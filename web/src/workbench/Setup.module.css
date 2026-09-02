@@ -1,90 +1,138 @@
-/* What is still the human's to change while the brief is a draft: the branch,
-   the base commit, the repos the work runs alongside and the pairings. See
-   `Setup.tsx`.
+/* What is still the human's to change while the brief is a draft: the repo the
+   work is done in — and with it the branch, the base and the companions — and
+   the three pairings. See `Setup.tsx`.
 
-   Drawn under the brief it belongs to, on the same card, which is why the block
-   opens with a rule rather than with a heading of its own. */
+   A row of dropdowns along the inside of the composer box's bottom edge rather
+   than a form under it, so what it costs the eye is one line of labels and
+   values. Which means almost every rule here is a rule taking something *off*
+   a control the app draws with a border and a field's paper everywhere else:
+   inside this box the border is the box's, and a trigger that drew its own
+   would read as a form dropped into a chat composer. The panel behind the Repo
+   trigger is the exception, being a card of its own. */
 
-/* Ruled off from the prose above it, because the brief is the card's headline
-   and this is the setup that follows it — and gone entirely once grilling
-   starts, which is why nothing here is ever drawn disabled. */
-.conversationSetup {
-  margin-top: 1.25rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--edge);
-}
-
-/* The gap under the last of them is the card's own padding, rather than that
-   plus the one every section keeps below itself. */
-.conversationSetup > :last-child {
-  margin-bottom: 0;
-}
-
-/* The two fields the setup opens with — the branch the work is done on and the
-   branch it comes off — across one row where the pane is wide enough for two,
-   and down the page where it is not. The same row the pairings below use, and
-   the wrap does the same work: each field asks for about half of a wide pane
-   and refuses to go under a readable width, so a narrow pane puts the second on
-   its own line. No breakpoint, the width that matters being the pane's rather
-   than the window's. */
-.branches {
+/* The row. It wraps rather than scrolling — the pane is as wide as the human
+   dragged it, and four triggers do not fit a phone — and the wrap is the box's
+   own width rather than the window's. */
+.options {
   display: flex;
   flex-wrap: wrap;
-  column-gap: 1rem;
+  align-items: start;
+  row-gap: 0.35rem;
 }
 
-.branches > .branchName,
-.branches > .baseBranch {
-  flex: 1 1 14rem;
+/* Each option asks for about a quarter of a wide box and refuses to go under a
+   readable width, so a narrow one puts what is left over on the next line. */
+.repoOption,
+.profileChoice {
+  flex: 1 1 9rem;
   min-width: 0;
 }
 
-.branchName,
-.baseBranch {
-  margin-bottom: 1.5rem;
-}
-
-/* The ⋯ at the end of that row, and the first one drawn inside a card body
-   rather than at the head of a pane — so it is painted here rather than taking
-   the mark the two pane headers share. It sits level with the bottom of the
-   fields beside it, because that is where the controls are: the labels above
-   them are what the row is taller than a button by.
-
-   It does not stretch with them either, having nothing to fill: the two fields
-   ask for half a wide pane each and this asks for the width of a mark. */
-.setupMenu {
-  flex: 0 0 auto;
-  align-self: end;
-  margin-bottom: 1.5rem;
-}
-
-.setupMenu > button {
-  padding: 0.5rem 0.5rem;
-  font-size: 1.1rem;
-  line-height: 1.4;
+/* Both triggers are the same two lines — the role dimmed above, the choice
+   under it — so the label is written once and worn by the `<label>` the pairing
+   picker is named by and by the span inside the Repo trigger alike. */
+.optionLabel {
+  display: block;
+  padding: 0 0.6rem;
+  font-size: 0.75rem;
+  line-height: 1.5;
   color: var(--ink-soft);
+}
+
+/* The Repo trigger, which is a menu's button rather than a listbox's and so is
+   painted here: everything a button arrives with given up, and the two lines
+   put back. */
+.repoOption > button {
+  display: block;
+  width: 100%;
+  padding: 0;
+  color: inherit;
+  text-align: start;
   background: none;
   border: 1px solid transparent;
   border-radius: 0.4rem;
 }
 
-/* Darkened while the menu is down, so the mark says the drop under it is this
-   card's — the same thing the pane headers' ⋯ does. */
-.setupMenu > button[aria-expanded="true"] {
-  color: var(--ink);
+/* Its value line, laid out as the listbox's closed control is laid out beside
+   it — the reading, and the mark saying which way the panel comes down at the
+   far end — so the four triggers read as four of one thing. */
+.optionLine {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0 0.6rem 0.15rem;
 }
 
-/* Wide enough for a repository name and the row that opens the level listing
-   them, rather than as wide as the longest name happens to be. */
-.setupMenu > [role="menu"] {
-  min-width: 14rem;
+.optionValue {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
-/* The repos this conversation works alongside, under the row they were added
-   from. A list, because that is what it is — and one with no bullets and no
-   indent, the rows being cards of their own rather than prose. */
+.optionArrow {
+  flex: none;
+  margin-left: auto;
+  font-size: 0.8em;
+  color: var(--ink-soft);
+}
+
+/* And the pairing pickers' own control, which is the app's listbox — see
+   `picking.module.css`, where it is drawn as the field it stands in place of
+   everywhere else. Here it is not standing in for a field: the box is the
+   field, so the paper and the border come off and what is left is the reading
+   and its arrow. What it does under the pointer and while it is open is left
+   alone, that being the only thing saying a borderless trigger can be
+   pressed. */
+.optionPick > button {
+  padding: 0 0.6rem 0.15rem;
+  background: none;
+  border-color: transparent;
+}
+
+/* Wide enough for a pairing however narrow the trigger it hangs from — a
+   reading is "Claude Code Fable 5 — Work" and a quarter of the box is not that.
+   Hung from the trigger's near edge, and from its far one for the last of them,
+   so a row of them never drops a list past the edge of the pane. */
+.optionPick > [role="listbox"] {
+  min-width: 15rem;
+  max-width: min(20rem, calc(100vw - 2.5rem));
+}
+
+.options > :last-child .optionPick > [role="listbox"] {
+  right: 0;
+  left: auto;
+}
+
+/* The panel behind the Repo trigger: the branch, the base, what the work runs
+   alongside and the rows those are configured on. A card rather than part of
+   the row, so it is the one thing here drawn with a surface of its own — the
+   chrome is `Menu.module.css` and this is its width and where it hangs.
+
+   From the near edge, the trigger being the first thing in the row, and never
+   wider than the window it comes down over. Capped and scrolling inside the
+   cap: a conversation with three companions is a form taller than the phone it
+   is being read on. */
+.repoOption > [role="group"] {
+  right: auto;
+  left: 0;
+  width: min(22rem, calc(100vw - 2.5rem));
+  max-height: min(28rem, 70vh);
+  overflow-y: auto;
+}
+
+.repoPick,
+.branchName,
+.baseBranch,
+.addCompanion {
+  margin-bottom: 0.85rem;
+}
+
+/* The repos this conversation works alongside, under the control they were
+   added from. A list, because that is what it is — and one with no bullets and
+   no indent, the rows being cards of their own rather than prose. */
 .companions {
-  margin: 0 0 1.5rem;
+  margin: 0;
   padding: 0;
   list-style: none;
 }
@@ -112,8 +160,8 @@
 }
 
 /* Where the checkout comes off and how far in the work may reach, side by side
-   wherever there is room for two and stacked where there is not — the same wrap
-   the branch row above uses, at the width a row inside a card can afford. */
+   wherever there is room for two and stacked where there is not — at the width
+   a row inside a panel can afford. */
 .companionConfig {
   display: flex;
   flex-wrap: wrap;
@@ -123,7 +171,7 @@
 }
 
 .companionConfig > .baseBranch {
-  flex: 1 1 12rem;
+  flex: 1 1 10rem;
   min-width: 0;
   margin-bottom: 0.5rem;
 }
@@ -183,8 +231,12 @@
   opacity: 0.65;
 }
 
+/* Every label inside the panel, which is a form and so is labelled as one —
+   unlike the row outside it, whose labels are the triggers' own first line. */
+.repoPick label,
 .branchName label,
 .baseBranch label,
+.addCompanion label,
 .companionBranch label {
   display: block;
   margin-bottom: 0.35rem;
@@ -211,9 +263,12 @@
 }
 
 /* One of a short list the repository already holds, which is what a native
-   dropdown is for: a branch has nothing to draw beside its name, so this stays
-   a `<select>` where the pairings above have become a listbox of their own. */
-.baseBranch select {
+   dropdown is for: a branch has nothing to draw beside its name, and neither
+   has a repo — so these stay a `<select>` where the pairings outside have
+   become a listbox of their own. */
+.repoPick select,
+.baseBranch select,
+.addCompanion select {
   width: 100%;
   font: inherit;
   color: inherit;
@@ -223,9 +278,17 @@
   padding: 0.5rem 0.6rem;
 }
 
+/* Nothing registered and nothing saved: the two lines that stand where a
+   control would, quieter than what is around them. */
+.nothing {
+  font-size: 0.9rem;
+}
+
 .branchName .failure,
+.repoPick .failure,
 .baseBranch .failure,
-.conversationProfiles .failure {
+.addCompanion .failure,
+.profileChoice .failure {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
 }
@@ -237,52 +300,7 @@
   font-size: 0.85rem;
 }
 
-/* The two accounts the work runs under. Separate choices because they are
-   genuinely separate accounts and models, so they are drawn as two fields rather
-   than as one with a note about the other. */
-.conversationProfiles {
-  margin-bottom: 1.5rem;
-}
-
-.conversationProfiles h3 {
-  margin: 0 0 0.75rem;
-  font-size: 1.1rem;
-}
-
-/* All of them across one row where the pane is wide enough, and down the
-   page where it is not. The wrap does that on its own — each choice refuses to
-   go under a readable width, so a narrow pane cannot fit them all and puts what
-   is left over on its own line. No breakpoint, because the width that matters
-   here is the pane's rather than the window's. */
-.pairings {
-  display: flex;
-  flex-wrap: wrap;
-  column-gap: 1rem;
-}
-
-.pairings > .profileChoice {
-  flex: 1 1 14rem;
-  min-width: 0;
-}
-
-.profileChoice {
-  margin-bottom: 1rem;
-}
-
-.profileChoice label {
-  display: block;
-  margin-bottom: 0.35rem;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-}
-
-/* The pairing itself is picked with a listbox the app draws rather than a
-   `<select>`, so that every row can carry its harness's mark — what it looks
-   like is `picking.module.css`, this card being one of five places the same
-   control stands. Nothing about it is left here: the choice is as wide as the
-   field, which the control already is.
-
-   A chosen profile whose pair has gone: the control still shows it, because it
+/* A chosen profile whose pair has gone: the control still shows it, because it
    is what was chosen, and the reason it will not do is said under it. */
 .profileChoice .broken {
   margin: 0.35rem 0 0;
@@ -301,38 +319,47 @@
    of them the human is in — the branch, a base, or a companion's own. The
    pairing control says it for itself, in `picking.module.css`. */
 .fieldLine input:focus-visible,
-.baseBranch select:focus-visible {
+.repoPick select:focus-visible,
+.baseBranch select:focus-visible,
+.addCompanion select:focus-visible {
   border-color: var(--accent);
 }
 
-/* And the same under the pointer, one border darker — with the two controls
-   that are not fields taking the accent instead, which is what a control the
-   app draws itself does everywhere else. */
+/* And the same under the pointer, one border darker — with the × taking the
+   accent instead, which is what a control the app draws itself does everywhere
+   else. */
 @media (hover: hover) {
   .fieldLine input:hover,
-  .baseBranch select:hover {
+  .repoPick select:hover,
+  .baseBranch select:hover,
+  .addCompanion select:hover {
     border-color: var(--ink-soft);
   }
 
-  .setupMenu > button:not(:disabled):hover,
   .forget:not(:disabled):hover {
     color: var(--accent);
   }
 }
 
-/* The two of them reached from the keyboard, which no pointer's rule covers. */
-.setupMenu > button:focus-visible,
+/* The × reached from the keyboard, which no pointer's rule covers. */
 .forget:focus-visible {
   border-color: var(--accent);
   color: var(--ink);
 }
 
-/* The build cache a Rust repository will not get, said at the foot of the setup
-   card — the last thing read before the work is started. Drawn as the settings
-   page draws a missing credential: the stopped red down one edge, because it is
-   the same "this is waiting on you" and not a failure. */
-.conversationSetup .uncached {
-  margin: 1rem 0 0;
+/* What the setup says rather than asks, under the box: why an adopting
+   conversation is asked for pairings it will not grill under, and the build
+   cache a Rust repository will not get. */
+.aside {
+  margin: 0.85rem 0 0;
+}
+
+/* The second of those, drawn as the settings page draws a missing credential:
+   the stopped red down one edge, because it is the same "this is waiting on
+   you" and not a failure. It is the last thing read before the work is
+   started. */
+.uncached {
+  margin: 0.85rem 0 0;
   padding: 0.7rem 0.9rem;
   background: var(--card);
   border: 1px solid var(--edge);

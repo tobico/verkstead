@@ -433,7 +433,7 @@ flowchart LR
     and started again when the size changes because sccache reads it once.
     Without one it degrades rather
     than failing: the downloads are still shared, a startup line says the
-    compiling is not, and the setup card warns on a repo with a root
+    compiling is not, and the composer warns on a repo with a root
     `Cargo.toml`. `CARGO_INCREMENTAL` is deliberately untouched — cargo builds
     dependencies non-incrementally already, which is exactly what sccache can
     cache, and the workspace's own crates stay incremental in the worktree's
@@ -524,6 +524,19 @@ remembered is read. The details pane caps its content at the 60rem the Set and
 Settings pages are read at and centres it when the pane is wider, so a pane
 dragged to the width of a window is still a pane a line can be read across.
 
+**A Conversation whose record is the one Event has no timeline pane at all**
+(*settled 2026-09-02, building brief-details-view*), which is every draft
+nothing has happened to yet: there is nothing to read on such a record — one
+card, under a header saying what the sidebar row beside it already says — so the
+level is not drawn and the details pane takes its column as well as its own. The
+whole pane goes rather than most of it: no strip of what its head carried, no
+pins and no status. The narrow layout's walk skips it in both directions, so
+opening the Conversation lands on the composer and Back out of the composer is
+Back out of the Conversation. The one border left is the sidebar's own, moving
+the sidebar's own width, and what this device settled the timeline's column at is
+left untouched — a second Event of any kind brings the three panes back exactly
+as they were.
+
 The details pane is the one selected thing and nothing else: with nothing
 selected it is blank, and a narrow layout offers no way to page into it
 (*settled 2026-08-24, building workbench-refit*). That is nearly always an
@@ -557,17 +570,52 @@ scrolls up, and again once they come back down. A phone lands on the timeline
 with the newest thing marked open, never carried past the record into the
 details.
 
-What a Conversation needs settling before it runs — branch, base commit, both
-Pairings, the readiness verdict — rides under the Brief on its timeline card
-instead, disappearing entirely once grilling starts, since the server freezes
-all of it at that moment. The repo name, the worktree path and the conversation
-state are drawn nowhere: the record tells that story.
+What a Conversation needs settling before it runs — repo, branch, base commit,
+both Pairings, the readiness verdict — stands on the **composer**, which is the
+details pane a drafting Brief opens, drawn as the composer of a chat app: one
+box at the app's measure holding the document as the field it is written in,
+the setup as a row of borderless label-over-value dropdowns along the inside of
+its bottom edge — Repo first, whose one flat panel holds which repo the work is
+in, the branch, the base and the companions, then the three role Pairings — and
+the press that starts the work under the box, against its right edge. Switching
+a draft's repo resets its base to the new repo's default and drops a companion
+that has become its own repo, leaving the branch name and the Pairings alone;
+it is refused, and the picker reads disabled, from the moment a worktree exists —
+and on a draft adopting a roadmap, whose repo the roadmap settled rather than the
+human: only the roadmap's name is kept, so work moved off would be adopting a
+name rather than a roadmap.
+It is the pane for a Conversation while it drafts, whatever the Brief's own
+freeze — an adopting draft gets it with the box locked to the stage's rendering
+and the Adopt press where the start would be. Past drafting a frozen Brief opens
+the read-only pane instead, and the repo name, the worktree path and the
+conversation state are drawn nowhere on the record: it tells that story itself.
+
+**The same composer stands with nothing behind it, as the compose page**
+(*settled 2026-09-02, building brief-details-view*), reached from a New
+conversation link at the head of the sidebar and drawn on the two-pane frame the
+one-Event layout uses. What it holds — repo, brief, branch, base, companions,
+pairings — is kept on the device the way an answer sheet's draft is, so a reload
+or a closed tab loses nothing, and nothing reaches the server until a press.
+**Start** creates the Conversation, replays every touched field through the
+per-field setup endpoints and kicks the work off; **Save as draft**, quieter and
+beside it, stops after the fields. Creating needs a repo and nothing else, so the
+quieter press waits on that alone; the other carries a grilling start and waits
+on what one has always waited on — a brief and the three roles — drawing inert
+short of that and saying what is missing when it is pressed, exactly as the
+composer's own start does. Both land in the Conversation they made, and a
+successful create clears what the device was holding. There is no batched create and no second set of validation rules: a
+field the server refuses leaves the rest of the work on a part-set draft, and the
+refusal is carried to that draft's own composer to be read where the field is.
+Its three role pickers stand on what the picked repo was last grilled with, read
+off the repo and re-read whenever it is switched, so the page shows what a draft
+created there would have arrived showing — shown and not held, so a picker left
+on it sends nothing at create and the server's own prefill answers for it.
 
 Timeline events:
 
 | Event | In timeline | In details pane |
 |---|---|---|
-| Brief | inline, always: a field that saves itself while drafting, a rendering once frozen; setup under it while drafting | — |
+| Brief | inline, always: the server's rendering clamped to five lines, drafting or frozen | the composer while its round drafts — one box holding the field that saves itself with the setup along its bottom edge, and the start under it; the frozen document and what the round was configured with, once it is past drafting |
 | Agent output | turn count, latest statement, liveness mark | Transcript or Screen |
 | Question set | table of #, question, answer | full answer-set document |
 | Commit | +/− and changed-line counts, clamped summary snippet | boxed Message (diagram drawn) above the server-rendered diff viewer |

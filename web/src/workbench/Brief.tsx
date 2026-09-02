@@ -3,7 +3,7 @@
 //!
 //! A pane of its own rather than the plain [`Document`] the handoff and the
 //! instruction share, because it carries the one thing nothing else on the page
-//! carries. The setup card goes when the Brief freezes — the branch, the base,
+//! carries. The composer goes when the round stops drafting — the branch, the base,
 //! the pairings and the companions all settled at that moment — so from then on
 //! a read-only companion leaves no trace anywhere: a read-write one surfaces
 //! later through its commits and its pull request, and a read-only one never
@@ -14,7 +14,7 @@
 //! ask what this piece of work *is* — and a Conversation with no companions gets
 //! the summary all the same.
 //!
-//! Read-only throughout. The setup card is still the only place any of this is
+//! Read-only throughout. The composer is still the only place any of this is
 //! changed, so there is not a control on this pane: what it says of a
 //! Conversation past drafting is what nobody can change any more.
 //!
@@ -51,7 +51,7 @@ import { PaneHead } from "./PaneHead";
 import { ABBREVIATED } from "./Timeline";
 
 /// How far into a companion the work may reach, in the words its switch is
-/// labelled with on the setup card — the same fact, said after it was settled.
+/// labelled with on the composer — the same fact, said after it was settled.
 const ACCESS: Record<CompanionMode, string> = {
   ReadOnly: "Read-only",
   ReadWrite: "Read-write",
@@ -78,7 +78,12 @@ export const UNNAMED = "Chosen when the work starts.";
 export function Brief(props: {
   conversation: ConversationView;
   brief: BriefEvent;
-  back: () => void;
+
+  /// The way out of the pane, named as well as pressed — the composer's
+  /// arrangement, and for the composer's reason: this pane is the other thing a
+  /// Conversation whose record is the one Event can open, and such a record has
+  /// no Timeline drawn to go back to. See `Composer.tsx`.
+  back: { to: string; go: () => void };
 
   /// Whether this is a record read out of a file — a share — rather than the
   /// Conversation on the machine it was worked on.
@@ -98,7 +103,7 @@ export function Brief(props: {
   return (
     <>
       <PaneSticky>
-        <PaneHead back={{ to: "Timeline", go: props.back }} title="Brief" />
+        <PaneHead back={props.back} title="Brief" />
       </PaneSticky>
 
       <Show

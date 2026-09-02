@@ -44,20 +44,20 @@ pub use conversations::{
     GrillingStarted, HandoffEvent, Lifecycle, ManualTaskEvent, Merging, MovedEvent, NewAdoption,
     NewCompanion, NewConversation, NewOrder, NoticeEvent, PinnedEvent, ProposalView,
     PullRequestCheck, PullRequestComment, PullRequestCommit, PullRequestDetails, PullRequestEvent,
-    PullRequestSummary, QuestionSetEvent, ResolveConflictsEvent, Resolved, Resumed, RoadmapPane,
-    Screen, SessionsHere, SetRow, ShareView, ShowingArchived, Shown, Size, StageDocument,
-    StageEntry, StageListEvent, StageListReached, StageSource, Started, SteerCompanionRefusal,
-    SteerEvent, SteerOpened, SteerSubmission, SteerTarget, TaskDocument, TaskEntry, TaskListEvent,
-    TaskListReached, TaskSource, TimelineEvent, UnreadableSetEvent, Watching, Worktree,
-    agent_output_event, backlog_pane, brief_event, commit_event, commit_pane, handoff_event,
-    manual_task_event, moved_event, notice_event, proposal_view, pull_request_details,
-    pull_request_event, pull_request_reached, question_set_event, resolve_conflicts_event,
-    roadmap_pane, stage_list, stage_list_event, stage_list_reached, steer_event, task_list,
-    task_list_event, task_list_reached, unreadable_set_event,
+    PullRequestSummary, QuestionSetEvent, RepoChoice, RepoSwitched, ResolveConflictsEvent,
+    Resolved, Resumed, RoadmapPane, Screen, SessionsHere, SetRow, ShareView, ShowingArchived,
+    Shown, Size, StageDocument, StageEntry, StageListEvent, StageListReached, StageSource, Started,
+    SteerCompanionRefusal, SteerEvent, SteerOpened, SteerSubmission, SteerTarget, TaskDocument,
+    TaskEntry, TaskListEvent, TaskListReached, TaskSource, TimelineEvent, UnreadableSetEvent,
+    Watching, Worktree, agent_output_event, backlog_pane, brief_event, commit_event, commit_pane,
+    handoff_event, manual_task_event, moved_event, notice_event, proposal_view,
+    pull_request_details, pull_request_event, pull_request_reached, question_set_event,
+    resolve_conflicts_event, roadmap_pane, stage_list, stage_list_event, stage_list_reached,
+    steer_event, task_list, task_list_event, task_list_reached, unreadable_set_event,
 };
 pub use profiles::{
     AgentType, Broken, PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen,
-    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, RoleChoice,
+    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, RepoPairingsView, RoleChoice,
 };
 pub use push::{PushKey, Subscribed, Subscription, Unsubscribe};
 pub use repos::{

@@ -30,17 +30,20 @@ import { createSignal } from "solid-js";
 import { describe, expect, it, vi } from "vitest";
 
 import type {
+  AbandonedRepo,
   ConversationEntry,
   ConversationView,
   SteerOpened,
 } from "../src/api/types";
-// The one menu, which is what the sidebar offers its repositories through.
+// The one menu, which is what the compose page offers its roadmaps through.
 import menu from "../src/Menu.module.css";
 // The sidebar's own rows, and the ring one of them turns while a session runs.
 // What the ⋯ at the head of the Conversation offers, which is a module of its
 // own: the same rows are drawn by the sidebar's right-click.
 import actions from "../src/workbench/Actions.module.css";
+import composer from "../src/workbench/Composer.module.css";
 import sidebar from "../src/workbench/Conversations.module.css";
+import setup from "../src/workbench/Setup.module.css";
 import marks from "../src/workbench/Mark.module.css";
 import steerModal from "../src/workbench/Steer.module.css";
 import { under } from "../src/pairing";
@@ -59,6 +62,7 @@ import {
 } from "./bench";
 import { opened, pick, picker, showing } from "./pickers";
 import { json, serving, whenever } from "./serving";
+import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
 import building from "./fixtures/conversation-building.json" with { type: "json" };
 
 /// The renderer is a page's own doing and nothing here has a Diagram; mocked so
@@ -75,8 +79,12 @@ const BUSY: ConversationEntry[] = SIDEBAR.map((entry) =>
   entry.id === 5 ? { ...entry, working: true } : entry,
 );
 
-/// The repo the sidebar's menu is left offering when the other is unregistered.
+/// The repo the compose page is left offering when the other is unregistered.
 const FIRST = REPOS[0]!;
+
+/// The roadmaps nothing is driving, which is what the compose page's one menu
+/// holds.
+const ABANDONED = abandoned as AbandonedRepo[];
 
 /// The workbench with the repos answered from a list a test can move under it,
 /// which is what a repository being unregistered elsewhere looks like from here.
@@ -245,14 +253,14 @@ describe("what a Nudge leaves standing", () => {
     );
   });
 
-  /// The repos are a menu rather than a `<select>` now, and the merge is what
-  /// keeps its rows alive: a Nudge landing while the menu is open would
-  /// otherwise rebuild the row the human had tabbed to and take their focus
-  /// with it.
-  it("keeps the open menu's repo rows", async () => {
-    theWorkbench();
-    const { container, client } = mount();
-    fireEvent.click(await drawn(container, `.${sidebar.newConversation} > .${menu.trigger}`));
+  /// The roadmaps there are to adopt are a menu rather than a `<select>`, and
+  /// the merge is what keeps its rows alive: a Nudge landing while the menu is
+  /// open would otherwise rebuild the row the human had tabbed to and take their
+  /// focus with it.
+  it("keeps the open adopt menu's roadmap rows", async () => {
+    theWorkbench(whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)));
+    const { container, client } = mount("/compose");
+    fireEvent.click(await drawn(container, `.${composer.adopt} > .${menu.trigger}`));
     await drawn(container, `.${menu.drop} > [role="menuitem"]`);
     const offered = nodes(container, `.${menu.drop} > [role="menuitem"]`);
 
@@ -312,25 +320,29 @@ describe("what a Nudge leaves standing", () => {
 });
 
 describe("what a picker shows and what it would send", () => {
-  /// The sidebar's own repo choice is no longer one of these: the menu that
-  /// replaced the box holds nothing between the press and the wire, so the row
-  /// pressed *is* the repository sent and there is no divergence left to guard
-  /// against. What is asked here instead is that a repository unregistered
-  /// from somewhere else stops being offered.
+  /// Which repository a piece of work is composed in is one of these, and it is
+  /// the case the guarantee was written for: a repository unregistered from
+  /// somewhere else stops being offered, and nothing standing on it is quietly
+  /// moved to whichever one is left.
   it("stops offering a repo that has been unregistered", async () => {
     const { holds } = theRepos();
-    const { container, client } = mount();
-    fireEvent.click(await drawn(container, `.${sidebar.newConversation} > .${menu.trigger}`));
-    await drawn(container, `.${menu.drop} > [role="menuitem"]`);
+    const { container, client } = mount("/compose");
+    fireEvent.click(await drawn(container, `.${setup.repoOption} > button`));
+    const choice = (await waitFor(() =>
+      picker("Repo"),
+    )) as unknown as HTMLSelectElement;
+    await waitFor(() =>
+      expect(choice.options.length).toBeGreaterThanOrEqual(REPOS.length),
+    );
 
     holds([FIRST]);
     await nudged(client);
 
     await waitFor(() =>
       expect(
-        [...container.querySelectorAll(`.${menu.drop} > [role="menuitem"]`)].map(
-          (row) => row.textContent,
-        ),
+        [...choice.options]
+          .map((row) => row.textContent)
+          .filter((row) => REPOS.some((repo) => repo.name === row)),
       ).toEqual([FIRST.name]),
     );
   });

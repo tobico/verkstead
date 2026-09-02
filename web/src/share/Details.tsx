@@ -99,7 +99,7 @@ export function Details(props: {
               <Brief
                 conversation={props.conversation}
                 brief={brief()}
-                back={props.back}
+                back={{ to: "Timeline", go: props.back }}
                 readOnly
               />
             )}

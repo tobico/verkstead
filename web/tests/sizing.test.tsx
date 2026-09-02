@@ -77,6 +77,13 @@ const TWO: Frame = { rem: 70, three: false, picking: true };
 /// they read off the frame.
 const PAIR: Frame = { rem: FRAME / 16, three: false, picking: false };
 
+/// And the frame with a list but no middle pane — the workbench reading a
+/// Conversation whose record is the one Event. Two panes with the sidebar's own
+/// divider between them, which is [`TWO`] again in a window wide enough for the
+/// third pane: what says all three are standing is a middle pane to fill the
+/// column, and there is none.
+const WIDENED: Frame = { rem: FRAME / 16, three: false, picking: true };
+
 /// A set of widths with one or two of them said: the rest are the defaults,
 /// which is what a device that has dragged one frame and not the other holds.
 function all(some: Partial<Widths>): Widths {
@@ -859,6 +866,128 @@ describe("the divider between two panes with no list beside them", () => {
       expect(frame.style.getPropertyValue("--pane-pair")).toBe(
         `${DEFAULTS.pair}%`,
       ),
+    );
+  });
+});
+
+/// And the frame the workbench is drawn in while the Conversation it is reading
+/// has nothing on its record but the one Event: the same frame handed no middle
+/// pane, which is the sidebar and the details with one border between them.
+///
+/// The border is the sidebar's own, moving the sidebar's own width — so the
+/// arithmetic is the three-pane frame's arithmetic with the middle column taken
+/// out, and what this device settled that column at is left where it is for the
+/// moment a second Event brings it back.
+describe("the frame with no middle pane in it", () => {
+  /// Mounted the way the workbench mounts it while a record is the one Event:
+  /// a list to pick from, and nothing between it and the details.
+  function widened(width: Parameters<typeof windowIs>[0], wide = FRAME) {
+    across = wide;
+    windowIs(width);
+
+    const { container } = render(() => (
+      <Panes
+        pane="details"
+        middleLabel="Timeline"
+        conversations={<p>the list</p>}
+        details={<p>the composer</p>}
+      />
+    ));
+
+    return {
+      container,
+      frame: container.querySelector<HTMLElement>(`.${shell.panes}`)!,
+    };
+  }
+
+  /// Two panes and the one border, and the third pane's breakpoint brings
+  /// nothing: what it is about is room for a middle pane, and there is none to
+  /// find room for.
+  it("puts one handle between the panes, and none below the breakpoint", () => {
+    const beside = widened("two panes");
+
+    expect(
+      [...beside.frame.children].map((child) =>
+        child.getAttribute("aria-label"),
+      ),
+    ).toEqual(["Conversations", "Resize the conversations pane", "Details"]);
+
+    const wide = widened("three panes");
+    expect(dividers(wide.container)).toHaveLength(1);
+    expect(wide.frame.querySelector(`.${shell.middlePane}`)).toBeNull();
+
+    const narrow = widened("narrow");
+    expect(dividers(narrow.container)).toEqual([]);
+    expect(narrow.frame.style.getPropertyValue("--pane-sidebar")).toBe("");
+  });
+
+  /// The sidebar's width, and no width for the column that is not drawn: a name
+  /// written over a column that is not there would be this frame answering for
+  /// the one the Timeline comes back to.
+  it("names the sidebar's width and no other", () => {
+    remember(all({ sidebar: 34, middle: 34 }), THREE);
+
+    const { frame } = widened("three panes");
+
+    expect(frame.style.getPropertyValue("--pane-sidebar")).toBe("34%");
+    expect(frame.style.getPropertyValue("--pane-middle")).toBe("");
+    expect(frame.style.getPropertyValue("--pane-pair")).toBe("");
+  });
+
+  /// And the drag writes the sidebar's own key, leaving the middle pane's
+  /// exactly as this device left it — which is what hands the three-pane frame
+  /// its columns back the moment a second Event puts the Timeline up.
+  it("moves the sidebar and leaves the timeline's width where it was", async () => {
+    remember(all({ sidebar: 20, middle: 33 }), THREE);
+
+    const { container, frame } = widened("three panes");
+
+    dragTo(dividers(container)[0]!, FRAME * 0.3);
+
+    await waitFor(() =>
+      expect(frame.style.getPropertyValue("--pane-sidebar")).toBe("30%"),
+    );
+    expect(localStorage.getItem(SIDEBAR)).toBe("30");
+    expect(localStorage.getItem(MIDDLE)).toBe("33");
+  });
+
+  /// What has to be left standing beyond the sidebar is the details alone: the
+  /// pane the sidebar is beside *is* the details here, and there is no middle
+  /// pane owed anything between them.
+  it("leaves the details their own width and nothing else's", async () => {
+    const { container, frame } = widened("three panes");
+
+    dragTo(dividers(container)[0]!, FRAME * 0.98);
+
+    await waitFor(() =>
+      expect(frame.style.getPropertyValue("--pane-sidebar")).toBe(
+        `${100 - share(MINIMUMS.details, WIDENED)}%`,
+      ),
+    );
+  });
+
+  /// And the rules that draw it, jsdom laying out no grids: the sidebar's
+  /// column and everything after it, the details shown whatever level
+  /// `data-pane` names, and the way back out taken off a pane whose list is
+  /// already beside it.
+  it("draws the two columns and takes the way back off", () => {
+    expect(stylesheet).toContain(
+      "  .panes.widened {\n" +
+        "    grid-template-columns: var(--pane-sidebar, 20%) auto 1fr;\n  }",
+    );
+    expect(stylesheet).toContain(
+      "  .panes.widened > .detailsPane {\n    display: block;\n  }",
+    );
+    expect(stylesheet).toContain(
+      "  .panes.widened .detailsPane .paneBack {\n    display: none;\n  }",
+    );
+
+    // And what the pane holds is still read at the app's own measure, in the
+    // middle of whatever room the pane has: the rule is the details pane's own
+    // and says nothing about which frame it is standing in.
+    expect(stylesheet).toContain(
+      ".panes > .detailsPane {\n" +
+        "  padding-inline: max(1.25rem, (100% - 60rem) / 2);\n}",
     );
   });
 });

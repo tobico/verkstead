@@ -80,12 +80,20 @@ export type Widths = Record<Divider, number>;
 /// all.
 ///
 /// All three are the page's to answer — the first by measuring the frame, the
-/// second by asking which breakpoint holds, the third by whether it was handed
-/// a conversations pane — and together they are the whole of what the
-/// arithmetic here needs to know about the window in front of the human.
+/// second by asking which breakpoint holds *and* whether there is a middle pane
+/// to fill the column it brings, the third by whether it was handed a
+/// conversations pane — and together they are the whole of what the arithmetic
+/// here needs to know about the window in front of the human.
 ///
 /// A frame with nothing to pick from is the share's pair of panes, and `three`
 /// says nothing about one: there is no third pane for a breakpoint to bring in.
+///
+/// And a frame with a list but no middle pane is `three: false` at every width:
+/// the sidebar stands beside the details with one border between them, which is
+/// the layout those two are already in below the last breakpoint. So the
+/// arithmetic is the same arithmetic, the divider is the sidebar's own, and the
+/// width behind the column that is not drawn is left exactly where this device
+/// settled it — which is what hands it back when the middle pane returns.
 export type Frame = { rem: number; three: boolean; picking: boolean };
 
 /// What they are worth with nobody having said otherwise — the 15rem and 25rem

@@ -16,9 +16,11 @@ import type {
   ConversationView,
   ProfileEntry,
   RepoEntry,
+  RepoPairingsView,
   ShowingArchived,
 } from "../src/api/types";
 import { Shell } from "../src/App";
+import { ComposePage } from "../src/workbench/Compose";
 import { Conversations } from "../src/workbench/Conversations";
 import { Workbench } from "../src/workbench/Workbench";
 import { json, serving, whenever } from "./serving";
@@ -48,6 +50,21 @@ export const BRANCHES = ["main", "release-1.4", "origin/main"];
 /// own: what the base dropdown on its row offers, and nothing the conversation
 /// could branch from.
 export const COMPANION_BRANCHES = ["trunk", "origin/trunk"];
+
+/// And what a Repo with nothing to remember offers a page composing against it:
+/// three pickers with nothing in them, which is where every registered Repo
+/// starts and where the fixtures leave both of theirs.
+///
+/// Written here rather than read out of a fixture for a reason of the fixtures'
+/// own: the app they are written from watches nothing, so every Profile it reads
+/// back is broken and every Pairing it remembered would be judged away — a
+/// golden file of this endpoint could only ever hold this same nothing. A test
+/// about a Repo that does remember something serves its own.
+export const NO_PAIRINGS: RepoPairingsView = {
+  grilling: "Nothing",
+  implementation: null,
+  review: "Nothing",
+};
 
 /// And the sidebar's one setting, off — which is where a workbench nobody has
 /// archived anything in stands. Written here rather than read out of a fixture
@@ -121,6 +138,11 @@ export function mount(at = "/") {
             <Route path="/share" />
             <Route path="/roadmaps/:name" />
           </Route>
+          {/* And the compose page beside them, exactly as `App.tsx` has it: a
+              press on the sidebar's link is a navigation, and a test mounting
+              the workbench without this would be testing an app where that link
+              goes nowhere. */}
+          <Route path="/compose" component={ComposePage} />
         </MemoryRouter>
       </QueryClientProvider>
     )),
@@ -145,6 +167,11 @@ export function theWorkbench(...answers: Parameters<typeof serving>) {
         `/api/ui/repos/${companion.repo.id}/branches`,
         json(COMPANION_BRANCHES),
       ),
+    ),
+    // And what each of them was last grilled with, which the compose page asks
+    // for the moment one is picked. Nothing remembered, unless a test says so.
+    ...REPOS.map((repo) =>
+      whenever(`/api/ui/repos/${repo.id}/pairings`, json(NO_PAIRINGS)),
     ),
     whenever("/api/ui/abandoned-roadmaps", json([])),
     whenever(`/api/ui/conversations/${OPEN.id}`, json(OPEN)),

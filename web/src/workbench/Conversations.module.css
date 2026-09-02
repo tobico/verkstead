@@ -77,88 +77,22 @@
   white-space: nowrap;
 }
 
-/* Starting a conversation: which repo the work is in, and nothing else — the
-   branch name is prefilled by the server and the brief is written in the
-   timeline. One decision, so one press: the button is the whole of the form,
-   and the menu it drops is the anchor everything below hangs from. */
-.newConversation {
-  margin-bottom: 1.5rem;
-}
-
-/* The width of the pane, because it is the pane's one action and the menu comes
-   down the width of it. The mark is pushed to the far end, where a dropdown's
-   is. */
-.newConversation > button {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
+/* The way on to the compose page, and the pane's one action: where a
+   Conversation is written before it exists, roadmaps to adopt included. A link,
+   so it is the paint of a button rather than a button — no underline, and the
+   pane's width. */
+.compose {
+  display: block;
   width: 100%;
+  margin-bottom: 1.5rem;
   padding: 0.5rem 1rem;
   font-weight: 600;
+  text-align: center;
+  text-decoration: none;
   color: var(--accent);
   background: var(--card);
   border: 1px solid var(--edge);
   border-radius: 0.4rem;
-}
-
-/* As wide as the button it came down from, and over the list rather than in the
-   flow above it: opening it does not push the conversations down, which is the
-   whole of what the notices under the old box were doing. */
-.newConversation > [role="menu"] {
-  left: 0;
-}
-
-.newConversation .nothing {
-  margin: 0;
-  padding: 0.4rem 0.6rem;
-  font-size: 0.9rem;
-}
-
-.newConversation .failure {
-  margin: 0.5rem 0 0;
-  font-size: 0.9rem;
-}
-
-/* A run of rows kept apart from the rest by a rule, where pressing one of them
-   does a different kind of thing than pressing the others: the roadmaps nothing
-   is driving, under the repos a conversation is started in. This pane is the
-   only caller that groups its rows, which is why the two of them are here rather
-   than with the menu's own chrome. */
-.menuGroup {
-  margin-top: 0.3rem;
-  padding-top: 0.3rem;
-  border-top: 1px solid var(--edge);
-}
-
-.menuHeading {
-  margin: 0;
-  padding: 0.25rem 0.6rem;
-  font-size: 0.8rem;
-  color: var(--ink-soft);
-}
-
-/* The roadmap's name over the stage that would be started, because on a phone
-   the two of them do not share a line — and the Repo beside the name, since the
-   group is flat and two repositories may each hold an `mvp`. */
-.adoptRoadmap .what {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 0.4rem;
-}
-
-.adoptRoadmap .in,
-.adoptRoadmap .stage,
-.adoptRoadmap .base {
-  font-size: 0.85rem;
-  color: var(--ink-soft);
-}
-
-/* Where the roadmap was found, on its own line under the stage and only there
-   when it is somewhere other than the default branch. */
-.adoptRoadmap .base {
-  display: block;
 }
 
 /* The conversations themselves, drawn as the set lists' rows are: the whole card
@@ -298,7 +232,7 @@
     background: transparent;
   }
 
-  .newConversation > button:not(:disabled):hover {
+  .compose:hover {
     color: var(--accent-deep);
     border-color: var(--accent-deep);
   }

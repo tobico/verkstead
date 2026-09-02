@@ -25,6 +25,13 @@
 //! anchor, and nowhere to give the focus back to. Every other thing a menu is,
 //! the two of them share.
 //!
+//! And one shape of what comes down rather than one: what a menu drops is a
+//! list of rows, and what a **panel** drops is a card of ordinary controls —
+//! the composer's Repo dropdown, which is a branch field, two pickers and the
+//! rows they configure. Everything a popover is is the same for both; what a
+//! panel is not is a `menu`, whose children a screen reader expects to be rows
+//! to press.
+//!
 //! A card can hold more than one level of rows: a [`Nested`] row opens another
 //! level of the menu it is in, with a way back out at the top of it. One card,
 //! one backdrop, one Escape and one focus given back however deep it is — which
@@ -100,6 +107,18 @@ export function Menu(props: {
   /// What a screen reader calls the drop, where the trigger's own name is not
   /// enough to tell one menu on the page from another.
   name?: string;
+  /// Whether what comes down is a **panel** rather than a list of rows: one
+  /// flat card of ordinary controls — a field, a picker, the rows they
+  /// configure — instead of a list of things to press.
+  ///
+  /// The chrome is the whole of why it is here. A panel hangs where a menu
+  /// hangs, goes the two ways a menu goes and gives the focus back the same
+  /// way, and a second popover written for it is exactly how the three menus
+  /// this component replaced drifted apart. What changes is what it *is*:
+  /// `menu` is a role whose children are `menuitem`s and a text field is not
+  /// one, so a panel is a plain labelled group and the row paint in
+  /// `Menu.module.css` stays off it.
+  panel?: boolean;
   /// Whether the trigger takes a press. A disabled trigger still says what it
   /// says — a badge with a locking in flight is the case this is for.
   disabled?: boolean;
@@ -178,7 +197,10 @@ export function Menu(props: {
         type="button"
         class={props.mark ? `${styles.trigger} ${styles.mark}` : styles.trigger}
         ref={trigger}
-        aria-haspopup="menu"
+        // A panel says nothing here: `aria-haspopup` names a *kind* of popup and
+        // there is none for a group of fields, so it is the plain disclosure
+        // pair — expanded, and what it controls — which is what a panel is.
+        aria-haspopup={props.panel ? undefined : "menu"}
         aria-expanded={open() ? "true" : "false"}
         aria-controls={open() ? id : undefined}
         aria-label={props.label}
@@ -197,7 +219,12 @@ export function Menu(props: {
           aria-hidden="true"
           onClick={() => setOpen(false)}
         />
-        <div class={styles.drop} id={id} role="menu" aria-label={props.name}>
+        <div
+          class={props.panel ? `${styles.drop} ${styles.panel}` : styles.drop}
+          id={id}
+          role={props.panel ? "group" : "menu"}
+          aria-label={props.name}
+        >
           <Rows rows={props.children} />
         </div>
       </Show>

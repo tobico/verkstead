@@ -37,11 +37,11 @@ use verkstead_render::{
     ConversationUnarchived, ConversationView, Cursor, GrillingStarted, IgnoreRule,
     IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion,
     NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
-    RepoEntry, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, SetReading, SetView,
-    SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit,
-    SharedConversation, ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted,
-    Subscribed, Subscription, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe,
-    UpdateNotice, Verified,
+    RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
+    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
+    SharedCommit, SharedConversation, ShowingArchived, Standing, SteerOpened, SteerSubmission,
+    Submitted, Subscribed, Subscription, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet,
+    Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -65,6 +65,12 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // the Conversation: the branches are the repository's, and two
         // Conversations against one Repo are looking at the same list.
         .route("/api/ui/repos/{id}/branches", get(branches))
+        // And what that Repo was last grilled with, which is what a page asking
+        // the three role questions fills its own pickers from before there is a
+        // Conversation for the server to have prefilled. Under the Repo for the
+        // branches' reason: the memory is the Repo's, and every page composing
+        // against it is looking at the same answer.
+        .route("/api/ui/repos/{id}/pairings", get(pairings))
         // And one Repo opened, which is the pane its card leads to: the same
         // three facts the row carries, plus the branches, how much work is on
         // it, and what it is holding that nothing is driving. Its own read
@@ -178,6 +184,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             get(pull_request),
         )
         .route("/api/ui/conversations/{id}/brief", post(save_brief))
+        // And which Repo the work is in at all, which is the first thing the
+        // Repo panel asks and the one the branch and the base below it are
+        // facts about. Refused from the moment there is a checkout, like both
+        // of them.
+        .route("/api/ui/conversations/{id}/repo", post(switch_repo))
         .route("/api/ui/conversations/{id}/branch", post(rename_branch))
         .route("/api/ui/conversations/{id}/base", post(set_base_branch))
         // And the other registered Repos the work runs alongside, added and
@@ -597,6 +608,44 @@ async fn branches(State(state): State<AppState>, Path(id): Path<String>) -> Http
         Err(error) => {
             tracing::error!(error = ?error, repo_id = id, "listing a Repo's branches failed");
             unavailable("the Repo's branches could not be read")
+        }
+    }
+}
+
+/// `GET /api/ui/repos/{id}/pairings` — what one registered Repo was last
+/// grilled with, judged as something to fill a picker with.
+///
+/// What a Conversation started on this Repo would arrive showing, answered
+/// before one is started: the compose page has three role questions to ask and
+/// no record to read the answers off, so it asks the Repo the same thing
+/// creation asks it — see [`crate::conversations::pairing_prefill`], which is
+/// the one reading.
+///
+/// A 404 for an id nothing is registered under, and for one that is not a
+/// number either — the same answer the branches give for the same reason:
+/// neither names a Repo, and a page composing against one that has gone has a
+/// repo to pick again rather than a failure to report.
+async fn pairings(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return no_such_repo(&id);
+    };
+
+    match store::registered_repo(&state.pool, id).await {
+        Ok(None) => no_such_repo(&id.to_string()),
+        Ok(Some(_)) => match crate::conversations::pairing_prefill(&state, id).await {
+            Ok(prefill) => Json(prefill).into_response(),
+            Err(error) => {
+                tracing::error!(
+                    error = ?error,
+                    repo_id = id,
+                    "reading what a Repo was last grilled with failed",
+                );
+                unavailable("the repo's remembered pairings could not be read")
+            }
+        },
+        Err(error) => {
+            tracing::error!(error = ?error, repo_id = id, "reading a Repo failed");
+            unavailable("the repo's remembered pairings could not be read")
         }
     }
 }
@@ -2626,6 +2675,26 @@ async fn save_brief(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "saving a Brief failed");
             unavailable("the Brief could not be saved")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/repo` — move the work onto another
+/// registered Repo.
+async fn switch_repo(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(choice): Json<RepoChoice>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(RepoSwitched::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::switch_repo(&state.pool, id, choice.repo_id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "switching a conversation's repo failed");
+            unavailable("the repo could not be switched")
         }
     }
 }
