@@ -1,0 +1,27 @@
+{
+  "Listed": {
+    "entries": [
+      {
+        "kind": "Directory",
+        "name": ".config",
+        "path": "/home/ada/src/.config"
+      },
+      {
+        "kind": "Directory",
+        "name": "assets",
+        "path": "/home/ada/src/assets"
+      },
+      {
+        "kind": "Repository",
+        "name": "verkstead",
+        "path": "/home/ada/src/verkstead"
+      },
+      {
+        "kind": "File",
+        "name": "README.md",
+        "path": "/home/ada/src/README.md"
+      }
+    ],
+    "path": "/home/ada/src"
+  }
+}

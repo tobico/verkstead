@@ -14,9 +14,18 @@ still holds word for word, because the asking half is unchanged.
 **Watched Path**:
 A directory Verkstead is permitted to operate inside, said either in the
 environment at installation or in the workbench settings, the boundary being
-the union of the two. A security boundary rather than a convenience: any
-filesystem operation on a path outside every Watched Path is refused, and Repos
-are registered only from within one. The installation's own are resolved once
+the union of the two. A security boundary rather than a convenience: nothing
+outside every Watched Path is written, worked in or registered — a Repo is
+registered only from within one, and so is the account an Agent Profile names.
+**Reading the names in a directory is the one thing it does not bound**, and
+deliberately: the workbench's path fields browse the filesystem into
+themselves, and the fields whose values the boundary says nothing about — a
+Watched Path being added, a Sandbox Configuration bind — browse anywhere the
+server can read. What that discloses is a listing of names to the one human the
+tailnet is the perimeter for, and a field that could not reach the directory it
+is about to be pointed at would be a field nobody could fill in. The fields
+whose values *are* bounded browse bounded, by the same admission their save
+makes. The installation's own are resolved once
 at startup and a missing one refuses to start; the settings' own are re-read
 whenever an admission is decided and never refuse anything — one that will not
 resolve covers nothing, with a line in the log — so a bare binary comes up
