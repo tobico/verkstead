@@ -614,9 +614,12 @@ fn why(refusal: Resumed) -> Option<&'static str> {
     Some(match refusal {
         Resumed::Resumed => return None,
         Resumed::NoSuchConversation | Resumed::NotDriven | Resumed::AlreadyDriven => return None,
+        // A clause rather than a sentence of its own, as every one of these is:
+        // what it is read after is "nothing could be started for it as the
+        // server came back up", and a colon of its own would be the second in
+        // one line.
         Resumed::NotOnWindowsYet => {
-            "this Verkstead runs no sessions: Windows has no pseudo-terminal for \
-             a session's agent to run on yet"
+            "Windows has no pseudo-terminal for a session's agent to run on yet"
         }
         Resumed::NowhereToWork => "there is no Worktree on the record to work in",
         Resumed::WorktreeRefused => {
