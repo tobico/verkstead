@@ -132,6 +132,18 @@ impl Companion {
             false => self.branch.clone(),
         })
     }
+
+    /// Whether this companion is cut the Conversation's own branch rather than
+    /// one of its own — the same reading [`Self::branch_for`] makes, asked
+    /// without a name to make it of.
+    ///
+    /// Which is what makes this repository one the Conversation's branch name
+    /// has to be free in: a name invented for the work is cut here too, so a
+    /// start choosing one asks this repository the same question it asks the
+    /// Conversation's own.
+    pub fn mirrors(&self) -> bool {
+        self.mode != CompanionMode::ReadOnly && self.branch.is_empty()
+    }
 }
 
 /// Where a companion's checkout was put and what it was cut from, for the

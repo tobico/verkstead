@@ -192,6 +192,45 @@ pub(crate) fn branches(repo: &Path) -> Vec<String> {
         .collect()
 }
 
+/// Every name `repo` already answers to as a branch: its own, and each remote's
+/// with the remote's own name taken off the front.
+///
+/// What this is for is choosing a name nothing has, which is a different
+/// question from whether one particular name is free — [`branch_exists`] is
+/// that one, and it is what a refusal is written on. This is deliberately the
+/// wider reading: a name only origin holds can be cut locally and is still a
+/// name to leave alone, because what would be pushed to it is somebody's
+/// branch, and there is no shortage of other names to pick.
+///
+/// Read whole rather than asked name by name, because that is what the caller
+/// is doing: a walk over a thousand candidates is one `for-each-ref` here and a
+/// thousand lookups in memory, against a thousand git processes the other way.
+///
+/// Empty for a repository git will not read, which is [`branches`]'s reading
+/// and the safe one here. What follows a name chosen against nothing is a
+/// worktree git refuses, said in those words; a caller that read an unreadable
+/// repository as holding every name would have nothing left to choose.
+pub(crate) fn cut_names(repo: &Path) -> std::collections::HashSet<String> {
+    let listed = |refs: &str, format: &str| {
+        git(repo, &["for-each-ref", &format!("--format={format}"), refs])
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| line.split_once('\t'))
+            .filter(|(symref, _)| symref.is_empty())
+            .map(|(_, name)| name.to_owned())
+            .collect::<Vec<String>>()
+    };
+
+    // The remotes with `refs/remotes/<remote>/` off the front, so that
+    // `origin/rate-limiting` is read as the name a branch would be cut under —
+    // and `origin/HEAD` falls out with the other symbolic refs, being another
+    // name for a branch already in the list.
+    listed("refs/heads", "%(symref)\t%(refname:short)")
+        .into_iter()
+        .chain(listed("refs/remotes", "%(symref)\t%(refname:lstrip=3)"))
+        .collect()
+}
+
 /// What fetching `repo`'s remotes came to.
 ///
 /// Three answers rather than a boolean, because the middle one is not a
@@ -1254,6 +1293,58 @@ mod tests {
             !branch_exists(nowhere.path(), "wrap-up"),
             "which is the whole difference between the two readings",
         );
+    }
+
+    /// The names a start has to pick around: the local branches and the remote
+    /// ones as they would be cut, with the remote's own name off the front.
+    ///
+    /// A name only origin holds is one to leave alone — cutting it locally
+    /// works, and then the push behind it is into somebody's branch.
+    #[test]
+    fn the_names_a_repository_answers_to_are_its_locals_and_its_remotes() {
+        let (_dir, repo) = repository();
+        let tip = resolve(&repo, "main").expect("the branch resolves");
+
+        run(&repo, &["branch", "rate-limiting"]);
+        run(&repo, &["branch", "feature/throttling"]);
+        run(
+            &repo,
+            &["update-ref", "refs/remotes/origin/pushed-elsewhere", &tip],
+        );
+        run(&repo, &["update-ref", "refs/remotes/origin/main", &tip]);
+        run(
+            &repo,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/main",
+            ],
+        );
+
+        let names = cut_names(&repo);
+
+        assert!(names.contains("main"));
+        assert!(names.contains("rate-limiting"));
+        assert!(names.contains("feature/throttling"), "slashes and all");
+        assert!(
+            names.contains("pushed-elsewhere"),
+            "a remote's branch under the name it would be cut as",
+        );
+        assert!(
+            !names.contains("origin/pushed-elsewhere"),
+            "and not under the remote's own name for it",
+        );
+        assert!(
+            !names.contains("HEAD"),
+            "origin/HEAD is another name for a branch already in the list",
+        );
+        assert!(!names.contains("hushed-otter"), "and nothing else is in it");
+
+        // A directory git will not read holds no names, which is what leaves a
+        // caller something to choose.
+        let nowhere = tempfile::tempdir().unwrap();
+
+        assert!(cut_names(nowhere.path()).is_empty());
     }
 
     /// A worktree git still answers about, on the branch it was made for, is

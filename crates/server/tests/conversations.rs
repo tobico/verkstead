@@ -1782,17 +1782,124 @@ async fn starting_is_refused_when_the_base_branch_no_longer_resolves() {
 }
 
 /// Verkstead did not make the branch, so it will not take it over: what is on it
-/// is somebody's work.
+/// is somebody's work, and the name is one the human typed and meant.
 #[tokio::test]
-async fn starting_is_refused_when_the_branch_is_already_there() {
+async fn starting_is_refused_when_the_named_branch_is_already_there() {
     let (watched, _dir, app, repo, repo_id) = workbench().await;
     let id = ready(&app, watched.path(), repo_id).await;
 
-    let branch = opened(&app, id).await.branch;
-    git(&repo, &["branch", &branch]);
+    assert_eq!(
+        rename(&app, id, "rate-limiting").await,
+        BranchRenamed::Renamed
+    );
+    git(&repo, &["branch", "rate-limiting"]);
 
     assert_eq!(grill(&app, id).await, GrillingStarted::BranchExists);
-    assert_eq!(opened(&app, id).await.state, Lifecycle::Draft);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.branch, "rate-limiting", "and the name is still theirs");
+}
+
+/// But a name Verkstead invented is nobody's, so a repository that already has a
+/// branch by it is a reason to invent another rather than a reason to refuse:
+/// the human never saw that name and cannot have meant it.
+#[tokio::test]
+async fn a_start_invents_another_name_where_the_one_it_has_is_taken() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    let carried = opened(&app, id).await.branch;
+    git(&repo, &["branch", &carried]);
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+
+    assert_ne!(view.branch, carried, "the work is on a name of its own");
+    assert!(
+        has_branch(&repo, &view.branch),
+        "and that name is the branch that was cut",
+    );
+
+    // Still Verkstead's name and still the first session's to replace: what
+    // happened here is a prefill being swapped for another prefill.
+    assert!(!view.branch_named);
+    assert!(view.naming);
+
+    // And the work is where the record says it is, under the name it settled on.
+    let worktree = PathBuf::from(view.worktree.expect("a start makes one").path);
+    assert!(
+        worktree.ends_with(format!("verkstead-{}", view.branch)),
+        "the directory is named for the branch, not for the one it started with",
+    );
+    assert_eq!(
+        git(&worktree, &["rev-parse", "--abbrev-ref", "HEAD"]).trim(),
+        view.branch,
+    );
+}
+
+/// The same question asked of every repository the invented name is about to be
+/// cut in. A companion mirroring the Conversation's branch takes that name too,
+/// so one already holding it is answered by picking again rather than by the
+/// refusal a companion's own typed name would get.
+#[tokio::test]
+async fn a_start_invents_around_a_companion_that_holds_the_name() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let companion = second_repo(&app, watched.path(), "askance").await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    add_companion(&app, id, companion).await;
+    companion_mode(&app, id, companion, CompanionMode::ReadWrite).await;
+
+    let askance = watched.path().join("askance");
+    let carried = opened(&app, id).await.branch;
+
+    // Free in the Conversation's own repository and taken in the companion's,
+    // which is a name this start cannot use either.
+    git(&askance, &["branch", &carried]);
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+
+    assert_ne!(view.branch, carried);
+    assert!(has_branch(&repo, &view.branch));
+    assert!(
+        has_branch(&askance, &view.branch),
+        "the companion mirrors it, so it is cut there under the same name",
+    );
+}
+
+/// And a name only the remote holds is picked around as well, though nothing
+/// local is in the way of cutting it: the branch that would be pushed to it is
+/// somebody's, and there is no shortage of other names.
+#[tokio::test]
+async fn a_start_invents_around_a_name_only_the_remote_holds() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    let carried = opened(&app, id).await.branch;
+    let tip = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+
+    git(
+        &repo,
+        &[
+            "update-ref",
+            &format!("refs/remotes/origin/{carried}"),
+            &tip,
+        ],
+    );
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+    assert_ne!(view.branch, carried);
+    assert!(has_branch(&repo, &view.branch));
+    assert!(
+        !has_branch(&repo, &carried),
+        "and nothing was cut under the name it was carrying",
+    );
 }
 
 /// The companion of that name, as the Conversation reports it.
@@ -6460,6 +6567,90 @@ async fn steering_a_draft_checks_out_the_companions_it_was_configured_with() {
     // Nothing was added, so there is nothing for the Timeline to announce: what
     // this steer did was make what the record already said.
     assert!(notices(&view).is_empty());
+}
+
+/// A steered Draft settles its name the way a grill start does: a name Verkstead
+/// invented that the repository already answers to is another Conversation's or
+/// a stranger's, never this one's own coming back, so another is invented and
+/// the branch already there is left alone.
+#[tokio::test]
+async fn steering_a_draft_invents_around_a_name_the_repository_holds() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    let carried = opened(&app, id).await.branch;
+
+    git(&repo, &["branch", &carried]);
+    let stranger = git(&repo, &["rev-parse", &carried]).trim().to_owned();
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_grilling(&app, id, None).await,
+        ConversationSteered::Steered,
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_ne!(view.branch, carried, "the work is on a name of its own");
+    assert!(!view.branch_named, "and it is still Verkstead's name");
+    assert!(has_branch(&repo, &view.branch));
+
+    let worked = PathBuf::from(view.worktree.expect("a steered Draft gets one").path);
+
+    assert_eq!(
+        git(&worked, &["symbolic-ref", "--short", "HEAD"]).trim(),
+        view.branch,
+        "and the checkout is on it rather than on the branch that was there",
+    );
+    assert_eq!(
+        git(&repo, &["rev-parse", &carried]).trim(),
+        stranger,
+        "which is where it was left",
+    );
+}
+
+/// But a Conversation that has worked before picks its own branch back up, name
+/// and all — which is the whole point of that path, and what the settling above
+/// must not reach.
+#[tokio::test]
+async fn steering_a_conversation_that_has_worked_keeps_the_branch_it_was_on() {
+    let (watched, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+    let worked = PathBuf::from(view.worktree.expect("a start makes one").path);
+    let branch = view.branch.clone();
+
+    // Closed and steered back: the directory goes and the branch is kept, which
+    // is the case a name settled twice would have worked over.
+    assert_eq!(close(&app, id).await, ConversationClosed::Closed);
+    assert!(!worked.exists());
+    assert!(has_branch(&repo, &branch));
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_grilling(&app, id, None).await,
+        ConversationSteered::Steered,
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.branch, branch, "the branch it worked on is its own");
+
+    let back = PathBuf::from(view.worktree.expect("a steer checks it out again").path);
+
+    assert_eq!(
+        git(&back, &["symbolic-ref", "--short", "HEAD"]).trim(),
+        branch,
+    );
 }
 
 /// And a Conversation steered back out of Closed gets every companion checked
