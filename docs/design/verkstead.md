@@ -524,6 +524,16 @@ remembered is read. The details pane caps its content at the 60rem the Set and
 Settings pages are read at and centres it when the pane is wider, so a pane
 dragged to the width of a window is still a pane a line can be read across.
 
+**Where the panes stand side by side the page behind them never scrolls**: the
+frame is the window's height, each pane scrolls on its own and keeps the scroll
+when it runs out, and the frame both clips what stands past its bottom edge and
+is what everything in it is laid out from. The last of those is the one that
+keeps being left off, and it is the one that cannot be seen: without it an
+absolutely positioned element is measured from the document rather than from the
+frame, and something nobody can see makes the page as tall as wherever it landed.
+Scrolling that page moves the whole workbench off the screen rather than moving
+anything in it, which is why this is a rule and not a preference.
+
 The details pane is the one selected thing and nothing else: with nothing
 selected it is blank, and a narrow layout offers no way to page into it
 (*settled 2026-08-24, building workbench-refit*). That is nearly always an
