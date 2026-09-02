@@ -60,8 +60,10 @@ The desktop app is deliberately plain about its limits:
   sign of it going. A risk taken with open eyes: the day it goes, Mac sessions
   go with it until something replaces them.
 
-  Windows is untouched by any of this, and the UI state that says a session
-  cannot start is still built for it.
+  Windows is untouched by any of this. The UI state the bullet above promised
+  — the one saying a session cannot be started here — is not something this
+  port built either: it stayed a decision with nothing behind it until the
+  Windows port, which is the stage that built it.
 
   Amended: **the Windows port gates at the leaf call sites rather than around
   the modules.** Measured against the tree when that port was planned, the code
