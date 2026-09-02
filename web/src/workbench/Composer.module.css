@@ -11,7 +11,18 @@
 /* The column the whole of it stands in, centred in the pane and capped at the
    measure prose is read at everywhere else — the pane is as wide as the human
    dragged it, and a box the full width of a wide one would be a paragraph
-   nobody could read a line of. */
+   nobody could read a line of.
+
+   Half a rem wider than the measure either side, which is the padding the box
+   took on: what is capped at the measure is the *field*, and a box that kept
+   the measure for itself would have taken that half-rem out of the line the
+   brief is written on. So the cap is the measure plus what the box spends on
+   either edge, and everything under the box is widened with it — the presses
+   line up with the box's edges rather than with something inside them.
+
+   And centred in the pane's own height as well as across it, which the pane
+   does: see `.paneComposer` in `Panes.module.css`, the name this column wears
+   for it. */
 .composer {
   display: flex;
   flex-direction: column;
@@ -20,7 +31,7 @@
 
 .composer > * {
   width: 100%;
-  max-width: var(--measure);
+  max-width: calc(var(--measure) + 1rem);
 }
 
 .composer > :last-child {
@@ -31,7 +42,7 @@
    draws standing in for the field's own — see the field below, which gives its
    border up so there is one box here rather than a box inside a box. */
 .box {
-  padding: 0.5rem 0.25rem 0.35rem;
+  padding: 1rem 0.75rem 0.85rem;
   background: var(--card);
   border: 1px solid var(--edge);
   border-radius: 0.9rem;
@@ -48,11 +59,15 @@
    the field its height goes on measuring the same line breaks — see `.grow` in
    `App.module.css`.
 
-   As tall as a few lines before anything is typed, because what it is asking
-   for is a description rather than a line. */
-.box .grow {
-  min-height: 5.5rem;
-  max-width: none;
+   Three lines tall before anything is typed, because what it is asking for is a
+   description rather than a line — and three lines counted rather than guessed
+   at: the line height the page is set in, three times, plus the half-rem of
+   padding above and below and the pixel of border either side that the field
+   still takes up. It grew from there before this rule was reached at all, the
+   selector it was written against being `.grow`'s own hash rather than this
+   module's — which is why the field stood one line tall. */
+.box .field {
+  min-height: calc(3 * 1.5rem + 1rem + 2px);
 }
 
 .box textarea {
@@ -107,11 +122,11 @@
 
 /* Two ways of not being pressable, drawn the same because they read the same:
    a press already in flight, and a conversation that is not ready yet. The
-   second one is only `aria-disabled`, so it still takes the press — and what it
-   does with it is say what is missing. */
+   dimming is the whole of it — a cursor saying *not allowed* is a second way of
+   saying what the dimming has said, drawn in the one place a pointer is already
+   resting to read the tooltip that says why. */
 .startGrilling .start:disabled,
 .startGrilling .start.inert {
-  cursor: not-allowed;
   opacity: 0.65;
 }
 
@@ -273,13 +288,17 @@
   cursor: pointer;
 }
 
-.presses .draft:disabled {
-  cursor: not-allowed;
+/* The same two ways of not being pressable that the start beside it draws, and
+   drawn the same: a press already in flight, and nothing yet to create. The
+   second of them is only `aria-disabled`, so that a pointer can still reach the
+   `title` saying what is missing — see `Compose.tsx`. */
+.presses .draft:disabled,
+.presses .draft.inert {
   opacity: 0.65;
 }
 
 @media (hover: hover) {
-  .presses .draft:not(:disabled):hover {
+  .presses .draft:not(:disabled):not(.inert):hover {
     color: var(--accent-deep);
     border-color: var(--accent-deep);
   }

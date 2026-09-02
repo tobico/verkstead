@@ -31,7 +31,7 @@ import {
   type Composed,
 } from "../src/workbench/composing";
 import { OPEN, PROFILES, REPOS, drawn, mount, theWorkbench } from "./bench";
-import { pick, showing } from "./pickers";
+import { offered, pick, picker, showing } from "./pickers";
 import { json, serving, whenever } from "./serving";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
 
@@ -148,8 +148,24 @@ async function openRepo(container: ParentNode): Promise<HTMLElement> {
   return drawn(container, `.${setup.repoOption} > [role="group"]`);
 }
 
-/// Pick a repo out of it, which is the one thing a create cannot do without.
+/// Pick a repo, which is the one thing a create cannot do without.
+///
+/// Two controls wear that name, and which of them is standing is the whole of
+/// what this page does about a repo: a listbox in the row until one is picked,
+/// and the panel's own `<select>` — behind the trigger the listbox became —
+/// every time after. So the first pick walks the rows and the rest change the
+/// field, which is what the human does too.
 async function pickRepo(container: ParentNode, id: number): Promise<void> {
+  const listed = container.querySelector(`.${setup.repoSelect}`) !== null;
+
+  if (listed) {
+    // Waited for the rows to have landed, the control being drawn before the
+    // list it offers has arrived.
+    await waitFor(() => expect(offered("Repo").length).toBe(REPOS.length));
+    pick("Repo", REPOS.find((repo) => repo.id === id)!.name);
+    return;
+  }
+
   await openRepo(container);
 
   const picker = (await waitFor(() =>
@@ -208,7 +224,39 @@ describe("the compose page", () => {
     expect(screen.getByLabelText("Conversations")).toBeTruthy();
   });
 
-  it("says Select until a repo is picked, and the repo after it", async () => {
+  /// The Repo slot is two controls, one after the other: an ordinary dropdown
+  /// while nothing is picked, and the panel that arranges what was picked from
+  /// the moment something is. A panel of questions about a repository nobody has
+  /// chosen is a form about nothing.
+  it("offers the repos as a dropdown, and becomes the panel once one is picked", async () => {
+    theWorkbench();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await drawn(container, `.${setup.repoSelect}`);
+
+    // The invitation rather than the placeholder every other picker says: this
+    // one has not been answered rather than had its answer taken away.
+    expect(showing("Repo")).toBe("Select");
+    expect(container.querySelector(`.${setup.repoOption}`)).toBeNull();
+
+    await pickRepo(container, REPOS[1]!.id);
+
+    const trigger = await drawn(
+      container,
+      `.${setup.repoOption} .${setup.optionValue}`,
+    );
+    await waitFor(() => expect(trigger.textContent).toBe(REPOS[1]!.name));
+    expect(container.querySelector(`.${setup.repoSelect}`)).toBeNull();
+  });
+
+  /// Which of the two is standing follows the id this device is holding, and the
+  /// name on the trigger follows the repos — two different reads, so the panel
+  /// can be standing before there is a name for it to say. The moment the read
+  /// has not landed in looks exactly like the repo having been deregistered
+  /// since, and neither is a blank line under the label.
+  it("says the invitation again where the held repo has no name to draw", async () => {
+    keep({ ...blank(), repo: 9999 });
     theWorkbench();
     const { container } = mount("/compose");
 
@@ -220,9 +268,16 @@ describe("the compose page", () => {
     );
     expect(trigger.textContent).toBe("Select");
 
-    await pickRepo(container, REPOS[1]!.id);
-
-    await waitFor(() => expect(trigger.textContent).toBe(REPOS[1]!.name));
+    // And still saying it once the repos have landed and none of them answers
+    // to the id — the panel's own picker being where that is put right.
+    await openRepo(container);
+    const choice = (await waitFor(() =>
+      picker("Repo"),
+    )) as unknown as HTMLSelectElement;
+    await waitFor(() =>
+      expect(choice.options.length).toBeGreaterThanOrEqual(REPOS.length),
+    );
+    expect(trigger.textContent).toBe("Select");
   });
 
   it("keeps what is composed on this device, and creates nothing until a press", async () => {
@@ -254,8 +309,13 @@ describe("the compose page", () => {
     expect(writes(fetching, "/api/ui/conversations")).toBe(0);
   });
 
-  it("starts nothing until a repo is picked", async () => {
-    theWorkbench();
+  /// Neither press is ever truly `disabled` for a thing that is missing, only
+  /// for a press in flight: a disabled button is one no browser will hover and
+  /// no keyboard will reach, so the `title` saying what is missing would go the
+  /// same way as the press it never takes. Inert, `aria-disabled`, and answering
+  /// a press with nothing is what says it instead.
+  it("creates nothing until a repo is picked, and says why on both presses", async () => {
+    const fetching = creating();
     const { container } = mount("/compose");
 
     await composing(container);
@@ -263,13 +323,28 @@ describe("the compose page", () => {
     const start = screen.getByRole("button", { name: "Start work" });
     const draft = screen.getByRole("button", { name: "Save as draft" });
 
-    expect((start as HTMLButtonElement).disabled).toBe(true);
-    expect((draft as HTMLButtonElement).disabled).toBe(true);
+    for (const press of [start, draft]) {
+      expect((press as HTMLButtonElement).disabled).toBe(false);
+      expect(press.getAttribute("aria-disabled")).toBe("true");
+      expect(press.classList.contains(composer.inert!)).toBe(true);
+
+      // And why, on the press itself: one thing is missing, and it is the first
+      // control in the row above.
+      expect(press.getAttribute("title")).toBe("No repo selected");
+    }
+
+    // Pressed, either of them does nothing at all — which is what the press
+    // being taken at all has to be worth.
+    fireEvent.click(draft);
+    fireEvent.click(start);
+    expect(writes(fetching, "/api/ui/conversations")).toBe(0);
 
     await pickRepo(container, REPOS[1]!.id);
 
-    await waitFor(() => expect((draft as HTMLButtonElement).disabled).toBe(false));
-    expect((start as HTMLButtonElement).disabled).toBe(false);
+    await waitFor(() => expect(draft.getAttribute("aria-disabled")).toBe("false"));
+    expect(draft.classList.contains(composer.inert!)).toBe(false);
+    expect(draft.getAttribute("title")).toBeNull();
+    expect(start.getAttribute("title")).not.toBe("No repo selected");
   });
 
   /// And the two presses part company there. Creating is the whole of what the
@@ -278,8 +353,8 @@ describe("the compose page", () => {
   /// the three roles answered.
   ///
   /// Inert rather than disabled, exactly as the composer's own start is: a
-  /// disabled button takes no press to answer with, and what this one has to
-  /// say is what is missing.
+  /// disabled button is one a browser will not hover, and hovering is how what
+  /// is missing gets read.
   it("draws Start inert until there is a brief and three roles, and says what is missing", async () => {
     const fetching = creating();
     const { container } = mount("/compose");
@@ -294,25 +369,29 @@ describe("the compose page", () => {
     expect((start as HTMLButtonElement).disabled).toBe(false);
     expect(start.classList.contains(composer.inert!)).toBe(true);
 
-    // Pressed, it says what it is waiting on and creates nothing at all — the
-    // whole of what was wrong with a press that made the conversation and then
-    // reported the grilling refused.
-    fireEvent.click(start);
-
-    await waitFor(() =>
-      expect(
-        screen.getByText(
-          "Starting needs a brief, and every role picked and working.",
-        ),
-      ).toBeTruthy(),
+    // What it is waiting on, on the press itself rather than under the box —
+    // and nothing at all said on the page.
+    expect(start.getAttribute("title")).toBe(
+      "Starting needs a brief, and every role picked and working.",
     );
+    expect(
+      screen.queryByText(
+        "Starting needs a brief, and every role picked and working.",
+      ),
+    ).toBeNull();
+
+    // And pressed, it creates nothing at all — the whole of what was wrong with
+    // a press that made the conversation and then reported the grilling
+    // refused.
+    fireEvent.click(start);
     expect(writes(fetching, "/api/ui/conversations")).toBe(0);
 
     // And nothing about the other press: creating is all it does, and it can.
     expect(
-      (screen.getByRole("button", { name: "Save as draft" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(false);
+      screen
+        .getByRole("button", { name: "Save as draft" })
+        .getAttribute("aria-disabled"),
+    ).toBe("false");
 
     // A brief typed is the last of it, and the press goes live.
     fireEvent.input(await composing(container), {
@@ -375,6 +454,9 @@ describe("the compose page", () => {
     await pickRepo(container, REPOS[1]!.id);
     await rolesAnswered();
 
+    // The branch is inside the panel the trigger became once a repo was
+    // picked, which is where the rest of *which code* is settled.
+    await openRepo(container);
     fireEvent.input(await drawn(container, "#branch"), {
       target: { value: "widget-work" },
     });
@@ -428,6 +510,9 @@ describe("the compose page", () => {
     await pickRepo(container, REPOS[1]!.id);
     await rolesAnswered();
 
+    // The branch is inside the panel the trigger became once a repo was
+    // picked, which is where the rest of *which code* is settled.
+    await openRepo(container);
     fireEvent.input(await drawn(container, "#branch"), {
       target: { value: "not a branch name" },
     });
@@ -498,10 +583,10 @@ describe("the compose page", () => {
     await pickRepo(container, REPOS[1]!.id);
 
     await waitFor(() =>
-      expect(showing("Grilling")).toBe("Claude Code Fable 5 — fable"),
+      expect(showing("Grilling")).toBe("Fable 5 — fable"),
     );
-    expect(showing("Implementation")).toBe("Claude Code Opus 5 — opus");
-    expect(showing("Review")).toBe("Claude Code Sonnet 5 — sonnet");
+    expect(showing("Implementation")).toBe("Opus 5 — opus");
+    expect(showing("Review")).toBe("Sonnet 5 — sonnet");
   });
 
   it("re-reads on a switch, and leaves a role the human touched alone", async () => {
@@ -522,7 +607,7 @@ describe("the compose page", () => {
     await pickRepo(container, REPOS[1]!.id);
 
     await waitFor(() =>
-      expect(showing("Grilling")).toBe("Claude Code Fable 5 — fable"),
+      expect(showing("Grilling")).toBe("Fable 5 — fable"),
     );
 
     // One of the three made the human's own, which is what the switch must not
@@ -535,9 +620,9 @@ describe("the compose page", () => {
     // The two nobody touched are the other repo's memory now; the one they did
     // is still theirs.
     await waitFor(() =>
-      expect(showing("Review")).toBe("Claude Code Fable 5 — fable"),
+      expect(showing("Review")).toBe("Fable 5 — fable"),
     );
-    expect(showing("Implementation")).toBe("Claude Code Sonnet 5 — sonnet");
+    expect(showing("Implementation")).toBe("Sonnet 5 — sonnet");
     expect(showing("Grilling")).toBe("No grilling");
   });
 
@@ -571,7 +656,7 @@ describe("the compose page", () => {
     await pickRepo(container, REPOS[1]!.id);
 
     await waitFor(() =>
-      expect(showing("Grilling")).toBe("Claude Code Fable 5 — fable"),
+      expect(showing("Grilling")).toBe("Fable 5 — fable"),
     );
 
     // One picked away from what was shown, the other two left on it.

@@ -349,6 +349,11 @@
   border-radius: 0.6rem;
 }
 
+/* Read at the measure, exactly as a Question's Options are — see `.options`,
+   which is the same column of one-line rows and takes the same width. A
+   direction is a line of words on offer like an Option is, so three of them
+   drawn out to the card's full width would be the one control on the page whose
+   reach said it was a different kind of thing from the ones above it. */
 .directionPick .directions {
   list-style: none;
   margin: 0;
@@ -356,6 +361,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+  max-width: var(--measure);
 }
 
 /* The name of one direction, which carries no paint of its own: it is the row's

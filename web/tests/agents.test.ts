@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { reading } from "../src/agents";
+import { briefly, reading } from "../src/agents";
 import type { ProfileEntry } from "../src/api/types";
 
 /// One saved profile of a backend, which is all this cares about them: a name
@@ -144,5 +144,42 @@ describe("the reading of who runs a session", () => {
     expect(reading({ agent: null, model: null, profile: "Work" }, TWO)).toBe(
       "Work",
     );
+  });
+});
+
+/// The shorter reading the setup row's closed trigger draws, where the harness's
+/// mark beside the words is what still says Claude from Codex.
+describe("the reading with the backend left off", () => {
+  it("says the model and the account", () => {
+    expect(
+      briefly({ agent: "Claude", model: "claude-fable-5", profile: "Work" }, TWO),
+    ).toBe("Fable 5 — Work");
+  });
+
+  /// The same question about the account's name, asked the same way: a backend
+  /// with one saved account needs no name after its model.
+  it("drops the account's name where its backend has one", () => {
+    expect(
+      briefly({ agent: "Claude", model: "claude-fable-5", profile: "Work" }, [
+        profile("Work", "Claude"),
+      ]),
+    ).toBe("Fable 5");
+  });
+
+  /// And the backend is said after all where there is no model to say instead:
+  /// a Profile picked before a model was paired beside it has nothing else to
+  /// be read by.
+  it("falls back to the backend where the pairing has no model", () => {
+    expect(briefly({ agent: "Claude", model: null, profile: "Work" }, TWO)).toBe(
+      "Claude Code — Work",
+    );
+  });
+
+  /// An id the build cannot read is still the honest thing to show: it degrades
+  /// to itself here exactly as it does in the whole reading.
+  it("keeps the raw id of a model it does not know", () => {
+    expect(
+      briefly({ agent: "Claude", model: "claude-opus-9", profile: "Work" }, TWO),
+    ).toBe("claude-opus-9 — Work");
   });
 });

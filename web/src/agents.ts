@@ -163,6 +163,31 @@ function tells(said: Said, saved: ProfileEntry[] | undefined): boolean {
   return backend.length !== 1 || backend[0]!.name !== said.profile;
 }
 
+/// The same reading with the backend's name left off: "Fable 5 — Work".
+///
+/// For the one site that has already said which backend by other means — the
+/// closed trigger in the composer's setup row, which draws the harness's mark
+/// beside the words and has a quarter of the box to say the rest of it in. The
+/// rows behind that trigger keep the whole reading: a list is read down rather
+/// than glanced at, and the backend is the word that sorts it.
+///
+/// Everything else is [`reading`]'s own, the account's name above all — what
+/// tells two runs apart is the same question whether the backend is said or not.
+export function briefly(said: Said, saved: ProfileEntry[] | undefined): string {
+  const model = said.model ? prettify(said.model) : null;
+
+  return [
+    // The backend where there is no model to say instead: a Profile picked
+    // before a model was paired beside it has nothing else to be read by, and a
+    // reading of the account's name alone would say less than the control it
+    // replaced.
+    model ?? (said.agent === null ? "" : AGENT_NAME[said.agent]),
+    tells(said, saved) ? said.profile : "",
+  ]
+    .filter((part) => part !== "")
+    .join(" — ");
+}
+
 /// What one finished or running session was launched under, off the record it
 /// wrote as it started.
 ///

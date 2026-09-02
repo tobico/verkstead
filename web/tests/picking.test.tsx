@@ -336,6 +336,141 @@ describe("what a row of the listbox draws", () => {
   it("gives every row a height a finger can hit", () => {
     expect(css).toContain("min-height: 2.75rem;");
   });
+
+  /// The rows are a popover, so they come down over the same wash a menu comes
+  /// down over — 20%, the figure `Menu.module.css` carries.
+  it("washes the page under the rows, as a menu does", () => {
+    expect(css).toMatch(
+      /\.backdrop \{[^}]*background: rgb\(0 0 0 \/ 20%\);/,
+    );
+    // And the one set of rows that is not a popover keeps a clear one — the
+    // browse field's, where the typing goes on while they are down.
+    expect(css).toMatch(/\.backdrop\.clear \{[^}]*background: none;/);
+
+    // As does every set of rows inside the modal, where there is no page behind
+    // them to wash: the dialog is in the top layer with its own backdrop over
+    // the page already, and this one — fixed, and painted above everything in
+    // the card — would dim the card being filled in rather than anything
+    // behind it.
+    expect(css).toMatch(/dialog \.backdrop \{[^}]*background: none;/);
+  });
+
+  /// The caret is the app's own shape rather than whatever the reader's font
+  /// has for `▾` — the same chevron the status button draws.
+  it("draws the app's chevron rather than a character", () => {
+    picking();
+
+    expect(control().querySelector("svg")).toBeTruthy();
+    expect(control().textContent).not.toContain("▾");
+  });
+});
+
+/// The trigger with its label inside the handle, which is what the composer's
+/// setup row draws: one rectangle around the label and the value, a press on
+/// either opening the rows, and the label still what the control is called.
+describe("the listbox with its label in the handle", () => {
+  /// Named by the label rather than by everything inside the button: a combobox
+  /// says what it is called and what it is showing as two different things, and
+  /// a name read off the contents would run the two together.
+  it("is named by the label it draws inside itself", () => {
+    render(() => (
+      <Listbox
+        id="grilling-pairing"
+        heading={{ words: "Grilling" }}
+        options={ROWS}
+        value={(row) => row.value}
+        label={(row) => row.label}
+        mark={(row) => row.mark}
+        chosen="2:grok-4.6"
+        pick={() => {}}
+      />
+    ));
+
+    const control = picker("Grilling");
+
+    expect(control.id).toBe("grilling-pairing");
+    expect(control.getAttribute("aria-labelledby")).toBe(
+      "grilling-pairing-label",
+    );
+    expect(document.getElementById("grilling-pairing-label")!.textContent).toBe(
+      "Grilling",
+    );
+    // The value is still the value, said where every other control says it.
+    expect(showing("Grilling")).toBe("Grok 4.6");
+
+    // And out of the contents the value is read from, so that the name is not
+    // read into it as well: a node named directly by `aria-labelledby` is
+    // still read for the name however it is hidden, which is what leaves this
+    // control called "Grilling" and showing "Grok 4.6" rather than called
+    // "Grilling" and showing "Grilling Grok 4.6".
+    expect(
+      document.getElementById("grilling-pairing-label")!.getAttribute("aria-hidden"),
+    ).toBe("true");
+  });
+
+  /// And a press on the label is a press on the trigger, the label being part
+  /// of it: what the hover rectangle surrounds is what the press reaches.
+  it("drops the rows on a press on the label", () => {
+    render(() => (
+      <Listbox
+        id="grilling-pairing"
+        heading={{ words: "Grilling" }}
+        options={ROWS}
+        value={(row) => row.value}
+        label={(row) => row.label}
+        chosen=""
+        pick={() => {}}
+      />
+    ));
+
+    fireEvent.click(document.getElementById("grilling-pairing-label")!);
+
+    expect(expanded("Grilling")).toBe(true);
+  });
+
+  /// Two readings of one choice: the rows say the whole of it, and the trigger
+  /// says the shorter one the caller hands in.
+  it("reads the closed control shorter than the row it came off", () => {
+    render(() => (
+      <Listbox
+        id="grilling-pairing"
+        heading={{ words: "Grilling" }}
+        options={ROWS}
+        value={(row) => row.value}
+        label={(row) => row.label}
+        closed={(row) => row.label.replace("Claude Code ", "")}
+        chosen="1:claude-fable-5"
+        pick={() => {}}
+      />
+    ));
+
+    expect(showing("Grilling")).toBe("Fable 5");
+    expect(rows("Grilling")).toEqual([
+      "No grilling",
+      "Claude Code Fable 5",
+      "Grok 4.6",
+    ]);
+  });
+
+  /// And the words a control says where nothing is chosen are the caller's
+  /// where the caller has better ones: the composer's Repo control is an
+  /// invitation rather than a record of a choice not made.
+  it("says the caller's own placeholder", () => {
+    render(() => (
+      <Listbox
+        id="conversation-repo"
+        heading={{ words: "Repo" }}
+        options={[]}
+        value={(row: { value: string }) => row.value}
+        label={(row: { value: string }) => row.value}
+        nothing="Select"
+        chosen=""
+        pick={() => {}}
+      />
+    ));
+
+    expect(showing("Repo")).toBe("Select");
+  });
 });
 
 /// The last thing a native dropdown kept for itself: its popup is the browser's

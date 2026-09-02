@@ -95,14 +95,22 @@ fn config_is_overridable_by_flag() {
         config.data_dir.as_deref(),
         Some(Path::new("/srv/verkstead"))
     );
-    // Joined rather than spelled, because a separator is the platform's: the
-    // same directory and the same file name come out `\` apart on Windows, and
-    // a literal here would be this test asserting which platform it is running
-    // on.
+    // Said as the two halves rather than as one spelling, because a separator
+    // is the platform's: the same join reads `/srv/verkstead/verkstead.db` on
+    // Unix and `/srv/verkstead\verkstead.db` on Windows, and neither of those
+    // is what is being asserted. That one name inside whichever directory won
+    // is, and a literal here would be this test asserting which platform it is
+    // running on instead.
+    let database = database(Path::new("/srv/verkstead"));
     assert_eq!(
-        database(Path::new("/srv/verkstead")),
-        Path::new("/srv/verkstead").join("verkstead.db"),
-        "the database is that one name inside whichever directory won",
+        database.file_name().unwrap(),
+        "verkstead.db",
+        "the database is that one name",
+    );
+    assert_eq!(
+        database.parent().unwrap(),
+        Path::new("/srv/verkstead"),
+        "inside whichever directory won",
     );
 }
 
@@ -120,6 +128,12 @@ fn config_parses_without_a_watched_path_and_watches_nothing() {
 
 /// Several of them, as `PATH` is written — which is how they arrive from a
 /// service unit, where there is one string and not a repeatable flag.
+///
+/// The one string is built rather than written out, because how `PATH` is
+/// written is the platform's own — a `:` on Unix, a `;` on Windows, which is
+/// what the flag is parsed with; see `PATH_LIST_SEPARATOR` in `lib.rs`. A
+/// literal `:` here would be asserting that Windows cuts a drive letter off
+/// the path it belongs to.
 #[test]
 fn watched_paths_are_a_list_however_they_are_given() {
     let repeated = Config::parse_from([
@@ -129,15 +143,11 @@ fn watched_paths_are_a_list_however_they_are_given() {
         "--watched-path",
         "/srv/scratch",
     ]);
-    // Written the way the platform writes `PATH`, which is what the flag is
-    // parsed with: a `;` on Windows, where a `:` is a drive letter's own
-    // punctuation — see `PATH_LIST_SEPARATOR` in `lib.rs`. Spelled with a `:`
-    // here, this asked Windows for one path named after two.
     let one_string = std::env::join_paths(["/srv/repos", "/srv/scratch"])
         .unwrap()
         .into_string()
         .unwrap();
-    let separated = Config::parse_from(["verkstead serve", "--watched-path", one_string.as_str()]);
+    let separated = Config::parse_from(["verkstead serve", "--watched-path", &one_string]);
 
     assert_eq!(repeated.watched_paths, separated.watched_paths);
     assert_eq!(

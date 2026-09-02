@@ -895,6 +895,33 @@ mod tests {
         String::from_utf8(output.stdout).unwrap()
     }
 
+    /// A commit stamped with a moment of the test's choosing, for a history
+    /// whose commits are read back oldest first.
+    ///
+    /// [`run`] leaves git to read the clock, and a whole history built inside
+    /// one second is a history of commits that all carry the same moment. A
+    /// listing then has nothing to order two branches' commits by, and falls
+    /// back to the order its walk met them in — which, coming down from the
+    /// merge, is the opposite of the order they were made in. A machine slow
+    /// enough to cross a second between them reads them the other way round,
+    /// so the same history says two different things on two machines.
+    ///
+    /// Naming the moment leaves it to neither: what the sweep reads back is the
+    /// order these dates put the commits in.
+    fn commit_at(dir: &Path, message: &str, when: &str) {
+        let output = Command::new("git")
+            .args(["commit", "-m", message])
+            .current_dir(dir)
+            .env("GIT_AUTHOR_DATE", when)
+            .env("GIT_COMMITTER_DATE", when)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .expect("git should be on the PATH for these tests");
+
+        assert!(output.status.success(), "git commit -m {message:?} failed");
+    }
+
     /// The same run, for a git that is expected to fail: a merge that conflicts
     /// exits non-zero, and the conflict is the point of asking for it.
     fn attempt(dir: &Path, args: &[&str]) {
@@ -1430,15 +1457,19 @@ mod tests {
         let path = dir.path();
         let base = head(path);
 
+        // The last of the three fallbacks sweeps both branches together, so
+        // these two carry named moments rather than whatever the clock says:
+        // the work first, and what landed on main while it was going on after
+        // it.
         run(path, &["checkout", "--quiet", "-b", "rate-limiting"]);
         std::fs::write(path.join("limiter.rs"), "fn allow() {}\n").unwrap();
         run(path, &["add", "limiter.rs"]);
-        run(path, &["commit", "-m", "feat: rate limiting"]);
+        commit_at(path, "feat: rate limiting", "2026-01-01T09:00:00Z");
 
         run(path, &["checkout", "--quiet", "main"]);
         std::fs::write(path.join("elsewhere.rs"), "fn elsewhere() {}\n").unwrap();
         run(path, &["add", "elsewhere.rs"]);
-        run(path, &["commit", "-m", "feat: somebody else's work"]);
+        commit_at(path, "feat: somebody else's work", "2026-01-01T10:00:00Z");
 
         run(path, &["checkout", "--quiet", "rate-limiting"]);
         run(path, &["merge", "--no-ff", "-m", "merge: main", "main"]);
@@ -1474,12 +1505,13 @@ mod tests {
         assert_eq!(
             subjects(&sweeping(None, "trunk")),
             vec![
-                "feat: somebody else's work",
                 "feat: rate limiting",
+                "feat: somebody else's work",
                 "merge: main",
             ],
             "a Repo with no base branch that resolves at all sweeps by the base \
-             commit, exactly as it did before any of this",
+             commit, exactly as it did before any of this — both branches, \
+             oldest first",
         );
     }
 
