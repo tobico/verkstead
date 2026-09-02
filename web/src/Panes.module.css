@@ -20,14 +20,16 @@
    such pane at all then, and the two frames that happen in are said at the end
    of this file.
 
-   Four of the names here are worn by things this file does not draw:
+   Five of the names here are worn by things this file does not draw:
    `paneChrome` by whatever sticks to the top of a pane, `paneFoot` by whatever
-   sticks to its bottom, `paneBack` by the way out of one, and `paneScreen` by a
-   terminal that takes a pane's whole height. The rules that read them are about
-   what a *pane* does, and a pane is the frame's; so the frame writes the names
-   and the components that have to be recognised by it wear them —
-   `PaneHead.tsx`, `Timeline.tsx`, `Conversations.tsx` and `Screen.tsx` each
-   import this module for the ones they need. */
+   sticks to its bottom, `paneBack` by the way out of one, `paneScreen` by a
+   terminal that takes a pane's whole height, and `paneComposer` by the one
+   thing a pane holds that stands in the middle of it rather than at the top.
+   The rules that read them are about what a *pane* does, and a pane is the
+   frame's; so the frame writes the names and the components that have to be
+   recognised by it wear them — `PaneHead.tsx`, `Timeline.tsx`,
+   `Conversations.tsx`, `Screen.tsx` and the two composers each import this
+   module for the ones they need. */
 
 /* The frame — and the box that everything standing in it is positioned against,
    which is the half of clipping that is easy to leave off.
@@ -401,6 +403,48 @@
   padding-inline: max(1.25rem, (100% - 60rem) / 2);
 }
 
+/* And the other exception: the composer, which is the one thing a details pane
+   holds that is not read down the page. It is a box to fill in and a press
+   under it, so it stands in the middle of whatever room the pane has rather
+   than at the top of it — and the pane's header goes back to the pane's own
+   edge, because a header a column's width in from the edge of a pane whose
+   content is a box in the middle is a header hanging in space.
+
+   Both of those are the same rule: the column padding comes off, so the header
+   sits where every other pane's header sits relative to its pane, and the
+   composer centres itself across the pane exactly as it did across the column —
+   the column was centred in the pane to begin with, so nothing moves sideways.
+
+   The pane is a flex column for the centring, said at each of the widths that
+   show it, exactly as the Screen's is below: what those rules have to say is
+   `flex` where they said `block`. And the height it centres in is the window's
+   below the first breakpoint, where the pane is the page — above it the pane is
+   a cell of a frame that is already exactly that tall.
+
+   The centring itself is `.paneComposer`'s, at the foot of this file: auto
+   margins take the room that is left over and take nothing at all where there
+   is none, so a composer taller than the pane stands at the top and scrolls. */
+.panes > .detailsPane:has(.paneComposer) {
+  flex-direction: column;
+  min-height: 100dvh;
+  padding-inline: 1.25rem;
+}
+
+.panes[data-pane="details"] > .detailsPane:has(.paneComposer) {
+  display: flex;
+}
+
+/* And the window's height it asked for while it was the page goes, above the
+   width where the pane is a cell of a frame that is already exactly that tall
+   — the conversations pane says the same thing about its own, and for the same
+   reason: asking the viewport twice is what leaves a pane standing a pixel past
+   the bottom of the frame. */
+@media (min-width: 60rem) {
+  .panes > .detailsPane:has(.paneComposer) {
+    min-height: auto;
+  }
+}
+
 /* The one exception to that pane: the one with a Screen in it, which is the one
    pane in the frame that ends where the window does rather than running on
    down the page. A column: the header and the turn count keep their size and
@@ -459,6 +503,10 @@
 
 @media (min-width: 80rem) {
   .panes > .detailsPane:has(.paneScreen) {
+    display: flex;
+  }
+
+  .panes > .detailsPane:has(.paneComposer) {
     display: flex;
   }
 }
@@ -547,6 +595,13 @@
     display: block;
   }
 
+  /* Except where it holds a composer, which is a column in every frame — this
+     one above all, a Conversation with nothing on its record but its Brief
+     being exactly what stands the panes this wide. */
+  .panes.widened > .detailsPane:has(.paneComposer) {
+    display: flex;
+  }
+
   /* And the details pane's way back out, which the sidebar being on screen
      makes pointless exactly as it does the Timeline's. Said here rather than
      left to the 80rem rule in `PaneHead.module.css`, because what takes the way
@@ -555,4 +610,21 @@
   .panes.widened .detailsPane .paneBack {
     display: none;
   }
+}
+
+/* And the composer itself, which is what the pane above centres: the room the
+   pane has left over is taken above it and below it in equal halves.
+
+   Auto margins rather than `justify-content`, because they are the safe way to
+   do it: what they take is the room that is *left over*, so a composer taller
+   than the pane — a phone, a long list of companions — takes none at all, sits
+   at the top and scrolls, where a centred flex item taller than its box would
+   have hung over both edges with the top half out of reach.
+
+   Worn by both composers, which is the whole reason the name is written here:
+   the compose page and the pane a saved draft opens are one arrangement drawn
+   over two different things, and the pane rules above find either of them by
+   this. */
+.paneComposer {
+  margin-block: auto;
 }

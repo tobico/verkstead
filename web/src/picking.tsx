@@ -31,7 +31,10 @@
 //!   the caller offers no such row.
 //! - **The disabled state, and the label-by-id contract**: a `<label for=…>`
 //!   reaches either control. Which is why the listbox's own is a `button` — that
-//!   is the labelable element a `div` with a role on it is not.
+//!   is the labelable element a `div` with a role on it is not. The one control
+//!   named otherwise is the listbox drawn with its label *inside* the handle,
+//!   where the label is part of what is pressed and names it through
+//!   `aria-labelledby` — see `heading` on [`Listbox`].
 //!
 //! ## Which control, and why there are two
 //!
@@ -72,15 +75,21 @@ import {
   type JSX,
 } from "solid-js";
 
+import { faChevronDown } from "@fortawesome/free-solid-svg-icons";
+
 import { HarnessMark } from "./HarnessMark";
+import { Icon } from "./Icon";
 import type { AgentType } from "./agents";
 import styles from "./picking.module.css";
 
-/// What either control says where nothing is chosen.
+/// What either control says where nothing is chosen, unless the caller says
+/// otherwise.
 ///
 /// The same words on both, because it is the same state on both: a choice has
-/// not been made, or the one that was made is gone. A picker whose reader would
-/// need to be told something else can take the words as a prop then.
+/// not been made, or the one that was made is gone. The one caller that needs
+/// another word is the composer's Repo control before a repo is picked, where
+/// the row it stands in is an invitation rather than a record — see `nothing`
+/// on [`Choosing`], which is that prop arriving.
 const NOTHING = "Not chosen";
 
 /// What either control is given: the caller's rows, and the two functions that
@@ -116,6 +125,10 @@ type Choosing<T> = {
   /// read back afterwards is what settles it.
   gone?: () => void;
   disabled?: boolean;
+  /// What the control says where nothing is chosen, for the caller whose reader
+  /// would be told the wrong thing by [`NOTHING`] — an invitation to pick rather
+  /// than a record of a choice not made.
+  nothing?: string;
 };
 
 /// What a control is showing, off the rows it was given and the choice it was
@@ -205,7 +218,7 @@ export function Picker<T>(props: Choosing<T>): JSX.Element {
           nothing: that option is what the empty string means there, and a
           placeholder over it would be two rows for one state. */}
       <Show when={shown() === "" && !offersNothing()}>
-        <option value="">{NOTHING}</option>
+        <option value="">{props.nothing ?? NOTHING}</option>
       </Show>
       <For each={props.options}>
         {(option) => (
@@ -250,6 +263,29 @@ export function Listbox<T>(
     /// here rather than by each caller because the space between a mark and the
     /// words it belongs to is the same space in all five pickers.
     mark?: (option: T) => AgentType | null;
+
+    /// What the *closed* control reads, where that is not what the row it came
+    /// off reads.
+    ///
+    /// One picker, two readings: the rows are read down and say the whole of a
+    /// pairing, and the trigger is glanced at and says the half the mark beside
+    /// it has not already said — see `briefly` in [`./agents.ts`](./agents.ts).
+    /// The rows' own reading stands wherever a caller hands in nothing.
+    closed?: (option: T) => string;
+
+    /// The control's own label, drawn inside the handle rather than above it.
+    ///
+    /// For the composer's setup row, where a trigger is a dimmed label over its
+    /// value and the whole of the two lines is one thing to press: the label is
+    /// part of the handle, so the hover rectangle surrounds both and a press on
+    /// the word opens the rows. The caller's `class` paints it — what a dimmed
+    /// label looks like is the row's, and where it sits is this module's.
+    ///
+    /// It becomes the control's accessible name, which is what keeps the
+    /// trigger called "Grilling" rather than "Grilling Fable 5 — Work": a
+    /// combobox is named by its label and says its value separately. Everywhere
+    /// else the `<label for=…>` contract at the head of this file is untouched.
+    heading?: { words: string; class?: string };
 
     /// The anchor's own class, for the caller with the field around it to lay
     /// out. What the control *looks* like is this module's, all five being one
@@ -318,40 +354,70 @@ export function Listbox<T>(
         type="button"
         id={props.id}
         ref={control}
-        class={styles.control}
+        class={[styles.control, props.heading ? styles.headed : undefined]
+          .filter(Boolean)
+          .join(" ")}
         role="combobox"
         aria-haspopup="listbox"
         aria-expanded={open() ? "true" : "false"}
         aria-controls={open() ? list : undefined}
         aria-activedescendant={open() ? rowId(walking()) : undefined}
+        // The label inside the handle is what names the control, where there is
+        // one: read off the contents instead, the name would carry the value
+        // with it. Absent otherwise, so the `<label for=…>` above the other
+        // three keeps naming them.
+        aria-labelledby={props.heading ? `${props.id}-label` : undefined}
         disabled={props.disabled}
         onClick={() => (open() ? shut() : drop())}
         onKeyDown={key}
       >
+        {/* The label, where it lives in the handle rather than above it: part
+            of what is pressed, so the whole of the two lines is one target. */}
+        <Show when={props.heading}>
+          {(heading) => (
+            <span
+              id={`${props.id}-label`}
+              class={[styles.heading, heading().class].filter(Boolean).join(" ")}
+            >
+              {heading().words}
+            </span>
+          )}
+        </Show>
+
         {/* What is chosen, drawn the way the row it came off is — a mark and
             words — or the placeholder, which is what this control says rather
-            than a row it offers. */}
-        <Show
-          when={standing()}
-          fallback={<span class={styles.words}>{NOTHING}</span>}
-        >
-          {/* A row for certain: `standing` is what says the choice is one of
-              the options, which is what makes it one of them to draw. */}
-          <Reading of={picked()!} mark={props.mark} label={props.label} />
-        </Show>
-        {/* Which way the rows come down, and no part of what the control
-            says. */}
-        <span class={styles.arrow} aria-hidden="true">
-          ▾
+            than a row it offers. On a line of its own, so a label above it and
+            the caret beside both are laid out around it. */}
+        <span class={styles.line}>
+          <Show
+            when={standing()}
+            fallback={
+              <span class={styles.words}>{props.nothing ?? NOTHING}</span>
+            }
+          >
+            {/* A row for certain: `standing` is what says the choice is one of
+                the options, which is what makes it one of them to draw. */}
+            <Reading
+              of={picked()!}
+              mark={props.mark}
+              label={props.closed ?? props.label}
+            />
+          </Show>
         </span>
+
+        {/* Which way the rows come down, and no part of what the control says.
+            The app's own chevron rather than whatever caret the reader's font
+            has — see `Icon.tsx`. */}
+        <Icon of={faChevronDown} class={styles.arrow!} />
       </button>
 
       <Show when={open()}>
         {/* What a press away from the rows lands on, so that it lands on
             nothing else: a stray press that picked another pairing is not a
-            small thing on this card. No wash over the page, unlike a menu's —
-            this is a field being filled in rather than something opened over
-            what the human was reading. */}
+            small thing on this card. With the wash a menu comes down over,
+            because what these rows are is a popover: the page behind them is
+            not what the human is answering, and a dropdown that came down over
+            it unchanged read as less than it is. */}
         <div
           class={styles.backdrop}
           aria-hidden="true"

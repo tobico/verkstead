@@ -12,28 +12,37 @@
 
 /* The row. It wraps rather than scrolling — the pane is as wide as the human
    dragged it, and four triggers do not fit a phone — and the wrap is the box's
-   own width rather than the window's. */
+   own width rather than the window's.
+
+   A rem under the field it sits below, inside the same box: the brief is what
+   the box is for and this is how it will be run, and the two of them a hair
+   apart read as one block of controls. */
 .options {
   display: flex;
   flex-wrap: wrap;
   align-items: start;
   row-gap: 0.35rem;
+  margin-top: 1rem;
 }
 
 /* Each option asks for about a quarter of a wide box and refuses to go under a
    readable width, so a narrow one puts what is left over on the next line. */
 .repoOption,
+.repoSelect,
 .profileChoice {
   flex: 1 1 9rem;
   min-width: 0;
 }
 
-/* Both triggers are the same two lines — the role dimmed above, the choice
-   under it — so the label is written once and worn by the `<label>` the pairing
-   picker is named by and by the span inside the Repo trigger alike. */
+/* Every trigger is the same two lines — the role dimmed above, the choice under
+   it — so the label is written once and worn by the span inside the Repo
+   trigger and by the one each listbox draws inside its own handle. Inside it,
+   which is the whole of the arrangement: the label is part of what is pressed,
+   so one rectangle surrounds the pair of them and a press on the word opens the
+   dropdown. The padding is the handle's own, for that reason. */
 .optionLabel {
   display: block;
-  padding: 0 0.6rem;
+  grid-area: 1 / 1;
   font-size: 0.75rem;
   line-height: 1.5;
   color: var(--ink-soft);
@@ -41,11 +50,17 @@
 
 /* The Repo trigger, which is a menu's button rather than a listbox's and so is
    painted here: everything a button arrives with given up, and the two lines
-   put back. */
+   put back. The same grid the listboxes beside it lay their handles out on —
+   `.control.headed` in `picking.module.css` — because the caret stands beside
+   the label and the value both rather than on either: what it hangs off is the
+   whole handle. */
 .repoOption > button {
-  display: block;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 0.4rem;
   width: 100%;
-  padding: 0;
+  padding: 0 0.6rem 0.15rem;
   color: inherit;
   text-align: start;
   background: none;
@@ -54,13 +69,13 @@
 }
 
 /* Its value line, laid out as the listbox's closed control is laid out beside
-   it — the reading, and the mark saying which way the panel comes down at the
-   far end — so the four triggers read as four of one thing. */
+   it, so the four triggers read as four of one thing. */
 .optionLine {
   display: flex;
+  grid-area: 2 / 1;
   align-items: center;
   gap: 0.4rem;
-  padding: 0 0.6rem 0.15rem;
+  min-width: 0;
 }
 
 .optionValue {
@@ -70,9 +85,11 @@
   text-overflow: ellipsis;
 }
 
+/* And the caret, level with the two lines rather than with either of them. */
 .optionArrow {
-  flex: none;
-  margin-left: auto;
+  grid-row: 1 / 3;
+  grid-column: 2;
+  align-self: center;
   font-size: 0.8em;
   color: var(--ink-soft);
 }
@@ -80,22 +97,36 @@
 /* And the pairing pickers' own control, which is the app's listbox — see
    `picking.module.css`, where it is drawn as the field it stands in place of
    everywhere else. Here it is not standing in for a field: the box is the
-   field, so the paper and the border come off and what is left is the reading
-   and its arrow. What it does under the pointer and while it is open is left
-   alone, that being the only thing saying a borderless trigger can be
-   pressed. */
-.optionPick > button {
+   field, so the paper and the border come off and what is left is the label,
+   the reading and the caret. The Repo control the compose page draws before a
+   repo is picked is the same listbox and is painted with them — see
+   `.repoSelectPick` below.
+
+   What either does under the pointer is left alone, that being the only thing
+   saying a borderless trigger can be pressed. */
+.optionPick > button,
+.repoSelectPick > button {
   padding: 0 0.6rem 0.15rem;
   background: none;
   border-color: transparent;
 }
 
-/* Wide enough for a pairing however narrow the trigger it hangs from — a
-   reading is "Claude Code Fable 5 — Work" and a quarter of the box is not that.
-   Hung from the trigger's near edge, and from its far one for the last of them,
-   so a row of them never drops a list past the edge of the pane. */
+/* Wide enough for each row to read on one line — a reading is "Claude Code
+   Fable 5 — Work" and a quarter of the box is nothing like that, so the list is
+   twice the width the trigger would give it. Capped against the window it comes
+   down over, which is what wins on a phone: there the rows wrap as they always
+   did. Hung from the trigger's near edge, and from its far one for the last of
+   them, so a row of them never drops a list past the edge of the pane. */
 .optionPick > [role="listbox"] {
-  min-width: 15rem;
+  min-width: 30rem;
+  max-width: min(40rem, calc(100vw - 2.5rem));
+}
+
+/* The Repo control before there is a repo, which is a listbox where the picked
+   one is a panel: its rows are repository names and nothing else, so it asks
+   for a readable width rather than the pairings' double one. */
+.repoSelectPick > [role="listbox"] {
+  min-width: 12rem;
   max-width: min(20rem, calc(100vw - 2.5rem));
 }
 
@@ -288,6 +319,7 @@
 .repoPick .failure,
 .baseBranch .failure,
 .addCompanion .failure,
+.repoSelect .failure,
 .profileChoice .failure {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
@@ -325,6 +357,31 @@
   border-color: var(--accent);
 }
 
+/* And the triggers in the row, which say it in the quietest way there is: the
+   dimmed label comes up to the ordinary ink, and nothing else about the trigger
+   moves.
+
+   A ring around one of these would be a rectangle drawn around a control that
+   has deliberately given up every edge it had, and the accent border the
+   listbox paints on a field elsewhere is the same rectangle by another name —
+   so both come off here, and the label carries the focus instead. Keyboard
+   focus only: a press has the rows to show for itself, and a label that lit up
+   under every click would be saying what the open dropdown already said. */
+.repoOption > button:focus-visible,
+.optionPick > button:focus-visible,
+.optionPick > button[aria-expanded="true"],
+.repoSelectPick > button:focus-visible,
+.repoSelectPick > button[aria-expanded="true"] {
+  outline: none;
+  border-color: transparent;
+}
+
+.repoOption > button:focus-visible .optionLabel,
+.optionPick > button:focus-visible .optionLabel,
+.repoSelectPick > button:focus-visible .optionLabel {
+  color: var(--ink);
+}
+
 /* And the same under the pointer, one border darker — with the × taking the
    accent instead, which is what a control the app draws itself does everywhere
    else. */
@@ -333,6 +390,14 @@
   .repoPick select:hover,
   .baseBranch select:hover,
   .addCompanion select:hover {
+    border-color: var(--ink-soft);
+  }
+
+  /* The Repo trigger under the pointer, which is what the three listboxes
+     beside it already do from `picking.module.css`: the whole handle takes an
+     edge, label and value together, so what the pointer says can be pressed is
+     the rectangle that will be pressed. */
+  .repoOption > button:not(:disabled):hover {
     border-color: var(--ink-soft);
   }
 

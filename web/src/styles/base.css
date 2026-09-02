@@ -305,9 +305,12 @@ textarea::placeholder {
 
    That focus border is the one focus treatment the sweep had to add: a field
    had none at all, and everything else here is a button or a link and wears the
-   browser's own ring. Nothing anywhere takes a ring away.
+   browser's own ring. A textarea trades the ring for that border rather than
+   wearing both — the border is the same thing said in the place the words are
+   going, and a ring drawn a pixel outside it is the same fact twice around a
+   box the eye is already inside. The ring stays everywhere else. */
 
-   What is written here is what has no module to write it — a link anywhere in
+/* What is written here is what has no module to write it — a link anywhere in
    the app, and the field this file already draws. */
 @media (hover: hover) {
   /* Deepened, and underlined where a page took the underline off. The links
@@ -324,9 +327,15 @@ textarea::placeholder {
 }
 
 /* And the field being typed in, which is not the pointer's doing and so is not
-   inside the query. The browser's ring stays where it is: this is the border
-   saying which field the words are going into, read at a glance rather than at
-   the edge of one. */
+   inside the query: the border says which field the words are going into, read
+   at a glance rather than at the edge of one.
+
+   In place of the ring rather than beside it. Two rectangles a pixel apart
+   around a box the size of a paragraph is the same fact drawn twice, and the
+   one nearer the words is the one worth keeping — the composer's own field has
+   no border of its own to light up, and the box around it takes the accent
+   instead. See `Composer.module.css`. */
 textarea:focus-visible {
   border-color: var(--accent);
+  outline: none;
 }

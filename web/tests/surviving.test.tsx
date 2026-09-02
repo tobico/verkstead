@@ -60,7 +60,7 @@ import {
   survived,
   theWorkbench,
 } from "./bench";
-import { opened, pick, picker, showing } from "./pickers";
+import { offered, opened, pick, picker, rows, showing } from "./pickers";
 import { json, serving, whenever } from "./serving";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
 import building from "./fixtures/conversation-building.json" with { type: "json" };
@@ -327,24 +327,16 @@ describe("what a picker shows and what it would send", () => {
   it("stops offering a repo that has been unregistered", async () => {
     const { holds } = theRepos();
     const { container, client } = mount("/compose");
-    fireEvent.click(await drawn(container, `.${setup.repoOption} > button`));
-    const choice = (await waitFor(() =>
-      picker("Repo"),
-    )) as unknown as HTMLSelectElement;
-    await waitFor(() =>
-      expect(choice.options.length).toBeGreaterThanOrEqual(REPOS.length),
-    );
+
+    // The dropdown the row holds while nothing is picked, which is where the
+    // compose page offers the repositories — see `RepoSelect` in `Setup.tsx`.
+    await drawn(container, `.${setup.repoSelect}`);
+    await waitFor(() => expect(offered("Repo").length).toBe(REPOS.length));
 
     holds([FIRST]);
     await nudged(client);
 
-    await waitFor(() =>
-      expect(
-        [...choice.options]
-          .map((row) => row.textContent)
-          .filter((row) => REPOS.some((repo) => repo.name === row)),
-      ).toEqual([FIRST.name]),
-    );
+    await waitFor(() => expect(rows("Repo")).toEqual([FIRST.name]));
   });
 
   /// The same guarantee on the pane where the choice is the server's rather than
@@ -357,7 +349,7 @@ describe("what a picker shows and what it would send", () => {
     theWorkbench(whenever("/api/ui/profiles", () => json(standing.profiles)()));
     const { client } = mount(`/conversations/${OPEN.id}`);
     await waitFor(() => picker("Grilling"));
-    expect(showing("Grilling")).toBe("Claude Code Fable 5 — fable");
+    expect(showing("Grilling")).toBe("Fable 5 — fable");
 
     standing.profiles = PROFILES.filter(
       (profile) => profile.id !== chosen.profile.id,

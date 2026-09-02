@@ -617,6 +617,47 @@ describe("the rules the widths are read by", () => {
     );
   });
 
+  /// The composer is the one thing a details pane holds that is not read down
+  /// the page: a box to fill in and a press under it, standing in the middle of
+  /// whatever room the pane has. Which takes the column padding off — the box
+  /// centres itself across the pane exactly as it did across the column, and
+  /// the pane's header goes back to the pane's own edge rather than hanging a
+  /// column's width in from it.
+  it("stands the composer in the middle of its pane, against the pane's edge", () => {
+    expect(stylesheet).toContain(
+      ".panes > .detailsPane:has(.paneComposer) {\n" +
+        "  flex-direction: column;\n" +
+        "  min-height: 100dvh;\n" +
+        "  padding-inline: 1.25rem;\n}",
+    );
+
+    // Auto margins rather than a centring that would hang a tall composer over
+    // both edges with the top of it out of reach: what they take is the room
+    // that is left over, and there is none to take on a phone.
+    expect(stylesheet).toContain(".paneComposer {\n  margin-block: auto;\n}");
+
+    // A column at each of the widths that show the pane, the pane being shown
+    // by a different rule at each of them.
+    expect(stylesheet).toContain(
+      '.panes[data-pane="details"] > .detailsPane:has(.paneComposer) {\n' +
+        "  display: flex;\n}",
+    );
+    expect(stylesheet).toContain(
+      "  .panes.widened > .detailsPane:has(.paneComposer) {\n    display: flex;\n  }",
+    );
+    expect(stylesheet).toContain(
+      "  .panes > .detailsPane:has(.paneComposer) {\n    display: flex;\n  }",
+    );
+
+    // And the window's height it asked for while it was the page goes where
+    // every other pane's does: above the width where the frame is that tall.
+    expect(stylesheet).toContain(
+      `@media ${BESIDE} {\n` +
+        "  .panes > .detailsPane:has(.paneComposer) {\n" +
+        "    min-height: auto;\n  }\n}",
+    );
+  });
+
   /// Where the panes stand side by side the frame is the window, and the page
   /// behind it never scrolls: not by a pane standing past the bottom of the
   /// frame, and not by a pane that has been scrolled to its end handing the

@@ -100,6 +100,9 @@ import contents from "../src/set/Contents.module.css";
 import sheet from "../src/set/Sheet.module.css";
 import illegible from "../src/set/Unreadable.module.css";
 import { under } from "../src/pairing";
+// The listbox the app draws for itself, whose own names the setup row's
+// triggers are built out of — the line the reading stands on above all.
+import chrome from "../src/picking.module.css";
 // The element defaults, which is where the page's own line height is set.
 import base from "../src/styles/base.css?raw";
 // What can be done to a Conversation as a whole, both ways: the hashed names
@@ -121,6 +124,7 @@ import briefPane from "../src/workbench/Brief.module.css";
 // The composer, which is the details pane a conversation is drafted in: the
 // brief as a field, the setup under it and the press that starts the work.
 import composer from "../src/workbench/Composer.module.css";
+import composerCss from "../src/workbench/Composer.module.css?raw";
 import commitPane from "../src/workbench/Commit.module.css";
 import commitPaneCss from "../src/workbench/Commit.module.css?raw";
 // The Diff section the commit pane draws, which is the Set page's own component
@@ -182,6 +186,7 @@ import { STATE } from "../src/workbench/states";
 // deal of what it says about a card is a rule rather than an element.
 // What is still the human's to settle on the brief card.
 import setup from "../src/workbench/Setup.module.css";
+import setupCss from "../src/workbench/Setup.module.css?raw";
 import steerModal from "../src/workbench/Steer.module.css";
 // The status button at the head of the Conversation pane, both ways: the hashed
 // names its two lines are queried by, and the source of the paint that says
@@ -296,6 +301,13 @@ const ADOPTING = adopting as ConversationView;
 
 /// The one the fixture opens, which is the second row of the sidebar.
 const DRAFTING = SIDEBAR.find((entry) => entry.id === OPEN.id)!;
+
+/// The composer pane's own heading, which is what a draft is called: the branch
+/// somebody named, and *Draft* until one is named. The opened fixture has a
+/// name, so this is that name — see `naming.ts`, and the test that pins both
+/// halves of the rule.
+const composerHead = () =>
+  screen.getByRole("heading", { name: titled(OPEN) });
 
 /// The Brief on a Conversation's Timeline, which is the first thing on every
 /// one of them.
@@ -2121,7 +2133,7 @@ describe("a conversation's timeline", () => {
     const fetching = theWorkbench();
     mount(`/conversations/${OPEN.id}`);
 
-    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+    await waitFor(() => composerHead());
     expect(fetching).toHaveBeenCalledWith(
       `/api/ui/conversations/${OPEN.id}`,
       expect.anything(),
@@ -2427,7 +2439,7 @@ describe("the escape hatch on a conversation that will not load", () => {
     it("gives the conversation's own read a deadline, and nothing else one", async () => {
       const fetching = theWorkbench();
       mount(`/conversations/${OPEN.id}`);
-      await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+      await waitFor(() => composerHead());
 
       const signalOf = (path: string) =>
         fetching.mock.calls.find(([asked]) => String(asked) === path)?.[1]
@@ -2563,6 +2575,69 @@ describe("the escape hatch on a conversation that will not load", () => {
 /// path of its own — and the only home of the start button, which the foot of
 /// the timeline no longer draws.
 describe("the composer pane", () => {
+  /// One rule of the stylesheet, by the selector it is written against.
+  const rule = (sheet: string, selector: string): string => {
+    const opened = sheet.indexOf(`${selector} {`);
+    expect(opened, `the stylesheet should have a \`${selector}\` rule`).not.toBe(
+      -1,
+    );
+
+    return sheet.slice(opened, sheet.indexOf("}", opened));
+  };
+
+  /// What the pane is called: the branch the work will be done on, which is
+  /// what a draft is named by everywhere else — the sidebar's row, the summary
+  /// under a frozen brief — and *Draft* while the name is still the one
+  /// Verkstead invented. The composer is the one pane that was called after the
+  /// document in it rather than after the work.
+  it("is titled by the branch, and Draft until one is named", async () => {
+    const titleOf = (container: ParentNode) =>
+      container.querySelector(`.${shell.detailsPane} h1`)!.textContent;
+
+    theWorkbench();
+    const { container, unmount } = mount(`/conversations/${OPEN.id}`);
+
+    await drawn(container, `.${shell.detailsPane} .${composer.composer}`);
+    expect(OPEN.branch_named).toBe(true);
+    await waitFor(() => expect(titleOf(container)).toBe(OPEN.branch));
+
+    unmount();
+
+    // A name nobody chose is nothing to read, so the pane says what the record
+    // is instead.
+    theWorkbenchWith({ branch_named: false });
+    const again = mount(`/conversations/${OPEN.id}`);
+
+    await drawn(again.container, `.${shell.detailsPane} .${composer.composer}`);
+    await waitFor(() => expect(titleOf(again.container)).toBe(DRAFT));
+  });
+
+  /// The box asks for a description rather than a line, so it opens at three
+  /// lines of one: the line height the page is set in, three times, plus the
+  /// padding and the border the field itself takes up.
+  it("opens the brief field three lines tall", () => {
+    expect(rule(composerCss, ".box .field")).toContain(
+      "min-height: calc(3 * 1.5rem + 1rem + 2px)",
+    );
+  });
+
+  /// The box takes half a rem more padding either side and grows by the same,
+  /// so what the padding was taken out of — the line the brief is written on —
+  /// is the width it always was. Everything under the box is widened with it,
+  /// which is what keeps *Start work* against the box's own edge.
+  it("pays for its own padding rather than taking it out of the measure", () => {
+    expect(rule(composerCss, ".box")).toContain("padding: 1rem 0.75rem 0.85rem");
+    expect(rule(composerCss, ".composer > *")).toContain(
+      "max-width: calc(var(--measure) + 1rem)",
+    );
+  });
+
+  /// And a rem between the field and the row of options under it, the two of
+  /// them being one box and two different questions.
+  it("keeps a rem between the brief and the setup row", () => {
+    expect(rule(setupCss, ".options")).toContain("margin-top: 1rem");
+  });
+
   it("opens at a path of its own, on a cold load of it", async () => {
     theWorkbench();
     const { container } = mount(
@@ -2617,6 +2692,12 @@ describe("the composer pane", () => {
   /// The look: one box holding the brief and, along the inside of its bottom
   /// edge, the whole of the setup as a row of dropdowns — each a dimmed label
   /// over its value, the repo first and then the three roles.
+  ///
+  /// The label lives *inside* the handle on all four, which is what makes the
+  /// whole two lines one thing to press and one rectangle to hover. So it is
+  /// still what names the control, and says so through `aria-labelledby` on the
+  /// three that are listboxes: a name read off the contents would carry the
+  /// value into it.
   it("draws every option as a label over its value, inside the box", async () => {
     theWorkbench();
     const { container } = mount(`/conversations/${OPEN.id}`);
@@ -2632,7 +2713,7 @@ describe("the composer pane", () => {
     );
 
     // Over the value rather than beside it: the repo's label is the first line
-    // of its own trigger, and each role's names the listbox under it.
+    // of its own trigger.
     const repo = row.querySelector(`.${setup.repoOption} > button`)!;
     expect(
       repo
@@ -2641,16 +2722,94 @@ describe("the composer pane", () => {
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
 
+    // And each role's is the first line of the listbox's own handle, naming it
+    // without being read as part of what it is showing.
     for (const role of ["grilling", "implementation", "review"]) {
-      const label = row.querySelector<HTMLLabelElement>(
-        `label.${setup.optionLabel}[for="${role}-pairing"]`,
-      )!;
+      const control = document.getElementById(`${role}-pairing`)!;
+      const label = control.querySelector(`.${setup.optionLabel}`)!;
+
+      expect(control.getAttribute("aria-labelledby")).toBe(label.id);
       expect(
-        label.compareDocumentPosition(
-          document.getElementById(`${role}-pairing`)!,
-        ) & Node.DOCUMENT_POSITION_FOLLOWING,
+        label.compareDocumentPosition(control.querySelector(`.${chrome.line}`)!) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
       ).toBeTruthy();
     }
+
+    // Named by that label and by nothing else, which is what a combobox is
+    // called: the value it is showing is announced separately.
+    expect(picker("Grilling").id).toBe("grilling-pairing");
+  });
+
+  /// Every one of the four triggers is one rectangle around a label and a value:
+  /// the pointer takes an edge around the pair of them, and the keyboard says
+  /// where it is by lighting the label rather than by drawing a ring around a
+  /// control that has given up every edge it had.
+  it("hovers and focuses the whole handle rather than the value in it", () => {
+    // The Repo trigger, which is a menu's button and so is painted here — the
+    // three listboxes beside it take their hover from `picking.module.css`.
+    expect(setupCss).toContain(".repoOption > button:not(:disabled):hover");
+    expect(rule(setupCss, ".repoOption > button:not(:disabled):hover")).toContain(
+      "border-color: var(--ink-soft)",
+    );
+
+    // And the keyboard, on all four: no ring, no accent border, and the dimmed
+    // label brought up to the ordinary ink.
+    const quiet = rule(
+      setupCss,
+      ".repoOption > button:focus-visible,\n" +
+        ".optionPick > button:focus-visible,\n" +
+        '.optionPick > button[aria-expanded="true"],\n' +
+        ".repoSelectPick > button:focus-visible,\n" +
+        '.repoSelectPick > button[aria-expanded="true"]',
+    );
+    expect(quiet).toContain("outline: none");
+    expect(quiet).toContain("border-color: transparent");
+
+    expect(
+      rule(
+        setupCss,
+        ".repoOption > button:focus-visible .optionLabel,\n" +
+          ".optionPick > button:focus-visible .optionLabel,\n" +
+          ".repoSelectPick > button:focus-visible .optionLabel",
+      ),
+    ).toContain("color: var(--ink)");
+  });
+
+  /// The caret on each of them is the app's own chevron rather than whatever a
+  /// reader's font draws for `▾`, and it stands beside both lines rather than
+  /// on the value.
+  it("draws a chevron beside the two lines of every trigger", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const row = await drawn(container, `.${composer.box} > .${setup.options}`);
+
+    // Waited for the profiles, which is what the three pairing triggers are
+    // drawn off.
+    await waitFor(() => expect(picker("Grilling")).toBeTruthy());
+
+    expect(
+      row.querySelectorAll(`.${setup.repoOption} > button svg`),
+    ).toHaveLength(1);
+    expect(row.textContent).not.toContain("▾");
+
+    for (const role of ["Grilling", "Implementation", "Review"]) {
+      expect(picker(role).querySelector("svg")).toBeTruthy();
+    }
+
+    // Level with the pair of lines rather than with either: it says which way
+    // the rows come down, and what they come down from is the whole handle.
+    expect(rule(setupCss, ".optionArrow")).toContain("grid-row: 1 / 3");
+  });
+
+  /// The rows behind a pairing trigger are twice the width the trigger would
+  /// give them, so a reading lands on one line rather than wrapping onto three.
+  it("drops the pairing rows at twice the trigger's width", () => {
+    const list = rule(setupCss, '.optionPick > [role="listbox"]');
+
+    expect(list).toContain("min-width: 30rem");
+    // And still capped against the window, which is what wins on a phone.
+    expect(list).toContain("max-width: min(40rem, calc(100vw - 2.5rem))");
   });
 
   /// And the one control that is not part of the box: what happens to what is
@@ -2746,6 +2905,16 @@ describe("the composer pane", () => {
 describe("writing the brief", () => {
   const field = () => screen.getByLabelText("Brief") as HTMLTextAreaElement;
 
+  /// Every textarea in the app trades the browser's focus ring for the accent
+  /// border it already draws — two rectangles a pixel apart around a box the
+  /// size of a paragraph is the same fact drawn twice. The composer's own has
+  /// no border to light up, so the box around it takes the accent instead.
+  it("says the focus in the border rather than in a ring", () => {
+    expect(base).toContain(
+      "textarea:focus-visible {\n  border-color: var(--accent);\n  outline: none;\n}",
+    );
+  });
+
   /// Where a save of the Brief goes.
   const WRITING = `/api/ui/conversations/${OPEN.id}/brief`;
 
@@ -2766,7 +2935,7 @@ describe("writing the brief", () => {
   it("grows with what is typed into it", async () => {
     theWorkbench();
     const { container } = mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+    await waitFor(() => composerHead());
 
     const growing = container.querySelector(
       `.${composer.composer} .${app.grow}`,
@@ -2781,7 +2950,7 @@ describe("writing the brief", () => {
     const written = "# Rate limiting\n\nDecide where the counter lives.\n";
     const fetching = theWorkbench(json("Saved"));
     const { container } = mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+    await waitFor(() => composerHead());
 
     fireEvent.input(field(), { target: { value: written } });
     fireEvent.blur(field());
@@ -2796,7 +2965,7 @@ describe("writing the brief", () => {
   it("saves what was typed after a pause in the typing", async () => {
     const fetching = theWorkbench(json("Saved"));
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+    await waitFor(() => composerHead());
 
     // The clock is this test's from here: what it is about is a pause, and a
     // real one would be a real wait on every run.
@@ -2824,7 +2993,7 @@ describe("writing the brief", () => {
     const answering = holding(json("Saved"));
     const fetching = theWorkbench(whenever(WRITING, answering.held, "POST"));
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+    await waitFor(() => composerHead());
 
     fireEvent.input(field(), { target: { value: "# Half a" } });
     fireEvent.blur(field());
@@ -2852,7 +3021,7 @@ describe("writing the brief", () => {
   it("says nothing beside the heading in any state of a save", async () => {
     const fetching = theWorkbench(json("Saved"));
     const { container } = mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+    await waitFor(() => composerHead());
 
     const quiet = () => {
       expect(container.textContent).not.toContain("Saving");
@@ -2875,7 +3044,7 @@ describe("writing the brief", () => {
   it("says nothing to the server when the field has not moved", async () => {
     const fetching = theWorkbench(json("Saved"));
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+    await waitFor(() => composerHead());
 
     fireEvent.blur(field());
     fireEvent.input(field(), { target: { value: BRIEF.markdown } });
@@ -2889,7 +3058,7 @@ describe("writing the brief", () => {
   it("keeps what was written and says why when the server refuses it", async () => {
     const fetching = theWorkbench(json("NotDrafting"));
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+    await waitFor(() => composerHead());
 
     fireEvent.input(field(), { target: { value: "# Too late\n" } });
     fireEvent.blur(field());
@@ -2906,7 +3075,7 @@ describe("writing the brief", () => {
   it("stops trying once it has been refused", async () => {
     const fetching = theWorkbench(json("NotDrafting"));
     mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+    await waitFor(() => composerHead());
 
     fireEvent.input(field(), { target: { value: "# Too late\n" } });
     fireEvent.blur(field());
@@ -4053,16 +4222,26 @@ const READINGS = [
   "Claude Code Sonnet 5 — sonnet",
 ];
 
-/// How one Pairing the server has settled reads, off the same two lists: the
-/// rows in the order the profiles come to, and the readings in the order they
-/// are offered. So what a picker is showing is checked against the row it came
-/// off rather than against the composing being done again beside it.
-const readsAs = (view: PairingView): string =>
-  READINGS[
-    PROFILES.flatMap((profile) =>
-      profile.models.map((model) => pairing(profile, model)),
-    ).indexOf(pairing(view.profile, view.model!))
-  ]!;
+/// And what the *closed* trigger in the setup row reads, which is every one of
+/// those less the backend's name: the harness's mark is drawn beside the words
+/// there, so the words that name the harness would be saying it twice. The rows
+/// behind the trigger keep the whole reading — a list is read down.
+const SHOWINGS = READINGS.map((reading) =>
+  reading.replace("Claude Code ", ""),
+);
+
+/// Which row a Pairing the server has settled is, in the order the profiles come
+/// to — so what a picker shows is checked against the row it came off rather
+/// than against the composing being done again beside it.
+const rowOf = (view: PairingView): number =>
+  PROFILES.flatMap((profile) =>
+    profile.models.map((model) => pairing(profile, model)),
+  ).indexOf(pairing(view.profile, view.model!));
+
+/// How one of them reads in a list of rows, and how the trigger it was picked on
+/// says the same choice.
+const readsAs = (view: PairingView): string => READINGS[rowOf(view)]!;
+const showsAs = (view: PairingView): string => SHOWINGS[rowOf(view)]!;
 
 /// The last thing a conversation settles before anything will run it: which
 /// account and model grills, and which implements.
@@ -4104,11 +4283,13 @@ describe("a conversation's pairings", () => {
     const interviewing = under(OPEN.grilling_pairing)!;
     const reviewed = under(OPEN.review_pairing)!;
 
-    expect(showing("Grilling")).toBe(readsAs(interviewing));
+    // The trigger's own reading, which is the row's less the harness the mark
+    // beside it is already drawing.
+    expect(showing("Grilling")).toBe(showsAs(interviewing));
     expect(showing("Implementation")).toBe(
-      readsAs(OPEN.implementation_pairing!),
+      showsAs(OPEN.implementation_pairing!),
     );
-    expect(showing("Review")).toBe(readsAs(reviewed));
+    expect(showing("Review")).toBe(showsAs(reviewed));
     expect(
       new Set([
         showing("Grilling"),
@@ -5268,9 +5449,8 @@ describe("starting the work", () => {
   });
 
   /// An unready conversation gets the button all the same, drawn inert. Not
-  /// `disabled`, because a disabled button takes no press — and a press is how
-  /// the human reaches the explanation on a phone, where a `title` would never
-  /// show.
+  /// `disabled`: a disabled button is one no browser will hover, and hovering
+  /// is what the explanation hangs off.
   it("draws the button inert rather than withholding it", async () => {
     theWorkbenchWith({ ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
@@ -5285,13 +5465,14 @@ describe("starting the work", () => {
     expect(start.getAttribute("aria-disabled")).toBe("true");
     expect(start.disabled).toBe(false);
 
-    // Nothing said until it is asked, and neither of the notes that used to
-    // stand in for the button.
+    // And nothing said on the page: what is missing is the button's own
+    // tooltip, and neither of the notes that used to stand in for the button
+    // is there either.
     expect(screen.queryByText(/This needs a brief/)).toBeNull();
     expect(screen.queryByText(/the grilling can start/)).toBeNull();
   });
 
-  it("answers a press on the inert button with what is missing, and starts nothing", async () => {
+  it("answers a press on the inert button with nothing at all", async () => {
     const fetching = theWorkbenchWith(
       { ready_to_grill: false },
       whenever(
@@ -5304,25 +5485,34 @@ describe("starting the work", () => {
 
     fireEvent.click(await drawn(container, `.${composer.startGrilling} .${composer.start}`));
 
-    await waitFor(() => screen.getByText(/This needs a brief/));
     expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
+    expect(screen.queryByText(/This needs a brief/)).toBeNull();
   });
 
-  /// The same words for whoever has a pointer to hover with, and gone again
-  /// when the pointer is.
-  it("shows what is missing on hover too", async () => {
+  /// And what is missing is carried in the button's own tooltip, which is why
+  /// it stays `aria-disabled` rather than becoming disabled: a disabled button
+  /// is one a browser will not hover.
+  it("carries what is missing in the button's tooltip", async () => {
     theWorkbenchWith({ ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const start = await drawn(container, `.${composer.startGrilling} .${composer.start}`);
 
-    fireEvent.mouseEnter(start);
-    await waitFor(() => screen.getByText(/This needs a brief/));
-
-    fireEvent.mouseLeave(start);
-    await waitFor(() =>
-      expect(screen.queryByText(/This needs a brief/)).toBeNull(),
+    expect(start.getAttribute("title")).toBe(
+      "This needs a brief, and every role picked and working.",
     );
+  });
+
+  /// And a conversation that is ready says nothing at all: what the press does
+  /// is what the button already says.
+  it("says nothing on a start that can be pressed", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const start = await drawn(container, `.${composer.startGrilling} .${composer.start}`);
+
+    expect(start.getAttribute("title")).toBeNull();
+    expect(screen.queryByText(/creates the branch and its worktree/)).toBeNull();
   });
 
   it("posts to the conversation's own grill route, with nothing in the body", async () => {
@@ -13746,7 +13936,10 @@ describe("the documents on a timeline", () => {
 
     const opened = await drawn(details(), `.${composer.composer}`);
 
-    expect(details().querySelector("h1")!.textContent).toBe("Brief");
+    // Titled by the branch the work will be done on, which is what a draft is
+    // called everywhere else it is named — the frozen Brief's own pane above is
+    // the one still called after the document.
+    expect(details().querySelector("h1")!.textContent).toBe(titled(OPEN));
     // The markdown in the field rather than the rendering: what the pane opens
     // on is the document as it is written.
     expect(

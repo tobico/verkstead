@@ -447,10 +447,16 @@ export function PathField(props: {
 
       <Show when={open()}>
         {/* What a press away from the rows lands on, so that it lands on
-            nothing else — the listbox's own, and for its reason: this is a
-            field being filled in rather than a card opened over what the human
-            was reading. */}
-        <div class={chrome.backdrop} aria-hidden="true" onClick={() => shut()} />
+            nothing else — the listbox's own, and clear where the listbox's is
+            washed: these rows are a field being filled in rather than a card
+            opened over what the human was reading. The typing goes on while
+            they are down, and a page dimmed under a field somebody is still
+            typing into would be dimming the thing they are looking at. */}
+        <div
+          class={`${chrome.backdrop} ${chrome.clear}`}
+          aria-hidden="true"
+          onClick={() => shut()}
+        />
 
         <div
           ref={dropped}

@@ -40,6 +40,7 @@
 //! all: a conversation can be built without being grilled and wrapped up
 //! without being reviewed.
 
+import { faChevronDown } from "@fortawesome/free-solid-svg-icons";
 import { A } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
@@ -52,6 +53,7 @@ import {
   type JSX,
 } from "solid-js";
 
+import { Icon } from "../Icon";
 import { Menu } from "../Menu";
 import { Switch as Toggle } from "../Switch";
 import type { AgentType } from "../agents";
@@ -320,8 +322,8 @@ function RepoOption(props: { conversation: ConversationView }): JSX.Element {
 /// label over a value, the companions counted after the name, and one flat card
 /// holding the whole of *which code*.
 export function RepoOptions(props: {
-  /// What the value line reads — the repository's name, or the invitation to
-  /// pick one where nothing is picked yet.
+  /// What the value line reads: the repository's name. Drawn only where there
+  /// is one — the compose page stands [`RepoSelect`] in this slot until then.
   name: string;
   /// How many other repos the work runs alongside, for the `+N` after it.
   alongside: number;
@@ -343,15 +345,78 @@ export function RepoOptions(props: {
                   beside what the work will do with them. */}
               <Show when={props.alongside}>{(many) => <> +{many()}</>}</Show>
             </span>
-            <span class={styles.optionArrow} aria-hidden="true">
-              ▾
-            </span>
           </span>
+          {/* Which way the panel comes down, beside the label and the value
+              both rather than on either: what it hangs off is the whole
+              handle. The app's own chevron, as the listboxes beside it
+              draw — see `Icon.tsx`. */}
+          <Icon of={faChevronDown} class={styles.optionArrow!} />
         </>
       }
     >
       {props.children}
     </Menu>
+  );
+}
+
+/// The Repo option before there is a repo to be about: the same label over the
+/// same kind of value as the three beside it, listing what is registered.
+///
+/// The compose page's alone, and only until something is picked. A Conversation
+/// holds a Repo from the moment it exists, so the panel behind [`RepoOptions`]
+/// is always about *this* repository — the branch in it, the base under it, the
+/// repos beside it — and a panel of those questions above an unanswered one is a
+/// form about nothing. So the slot in the row is an ordinary dropdown while
+/// nothing is picked, and becomes the panel the moment something is: what the
+/// human does first is choose, and what they do after it is arrange.
+///
+/// A [`Listbox`] rather than a `<select>`, for the reason the picker inside the
+/// panel is one — what is shown and what would be sent cannot come apart — and
+/// so that it wears the row's dress: a `<select>` inside the composer box would
+/// be the one control in it drawn as a form.
+export function RepoSelect(props: {
+  /// What is chosen, as the picker writes it — the empty string until a repo is
+  /// picked, which is the only state this control is drawn in.
+  chosen: string;
+  disabled?: boolean;
+  pick: (repoId: number) => void;
+}): JSX.Element {
+  const repos = useReading(() => ({
+    queryKey: ["repos"],
+    queryFn: listRepos,
+
+    // Merged by the id each row carries flat, for [`RepoChoice`]'s reason: a
+    // Nudge landing while the human has the rows down must not take their
+    // choice with it.
+    freshness: { reconcile: "id" },
+  }));
+
+  return (
+    <div class={styles.repoSelect}>
+      <Listbox
+        id="conversation-repo"
+        class={styles.repoSelectPick}
+        heading={{ words: "Repo", class: styles.optionLabel }}
+        options={repos.data ?? []}
+        value={(repo) => String(repo.id)}
+        label={(repo) => repo.name}
+        // An invitation rather than a record of a choice not made: nothing has
+        // been picked here yet because nothing has been asked yet.
+        nothing="Select"
+        chosen={props.chosen}
+        disabled={props.disabled}
+        pick={(repo) => props.pick(Number(repo))}
+      />
+
+      {/* A list that could not be read at all, said under the control it would
+          have filled: a workbench with repositories registered and a dropdown
+          offering none of them is worth more than an empty list. */}
+      <Show when={repos.isError}>
+        <ErrorLine class={styles.failure}>
+          Could not read the repos: {repos.error?.message}
+        </ErrorLine>
+      </Show>
+    </div>
   );
 }
 
@@ -411,16 +476,6 @@ function RepoPicker(props: {
       disabled={props.disabled || move.isPending}
       pick={(repoId) => move.mutate(repoId)}
     >
-      {/* What moving the work would take with it, said before it is done rather
-          than after: the base is the one thing here that a switch resets. */}
-      <Show when={!props.disabled}>
-        <Note class={styles.aside}>
-          Moving this onto another repo puts its base back on that repo's
-          default branch. Its branch name, its pairings and the repos it works
-          alongside are kept.
-        </Note>
-      </Show>
-
       <Show when={refused()}>
         {(outcome) => (
           <ErrorLine class={styles.failure}>
@@ -730,7 +785,8 @@ function PairingPicker(props: {
 /// under it.
 export function RolePicker(props: {
   saved: ProfileEntry[];
-  /// What this control is called in the document, for the `<label>` over it.
+  /// What this control is called in the document, for the id the label inside
+  /// the handle names it by.
   role: string;
   label: string;
   /// The row a role that can run nothing offers above the pairings, where it
@@ -748,8 +804,9 @@ export function RolePicker(props: {
   const rows = (): Row[] => [
     ...(props.away
       ? // No mark: the row is not an account, so there is no harness for one to
-        // be of — see [`Row`].
-        [{ value: pairing.NONE, label: props.away, mark: null }]
+        // be of — see [`Row`]. And nothing shorter to read on the trigger: the
+        // words are already the whole of what the choice is.
+        [{ value: pairing.NONE, label: props.away, shown: props.away, mark: null }]
       : []),
     ...pairing.pairings(props.saved).map((row) => ({
       value: pairing.value(row),
@@ -757,19 +814,25 @@ export function RolePicker(props: {
       // rest of it: the profile's name is said after the model only where its
       // backend has more than one account saved.
       label: pairing.label(row, props.saved),
+      // And the shorter reading for the trigger, which has the mark beside it
+      // to say which backend and a quarter of the box to say the rest in.
+      shown: pairing.shown(row, props.saved),
       mark: row.profile.account.agent_type,
     })),
   ];
 
   return (
     <div class={styles.profileChoice}>
-      <label class={styles.optionLabel} for={`${props.role}-pairing`}>
-        {props.label}
-      </label>
       {/* A [`Listbox`] rather than a `<select>`, so this cannot come to show one
           pairing while the mutation below would choose another — and so that
           every row can carry its harness's mark, which an `<option>` cannot
           hold. See `src/picking.tsx`.
+
+          The role is drawn inside the handle rather than as a label above it:
+          the trigger is a dimmed label over a value, and the label is part of
+          what is pressed — one rectangle around the pair of them, and a press
+          on the word drops the rows. It is still what names the control, which
+          is what `heading` is careful about.
 
           The empty value is the state of having chosen nothing, and it is not
           an option to go back to: a conversation with no pairing is one that
@@ -785,9 +848,11 @@ export function RolePicker(props: {
       <Listbox
         id={`${props.role}-pairing`}
         class={styles.optionPick}
+        heading={{ words: props.label, class: styles.optionLabel }}
         options={rows()}
         value={(row) => row.value}
         label={(row) => row.label}
+        closed={(row) => row.shown}
         mark={(row) => row.mark}
         chosen={props.chosen}
         pick={(picked) => props.pick(picked)}
@@ -807,7 +872,15 @@ export function RolePicker(props: {
 /// the mark is `null`able: the row that runs nothing is not an account, so there
 /// is no harness for a mark to be of, and the control draws no element rather
 /// than a gap where one would have been.
-type Row = { value: string; label: string; mark: AgentType | null };
+type Row = {
+  value: string;
+  label: string;
+  /// And what the closed control reads, which is the row's own reading less the
+  /// backend's name: the mark beside it has said that already, and a trigger is
+  /// glanced at where a row is read down — see `shown` in `../pairing.ts`.
+  shown: string;
+  mark: AgentType | null;
+};
 
 /// The branch the work will be done on: empty until the human names one, and
 /// theirs to change until grilling begins.

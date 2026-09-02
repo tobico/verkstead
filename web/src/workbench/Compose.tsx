@@ -17,9 +17,15 @@
 //! of what creating needs, so *Save as draft* waits on that alone; *Start work*
 //! carries a grilling start as well, and waits on what one has always waited on
 //! — a brief, and the three roles answered. Short of that it draws inert and
-//! says what is missing when it is pressed, exactly as the composer's own start
+//! does nothing at all when it is pressed, exactly as the composer's own start
 //! does: a press that created the Conversation and then reported the grilling
-//! refused would be doing the opposite of what the line under it promised.
+//! refused would be doing the opposite of what it promised.
+//!
+//! **Nothing under the presses says any of that.** What each of them would do
+//! is what its own word says, and why one of them cannot be pressed is a `title`
+//! on the button rather than a paragraph under the box: the page is a box, a row
+//! and two presses, and every sentence added to it was read once and then read
+//! past forever.
 //!
 //! No Timeline beside it, for the reason a Conversation whose record is the one
 //! Event has none: there is nothing yet to read. So the page is the sidebar and
@@ -51,7 +57,7 @@
 //! cannot come to ask different questions or word them differently.
 
 import { faChevronDown } from "@fortawesome/free-solid-svg-icons";
-import { A, useNavigate } from "@solidjs/router";
+import { useNavigate } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Show, createEffect, createSignal, type JSX } from "solid-js";
 
@@ -59,6 +65,7 @@ import app from "../App.module.css";
 import { Icon } from "../Icon";
 import { Menu } from "../Menu";
 import { PaneSticky, Panes } from "../Panes";
+import shell from "../Panes.module.css";
 import { Switch as Toggle } from "../Switch";
 import {
   listAbandonedRoadmaps,
@@ -67,7 +74,7 @@ import {
 } from "../api/client";
 import type { RepoEntry } from "../api/types";
 import { useReading } from "../freshness";
-import { Empty, ErrorLine, Note } from "../notices";
+import { ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
 import { Conversations } from "./Conversations";
 import styles from "./Composer.module.css";
@@ -81,6 +88,7 @@ import {
   RULE,
   RepoChoice,
   RepoOptions,
+  RepoSelect,
   RolePicker,
 } from "./Setup";
 import setup from "./Setup.module.css";
@@ -123,6 +131,14 @@ export function ComposePage(): JSX.Element {
     />
   );
 }
+
+/// Why neither press can be pressed while no repo is picked, said on both of
+/// them.
+///
+/// The one thing a create cannot be done without, and the one control on this
+/// page that has not been answered — so the button says it where the press is
+/// refused rather than the page saying it above the row.
+const NO_REPO = "No repo selected";
 
 /// The composer itself, over the compose state.
 function Compose(props: {
@@ -274,16 +290,15 @@ function Compose(props: {
 
   /// What starting is waiting on, in the words the composer's own start says
   /// them in — the brief left out where a roadmap answers for it.
+  ///
+  /// A `title` on the press rather than a line under it. It is about a button
+  /// rather than about the page, and a sentence standing under the box whether
+  /// or not anybody wanted it is the page explaining itself unasked — see the
+  /// composer's own start, where the same words moved for the same reason.
   const waiting = () =>
     adopting() === null
       ? "Starting needs a brief, and every role picked and working."
       : "Starting needs every role picked and working.";
-
-  // Whether that explanation is out: pressed, it stays out, because it was asked
-  // for; hovered, it comes and goes with the pointer. The composer's own start
-  // holds the same two signals for the same reason.
-  const [asked, setAsked] = createSignal(false);
-  const [hovered, setHovered] = createSignal(false);
 
   const [gone, setGone] = createSignal(false);
 
@@ -387,7 +402,7 @@ function Compose(props: {
         <PaneHead back={props.back} title="New conversation" />
       </PaneSticky>
 
-      <div class={styles.composer}>
+      <div class={`${styles.composer} ${shell.paneComposer}`}>
         <div class={styles.box}>
           {/* The field, or the roadmap that has been loaded in place of it: an
               adopted stage's brief is the repository's own and arrives with the
@@ -397,8 +412,9 @@ function Compose(props: {
             when={adopting()}
             fallback={
               // A copy of what has been typed gives the field its height — see
-              // `.grow` in `App.module.css`.
-              <div class={app.grow} data-value={state().brief}>
+              // `.grow` in `App.module.css`, and `.field` in the composer's own
+              // module for the three lines it starts at.
+              <div class={`${app.grow} ${styles.field}`} data-value={state().brief}>
                 <textarea
                   rows="1"
                   aria-label="Brief"
@@ -415,128 +431,118 @@ function Compose(props: {
           <section class={setup.options} aria-label="Setup">
             {/* The repository first, because everything under it is a fact
                 about the one this picks — which is why the panel holds nothing
-                else until one is picked. */}
-            <RepoOptions
-              name={repo()?.name ?? adopting()?.repo ?? "Select"}
-              alongside={state().companions.length}
+                else until one is picked, and why there is no panel at all until
+                then: a dropdown while nothing is chosen, the arrangement of what
+                was chosen after it. See `RepoSelect` in `Setup.tsx`. */}
+            <Show
+              when={on(state()) !== null}
+              fallback={
+                <RepoSelect
+                  chosen=""
+                  disabled={make.isPending}
+                  pick={(repoId) => moveTo(repoId)}
+                />
+              }
             >
-              {() => (
-                <>
-                  <RepoChoice
-                    chosen={on(state()) === null ? "" : String(on(state()))}
-                    // Settled while a roadmap is loaded, the way it is settled
-                    // once a branch has been cut: the stage is in the repository
-                    // the roadmap is written in, and moving the work off it
-                    // would be moving it away from what it is adopting.
-                    disabled={make.isPending || adopting() !== null}
-                    pick={(repoId) => moveTo(repoId)}
-                  >
-                    {/* Nothing to attach a Conversation to, so the only thing
-                        to offer is the page that fixes that — which is what the
-                        menu this page replaced said in the same words. Under the
-                        picker rather than instead of it: the picker is the
-                        control that is empty, and this says why. */}
-                    <Show when={repos.data?.length === 0}>
-                      <Empty class={setup.nothing}>
-                        No repos are registered yet —{" "}
-                        <A href="/settings">register one</A> to start a
-                        conversation.
-                      </Empty>
-                    </Show>
+              <RepoOptions
+                name={repo()?.name ?? adopting()?.repo ?? ""}
+                alongside={state().companions.length}
+              >
+                {() => (
+                  <>
+                    <RepoChoice
+                      chosen={on(state()) === null ? "" : String(on(state()))}
+                      // Settled while a roadmap is loaded, the way it is
+                      // settled once a branch has been cut: the stage is in
+                      // the repository the roadmap is written in, and moving
+                      // the work off it would be moving it away from what it
+                      // is adopting.
+                      disabled={make.isPending || adopting() !== null}
+                      pick={(repoId) => moveTo(repoId)}
+                    >
+                      {/* And what the roadmap has settled, where one is loaded:
+                          the two fields that would have asked are not drawn at
+                          all, so this is where they are answered. */}
+                      <Show when={adopting()}>
+                        {(held) => (
+                          <Note class={setup.aside}>
+                            The stage is worked on its own branch, off{" "}
+                            <Show
+                              when={held().base}
+                              fallback={<>this repo's default branch</>}
+                            >
+                              {(base) => <code>{base()}</code>}
+                            </Show>
+                            . Clear the roadmap to compose work of your own.
+                          </Note>
+                        )}
+                      </Show>
+                    </RepoChoice>
 
-                    {/* Said before the move rather than after, exactly as the
-                        composer says it: the base is the one thing here that
-                        picking another repo resets. */}
-                    <Show when={ready() && adopting() === null}>
-                      <Note class={setup.aside}>
-                        Moving this onto another repo puts its base back on that
-                        repo's default branch. Its branch name, its pairings and
-                        the repos it works alongside are kept.
-                      </Note>
-                    </Show>
+                    <Show when={repo()}>
+                      {(chosen) => (
+                        <>
+                          {/* Neither is asked of a page adopting a roadmap: a
+                              stage is worked on its own slug, and the base went
+                              out with the row that loaded it. What a control
+                              cannot do it does not draw. */}
+                          <Show when={adopting() === null}>
+                            <BranchField
+                              id="branch"
+                              label="Branch"
+                              class={setup.branchName!}
+                              placeholder={AUTOMATIC}
+                              value={state().branch}
+                              set={(branch) => change({ branch })}
+                            />
 
-                    {/* And what the roadmap has settled, where one is loaded:
-                        the two fields that would have asked are not drawn at
-                        all, so this is where they are answered. */}
-                    <Show when={adopting()}>
-                      {(held) => (
-                        <Note class={setup.aside}>
-                          The stage is worked on its own branch, off{" "}
-                          <Show
-                            when={held().base}
-                            fallback={<>this repo's default branch</>}
-                          >
-                            {(base) => <code>{base()}</code>}
+                            <BasePicker
+                              id="base-branch"
+                              label="Base branch"
+                              repo={chosen()}
+                              chosen={state().base ?? RULE}
+                              pick={(branch) => change({ base: branch })}
+                            />
                           </Show>
-                          . Clear the roadmap to compose work of your own.
-                        </Note>
+
+                          {/* The invitation goes back to being the
+                              invitation the moment something is picked out of
+                              it: an add is done rather than held, and the row
+                              it makes is under the control. */}
+                          <CompanionChoice
+                            chosen=""
+                            add={(repoId) => alongside(repoId)}
+                          />
+
+                          <Show when={state().companions.length}>
+                            <ul
+                              class={setup.companions}
+                              aria-label="Companion repos"
+                            >
+                              <For each={state().companions}>
+                                {(row) => (
+                                  <Beside
+                                    alongside={row}
+                                    repo={
+                                      (repos.data ?? []).find(
+                                        (entry) => entry.id === row.repo_id,
+                                      ) ?? null
+                                    }
+                                    mirrors={state().branch}
+                                    settle={settle}
+                                    forget={() => forget(row.repo_id)}
+                                  />
+                                )}
+                              </For>
+                            </ul>
+                          </Show>
+                        </>
                       )}
                     </Show>
-                  </RepoChoice>
-
-                  <Show when={repo()}>
-                    {(chosen) => (
-                      <>
-                        {/* Neither is asked of a page adopting a roadmap: a
-                            stage is worked on its own slug, and the base went
-                            out with the row that loaded it. What a control
-                            cannot do it does not draw. */}
-                        <Show when={adopting() === null}>
-                          <BranchField
-                            id="branch"
-                            label="Branch"
-                            class={setup.branchName!}
-                            placeholder={AUTOMATIC}
-                            value={state().branch}
-                            set={(branch) => change({ branch })}
-                          />
-
-                          <BasePicker
-                            id="base-branch"
-                            label="Base branch"
-                            repo={chosen()}
-                            chosen={state().base ?? RULE}
-                            pick={(branch) => change({ base: branch })}
-                          />
-                        </Show>
-
-                        {/* The invitation goes back to being the invitation the
-                            moment something is picked out of it: an add is done
-                            rather than held, and the row it makes is under the
-                            control. */}
-                        <CompanionChoice
-                          chosen=""
-                          add={(repoId) => alongside(repoId)}
-                        />
-
-                        <Show when={state().companions.length}>
-                          <ul
-                            class={setup.companions}
-                            aria-label="Companion repos"
-                          >
-                            <For each={state().companions}>
-                              {(row) => (
-                                <Beside
-                                  alongside={row}
-                                  repo={
-                                    (repos.data ?? []).find(
-                                      (entry) => entry.id === row.repo_id,
-                                    ) ?? null
-                                  }
-                                  mirrors={state().branch}
-                                  settle={settle}
-                                  forget={() => forget(row.repo_id)}
-                                />
-                              )}
-                            </For>
-                          </ul>
-                        </Show>
-                      </>
-                    )}
-                  </Show>
-                </>
-              )}
-            </RepoOptions>
+                  </>
+                )}
+              </RepoOptions>
+            </Show>
 
             {/* And the three accounts, one trigger each — the same three
                 questions, asked before there is a record for an answer to be
@@ -603,6 +609,10 @@ function Compose(props: {
               type="button"
               class={styles.draft}
               disabled={!ready() || make.isPending}
+              // Why it cannot be pressed, on the press itself: there is one
+              // thing missing and it is the one thing the row above it is
+              // asking for.
+              title={ready() ? undefined : NO_REPO}
               onClick={() => make.mutate(false)}
             >
               Save as draft
@@ -612,68 +622,19 @@ function Compose(props: {
               class={styles.start}
               classList={{ [styles.inert!]: !startable() }}
               // Truly `disabled` for the two things that leave the press
-              // nothing to answer with: no repo, which is said above the row
-              // without anybody having to press anything, and a press already
-              // in flight. Not being ready to *start* is the other thing
-              // entirely — the composer's own start draws inert and says what
-              // is missing, and so does this.
+              // nothing to do: no repo, which is what its tooltip says, and a
+              // press already in flight. Not being ready to *start* is the
+              // other thing entirely — it draws inert, says what is missing on
+              // hover, and answers a press with nothing, exactly as the
+              // composer's own start does.
               disabled={!ready() || make.isPending}
               aria-disabled={!startable()}
-              onClick={() => (startable() ? make.mutate(true) : setAsked(true))}
-              onMouseEnter={() => setHovered(true)}
-              onMouseLeave={() => setHovered(false)}
+              title={ready() ? (startable() ? undefined : waiting()) : NO_REPO}
+              onClick={() => startable() && make.mutate(true)}
             >
               {make.isPending ? "Starting…" : "Start work"}
             </button>
           </div>
-
-          <Show
-            when={ready()}
-            fallback={
-              // Truly disabled rather than explaining itself on a press, unlike
-              // the composer's own start: there is one thing missing and no
-              // reading of the record could work out what — so it is said here,
-              // where it can be read without pressing anything.
-              <Note>Pick a repo to create this conversation in.</Note>
-            }
-          >
-            <Show
-              when={startable()}
-              fallback={
-                // What the press that *can* act does, since the other cannot
-                // yet: a note describing a start that would be refused is the
-                // page saying it will do something it will not.
-                <>
-                  <Note>
-                    Saving this as a draft creates the conversation and leaves it
-                    to be started.
-                  </Note>
-                  <Show when={asked() || hovered()}>
-                    <Note>{waiting()}</Note>
-                  </Show>
-                </>
-              }
-            >
-              <Show
-                when={adopting()}
-                fallback={
-                  <Note>
-                    Starting creates the conversation, its branch and its
-                    worktree, and freezes the brief. Saving it as a draft creates
-                    it and leaves it to be started.
-                  </Note>
-                }
-              >
-                <Note>
-                  Starting creates the conversation and adopts the stage: its
-                  branch and its worktree are made, and the stage brief becomes
-                  the brief. Saving it as a draft creates it and leaves the stage
-                  to be adopted. All three pairings are carried, because the
-                  stages after this one inherit them from it.
-                </Note>
-              </Show>
-            </Show>
-          </Show>
 
           <Show when={gone()}>
             <ErrorLine class={styles.failure}>
