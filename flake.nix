@@ -127,9 +127,45 @@
               # which is the sharing proved without touching the internet.
               curl
               # The PWA icons are one PNG downscaled to the sizes the favicon,
-              # the manifest and iOS need — see tools/generate-icons.sh.
+              # the manifest and iOS need — see tools/generate-icons.sh. The
+              # same tool downscales the same artwork into the sizes a desktop's
+              # launcher draws — see tools/generate-packaging.sh.
               imagemagick
+              # `desktop-file-validate`, which that script runs over the entry it
+              # writes: an entry a desktop will not parse is one that never
+              # appears in a menu, and nothing else here would notice.
+              desktop-file-utils
+              # `mksquashfs`, which is an AppImage's filesystem and so most of
+              # what tools/build-appimage.sh needs to make one — see there for
+              # why the format's own tool is not what makes it.
+              squashfsTools
+              # What the desktop crate's C dependencies below are found with.
+              # Nothing else here needs one: `crates/desktop` is the first thing
+              # in this repository to link a system library at all.
+              pkg-config
             ]);
+
+          # The desktop app's toolkit, and the tray protocol drawn over it
+          # (ADR-0012). Build inputs rather than packages so that pkg-config is
+          # pointed at their development files: the tray and the app's dialogs
+          # compile against GTK3 headers, and a shell without them cannot build
+          # `crates/desktop` at all. The same two are what the AppImage carries.
+          buildInputs = with pkgs; [
+            gtk3
+            libayatana-appindicator
+          ];
+
+          # Where the appindicator is found at *run* time, which is a separate
+          # question from the one `buildInputs` answers: `libappindicator-sys`
+          # opens the library with `dlopen` under its bare name rather than
+          # linking it, so there is no dependency recorded for the loader to
+          # follow and no rpath written into the binary to follow it by. On a
+          # distribution the name is found in `/usr/lib` and nothing has to be
+          # said; here it is a store path, and this is what says it — without it
+          # `cargo run --bin verkstead-desktop` panics inside that crate before
+          # a tray icon is ever drawn. The AppImage answers the same question
+          # the same way over its own bundle — see tools/build-appimage.sh.
+          env.LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [ pkgs.libayatana-appindicator ];
 
           env.RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
         };

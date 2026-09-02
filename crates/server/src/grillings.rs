@@ -88,11 +88,22 @@ pub(crate) async fn again(state: AppState, conversation_id: i64, driving: Drivin
 
     orphaned(&state, conversation_id, &timeline).await;
 
+    // What the prompt names first is the grilling skill, by the path this
+    // server installed it at — and a server that installed none runs no
+    // sessions to name it to.
+    let Some(skills) = state.sessions.skills() else {
+        tracing::error!(
+            conversation_id,
+            "this server has no grilling skill to send a session into, so none was started"
+        );
+        return;
+    };
+
     // The round's own Brief either way — the newest on the Timeline, which is
     // the one the round this session belongs to was opened with.
     let prompt = match digest {
-        Digest::Prime => skills::grilling_again(&brief(&timeline), &settled(&timeline)),
-        Digest::Skip => skills::grilling(&brief(&timeline)),
+        Digest::Prime => skills::grilling_again(skills, &brief(&timeline), &settled(&timeline)),
+        Digest::Skip => skills::grilling(skills, &brief(&timeline)),
     };
 
     // Read back here rather than carried from anywhere: a stall may be answered

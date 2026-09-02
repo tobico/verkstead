@@ -34,7 +34,11 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{SharedConversation, TimelineEvent};
 use verkstead_schema::QuestionSet;
-use verkstead_server::{Gh, open_database, router, router_asking_github, store};
+use verkstead_server::{open_database, router, store};
+// The `gh` half, which the six tests that reach GitHub want — see
+// [`app_asking_github`] for what keeps them, and these, off Windows.
+#[cfg(unix)]
+use verkstead_server::{Gh, router_asking_github};
 
 /// A router over a database with nothing in it, plus the pool and the directory
 /// keeping it alive.
@@ -54,6 +58,13 @@ async fn app() -> (tempfile::TempDir, SqlitePool, Router) {
 /// was reached at all, and a script that records what it was asked is what can
 /// say so. The directory it writes in is the one the router keeps its settings
 /// in, which holds no token — so nothing here could publish even if it tried.
+///
+/// The script is a `/bin/sh` one, which is what leaves this and the six tests
+/// that ask for it off Windows: a stand-in that is a shell script is a stand-in
+/// for a machine with a shell at that path. What they are about — which presses
+/// reach GitHub — is nothing a platform changes, and the rest of this file is
+/// asked wherever the suite runs.
+#[cfg(unix)]
 async fn app_asking_github() -> (tempfile::TempDir, SqlitePool, Router) {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))
@@ -83,10 +94,12 @@ async fn app_asking_github() -> (tempfile::TempDir, SqlitePool, Router) {
 ///
 /// That module's own tests are what pin the address; this is what says the rows
 /// and the toast are composed through it.
+#[cfg(unix)]
 const HOSTED: &str = "https://tobico.github.io/verkstead/share-viewer.html";
 
 /// A Conversation with a Brief and nothing else: no pull request, which is what
 /// the press that comments on them has to have nothing to do about.
+#[cfg(unix)]
 async fn drafting(pool: &SqlitePool) -> i64 {
     let repo = repo(pool).await;
 
@@ -103,6 +116,7 @@ async fn drafting(pool: &SqlitePool) -> i64 {
 }
 
 /// Press something, and read what came back.
+#[cfg(unix)]
 async fn post<T: DeserializeOwned>(app: &Router, path: &str) -> T {
     let response = app
         .clone()
@@ -370,6 +384,82 @@ async fn a_share_carries_what_was_asked_answered_and_built() {
             "a share carried {left}: {boarded:?}"
         );
     }
+}
+
+/// A trimmed Conversation shares exactly as it did before the trim.
+///
+/// The two halves of one rule, asked from the other side: what a trim takes is
+/// what only a drill-down shows, and a share never carried any of that. So the
+/// file a colleague opens is the same file whether it was made the day the work
+/// finished or a month after the Cleanup swept — which is what makes trimming
+/// safe to do unasked.
+///
+/// Shared on both sides of the trim rather than compared against a written-out
+/// expectation, because the claim is *the same*, and every field of it is one a
+/// later stage might add to.
+#[tokio::test]
+async fn trimming_leaves_the_share_exactly_as_it_was() {
+    let (_dir, pool, app) = app().await;
+    let id = everything(&pool).await;
+
+    // Something for the trim to take: a share of a Conversation with no bulk on
+    // it would come back the same for the wrong reason.
+    let printed = store::timeline(&pool, id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find_map(|event| matches!(event.event, store::Event::AgentOutput(..)).then_some(event.id))
+        .expect("a session printed into that Conversation");
+
+    store::append_capture(
+        &pool,
+        printed,
+        "the session said a great deal\n",
+        &store::Summary {
+            lines: 1,
+            turns: Some(2),
+            latest: "the session said a great deal".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+
+    store::append_transcript(&pool, printed, &[r#"{"type":"assistant"}"#.to_owned()])
+        .await
+        .unwrap();
+
+    store::close_conversation(&pool, id).await.unwrap();
+    assert_eq!(
+        store::archive_conversation(&pool, id).await.unwrap(),
+        store::Archiving::Archived,
+    );
+
+    let before = share(&app, id).await;
+
+    assert_eq!(
+        store::trim_conversation(&pool, id).await.unwrap(),
+        store::Trimming::Trimmed,
+    );
+
+    assert_eq!(
+        store::capture(&pool, id, printed).await.unwrap(),
+        Some(String::new()),
+        "which really took what it was there to take",
+    );
+
+    let after = share(&app, id).await;
+
+    assert_eq!(
+        SharedConversation {
+            // The one field that is meant to differ: a share is a moment, and
+            // these are two of them.
+            exported_at: before.exported_at.clone(),
+            ..after
+        },
+        before,
+        "the record, every sheet and every pane, exactly as it was before the \
+         bulk was taken",
+    );
 }
 
 #[tokio::test]
@@ -1237,6 +1327,8 @@ async fn a_commit_the_repository_has_lost_says_so_rather_than_stopping_the_expor
 /// The gist's own URL travels beside it, because the Share pane draws both: the
 /// viewer's link is what a reader is sent, and the gist is where the file is and
 /// the only place a share can be deleted.
+// The `gh` behind this one is a shell script — see `app_asking_github`.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_published_share_is_on_the_conversation_the_workbench_draws() {
     let (_dir, pool, app) = app_asking_github().await;
@@ -1271,6 +1363,8 @@ async fn a_published_share_is_on_the_conversation_the_workbench_draws() {
 /// somebody *now* — one link at a time rather than a history of them. What was
 /// already sent goes on standing at its own URL; this is only what the next
 /// comment is written from.
+// The `gh` behind this one is a shell script — see `app_asking_github`.
+#[cfg(unix)]
 #[tokio::test]
 async fn publishing_again_replaces_the_link_the_workbench_draws() {
     let (_dir, pool, app) = app_asking_github().await;
@@ -1319,6 +1413,8 @@ async fn a_share_does_not_carry_the_link_to_a_share() {
 /// automatic share is gated on: the fact says a comment *landed*, and a press
 /// that left none anywhere leaves the next settle free to try — see
 /// `share_to_pull_requests` in `crates/server/src/settling.rs`.
+// The `gh` behind this one is a shell script — see `app_asking_github`.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_conversation_on_no_pull_request_is_not_published_at_all() {
     let (dir, pool, app) = app_asking_github().await;
@@ -1343,6 +1439,8 @@ async fn a_conversation_on_no_pull_request_is_not_published_at_all() {
 
 /// And an id that names no Conversation is the same 404 every other reading of
 /// one is: there is nothing to compose a share of, let alone comment.
+// The `gh` behind this one is a shell script — see `app_asking_github`.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_conversation_that_is_not_there_is_a_miss() {
     let (_dir, _pool, app) = app_asking_github().await;

@@ -38,27 +38,29 @@
 //! details pane, which is why this takes a way of selecting one — and so do the
 //! backlog and the roadmap, whose cards open the documents their entries name
 //! and which are selected by a word rather than by an id, having no Event of
-//! their own. Three of them are documents — the frozen Brief, the handoff and
-//! the instruction a
+//! their own. Three of them are documents — the Brief, the handoff and the
+//! instruction a
 //! steer carried — and a document's summary is its own opening: the card shows
 //! [`CLAMPED_LINES`] of it under a fade, and the pane holds the whole. A Notice
 //! is read the same way and cut differently: what it has to say is a sentence
-//! rather than a document, so its card shows one line under an ellipsis. The
-//! Brief is also the one Event that is written here as well as read: while the
-//! Conversation is drafting it is a field that saves itself rather than a card
-//! to open, and it carries a Conversation's setup under it for as long as there
-//! is a draft to set up.
+//! rather than a document, so its card shows one line under an ellipsis.
 //!
-//! Nothing is held against the foot of the pane. A strip for the session running
+//! The Brief is a document here whatever its round has come to, and the pane
+//! behind it is the one that differs: a round still being drafted opens the
+//! composer — the Brief as a field, the Conversation's setup, and the press
+//! that starts the work — and a round already worked opens the record of what
+//! it was built from. Nothing of either is written on the card.
+//!
+//! Nothing is held against the foot of the pane, and nothing at the foot of the
+//! record. A strip for the session running
 //! now used to be — the title and the liveness mark, a way back to a card that a
 //! long record had scrolled away from — and the status button at the head of the
 //! pane says what is running, in more words than the strip ever did and where
-//! the eye lands rather than at the far end of the pane.
-//!
-//! The Timeline is also where the work is moved on from, because that is where
-//! the reason to move it is: a control sits at the end of everything that has
-//! happened so far, which is exactly where the next thing to happen belongs.
-//! One lives there — `Start work` under the Brief it will freeze. What to
+//! the eye lands rather than at the far end of the pane. `Start work` was there
+//! too, at the end of everything that had happened and under the Brief it would
+//! freeze, and it is on the composer now, under the setup it is waiting on:
+//! setting a piece of work up and kicking it off are one act, and both happen
+//! in the one pane. What to
 //! do about a conversation Verkstead has finished with is not there: a Steer is
 //! the way back into one, and it is in the menu the status button drops with
 //! everything else done to the conversation as a whole.
@@ -77,7 +79,6 @@
 //! answered on and land here as the answered Set.
 
 import { faShare } from "@fortawesome/free-solid-svg-icons";
-import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
   For,
   Match,
@@ -91,7 +92,7 @@ import {
 } from "solid-js";
 
 import { ran, reading } from "../agents";
-import { listProfiles, saveBrief, startGrilling } from "../api/client";
+import { listProfiles } from "../api/client";
 import type {
   AgentOutputEvent,
   BriefEvent,
@@ -117,19 +118,17 @@ import type {
   TimelineEvent,
   UnreadableSetEvent,
 } from "../api/types";
-import app from "../App.module.css";
 import { CardButton } from "../CardButton";
 import { IconButton } from "../IconButton";
 import { PaneSticky } from "../Panes";
 import { useReading } from "../freshness";
 import { HarnessMark } from "../HarnessMark";
-import { Empty, ErrorLine, Note } from "../notices";
+import { Empty } from "../notices";
 import { followBottom } from "../scrolling";
 // The badge and the sentence a Set this build cannot read is drawn with, taken
 // from the page that draws the whole record rather than kept a second time
 // here: the row and the page are one record read at two distances.
 import unreadable from "../set/Unreadable.module.css";
-import { Adoption } from "./Adoption";
 import { Checks } from "./Checks";
 import { Mark } from "./Mark";
 // The marks themselves, for the one this file draws without a session behind
@@ -138,13 +137,12 @@ import { Mark } from "./Mark";
 import marks from "./Mark.module.css";
 import { Conflict } from "./Merging";
 import { PaneHead } from "./PaneHead";
-import { Setup } from "./Setup";
+import { NO_SESSIONS } from "./sessions";
 import { StatusButton } from "./StatusButton";
 import styles from "./Timeline.module.css";
 import { titled } from "./naming";
 import { STATE } from "./states";
 import { opensRoadmap, type Opening } from "./openings";
-import { keeping } from "./settling";
 import { windowed } from "./windowing";
 
 /// How much of a commit's hash the timeline shows.
@@ -178,6 +176,11 @@ const GRILL_REFUSAL: Record<
   Started: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "This conversation has already been started.",
+  // The one refusal here that is about this Verkstead rather than about this
+  // conversation, and the one the page draws before the press where it can —
+  // see `sessions.tsx`, whose sentence every other press that wanted a session
+  // says as well.
+  NotOnWindowsYet: NO_SESSIONS,
   NoGrillingProfile:
     "Pick a grilling profile and model — or No grilling — first, on the brief.",
   NoImplementationProfile:
@@ -306,16 +309,16 @@ function Clamped(props: {
 /// on that instead — it reads as the same card either way, because it is the
 /// same card.
 ///
-/// `open` is nothing where the card is not openable, which is the Brief for as
-/// long as it is a draft: a field is not a thing to press, and neither is the
-/// setup standing under it.
+/// Every card drawn through here is openable: each of them is a document or a
+/// list whose whole self is in the details pane, the Brief while it is being
+/// drafted included — what a press on that one opens is the composer.
 function Openable(props: {
   /// The module's name for which of the three documents this card is. The card
   /// is told rather than asking, because what a Brief is and what a Handoff is
   /// is the caller's to know.
   kind: string;
   selected: boolean;
-  open: (() => void) | null;
+  open: () => void;
   children: JSX.Element;
 }): JSX.Element {
   return (
@@ -701,32 +704,6 @@ export function Timeline(props: {
           )}
         </For>
       </ol>
-
-      {/* After everything that has happened, because it is what happens next.
-          Drawn outside the list: neither is an event, and either would be an
-          event that moved every time one landed. Only one is ever drawn — each
-          is for a different state — so they read as the one thing there is to do
-          from here. What to do about a conversation that is finished is not
-          here, and neither is getting a stopped one going again: a steer and a
-          resume are both rows of the menu the status button drops, drawn
-          whatever state the conversation is in.
-
-          And none of it is drawn in a share: what happens next is nothing a
-          reader holding a file has any part in, and a record that ended on a
-          press would be asking them for one. */}
-      <Show when={!props.readOnly}>
-        <Show
-          when={props.conversation.adopting}
-          fallback={<StartGrilling conversation={props.conversation} />}
-        >
-          {(adopting) => (
-            <Adoption
-              conversation={props.conversation}
-              adopting={adopting()}
-            />
-          )}
-        </Show>
-      </Show>
     </>
   );
 }
@@ -1898,301 +1875,49 @@ function Commit(props: {
   );
 }
 
-/// The button that gives a Conversation somewhere to work.
-///
-/// Drawn whenever there is something to start, ready or not. `ready_to_grill`
-/// decides how it *behaves* rather than whether it is there: an unready button
-/// looks inert and, pressed, says what is missing instead of starting. So it is
-/// `aria-disabled` rather than `disabled` — a truly disabled button takes no
-/// press to answer, and its only way of explaining itself is a `title` that a
-/// phone will never show. The explanation is on hover as well, for whoever has a
-/// pointer to hover with.
-///
-/// The server checks every one of the conditions again regardless — the page's
-/// copy is only as fresh as its last read.
-function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
-  const queries = useQueryClient();
-
-  const [refused, setRefused] = createSignal<GrillingStarted | null>(null);
-
-  // Whether the explanation is out: pressed, it stays out, because it was asked
-  // for; hovered, it comes and goes with the pointer.
-  const [asked, setAsked] = createSignal(false);
-  const [hovered, setHovered] = createSignal(false);
-
-  const ready = () => props.conversation.ready_to_grill;
-  const missing = () => !ready() && (asked() || hovered());
-
-  const start = useMutation(() => ({
-    mutationFn: () => startGrilling(props.conversation.id),
-    onSuccess: (outcome: GrillingStarted) => {
-      if (outcome !== "Started") {
-        setRefused(outcome);
-        // Refused against a picture of the world this page read a moment ago:
-        // reading it again is both the correction and the explanation.
-        void queries.invalidateQueries({ queryKey: ["conversation"] });
-        void queries.invalidateQueries({ queryKey: ["profiles"] });
-        return;
-      }
-
-      setRefused(null);
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
-      void queries.invalidateQueries({ queryKey: ["conversations"] });
-    },
-  }));
-
-  return (
-    <Show when={props.conversation.state === "Draft"}>
-      <div class={styles.startGrilling}>
-        <button
-          type="button"
-          class={styles.start}
-          classList={{ [styles.inert!]: !ready() }}
-          // Only ever `disabled` for a press already in flight. Not being ready
-          // is the other thing entirely: that press has an answer to give.
-          disabled={start.isPending}
-          aria-disabled={!ready()}
-          onClick={() => (ready() ? start.mutate() : setAsked(true))}
-          onMouseEnter={() => setHovered(true)}
-          onMouseLeave={() => setHovered(false)}
-        >
-          {start.isPending ? "Starting…" : "Start work"}
-        </button>
-        <Show
-          when={ready()}
-          fallback={
-            <Show when={missing()}>
-              <Note>
-                This needs a brief, and every role picked and working.
-              </Note>
-            </Show>
-          }
-        >
-          <Note>
-            This creates the branch and its worktree, and freezes the brief.
-          </Note>
-        </Show>
-
-        <Show when={refused()}>
-          {(outcome) => (
-            <ErrorLine class={styles.failure}>
-              {grillRefusal(outcome())}
-            </ErrorLine>
-          )}
-        </Show>
-        <Show when={start.isError}>
-          <ErrorLine class={styles.failure}>
-            The work could not be started: {start.error?.message}
-          </ErrorLine>
-        </Show>
-      </div>
-    </Show>
-  );
-}
-
-/// The Brief: the markdown a Conversation starts from, read inline and written
-/// inline.
+/// The Brief: the markdown a Conversation starts from, read on the record as
+/// the document it is.
 ///
 /// Inline in the Timeline rather than in the details pane, because there is
 /// nothing of it the Timeline does not already show — it *is* its own summary.
+/// The card is the server's rendering clamped to [`CLAMPED_LINES`], drafting or
+/// frozen, and the whole of it is behind the press: no field here and no setup
+/// under it, because arranging a piece of work is one act and it happens in a
+/// pane of its own — see [`Composer`](./Composer.tsx).
 ///
-/// While the Conversation is drafting the Brief *is* a field: raw markdown in a
-/// textarea that is always there, growing with what is typed into it, saving
-/// itself on a pause and on the way out of it. There is no Edit and no Save,
-/// because a document that is only ever written in one state does not need a
-/// mode to be written in — and a card that swapped a rendering for a field
-/// would cost a tap before every correction.
-///
-/// Once grilling starts it freezes, and from then on it is read as the server
-/// rendered it. The two are one field's worth of markdown either way, and the
-/// Brief is the one document on this wire that travels both ways for exactly
-/// that reason.
-///
-/// The setup rides under it while the Conversation is still drafting — the
-/// branch, the base commit and the pairings — because setting the work up
-/// and kicking it off are one act, and this is where it is kicked off. Once
-/// grilling starts the card is the Brief alone: everything under it froze at
-/// that moment, so there is nothing there to draw.
-///
-/// Which is also when it becomes a card to press: frozen, it is a document like
-/// the handoff, clamped to [`CLAMPED_LINES`] with the whole of it in the details
-/// pane. While it is a draft it is not openable at all — the card is a field
-/// with a setup under it, and every press on it belongs to one of those.
+/// Which pane the press opens is the round's business rather than the card's. A
+/// round still being drafted opens the composer, and a Brief the work has
+/// already been started from opens the read-only [`Brief`](./Brief.tsx) pane
+/// with the configuration it was frozen with under it.
 function Brief(props: {
   conversation: ConversationView;
   brief: BriefEvent;
   selected: boolean;
   open: () => void;
 }): JSX.Element {
-  const queries = useQueryClient();
-
-  /// Whether the Brief has frozen, which is the one thing that decides what kind
-  /// of card this is.
-  ///
-  /// Frozen, it is a document like the handoff: clamped, and pressed to read the
-  /// whole of it. Still a draft, it is a card with things on it to press — the
-  /// field, or the setup that stands under a Brief arriving with an adoption —
-  /// so it neither opens nor clamps. The two go together deliberately: a card
-  /// that cut a document off without offering the rest would be one that had
-  /// hidden it.
-  ///
-  /// The Brief's own flag rather than the Conversation's state, because what
-  /// froze is the round and a Conversation steered into a second one has a Brief
-  /// per round on the same Timeline: the server is what says which round each
-  /// belongs to. An adopting Conversation's stage brief comes down frozen from
-  /// the start — it is nobody here's to write.
-  const frozen = () => props.brief.frozen;
-
-  /// Whether the Brief is the human's to write here, which is the same question
-  /// the other way round.
-  const writing = () => !frozen();
-
-  // What has been typed, or nothing if nothing has been. The field follows the
-  // Event until the first keystroke and follows itself after it, so a read of
-  // the Conversation landing mid-sentence cannot take the sentence with it.
-  const [typed, setTyped] = createSignal<string | null>(null);
-  const text = () => typed() ?? props.brief.markdown;
-
-  // What the record has, as far as this card knows: what came down with the
-  // Event, until a save of its own puts something else there.
-  const [kept, setKept] = createSignal<string | null>(null);
-  const recorded = () => kept() ?? props.brief.markdown;
-
-  const [refused, setRefused] = createSignal<BriefSaved | null>(null);
-
-  /// Whether the field is ahead of the record, which is the whole of what there
-  /// is to save.
-  const unsaved = () => text() !== recorded();
-
-  /// Whether a refusal has come back, which stops the field for good: both of
-  /// them are permanent — a Brief that has frozen does not thaw, and a
-  /// Conversation that is gone does not come back. Trying again every time the
-  /// typing paused would be a request a second for as long as the human went on
-  /// writing, and the answer would be the one already on the card.
-  const settled = () => refused() !== null;
-
-  const save = useMutation(() => ({
-    mutationFn: (markdown: string) => saveBrief(props.conversation.id, markdown),
-    onSuccess: (outcome: BriefSaved, markdown: string) => {
-      if (outcome !== "Saved") {
-        // What was typed stands: it is the only copy of it there is, and the
-        // human is owed the chance to take it somewhere else. The commonest
-        // refusal is the freeze landing mid-edit, which is why it is said in
-        // words rather than left to a field that quietly stopped keeping up.
-        setRefused(outcome);
-        return;
-      }
-
-      setRefused(null);
-      setKept(markdown);
-      // The readiness verdict under this card is a fact about the Brief, so it
-      // is read again every time the Brief moves.
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
-    },
-    // Whatever became of it, the field may have been typed into while it was in
-    // flight — so the moment one save is done the next is considered.
-    onSettled: () => keeper.done(),
-  }));
-
-  const keeper = keeping({
-    unsaved,
-    settled,
-    save: () => save.mutate(text()),
-  });
-
   return (
-    <Openable
-      kind={styles.brief!}
-      selected={props.selected}
-      open={frozen() ? props.open : null}
-    >
-      {/* The heading alone: a field that keeps itself needs no word beside it
-          saying so, and a line that changed as fast as this one was read past
-          on a card the eye is meant to be typing into. What a save cannot do
-          is still said, under the field, in words. */}
+    <Openable kind={styles.brief!} selected={props.selected} open={props.open}>
+      {/* The heading alone. What a save cannot do is said where a save is
+          made, which is the pane rather than this. */}
       <div class={styles.eventHead}>
         <h2>Brief</h2>
       </div>
 
       <Show
-        when={writing()}
+        when={props.brief.markdown !== ""}
         fallback={
-          <Show
-            when={props.brief.markdown !== ""}
-            fallback={
-              <Empty>
-                <Show
-                  when={props.conversation.adopting}
-                  fallback={<>Nothing was written.</>}
-                >
-                  Nothing written yet — adopting the stage is what puts its
-                  brief here.
-                </Show>
-              </Empty>
-            }
-          >
+          <Empty>
             <Show
-              when={frozen()}
-              fallback={
-                <div
-                  class={`${styles.briefBody} markdown`}
-                  innerHTML={props.brief.html}
-                />
-              }
+              when={props.conversation.adopting}
+              fallback={<>Nothing was written.</>}
             >
-              <Clamped class={styles.briefBody!} html={props.brief.html} />
+              Nothing written yet — adopting the stage is what puts its brief
+              here.
             </Show>
-          </Show>
+          </Empty>
         }
       >
-        {/* A copy of what has been typed gives the field its height — see
-            `.grow` in `App.module.css`. */}
-        <div class={app.grow} data-value={text()}>
-          <textarea
-            rows="1"
-            aria-label="Brief"
-            placeholder="What is this piece of work?"
-            value={text()}
-            onInput={(ev) => {
-              setTyped(ev.currentTarget.value);
-              keeper.settle();
-            }}
-            onBlur={() => keeper.keep()}
-          />
-        </div>
-      </Show>
-
-      {/* Outside the field rather than under it, so a freeze that lands while
-          the human was typing is still explained on the card it happened to
-          once the card has gone back to being a rendering. */}
-      <Show when={refused()}>
-        {(outcome) => (
-          <ErrorLine class={styles.failure}>
-            {BRIEF_REFUSAL[outcome()]}
-          </ErrorLine>
-        )}
-      </Show>
-      <Show when={save.isError}>
-        <ErrorLine class={styles.failure}>
-          The brief could not be saved: {save.error?.message}
-        </ErrorLine>
-      </Show>
-
-      {/* Under the brief, and only while the conversation is drafting: the
-          branch, the base commit and the pairings all freeze when grilling
-          starts, so past that moment there is nothing here that could be
-          changed.
-
-          Under the brief being written, which on an adopting conversation is
-          one that is frozen: the stage brief is nobody here's to write, and its
-          setup is still the human's. */}
-      <Show
-        when={
-          props.conversation.state === "Draft" &&
-          (writing() || props.conversation.adopting !== null)
-        }
-      >
-        <Setup conversation={props.conversation} />
+        <Clamped class={styles.briefBody!} html={props.brief.html} />
       </Show>
     </Openable>
   );

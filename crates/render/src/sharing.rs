@@ -36,7 +36,9 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
-use crate::conversations::{CommitPane, CompanionView, ConversationView, TimelineEvent};
+use crate::conversations::{
+    CommitPane, CompanionView, ConversationView, SessionsHere, TimelineEvent,
+};
 use crate::profiles::PickedView;
 use crate::repos::RepoEntry;
 use crate::view::SetView;
@@ -222,6 +224,14 @@ pub fn shared(
             ready_to_continue: false,
             compiles_uncached: false,
 
+            // And the state a session would be started from, said as the
+            // ordinary one. It is a fact about the machine that would run it —
+            // which is the workbench's rather than the reader's, a share being
+            // opened wherever somebody was sent it — so a share carrying the
+            // exporter's answer would be telling the reader about a platform
+            // that is not theirs.
+            sessions: SessionsHere::Run,
+
             // And what is being adopted, which is the one other thing that puts
             // a control on the record: an adopting Conversation draws the Adopt
             // press and the setup card under its Brief.
@@ -248,6 +258,15 @@ pub fn shared(
             // a reader already holds a share, and one carrying the link to
             // another would be handing on a URL nobody meant to give them.
             shared: None,
+
+            // And whether a Cleanup has been through the record, which is a
+            // fact about what the *workbench* still holds. A share never
+            // carried a line of what a trim takes, so the file is the file it
+            // always was and there is nothing on it for the word to explain —
+            // said as nothing here, so that sharing a Conversation the sweep
+            // has been through hands over exactly what sharing it the day the
+            // work finished would have.
+            trimmed: false,
 
             // And the machine this was worked on, said as nothing. Where a
             // checkout is, and which account and model wrote the work, are the

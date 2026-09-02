@@ -34,6 +34,8 @@ import type {
 } from "../src/api/types";
 import { drawDiagrams } from "../src/set/diagrams";
 import { Share } from "../src/share/Share";
+// What the summary under a Brief says of a branch nobody has named.
+import { UNNAMED } from "../src/workbench/Brief";
 // The header a commit's pane draws itself with: the subject, the repository it
 // landed in where that is worth saying, and how much it moved.
 import commitStyles from "../src/workbench/Commit.module.css";
@@ -254,6 +256,49 @@ describe("a shared conversation", () => {
     expect(
       details.textContent?.includes("Pausing when an account runs out of window"),
     ).toBe(true);
+  });
+
+  /// A share of work nobody has named yet says what will become of the branch
+  /// rather than the name Verkstead invented for the row.
+  ///
+  /// The one place that reading is still drawn: in the workbench a Conversation
+  /// with a name still to be chosen is a Draft, and a Draft's Brief opens the
+  /// composer rather than this pane.
+  it("reports a branch nobody has named as one still to be chosen", async () => {
+    const brief = SHARED.conversation.timeline.find(
+      (event): event is Extract<TimelineEvent, { Brief: unknown }> =>
+        "Brief" in event,
+    );
+    expect(brief).toBeTruthy();
+
+    const unnamed = holding([brief!]);
+
+    render(() => (
+      <Share
+        shared={{
+          ...unnamed,
+          conversation: {
+            ...unnamed.conversation,
+            state: "Draft",
+            branch_named: false,
+          },
+        }}
+      />
+    ));
+
+    const details = await screen.findByLabelText("Details");
+    await waitFor(() =>
+      expect(details.querySelector("h1")?.textContent).toBe("Brief"),
+    );
+
+    const branch = [...details.querySelectorAll("div")].find(
+      (fact) => fact.querySelector("dt")?.textContent === "Branch",
+    );
+
+    expect(branch?.querySelector("dd")?.textContent).toBe(UNNAMED);
+    expect(details.textContent).not.toContain(
+      SHARED.conversation.branch,
+    );
   });
 
   /// And says nothing under it about the machine the work was done on.

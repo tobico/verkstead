@@ -1,5 +1,5 @@
-//! The paths a save carries when the form in front of the human is not about
-//! them.
+//! The paths and the Cleanup a save carries when the form in front of the human
+//! is not about them.
 //!
 //! One request writes the whole of `config.yaml`, so every section's save sends
 //! every value in it — the author, the build cache, the share-on-Done switch and
@@ -16,7 +16,12 @@
 //! sandbox gets, and `name=/abs/path` for one Repo's own. The view takes that
 //! apart so a page can draw the two halves; this puts it back together.
 
-import type { SettingsView } from "../api/types";
+import type {
+  CleanupEdit,
+  CleanupStepEdit,
+  CleanupStepView,
+  SettingsView,
+} from "../api/types";
 
 /// The two lists as they stand, ready to be spread into a save.
 ///
@@ -35,5 +40,34 @@ export function heldPaths(told: SettingsView | undefined): {
     sandbox_binds: (paths?.binds ?? [])
       .filter((entry) => entry.source === "Settings")
       .map((entry) => (entry.repo ? `${entry.repo}=${entry.path}` : entry.path)),
+  };
+}
+
+/// And the Cleanup as it stands, ready to be sent by a section that is not
+/// about it.
+///
+/// A duration nobody typed goes back as the empty string rather than as the
+/// default it is being shown as: the days that come back are always a number,
+/// and a section that echoed one would be writing a choice into the file on
+/// behalf of somebody who never made it.
+///
+/// The switches where the read left them, and the trim on where it has not
+/// landed — which is what the server writes for a Verkstead nobody has told
+/// anything.
+export function heldCleanup(told: SettingsView | undefined): CleanupEdit {
+  return {
+    trim: heldStep(told?.cleanup.trim, true),
+    delete: heldStep(told?.cleanup.delete, false),
+  };
+}
+
+/// One of its two rows, given what to say where the read has not landed.
+function heldStep(
+  step: CleanupStepView | undefined,
+  standing: boolean,
+): CleanupStepEdit {
+  return {
+    enabled: step?.enabled ?? standing,
+    days: step?.days_configured ? String(step.days) : "",
   };
 }

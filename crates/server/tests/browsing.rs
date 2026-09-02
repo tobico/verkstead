@@ -285,7 +285,11 @@ async fn a_relative_path_is_refused_in_either_scope() {
 }
 
 /// The anywhere scope with nothing typed is `/`, which is where a browse
-/// bounded by nothing begins.
+/// bounded by nothing begins — on a machine that has a `/`, which is both
+/// Unixes and not Windows. What the endpoint does with the answer is the same
+/// either way, so where that scope begins on a machine with drives instead is
+/// settled in `browsing`'s own unit tests rather than a second time here.
+#[cfg(unix)]
 #[tokio::test]
 async fn the_anywhere_scope_with_no_path_reads_the_filesystem_root() {
     let watched = tempfile::tempdir().unwrap();
@@ -319,6 +323,13 @@ async fn an_empty_path_is_no_path() {
 
 /// A path that merely reads as inside a Watched Path is not inside it: the
 /// boundary is consulted on the resolved path, here as everywhere else.
+///
+/// Made where a link can be made without asking anybody's permission, which is
+/// both Unixes and not Windows. What the endpoint does with the answer is the
+/// same everywhere — it hands the boundary a path and draws what comes back —
+/// so what is lost there is the making of the link rather than any of the
+/// refusal being tested, which `watched`'s own case says the same way.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_symlink_out_of_a_watched_root_is_refused() {
     let root = tempfile::tempdir().unwrap();

@@ -1,0 +1,130 @@
+[package]
+name = "verkstead-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "verkstead_desktop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "verkstead-desktop"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+# The server, run in-process out of a second binary rather than a second
+# artifact of the first one (ADR-0012). The headless `verkstead` links the same
+# library and carries none of what is below.
+verkstead-server = { path = "../server" }
+# What the viewer is handed to: whatever this desktop opens a URL with.
+open = "5"
+# The tray takes its icon as pixels, so the PNG in `assets/icons/` is decoded on
+# the way in — see `tray::rgba`. Already in the build under `tray-icon`, which
+# writes those pixels back out as a PNG for the panel to load.
+png = "0.18"
+# The runtime the server is given, built here for the reason `crates/cli` builds
+# its own: where it runs is the starting binary's call, and this one keeps it off
+# the main thread — see `Desktop::run`.
+tokio.workspace = true
+# Where the server's `tracing` goes is the starting binary's call as well.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# The icon in the tray and the menu on it (ADR-0012), and `muda` under it.
+# Default features off because both of them are Linux's — see the Linux table
+# below, which is where the backend is turned on.
+tray-icon = { version = "0.24", default-features = false }
+
+# The Linux half of the toolkit: GTK, which is what draws the icon, the menu on
+# it and the two dialogs — see `toolkit` and `dialog`.
+[target.'cfg(target_os = "linux")'.dependencies]
+# The loop the tray lives on here, which wants the main thread — see
+# `Desktop::run`. The same 0.18 `muda` draws its menu with, so the build carries
+# one GTK crate rather than two, and the same one the two dialogs are drawn with
+# — see `dialog`, which has to draw on the loop's own thread and so cannot hand
+# the job to a toolkit somebody else started.
+gtk = "0.18"
+# The `gtk` feature is the Linux backend — an appindicator, drawn with the
+# toolkit `dialog` is already drawing with. The other default feature, `libxdo`,
+# stays off: `muda` wants it only for the accelerators on its predefined items,
+# this menu has neither, and carrying it would put a system library into CI, the
+# dev shell and the AppImage for nothing.
+tray-icon = { version = "0.24", default-features = false, features = ["gtk"] }
+
+# And the macOS half: AppKit, reached through the `objc2` bindings `tray-icon`
+# already builds on this platform, so the two halves of the app speak to one set
+# of them rather than two.
+[target.'cfg(target_os = "macos")'.dependencies]
+# The main queue, which is how a thread that is not the main one asks the loop
+# to end — see `toolkit::stop_from_elsewhere`, and `gtk::glib::idle_add_once`
+# beside it for what it is the answer to.
+dispatch2 = { version = "0.3", default-features = false, features = ["alloc"] }
+# `MainThreadMarker`: what AppKit is spoken to with, and what says at compile
+# time that it was spoken to from the right thread.
+objc2 = "0.6"
+# `NSApplication` — the loop, and the app told it is a menu-bar app — and
+# `NSAlert`, which is what the two dialogs are here. One header's worth of
+# feature per thing named, which is how this crate is cut up; `NSGraphicsContext`
+# is not drawn with, it is the argument the event `toolkit` ends the loop with
+# takes as nil.
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+  "std",
+  "NSAlert",
+  "NSApplication",
+  "NSEvent",
+  "NSGraphicsContext",
+  "NSResponder",
+  "NSRunningApplication",
+] }
+# `NSString`, which is what a dialog's words are handed over as, and `NSPoint`,
+# which that same event has to be given somewhere to have happened.
+objc2-foundation = { version = "0.3", default-features = false, features = [
+  "std",
+  "NSGeometry",
+  "NSString",
+  "objc2-core-foundation",
+] }
+
+# And the Windows half: Win32 itself, spoken to through the same `windows-sys`
+# `tray-icon` already builds on here — so the app and the tray under it speak to
+# one binding of it rather than two.
+[target.'cfg(windows)'.dependencies]
+# The message loop the tray lives on and the two ways it ends
+# (`Win32_UI_WindowsAndMessaging` and the thread id in `Win32_System_Threading`
+# — see `toolkit`), `MessageBoxW`, which is what the two dialogs are here — see
+# `dialog` — and the window station this process is on, which is how a Verkstead
+# started where there is no desktop finds that out before it draws — see
+# `screen`. One feature per header, which is how the macOS table above is cut up.
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_StationsAndDesktops",
+  "Win32_System_Threading",
+  "Win32_UI_WindowsAndMessaging",
+] }
+# The Run key, which is what Launch on Startup is here — see `startup::run_key`.
+# Microsoft's own wrapper over the registry calls rather than the calls: what
+# this crate does with it is open a key, read a value, write one and take one
+# away, and each of those is a call with a length to ask for, a buffer to size
+# and an error code to read that the wrapper has already handled.
+windows-registry = "0.6"
+
+[build-dependencies]
+# The icon and the version information the exe carries — see `build.rs`: it
+# writes the resource script and runs the resource compiler, which on Windows is
+# the SDK's own `rc.exe`. Not under the `cfg(windows)` table above, because a
+# build script is the *host's* program and that table is read for the host: a
+# Linux machine checking this crate for Windows would find the dependency it
+# needs missing. The build script asks what it is building for instead, and does
+# nothing where the answer is not Windows.
+#
+# Default features off: the one of them reads `[package.metadata.winresource]`
+# out of a Cargo.toml, and everything here is said in `build.rs` — carrying a
+# TOML parser to read what nothing writes would be a parser for nothing.
+winresource = { version = "0.1", default-features = false }
+
+[dev-dependencies]
+# The tests run the real binary, so what they check is what an icon starts.
+tempfile = "3"
+ureq = "3"

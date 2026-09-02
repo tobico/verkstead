@@ -41,6 +41,14 @@ const PATHS = {
     "verkstead=/var/cache/verkstead-cargo",
   ],
 };
+
+/// And the Cleanup as a save puts it back: the switches where the read left
+/// them, and each duration as the string a form holds. Carried by every
+/// section for the reason the paths are — see [`heldCleanup`].
+const CLEANUP = {
+  trim: { enabled: true, days: "5" },
+  delete: { enabled: true, days: "90" },
+};
 const UNSET = unset as SettingsView;
 
 /// The same settings with an sccache the server did find, which no fixture
@@ -293,6 +301,7 @@ describe("changing the build cache", () => {
         },
         // Untouched by this form, and sent back as it stands: one request
         // writes the whole of `config.yaml`.
+        cleanup: CLEANUP,
         conflict_resolution: TOLD.conflict_resolution,
         share_on_done: TOLD.share_on_done,
         ...PATHS,
@@ -337,6 +346,7 @@ describe("changing the build cache", () => {
         rust_build_cache: { enabled: true, size: "80G" },
         // Untouched by this form, and sent back as it stands: one request
         // writes the whole of `config.yaml`.
+        cleanup: CLEANUP,
         conflict_resolution: TOLD.conflict_resolution,
         share_on_done: TOLD.share_on_done,
         ...PATHS,

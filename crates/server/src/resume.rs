@@ -105,6 +105,16 @@ pub(crate) async fn resume(
         return Ok(Resumed::NotDriven);
     }
 
+    // Nor on a build that runs no sessions, whatever state it is in: what Resume
+    // works out is which session should be running, and there are none to run
+    // here. Named rather than left to the launch, which is what makes it a
+    // refusal the human reads instead of a Conversation that quietly stays where
+    // it was — see [`crate::sessions::run_on`], and [`why`], which is what the
+    // restart's own take-up writes down.
+    if state.sessions.here().absent() {
+        return Ok(Resumed::NotOnWindowsYet);
+    }
+
     // Whether the run has already stopped, which is the record's answer to the
     // same question the register answers — and the one that wins where they
     // disagree. A stop is Verkstead saying *nothing is driving this any more*,
@@ -604,6 +614,13 @@ fn why(refusal: Resumed) -> Option<&'static str> {
     Some(match refusal {
         Resumed::Resumed => return None,
         Resumed::NoSuchConversation | Resumed::NotDriven | Resumed::AlreadyDriven => return None,
+        // A clause rather than a sentence of its own, as every one of these is:
+        // what it is read after is "nothing could be started for it as the
+        // server came back up", and a colon of its own would be the second in
+        // one line.
+        Resumed::NotOnWindowsYet => {
+            "Windows has no pseudo-terminal for a session's agent to run on yet"
+        }
         Resumed::NowhereToWork => "there is no Worktree on the record to work in",
         Resumed::WorktreeRefused => {
             "its Worktree is not one any more, and git would not make it again from the branch"

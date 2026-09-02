@@ -89,6 +89,7 @@
       }
     }
   },
+  "sessions": "Run",
   "shared": null,
   "state": "Grilling",
   "stop_asked": false,
@@ -189,6 +190,7 @@
       }
     }
   ],
+  "trimmed": false,
   "waiting": false,
   "waiting_on_checks": false,
   "working": false,

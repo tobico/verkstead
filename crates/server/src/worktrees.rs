@@ -15,7 +15,6 @@
 //! and leaves the branch: a branch is a name and a commit, and it may hold work
 //! worth reading; a worktree is a directory the human never asked to keep.
 
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -319,18 +318,19 @@ fn fetching(repo: &Path, limit: Option<Duration>) -> Fetched {
         return answered(command.output());
     };
 
-    // A group of its own, so that the kill below reaches the transport helper
-    // git started as well as git itself.
-    command.process_group(0);
+    // A group of its own where the platform has them, so that the kill below
+    // reaches the transport helper git started as well as git itself — see
+    // [`stop`], which is where the whole of that difference is.
+    in_its_own_group(&mut command);
 
     let child = match command.spawn() {
         Ok(child) => child,
         Err(error) => return Fetched::Failed(error.to_string()),
     };
 
-    // Kept before the child is handed over, because the group is named by it and
-    // the thread below is where the child goes.
-    let group = child.id();
+    // Kept before the child is handed over, because what is killed is named by
+    // it and the thread below is where the child goes.
+    let fetch = child.id();
 
     // Waited on by a thread rather than by polling, so that the pipes are
     // drained while git is still writing to them: a fetch blocked on a full
@@ -343,7 +343,7 @@ fn fetching(repo: &Path, limit: Option<Duration>) -> Fetched {
     match waited.recv_timeout(limit) {
         Ok(output) => answered(output),
         Err(_) => {
-            stop(group);
+            stop(fetch);
 
             // The thread above is left to reap it, which it does as soon as the
             // group is gone.
@@ -373,14 +373,29 @@ fn answered(output: std::io::Result<std::process::Output>) -> Fetched {
     })
 }
 
+/// Put the fetch in a process group of its own, on the platforms that have
+/// them, so that ending it is ending everything it started — see [`stop`].
+#[cfg(unix)]
+fn in_its_own_group(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+
+    command.process_group(0);
+}
+
+/// And where there are none — see [`stop`]'s Windows arm, which reaches what it
+/// can reach without one.
+#[cfg(not(unix))]
+fn in_its_own_group(_command: &mut Command) {}
+
 /// Kill a fetch that has run past its deadline, and everything it started.
 ///
 /// The group rather than the process: `git fetch` does its talking through a
 /// transport helper it spawns, and that helper is where a stalled network
 /// leaves things waiting. Signalling git alone would end the wait here and
 /// leave the helper behind with nobody to reap it.
-fn stop(group: u32) {
-    let Ok(group) = i32::try_from(group) else {
+#[cfg(unix)]
+fn stop(fetch: u32) {
+    let Ok(group) = i32::try_from(fetch) else {
         return;
     };
 
@@ -393,6 +408,44 @@ fn stop(group: u32) {
             error = ?error,
             "a fetch that ran past its deadline could not be killed"
         );
+    }
+}
+
+/// The same on Windows, which has no process group of that kind to put a fetch
+/// in — so the tree is what stands in for one.
+///
+/// **A fetch that ran past its deadline is killed here too.** What that reaches
+/// is narrower than a group: `taskkill /T` walks the parent-child relationships
+/// as they stand at the moment it looks, so it ends git and the transport
+/// helper git started, and would miss a grandchild that had already been
+/// reparented. Narrower is the whole of the difference — the process holding
+/// the stalled connection is git or its helper, which is what the group was for
+/// on the other platform.
+///
+/// `taskkill` rather than a kill of the one process, which is all the standard
+/// library offers by the time the child has been handed to the thread waiting
+/// on it: a helper left behind holds the socket open, and the point of the
+/// deadline is that nothing is left holding one.
+#[cfg(windows)]
+fn stop(fetch: u32) {
+    let killed = Command::new("taskkill")
+        .args(["/F", "/T", "/PID"])
+        .arg(fetch.to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+
+    match killed {
+        Ok(status) if status.success() => {}
+        Ok(status) => tracing::warn!(
+            %status,
+            "a fetch that ran past its deadline could not be killed"
+        ),
+        Err(error) => tracing::warn!(
+            error = ?error,
+            "a fetch that ran past its deadline could not be killed"
+        ),
     }
 }
 
@@ -1644,6 +1697,10 @@ mod tests {
     /// A link is deleted as a link and never followed. What is on the other end
     /// is by definition outside the one directory this may delete inside, so
     /// walking it would be the whole of the mistake this is written against.
+    ///
+    /// On the platforms where a test may make a link at all — Windows wants a
+    /// privilege for one, and the sweep's own reasoning is the same there.
+    #[cfg(unix)]
     #[test]
     fn a_link_under_the_worktrees_directory_goes_as_a_link() {
         let (dir, repo) = repository();

@@ -117,9 +117,10 @@ import adoption from "../src/workbench/Adoption.module.css";
 // The detail panes, each a module of its own: the brief and what the
 // conversation was configured with, a commit, a document read whole, one
 // session's record and the terminal it was printed on, and a pull request.
-// What the summary under a frozen Brief says of a branch nobody has named.
-import { UNNAMED } from "../src/workbench/Brief";
 import briefPane from "../src/workbench/Brief.module.css";
+// The composer, which is the details pane a conversation is drafted in: the
+// brief as a field, the setup under it and the press that starts the work.
+import composer from "../src/workbench/Composer.module.css";
 import commitPane from "../src/workbench/Commit.module.css";
 import commitPaneCss from "../src/workbench/Commit.module.css?raw";
 // The Diff section the commit pane draws, which is the Set page's own component
@@ -193,12 +194,16 @@ import timelineCss from "../src/workbench/Timeline.module.css?raw";
 // jsdom lays nothing out for, and the pane names everything else is found by.
 import shell from "../src/Panes.module.css";
 import shellCss from "../src/Panes.module.css?raw";
+// And the one sentence a Verkstead with no session to start says, wherever it
+// says it — the fifth thing every press that wanted a session comes back with.
+import { NO_SESSIONS } from "../src/workbench/sessions";
 import { ABBREVIATED, CLAMPED_LINES, SWIPE } from "../src/workbench/Timeline";
 import {
   COMPANION_BRANCH_REFUSAL,
   COMPANION_MODE_REFUSAL,
   COMPANION_REFUSAL,
   COMPANION_REMOVAL_REFUSAL,
+  REPO_SWITCH_REFUSAL,
 } from "../src/workbench/Setup";
 import { STEER_REFUSAL } from "../src/workbench/Steer";
 import {
@@ -354,6 +359,33 @@ function unopened(conversation: { id: number }): string {
   return `/conversations/${conversation.id}/events/0`;
 }
 
+/// The composer, waited for where the Conversation opens on it.
+///
+/// Every fixture the tests below open is a Draft whose record is the Brief and
+/// nothing else, so there is no Timeline drawn to press a card on: the landing
+/// opens the composer and a narrow window is already standing at it. Which
+/// level is showing matters to a test that asks about roles rather than
+/// classes — the frame draws one pane at a time and the rest are
+/// `display: none`, and an accessible name is only found in the one being
+/// shown. Pressing a Brief card to open this pane is a record with more on it
+/// than the Brief, and is asked where that is the question.
+async function openComposer(container: ParentNode): Promise<HTMLElement> {
+  return drawn(container, `.${shell.detailsPane} .${composer.composer}`);
+}
+
+/// And on into the Repo panel, which is where the branch, the base and the
+/// companion repos are settled: the first option of the composer's row, and one
+/// flat card rather than a menu of levels.
+async function openRepo(container: ParentNode): Promise<HTMLElement> {
+  await openComposer(container);
+
+  fireEvent.click(
+    await drawn<HTMLButtonElement>(container, `.${setup.repoOption} > button`),
+  );
+
+  return drawn(container, `.${setup.repoOption} > [role="group"]`);
+}
+
 /// Open the conversation's action menu: press the trigger, and wait for what it
 /// drops.
 async function openActions(container: ParentNode): Promise<HTMLElement> {
@@ -361,8 +393,9 @@ async function openActions(container: ParentNode): Promise<HTMLElement> {
   return drawn(container, `.${actions.conversationActions} > .${dropdown.drop}`);
 }
 
-/// The status button's first line, in its two parts: the status word and the
-/// state understated beside it.
+/// The status button's first line, in its parts: the status word, the state
+/// understated beside it, and the word for what a Cleanup took where one has
+/// been through the record.
 ///
 /// Where there is no status word to say — a Draft, a Done or a Closed
 /// conversation — the state takes the bold and stands alone, so `word` is the
@@ -371,6 +404,7 @@ async function openActions(container: ParentNode): Promise<HTMLElement> {
 async function standing(container: ParentNode): Promise<{
   word: string | null;
   state: string | null;
+  trimmed: string | null;
   attention: boolean;
 }> {
   const line = await drawn(
@@ -381,6 +415,8 @@ async function standing(container: ParentNode): Promise<{
   return {
     word: line.querySelector(`.${statusButton.title}`)?.textContent ?? null,
     state: line.querySelector(`.${statusButton.state}`)?.textContent ?? null,
+    trimmed:
+      line.querySelector(`.${statusButton.trimmed}`)?.textContent ?? null,
     attention: line.classList.contains(statusButton.attention!),
   };
 }
@@ -397,22 +433,6 @@ async function saidRunning(container: ParentNode): Promise<string | null> {
 /// itself.
 async function gear(container: ParentNode): Promise<HTMLButtonElement> {
   return drawn<HTMLButtonElement>(container, 'button[aria-label="Settings"]');
-}
-
-/// Drop the new-conversation menu, which is where both ways of starting one
-/// live: press the button, and wait for what it drops.
-async function openNewConversation(
-  container: ParentNode,
-): Promise<HTMLElement> {
-  fireEvent.click(await drawn(container, `.${sidebar.newConversation} > .${dropdown.trigger}`));
-  return drawn(container, `.${sidebar.newConversation} > .${dropdown.drop}`);
-}
-
-/// The repos in that menu, in the order they are offered — waited for, because
-/// the menu opens whether or not the list has arrived.
-async function repoRows(container: ParentNode): Promise<HTMLButtonElement[]> {
-  await drawn(container, `.${dropdown.drop} > [role="menuitem"]`);
-  return [...container.querySelectorAll<HTMLButtonElement>(`.${dropdown.drop} > [role="menuitem"]`)];
 }
 
 /// The body the page put on the wire when it wrote to `path`.
@@ -734,24 +754,6 @@ describe("the workbench", () => {
     );
   });
 
-  /// The menu still opens with nothing to start a conversation in — and what is
-  /// in it is the page that fixes that, because a menu that opened on nothing
-  /// would say only that the button was broken.
-  it("says where to go when there is no repo to start one against", async () => {
-    serving(
-      whenever("/api/ui/conversations", json([])),
-      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
-      whenever("/api/ui/repos", json([])),
-    );
-    const { container } = mount();
-    await openNewConversation(container);
-
-    await waitFor(() => screen.getByText(/No repos are registered yet/));
-    expect(container.querySelector(`.${dropdown.drop} > [role="menuitem"]`)).toBeNull();
-    expect(screen.getByText("register one").getAttribute("href")).toBe(
-      "/settings",
-    );
-  });
 });
 
 /// The sidebar drawn over a sidebar of this test's own making, so that a row can
@@ -1815,7 +1817,11 @@ describe("what a right-click on a card offers", () => {
     rightClick(await grillingCard(container));
     await opened(container);
 
-    expect(history.get()).toBe(`/conversations/${OPEN.id}`);
+    // The Draft it was opened at, still standing on its composer: the
+    // right-click moved neither the selection nor the pane.
+    expect(history.get()).toBe(
+      `/conversations/${OPEN.id}/events/${BRIEF.id}`,
+    );
     expect(
       askedFor(fetching, "/api/ui/conversations/order"),
       "nothing was dragged, so there is nothing to save",
@@ -1894,271 +1900,6 @@ describe("what a right-click on a card offers", () => {
   });
 });
 
-describe("the new conversation menu", () => {
-  /// The whole of starting one: a press on the button, a press on a repo, and
-  /// the conversation that came back is open.
-  it("sends the repo that was pressed, and opens what came back", async () => {
-    const fetching = theWorkbench(json({ Started: { id: OPEN.id } }));
-    const { container, history } = mount();
-    await openNewConversation(container);
-
-    fireEvent.click((await repoRows(container))[1]!);
-
-    // Straight into it: what the human does next is write the brief.
-    await waitFor(() => expect(history.get()).toBe(`/conversations/${OPEN.id}`));
-    expect(sent(fetching, "/api/ui/conversations")).toEqual({
-      repo_id: REPOS[1]!.id,
-    });
-  });
-
-  /// Every registered repo is a row, in the order the server sent them, and
-  /// nothing is picked in advance: the row pressed *is* the choice.
-  it("offers every registered repo, in the server's order", async () => {
-    theWorkbench();
-    const { container } = mount();
-    await openNewConversation(container);
-
-    expect((await repoRows(container)).map((row) => row.textContent)).toEqual(
-      REPOS.map((repo) => repo.name),
-    );
-  });
-
-  /// Nothing of it is on the page until it is asked for, which is the point of
-  /// the menu: the sidebar is the conversations, and the way to add to them is
-  /// one button.
-  it("keeps the repos out of the sidebar until the button is pressed", async () => {
-    theWorkbench();
-    const { container } = mount();
-    await drawn(container, `.${sidebar.newConversation} > .${dropdown.trigger}`);
-
-    expect(container.querySelector(`.${sidebar.newConversation} > .${dropdown.drop}`)).toBeNull();
-  });
-
-  it("closes once a repo has been chosen", async () => {
-    theWorkbench(json({ Started: { id: OPEN.id } }));
-    const { container } = mount();
-    await openNewConversation(container);
-
-    fireEvent.click((await repoRows(container))[0]!);
-
-    await waitFor(() =>
-      expect(container.querySelector(`.${sidebar.newConversation} > .${dropdown.drop}`)).toBeNull(),
-    );
-  });
-
-  /// The way out that needs no aim, and the focus back on the button it came
-  /// from rather than at the top of the page.
-  it("closes on escape, and gives the button back the focus", async () => {
-    theWorkbench();
-    const { container } = mount();
-    await openNewConversation(container);
-
-    fireEvent.keyDown(document, { key: "Escape" });
-
-    await waitFor(() =>
-      expect(container.querySelector(`.${sidebar.newConversation} > .${dropdown.drop}`)).toBeNull(),
-    );
-    expect(document.activeElement).toBe(
-      container.querySelector(`.${sidebar.newConversation} > .${dropdown.trigger}`),
-    );
-  });
-
-  /// A press away from it lands on the backdrop rather than on the page, so the
-  /// press that takes the menu back cannot also open a conversation.
-  it("closes on a press outside it", async () => {
-    theWorkbench();
-    const { container } = mount();
-    await openNewConversation(container);
-
-    fireEvent.click(await drawn(container, `.${sidebar.newConversation} > .${dropdown.backdrop}`));
-
-    await waitFor(() =>
-      expect(container.querySelector(`.${sidebar.newConversation} > .${dropdown.drop}`)).toBeNull(),
-    );
-  });
-
-  /// Opened from the keyboard, the first row is where the human is going: a
-  /// menu whose first Tab landed past it is one they would have to walk
-  /// backwards out of.
-  it("puts the focus on the first row when it opens", async () => {
-    theWorkbench();
-    const { container } = mount();
-    await openNewConversation(container);
-
-    const rows = await repoRows(container);
-    expect(document.activeElement).toBe(rows[0]);
-  });
-
-  /// A server that could not answer at all is the one thing here that is an
-  /// error rather than an outcome — and the menu stays open to say it in,
-  /// because a press that failed left nothing else on the screen to carry it.
-  it("stays open to say a start failed", async () => {
-    theWorkbench(
-      whenever(
-        "/api/ui/conversations",
-        () => Promise.reject(new Error("down")),
-        "POST",
-      ),
-    );
-    const { container } = mount();
-    await openNewConversation(container);
-
-    fireEvent.click((await repoRows(container))[0]!);
-
-    const said = await drawn(container, `.${sidebar.newConversation} > .${dropdown.drop} .${notices.error}`);
-    expect(said.textContent).toContain("down");
-  });
-});
-
-describe("the adopt-a-roadmap group", () => {
-  /// Under the repos and behind a heading of its own, because pressing one
-  /// starts a different kind of conversation.
-  it("names each abandoned roadmap, its repo and the stage it is up to", async () => {
-    theWorkbench(whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)));
-    const { container } = mount();
-    await openNewConversation(container);
-
-    const group = await drawn(container, `.${sidebar.menuGroup}`);
-    expect(group.querySelector(`.${sidebar.menuHeading}`)!.textContent).toBe(
-      "Adopt a roadmap",
-    );
-
-    const rows = [
-      ...group.querySelectorAll<HTMLButtonElement>(`.${sidebar.adoptRoadmap}`),
-    ];
-    const flat = ABANDONED.flatMap((repo) =>
-      repo.roadmaps.map((roadmap) => ({ repo: repo.repo, roadmap })),
-    );
-    expect(rows.length).toBe(flat.length);
-
-    for (const [n, held] of flat.entries()) {
-      const said = rows[n]!.textContent!;
-      expect(said).toContain(held.roadmap.name);
-      expect(said).toContain(held.repo);
-      expect(said).toContain(held.roadmap.stage);
-      expect(said).toContain(held.roadmap.stage_title);
-    }
-  });
-
-  /// The roadmaps are in the menu and nowhere else: nothing is waiting on the
-  /// human here, so nothing of it is in view until the menu is opened.
-  it("leaves no notice in the sidebar", async () => {
-    theWorkbench(whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)));
-    const { container } = mount();
-    await waitFor(() => screen.getByText(DRAFTING.branch));
-
-    expect(container.querySelector(`.${sidebar.adoptRoadmap}`)).toBeNull();
-  });
-
-  /// Beneath the repos, which is the order the two are decided in: starting
-  /// work is the ordinary thing, and adopting is what is also there.
-  it("is drawn beneath the repos", async () => {
-    theWorkbench(whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)));
-    const { container } = mount();
-    await openNewConversation(container);
-
-    const group = await drawn(container, `.${sidebar.menuGroup}`);
-    expect((await repoRows(container))[0]!.compareDocumentPosition(group)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
-  });
-
-  /// Nothing to adopt is nothing to say. A Repo whose roadmaps are all
-  /// complete, mid-flight or broken contributes nothing at all, and a menu with
-  /// none draws no heading over an empty group.
-  it("says nothing when there is nothing to adopt", async () => {
-    theWorkbench();
-    const { container } = mount();
-    await openNewConversation(container);
-
-    expect(container.querySelector(`.${sidebar.menuGroup}`)).toBeNull();
-  });
-
-  /// Read again with everything else the page is showing, because the server
-  /// reads it off the repositories every time it is asked: a roadmap somebody
-  /// has since picked up stops being on the list, and the row goes with it.
-  it("is read again when the page looks again", async () => {
-    const fetching = theWorkbench(
-      whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)),
-    );
-    const { container } = mount();
-    await openNewConversation(container);
-    await drawn(container, `.${sidebar.menuGroup}`);
-
-    const before = askedFor(fetching, "/api/ui/abandoned-roadmaps");
-    readAgain();
-
-    await waitFor(() =>
-      expect(askedFor(fetching, "/api/ui/abandoned-roadmaps")).toBeGreaterThan(
-        before,
-      ),
-    );
-  });
-
-  /// Pressing a roadmap starts a conversation to adopt it with, and goes
-  /// straight into it — which is where both pairings and the base commit are
-  /// fixed, and where adopting is pressed.
-  ///
-  /// What goes out is the repo and the roadmap and nothing else: which stage is
-  /// next is the roadmap's own answer at the commit the conversation ends up
-  /// branching from, and the page reads it back there.
-  it("starts a conversation to adopt the roadmap that was pressed", async () => {
-    const fetching = theWorkbench(
-      whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)),
-      whenever("/api/ui/adoptions", json({ Started: { id: OPEN.id } }), "POST"),
-    );
-    const { container, history } = mount();
-    await openNewConversation(container);
-
-    const rows = await drawn(container, `.${sidebar.menuGroup}`);
-    fireEvent.click(
-      rows.querySelectorAll<HTMLButtonElement>(`.${sidebar.adoptRoadmap}`)[1]!,
-    );
-
-    await waitFor(() =>
-      expect(sent(fetching, "/api/ui/adoptions")).toEqual({
-        repo_id: ABANDONED[0]!.repo_id,
-        roadmap: ABANDONED[0]!.roadmaps[1]!.name,
-        // Off the default branch, so there is no base to fix: a conversation
-        // with none already reads the roadmap there.
-        base: null,
-      }),
-    );
-    await waitFor(() => expect(history.get()).toBe(`/conversations/${OPEN.id}`));
-  });
-
-  /// A roadmap staged on a branch that has not merged is only on that branch,
-  /// so the conversation has to start fixed to it — a conversation reading the
-  /// default branch would find nothing of the roadmap that was just pressed.
-  /// The row says where it was found for the same reason: which branch it is
-  /// decides what the stage gets built on.
-  it("starts a conversation fixed to the branch an unmerged roadmap was found on", async () => {
-    const fetching = theWorkbench(
-      whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)),
-      whenever("/api/ui/adoptions", json({ Started: { id: OPEN.id } }), "POST"),
-    );
-    const { container } = mount();
-    await openNewConversation(container);
-
-    const rows = await drawn(container, `.${sidebar.menuGroup}`);
-    const found = rows.querySelectorAll<HTMLButtonElement>(
-      `.${sidebar.adoptRoadmap}`,
-    )[2]!;
-
-    expect(found.textContent).toContain("tobi/steer");
-
-    fireEvent.click(found);
-
-    await waitFor(() =>
-      expect(sent(fetching, "/api/ui/adoptions")).toEqual({
-        repo_id: ABANDONED[0]!.repo_id,
-        roadmap: ABANDONED[0]!.roadmaps[2]!.name,
-        base: ABANDONED[0]!.roadmaps[2]!.base,
-      }),
-    );
-  });
-});
-
 /// The page a conversation started from that notice opens on: the roadmap and
 /// its stage named, the two profiles and the base commit to fix, and one press.
 describe("the adoption page", () => {
@@ -2198,10 +1939,15 @@ describe("the adoption page", () => {
     theAdoption();
     const { container } = mount(`/conversations/${ADOPTING.id}`);
 
+    await openComposer(container);
     await drawn(container, `.${adoption.adoption}`);
 
     await waitFor(() => screen.getByLabelText("Grilling"));
     expect(screen.getByLabelText("Implementation")).toBeTruthy();
+
+    // And the base inside the Repo panel, which is where every fact about the
+    // repository is settled.
+    await openRepo(container);
     expect(screen.getByLabelText("Base branch")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Adopt" })).toBeTruthy();
   });
@@ -2217,7 +1963,7 @@ describe("the adoption page", () => {
     await drawn(container, `.${adoption.adoption}`);
 
     expect(screen.queryByLabelText("Brief")).toBeNull();
-    expect(container.querySelector(`.${timeline.startGrilling}`)).toBeNull();
+    expect(container.querySelector(`.${composer.startGrilling}`)).toBeNull();
     expect(screen.queryByLabelText("Branch")).toBeNull();
   });
 
@@ -2260,6 +2006,7 @@ describe("the adoption page", () => {
       ),
     );
 
+    await openRepo(container);
     fireEvent.change(await waitFor(() => screen.getByLabelText("Base branch")), {
       target: { value: elsewhere.base_commit },
     });
@@ -2396,15 +2143,14 @@ describe("a conversation's timeline", () => {
   });
 
   it("is a list of events rather than a brief with a page around it", async () => {
-    theWorkbench();
+    theRecordedWith();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+    await drawn(container, `.${timeline.timeline}`);
 
-    // One kind of Event so far, drawn as one entry of the list the stages after
-    // this one add to.
+    // An entry per Event, drawn as the list the stages after this one add to.
     expect(container.querySelectorAll(`.${timeline.timeline} > .${timeline.timelineEvent}`)).toHaveLength(
-      OPEN.timeline.length,
+      RECORDED.timeline.length,
     );
   });
 
@@ -2413,7 +2159,7 @@ describe("a conversation's timeline", () => {
   /// card says them, so the card and the header of the pane it opens read as
   /// the one name said twice.
   it("says the repo understated beside the branch it is titled by", async () => {
-    theWorkbench();
+    theRecordedWith();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const head = await drawn(container, `.${shell.middlePane} .${paneHead.head}`);
@@ -2439,7 +2185,7 @@ describe("a conversation's timeline", () => {
   /// And on a Draft above all, where the title is the word *Draft* and the Repo
   /// is the whole of what tells this header from the next draft's.
   it("says it on a draft too, where the title is the word Draft", async () => {
-    theWorkbenchWith({ branch_named: false, state: "Draft" });
+    theRecordedWith({ branch_named: false, state: "Draft" });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const head = await drawn(container, `.${shell.middlePane} .${paneHead.head}`);
@@ -2810,8 +2556,193 @@ describe("the escape hatch on a conversation that will not load", () => {
   });
 });
 
+/// The composer: the details pane a Conversation is drafted in, which is where
+/// the brief is written, the setup settled and the work started from.
+///
+/// A pane like every other, reached by pressing the Brief card and standing at a
+/// path of its own — and the only home of the start button, which the foot of
+/// the timeline no longer draws.
+describe("the composer pane", () => {
+  it("opens at a path of its own, on a cold load of it", async () => {
+    theWorkbench();
+    const { container } = mount(
+      `/conversations/${OPEN.id}/events/${BRIEF.id}`,
+    );
+
+    const pane = await drawn(
+      container,
+      `.${shell.detailsPane} .${composer.composer}`,
+    );
+
+    // The whole of what setting a piece of work up is: the brief as a field,
+    // everything that has to be settled, and the press.
+    expect(
+      (pane.querySelector("textarea") as HTMLTextAreaElement).value,
+    ).toBe(BRIEF.markdown);
+    await drawn(pane, `.${composer.box} .${setup.options}`);
+    expect(pane.querySelector(`.${composer.startGrilling}`)).toBeTruthy();
+  });
+
+  /// The button was under the record, at the end of everything that had
+  /// happened. It is under the setup now, and the timeline draws nothing of it:
+  /// the pane is its only home.
+  ///
+  /// Asked over a record with something else on it, so that there is a timeline
+  /// to have taken the button off — a Conversation whose record is the Brief
+  /// alone draws no timeline pane at all.
+  it("takes the start button off the foot of the timeline", async () => {
+    theRecordedWith();
+    const { container } = mount(COMPOSING);
+
+    const start = await drawn(
+      container,
+      `.${shell.detailsPane} .${composer.startGrilling}`,
+    );
+
+    expect(
+      container
+        .querySelector(`.${shell.middlePane}`)!
+        .querySelector(`.${composer.startGrilling}`),
+    ).toBeNull();
+
+    // Under the box everything there is to settle stands in, which is what it
+    // is waiting on.
+    expect(
+      container
+        .querySelector(`.${composer.box}`)!
+        .compareDocumentPosition(start) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  /// The look: one box holding the brief and, along the inside of its bottom
+  /// edge, the whole of the setup as a row of dropdowns — each a dimmed label
+  /// over its value, the repo first and then the three roles.
+  it("draws every option as a label over its value, inside the box", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const row = await drawn(container, `.${composer.box} > .${setup.options}`);
+
+    await waitFor(() =>
+      expect(
+        [...row.querySelectorAll(`.${setup.optionLabel}`)].map(
+          (label) => label.textContent,
+        ),
+      ).toEqual(["Repo", "Grilling", "Implementation", "Review"]),
+    );
+
+    // Over the value rather than beside it: the repo's label is the first line
+    // of its own trigger, and each role's names the listbox under it.
+    const repo = row.querySelector(`.${setup.repoOption} > button`)!;
+    expect(
+      repo
+        .querySelector(`.${setup.optionLabel}`)!
+        .compareDocumentPosition(repo.querySelector(`.${setup.optionValue}`)!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    for (const role of ["grilling", "implementation", "review"]) {
+      const label = row.querySelector<HTMLLabelElement>(
+        `label.${setup.optionLabel}[for="${role}-pairing"]`,
+      )!;
+      expect(
+        label.compareDocumentPosition(
+          document.getElementById(`${role}-pairing`)!,
+        ) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+  });
+
+  /// And the one control that is not part of the box: what happens to what is
+  /// in it rather than something else to fill in.
+  it("keeps the start button outside the box", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const pane = await drawn(container, `.${composer.composer}`);
+    const start = await drawn(pane, `.${composer.startGrilling}`);
+
+    expect(pane.querySelector(`.${composer.box}`)!.contains(start)).toBe(false);
+  });
+
+  /// An adopting draft's brief is the stage's own and comes down frozen, so
+  /// there is nothing here to type into: the box is the rendering, and the
+  /// adoption stands where the start button would.
+  it("locks the box on an adopting draft, and adopts where it would start", async () => {
+    const written: ConversationView = {
+      ...ADOPTING,
+      timeline: ADOPTING.timeline.map((event) =>
+        "Brief" in event
+          ? {
+              Brief: {
+                ...event.Brief,
+                markdown: "# The stage\n",
+                html: "<h1>The stage</h1>",
+              },
+            }
+          : event,
+      ),
+    };
+    theWorkbench(
+      whenever(`/api/ui/conversations/${ADOPTING.id}`, json(written)),
+    );
+    const { container } = mount(`/conversations/${ADOPTING.id}`);
+
+    const pane = await drawn(
+      container,
+      `.${shell.detailsPane} .${composer.composer}`,
+    );
+
+    expect(pane.querySelector(`.${composer.written}`)!.innerHTML).toBe(
+      "<h1>The stage</h1>",
+    );
+    expect(pane.querySelector("textarea")).toBeNull();
+    expect(pane.querySelector(`.${adoption.adoption}`)).toBeTruthy();
+    expect(pane.querySelector(`.${composer.startGrilling}`)).toBeNull();
+  });
+
+  /// And a round whose branch was cut long ago draws what is still the human's
+  /// and nothing else: the branch and the base froze when the first round's
+  /// work started, and the pairings are re-settled every time work starts.
+  it("omits what froze when the branch was cut, and keeps the pairings", async () => {
+    theWorkbenchWith({
+      worktree: {
+        path: "/var/lib/verkstead/worktrees/verkstead-open",
+        missing: false,
+      },
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await drawn(container, `.${shell.detailsPane} .${composer.composer}`);
+    await waitFor(() => screen.getByLabelText("Grilling"));
+
+    // The Repo option stays, because which repo the work is in is still a fact
+    // worth reading — and its picker says for itself that it is settled. Every
+    // control behind it is one the server would refuse, and what a control
+    // cannot do it does not draw.
+    expect(container.querySelector(`.${setup.repoOption}`)).toBeTruthy();
+
+    fireEvent.click(
+      await drawn<HTMLButtonElement>(container, `.${setup.repoOption} > button`),
+    );
+    await waitFor(() => screen.getByLabelText("Repo"));
+
+    expect((screen.getByLabelText("Repo") as HTMLSelectElement).disabled).toBe(
+      true,
+    );
+    expect(container.querySelector(`.${setup.companions}`)).toBeNull();
+    expect(screen.queryByLabelText("Branch")).toBeNull();
+    expect(screen.queryByLabelText("Base branch")).toBeNull();
+
+    // And the press it is all for is still there.
+    expect(container.querySelector(`.${composer.startGrilling}`)).toBeTruthy();
+  });
+});
+
 /// The brief while the Conversation is drafting: a field that is always there
-/// and saves itself, rather than a rendering with a way into a form.
+/// and saves itself, rather than a rendering with a way into a form. On the
+/// composer, which is the details pane a Draft opens on — the record's own card
+/// is the rendering of it, drafting or frozen.
 describe("writing the brief", () => {
   const field = () => screen.getByLabelText("Brief") as HTMLTextAreaElement;
 
@@ -2820,8 +2751,8 @@ describe("writing the brief", () => {
 
   it("is a field on what was last written, with nothing to press to open it", async () => {
     theWorkbench();
-    mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await drawn(container, `.${shell.detailsPane} .${composer.composer}`);
 
     // The markdown, not the HTML: the source travels beside the rendering for
     // exactly this, so the field needs no parser to fill itself in.
@@ -2838,7 +2769,7 @@ describe("writing the brief", () => {
     await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
 
     const growing = container.querySelector(
-      `.${timeline.brief} .${app.grow}`,
+      `.${composer.composer} .${app.grow}`,
     )!;
     expect(growing.getAttribute("data-value")).toBe(BRIEF.markdown);
 
@@ -2995,11 +2926,19 @@ describe("writing the brief", () => {
   /// every time the world was read again could never be finished.
   it("lives through the page reading the conversation again", async () => {
     // The read that lands while the field is being typed into comes back with
-    // something else about the Conversation changed — the branch renamed from
-    // another device — so the test can wait for it to have landed rather than
+    // something else about the Conversation changed — the repository renamed
+    // in the settings — so the test can wait for it to have landed rather than
     // sleep until it has. What is asked here is what a read does to the field,
     // and it does the same whether or not anything came back different.
-    const RENAMED: ConversationView = { ...OPEN, branch: "work/renamed-away" };
+    //
+    // The Repo's name rather than the branch, because this Conversation's
+    // record is the Brief alone: there is no Timeline pane and so no header
+    // titled by the branch, and what the composer says out loud about the
+    // Conversation is the repository the Repo option is labelled with.
+    const RENAMED: ConversationView = {
+      ...OPEN,
+      repo: { ...OPEN.repo, name: "renamed-away" },
+    };
     let standing = OPEN;
     const fetching = serving(
       whenever("/api/ui/conversations", json(SIDEBAR)),
@@ -3008,19 +2947,19 @@ describe("writing the brief", () => {
       whenever("/api/ui/profiles", json(PROFILES)),
       whenever(READING, () => json(standing)()),
     );
-    mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await drawn(container, `.${shell.detailsPane} .${composer.composer}`);
 
     fireEvent.input(field(), { target: { value: "# Half a thought" } });
 
     standing = RENAMED;
     readAgain();
-    // The header is called by both of the things it says — the branch and the
-    // Repo understated beside it — so waiting on the new name waits on both.
     await waitFor(() =>
-      screen.getByRole("heading", {
-        name: `${RENAMED.branch} ${OPEN.repo.name}`,
-      }),
+      expect(
+        container.querySelector(
+          `.${setup.repoOption} .${setup.optionValue}`,
+        )!.textContent,
+      ).toContain(RENAMED.repo.name),
     );
 
     // The read landed, and what was typed is still in the field.
@@ -3041,54 +2980,84 @@ describe("writing the brief", () => {
 });
 
 /// Setting a conversation up: what has to be settled before anything will run
-/// it, drawn under the brief it belongs to.
+/// it, drawn along the inside of the bottom edge of the box the brief is
+/// written in — on the composer, which is where the brief is written.
 describe("a conversation's setup", () => {
-  /// The brief is the card's headline and the setup follows it, because setting
-  /// the work up and kicking it off are one act and both happen in the record.
-  it("stands on the brief card, under the brief itself", async () => {
+  /// The brief is what the box holds and the options are its bottom edge,
+  /// because setting the work up and kicking it off are one act and both happen
+  /// in the one box.
+  it("stands inside the box, under the brief itself", async () => {
     theWorkbench();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    const card = await drawn(
+    const row = await drawn(
       container,
-      `.${timeline.timelineEvent} > .${timeline.brief} .${setup.conversationSetup}`,
+      `.${shell.detailsPane} .${composer.box} > .${setup.options}`,
     );
 
-    expect(card.querySelector(`.${setup.branchName}`)).toBeTruthy();
-    expect(card.querySelector(`.${setup.baseBranch}`)).toBeTruthy();
-    expect(card.querySelector(`.${setup.conversationProfiles}`)).toBeTruthy();
-
-    // The two branch fields are one row's to lay out, the way the pairings
-    // below them are; the stylesheet is what wraps it where the pane is narrow.
-    const row = card.querySelector(`.${setup.branches}`)!;
-    expect(row.querySelector(`.${setup.branchName}`)).toBeTruthy();
-    expect(row.querySelector(`.${setup.baseBranch}`)).toBeTruthy();
-
-    // Under the words rather than over them: the brief is what the card is,
-    // and while it is a draft the words are the field they are typed into.
-    const body = container.querySelector(`.${timeline.brief} .${app.grow}`)!;
+    // Four options, the repo first and then the three roles.
+    expect(row.querySelector(`.${setup.repoOption}`)).toBeTruthy();
+    await waitFor(() =>
+      expect(row.querySelectorAll(`.${setup.profileChoice}`)).toHaveLength(3),
+    );
     expect(
-      body.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING,
+      [...row.children].indexOf(row.querySelector(`.${setup.repoOption}`)!),
+      "the repo is what everything after it is a fact about",
+    ).toBe(0);
+
+    // Under the words rather than over them: the brief is what the pane is
+    // for, and while it is a draft the words are the field they are typed
+    // into.
+    const body = container.querySelector(`.${composer.composer} .${app.grow}`)!;
+    expect(
+      body.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+
+  /// The branch, the base and the companion repos are all answers to *which
+  /// code*, so they are one dropdown rather than four — and one flat panel
+  /// rather than a menu walked a level at a time.
+  it("puts everything about the repo behind the first option", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openComposer(container);
+
+    // What the trigger reads: the repo, and how many others the work runs
+    // alongside.
+    const trigger = await drawn(container, `.${setup.repoOption} > button`);
+    expect(trigger.textContent).toContain("Repo");
+    expect(trigger.textContent).toContain(OPEN.repo.name);
+    expect(OPEN.companions.length).toBe(1);
+    expect(trigger.textContent).toContain("+1");
+
+    // And nothing of it on the pane until it is pressed.
+    expect(screen.queryByLabelText("Branch")).toBeNull();
+
+    const panel = await openRepo(container);
+    expect(panel.querySelector(`.${setup.branchName}`)).toBeTruthy();
+    expect(panel.querySelector(`.${setup.baseBranch}`)).toBeTruthy();
+    expect(panel.querySelector(`.${setup.addCompanion}`)).toBeTruthy();
+    expect(panel.querySelector(`.${setup.companions}`)).toBeTruthy();
   });
 
   /// A Rust repository on a server with no sccache: the work will run, and
   /// every dependency in it will be compiled again. Said at the foot of the
   /// card, which is the last thing read before the work is started — and said
   /// as a note, because nothing here is broken and nothing is gated on it.
-  it("warns at the foot of the card where compiles will not be cached", async () => {
+  it("warns under the box where compiles will not be cached", async () => {
     theWorkbenchWith({ compiles_uncached: true });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    const card = await drawn(container, `.${setup.conversationSetup}`);
-    const warning = card.querySelector(`.${setup.uncached}`)!;
+    const pane = await drawn(container, `.${composer.composer}`);
+    const warning = await drawn(pane, `.${setup.uncached}`);
 
     expect(warning.textContent).toMatch(/No sccache is installed/);
     expect(
-      card
-        .querySelector(`.${setup.conversationProfiles}`)!
+      pane
+        .querySelector(`.${composer.box}`)!
         .compareDocumentPosition(warning) & Node.DOCUMENT_POSITION_FOLLOWING,
-      "the last thing on the card, under everything there is to settle",
+      "under the box, which is everything there is to settle",
     ).toBeTruthy();
   });
 
@@ -3099,7 +3068,7 @@ describe("a conversation's setup", () => {
     theWorkbenchWith({ compiles_uncached: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    await drawn(container, `.${setup.conversationSetup}`);
+    await drawn(container, `.${setup.options}`);
 
     expect(container.querySelector(`.${setup.uncached}`)).toBeNull();
   });
@@ -3113,7 +3082,7 @@ describe("a conversation's setup", () => {
 
     await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`);
 
-    expect(container.querySelector(`.${setup.conversationSetup}`)).toBeNull();
+    expect(container.querySelector(`.${setup.options}`)).toBeNull();
     expect(screen.queryByLabelText("Branch")).toBeNull();
     expect(screen.queryByLabelText("Base branch")).toBeNull();
     expect(screen.queryByLabelText("Grilling")).toBeNull();
@@ -3131,10 +3100,13 @@ describe("a conversation's setup", () => {
     });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`);
+    // The record itself, which is what tells the story: where the checkout is
+    // stands on the Brief's own pane, under the configuration it was frozen
+    // with, and nowhere else.
+    const record = await drawn(container, `.${shell.middlePane}`);
 
-    expect(container.textContent).not.toContain(OPEN.repo.path);
-    expect(container.textContent).not.toContain(
+    expect(record.textContent).not.toContain(OPEN.repo.path);
+    expect(record.textContent).not.toContain(
       "/var/lib/verkstead/worktrees/verkstead-open",
     );
   });
@@ -3143,8 +3115,8 @@ describe("a conversation's setup", () => {
   /// to press, and leaving the field is what sends what is in it.
   it("offers the branch name the server prefilled, and sends a new one", async () => {
     const fetching = theWorkbench(json("Renamed"));
-    mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Branch"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     const field = screen.getByLabelText("Branch") as HTMLInputElement;
     expect(field.value).toBe(OPEN.branch);
@@ -3165,9 +3137,9 @@ describe("a conversation's setup", () => {
   /// what leaving it empty means, and the pane is headed by what the
   /// Conversation is — a draft.
   it("leaves the branch field empty where the name is Verkstead's own", async () => {
-    theWorkbenchWith({ branch_named: false });
-    const { container } = mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Branch"));
+    theRecordedWith({ branch_named: false });
+    const { container } = mount(COMPOSING);
+    await openRepo(container);
 
     const field = screen.getByLabelText("Branch") as HTMLInputElement;
     expect(field.value).toBe("");
@@ -3184,7 +3156,7 @@ describe("a conversation's setup", () => {
   /// the name is the first session's to replace. The card has gone by then, so
   /// there is no field left to say anything about — only the title.
   it("heads the pane Draft until the branch has been named", async () => {
-    theWorkbenchWith({
+    theRecordedWith({
       branch_named: false,
       naming: true,
       state: "Grilling",
@@ -3201,7 +3173,7 @@ describe("a conversation's setup", () => {
   /// And says the branch the moment nobody is waiting on the name — the session
   /// renamed it, or ended and left it. Nothing reads Draft for ever.
   it("heads the pane with the branch once the naming is over", async () => {
-    theWorkbenchWith({
+    theRecordedWith({
       branch_named: false,
       naming: false,
       state: "Grilling",
@@ -3221,8 +3193,8 @@ describe("a conversation's setup", () => {
   /// but the empty field.
   it("hands the name back when the field is emptied", async () => {
     const fetching = theWorkbench(json("Renamed"));
-    mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Branch"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     const field = screen.getByLabelText("Branch") as HTMLInputElement;
     expect(field.value).toBe(OPEN.branch);
@@ -3239,8 +3211,8 @@ describe("a conversation's setup", () => {
 
   it("saves a typed branch name after a pause in the typing", async () => {
     const fetching = theWorkbench(json("Renamed"));
-    mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Branch"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
     const naming = `/api/ui/conversations/${OPEN.id}/branch`;
 
     vi.useFakeTimers();
@@ -3268,8 +3240,8 @@ describe("a conversation's setup", () => {
     const naming = `/api/ui/conversations/${OPEN.id}/branch`;
     const answering = holding(json("Renamed"));
     const fetching = theWorkbench(whenever(naming, answering.held, "POST"));
-    mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Branch"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     fireEvent.input(screen.getByLabelText("Branch"), {
       target: { value: "counter-in" },
@@ -3302,8 +3274,8 @@ describe("a conversation's setup", () => {
         "POST",
       ),
     );
-    mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Branch"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     fireEvent.input(screen.getByLabelText("Branch"), {
       target: { value: "two..dots" },
@@ -3355,7 +3327,8 @@ describe("a conversation's setup", () => {
   /// there is no longer anything to pin to but a branch.
   it("offers the default rule and then every branch of the repo", async () => {
     theWorkbench();
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     const picker = (await waitFor(() =>
       screen.getByLabelText("Base branch"),
@@ -3376,7 +3349,8 @@ describe("a conversation's setup", () => {
 
   it("records the branch that was picked, by name", async () => {
     const fetching = theWorkbench(json("Recorded"));
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     fireEvent.change(await basePicker("origin/main"), {
       target: { value: "origin/main" },
@@ -3394,7 +3368,8 @@ describe("a conversation's setup", () => {
   /// a dropdown entry cannot say when it will resolve.
   it("takes the override away when the rule is picked", async () => {
     const fetching = theWorkbench(json("Recorded"));
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     fireEvent.change(await basePicker("origin/main"), {
       target: { value: "" },
@@ -3419,7 +3394,8 @@ describe("a conversation's setup", () => {
       whenever(`/api/ui/repos/${OPEN.repo.id}/branches`, json(["main"])),
       whenever(`/api/ui/conversations/${OPEN.id}`, json(OPEN)),
     );
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     const picker = await basePicker("main");
 
@@ -3446,6 +3422,7 @@ describe("a conversation's setup", () => {
       whenever(`/api/ui/conversations/${OPEN.id}`, json(rule)),
     );
     const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     const picker = (await waitFor(() =>
       screen.getByLabelText("Base branch"),
@@ -3463,7 +3440,7 @@ describe("a conversation's setup", () => {
   it("says nothing under the dropdown about when the base resolves", async () => {
     theWorkbench();
     const { container } = mount(`/conversations/${OPEN.id}`);
-
+    await openRepo(container);
     await waitFor(() => screen.getByLabelText("Base branch"));
 
     expect(
@@ -3473,8 +3450,130 @@ describe("a conversation's setup", () => {
   });
 });
 
-/// The other repositories a conversation works alongside: added from the ⋯ at
-/// the end of the branch row, and drawn as a row apiece under it.
+/// Which repo the work is in at all: the first thing in the Repo panel, and the
+/// one the branch, the base and the companions under it are facts about.
+///
+/// What follows a switch — the base back on the new repo's default, a companion
+/// that has just become the conversation's own repo dropped — is the server's,
+/// and `crates/store/tests/conversations.rs` is what says so. What is asked here
+/// is that the press goes out, that the panel reads the record back, and that a
+/// branch already cut settles the picker rather than hiding it.
+describe("switching a draft's repo", () => {
+  /// The picker, waited for: the repos arrive on a read of their own, and a
+  /// `<select>` told to show an option it has not been given yet falls to the
+  /// first one it has.
+  async function repoPicker(container: ParentNode): Promise<HTMLSelectElement> {
+    await openRepo(container);
+
+    const picker = (await waitFor(() =>
+      screen.getByLabelText("Repo"),
+    )) as HTMLSelectElement;
+
+    await waitFor(() => expect(picker.options.length).toBe(REPOS.length));
+
+    return picker;
+  }
+
+  /// Every registered repo, the conversation's own among them and showing —
+  /// nothing is filtered out, the way nothing is filtered out of the companion
+  /// picker beside it.
+  it("offers every registered repo, above the branch and the base", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const picker = await repoPicker(container);
+
+    expect([...picker.options].map((option) => option.textContent)).toEqual(
+      REPOS.map((repo) => repo.name),
+    );
+    expect(picker.value).toBe(String(OPEN.repo.id));
+
+    // At the top of the panel, which is the order the panel is read in: the
+    // repo, and then everything that is a fact about it.
+    const panel = await drawn(container, `.${setup.repoOption} > [role="group"]`);
+    const pick = panel.querySelector(`.${setup.repoPick}`)!;
+    expect(
+      pick.compareDocumentPosition(panel.querySelector(`.${setup.branchName}`)!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("moves the work onto the repo that was picked", async () => {
+    const fetching = theWorkbench(json("Switched"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const elsewhere = REPOS.find((repo) => repo.id !== OPEN.repo.id)!;
+    fireEvent.change(await repoPicker(container), {
+      target: { value: String(elsewhere.id) },
+    });
+
+    await waitFor(() =>
+      expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/repo`)).toEqual({
+        repo_id: elsewhere.id,
+      }),
+    );
+  });
+
+  /// Said where the press was made, the panel not shutting on a refusal.
+  it("says in the panel why a switch was refused", async () => {
+    theWorkbench(json("NoSuchRepo"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const elsewhere = REPOS.find((repo) => repo.id !== OPEN.repo.id)!;
+    fireEvent.change(await repoPicker(container), {
+      target: { value: String(elsewhere.id) },
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText(REPO_SWITCH_REFUSAL.NoSuchRepo)).toBeTruthy(),
+    );
+  });
+
+  /// A later round, steered onto work that is already built: the checkout is of
+  /// one repository, so the server refuses the switch and the picker says so by
+  /// being disabled. The branch and the base go entirely, as they always have —
+  /// this is the one control in the panel drawn in a state it cannot act in,
+  /// because which repo the work is in is still a fact worth reading.
+  it("reads disabled once the branch has been cut", async () => {
+    theWorkbenchWith({
+      worktree: { path: "/var/lib/verkstead/worktrees/verkstead-open", missing: false },
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
+
+    const picker = (await waitFor(() =>
+      screen.getByLabelText("Repo"),
+    )) as HTMLSelectElement;
+
+    expect(picker.disabled).toBe(true);
+    expect(screen.queryByLabelText("Branch")).toBeNull();
+    expect(screen.queryByLabelText("Base branch")).toBeNull();
+    expect(screen.queryByLabelText("Works alongside")).toBeNull();
+  });
+
+  /// And on a draft adopting a roadmap, which has no worktree at all: a roadmap
+  /// is a file in the repo it was found in and only its name is kept, so work
+  /// moved elsewhere would be adopting a name rather than a roadmap. The base
+  /// and the companions are still the human's here — it is the repo alone that
+  /// the roadmap settled.
+  it("reads disabled on a draft adopting a roadmap", async () => {
+    theWorkbench(
+      whenever(`/api/ui/conversations/${ADOPTING.id}`, json(ADOPTING)),
+    );
+    const { container } = mount(`/conversations/${ADOPTING.id}`);
+    await openRepo(container);
+
+    const picker = (await waitFor(() =>
+      screen.getByLabelText("Repo"),
+    )) as HTMLSelectElement;
+
+    expect(picker.disabled).toBe(true);
+    expect(ADOPTING.worktree).toBeNull();
+    expect(screen.getByLabelText("Base branch")).toBeTruthy();
+  });
+});
+/// The other repositories a conversation works alongside: added from a picker
+/// inside the Repo panel, and drawn as a row apiece under it.
 ///
 /// Whether a repository may be added at all is the server's — its own repo and
 /// one already there are refused over there, and the tests in
@@ -3482,37 +3581,37 @@ describe("a conversation's setup", () => {
 /// that the press goes out, that the row is drawn, and that a refusal is said in
 /// words where it was made.
 describe("a conversation's companion repos", () => {
-  /// The two presses it takes to get to the list of repos: the ⋯ at the end of
-  /// the branch row, and then the row that opens the level they are listed in.
-  async function openTheList(container: ParentNode): Promise<void> {
-    fireEvent.click(
-      await drawn<HTMLButtonElement>(
-        container,
-        `.${setup.setupMenu} > button`,
-      ),
-    );
-    fireEvent.click(
-      screen.getByRole("menuitem", { name: /Add companion repo/ }),
-    );
+  /// The control they are added from, inside the Repo panel with the branch and
+  /// the base they belong beside.
+  async function theAdder(container: ParentNode): Promise<HTMLSelectElement> {
+    await openRepo(container);
+
+    return (await waitFor(() =>
+      screen.getByLabelText("Works alongside"),
+    )) as HTMLSelectElement;
   }
 
-  it("lists the registered repos in a level of the one menu", async () => {
+  it("offers every registered repo under the invitation to add one", async () => {
     theWorkbenchWith({ companions: [] });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    await openTheList(container);
+    const adder = await theAdder(container);
 
-    // Every registered repo, including this conversation's own: what may be
-    // added is the server's to say, and a list that quietly left one out would
-    // send the human hunting for a repo that is registered.
-    for (const repo of REPOS) {
-      expect(screen.getByRole("menuitem", { name: repo.name })).toBeTruthy();
-    }
+    // The invitation first, which is what the control shows while nothing has
+    // been picked — and then every registered repo, including this
+    // conversation's own: what may be added is the server's to say, and a list
+    // that quietly left one out would send the human hunting for a repo that is
+    // registered.
+    expect([...adder.options].map((option) => option.textContent)).toEqual([
+      "Add a repo…",
+      ...REPOS.map((repo) => repo.name),
+    ]);
+    expect(adder.value).toBe("");
 
-    // One card and one wash, because a level is a place in this menu rather
-    // than a menu of its own.
-    expect(container.querySelectorAll(`.${dropdown.drop}`)).toHaveLength(1);
-    expect(container.querySelectorAll(`.${dropdown.backdrop}`)).toHaveLength(1);
+    // And it is a flat panel rather than a menu walked a level at a time.
+    expect(
+      container.querySelector(`.${dropdown.drop} [role="menuitem"]`),
+    ).toBeNull();
   });
 
   it("sends the repo that was pressed", async () => {
@@ -3523,8 +3622,8 @@ describe("a conversation's companion repos", () => {
     ));
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    await openTheList(container);
-    fireEvent.click(screen.getByRole("menuitem", { name: REPOS[1]!.name }));
+    const adder = await theAdder(container);
+    fireEvent.change(adder, { target: { value: String(REPOS[1]!.id) } });
 
     await waitFor(() =>
       expect(
@@ -3532,16 +3631,18 @@ describe("a conversation's companion repos", () => {
       ).toEqual({ repo_id: REPOS[1]!.id }),
     );
 
-    // The menu is a way to say which repository, and the row appearing under
-    // the branch is the confirmation — so the card comes back.
-    await waitFor(() => expect(container.querySelector(`.${dropdown.drop}`)).toBeNull());
+    // The panel stays where it is — the row appearing under the control is the
+    // confirmation — and the control goes back to the invitation, what was
+    // picked having been done rather than held.
+    expect(container.querySelector(`.${dropdown.drop}`)).toBeTruthy();
+    await waitFor(() => expect(adder.value).toBe(""));
   });
 
   /// A refusal is not an error: it is a sentence about the repository that was
-  /// pressed, and it is said in the level the press was made in — which is
-  /// still open, because a menu that shut would take the only place it had left
-  /// to be said.
-  it("says a refusal where the press was made, and stays open to say it", async () => {
+  /// picked, and it is said under the control it was picked from — which is
+  /// still open, because a panel that shut would take the only place it had
+  /// left to be said.
+  it("says a refusal where the pick was made, and stays open to say it", async () => {
     theWorkbenchWith({ companions: [] }, whenever(
       `/api/ui/conversations/${OPEN.id}/companions`,
       json("OwnRepo"),
@@ -3549,30 +3650,33 @@ describe("a conversation's companion repos", () => {
     ));
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    await openTheList(container);
-    fireEvent.click(screen.getByRole("menuitem", { name: OPEN.repo.name }));
+    const adder = await theAdder(container);
+    fireEvent.change(adder, { target: { value: String(OPEN.repo.id) } });
 
     await waitFor(() =>
-      expect(container.textContent).toContain(COMPANION_REFUSAL.OwnRepo),
+      expect(
+        container.querySelector(`.${setup.addCompanion} .${setup.failure}`)
+          ?.textContent,
+      ).toBe(COMPANION_REFUSAL.OwnRepo),
     );
     expect(container.querySelector(`.${dropdown.drop}`)).toBeTruthy();
   });
 
-  /// A row apiece under the branch row, naming the repository.
-  it("draws a row per companion under the branch row", async () => {
+  /// A row apiece in the Repo panel, naming the repository.
+  it("draws a row per companion under the control they were added from", async () => {
     theWorkbench();
     const { container } = mount(`/conversations/${OPEN.id}`);
+    const panel = await openRepo(container);
 
-    const rows = await drawn(container, `.${setup.companions}`);
+    const rows = await drawn(panel, `.${setup.companions}`);
     expect([...rows.querySelectorAll(`.${setup.companionName}`)].map(
       (name) => name.textContent,
     )).toEqual(OPEN.companions.map((companion) => companion.repo.name));
 
-    // Under the two fields rather than over them: the branch row is what they
-    // were added from.
-    const branches = container.querySelector(`.${setup.branches}`)!;
+    // Under the control rather than over it: it is what they were added from.
+    const adder = panel.querySelector(`.${setup.addCompanion}`)!;
     expect(
-      branches.compareDocumentPosition(rows) & Node.DOCUMENT_POSITION_FOLLOWING,
+      adder.compareDocumentPosition(rows) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 
@@ -3580,7 +3684,8 @@ describe("a conversation's companion repos", () => {
     const companion = OPEN.companions[0]!;
     const removing = `/api/ui/conversations/${OPEN.id}/companions/${companion.repo.id}/remove`;
     const fetching = theWorkbench(whenever(removing, json("Removed"), "POST"));
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     fireEvent.click(
       await waitFor(() =>
@@ -3596,6 +3701,7 @@ describe("a conversation's companion repos", () => {
     const removing = `/api/ui/conversations/${OPEN.id}/companions/${companion.repo.id}/remove`;
     theWorkbench(whenever(removing, json("NotDrafting"), "POST"));
     const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     fireEvent.click(
       await waitFor(() =>
@@ -3617,13 +3723,18 @@ describe("a conversation's companion repos", () => {
     theWorkbenchWith({ companions: [] });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    await drawn(container, `.${setup.branches}`);
+    const panel = await openRepo(container);
 
-    expect(container.querySelector(`.${setup.companions}`)).toBeNull();
+    expect(panel.querySelector(`.${setup.companions}`)).toBeNull();
 
     // And the way to add one is still there: having none is the state most
     // conversations are in rather than a thing to be locked out of.
-    expect(container.querySelector(`.${setup.setupMenu}`)).toBeTruthy();
+    expect(panel.querySelector(`.${setup.addCompanion}`)).toBeTruthy();
+
+    // The trigger says the repo alone, there being nothing to count.
+    expect(
+      container.querySelector(`.${setup.repoOption} > button`)!.textContent,
+    ).not.toContain("+");
   });
 
   /// The rows freeze with the branch and the base, because the server freezes
@@ -3636,7 +3747,7 @@ describe("a conversation's companion repos", () => {
     await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`);
 
     expect(container.querySelector(`.${setup.companions}`)).toBeNull();
-    expect(container.querySelector(`.${setup.setupMenu}`)).toBeNull();
+    expect(container.querySelector(`.${setup.repoOption}`)).toBeNull();
   });
 });
 
@@ -3678,7 +3789,7 @@ describe("configuring a companion repo", () => {
 
   /// What one of that row's controls is called: the words on the label, and
   /// the repository it belongs to, which the label carries where nobody sees
-  /// it — a card with two companions on it has two of every control.
+  /// it — a panel with two companions in it has two of every control.
   const named = (control: string) => `${control} for ${ASKANCE.repo.name}`;
 
   /// The branch field on the companion's row, which is told from the
@@ -3692,7 +3803,8 @@ describe("configuring a companion repo", () => {
   /// different repository with a default branch and a list of its own.
   it("offers the companion repo's own rule and then its own branches", async () => {
     theCompanion({});
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     const picker = (await waitFor(() =>
       screen.getByLabelText(named("Base")),
@@ -3713,7 +3825,8 @@ describe("configuring a companion repo", () => {
 
   it("records the base branch that was picked, by name", async () => {
     const fetching = theCompanion({}, whenever(BASE, json("Recorded"), "POST"));
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     const picker = (await waitFor(() =>
       screen.getByLabelText(named("Base")),
@@ -3737,6 +3850,7 @@ describe("configuring a companion repo", () => {
   it("flips to read-write, and there is nothing to name until it is on", async () => {
     const fetching = theCompanion({}, whenever(MODE, json("Chosen"), "POST"));
     const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     const toggle = (await waitFor(() =>
       screen.getByLabelText(named("Read-write")),
@@ -3758,7 +3872,8 @@ describe("configuring a companion repo", () => {
   /// branch, so what they read is what they will get.
   it("prefills a mirroring branch with the conversation's own name", async () => {
     theCompanion({ mode: "ReadWrite", branch: "" });
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     await waitFor(() => expect(branchField().value).toBe(OPEN.branch));
   });
@@ -3777,7 +3892,8 @@ describe("configuring a companion repo", () => {
         json(COMPANION_BRANCHES),
       ),
     );
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     await waitFor(() => expect(branchField().value).toBe("counter-in-redis"));
   });
@@ -3785,7 +3901,8 @@ describe("configuring a companion repo", () => {
   /// A name that has been typed stands on its own and stops following.
   it("leaves a named branch where it is, whatever the conversation's is called", async () => {
     theCompanion({ mode: "ReadWrite", branch: "alongside" });
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     await waitFor(() => expect(branchField().value).toBe("alongside"));
     expect(branchField().value).not.toBe(OPEN.branch);
@@ -3798,7 +3915,8 @@ describe("configuring a companion repo", () => {
       { mode: "ReadWrite", branch: "" },
       whenever(NAMING, json("Renamed"), "POST"),
     );
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
     await waitFor(() => branchField());
 
     expect(screen.queryByRole("button", { name: "Rename" })).toBeNull();
@@ -3842,7 +3960,8 @@ describe("configuring a companion repo", () => {
         "POST",
       ),
     );
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
     await waitFor(() => expect(branchField().value).toBe("alongside"));
 
     fireEvent.input(branchField(), { target: { value: "" } });
@@ -3858,6 +3977,7 @@ describe("configuring a companion repo", () => {
   it("says why a change was refused, on the row it was refused for", async () => {
     theCompanion({}, whenever(MODE, json("NotDrafting"), "POST"));
     const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     fireEvent.click(await waitFor(() => screen.getByLabelText(named("Read-write"))));
 
@@ -3879,7 +3999,8 @@ describe("configuring a companion repo", () => {
       { mode: "ReadWrite", branch: "" },
       whenever(NAMING, () => json(outcome)(), "POST"),
     );
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
     await waitFor(() => branchField());
 
     fireEvent.input(branchField(), { target: { value: "two..dots" } });
@@ -4304,14 +4425,18 @@ describe("a conversation's pairings", () => {
     expect(screen.queryByText("Ready to grill.")).toBeNull();
   });
 
-  /// One row where the pane is wide enough for them, which is the stylesheet's
-  /// half of it; what this holds is that they are the one row's to lay out.
-  it("draws the pickers as a single row", async () => {
+  /// The three stand in the option row beside the Repo, with no heading of
+  /// their own: the role is written on each one, so a word over all three would
+  /// be the row saying what its labels already say.
+  it("draws the pickers as three options of the one row", async () => {
     theWorkbench();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    const row = await drawn(container, `.${setup.conversationProfiles} .${setup.pairings}`);
-    expect(row.querySelectorAll(`.${setup.profileChoice}`)).toHaveLength(3);
+    const row = await drawn(container, `.${setup.options}`);
+    await waitFor(() =>
+      expect(row.querySelectorAll(`.${setup.profileChoice}`)).toHaveLength(3),
+    );
+    expect(row.querySelector("h3")).toBeNull();
   });
 
   /// A profile whose pair has gone is not one to launch a session under. What is
@@ -4361,8 +4486,12 @@ describe("a conversation's pairings", () => {
 });
 
 describe("the panes on a narrow window", () => {
+  /// Asked over a record with something on it beyond the Brief, which is what
+  /// makes three levels to walk: a Conversation whose record is the one Event
+  /// draws no Timeline at all, and the walk skips it — see *the one-event
+  /// layout* below.
   it("starts on the conversations and walks in and back out", async () => {
-    theWorkbench();
+    theRecordedWith();
     const { container } = mount();
     await waitFor(() => screen.getByText(DRAFTING.branch));
 
@@ -4374,10 +4503,10 @@ describe("the panes on a narrow window", () => {
       expect(frame(container).dataset.pane).toBe("middle"),
     );
 
-    // The third level is the open Event's own, and nothing is open: there is
-    // nothing to page into, so nothing offers to.
-    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
-    expect(screen.queryByRole("button", { name: "Details →" })).toBeNull();
+    // The third level is the open Event's own, and the landing opens the newest
+    // thing on the record — so there is something to page into, and the way on
+    // is offered.
+    await waitFor(() => screen.getByRole("button", { name: "Details →" }));
 
     // The way back out is a navigation — it takes the Conversation off the URL
     // — so the level changes when the router has moved rather than when the
@@ -4393,7 +4522,7 @@ describe("the panes on a narrow window", () => {
   /// rather than a navigation to where the page already stands — which is what
   /// pages a phone forward into it a second time.
   it("walks back in to the conversation it just came out of", async () => {
-    theWorkbench();
+    theRecordedWith();
     const { container, history } = mount();
     await waitFor(() => screen.getByText(DRAFTING.branch));
 
@@ -4402,7 +4531,7 @@ describe("the panes on a narrow window", () => {
       expect(frame(container).dataset.pane).toBe("middle"),
     );
     expect(history.get()).toBe(`/conversations/${DRAFTING.id}`);
-    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+    await drawn(container, `.${timeline.timeline}`);
 
     fireEvent.click(screen.getByRole("button", { name: "← Conversations" }));
     await waitFor(() =>
@@ -4455,9 +4584,9 @@ describe("the panes on a narrow window", () => {
   /// Opening a Conversation is a navigation, and Back is a way of changing which
   /// one is open that never goes through a click handler.
   it("follows the URL rather than the button that changed it", async () => {
-    theWorkbench();
+    theRecordedWith();
     const { container, history } = mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+    await drawn(container, `.${timeline.timeline}`);
 
     expect(frame(container).dataset.pane).toBe("middle");
 
@@ -4765,6 +4894,31 @@ function theGrillingOutput(
   );
 }
 
+/// The same conversation after a Cleanup has been through it: every card where
+/// it was, and the session's own output taken out from under the one that opens
+/// on it.
+///
+/// Which is exactly what the server hands over once a trim has run — the
+/// Transcript has no lines left to read and the Capture has no chunks — so what
+/// this stands up is the shape the pane really meets rather than a shape
+/// invented for it.
+function theTrimmed(...answers: Parameters<typeof serving>) {
+  return serving(
+    whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+    whenever("/api/ui/repos", json(REPOS)),
+    whenever("/api/ui/profiles", json(PROFILES)),
+    whenever(
+      `/api/ui/conversations/${GRILLING.id}`,
+      json({ ...GRILLING, state: "Closed", archived: true, trimmed: true }),
+    ),
+    whenever(TRANSCRIPT_OF_IT, json(SAID_NOTHING)),
+    whenever(CAPTURE_OF_IT, json({ ...CAPTURE, text: "" })),
+    whenever(SCREEN_OF_IT, json(SCREEN)),
+    ...answers,
+  );
+}
+
 /// Where a browser would have found an element, for the one assertion that
 /// reads a measurement back: jsdom has no layout, so every element on the page
 /// is at nothing and nothing wide, and a mark measured off two of them would
@@ -4790,6 +4944,45 @@ function theWorkbenchWith(
   );
 }
 
+
+/// A second Event on the opened Conversation's record, and the Conversation
+/// carrying it.
+///
+/// The fixture's own record is the Brief and nothing else, which is the frame
+/// with no Timeline in it at all — see *the one-event layout* below. So what is
+/// about the Timeline pane rather than about the composer is asked over this
+/// instead: the same Conversation with one more Event on it, which is the whole
+/// of what it takes for the three panes to stand again.
+const ASIDE: TimelineEvent = {
+  Notice: {
+    id: 12,
+    at: "2026-08-03T09:07:11.000Z",
+    html: "<p>Verkstead had something to say about this one.</p>\n",
+  },
+};
+
+const RECORDED: ConversationView = {
+  ...OPEN,
+  timeline: [...OPEN.timeline, ASIDE],
+};
+
+/// The workbench with that record open, and with whatever else about the
+/// Conversation the test is asking after.
+///
+/// The second Event is the newest openable thing on the record, so opening the
+/// Conversation by its own path lands on *its* pane rather than on the
+/// composer. A test that wants both panes at once mounts the Brief's own path,
+/// which is a cold load of the composer and leaves the landing nothing to do.
+function theRecordedWith(
+  over: Partial<ConversationView> = {},
+  ...answers: Parameters<typeof serving>
+) {
+  return theWorkbenchWith({ timeline: RECORDED.timeline, ...over }, ...answers);
+}
+
+/// And the Brief's own path on it, which is where a test that wants the
+/// composer beside the record mounts.
+const COMPOSING = `/conversations/${OPEN.id}/events/${BRIEF.id}`;
 
 /// The sidebar's other draft, which is the opened fixture again under its id
 /// and with a Brief of its own.
@@ -4839,6 +5032,84 @@ function theThree(...answers: Parameters<typeof serving>) {
 /// was holding went on standing over it. What settles it is that the whole of
 /// the reading half of the page is keyed on the id now, so a switch builds it
 /// again from nothing whether or not anything had to be fetched.
+/// A Conversation whose record is the one Event, which is every Draft nothing
+/// has happened to yet: there is nothing to read on such a Timeline — one card,
+/// under a header saying what the sidebar row beside it already says — so the
+/// pane is not drawn and the composer takes its column as well as its own.
+describe("the one-event layout", () => {
+  it("draws the conversations and the composer, and no timeline at all", async () => {
+    expect(OPEN.timeline).toHaveLength(1);
+
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await drawn(container, `.${shell.detailsPane} .${composer.composer}`);
+
+    // The level is not drawn rather than drawn empty: there is no such pane in
+    // the document, and the frame says so by the name it wears.
+    expect(container.querySelector(`.${shell.conversationsPane}`)).toBeTruthy();
+    expect(container.querySelector(`.${shell.middlePane}`)).toBeNull();
+    expect(frame(container).classList.contains(shell.widened!)).toBe(true);
+
+    // And nothing of what its head carried is anywhere else — no title, no
+    // share, no status, no pins, and no record.
+    expect(container.querySelector(`.${timeline.timeline}`)).toBeNull();
+    expect(container.querySelector(`.${timeline.paneTitle}`)).toBeNull();
+    expect(container.querySelector(`.${statusButton.status}`)).toBeNull();
+    expect(container.querySelector(`.${timeline.pinned}`)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Share" })).toBeNull();
+  });
+
+  /// A second Event of any kind is the whole of what brings it back, and the
+  /// widths it comes back at are the ones this device settled — which is the
+  /// frame's own doing, and asked of it in `tests/sizing.test.tsx`.
+  it("puts the timeline back when a second event lands", async () => {
+    let standing: ConversationView = OPEN;
+    serving(
+      whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+      whenever("/api/ui/repos", json(REPOS)),
+      whenever("/api/ui/profiles", json(PROFILES)),
+      whenever(READING, () => json(standing)()),
+    );
+    const { container, client } = mount(`/conversations/${OPEN.id}`);
+
+    await drawn(container, `.${shell.detailsPane} .${composer.composer}`);
+    expect(container.querySelector(`.${shell.middlePane}`)).toBeNull();
+
+    standing = RECORDED;
+    await nudged(client);
+
+    await drawn(container, `.${shell.middlePane} .${timeline.timeline}`);
+    expect(frame(container).classList.contains(shell.widened!)).toBe(false);
+  });
+
+  /// And the walk on a narrow window skips the level that is not there, in
+  /// either direction: opening the Conversation lands on the composer, and the
+  /// way off the composer is the way out of the Conversation.
+  it("lands on the brief pane, and back goes to the conversations", async () => {
+    theWorkbench();
+    const { container, history } = mount();
+    await waitFor(() => screen.getByText(DRAFTING.branch));
+
+    fireEvent.click(screen.getByText(DRAFTING.branch));
+
+    await waitFor(() =>
+      expect(frame(container).dataset.pane).toBe("details"),
+    );
+    await drawn(container, `.${shell.detailsPane} .${composer.composer}`);
+
+    // Nothing to page forward into either: the way on is the timeline's, and
+    // there is no timeline.
+    expect(screen.queryByRole("button", { name: "Details →" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "← Conversations" }));
+
+    await waitFor(() => expect(history.get()).toBe("/"));
+    expect(frame(container).dataset.pane).toBe("conversations");
+  });
+});
+
 describe("switching between conversations", () => {
   /// The field a drafting card is, which is how these tests say which draft is
   /// on screen.
@@ -4980,10 +5251,10 @@ describe("opening a conversation is looking at it", () => {
 
 describe("starting the work", () => {
   it("offers the button under the timeline once the conversation is ready", async () => {
-    theWorkbench();
-    const { container } = mount(`/conversations/${OPEN.id}`);
+    theRecordedWith();
+    const { container } = mount(COMPOSING);
 
-    const start = await drawn(container, `.${timeline.startGrilling} .${timeline.start}`);
+    const start = await drawn(container, `.${composer.startGrilling} .${composer.start}`);
 
     expect(OPEN.ready_to_grill).toBe(true);
     expect(start.textContent).toContain("Start work");
@@ -5006,11 +5277,11 @@ describe("starting the work", () => {
 
     const start = await drawn<HTMLButtonElement>(
       container,
-      `.${timeline.startGrilling} .${timeline.start}`,
+      `.${composer.startGrilling} .${composer.start}`,
     );
 
     expect(start.textContent).toContain("Start work");
-    expect(start.classList).toContain(timeline.inert);
+    expect(start.classList).toContain(composer.inert);
     expect(start.getAttribute("aria-disabled")).toBe("true");
     expect(start.disabled).toBe(false);
 
@@ -5031,7 +5302,7 @@ describe("starting the work", () => {
     );
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    fireEvent.click(await drawn(container, `.${timeline.startGrilling} .${timeline.start}`));
+    fireEvent.click(await drawn(container, `.${composer.startGrilling} .${composer.start}`));
 
     await waitFor(() => screen.getByText(/This needs a brief/));
     expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
@@ -5043,7 +5314,7 @@ describe("starting the work", () => {
     theWorkbenchWith({ ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    const start = await drawn(container, `.${timeline.startGrilling} .${timeline.start}`);
+    const start = await drawn(container, `.${composer.startGrilling} .${composer.start}`);
 
     fireEvent.mouseEnter(start);
     await waitFor(() => screen.getByText(/This needs a brief/));
@@ -5064,7 +5335,7 @@ describe("starting the work", () => {
     );
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    fireEvent.click(await drawn(container, `.${timeline.startGrilling} .${timeline.start}`));
+    fireEvent.click(await drawn(container, `.${composer.startGrilling} .${composer.start}`));
 
     await waitFor(() =>
       expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toEqual(
@@ -5097,7 +5368,7 @@ describe("starting the work", () => {
       );
       const { container } = mount(`/conversations/${OPEN.id}`);
 
-      fireEvent.click(await drawn(container, `.${timeline.startGrilling} .${timeline.start}`));
+      fireEvent.click(await drawn(container, `.${composer.startGrilling} .${composer.start}`));
 
       await waitFor(() => screen.getByText(said));
     },
@@ -5110,7 +5381,7 @@ describe("starting the work", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await waitFor(() => screen.getByText("Draft → Grilling"));
-    expect(container.querySelector(`.${timeline.startGrilling}`)).toBeNull();
+    expect(container.querySelector(`.${composer.startGrilling}`)).toBeNull();
   });
 });
 
@@ -5396,6 +5667,78 @@ describe("a session's output on the timeline", () => {
 
     expect(shown.textContent).toBe(CAPTURE.text);
     expect(askedFor(fetching, CAPTURE_OF_IT)).toBeGreaterThan(0);
+  });
+
+  /// And where a Cleanup has taken that record, the pane says so.
+  ///
+  /// The loss explaining itself. Trimmed, the Transcript comes back with no
+  /// turns and the Capture with no bytes, which is the same nothing a session
+  /// that never printed leaves — and drawn as that nothing it reads as a pane
+  /// that has failed. The card above it is untouched: the summary the Timeline
+  /// draws survived the trim, and this is the drill-down under it saying where
+  /// the rest went.
+  it("says the detail was trimmed rather than opening on nothing", async () => {
+    theTrimmed();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
+
+    const said = await drawn(container, `.${shell.detailsPane} .${outputPane.trimmed}`);
+
+    expect(said.textContent).toContain("trimmed");
+    expect(
+      container.querySelector(`.${shell.detailsPane} .${outputPane.capture}`),
+      "and nothing standing empty where the record was",
+    ).toBeNull();
+
+    // The summary that survived, still drawn over it: what is gone is the
+    // drill-down rather than the card.
+    const summary = await drawn(container, `.${shell.detailsPane} .${outputPane.captureSummary}`);
+    expect(summary.querySelector(`.${outputPane.turns}`)!.textContent).toBe(
+      `${OUTPUT.turns} turns`,
+    );
+  });
+
+  /// The other half of the switch says the same thing, and asks the server for
+  /// nothing: the grid is replayed from the bytes the trim took, so what a
+  /// request would come back with is an empty terminal.
+  it("says the same of the screen, and asks for no grid", async () => {
+    const fetching = theTrimmed();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
+    await drawn(container, `.${shell.detailsPane} .${outputPane.trimmed}`);
+
+    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${outputPane.screenTab}`));
+
+    const said = await drawn(container, `.${shell.detailsPane} .${outputPane.trimmed}`);
+
+    expect(said.textContent).toContain("trimmed");
+    expect(askedFor(fetching, SCREEN_OF_IT)).toBe(0);
+  });
+
+  /// And a session that simply printed nothing says what it always said: the
+  /// word is about a cleanup that happened, so a conversation no sweep has
+  /// reached never sees it.
+  it("still says a quiet session printed nothing where no cleanup ran", async () => {
+    theGrilling(whenever(CAPTURE_OF_IT, json({ ...CAPTURE, text: "" })));
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
+
+    // Waited for rather than read once: the same notice says the pane is
+    // loading while the two records are on their way, and what this is about is
+    // the words it settles on.
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${shell.detailsPane} .${notices.empty}`)
+          ?.textContent,
+      ).toBe("This session has printed nothing yet."),
+    );
+
+    expect(
+      container.querySelector(`.${shell.detailsPane} .${outputPane.trimmed}`),
+    ).toBeNull();
   });
 
   /// The pane opens on what the session said rather than on how it looked: the
@@ -6213,7 +6556,7 @@ describe("the mark of the harness a session ran under", () => {
   /// A line saying nothing is running has no harness to mark, which is the same
   /// nothing its words say.
   it("marks nothing on a line with no session behind it", async () => {
-    theWorkbench();
+    theRecordedWith();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const line = await drawn(
@@ -6829,7 +7172,7 @@ describe("closing a conversation", () => {
   /// it, and a line of prose about a press that is no longer offered would be
   /// the only thing in the card that was not a press.
   it("offers nothing to close on one that is closed already", async () => {
-    theWorkbenchWith({ state: "Closed", ready_to_grill: false });
+    theRecordedWith({ state: "Closed", ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await openActions(container);
@@ -6874,7 +7217,7 @@ describe("closing and archiving a conversation", () => {
     );
     expect(offered.slice(-2)).toEqual([actions.close, actions.closeAndArchive]);
 
-    theWorkbenchWith({ state: "Closed", ready_to_grill: false });
+    theRecordedWith({ state: "Closed", ready_to_grill: false });
     const closed = mount(`/conversations/${OPEN.id}`);
 
     await openActions(closed.container);
@@ -6963,7 +7306,7 @@ describe("archiving a conversation", () => {
   });
 
   it("stands where close was, on one that has been closed", async () => {
-    theWorkbenchWith({ state: "Closed", ready_to_grill: false });
+    theRecordedWith({ state: "Closed", ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const menu = await openActions(container);
@@ -6972,7 +7315,7 @@ describe("archiving a conversation", () => {
   });
 
   it("posts to the conversation's own archive route", async () => {
-    const fetching = theWorkbenchWith(
+    const fetching = theRecordedWith(
       { state: "Closed", ready_to_grill: false },
       whenever(
         `/api/ui/conversations/${OPEN.id}/archive`,
@@ -6993,7 +7336,7 @@ describe("archiving a conversation", () => {
   /// What the human is owed before a press that makes something disappear: that
   /// it is the list it goes off, and that nothing of the record goes with it.
   it("says the record stays where it is", async () => {
-    theWorkbenchWith({ state: "Closed", ready_to_grill: false });
+    theRecordedWith({ state: "Closed", ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await openActions(container);
@@ -7005,7 +7348,7 @@ describe("archiving a conversation", () => {
   /// A page drawn against a conversation that has since been steered back into
   /// the work: the press is refused, and the refusal opens over the page.
   it("says over the page that there is nothing to put away", async () => {
-    theWorkbenchWith(
+    theRecordedWith(
       { state: "Closed", ready_to_grill: false },
       whenever(
         `/api/ui/conversations/${OPEN.id}/archive`,
@@ -7031,7 +7374,7 @@ describe("unarchiving a conversation", () => {
   /// One row or the other, never both — the two say opposite things about the
   /// same conversation.
   it("stands where archive was, on one already put away", async () => {
-    theWorkbenchWith({
+    theRecordedWith({
       state: "Closed",
       ready_to_grill: false,
       archived: true,
@@ -7046,7 +7389,7 @@ describe("unarchiving a conversation", () => {
   });
 
   it("posts to the conversation's own unarchive route", async () => {
-    const fetching = theWorkbenchWith(
+    const fetching = theRecordedWith(
       { state: "Closed", ready_to_grill: false, archived: true },
       whenever(
         `/api/ui/conversations/${OPEN.id}/unarchive`,
@@ -7067,7 +7410,7 @@ describe("unarchiving a conversation", () => {
   /// What the human is owed before a press that puts something back: that it is
   /// the list it returns to, and that it stays there.
   it("says the conversation goes back on the list", async () => {
-    theWorkbenchWith({
+    theRecordedWith({
       state: "Closed",
       ready_to_grill: false,
       archived: true,
@@ -7084,7 +7427,7 @@ describe("unarchiving a conversation", () => {
   /// The one thing left to refuse: a page drawn against a conversation that has
   /// since gone. Over the page, as every other refusal here goes.
   it("says over the page that the conversation is gone", async () => {
-    theWorkbenchWith(
+    theRecordedWith(
       { state: "Closed", ready_to_grill: false, archived: true },
       whenever(
         `/api/ui/conversations/${OPEN.id}/unarchive`,
@@ -7189,11 +7532,11 @@ describe("a second round", () => {
   /// from here: nothing stands under the timeline, and the steer that opens a
   /// round like this one is in the menu on the header.
   it("offers the steer and nothing else on a finished conversation", async () => {
-    theWorkbenchWith({ state: "Done" });
+    theRecordedWith({ state: "Done" });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await drawn(container, `.${timeline.timeline}`);
-    expect(container.querySelector(`.${timeline.startGrilling}`)).toBeNull();
+    expect(container.querySelector(`.${composer.startGrilling}`)).toBeNull();
 
     await openActions(container);
     await drawn(container, `.${actions.conversationActions} .${actions.steer}`);
@@ -10466,7 +10809,7 @@ describe("the pinned task list", () => {
     // the ordinary case: the server pins nothing and there is nothing to draw.
     expect(OPEN.pinned).toEqual([]);
 
-    theWorkbench();
+    theRecordedWith();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await drawn(container, `.${timeline.timeline}`);
@@ -11614,7 +11957,7 @@ describe("the status button", () => {
   /// which is the point of the move: what there is to do about a Conversation
   /// is reached from the thing that says what it is doing.
   it("opens the conversation's actions when it is pressed", async () => {
-    theWorkbench();
+    theRecordedWith();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     fireEvent.click(
@@ -11631,7 +11974,7 @@ describe("the status button", () => {
 
   /// And says so, in the mark every other thing that drops a menu says it in.
   it("carries the chevron that says it opens", async () => {
-    theWorkbench();
+    theRecordedWith();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const mark = await drawn(
@@ -11645,7 +11988,7 @@ describe("the status button", () => {
   });
 
   it("leaves the pane no ⋯ of its own", async () => {
-    theWorkbench();
+    theRecordedWith();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await drawn(container, `.${statusButton.status}`);
@@ -11699,7 +12042,7 @@ describe("the status button", () => {
   });
 
   it("says nothing is running in every other quiet moment", async () => {
-    theWorkbench();
+    theRecordedWith();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     expect(await saidRunning(container)).toBe("No agent running");
@@ -11768,7 +12111,7 @@ describe("a conversation that has stopped", () => {
   it("says nothing about a stop where nothing has stopped", async () => {
     expect(OPEN.blocked_on).toBeNull();
 
-    theWorkbench();
+    theRecordedWith();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const line = await standing(container);
@@ -12870,7 +13213,7 @@ describe("a wrap-up waiting on its checks", () => {
 /// between them, would be the button reading itself out.
 describe("a conversation that has ended", () => {
   it("says Done where the work reached the end of the ladder", async () => {
-    theWorkbenchWith({ state: "Done" });
+    theRecordedWith({ state: "Done" });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const line = await standing(container);
@@ -12881,17 +13224,53 @@ describe("a conversation that has ended", () => {
   });
 
   it("says Closed where the work stopped wherever it was", async () => {
-    theWorkbenchWith({ state: "Closed", ready_to_grill: false });
+    theRecordedWith({ state: "Closed", ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     expect((await standing(container)).word).toBe("Closed");
+  });
+
+  /// And the one thing a Cleanup leaves on the page: the word for what it took,
+  /// beside the word for where the work got to.
+  ///
+  /// A word rather than a banner, and only ever about a trim that has already
+  /// happened — nothing anywhere says one is coming.
+  it("names a trimmed conversation Trimmed beside its state", async () => {
+    theRecordedWith({
+      state: "Closed",
+      ready_to_grill: false,
+      archived: true,
+      trimmed: true,
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const line = await standing(container);
+
+    expect(line.word).toBe("Closed");
+    expect(line.trimmed).toBe("Trimmed");
+  });
+
+  /// And says nothing of the kind on one no sweep has reached, which is nearly
+  /// every conversation there is: the line is exactly what it was.
+  it("says nothing about trimming on one no cleanup has been through", async () => {
+    theRecordedWith({
+      state: "Closed",
+      ready_to_grill: false,
+      archived: true,
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const line = await standing(container);
+
+    expect(line.word).toBe("Closed");
+    expect(line.trimmed).toBeNull();
   });
 
   /// And a Draft is the third of them, for the other half of the same reason:
   /// nothing is supposed to be driving one either, so there is no status to
   /// say beside the word.
   it("says Draft on one nothing has started", async () => {
-    theWorkbench();
+    theRecordedWith();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const line = await standing(container);
@@ -12904,7 +13283,7 @@ describe("a conversation that has ended", () => {
   /// it beside the state rather than instead of it.
   it("says the state beside a status while the work is still going", async () => {
     for (const state of ["Grilling", "Implementing", "Wrapping", "FollowUp"] as const) {
-      theWorkbenchWith({ state, ready_to_resume: true });
+      theRecordedWith({ state, ready_to_resume: true });
       const { container, unmount } = mount(`/conversations/${OPEN.id}`);
 
       const line = await standing(container);
@@ -13348,23 +13727,32 @@ describe("the documents on a timeline", () => {
     await drawn(details(), `.${documentPane.document}`);
   });
 
-  /// The brief while it is still a draft is a field with the setup under it, and
-  /// every press on that card belongs to one of those.
-  it("leaves the drafting brief a field, unclamped and unpressable", async () => {
-    theWorkbench();
+  /// The brief while it is still a draft is the same card as the frozen one: no
+  /// field on the record, the rendering in the same clamp, and the press that
+  /// opens it. What it opens is the composer rather than the read-only pane —
+  /// the whole of the document, and under it the setup and the start.
+  it("clamps the drafting brief too, and opens the composer", async () => {
+    theRecordedWith();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const brief = await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`);
-    await drawn(container, `.${timeline.brief} .${app.grow} textarea`);
 
-    expect(brief.querySelector(`.${timeline.clamp}`)).toBeNull();
-    expect(brief.getAttribute("role")).toBeNull();
-    expect(brief.getAttribute("tabindex")).toBeNull();
-    expect(brief.classList.contains(pressable.pressable!)).toBe(false);
+    expect(brief.querySelector(`.${timeline.clamp} > .${timeline.briefBody}`)).toBeTruthy();
+    expect(brief.querySelector("textarea")).toBeNull();
+    expect(brief.getAttribute("role")).toBe("button");
+    expect(brief.classList.contains(pressable.pressable!)).toBe(true);
 
     fireEvent.click(brief);
 
-    expect(details().querySelector(`.${documentPane.document}`)).toBeNull();
+    const opened = await drawn(details(), `.${composer.composer}`);
+
+    expect(details().querySelector("h1")!.textContent).toBe("Brief");
+    // The markdown in the field rather than the rendering: what the pane opens
+    // on is the document as it is written.
+    expect(
+      (opened.querySelector("textarea") as HTMLTextAreaElement).value,
+    ).toBe(BRIEF.markdown);
+    expect(details().querySelector(`.${timeline.clamp}`)).toBeNull();
   });
 
   /// A notice is a sentence rather than a document, so its card is cut at one
@@ -13472,22 +13860,6 @@ describe("the configuration on the brief's pane", () => {
     },
     base_commit: "0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e76f32b11a",
   };
-
-  /// A conversation nobody has named has no branch to report: the name it is
-  /// carrying is Verkstead's own, and what the summary says is what will become
-  /// of it rather than a name nobody chose.
-  ///
-  /// Drawn on the adopting draft, whose brief is frozen from the start — which
-  /// is what makes it the one draft with a pane to open at all.
-  it("reports a branch nobody has named as one still to be chosen", async () => {
-    theWorkbench(
-      whenever(`/api/ui/conversations/${ADOPTING.id}`, json(ADOPTING)),
-    );
-    await openBrief(ADOPTING);
-
-    expect(configuration().Branch).toBe(UNNAMED);
-    expect(summary()!.textContent).not.toContain(ADOPTING.branch);
-  });
 
   it("says the repo, the branch, the base commit, the worktree and the pairings", async () => {
     theGrilling();
@@ -13958,19 +14330,19 @@ describe("landing on the end of the record", () => {
     await drawn(container, `.${shell.detailsPane} .${documents.section}`);
   });
 
-  /// A record with nothing openable on it selects nothing and the pane stays
-  /// bare paper — which is a Draft whose Brief is still being written, and the
-  /// state every Conversation starts in.
-  it("selects nothing on a record with nothing to open", async () => {
+  /// Every Conversation starts on a Brief, so a Draft with nothing else on its
+  /// record lands on the composer that Brief is written in — which is where the
+  /// human is going next in any case.
+  it("lands a draft on the composer its brief is written in", async () => {
     theWorkbench();
     const { container, history } = mount(`/conversations/${OPEN.id}`);
 
-    await drawn(container, `.${timeline.timeline}`);
-
-    expect(history.get()).toBe(`/conversations/${OPEN.id}`);
-    expect(
-      container.querySelector(`.${shell.detailsPane} .${paneHead.head}`),
-    ).toBeNull();
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${OPEN.id}/events/${BRIEF.id}`,
+      ),
+    );
+    await drawn(container, `.${shell.detailsPane} .${composer.composer}`);
   });
 
   /// And a path that already names a pane is a cold load of that pane — a
@@ -14086,5 +14458,133 @@ describe("the timeline following its bottom", () => {
       ).toHaveLength(record.length),
     );
     expect(scrolled.mock.calls.length).toBeGreaterThan(landed);
+  });
+});
+
+/// A Verkstead with no session to run: the state where a session would start,
+/// and no press that would start one.
+///
+/// The server says so on every conversation it sends — a Windows build has no
+/// terminal for an agent to work in — and this is the whole of what the page
+/// does about it. Asked here rather than on a Windows machine, which is the
+/// point of the fact being a value: the fixture says the server runs none, and
+/// what the page draws is drawn on whatever is running these tests.
+describe("a Verkstead that runs no sessions", () => {
+  /// The drafting conversation as such a server would send it.
+  const ABSENT: Partial<ConversationView> = { sessions: "NotOnWindowsYet" };
+
+  it("says so where the work would be started, and offers no press", async () => {
+    theWorkbenchWith(ABSENT);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const under = await drawn(container, `.${composer.startGrilling}`);
+
+    expect(under.textContent).toContain(NO_SESSIONS);
+    expect(
+      under.querySelector(`.${composer.start}`),
+      "and no Start work to press, ready or not",
+    ).toBeNull();
+  });
+
+  /// And the press beside it, on the page a conversation started from the
+  /// abandoned-roadmaps notice opens on: the same sentence, in the place the
+  /// same press would have been.
+  it("says the same where a stage would be adopted, and offers no press", async () => {
+    theWorkbench(
+      whenever(
+        `/api/ui/conversations/${ADOPTING.id}`,
+        json({ ...ADOPTING, ...ABSENT }),
+      ),
+    );
+    const { container } = mount(`/conversations/${ADOPTING.id}`);
+
+    const panel = await drawn(container, `.${adoption.adoption}`);
+
+    expect(panel.textContent).toContain(NO_SESSIONS);
+    expect(screen.queryByRole("button", { name: "Adopt" })).toBeNull();
+  });
+
+  /// And Resume goes off the menu, on a conversation the server still says
+  /// there is driving to start again for: what the press works out is which
+  /// session should be running, and there are none.
+  it("offers no resume, on a conversation the server says is ready for one", async () => {
+    theGrillingStanding(ABSENT);
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const menu = await openActions(container);
+    await drawn(menu, `.${actions.close}`);
+
+    expect(GRILLING.ready_to_resume).toBe(true);
+    expect(menu.querySelector(`.${actions.resume}`)).toBeNull();
+    expect(
+      menu.querySelector(`.${actions.steer}`),
+      "and the steer row stays: done is still somewhere to steer into",
+    ).toBeTruthy();
+  });
+
+  /// The steer modal is the one place where some of what it offers still works.
+  /// Four of the five targets run a session and are held shut with the reason
+  /// above them; done runs nothing, and is the move this build can still make.
+  it("holds the steer shut on every target that runs, and says why", async () => {
+    theGrillingStanding(ABSENT, whenever(STEERING, OVER_NOTHING, "POST"));
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(container);
+    const press = (await drawn(
+      modal,
+      `.${steerModal.steerButtons} .${steerModal.steer}`,
+    )) as HTMLButtonElement;
+
+    for (const target of ["Grilling", "Implementing"]) {
+      fireEvent.click(
+        await drawn(modal, `.${steerModal.steerTarget} input[value="${target}"]`),
+      );
+
+      await waitFor(() => expect(press.disabled).toBe(true));
+      expect(modal.textContent).toContain(NO_SESSIONS);
+    }
+
+    fireEvent.click(
+      await drawn(modal, `.${steerModal.steerTarget} input[value="Done"]`),
+    );
+
+    await waitFor(() => expect(press.disabled).toBe(false));
+    expect(
+      modal.textContent,
+      "and nothing is said about sessions where none would run",
+    ).not.toContain(NO_SESSIONS);
+  });
+
+  /// And every press that could still be made and refused says one thing.
+  ///
+  /// Five ways into a session and one answer: which press asked for one is not
+  /// something the human has to be told about, and five wordings of it would be
+  /// five people's guesses at the same sentence.
+  it("says one thing, whichever press asked for a session", () => {
+    expect(ADOPT_REFUSAL.NotOnWindowsYet).toBe(NO_SESSIONS);
+    expect(RESUME_REFUSAL.NotOnWindowsYet).toBe(NO_SESSIONS);
+    expect(STEER_REFUSAL.NotOnWindowsYet).toBe(NO_SESSIONS);
+    expect(RESOLVE_REFUSAL.NotOnWindowsYet).toBe(NO_SESSIONS);
+  });
+
+  /// And a start that was refused all the same — the page is only as fresh as
+  /// its last read, so a conversation that was drawn before the server said
+  /// anything about sessions still has a button to press.
+  it("answers a start that was refused with the same sentence", async () => {
+    theWorkbenchWith(
+      {},
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/grill`,
+        json("NotOnWindowsYet" satisfies GrillingStarted),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${composer.startGrilling} .${composer.start}`),
+    );
+
+    await waitFor(() => screen.getByText(NO_SESSIONS));
   });
 });

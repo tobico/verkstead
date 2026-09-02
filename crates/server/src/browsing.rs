@@ -32,8 +32,10 @@ use crate::watched::{Admission, Boundary, WatchedPaths};
 ///
 /// No path at all is the field standing empty, and the two scopes answer it
 /// differently: the watched scope hands back the Watched Paths themselves,
-/// which is where a browse bounded by them begins, and the anywhere scope reads
-/// `/`, which is where a browse bounded by nothing does.
+/// which is where a browse bounded by them begins, and the anywhere scope hands
+/// back the top of the machine, which is where a browse bounded by nothing
+/// does — and which is the one thing here the platforms disagree about, so see
+/// [`topmost`] for what each of them calls it.
 ///
 /// Blocking: the directory is opened, and — in the scope bounded by them — so
 /// is the file the Watched Paths are half said in.
@@ -55,13 +57,13 @@ pub(crate) fn list(
             Admission::Outside => DirectoryListing::OutsideWatchedPaths,
         },
 
-        // Rooted at `/`, and resolved here rather than by the boundary: this is
-        // the scope no boundary is consulted for, and the two questions the
-        // admission would have answered on the way — absolute, and there — are
-        // the same two questions asked of any path.
-        (BrowseScope::Anywhere, path) => {
-            let path = path.unwrap_or_else(|| PathBuf::from("/"));
+        // Rooted at the top of the machine, and resolved here rather than by
+        // the boundary: this is the scope no boundary is consulted for, and the
+        // two questions the admission would have answered on the way — absolute,
+        // and there — are the same two questions asked of any path.
+        (BrowseScope::Anywhere, None) => topmost(),
 
+        (BrowseScope::Anywhere, Some(path)) => {
             if !path.is_absolute() {
                 return DirectoryListing::NotAbsolute;
             }
@@ -99,6 +101,55 @@ fn roots(boundary: &Boundary<'_>) -> DirectoryListing {
         path: None,
         entries,
     }
+}
+
+/// Where a browse bounded by nothing begins, which is the one thing about this
+/// scope the platforms disagree on.
+///
+/// A Unix has one filesystem root and the browse opens on what `/` holds. A
+/// Windows machine has one root per drive and nothing above them — `/` is not
+/// even a path [`Path::is_absolute`] accepts there, having a root but no prefix
+/// — so the browse opens on the drives themselves, as a listing with no
+/// directory above it. Which is the shape [`roots`] hands the other scope back:
+/// the two scopes begin in different places, and both of them begin somewhere.
+#[cfg(not(windows))]
+fn topmost() -> DirectoryListing {
+    entries_of(Path::new("/"))
+}
+
+/// The drives, for the reason above.
+#[cfg(windows)]
+fn topmost() -> DirectoryListing {
+    let mut entries: Vec<DirectoryEntry> = drives(|drive| drive.is_dir())
+        .into_iter()
+        .filter_map(|drive| entry(root_name(&drive)?, drive))
+        .collect();
+
+    ordered(&mut entries);
+
+    DirectoryListing::Listed {
+        path: None,
+        entries,
+    }
+}
+
+/// The drive letters a machine answers to, as the roots they are: `C:\` rather
+/// than `C:`, which is the difference between the top of a drive and whatever
+/// directory that drive was last at.
+///
+/// Asked of the filesystem a letter at a time rather than of Win32: the call
+/// that hands back the whole set is a dependency this crate does not otherwise
+/// have, and twenty-six questions about a directory cost less than the one
+/// `read_dir` whichever answer is picked is about to get. Compiled on the
+/// platforms that have no drives as well, so the Linux runner tests it — which
+/// is how the platform's own directories are tested too, and what varies is
+/// `present` rather than anything this decides.
+#[cfg(any(windows, test))]
+fn drives(present: impl Fn(&Path) -> bool) -> Vec<PathBuf> {
+    (b'A'..=b'Z')
+        .map(|letter| PathBuf::from(format!("{}:\\", letter as char)))
+        .filter(|drive| present(drive))
+        .collect()
 }
 
 /// What one resolved directory holds.
@@ -401,7 +452,10 @@ mod tests {
     }
 
     /// The anywhere scope with nothing typed is `/`, which is where a browse
-    /// bounded by nothing begins.
+    /// bounded by nothing begins — on a machine that has a `/`, which is both
+    /// Unixes and not Windows. What that scope opens on there is the drives,
+    /// and the case below says so without needing one.
+    #[cfg(unix)]
     #[test]
     fn the_anywhere_scope_with_no_path_reads_the_filesystem_root() {
         let listing = list(&WatchedPaths::none(), BrowseScope::Anywhere, None);
@@ -412,6 +466,32 @@ mod tests {
 
         assert_eq!(path.as_deref(), Some("/"));
         assert!(!entries.is_empty(), "there is something in /");
+    }
+
+    /// Every letter is asked about and the ones that answer are the roots, each
+    /// spelled as the top of its drive rather than as the drive.
+    ///
+    /// Run wherever the suite runs, because what varies between the platforms
+    /// is which letters answer rather than any of the reasoning: the machine
+    /// stands in as the closure.
+    #[test]
+    fn the_drives_are_the_letters_something_is_mounted_on() {
+        let mounted = |drive: &Path| matches!(drive.to_str(), Some("C:\\") | Some("Z:\\"));
+
+        assert_eq!(
+            drives(mounted)
+                .into_iter()
+                .map(|drive| drive.display().to_string())
+                .collect::<Vec<_>>(),
+            ["C:\\", "Z:\\"]
+        );
+    }
+
+    /// And a machine with nothing mounted lists nothing, rather than offering a
+    /// letter that is not there.
+    #[test]
+    fn a_machine_with_no_drives_has_no_roots() {
+        assert!(drives(|_| false).is_empty());
     }
 
     /// A field halfway through a word, which is the ordinary state of one.

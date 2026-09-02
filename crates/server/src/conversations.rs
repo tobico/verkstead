@@ -22,7 +22,8 @@ use sqlx::SqlitePool;
 use verkstead_render::{
     Adopted, BaseRecorded, BranchRenamed, BriefSaved, CompanionAdded, CompanionBaseRecorded,
     CompanionBranchRenamed, CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved,
-    ConversationClosed, GrillingStarted, PairingView, PickedView, Started, Worktree,
+    ConversationClosed, GrillingStarted, PairingView, PickedView, RepoPairingsView, RepoSwitched,
+    Started, Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
 
@@ -151,32 +152,87 @@ async fn prefill(state: &AppState, id: i64, repo_id: i64) {
 
 /// What [`prefill`] does, with somewhere for a store error to go.
 async fn remembered(state: &AppState, id: i64, repo_id: i64) -> Result<()> {
-    let remembered = store::remembered_pairings(&state.pool, repo_id).await?;
+    let prefill = pairing_prefill(state, repo_id).await?;
 
     // A Repo last started with no grilling is prefilled with no grilling, which
     // is the memory doing exactly what it does for a Pairing: what the human
     // last picked, ready to be changed. Nothing is judged about the row that
     // runs nothing — there is no Profile to have gone — so it is applied
     // wherever it was remembered.
-    if remembered.grilling.skipped() {
+    if prefill.grilling.skipped() {
         store::skip_grilling(&state.pool, id).await?;
-    } else if let Some((profile_id, model)) = usable(&state.watched, remembered.grilling).await? {
-        store::set_grilling_pairing(&state.pool, id, profile_id, Some(&model)).await?;
+    } else if let Some(pairing) = prefill.grilling.pairing() {
+        store::set_grilling_pairing(
+            &state.pool,
+            id,
+            pairing.profile.id,
+            pairing.model.as_deref(),
+        )
+        .await?;
     }
 
-    if let Some((profile_id, model)) = usable(&state.watched, remembered.implementation).await? {
-        store::set_implementation_pairing(&state.pool, id, profile_id, Some(&model)).await?;
+    if let Some(pairing) = &prefill.implementation {
+        store::set_implementation_pairing(
+            &state.pool,
+            id,
+            pairing.profile.id,
+            pairing.model.as_deref(),
+        )
+        .await?;
     }
 
     // And the same one role along: a Repo last started with no review opens its
     // next Conversation on that row too.
-    if remembered.review.skipped() {
+    if prefill.review.skipped() {
         store::skip_review(&state.pool, id).await?;
-    } else if let Some((profile_id, model)) = usable(&state.watched, remembered.review).await? {
-        store::set_review_pairing(&state.pool, id, profile_id, Some(&model)).await?;
+    } else if let Some(pairing) = prefill.review.pairing() {
+        store::set_review_pairing(
+            &state.pool,
+            id,
+            pairing.profile.id,
+            pairing.model.as_deref(),
+        )
+        .await?;
     }
 
     Ok(())
+}
+
+/// What a Repo was last grilled with, judged as something to prefill pickers
+/// with — the whole of what [`prefill`] applies, and what the compose page
+/// fills its own pickers from before there is a Conversation to apply it to.
+///
+/// Read here rather than beside the Repo's other endpoints because the judging
+/// is this module's: what a new Conversation on this Repo would arrive showing
+/// is the question, and a second reading of the memory somewhere else would be
+/// a second answer to it.
+pub(crate) async fn pairing_prefill(state: &AppState, repo_id: i64) -> Result<RepoPairingsView> {
+    let remembered = store::remembered_pairings(&state.pool, repo_id).await?;
+
+    Ok(RepoPairingsView {
+        grilling: prefilled(&state.watched, remembered.grilling).await?,
+        implementation: usable(&state.watched, remembered.implementation).await?,
+        review: prefilled(&state.watched, remembered.review).await?,
+    })
+}
+
+/// One role's memory as a picker would show it, for the two roles that can
+/// remember the row that runs no session.
+///
+/// The row is not judged — there is no Profile to have gone — so it comes back
+/// as itself, and everything else goes through [`usable`].
+async fn prefilled(
+    watched: &crate::watched::WatchedPaths,
+    remembered: store::Picked,
+) -> Result<PickedView> {
+    if remembered.skipped() {
+        return Ok(PickedView::Skipped);
+    }
+
+    Ok(match usable(watched, remembered).await? {
+        Some(pairing) => PickedView::Under(pairing),
+        None => PickedView::Nothing,
+    })
 }
 
 /// A remembered Pairing as something to prefill a picker with, or `None` where
@@ -190,10 +246,14 @@ async fn remembered(state: &AppState, id: i64, repo_id: i64) -> Result<()> {
 ///
 /// A remembered role that was picked away is `None` here too — it is nothing to
 /// prefill a *Pairing* with, and its caller applies it on its own account.
+///
+/// What comes back is the Pairing whole, both halves settled: it is what one
+/// caller writes onto a new Conversation and what the other hands to a page, and
+/// neither of them should have to put the two together again.
 async fn usable(
     watched: &crate::watched::WatchedPaths,
     remembered: store::Picked,
-) -> Result<Option<(i64, String)>> {
+) -> Result<Option<PairingView>> {
     let Some(model) = remembered
         .pairing()
         .and_then(|pairing| pairing.model.clone())
@@ -208,7 +268,7 @@ async fn usable(
 
     Ok(
         (pairing.profile.broken.is_none() && pairing.profile.models.contains(&model))
-            .then_some((pairing.profile.id, model)),
+            .then_some(pairing),
     )
 }
 
@@ -595,6 +655,25 @@ pub(crate) async fn set_base_branch(
     })
 }
 
+/// Move a drafting Conversation onto another registered Repo.
+///
+/// Thin over the store, and for [`add_companion`]'s reason with one more behind
+/// it: everything a switch decides — which repository, what its base goes back
+/// to, and which companion is no longer one — is a question about the rows, and
+/// nothing has been checked out to ask git about. The two refusals that matter
+/// are the ones saying something *has* been settled elsewhere: a worktree, which
+/// the store answers off the row it wrote, and an adoption, whose repository was
+/// settled by the roadmap rather than by the human.
+pub(crate) async fn switch_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<RepoSwitched> {
+    Ok(match store::switch_repo(pool, id, repo_id).await? {
+        store::Switched::Switched => RepoSwitched::Switched,
+        store::Switched::NoSuchConversation => RepoSwitched::NoSuchConversation,
+        store::Switched::NotDrafting => RepoSwitched::NotDrafting,
+        store::Switched::Adopting => RepoSwitched::Adopting,
+        store::Switched::NoSuchRepo => RepoSwitched::NoSuchRepo,
+    })
+}
+
 /// Add a registered Repo for the work to run alongside.
 ///
 /// Thin over the store, and deliberately so: what a companion may be is decided
@@ -838,6 +917,17 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
 
     if conversation.state != store::Lifecycle::Draft {
         return Ok(GrillingStarted::NotDrafting);
+    }
+
+    // And in front of everything this press makes, on a build that runs no
+    // sessions: the branch, the worktree and the frozen Brief are what a session
+    // is started *into*, and making all three for a launch that cannot happen
+    // would leave the human a Conversation grilling with nothing grilling it.
+    // The pane draws the state rather than the button — see
+    // [`crate::sessions::run_on`] — and this is that rule asked again on
+    // arrival.
+    if state.sessions.here().absent() {
+        return Ok(GrillingStarted::NotOnWindowsYet);
     }
 
     // Read as rows rather than judged off the ids, which is the same reading the
@@ -1091,15 +1181,13 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // bundled grilling skill: a sandbox has no global `CLAUDE.md` to say what a
     // session is for, so the prompt is where it is said — see [`crate::skills`].
     if let Some(pairing) = conversation.grilling_pairing.pairing().cloned()
+        && let Some(prompt) = state
+            .sessions
+            .skills()
+            .map(|skills| skills::grilling(skills, &brief))
         && let Err(error) = state
             .sessions
-            .start(
-                pool,
-                &state.nudges,
-                &conversation,
-                &pairing,
-                &skills::grilling(&brief),
-            )
+            .start(pool, &state.nudges, &conversation, &pairing, &prompt)
             .await
     {
         tracing::error!(error = ?error, conversation_id = id, "a grilling session could not be started");
@@ -1401,6 +1489,14 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // one.
     if conversation.worktree.is_some() {
         return Ok(Adopted::NotDrafting);
+    }
+
+    // And the same stand-down the press beside this one makes, in the same place
+    // and for the same reason: what adopting makes is where a session works, and
+    // a stage taken up on a build that runs none is a stage nothing will start
+    // on. See [`start_grilling`].
+    if state.sessions.here().absent() {
+        return Ok(Adopted::NotOnWindowsYet);
     }
 
     // The one thing about the roadmap that is Verkstead's, and the whole of what

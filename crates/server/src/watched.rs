@@ -351,6 +351,12 @@ mod tests {
 
     /// A path that reads as inside a Watched Path and is not: the symlink is
     /// followed before the boundary is consulted.
+    ///
+    /// Made where a link can be made without asking anybody's permission, which
+    /// is both Unixes and not Windows. The code under test is the same
+    /// everywhere — it is `canonicalize` and a prefix — so what is lost there is
+    /// the making of the link rather than any of the boundary's own reasoning.
+    #[cfg(unix)]
     #[test]
     fn a_symlink_out_of_a_watched_path_is_outside_it() {
         let root = tempdir();
@@ -469,6 +475,7 @@ mod tests {
             .save_config(&crate::settings::Config::of(
                 crate::settings::GitAuthor::default(),
                 crate::settings::RustBuildCache::default(),
+                crate::settings::Cleanup::default(),
                 crate::store::ConflictResolution::Merge,
                 false,
                 vec![],

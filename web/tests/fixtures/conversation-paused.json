@@ -59,6 +59,7 @@
   },
   "resets": "3pm",
   "review_pairing": "Nothing",
+  "sessions": "Run",
   "shared": null,
   "state": "Implementing",
   "stop_asked": false,
@@ -102,6 +103,7 @@
       }
     }
   ],
+  "trimmed": false,
   "waiting": true,
   "waiting_on_checks": false,
   "working": false,

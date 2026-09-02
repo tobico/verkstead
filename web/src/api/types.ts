@@ -79,7 +79,7 @@ base: string, };
  * watching says itself on a Timeline instead — see the server's `continuing`
  * module, which starts the same stage by the other route.
  */
-export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | "RoadmapComplete" | "NoBrief" | "StageInFlight" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
+export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NotOnWindowsYet" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | "RoadmapComplete" | "NoBrief" | "StageInFlight" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
 /**
  * The Repo's registered name.
  */
@@ -567,6 +567,66 @@ export type CheckRollup = "Passed" | "Running" | "Failed";
 export type Checked = "Passed" | "Running" | "Failed";
 
 /**
+ * And the Cleanup as the human has just set it.
+ *
+ * The days are a string because that is what a form holds, and an empty one is
+ * *no duration configured* rather than a duration of nothing — which is what
+ * clearing the field means and what puts the default back. So is anything that
+ * is not a whole number of days: the page sends what was typed, and nothing
+ * here is refused over it.
+ */
+export type CleanupEdit = { trim: CleanupStepEdit, delete: CleanupStepEdit, };
+
+/**
+ * One row of it: the switch, and the days as they were typed.
+ */
+export type CleanupStepEdit = { enabled: boolean, days: string, };
+
+/**
+ * One of those two: whether it happens, and how long after the archiving.
+ *
+ * The switch is never null, the way the build cache's is not: what comes back
+ * is where the switch *sits* rather than whether anybody has touched it. The
+ * days are always a number for the same reason, with the flag beside them
+ * saying whether it is one somebody chose — which is what lets the field draw
+ * the default as a placeholder.
+ */
+export type CleanupStepView = { enabled: boolean, 
+/**
+ * How many days after the archiving, counted from the archiving itself
+ * rather than from the other step: the two clocks are independent, so a
+ * delete sooner than a trim is a Conversation deleted before it was ever
+ * trimmed rather than anything to put right.
+ */
+days: number, 
+/**
+ * Whether those days are ones somebody typed, rather than the default
+ * being shown.
+ */
+days_configured: boolean, };
+
+/**
+ * The Cleanup as the settings page draws it: the two things that happen to an
+ * archived Conversation, and when.
+ *
+ * Two rows of the same shape and two different answers with nothing
+ * configured, which is what the page has to draw: the trim is on at three
+ * days, and the delete is off at thirty.
+ */
+export type CleanupView = { 
+/**
+ * The bulk taken out of an archived Conversation: the full agent output,
+ * the Transcripts and the session names, which is everything a Share never
+ * carried.
+ */
+trim: CleanupStepView, 
+/**
+ * And the whole of it taken away, which is the one thing here that
+ * forgets.
+ */
+delete: CleanupStepView, };
+
+/**
  * One pull request the comment landed on.
  */
 export type CommentedOn = { 
@@ -1010,7 +1070,7 @@ unseen: boolean, };
  * to be wrong about is the *target* — a state whose work cannot be set going
  * from what the record holds.
  */
-export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "NoFollowUpBrief" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused" | "NoSuchCompanionRepo" | { "Companion": { 
+export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NotOnWindowsYet" | "NoInstruction" | "NoFollowUpBrief" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused" | "NoSuchCompanionRepo" | { "Companion": { 
 /**
  * The Repo's registered name.
  */
@@ -1141,6 +1201,15 @@ ready_to_grill: boolean,
  * are facts about the server that nothing else on this payload carries.
  */
 compiles_uncached: boolean, 
+/**
+ * Whether this Verkstead runs sessions at all — see [`SessionsHere`].
+ *
+ * A fact about the build rather than about this Conversation, and the same
+ * answer on every Conversation one server sends. Carried here for the
+ * reason [`ConversationView::compiles_uncached`] is: it is read where the
+ * work is started from, and nothing else on this payload says it.
+ */
+sessions: SessionsHere, 
 /**
  * Whether there is driving to start again: the Conversation is in a state
  * something ought to be driving, and nothing is.
@@ -1380,6 +1449,22 @@ timeline: Array<TimelineEvent>,
  */
 archived: boolean, 
 /**
+ * Whether the Cleanup has taken the bulk out of it — see the store's
+ * `cleanup` module, and **Trimmed** in the glossary.
+ *
+ * Two things on the page turn on it, and each of them is the loss
+ * explaining itself rather than a warning of one to come: the record names
+ * itself Trimmed where it says how the work ended, and a session's card —
+ * drawn from the summary that survived — says the detail was trimmed
+ * instead of opening on an empty pane.
+ *
+ * The mark rather than the clock. It stays true through an unarchiving and
+ * through a fresh archiving after one, because what was taken is gone
+ * whatever the Conversation does next, and a card whose drill-down is
+ * missing needs its explanation for as long as it is on the Timeline.
+ */
+trimmed: boolean, 
+/**
  * The Events that stay in view rather than scrolling past with the record.
  *
  * Apart from the Timeline rather than in it, because that is what pinning
@@ -1487,7 +1572,7 @@ export type EntryKind = "Directory" | "File" | "Repository";
  * the Repo they are about. Nothing gates the button on a companion: the
  * configuration is always complete, so refusal at the start is the whole story.
  */
-export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "EmptyBrief" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
+export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NotOnWindowsYet" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "EmptyBrief" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
 /**
  * What the companion Repo is called, which is what the human picked it
  * by and what they will go and look at.
@@ -2200,6 +2285,16 @@ export type Registered = "Added" | "NotAbsolute" | "Missing" | "OutsideWatchedPa
 export type Registration = { path: string, };
 
 /**
+ * Which registered Repo a drafting Conversation is to be moved onto.
+ *
+ * The id and nothing else, the way [`NewCompanion`] is: everything that
+ * follows a switch — the base going back to the rule, a companion that has
+ * just become the Conversation's own Repo going away — follows from the choice
+ * rather than being said again beside it.
+ */
+export type RepoChoice = { repo_id: number, };
+
+/**
  * One repository's block of a Set's Diff: what it is called, and its
  * uncommitted changes rendered as any other Diff is.
  *
@@ -2230,6 +2325,37 @@ repo: string | null, diff: DiffView, };
 export type RepoEntry = { id: number, name: string, path: string, default_branch: string, };
 
 /**
+ * What a Repo was last grilled with, as a Conversation started on it would
+ * arrive showing it — the prefill, read before there is a Conversation for it
+ * to have been applied to.
+ *
+ * The same three fields a [`crate::ConversationView`] carries and in the same
+ * shapes, because that is what this is: what the pickers of a freshly created
+ * draft on this Repo would say. A page filling its own pickers from this and a
+ * page reading them off a draft are drawing the same answer, and one shape is
+ * what keeps the two from wording it differently.
+ *
+ * Each of them is judged before it is handed over, exactly as creation judges
+ * it: a remembered Pairing whose Profile has broken, or whose Profile no
+ * longer lists the model it was remembered with, comes back as nothing picked
+ * — the same nothing a Repo with no memory at all comes back as.
+ */
+export type RepoPairingsView = { 
+/**
+ * One of the two roles whose memory can hold the row that runs no session,
+ * so this says which of three rather than whether anything is remembered.
+ */
+grilling: PickedView, 
+/**
+ * The one role that has no such row: a Pairing, or nothing.
+ */
+implementation: PairingView | null, 
+/**
+ * And the other role that has one.
+ */
+review: PickedView, };
+
+/**
  * What became of taking one off the registry.
  *
  * A removal rather than a deletion, which is why nothing here says anything
@@ -2241,6 +2367,11 @@ export type RepoEntry = { id: number, name: string, path: string, default_branch
  * the same kind of reason.
  */
 export type RepoRemoved = "Removed" | "NoSuchRepo" | "InUse";
+
+/**
+ * What became of moving a Conversation onto another Repo.
+ */
+export type RepoSwitched = "Switched" | "NoSuchConversation" | "NotDrafting" | "Adopting" | "NoSuchRepo";
 
 /**
  * One registered Repo opened: everything the card cannot hold, read at the
@@ -2334,7 +2465,7 @@ at: string, };
  * resolution session would work in, which a Conversation left Done for weeks is
  * the likeliest of any to have lost.
  */
-export type Resolved = "Resolving" | "NoSuchConversation" | "NotDone" | "NothingConflicts" | "NowhereToWork" | "WorktreeRefused";
+export type Resolved = "Resolving" | "NoSuchConversation" | "NotDone" | "NotOnWindowsYet" | "NothingConflicts" | "NowhereToWork" | "WorktreeRefused";
 
 /**
  * The submitted collection of Answers and Unanswered markers for one Question
@@ -2401,7 +2532,7 @@ nothing_else?: boolean, };
  * A recompute that quietly found nothing to launch is exactly the failure this
  * whole feature is replacing.
  */
-export type Resumed = "Resumed" | "NoSuchConversation" | "NotDriven" | "AlreadyDriven" | "NowhereToWork" | "WorktreeRefused" | "NoDirection" | "NothingToWork" | "NoGrillingPairing" | "NoImplementationPairing" | "NoFollowUpBrief";
+export type Resumed = "Resumed" | "NoSuchConversation" | "NotDriven" | "NotOnWindowsYet" | "AlreadyDriven" | "NowhereToWork" | "WorktreeRefused" | "NoDirection" | "NothingToWork" | "NoGrillingPairing" | "NoImplementationPairing" | "NoFollowUpBrief";
 
 /**
  * The roadmap opened: every stage brief of it, rendered.
@@ -2495,6 +2626,22 @@ why: string, };
  * different width.
  */
 export type Screen = { repaint: string, columns: number, rows: number, };
+
+/**
+ * Whether this Verkstead runs sessions at all, and where it does not, what to
+ * say about it.
+ *
+ * One fact about the build, said once and read everywhere a session would
+ * start: the pane draws it where the press would have been, and every way into
+ * a session refuses by it — see [`GrillingStarted::NotOnWindowsYet`], which is
+ * the same refusal under five names because there are five ways in.
+ *
+ * **A value rather than a `cfg`**, as the platform directories and the sandbox
+ * surface are: the arm a machine will never run is still an arm its tests call,
+ * so what a Windows build answers is testable on the Linux runner and the
+ * viewer's half is testable without a Windows machine anywhere.
+ */
+export type SessionsHere = "Run" | "NotOnWindowsYet";
 
 /**
  * One stored Question Set as the browser receives it: the document where this
@@ -2630,6 +2777,12 @@ export type SettingsEdit = { git_author: Author, github_token: TokenEdit,
  */
 rust_build_cache: BuildCacheEdit, 
 /**
+ * And what the Cleanup is to do after an archiving, as values for that
+ * reason again: two switches and two durations, and a save says where each
+ * of them is to stand.
+ */
+cleanup: CleanupEdit, 
+/**
  * And how a conflicted pull request is resolved where its Repo says
  * nothing, as a value for the same reason: there are two answers and a save
  * says which of them this is to be.
@@ -2723,6 +2876,11 @@ github_token: TokenSaved | null,
  * And how the shared Rust build cache stands.
  */
 rust_build_cache: BuildCacheView, 
+/**
+ * And what the Cleanup does to an archived Conversation, and how long
+ * after the archiving it does it.
+ */
+cleanup: CleanupView, 
 /**
  * And how a conflicted pull request is resolved in every Repo that has not
  * said otherwise.

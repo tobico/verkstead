@@ -19,6 +19,13 @@
 //! and neither is anything this file knows about. The middle pane is named for
 //! its place for that reason.
 //!
+//! Either of the outer two may be left out, and what is then drawn is two panes
+//! with one border between them. A share has no list to pick from, so the first
+//! goes; a Conversation whose record is the one Event has no Timeline worth
+//! standing beside it, so the second does and the details take the room. The
+//! hierarchy is the caller's to say, and a level with nothing in it is a level
+//! the frame does not draw.
+//!
 //! How wide they stand is the frame's, because a width is a property of the
 //! frame rather than of anything drawn in it. They are percentages kept per
 //! device (`widths.ts`) — one set for the device rather than one per page, with
@@ -139,8 +146,15 @@ export function Panes(props: {
   /// them where the sidebar's and the middle pane's were. Nothing else changes:
   /// the panes are the same panes, drawn by the same components, walked through
   /// one at a time on a phone.
+  ///
+  /// The middle one is absent where the level it stands for has nothing to
+  /// show: a Conversation whose record is the one Event has no Timeline worth
+  /// a column, so the workbench hands none in and the details take the room
+  /// the record would have had. Two panes again, and the divider between them
+  /// is the sidebar's — the same border, moving the same width, so the frame
+  /// this device settled its columns in is the frame it comes back to.
   conversations?: JSX.Element;
-  middle: JSX.Element;
+  middle?: JSX.Element;
   details: JSX.Element;
 
   /// What the middle pane holds, which is what it is called and what the
@@ -164,10 +178,29 @@ export function Panes(props: {
   /// workbench's columns, and the other way about.
   const picking = () => list() !== undefined;
 
+  /// And the middle pane, resolved once for the same reason the list is: the
+  /// frame asks whether there is one every time it works out its columns, and
+  /// a Timeline built afresh at each asking is a Timeline's worth of work
+  /// thrown away.
+  const record = children(() => props.middle);
+
+  /// Whether there is a level between the list and the details at all — see
+  /// `middle` above. Where there is not, the frame is the sidebar and the
+  /// details with the sidebar's own divider between them, which is the layout
+  /// the two of them already stand in below the last breakpoint.
+  const reading = () => record() !== undefined;
+
   /// Which layout is standing, which decides how many dividers there are and
   /// how much room each pane is allowed to leave the others.
   const beside = matching(BESIDE);
   const allThree = matching(ALL_THREE);
+
+  /// And whether all three of them are actually up, which is the width *and*
+  /// there being a middle pane to fill the column it brings: a frame handed no
+  /// Timeline stands two panes however wide the window is, so the second
+  /// divider never arrives and the width behind it is left exactly as this
+  /// device settled it.
+  const three = () => allThree() && reading();
 
   /// How wide the panes stand. Read off this device once, and written back when
   /// a drag is let go of rather than on the way — a width settled on is worth
@@ -223,7 +256,7 @@ export function Panes(props: {
   /// many panes are sharing it.
   const frame = (): Frame => ({
     rem: across(),
-    three: allThree(),
+    three: three(),
     picking: picking(),
   });
 
@@ -286,22 +319,35 @@ export function Panes(props: {
   /// phone should be reading. And the names are the standing layout's own: the
   /// stylesheet has a default behind each of them, so a name the frame does not
   /// carry is the untouched frame rather than a broken one.
+  ///
+  /// Which is why the frame with no middle pane names the sidebar's width and
+  /// nothing else: there is no column for the middle one to be the width of,
+  /// and a name written over a column that is not there would be this frame
+  /// answering for the one the Timeline comes back to.
   const columns = () => {
     if (!beside()) {
       return undefined;
     }
 
-    return picking()
+    if (!picking()) {
+      return { "--pane-pair": `${shown().pair}%` };
+    }
+
+    return reading()
       ? {
           "--pane-sidebar": `${shown().sidebar}%`,
           "--pane-middle": `${shown().middle}%`,
         }
-      : { "--pane-pair": `${shown().pair}%` };
+      : { "--pane-sidebar": `${shown().sidebar}%` };
   };
 
   return (
     <div
-      class={[styles.panes, picking() ? undefined : styles.two]
+      class={[
+        styles.panes,
+        picking() ? undefined : styles.two,
+        reading() ? undefined : styles.widened,
+      ]
         .filter(Boolean)
         .join(" ")}
       data-pane={props.pane}
@@ -321,7 +367,13 @@ export function Panes(props: {
           stands beside something, the middle pane's only where all three panes
           are up, and the pair's where there is no list and so no sidebar. Each
           sits between the two panes it parts, so the grid places it without
-          being told where. */}
+          being told where.
+
+          The sidebar's is the border of whatever stands to its right, which is
+          the Timeline where there is one and the details where there is not:
+          the same handle moving the same width either way, so the frame with
+          no middle pane keeps the columns this device settled and hands them
+          straight back when the Timeline returns. */}
       <Show when={beside() && picking()}>
         <Handle
           divider="sidebar"
@@ -334,14 +386,20 @@ export function Panes(props: {
         />
       </Show>
 
-      <section
-        class={`${styles.pane} ${styles.middlePane}`}
-        aria-label={props.middleLabel}
-      >
-        {props.middle}
-      </section>
+      {/* The middle pane, where the caller handed one in. Where it did not,
+          there is no such section in the document at all — the level is not
+          drawn rather than drawn empty, so nothing of what it would have
+          carried is left standing in a strip above the pane beside it. */}
+      <Show when={reading()}>
+        <section
+          class={`${styles.pane} ${styles.middlePane}`}
+          aria-label={props.middleLabel}
+        >
+          {record()}
+        </section>
+      </Show>
 
-      <Show when={allThree() && picking()}>
+      <Show when={three() && picking()}>
         <Handle
           divider="middle"
           label={`Resize the ${props.middleLabel.toLowerCase()} pane`}

@@ -140,19 +140,23 @@ export function openingAt(pathname: string): Opening | null {
 /// known yet — the Timeline draws a card per kind and needs no such question,
 /// and picking the end of a record is nothing but it.
 ///
-/// Three of them answer for themselves rather than by their kind: the Brief
-/// opens only once it has frozen — while it is being written the card is a field
-/// with the conversation's setup under it — a steer opens only where it carried
-/// a document, and the backlog only where there is still one to read. A move, a
-/// manual task and a steer into wrapping up have nothing to show at all, and
-/// each is drawn as a line rather than as a card for that reason.
+/// Two of them answer for themselves rather than by their kind: a steer opens
+/// only where it carried a document, and the backlog only where there is still
+/// one to read. A move, a manual task and a steer into wrapping up have nothing
+/// to show at all, and each is drawn as a line rather than as a card for that
+/// reason.
+///
+/// The Brief opens whatever its round has come to — the composer while that
+/// round is being drafted, and the read-only pane once the work has started
+/// from it. Which of the two it is is the pane's own question rather than this
+/// one's; a Brief is openable either way.
 ///
 /// The two lists open by their word rather than by the row's id, being read off
 /// the worktree rather than off the record. A row that landed several roadmaps
 /// draws a card apiece, and the last of them is the last card of that row.
 export function openingOf(event: TimelineEvent): Opening | null {
   if ("Brief" in event) {
-    return event.Brief.frozen ? event.Brief.id : null;
+    return event.Brief.id;
   }
 
   if ("Steer" in event) {
@@ -188,8 +192,9 @@ export function openingOf(event: TimelineEvent): Opening | null {
 /// leave the pane bare at the exact moment the human asked to be shown where
 /// the work got to.
 ///
-/// A record with nothing openable on it at all — a Draft with only the Brief
-/// being written — selects nothing, and the pane stays bare paper.
+/// A record with nothing openable on it at all selects nothing, and the pane
+/// stays bare paper. Which is nothing a Conversation of this workbench's ever
+/// is: every one of them starts on a Brief, so a Draft opens on its composer.
 export function lastOpening(timeline: readonly TimelineEvent[]): Opening | null {
   for (let at = timeline.length - 1; at >= 0; at -= 1) {
     const opening = openingOf(timeline[at]!);

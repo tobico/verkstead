@@ -3018,6 +3018,113 @@ pub async fn set_base_commit(pool: &SqlitePool, id: i64, commit: Option<&str>) -
     Ok(Edited::Saved)
 }
 
+/// What became of moving a drafting Conversation onto another Repo.
+///
+/// [`Edited`]'s two refusals with the registry's own and the adoption's added,
+/// rather than that enum reused: which Repo a Conversation is on is picked out
+/// of the registry, so a Repo that has been taken off it is a refusal the three
+/// edits above have no way of giving — and so is a Conversation whose repository
+/// was settled by the roadmap it is adopting rather than by the human.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Switched {
+    /// Moved.
+    Switched,
+
+    /// There is no Conversation with that id.
+    NoSuchConversation,
+
+    /// It is past drafting, or its branch has been cut, so what it is checked
+    /// out of is settled.
+    NotDrafting,
+
+    /// It is adopting a roadmap, and the roadmap is a file in the repository it
+    /// is on: moving the work would leave it adopting a name rather than a
+    /// roadmap.
+    Adopting,
+
+    /// There is no Repo with that id on the registry.
+    NoSuchRepo,
+}
+
+/// Move a drafting Conversation onto another registered Repo.
+///
+/// Refused off the same two questions the branch name and the base commit are —
+/// where the Conversation has got to, and whether its branch has been made — and
+/// the second matters more here than anywhere: a checkout is of one repository,
+/// and moving the work would leave a worktree of a repository the record no
+/// longer names.
+///
+/// And off a third the other two never have to ask: **whether it is adopting a
+/// roadmap.** Only the roadmap's *name* is kept — what it is is read off the
+/// repository at the base commit every time the page is drawn — so a
+/// Conversation moved onto another Repo would go looking for that name over
+/// there, and find either nothing to adopt or, where the two repositories each
+/// hold an `mvp`, a stage of an entirely different roadmap. Which repository an
+/// adoption is in was settled by the row that started it rather than by the
+/// human, so it is not theirs to change afterwards; what is, is putting the
+/// roadmap down and composing work of their own.
+///
+/// Three things follow from the move, and they are here rather than in the
+/// caller because a Conversation between them would be one nothing could read:
+///
+/// - the **base goes back to the rule**, because an override names a branch of
+///   the repository being left and the new one has its own default;
+/// - a **companion equal to the Repo picked goes away**, a Conversation's own
+///   Repo never being a companion of it — every other companion is kept, having
+///   nothing to do with which repository the work itself is in;
+/// - the **branch name and the Pairings are untouched**: a name the human typed
+///   is about the work rather than about the repository, and so is every
+///   account chosen to run it.
+pub async fn switch_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<Switched> {
+    if let Some(refusal) = not_drafting(pool, id).await? {
+        return Ok(match refusal {
+            Edited::NoSuchConversation => Switched::NoSuchConversation,
+            _ => Switched::NotDrafting,
+        });
+    }
+
+    if branch_made(pool, id).await? {
+        return Ok(Switched::NotDrafting);
+    }
+
+    if adopting(pool, id).await?.is_some() {
+        return Ok(Switched::Adopting);
+    }
+
+    // On the registry rather than merely in the table, for the reason a
+    // companion is: what a Conversation may be moved onto is what the human has
+    // registered, and one taken off it is no more choosable than one that was
+    // never there.
+    if super::registered_repo(pool, repo_id).await?.is_none() {
+        return Ok(Switched::NoSuchRepo);
+    }
+
+    let mut tx = pool
+        .begin()
+        .await
+        .with_context(|| format!("moving Conversation {id} onto Repo {repo_id}"))?;
+
+    sqlx::query("UPDATE conversations SET repo_id = ?, base_commit = NULL WHERE id = ?")
+        .bind(repo_id)
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("moving Conversation {id} onto Repo {repo_id}"))?;
+
+    sqlx::query("DELETE FROM companions WHERE conversation_id = ? AND repo_id = ?")
+        .bind(id)
+        .bind(repo_id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("dropping Repo {repo_id} as a companion of Conversation {id}"))?;
+
+    tx.commit()
+        .await
+        .with_context(|| format!("moving Conversation {id} onto Repo {repo_id}"))?;
+
+    Ok(Switched::Switched)
+}
+
 /// The reason this Conversation is not the human's to edit, or `None` where it
 /// is.
 ///

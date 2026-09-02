@@ -1,0 +1,296 @@
+/* Where a Conversation is drafted: the box the Brief is written in, the setup
+   along the inside of its bottom edge, and the press that starts the work under
+   it. See `Composer.tsx` — and `Compose.tsx`, which is the same box before
+   there is a Conversation under it and is painted from here for that reason.
+
+   The look is the composer of a chat app, because the act is the same one: a
+   piece of work is described in a box, a few options about how it is to be run
+   sit inside that box's edge, and one button underneath sends it. What is *in*
+   the row is `Setup.module.css`; what is here is the box around it. */
+
+/* The column the whole of it stands in, centred in the pane and capped at the
+   measure prose is read at everywhere else — the pane is as wide as the human
+   dragged it, and a box the full width of a wide one would be a paragraph
+   nobody could read a line of. */
+.composer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.composer > * {
+  width: 100%;
+  max-width: var(--measure);
+}
+
+.composer > :last-child {
+  margin-bottom: 0;
+}
+
+/* The box: one surface holding the field and the options, with the border it
+   draws standing in for the field's own — see the field below, which gives its
+   border up so there is one box here rather than a box inside a box. */
+.box {
+  padding: 0.5rem 0.25rem 0.35rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.9rem;
+}
+
+/* Which of the two is being typed in is the box's to say, the field inside it
+   having nothing left to say it with. */
+.box:focus-within {
+  border-color: var(--accent);
+}
+
+/* The field, drawn as the box rather than as a field inside it: no paper of its
+   own and no border, and the border kept at its width so the copy that gives
+   the field its height goes on measuring the same line breaks — see `.grow` in
+   `App.module.css`.
+
+   As tall as a few lines before anything is typed, because what it is asking
+   for is a description rather than a line. */
+.box .grow {
+  min-height: 5.5rem;
+  max-width: none;
+}
+
+.box textarea {
+  background: none;
+  border-color: transparent;
+}
+
+/* And nothing under the pointer or the caret either: the box around it is
+   already saying both. Inside the query every hover rule in the app is written
+   in — see `styles/base.css`. */
+.box textarea:focus-visible {
+  border-color: transparent;
+}
+
+@media (hover: hover) {
+  .box textarea:hover {
+    border-color: transparent;
+  }
+}
+
+/* The Brief where it is a document rather than a field — an adopting
+   Conversation's, which is the stage's own. At the padding the field beside it
+   is read at, so the box reads the same whichever it is holding. */
+.written {
+  padding: 0.5rem 0.6rem;
+}
+
+/* What a save cannot do, said under the box it happened in. */
+.failure {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+/* What happens next, under the box and against its far edge: it is what becomes
+   of what is in the box rather than another thing to fill in, which is the whole
+   of why it is the one control drawn outside. */
+.startGrilling {
+  margin-top: 0.85rem;
+  text-align: end;
+}
+
+.startGrilling .start {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+/* Two ways of not being pressable, drawn the same because they read the same:
+   a press already in flight, and a conversation that is not ready yet. The
+   second one is only `aria-disabled`, so it still takes the press — and what it
+   does with it is say what is missing. */
+.startGrilling .start:disabled,
+.startGrilling .start.inert {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.startGrilling .failure {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+/* And what stands where the button would be on a Verkstead that runs no
+   sessions: the same size as the note under a button, because that is what it
+   is — the state, said in words, where there is nothing to press. Left-aligned
+   against the box rather than following the button to the far edge: it is a
+   sentence to read, and the end of the line is not where one starts. */
+.startGrilling .noSessions {
+  margin: 0;
+  font-size: 0.9rem;
+  text-align: start;
+}
+
+/* Under the pointer, the one filled button on the pane: it deepens its accent.
+   Never while it is refusing the press — the start has two ways of doing that
+   and this excludes both — and inside a query, because a hover state has to be
+   (see `styles/base.css`). */
+@media (hover: hover) {
+  .startGrilling .start:not(:disabled):not(.inert):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}
+
+/* The roadmap the compose page has been loaded with, standing where the field
+   would be: the box locks to it, an adopted stage's brief being the
+   repository's own. At the padding the rendering beside it is read at, so the
+   box reads the same whichever of the three it is holding. See `Compose.tsx`. */
+.loaded {
+  padding: 0.5rem 0.6rem;
+}
+
+/* The roadmap's name, whatever it calls itself, and the way back out at the far
+   end — one line, wrapping on a phone rather than pushing the × off the card. */
+.roadmapLine {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.5rem;
+  align-items: baseline;
+  margin: 0 0 0.25rem;
+}
+
+.roadmapTitle {
+  color: var(--ink-soft);
+}
+
+/* The mark that puts the roadmap down, pushed to the far end of that line: it is
+   drawn as the companion rows' own × is, for the reason it is the same act —
+   taking a thing back off what is being composed. */
+.clear {
+  margin-left: auto;
+  padding: 0 0.3rem;
+  font: inherit;
+  line-height: 1;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+/* The stage that would be started, which is what the press under the box would
+   actually do. */
+.stage {
+  margin: 0 0 0.5rem;
+  font-weight: 600;
+}
+
+/* The dropdown that loads one, at the near edge of the row the presses are at
+   the far edge of — pushed there by the presses' own `flex-end`, so a row with
+   no roadmaps to offer is the pair of presses exactly as it was.
+
+   An action with a chevron rather than a label over a value: the row inside the
+   box says what the work is, and this says what to put in the box. */
+.adopt {
+  margin-right: auto;
+}
+
+.adopt > button {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.6rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+}
+
+/* Hung from the trigger's near edge rather than its far one, the trigger being
+   the first thing in the row — and never wider than the window it comes down
+   over. Capped and scrolling inside the cap: a workbench watching a handful of
+   repositories has more roadmaps than a phone has room for. */
+.adopt > [role="menu"] {
+  right: auto;
+  left: 0;
+  width: min(22rem, calc(100vw - 2.5rem));
+  max-height: min(28rem, 70vh);
+  overflow-y: auto;
+}
+
+/* The roadmap's name over the stage that would be started, because on a phone
+   the two of them do not share a line — and the Repo beside the name, since the
+   list is flat and two repositories may each hold an `mvp`. */
+.roadmapRow .what {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.4rem;
+}
+
+.roadmapRow .in,
+.roadmapRow .next,
+.roadmapRow .found {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* Where the roadmap was found, on its own line under the stage and only there
+   when it is somewhere other than the default branch. */
+.roadmapRow .found {
+  display: block;
+}
+
+/* And the compose page's presses, which are the same one with another beside
+   it: a Conversation can be created without being started, and that is the
+   quieter of the two. A row, so the pair sits against the far edge the start
+   alone sits against — inside `.startGrilling`, which is where what they have
+   to say still goes. */
+.presses {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+
+/* The secondary one: the shape of the start beside it and the paint of an
+   outline, because creating without starting is the smaller of the two acts and
+   a page of buttons all painted as the primary one says nothing about which of
+   them matters.
+
+   Painted here rather than handed the app's [`QuietButton`], which is a control
+   with no disabled state: this one has to be able to say that there is nothing
+   to create yet. */
+.presses .draft {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.presses .draft:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+@media (hover: hover) {
+  .presses .draft:not(:disabled):hover {
+    color: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+
+  /* The two quiet controls under the box deepen their accent the way the
+     filled one deepens its fill. */
+  .adopt > button:not(:disabled):hover {
+    color: var(--accent-deep);
+  }
+
+  .clear:hover {
+    color: var(--ink);
+  }
+}

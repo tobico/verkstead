@@ -46,7 +46,7 @@ import type {
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty } from "../notices";
-import { heldPaths } from "./held";
+import { heldCleanup, heldPaths } from "./held";
 import styles from "./PathEditor.module.css";
 
 /// The settings as they stand, read once for every pane that draws them — the
@@ -140,6 +140,8 @@ export function useWritingPaths() {
             ? (standing?.rust_build_cache.size ?? "")
             : "",
         },
+        // And what becomes of an archived Conversation — see [`heldCleanup`].
+        cleanup: heldCleanup(standing),
         conflict_resolution: standing?.conflict_resolution ?? "Merge",
         share_on_done: standing?.share_on_done ?? false,
         ...lists,

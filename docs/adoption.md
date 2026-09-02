@@ -32,7 +32,7 @@ The vocabulary in bold is the project's, defined once in
 | `roadrunner` — a terminal per run, driving `.tasks/` and `docs/roadmaps/` | The orchestrator, driving the same two files off the Repo, with the run visible on a **Timeline** instead of scrolling past |
 | roadrunner's interruptions | A **Halt** and its stop **Notice** — pushed to your phone, read where the work is, and answered by one **Resume** |
 | askance — one queue of Question Sets for the machine | **Question Sets** on the Timeline of the Conversation they were asked from |
-| The skills installed under `~/.claude/skills` | **Skills** shipped inside the binary and mounted read-only at `/verkstead/skills`, with the account's own hidden behind an empty directory, so a session's behaviour is the product's |
+| The skills installed under `~/.claude/skills` | **Skills** shipped inside the binary and read-only inside at a path no backend owns, with the account's own not reachable at all, so a session's behaviour is the product's |
 | A gate at every commit | No commit gates. Review consolidates in the wrap-up, per pull request |
 
 What stays: **askance is a separate, maintained product**, and the
@@ -42,8 +42,24 @@ wrappers that launched it — see [The old tools](#the-old-tools).
 
 ## Getting it running
 
-Nothing has been released under this name yet, so the flake is the whole of the
-install. On a NixOS host, import it and enable the service:
+Nothing has been released under this name yet, so what follows is what a `v*`
+tag produces rather than something to fetch today — [releasing.md](releasing.md)
+says what a tag builds and where it puts it.
+
+There are four ways in, and they are four different things rather than four
+spellings of one. **The flake and the NixOS module run the headless daemon**, on
+a machine that is always on and answering from wherever you are. **The AppImage
+is the same server started from an icon**, on the Linux desktop in front of you,
+with the viewer in your browser and a tray icon over it. **The dmg is that same
+app for a Mac**, with the icon in the menu bar instead. **The exe is that same
+app for Windows**, and is the whole download rather than something to install.
+Which one you want is which of those machines you were describing; two at once
+is two Verksteads, and the second to reach port 8422 says so in a dialog and
+exits.
+
+### The daemon, on NixOS
+
+On a NixOS host, import the flake and enable the service:
 
 ```nix
 services.verkstead = {
@@ -97,12 +113,237 @@ large its compiled half may grow, are in the workbench settings; it is on with
 nothing configured. `systemctl clean --what=cache verkstead` empties it, and
 nothing but build output is in it.
 
+The **Data Directory** is not one of the three either, and not a choice on this
+module: the unit keeps it in its own state directory, `/var/lib/verkstead`, and
+passes it as `--data-dir`. Started without that flag — the same package run by
+hand — Verkstead keeps it in the platform's own place instead:
+`~/.local/share/verkstead` on Linux, `~/Library/Application Support/Verkstead`
+on macOS, `%APPDATA%\Verkstead` on Windows. One directory either way, holding
+the database, the Worktrees, the Skills, the handoff directories and both
+settings files.
+
 The server binds loopback and speaks plain HTTP. Answering from a phone needs
 HTTPS, which is `tailscale serve --bg 8422` in front of it — and push
 notifications need that HTTPS to work at all.
 
-Out of a checkout instead, which is the same server with `verkstead.db` in the
-working directory, is [development.md](development.md#quickstart).
+### The desktop app, on a Linux machine
+
+`Verkstead-x86_64.AppImage` is one file holding the server, the viewer and every
+library the tray is drawn over, so a machine with none of them installed needs
+nothing else to draw a tray icon. x86_64 only: an arm64 Linux desktop has the
+bare CLI and `verkstead serve`. Downloaded, made executable — a Release asset
+carries no mode — and run, it serves on `127.0.0.1:8422`, opens the viewer in the default
+browser, and puts an icon in the tray with the four things a browser tab cannot
+do for itself: **Open** brings the viewer back, **View Logs** opens the file the
+server's logging goes to when there is no terminal to print it in, **Launch on
+Startup** is a checkbox over the desktop's own startup registration, and
+**Exit** stops the server. `--no-open` starts it without the browser, and
+`--data-dir` moves the Data Directory off `~/.local/share/verkstead`.
+
+**A desktop with no tray host shows no icon, and nothing is wrong.** Vanilla
+GNOME is the case people meet — it draws no tray, and an AppIndicator extension
+is what gives it one. Verkstead cannot tell that from a tray that is drawing the
+icon, because the appindicator registers on the bus either way, so there is no
+message it could honestly give you. What it does instead is what it does
+everywhere: serve, and open the viewer. The viewer is the whole interface — the
+tray holds those four items and nothing else — so what is lost is the icon
+rather than the app: the viewer is a URL you already have, the log file is in
+the platform's log directory, and stopping it is stopping the process. The
+extension is what gets the four back, and there is nothing to reinstall or
+reconfigure here once it is on.
+
+**Three things stay the machine's**, and a bundle is the wrong place for any of
+them.
+
+**Sessions need bubblewrap**, and it cannot ride inside: an AppImage is mounted
+`nosuid` and its files sit at a path made for one run, so a copy carried in the
+bundle would be denied the privilege bwrap needs however it was granted. The
+NixOS module puts it on the service's path; a desktop elsewhere wants the
+distribution's `bubblewrap` package installed.
+
+**The C library is the host's**, because a process holding two of them has two
+of everything a C library keeps. The bundle is built against glibc 2.35, which
+is the floor it runs on: Ubuntu 22.04, Debian 12 and anything newer will load
+it, and a distribution older than those — RHEL 9 and its family among them —
+will not, saying `GLIBC_2.35 not found` and nothing friendlier.
+
+**And FUSE, because an AppImage mounts itself.** It wants a `fusermount` on the
+`PATH` and a `/dev/fuse` to open; every desktop install has both, and a minimal
+or hardened one may not. Without them the file says so — "Cannot mount AppImage,
+please check your FUSE setup" — and `--appimage-extract-and-run` is the way past
+it for a machine you cannot change.
+
+### The desktop app, on a Mac
+
+`Verkstead-universal.dmg` holds `Verkstead.app`: the same server and the same
+viewer the AppImage carries, drawn over AppKit instead of GTK, and universal —
+the Apple silicon build and the Intel one are in the one executable, so there is
+one download and no architecture to choose between. macOS 11 is the oldest it
+will start on. Open the image and drag Verkstead into the Applications folder
+beside it in the window, which is the whole of the install.
+
+**The first launch is then refused, and that is expected.** The app is unsigned
+— there is no Developer ID behind it, which is
+[ADR-0012](adr/0012-desktop-tray-binary.md)'s decision rather than an oversight
+— and Gatekeeper will not open an app that arrived over the internet unsigned
+just because somebody double-clicked it. What it says is that macOS "could not
+verify" Verkstead "is free of malware", in a dialog with no way past on it.
+There is a way past, and it is three steps — the first of them being the launch
+that fails, because the refusal is what puts Verkstead in the list the second
+step reads:
+
+1. Double-click **Verkstead** in Applications, and click **Done** on the
+   refusal.
+2. Open **System Settings → Privacy & Security** and scroll down to
+   **Security**. `"Verkstead" was blocked to protect your Mac` is there with an
+   **Open Anyway** button beside it: click it, and authenticate.
+3. macOS asks once more, in a dialog that this time has an **Open Anyway** on
+   it. Click that, and the app starts.
+
+Once, rather than at every launch: what was approved is that copy of the app,
+and starting it afterwards — by hand, or from Launch on Startup — is ordinary.
+Replacing it with a newer download is a different copy and wants the same three
+steps again.
+
+What is on the screen after that is an icon in the menu bar, and the menu on it
+is the Linux tray's four: **Open** brings the viewer back, and heads the menu a
+click on the icon opens; **View Logs** opens the file under
+`~/Library/Logs/Verkstead` that the server's logging goes to when there is no
+terminal to print it in; **Launch on Startup** is a checkbox over a launch
+agent at `~/Library/LaunchAgents/net.tobico.Verkstead.plist`; and **Exit**
+stops the server. `--no-open` starts it without the browser and `--data-dir`
+moves the Data Directory off `~/Library/Application Support/Verkstead`, both of
+them for a run from a terminal — an app launched from Finder is launched with no
+arguments at all.
+
+macOS keeps a **Login Items** list of its own beside that plist, in a database
+the file is not in, and the checkbox cannot see it: switching Verkstead off
+there leaves the box ticked and the plist where it was.
+
+**Sessions run on a Mac**, and what one may reach is the same description as on
+Linux rendered over Apple's sandbox instead of bubblewrap: the Conversation's
+Worktree, the Repo's git directory and the handoff directory writable, each
+Companion Repo at the mode it was set to, the Sandbox Configuration's entries,
+the Build Cache with the machine's one `sccache` behind it, a HOME of the
+session's own with the Agent Profile's account inside it, the Skills and the
+`verkstead` a session asks with read-only, the system read-only, `/tmp`, the
+network whole and unfiltered, and nothing else of the machine.
+
+**`/tmp` is the one place a Mac session reaches more than a Linux one**, and
+the one thing on that list that is not the same on both. On Linux it is a
+filesystem of the session's own: it holds nothing of the machine's, and it goes
+when the session does. A policy has nothing like that to offer, so on a Mac it
+is your real `/tmp` — a session can read whatever else on the machine left
+something there, and what it writes stays behind for whoever looks. That is
+deliberate rather than an oversight: giving a session a temporary directory of
+its own would mean refusing every tool that reaches for the literal `/tmp`,
+which is most of them. Nothing of Verkstead's is kept there — the handoff
+document a grilling writes goes under the session's own HOME on a Mac, so two
+Conversations running at once are not writing to one path.
+
+**What differs is that the boundary refuses rather than hides**, and it is worth
+knowing which of the two you have. A session on Linux is in a namespace your
+home directory was never in; a session on a Mac is looking at a machine that has
+one, and is refused every byte of it. What it can still read is the metadata: a
+path it may not open answers `stat` and then refuses to open, because that is
+what a Mac looks like from inside a policy and a rule per path to pretend
+otherwise would buy nothing. And what a mount makes out of nothing is made for
+real instead: the session's HOME, the account linked into it, and the directory
+holding the Skills and the `verkstead` binary are all really there under the
+Data Directory, and what keeps one Conversation out of another's is the policy
+rather than the absence.
+
+**Nothing outlives the app.** Exit off the menu is a stop where it stands, as it
+is on Linux, and so is the process being killed outright: every session and the
+compile server go with it either way. Linux has that from bubblewrap's
+`--die-with-parent`; a Mac has no such flag, so Verkstead starts a keeper beside
+each sandbox whose whole job is to end it once the server is gone.
+
+**Two things stay the machine's**, where three do on Linux.
+
+**The tools a session runs**, because the bundle is the server and the viewer
+and not a toolchain. `git`, `node`, `cargo` and whatever else an agent reaches
+for are the Mac's own: Apple's under `/usr/bin`, where `git` arrives with the
+Xcode Command Line Tools; Homebrew's under `/opt/homebrew`; and nix's under
+`/run/current-system` where the Mac is running nix-darwin. All three are on a
+session's `PATH` inside and readable through the boundary, and a Mac with none
+of them installed has sessions that can run a shell and not much else.
+
+**And the sandbox itself**, which is `/usr/bin/sandbox-exec`: on every Mac,
+nothing to install, and deprecated by Apple with no replacement an unsigned app
+can use — the supported way to sandbox is an entitlement on a signed bundle,
+applied to the app itself rather than to a child it spawns. ADR-0012 takes that
+with open eyes, and it is the one thing here that could stop working without
+anybody touching Verkstead: the day the command goes, Mac sessions go with it
+until something replaces them.
+
+### The desktop app, on Windows
+
+`Verkstead-x86_64.exe` is the whole download and the whole install: the server,
+the viewer and everything the tray is drawn with in one file, with no installer
+and no MSI behind it (ADR-0012). It is portable — put it wherever you keep such
+things, a folder of your own or a stick, and double-click it. x86_64 only, which
+is every Intel and AMD machine, and an arm64 one runs it under the emulation
+Windows does for exactly this.
+
+**The first launch is then stopped, and that is expected.** The exe is unsigned
+— there is no code-signing certificate behind it, which is
+[ADR-0012](adr/0012-desktop-tray-binary.md)'s decision rather than an oversight
+— and Windows marks a file that arrived from the internet, so SmartScreen puts a
+blue **Windows protected your PC** window in front of it with a **Don't run**
+button and nothing else that looks like a way on. There is a way on, and it is
+two clicks:
+
+1. Click **More info**, which is the line under the message and the whole of
+   what is hidden here.
+2. It names the file and says *Unknown publisher*, and a **Run anyway** button
+   appears at the bottom. Click that.
+
+Once, rather than at every launch: what was allowed through is that copy of the
+file, and starting it again — by hand, or from Launch on Startup — is ordinary.
+A newer download is a different file and wants the same two clicks. The other
+way round is to take the mark off before the first launch instead: right-click
+the exe, **Properties**, and tick **Unblock** at the bottom of the **General**
+tab.
+
+What is on the screen after that is an icon in the notification area, and the
+menu on it is the Linux tray's four: **Open** brings the viewer back, and is
+what a double-click on the icon does; **View Logs** opens the file under
+`%LOCALAPPDATA%\Verkstead` that the server's logging goes to when there is no
+console to print it in; **Launch on Startup** is a checkbox over a
+`net.tobico.Verkstead` value under
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`; and **Exit** stops the
+server. **Windows hides an icon it has not seen before**, in the flyout the `^`
+on the taskbar opens — dragging it out of there onto the taskbar is what pins
+it, and until you do, the app is running with its icon one click further away
+than this describes.
+
+**A moved exe repoints its own registration.** Every launch rewrites the Run
+value while it is there, with the path of the file that is running, so a
+portable exe that has been moved to another folder heals the entry the next time
+you start it by hand — and a machine that never ticked the box is never
+registered. What the box cannot see is Windows' own second opinion: the
+**Startup apps** tab in Task Manager, which Explorer records separately, so
+switching Verkstead off there leaves the box ticked and the value where it was.
+
+`--no-open` starts it without the browser and `--data-dir` moves the Data
+Directory off `%APPDATA%\Verkstead`, both of them for a run from a terminal — an
+app started from Explorer is started with no arguments at all. It is a
+windows-subsystem binary, so double-clicking it opens no console window, and a
+run from PowerShell prints nothing where you started it: the log file is the
+account of a run either way.
+
+**Sessions do not run on Windows**, and the workbench says so where one would be
+started rather than failing to start one: *Verkstead does not run sessions on
+Windows yet: an agent works in a terminal, and Windows has none to give it.*
+Everything else there works — the Repos, the Briefs, the Question Sets, the
+Timeline, the pull requests — and a Conversation whose sessions should run is a
+Conversation for a Linux machine or a Mac. Bringing them here is a later stage's
+work, and nothing about this download changes when it lands.
+
+Out of a checkout instead — the same server, told `--data-dir .` so that
+`verkstead.db` and the rest land in the checkout rather than in the platform
+directory — is [development.md](development.md#quickstart).
 
 ## A day's work
 

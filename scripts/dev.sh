@@ -6,4 +6,4 @@ popd
 
 cargo build
 
-RUST_LOG=verkstead_server=debug cargo run serve --watched-path $HOME/src --watched-path $HOME/work --data-dir /var/lib/verkstead
+RUST_LOG=verkstead_server=debug cargo run --bin verkstead-desktop -- --data-dir /var/lib/verkstead

@@ -82,6 +82,16 @@
   box-shadow: var(--lift);
 }
 
+/* And the same card holding controls rather than rows: the composer's Repo
+   dropdown is a branch field, two pickers and the companion rows they
+   configure, which is a form and not a list of things to press. So it is given
+   the room a form needs, and every rule below that draws a row is kept off it —
+   a `×` inside one would otherwise come down full width, laid out as a menu
+   entry. */
+.drop.panel {
+  padding: 0.75rem;
+}
+
 /* The same card, put where the pointer was rather than under a trigger: a menu
    opened by a right-click has no button to hang from. Fixed to the window,
    because the coordinates a pointer event carries are the window's own — and
@@ -97,7 +107,7 @@
 /* Every row of every menu: drawn as the text it is rather than as a control,
    because a menu of buttons that looked like buttons would read as a form to
    fill in. */
-.drop button,
+.drop:not(.panel) button,
 .drop a[role="menuitem"] {
   display: flex;
   flex-direction: column;
@@ -146,7 +156,7 @@
 
 /* The row the keyboard has walked to, which is no pointer's doing and so is
    not inside the query at the foot of this file. */
-.drop button:focus-visible,
+.drop:not(.panel) button:focus-visible,
 .drop a[role="menuitem"]:focus-visible {
   background: var(--paper);
 }
@@ -161,7 +171,7 @@
    the `--ink` it darkens to while its own menu is down, so a mark under the
    pointer and a mark with a drop under it never read as the same thing. */
 @media (hover: hover) {
-  .drop button:not(:disabled):hover,
+  .drop:not(.panel) button:not(:disabled):hover,
   .drop a[role="menuitem"]:hover {
     background: var(--paper);
   }

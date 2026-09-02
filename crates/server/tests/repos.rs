@@ -227,6 +227,12 @@ async fn a_repo_outside_the_watched_paths_is_refused_by_the_server() {
 
 /// A path that reads as inside a Watched Path and is not: the symlink is
 /// followed before the boundary is consulted.
+///
+/// Made where a link can be made without asking anybody's permission,
+/// which is both Unixes and not Windows: what the boundary does with one is
+/// the same reasoning everywhere, so what is lost there is the making of the
+/// link rather than any of it.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_repo_reached_through_a_symlink_out_of_a_watched_path_is_refused() {
     let root = tempfile::tempdir().unwrap();
@@ -683,8 +689,8 @@ async fn a_repo_that_was_removed_cannot_be_opened() {
 }
 
 /// A Repo taken off the registry is off every list that offers Repos for new
-/// work — this one, the New conversation menu behind it, and the roadmap notice,
-/// all of which are the same read.
+/// work — this one, the compose page's Repo dropdown behind it, and the
+/// roadmaps there are to adopt, all of which are the same read.
 #[tokio::test]
 async fn a_removed_repo_is_off_the_list() {
     let watched = tempfile::tempdir().unwrap();

@@ -20,7 +20,7 @@ use serde::de::DeserializeOwned;
 use tower::ServiceExt;
 use verkstead_render::{
     BriefSaved, Broken, ConversationView, PickedView, ProfileAccount, ProfileChosen,
-    ProfileDeleted, ProfileEntry, ProfileSaved, Registered, Started,
+    ProfileDeleted, ProfileEntry, ProfileSaved, Registered, RepoPairingsView, Started,
 };
 use verkstead_server::{WatchedPaths, open_database, router_watching, store};
 
@@ -477,6 +477,12 @@ async fn a_pair_outside_the_watched_paths_is_refused_by_the_server() {
 /// A path that merely *reads* as inside a Watched Path is not inside one: the
 /// symlink is followed before the boundary is consulted, exactly as it is for a
 /// Repo.
+///
+/// Made where a link can be made without asking anybody's permission,
+/// which is both Unixes and not Windows: what the boundary does with one is
+/// the same reasoning everywhere, so what is lost there is the making of the
+/// link rather than any of it.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_symlink_out_of_the_watched_paths_does_not_get_a_pair_in() {
     let (watched, _dir, app) = workbench().await;
@@ -754,6 +760,12 @@ async fn an_opencode_home_without_the_directories_opencode_reads_is_refused() {
 /// And its home is judged the way a pair's halves are: named by what it is when
 /// it has gone, and against the boundary rather than only against the
 /// filesystem.
+///
+/// Made where a link can be made without asking anybody's permission,
+/// which is both Unixes and not Windows: what the boundary does with one is
+/// the same reasoning everywhere, so what is lost there is the making of the
+/// link rather than any of it.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_home_that_has_gone_or_left_the_watched_paths_reads_as_broken() {
     let (watched, _dir, app) = workbench().await;
@@ -827,6 +839,12 @@ async fn a_home_is_refused_by_its_own_name() {
 /// Broken is asked of the boundary and not only of the filesystem: a directory
 /// replaced by a symlink out of the Watched Paths still exists, and mounting it
 /// would be reaching around a boundary with a path that was admitted once.
+///
+/// Made where a link can be made without asking anybody's permission,
+/// which is both Unixes and not Windows: what the boundary does with one is
+/// the same reasoning everywhere, so what is lost there is the making of the
+/// link rather than any of it.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_pair_that_now_points_out_of_the_watched_paths_reads_as_broken() {
     let (watched, _dir, app) = workbench().await;
@@ -1392,4 +1410,168 @@ async fn a_grilling_pairing_started_after_no_grilling_is_what_gets_prefilled() {
         Some(fable.id),
         "the account that interviewed last, with the row before it gone",
     );
+}
+
+/// And the same memory read without a Conversation to have applied it to, which
+/// is what a page composing one asks for: the prefill itself, off the Repo.
+async fn prefill(app: &Router, repo_id: i64) -> RepoPairingsView {
+    get(app, &format!("/api/ui/repos/{repo_id}/pairings")).await
+}
+
+/// The Repo the fixtures above register, which is the only one in them.
+async fn only_repo(app: &Router) -> i64 {
+    let repos: Vec<verkstead_render::RepoEntry> = get(app, "/api/ui/repos").await;
+    repos[0].id
+}
+
+/// What a Conversation would arrive filled with, answered before there is one:
+/// the same three the pane above draws, off the Repo rather than off a record.
+#[tokio::test]
+async fn a_repos_pairings_are_offered_before_anything_is_created() {
+    let (watched, dir, app) = workbench().await;
+    let id = conversation(&app, watched.path()).await;
+    let fable = saved(&app, watched.path(), "fable").await;
+    let opus = saved(&app, watched.path(), "opus").await;
+    let haiku = saved(&app, watched.path(), "haiku").await;
+
+    choose_grilling(&app, id, fable.id, MODEL).await;
+    choose_implementation(&app, id, opus.id, MODEL).await;
+    choose_review(&app, id, haiku.id, MODEL).await;
+    grill(dir.path(), id).await;
+
+    let offered = prefill(&app, only_repo(&app).await).await;
+
+    let grilling = offered
+        .grilling
+        .pairing()
+        .expect("the grilling picker has something to show");
+    assert_eq!(grilling.profile.id, fable.id);
+    assert_eq!(grilling.model.as_deref(), Some(MODEL));
+
+    let implementation = offered
+        .implementation
+        .clone()
+        .expect("and so does the implementation one");
+    assert_eq!(implementation.profile.id, opus.id);
+    assert_eq!(implementation.model.as_deref(), Some(MODEL));
+
+    let review = offered
+        .review
+        .pairing()
+        .expect("and so does the review one");
+    assert_eq!(review.profile.id, haiku.id);
+    assert_eq!(review.model.as_deref(), Some(MODEL));
+
+    // The very thing creation would have applied: a Conversation started on this
+    // Repo now arrives showing exactly what was offered above.
+    let view = opened(&app, another(&app).await).await;
+    assert_eq!(view.grilling_pairing, offered.grilling);
+    assert_eq!(view.implementation_pairing, offered.implementation);
+    assert_eq!(view.review_pairing, offered.review);
+}
+
+/// And the row that runs no session, which is a pick like any other and comes
+/// back as itself: there is no Profile in it to have gone.
+#[tokio::test]
+async fn a_repo_that_last_ran_no_review_offers_that() {
+    let (watched, dir, app) = workbench().await;
+    let id = conversation(&app, watched.path()).await;
+    let fable = saved(&app, watched.path(), "fable").await;
+
+    choose_grilling(&app, id, fable.id, MODEL).await;
+    choose_implementation(&app, id, fable.id, MODEL).await;
+    assert_eq!(no_review(&app, id).await, ProfileChosen::Chosen);
+    grill(dir.path(), id).await;
+
+    assert_eq!(
+        prefill(&app, only_repo(&app).await).await.review,
+        PickedView::Skipped,
+    );
+}
+
+/// A remembered Pairing whose Profile has broken is nothing to fill a picker
+/// with, so the role comes back unchosen — the same nothing a Repo that has
+/// never been grilled comes back as, and exactly what creation would have
+/// silently skipped.
+#[tokio::test]
+async fn a_memory_that_no_longer_applies_is_offered_as_nothing() {
+    let (watched, dir, app) = workbench().await;
+    let id = conversation(&app, watched.path()).await;
+    let fable = saved(&app, watched.path(), "fable").await;
+    let opus = saved(&app, watched.path(), "opus").await;
+
+    choose_grilling(&app, id, fable.id, MODEL).await;
+    choose_implementation(&app, id, opus.id, MODEL).await;
+    grill(dir.path(), id).await;
+
+    std::fs::remove_file(watched.path().join("opus/.claude.json")).unwrap();
+
+    let offered = prefill(&app, only_repo(&app).await).await;
+    assert_eq!(
+        offered.grilling.pairing().map(|pairing| pairing.profile.id),
+        Some(fable.id),
+        "the half that is still there is still offered"
+    );
+    assert_eq!(offered.implementation, None);
+}
+
+/// And a remembered model the Profile has since stopped listing, the same way:
+/// the Profile is fine, and that pairing of it is not one any more.
+#[tokio::test]
+async fn a_model_a_profile_no_longer_lists_is_offered_as_nothing() {
+    let (watched, dir, app) = workbench().await;
+    let id = conversation(&app, watched.path()).await;
+    let work = saved(&app, watched.path(), "work").await;
+
+    choose_grilling(&app, id, work.id, MODEL).await;
+    choose_implementation(&app, id, work.id, MODEL).await;
+    grill(dir.path(), id).await;
+
+    // Retyped without the model both halves were remembered with.
+    let (claude_dir, config_file) = pair(watched.path(), "work");
+    let rewritten: ProfileSaved = post(
+        &app,
+        &format!("/api/ui/profiles/{}", work.id),
+        &edit("work", &claude_dir, &config_file, &[MODELS[0]]),
+    )
+    .await;
+    assert_eq!(rewritten, ProfileSaved::Saved);
+
+    let offered = prefill(&app, only_repo(&app).await).await;
+    assert_eq!(offered.grilling, PickedView::Nothing);
+    assert_eq!(offered.implementation, None);
+}
+
+/// A Repo nothing has been grilled on has nothing to offer, which is three
+/// empty pickers rather than a refusal: it is where every Repo starts.
+#[tokio::test]
+async fn a_repo_with_no_memory_offers_nothing_at_all() {
+    let (watched, _dir, app) = workbench().await;
+    conversation(&app, watched.path()).await;
+
+    let offered = prefill(&app, only_repo(&app).await).await;
+    assert_eq!(offered.grilling, PickedView::Nothing);
+    assert_eq!(offered.implementation, None);
+    assert_eq!(offered.review, PickedView::Nothing);
+}
+
+/// And a Repo that is not registered has no memory to read, which is a 404 for
+/// the reason its branches are: the page has a repo to pick again rather than a
+/// failure to report.
+#[tokio::test]
+async fn the_pairings_of_a_repo_that_is_not_there_are_refused() {
+    let (_watched, _dir, app) = workbench().await;
+
+    for asked in ["404", "nonsense"] {
+        let (status, _) = fetch(
+            &app,
+            Request::builder()
+                .uri(format!("/api/ui/repos/{asked}/pairings"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
 }

@@ -9,6 +9,11 @@
 //!
 //! The probe is a shell, because `stty` is how a process asks the terminal
 //! underneath it how big it is, and a shell is the shortest way to `stty`.
+//!
+//! On the platforms that have a pseudo-terminal to open. Windows has not, and
+//! the whole of what it has instead is a `Terminal::open` that refuses — see
+//! `terminal::absent`, where there is nothing here left to ask.
+#![cfg(unix)]
 
 use std::time::{Duration, Instant};
 
