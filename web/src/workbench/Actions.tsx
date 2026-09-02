@@ -1,6 +1,7 @@
 //! What can be done to a Conversation as a whole, rather than to any one event:
-//! the rows behind the status button at the head of the Conversation pane, and
-//! the same rows under the pointer on a card in the sidebar.
+//! the rows behind the status button that ends the sticky block over the
+//! Conversation pane, and the same rows under the pointer on a card in the
+//! sidebar.
 //!
 //! A menu rather than three buttons, because the last of them throws a worktree
 //! away and a pane header is somewhere the human's cursor passes on the way to
@@ -16,6 +17,12 @@
 //! the work now stands at the moment of the press, which is the whole point of
 //! one row rather than one per way of stopping — saying something else should
 //! happen is what Steer is for.
+//!
+//! One stop is worth more than that row's standing sentence, and it says so
+//! there: a run stopped by an exhausted usage window waits for this press *and*
+//! for the account to come back, so the row leads with when that is — see
+//! [`resuming`]. The only place it is said, the status button under the pinned
+//! cards having one line and the work to say it about.
 //!
 //! Then, in order of what each costs: stop, which waits for the task the run is
 //! on; force stop, which does not; steer, which moves the work somewhere else;
@@ -192,6 +199,31 @@ export const RESUME_REFUSAL: Record<Resumed, string> = {
   NoFollowUpBrief:
     "Nothing on the record says what this follow-up was opened about. Steer it into Follow-up again with a fresh brief.",
 };
+
+/// What the Resume row says under its name: what the press does, and — on the
+/// one stop that waits for something the press cannot supply — when the account
+/// it was spending comes back.
+///
+/// The window fact leads, because it is the half the human does not already
+/// know: every row here says what its press does, and only this one has anything
+/// to say about *when*. Nothing waits on it and nothing counts down to it — no
+/// stop resumes itself, so a run stopped by a spent window waits for the same
+/// press as every other, and the words are there to say whether pressing now is
+/// worth it.
+///
+/// Here rather than on the status button, where it used to stand: the button
+/// says where the *work* is and has one line to say it in, and this row is the
+/// press the fact is about. As the session printed it — `3pm` stays `3pm` — the
+/// wording being the backend's and the reader's own clock being what it is read
+/// against.
+export function resuming(conversation: ConversationView): string {
+  const standing =
+    "Work out what should be running from where the work stands, and start it.";
+
+  return conversation.resets === null
+    ? standing
+    : `Out of window until ${conversation.resets}. ${standing}`;
+}
 
 /// One row of this menu: what the press is called, and under it the sentence
 /// saying what pressing it means.
@@ -492,7 +524,12 @@ function actions(): {
             among them, and drawn only where the server says there is something
             to start — see `ready_to_resume`. It carries nothing: what to start
             is worked out from where the work now stands at the moment of the
-            press. */}
+            press.
+
+            What it says is the one thing that differs between two stops: an
+            exhausted usage window is the stop that waits for an account as well
+            as for this press, and the row is where that is said — see
+            [`resuming`]. */}
         {/* And never on a Verkstead with no session to start: what Resume
             works out is which session should be running, so a row offering it
             there is a press that could only be refused. What says so is on the
@@ -505,7 +542,7 @@ function actions(): {
             class={styles.resume}
             label="Resume"
             pressing="Resuming…"
-            says="Work out what should be running from where the work stands, and start it."
+            says={resuming(conversation())}
             working={start.isPending}
             press={() => start.mutate(conversation().id)}
           />
@@ -645,14 +682,15 @@ function actions(): {
   };
 }
 
-/// The menu at the head of the Conversation pane: what there is to do about the
+/// The menu on the Conversation pane: what there is to do about the
 /// Conversation that is open.
 ///
 /// The trigger is the caller's, which is the one thing that makes this menu
-/// different from every other one at the head of a pane. What drops it is the
-/// StatusButton — a two-line button saying where the work stands — so the mark
-/// and the paint that the menu draws for a ⋯ would both be in the way, and the
-/// caller hands in what its trigger reads as and a class to paint it by.
+/// different from every other one on a pane. What drops it is the StatusButton
+/// — a button saying where the work stands, at the foot of the sticky block —
+/// so the mark and the paint that the menu draws for a ⋯ would both be in the
+/// way, and the caller hands in what its trigger reads as and a class to paint
+/// it by.
 ///
 /// The class is handed to the anchor *beside* this menu's own, rather than in
 /// place of it: what the card the rows come down as looks like belongs with the

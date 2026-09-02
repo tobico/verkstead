@@ -403,8 +403,9 @@ always open, keeping itself whenever the typing stops for a moment and whenever
 the field is left, and saying nothing about it either way. There is no Edit, no
 Save and no word about saving, because there is no other thing the Brief could
 be doing while it is a draft. The card itself is the server's rendering clamped
-to five lines the whole time, drafting or frozen, and once the round is past
-drafting the pane is that rendering and what the round was configured with.
+to three lines the whole time, drafting or frozen, ending in the ellipsis that
+says it goes on, and once the round is past drafting the pane is that rendering
+and what the round was configured with.
 
 **The composer is drawn as the composer of a chat app**, because the act is the
 same one: one box at the app's own measure, centred in the pane, holding the
@@ -486,11 +487,15 @@ _Avoid_: feed, log, history, activity stream
 **Event**:
 One entry in a Timeline — a Brief, agent output, a Question Set, a Handoff, a
 commit, a task list, a stage list, a PR, a Notice. Each shows a summary in the
-Timeline and its full self in the details pane. Task lists, stage lists and PRs
-are **pinned**: a fixed set, with no manual pin or unpin. Where more than one is
-pinned they are drawn in one order — the pull request, then the task list, then
-the roadmap — the pull request leading as the only one of the three with
-anything on it to answer.
+Timeline and its full self in the details pane. The session running now, task
+lists, stage lists and PRs are **pinned**: a fixed set, with no manual pin or
+unpin. Where more than one is pinned they are drawn in one order — the running
+session, then the pull request, then the task list, then the roadmap — the
+session leading because it is what the Conversation is *doing*, and the pull
+request behind it as the only one of the rest with anything on it to answer.
+**The session is the one that comes and goes**: it is pinned while something is
+writing into it and nowhere at all otherwise, so a Conversation Verkstead has
+finished with carries no card claiming a run that stopped.
 **A commit is an Event when the base branch does not already hold it.** Every
 commit that lands on a watched branch reaches the Timeline, minus everything the
 branch the work was cut off is carrying: a resolution session that merges the
@@ -675,10 +680,10 @@ The agent-written account a code commit carries as its message body — prose
 first, a delta Diagram after it — kept by the sweep of whichever repository it
 landed in with its trailers stripped,
 rendered as the **Message** above the diff in the commit's details pane —
-headed and boxed there the way a Set's Preface is — and clamped to a prose
-snippet on its Timeline card. Written for commits that deliver work; pure
-bookkeeping commits carry none, and a commit without one draws as it always
-did.
+headed and boxed there the way a Set's Preface is. Nothing of it is on the
+Timeline card, which is the subject and the size of the change: the account of a
+change is read at the depth it was written for. Written for commits that deliver
+work; pure bookkeeping commits carry none.
 _Avoid_: commit message (the summary is its body, not the whole), description,
 gate summary (the gate is gone), changelog entry
 
@@ -833,10 +838,10 @@ recorded facts rather than written down per Pairing — the harness, the model i
 the Profile's name — so a Profile saved a year ago reads the way one saved today
 does, and an id this build has not learned the name of reads as the id, which is
 legible where a blank would not be. Every site shares it: the four pairing
-pickers, the Agent run card on the Timeline and the details pane it opens, the
-status button's running line, and the Brief's three pairing facts. The pickers
-are drawn by hand rather than as a `<select>` for one reason — an `<option>`
-holds text and no mark.
+pickers, the second line of the Agent run card on the Timeline and the details
+pane it opens, and the Brief's three pairing facts. The pickers are drawn by
+hand rather than as a `<select>` for one reason — an `<option>` holds text and
+no mark.
 _Avoid_: profile choice, model selection, profile+model, combination
 
 **Grilling Pairing** / **Implementation Pairing** / **Review Pairing**:
@@ -1131,8 +1136,8 @@ neither does the human's own Stop.
 Profile has exhausted its window stops the way everything else does, and all
 that tells it apart is what it carries: the Profile that ran out, and — where
 the sentence the session printed carried a time this build could read — when the
-window comes back, as words on the status button's second line, where what is
-running is otherwise said. Information rather than a timer: nothing counts down
+window comes back, as words on the Resume row of the actions menu, which is the
+press the fact is about. Information rather than a timer: nothing counts down
 to it, and nothing starts when it passes. Recognition is one phrase per backend,
 kept in one place because the wording is the backend's and will move — the same
 bargain the idle signature makes — and it is read off all three records a session
@@ -1163,14 +1168,15 @@ incident, alert, block, rate limit, throttle
 **Resume**:
 The one way a stopped Conversation gets going again, standing as the first row
 of the conversation actions menu wherever there is driving to start — above the
-stops, being the one *go* among them, and reached from the status button
-that says nothing is driving this as much as from the sidebar's right-click,
-which drops the same rows. It recomputes what *ought* to be running now — from
+stops, being the one *go* among them, and reached from the status button that
+says the work has stopped as much as from the sidebar's right-click, which
+drops the same rows. It recomputes what *ought* to be running now — from
 the lifecycle the Conversation is in and what its branch has written — and
 starts that, rather than running again whatever it was that stopped. A stop may
 be answered the next morning, and the Conversation moves on in the meantime;
-where the stop carries words about a usage window coming back, they stand on the
-button's second line as text, and nothing is waiting on them.
+where the stop carries words about a usage window coming back, this row leads
+with them — *when* being the half the human does not already know — and nothing
+is waiting on them.
 
 It carries nothing. Steering the work is what **Steer** is for, so there is no
 note to write and one row rather than one per way of stopping. It is never

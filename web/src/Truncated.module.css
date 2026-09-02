@@ -1,0 +1,27 @@
+/* One line of a name that may not fit it, cut at the front — see
+   `Truncated.tsx` for why the front. */
+
+/* The clamp itself. `direction: rtl` is the whole trick: a line laid out
+   right-to-left starts at its right edge and overflows off its left, so the
+   ellipsis the browser draws for the overflow lands at the *start* of the name
+   rather than at the end of it.
+
+   What that would do to the name itself is what the `<bdi>` inside stops. The
+   element isolates its content and works its direction out from the first
+   strong character in it, which for a branch name is a Latin letter — so the
+   name is laid out left-to-right as one unit inside a right-to-left line, and
+   nothing in it moves. Digits and punctuation at either end travel with the
+   isolate rather than being reordered around it, which is what they would do
+   sitting bare in an rtl line.
+
+   `min-width: 0` because this is a flex item everywhere it is used: without it
+   a flex item refuses to shrink below its content, and a clamp that is never
+   narrower than the name it holds never clamps. */
+.truncated {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  direction: rtl;
+}

@@ -28,7 +28,24 @@
   padding: 1rem 0;
 }
 
+/* The title takes whatever the row has left, and never asks for more: the pane's
+   own controls stay beside it however long it is, and a title too long for the
+   row gives way inside itself.
+
+   `flex: 1 1 0` is the whole of that, and the zero is the load-bearing half. A
+   wrapping row decides where to break on each item's *hypothetical* size — its
+   basis, before any shrinking — so an `auto` basis puts the controls on a line
+   of their own the moment the title alone is wider than the row, whatever it is
+   then allowed to shrink to. A basis of zero asks for nothing, so the break
+   never happens and the shrinking does. `min-width: 0` is what lets it shrink
+   past its own content.
+
+   What a title *does* with the room it is given is the pane's — the timeline
+   cuts its branch name at the front, see `.paneName` in `Timeline.module.css`;
+   every other pane's is a word or two and never reaches this. */
 .head h1 {
+  flex: 1 1 0;
+  min-width: 0;
   margin: 0;
 }
 

@@ -8,11 +8,12 @@
    selector says only what it is about — the card an entry belongs to, and
    nothing about the rest of the app.
 
-   The block the header, the status button and the pinned cards are wrapped in
+   The block the header, the pinned cards and the status button are wrapped in
    is the Workbench's: what a pane sticks to its top edge is the frame's
    business, so `Timeline.tsx` wears `paneChrome` out of `Panes.module.css`
-   rather than naming a block of its own. The status button standing in it is
-   painted where it is built, in `StatusButton.module.css`, and nothing this
+   rather than naming a block of its own. The status button standing at the foot
+   of it is painted where it is built, in `StatusButton.module.css`, and nothing
+   this
    pane says about where the Conversation stands is drawn from here any more.
 
    Two components draw into this vocabulary from their own files: `Pause`, whose
@@ -34,39 +35,49 @@
    beside it. The title/subtitle pattern the sidebar's card draws the same two
    facts in — see `.conversationRow .title` and `.meta` in
    `Conversations.module.css` — so the card and the header of the pane it opens
-   read as the one name said twice, and the status button under them says its
-   own two lines in the same voice.
+   read as the one name said twice, and the status button at the foot of the
+   block says its own line in the same voice.
 
    Inside the `<h1>` rather than under it, because the Repo is part of what this
    pane is called rather than a caption on it: on a Draft the title is the word
    *Draft* and the Repo is the whole of what tells one draft from another.
 
-   Wrapping and baseline-aligned, since the header row is also where the way
-   back and the way on stand at phone widths: a long branch beside a long Repo
-   name puts the Repo on a line of its own rather than pushing either control
-   off the edge. `min-width: 0` so the wrapping happens inside the heading
-   instead of the heading growing past the row. */
+   One line, baseline-aligned, and never wrapped. The controls at the far end of
+   the header row are the reason: a heading that wrapped grew down the row and
+   took them onto a line of their own, and the share is wanted at the top right
+   of the pane whatever the branch is called. So the branch is cut instead —
+   [`Truncated`](../Truncated.tsx), which cuts it at the front and holds the
+   whole of it in a tooltip — and the Repo keeps its place beside it.
+
+   `min-width: 0` so the cutting happens inside the heading instead of the
+   heading growing past the row. */
 .paneName {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: baseline;
   gap: 0 0.5rem;
   min-width: 0;
 }
 
+/* The branch, which is the half that gives way: it is the long one, and the
+   Repo beside it is a word. */
 .paneName .paneTitle {
-  overflow-wrap: anywhere;
+  flex: 0 1 auto;
 }
 
 /* The step down the sidebar's card takes to say which Repo it is in, and the
    one the status button's state takes beside its status word. Its weight is
    said out loud because it is inside a heading, which would otherwise lend it
-   the title's bold. */
+   the title's bold.
+
+   Not cut and not shrunk: it is one short word beside a name that may be long,
+   and it is what tells two Drafts apart. */
 .paneName .paneRepo {
+  flex: none;
   font-size: 0.9rem;
   font-weight: 400;
   color: var(--ink-soft);
-  overflow-wrap: anywhere;
+  white-space: nowrap;
 }
 
 /* The way on to the next level, which only the timeline has one of: the details
@@ -80,9 +91,14 @@
    details, and the share icon that opens a pane of its own. One group rather
    than two items, so the header stays a title at one end and its controls at
    the other however many of them are drawn — see `PaneHead.module.css`, which
-   spaces what is in the row apart. */
+   spaces what is in the row apart.
+
+   `flex: none`, which is the other half of holding them there: the title beside
+   them is what gives way when the row is too narrow, and a group that shrank
+   would squeeze the share icon rather than cut the branch name. */
 .paneControls {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 0.8rem;
 }
@@ -111,14 +127,15 @@
    moment in the record. What keeps them in view is the chrome block they share
    with the header, which sticks the two of them to the top edge as one and
    carries the paper the record passes behind; all this rule is now is the air
-   they keep above and below themselves.
+   under them, which is the gap between the last pinned card and the status
+   button that ends the block.
 
    One card is ever inside it: with more than one pinned the carousel below is
    what is here, and the card is inside that. */
 .pinned {
   display: flex;
   flex-direction: column;
-  padding: 0 0 1rem;
+  padding: 0 0 0.75rem;
 }
 
 /* The carousel, which is what more than one pinned card is: they are held above
@@ -188,22 +205,21 @@
     border-color: var(--accent);
   }
 
+  /* Half outside the card each, so the circle sits centred over the edge line
+     it turns the deck across — half the 1.75rem width, which is what puts the
+     centre exactly on the edge. The pane's own padding is the room they hang
+     into.
+
+     Outside rather than inset, which is the other half of a change the cards
+     made: they are borderless at rest now, so an arrow lying inside one had
+     nothing to lie against, and the card had to be padded away from words it
+     was not touching. Nothing is padded for them any more. */
   .deck > .back {
-    left: 0.35rem;
+    left: -0.875rem;
   }
 
   .deck > .on {
-    right: 0.35rem;
-  }
-
-  /* And the room the arrows need, which is the card's to give: they lie over
-     its own edges, so a card that did not stand back from them would have them
-     lying over its words. Only here — where there is no pointer there are no
-     arrows to clear, and a card in a phone-width pane has no width to spare. */
-  .deck .taskList,
-  .deck .stageList,
-  .deck .pullRequest {
-    padding-inline: 2.4rem;
+    right: -0.875rem;
   }
 }
 
@@ -559,47 +575,48 @@
 /* The documents on a timeline — the frozen brief, the handoff the grilling
    wrote, and the instruction a steer carried. All of them are prose, and read
    at the measure like every other block of it, on the card and in the pane the
-   card opens — where `.document` says the same thing again. */
+   card opens — where `.document` says the same thing again.
+
+   The same element the clamp above is on: the card holds one block per document
+   rather than a rendering inside a box around it, there being nothing left for
+   the box to do. */
 .brief .briefBody,
 .handoff .handoffBody,
 .steeredWith .steerBody {
   max-width: var(--measure);
 }
 
-/* On the card, each of them is cut off at five lines: enough to say what the
-   document is about, and never enough to push the record off the screen. The
-   whole of it is in the details pane, which is what pressing the card opens.
+/* On the card, each of them is cut off at three lines with an ellipsis: enough
+   to say what the document is about, and few enough that the block of pinned
+   cards over the record ends where the eye expects it to. The whole of it is in
+   the details pane, which is what pressing the card opens.
 
-   The height is written in `em` rather than in lines, because what is clamped is
-   a rendering rather than a paragraph — a heading, a list and a fence are all in
-   there and no two of them are one line high. Five lines of body text is the
-   measure of it, and a document whose first block is taller simply shows less of
-   itself. */
+   `line-clamp` counts line boxes wherever they are, so the rendering keeps its
+   own blocks — a heading, a list, a fence — and the first three lines of them
+   are what shows. It was a height in `em` under a gradient before, which is the
+   same cut said two ways: five lines of body text measured out, and a fade over
+   the last of them drawn only where a `ResizeObserver` had found the document
+   went on. The ellipsis says the same thing and says it hard, which is what the
+   foot of a sticky block wants — a fade there read as the block itself trailing
+   off, and the eye had nothing to tell the two edges apart with. It is the cut
+   the notice below already takes, at one line rather than three. */
 .clamp {
-  position: relative;
-  max-height: 7.5em;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
   overflow: hidden;
 }
 
-/* The cut, drawn only where the document goes on under it — `Clamped` in
-   `Timeline.tsx` is what measures. The last line fades into the card rather than
-   stopping at a straight edge, so what is missing reads as missing rather than
-   as the end of the document.
+/* And the rendering's own outer margins taken off, the clamp being the card's
+   own block now rather than a box around one: a document whose first block came
+   with a margin above it would push itself down out of its own first line. */
+.clamp > :first-child {
+  margin-top: 0;
+}
 
-   Into whatever colour the card is standing in, which is the card's own to say:
-   `--ground` comes down from `CardButton.module.css` and is the paper until the
-   card is pointed at or opened and the fill until it is let go. A fade that
-   named a colour itself would be a strip of the wrong one across every card
-   nobody was pointing at. */
-.clamp.cut::after {
-  content: "";
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 2.5em;
-  background: linear-gradient(to bottom, transparent, var(--ground, var(--card)));
-  pointer-events: none;
+.clamp > :last-child {
+  margin-bottom: 0;
 }
 
 /* A move: the conversation changing hands, written as the transition itself —
@@ -702,17 +719,17 @@
 
 /* One line of what it says, cut with an ellipsis where there is more.
 
-   One rather than the five a document's card shows, because these are not
+   One rather than the three a document's card shows, because these are not
    documents: what a notice has to say is a sentence, and the sentence is what
    tells one from another down a column of them. A stop is the exception that
    makes the case — a paragraph and two blocks of terminal output, which is a
    card to be scrolled past rather than read.
 
-   The ellipsis rather than the fade the documents take, and for the same
-   reason: a fade says *this document goes on*, and a line that ends in an
-   ellipsis says *this line was cut*. `line-clamp` counts line boxes wherever
-   they are, so the markdown inside keeps its own blocks and the first line of
-   the first of them is what shows. */
+   The same cut the documents take, at a third of the length: `line-clamp` counts
+   line boxes wherever they are, so the markdown inside keeps its own blocks and
+   the first line of the first of them is what shows. It was the only card cut
+   this way while the documents were cut under a fade — see `.clamp` above, which
+   came round to it. */
 .notice .noticeBody {
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -737,11 +754,12 @@
 .notice.blocking {
 }
 
-/* What a session has printed, summarised. A `CardButton`, because the whole of
-   it is in the details pane and this is how it is opened — so it is a card that
-   says it can be pressed rather than one with a control in it. That it can be
-   pressed, and that it is the one open, are that component's to draw; what is
-   left here is the line inside it. */
+/* A session, summarised: the words *Agent run*, how far it got and whether it is
+   still going, over the line saying what it was run under. A `CardButton`,
+   because the whole of it is in the details pane and this is how it is opened —
+   so it is a card that says it can be pressed rather than one with a control in
+   it. That it can be pressed, and that it is the one open, are that component's
+   to draw; what is left here is the two lines inside it. */
 .agentOutput .eventHead {
   margin-bottom: 0.35rem;
   justify-content: flex-start;
@@ -760,29 +778,32 @@
   font-weight: 600;
 }
 
-/* The harness's mark, in front of the words that name the run. A margin rather
-   than a gap, the heading being a run of text rather than a flex row — and so a
-   card whose run recorded no harness leaves no space where a mark would have
-   been, there being no element to carry the margin. */
-.agentOutput .harness {
-  margin-inline-end: 0.4em;
-}
-
 .agentOutput .turns {
   font-size: 0.9rem;
   color: var(--ink-soft);
 }
 
-/* The last thing the agent said, on one line: what it said before that is what
-   the details pane is for. */
-.agentOutput .latest {
+/* What the run was launched under, on the line under the words: the backend, the
+   model and the account, in the shared reading every other site says the same
+   run in — see `reading` in `../agents.ts`.
+
+   The ordinary weight and the ordinary ink, because it is a fact about the run
+   rather than a caption on the title above it. The line the card used to end on
+   was the last thing the session printed, set small and monospaced; reading
+   output is the details pane's job, and one line of a terminal was the card's
+   least useful part dressed as its content. */
+.agentOutput .ranAs {
   display: block;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.85rem;
-  color: var(--ink-soft);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+/* The harness's mark, in front of the words that name what ran. A margin rather
+   than a gap, the line being a run of text rather than a flex row — and so a
+   card whose run recorded no harness leaves no space where a mark would have
+   been, there being no element to carry the margin. */
+.agentOutput .harness {
+  margin-inline-end: 0.4em;
 }
 
 /* A Question Set the session put to the human, read as the interview it was: a
@@ -993,36 +1014,20 @@
   color: inherit;
 }
 
+/* In the app's own green and red rather than a pair of hexes written here: the
+   same two the pane this card opens colours its counts and its patch with — see
+   `--added` and `--removed` in `styles/base.css` — so one commit says which way
+   it moved in one voice wherever it is drawn. The hardcoded pair had a green of
+   its own and a red that was very nearly unreadable in the dark scheme, the
+   tokens being the only colours here that follow it. */
 .commit .added {
-  color: #1a7f37;
+  color: var(--added);
   font-weight: 600;
 }
 
 .commit .removed {
-  color: #b3382c;
+  color: var(--removed);
   font-weight: 600;
-}
-
-/* And under those, the opening of what the commit said about itself. Cut off at
-   the five lines a document's card is cut off at — `CLAMPED_LINES` in
-   `Timeline.tsx` — and the whole of it, drawn, is in the pane the card opens.
-
-   A line clamp rather than the height `.clamp` uses, because this is prose and
-   nothing else: every line of it is one line high, so five lines is a count
-   here where a rendering with a heading and a fence in it can only be measured.
-   Which is also what pays for the ellipsis — it says the summary goes on,
-   exactly as the fade over a document does, and neither the markup nor a
-   measurement is needed to draw it. */
-.commit .snippet {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 5;
-  line-clamp: 5;
-  overflow: hidden;
-  max-width: var(--measure);
-  margin: 0.45rem 0 0;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
 }
 
 /* Under the pointer, everything on this pane that can be pressed. Together at

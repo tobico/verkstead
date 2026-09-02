@@ -67,6 +67,7 @@ import { CardButton } from "../CardButton";
 import { IconButton } from "../IconButton";
 import { PaneSticky } from "../Panes";
 import { Switch as Toggle } from "../Switch";
+import { Truncated } from "../Truncated";
 import {
   listConversations,
   placeConversations,
@@ -791,7 +792,12 @@ function ConversationRow(props: {
         }}
       >
         <span class={styles.what}>
-          <span class={styles.title}>{titled(props.entry)}</span>
+          {/* Held to one line and cut at the front where it does not fit, with
+              the whole of it under the pointer — the pane header this card
+              opens draws the same name the same way, and the two are the one
+              name said twice. Nothing here for a screen reader: the label on
+              the card above already says the whole sentence. */}
+          <Truncated class={styles.title} text={titled(props.entry)} />
           <span class={styles.meta}>
             <span>{props.entry.repo}</span>
           </span>
@@ -821,9 +827,11 @@ function moved(order: number[], id: number, to: number): number[] {
 /// Which row the pointer is over: the first whose bottom edge is below it, and
 /// the last row when it is below all of them.
 ///
-/// By the rendered rows rather than by arithmetic over a row height, because
-/// rows are not all one height — a long branch name wraps — and a drag that
-/// guessed would put the row somewhere the human was not pointing.
+/// By the rendered rows rather than by arithmetic over a row height, because a
+/// row height is not a constant this is allowed to assume — the repo line under
+/// a name wraps, and a row height written down here would go stale the first
+/// time anything in a card changed — and a drag that guessed would put the row
+/// somewhere the human was not pointing.
 function under(list: HTMLUListElement, y: number): number {
   const rows = [
     ...list.querySelectorAll<HTMLElement>(`.${styles.conversationRow}`),

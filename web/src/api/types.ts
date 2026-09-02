@@ -142,13 +142,18 @@ title: string,
 stage: AdoptedStage | null, };
 
 /**
- * A session's output as the Timeline shows it: how far its conversation has
- * got, the last thing that was said, and whether more is coming.
+ * A session's output as the Timeline carries it: how far its conversation has
+ * got, the last thing that was said, what it was run under, and whether more
+ * is coming.
  *
  * The summary and not the Capture. A grilling session prints megabytes over
  * an hour, and the Timeline is re-read every time an open page hears the world
- * moved — so what a Conversation carries is these two lines, and the Capture
- * is fetched by the pane that shows it.
+ * moved — so what a Conversation carries is this handful of facts, and the
+ * Capture is fetched by the pane that shows it.
+ *
+ * Carries rather than shows, because the card draws some of it: the turns, the
+ * liveness, and the reading of the Pairing it ran under. What it printed is not
+ * drawn anywhere — see [`latest`](AgentOutputEvent::latest).
  */
 export type AgentOutputEvent = { id: number, 
 /**
@@ -173,6 +178,14 @@ turns: number | null,
  * The last thing the agent said, off its own log — or, where it kept none,
  * the last line it printed with the terminal's control sequences taken
  * out. Empty where it has said nothing yet.
+ *
+ * **No card draws this**, and one did: it was the line a session's card
+ * ended on until the card gave the room to what the run was launched
+ * under, reading output being the details pane's job. It stays because it
+ * is the summarising itself — that the line quoted is what the *agent*
+ * said and not what a tool or the backend did — and this payload is the
+ * only place that reading can be seen from outside, which is what the
+ * sessions suite reads it as.
  */
 latest: string, 
 /**
@@ -679,22 +692,6 @@ sha: string,
  * renderer an attached Diff is.
  */
 subject: string, files: number, insertions: number, deletions: number, 
-/**
- * What the commit said about itself, as prose alone: its Commit Summary
- * flattened to a line with the Diagram left out, for the card to clamp —
- * see [`crate::markdown::to_prose`].
- *
- * The prose and not the rendering, unlike every other document on a card.
- * A commit's card is a button, rendered markdown cannot live inside one,
- * and the summary is on the card to be read rather than to be read *at*:
- * what it looks like whole is the pane's, and the card says what it says.
- *
- * `None` where the commit carried no summary — which is every bookkeeping
- * commit and every commit recorded before summaries were kept — and where
- * what it carried was a Diagram and nothing else. Both draw the card that
- * has always been drawn.
- */
-snippet: string | null, 
 /**
  * Which repository it landed in, where that is not the Conversation's own.
  *
@@ -1385,11 +1382,12 @@ waiting_on_checks: boolean,
  * `null` on every stop that is not a usage window's — which is nearly all
  * of them, and every Conversation that has not stopped.
  *
- * Words for the status button's second line, where what is running is
- * otherwise said, rather than a moment anything acts on: no stop resumes
- * itself, so what a stopped run waits for is a press whatever stopped it.
- * The one thing that tells a run stopped by an exhausted window from a run
- * stopped by anything else — same card, same status, same row to press.
+ * Words for the Resume row of the actions menu — the press they are about
+ * — rather than a moment anything acts on: no stop resumes itself, so what
+ * a stopped run waits for is a press whatever stopped it. The one thing
+ * that tells a run stopped by an exhausted window from a run stopped by
+ * anything else, which is why the row that leads with them is where they
+ * go: same card, same status word, same row to press.
  *
  * As the session printed it, because the wording is the backend's: `3pm`
  * stays `3pm`, which is what somebody looks at their own clock for.
@@ -1884,20 +1882,21 @@ export type PickedView = "Nothing" | "Skipped" | { "Under": PairingView };
 /**
  * An Event the Timeline keeps in view rather than letting scroll past.
  *
- * A fixed set — a task list, a stage list and a PR — and no manual pin or
- * unpin: what is pinned is decided by what kind of thing it is, so there is no
- * state here to flip and no route to flip it with. A tagged kind for the reason
- * [`TimelineEvent`] is one: what gets drawn turns on which kind it is.
+ * A fixed set — a running session, a task list, a stage list and a PR — and no
+ * manual pin or unpin: what is pinned is decided by what kind of thing it is,
+ * so there is no state here to flip and no route to flip it with. A tagged kind
+ * for the reason [`TimelineEvent`] is one: what gets drawn turns on which kind
+ * it is.
  *
- * All three are on the record as well, each at the moment it arrived there, and
+ * All four are on the record as well, each at the moment it arrived there, and
  * each is one card drawn twice rather than two cards.
  *
- * The list they arrive in is ordered, and the viewer draws it in that order: a
- * pull request first, then a task list, then a roadmap. The ordering is done
- * where the list is built rather than here — see the pinned block in
- * `crates/server/src/ui.rs`.
+ * The list they arrive in is ordered, and the viewer draws it in that order:
+ * the running session first, then a pull request, then a task list, then a
+ * roadmap. The ordering is done where the list is built rather than here — see
+ * the pinned block in `crates/server/src/ui.rs`.
  */
-export type PinnedEvent = { "TaskList": TaskListEvent } | { "StageList": StageListEvent } | { "PullRequest": PullRequestEvent };
+export type PinnedEvent = { "AgentOutput": AgentOutputEvent } | { "TaskList": TaskListEvent } | { "StageList": StageListEvent } | { "PullRequest": PullRequestEvent };
 
 /**
  * The account a Profile names, in the shape the agent type running it keeps

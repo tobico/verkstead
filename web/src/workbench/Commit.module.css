@@ -50,13 +50,19 @@
   color: var(--ink-soft);
 }
 
+/* In the app's own green and red rather than a pair of hexes written here: the
+   same two the diff under these counts colours its added and removed lines with
+   — see `--added` and `--removed` in `styles/base.css` — so a commit says which
+   way it moved in one voice from the counts down into the patch. The hardcoded
+   pair had a green of its own and a red that was very nearly unreadable in the
+   dark scheme, the tokens being the only colours here that follow it. */
 .header .added {
-  color: #1a7f37;
+  color: var(--added);
   font-weight: 600;
 }
 
 .header .removed {
-  color: #b3382c;
+  color: var(--removed);
   font-weight: 600;
 }
 

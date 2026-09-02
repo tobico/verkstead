@@ -95,14 +95,23 @@ fn config_is_overridable_by_flag() {
         config.data_dir.as_deref(),
         Some(Path::new("/srv/verkstead"))
     );
-    // Said as the two halves rather than as one spelling, because the spelling
+    // Said as the two halves rather than as one spelling, because a separator
     // is the platform's: the same join reads `/srv/verkstead/verkstead.db` on
     // Unix and `/srv/verkstead\verkstead.db` on Windows, and neither of those
     // is what is being asserted. That one name inside whichever directory won
-    // is.
+    // is, and a literal here would be this test asserting which platform it is
+    // running on instead.
     let database = database(Path::new("/srv/verkstead"));
-    assert_eq!(database.file_name().unwrap(), "verkstead.db");
-    assert_eq!(database.parent().unwrap(), Path::new("/srv/verkstead"));
+    assert_eq!(
+        database.file_name().unwrap(),
+        "verkstead.db",
+        "the database is that one name",
+    );
+    assert_eq!(
+        database.parent().unwrap(),
+        Path::new("/srv/verkstead"),
+        "inside whichever directory won",
+    );
 }
 
 /// Configuration with no default and no requirement either: what Verkstead may
@@ -121,7 +130,8 @@ fn config_parses_without_a_watched_path_and_watches_nothing() {
 /// service unit, where there is one string and not a repeatable flag.
 ///
 /// The one string is built rather than written out, because how `PATH` is
-/// written is the platform's own — a `:` on Unix, a `;` on Windows — and a
+/// written is the platform's own — a `:` on Unix, a `;` on Windows, which is
+/// what the flag is parsed with; see `PATH_LIST_SEPARATOR` in `lib.rs`. A
 /// literal `:` here would be asserting that Windows cuts a drive letter off
 /// the path it belongs to.
 #[test]

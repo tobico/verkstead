@@ -153,10 +153,10 @@ pub struct Stopped {
     /// anything at all — and `None` on every stop that is not a usage window's,
     /// which is nearly all of them.
     ///
-    /// Words on the status button's second line rather than a moment anything
-    /// acts on:
+    /// Words on the Resume row of the actions menu rather than a moment
+    /// anything acts on:
     /// what a stopped run waits for is a press. Kept as text for the reason the
-    /// line that said it is kept — the wording is the backend's and will move,
+    /// row that says it is kept — the wording is the backend's and will move,
     /// and somebody reading a stop a week later is reading what the session
     /// printed rather than this build's opinion of it.
     pub resets: Option<String>,

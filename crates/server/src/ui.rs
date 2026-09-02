@@ -1093,46 +1093,72 @@ pub(crate) async fn conversation_view(
         }
     };
 
-    // What is pinned, in the order the carousel turns through it: every pull
-    // request the work ended up on, then the backlog, then the roadmap.
+    // What is pinned, in the order the carousel turns through it: the session
+    // running now, then every pull request the work ended up on, then the
+    // backlog, then the roadmap.
     //
-    // The pull request leads because it is the one of the three with anything on
-    // it to answer — a review waiting, checks gone red, a merge that stopped —
-    // where a backlog and a roadmap are lists read off the worktree with nothing
-    // on them to do. The two lists follow in the order the work goes through
-    // them: a backlog is this piece of work's own tasks, and a roadmap is the
-    // stages around it.
+    // The session leads because it is what is happening: while one runs, it is
+    // the answer to what this Conversation is doing, and the card carries the
+    // reading of what it was launched under that the status button used to say
+    // under its status word. The pull request follows it as the one of the rest
+    // with anything on it to answer — a review waiting, checks gone red, a merge
+    // that stopped — where a backlog and a roadmap are lists read off the
+    // worktree with nothing on them to do. The two lists come last in the order
+    // the work goes through them: a backlog is this piece of work's own tasks,
+    // and a roadmap is the stages around it.
     //
     // Which card fronts when a Conversation is opened is not settled here. That
     // is the viewer's, and this order is what it falls back to where nothing is
     // blocking — see `fronting` in `web/src/workbench/Timeline.tsx`.
     //
-    // The pull requests *are* on the record — the Conversation's own
-    // repository's is what moved the Conversation into Wrapping, and a
-    // companion's is that wrap-up covering the repository it also committed in —
-    // so they are read off the Timeline for the reason the Brief is: they are
-    // already here. All of them rather than the last one found: a Conversation
-    // ends on one pull request per repository it was worked in, and the human
-    // wraps up all of them at once. What is not read here is what a PR holds,
-    // which is a request of its own; see [`pull_request`].
+    // Every one of them is on the record as well and every one is read off it,
+    // for the reason the Brief is: they are already here. The pull requests are
+    // read all of them rather than the last one found — a Conversation ends on
+    // one pull request per repository it was worked in, and the human wraps up
+    // all of them at once. What is not read here is what a PR holds, which is a
+    // request of its own; see [`pull_request`].
+    //
+    // The session is read the other way about: the Event something is printing
+    // into, by `printing_into` and so by both reads of the register — the same
+    // reading the card on the record is drawn against a few hundred lines down,
+    // so a session in its first moment is pinned as running rather than pinned
+    // as stopped. It names at most one Event and names nothing at all the rest
+    // of the time. A Conversation that has finished would otherwise carry the
+    // last run it ever made at the head of its pane for good — a card still
+    // saying *running* about a worktree that has been taken away.
     let mut pinned: Vec<verkstead_render::PinnedEvent> = timeline
         .iter()
+        .filter(|event| printing_into(event.id))
         .filter_map(|event| match &event.event {
-            store::Event::PullRequest(opened) => Some(verkstead_render::pull_request_event(
-                event.id,
-                event.at.clone(),
-                verkstead_render::PullRequestSummary {
-                    number: opened.number,
-                    title: opened.title.clone(),
-                    url: opened.url.clone(),
-                    repo: opened.repo.clone(),
-                    checks: own_checks(&opened.repo, checks),
-                    merging: merges.get(&event.id).copied().map(merging),
-                },
-            )),
+            store::Event::AgentOutput(summary, ran_under) => {
+                Some(verkstead_render::agent_output_pinned(session(
+                    event.id,
+                    event.at.clone(),
+                    summary.clone(),
+                    ran_under.clone(),
+                    true,
+                    idling,
+                )))
+            }
             _ => None,
         })
         .collect();
+
+    pinned.extend(timeline.iter().filter_map(|event| match &event.event {
+        store::Event::PullRequest(opened) => Some(verkstead_render::pull_request_event(
+            event.id,
+            event.at.clone(),
+            verkstead_render::PullRequestSummary {
+                number: opened.number,
+                title: opened.title.clone(),
+                url: opened.url.clone(),
+                repo: opened.repo.clone(),
+                checks: own_checks(&opened.repo, checks),
+                merging: merges.get(&event.id).copied().map(merging),
+            },
+        )),
+        _ => None,
+    }));
 
     // And the two lists behind it. Each goes in two places — pinned here, and on
     // the record at the row that says it landed — and this is the one reading
@@ -1506,27 +1532,14 @@ pub(crate) async fn conversation_view(
                     // renamed and a Pairing repicked, and what this Event is is
                     // the account of one session that has already happened.
                     store::Event::AgentOutput(summary, ran_under) => {
-                        let (profile, model, agent_type) = match ran_under {
-                            Some(ran_under) => (
-                                Some(ran_under.profile),
-                                ran_under.model,
-                                ran_under.agent_type.map(crate::profiles::agent_type),
-                            ),
-                            None => (None, None, None),
-                        };
-
-                        verkstead_render::agent_output_event(
+                        verkstead_render::agent_output_event(session(
                             event.id,
                             event.at,
-                            summary.lines,
-                            summary.turns,
-                            summary.latest,
+                            summary,
+                            ran_under,
                             printing_into(event.id),
                             idling,
-                            profile,
-                            model,
-                            agent_type,
-                        )
+                        ))
                     }
                     // The table of what was asked against what was decided, and no
                     // more: the whole document is what the details pane fetches,
@@ -1573,12 +1586,10 @@ pub(crate) async fn conversation_view(
                     store::Event::Handoff(markdown) => {
                         verkstead_render::handoff_event(event.id, event.at, &markdown)
                     }
-                    // The counts, the subject and what the commit said about
-                    // itself, and not the diff: the diff is in the repository,
-                    // and what fetches it is the pane that shows it. The summary
-                    // goes over whole and comes out as the snippet the card
-                    // clamps — the renderer's, so that the cutting of a commit's
-                    // own words happens where every other rendering of them does.
+                    // The subject and the counts, and neither the summary nor
+                    // the diff: what the commit said about itself is drawn whole
+                    // in the pane the card opens, and the diff is in the
+                    // repository for that same pane to fetch.
                     store::Event::Commit(commit) => verkstead_render::commit_event(
                         event.id,
                         event.at,
@@ -1588,7 +1599,6 @@ pub(crate) async fn conversation_view(
                             files: commit.files,
                             insertions: commit.insertions,
                             deletions: commit.deletions,
-                            summary: commit.summary,
                             // Which repository it came out of, where that is not
                             // this Conversation's own. The store decides that,
                             // because it is the store that knows both.
@@ -3431,6 +3441,46 @@ fn own_checks(repo: &Option<String>, checks: Option<CheckRollup>) -> Option<Chec
     match repo {
         None => checks,
         Some(_) => None,
+    }
+}
+
+/// One session as the card that draws it takes it: what the store wrote down
+/// about the run, and the two facts about it that are the running server's.
+///
+/// Here because the card is drawn twice — on the record where the session
+/// happened, and pinned above it while something is still writing into it — and
+/// both places read the same three rows the same way. The Pairing it was
+/// launched under is unpacked rather than passed along: a session from before
+/// Verkstead wrote any of it down has none, and no Pairing is three nothings
+/// rather than a shape with nothing in it.
+fn session(
+    id: i64,
+    at: String,
+    summary: store::Summary,
+    ran_under: Option<store::RanUnder>,
+    running: bool,
+    idle: bool,
+) -> verkstead_render::AgentSession {
+    let (profile, model, agent_type) = match ran_under {
+        Some(ran_under) => (
+            Some(ran_under.profile),
+            ran_under.model,
+            ran_under.agent_type.map(crate::profiles::agent_type),
+        ),
+        None => (None, None, None),
+    };
+
+    verkstead_render::AgentSession {
+        id,
+        at,
+        lines: summary.lines,
+        turns: summary.turns,
+        latest: summary.latest,
+        running,
+        idle,
+        profile,
+        model,
+        agent_type,
     }
 }
 

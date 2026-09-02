@@ -7,12 +7,6 @@
    saying are the two that take a fill. */
 
 .card {
-  /* The colour the card is drawn in, for whatever inside it has to match: a
-     clamped document fades its cut into this rather than into a colour of its
-     own guessing. It is the paper the card sits on until the card is filled,
-     and the fill afterwards. */
-  --ground: var(--paper);
-
   display: block;
   width: 100%;
   padding: 1rem;
@@ -40,8 +34,6 @@
    about the work — a Question Set waiting on the human, a Set this build cannot
    read — and being the one being looked at is not one of them. */
 .open {
-  --ground: var(--card);
-
   background: var(--card);
 }
 
@@ -51,8 +43,6 @@
    there and does not move under the hand. */
 @media (hover: hover) {
   .pressable:hover {
-    --ground: var(--card);
-
     background: var(--card);
   }
 }

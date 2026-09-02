@@ -200,7 +200,7 @@
 }
 
 /* The left-hand column: everything the row says in words. `min-width: 0` so a
-   long branch name wraps inside it instead of pushing the mark off the edge. */
+   long branch name is cut inside it instead of pushing the mark off the edge. */
 .conversationRow .what {
   display: flex;
   flex: 1;
@@ -209,6 +209,11 @@
   min-width: 0;
 }
 
+/* One line, cut at the front where the name does not fit and with the whole of
+   it under the pointer — [`Truncated`](../Truncated.tsx) does the cutting, and
+   the header of the pane this card opens draws the same name the same way. A
+   name that wrapped made the rows different heights, which is a list to run an
+   eye down turned into a column to read. */
 .conversationRow .title {
   font-weight: 600;
 }

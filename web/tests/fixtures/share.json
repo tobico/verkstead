@@ -148,7 +148,6 @@
           "merge": false,
           "repo": null,
           "sha": "3f9c1d7a5b2e08c46d1f9a3b7c5e2d840f6a1b93",
-          "snippet": null,
           "subject": "chore: plan the usage-limit pause"
         }
       },
@@ -162,7 +161,6 @@
           "merge": false,
           "repo": null,
           "sha": "b81e4a06c92d5f37a4b0c8e1d6f2937a5c0b4e8d",
-          "snippet": "The relay reads the account's own limit error off stderr and hands the session's runner a time to wake at, instead of the fixed backoff it used to guess.",
           "subject": "feat: read the account's own limit error"
         }
       },
@@ -176,7 +174,6 @@
           "merge": false,
           "repo": "askance",
           "sha": "7d3a1c58e0b94f26a8d5c13f7b204e69a1c8d35f",
-          "snippet": null,
           "subject": "feat: say which account a limit error was about"
         }
       },
@@ -190,7 +187,6 @@
           "merge": true,
           "repo": null,
           "sha": "e2b7c4d90a15f836b4e0c7a2d9f31846b5c0e7a4",
-          "snippet": null,
           "subject": "Merge branch 'main' into usage-limit-pause"
         }
       }

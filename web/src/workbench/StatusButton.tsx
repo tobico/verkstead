@@ -10,26 +10,31 @@
 //! *what is this doing, and what can I do about it* was spread across the pane
 //! and had to be assembled by whoever was reading it.
 //!
-//! So it is one button, in the sticky block under the title and above the
-//! pinned cards, drawn in every state. Two lines, as a card in the sidebar is:
-//! the status word over what is running. Pressing it opens the conversation
-//! actions menu, and the chevron at its right edge is what says so.
+//! So it is one button, in the sticky block under the pinned cards and at the
+//! foot of it, drawn in every state. Pressing it opens the conversation actions
+//! menu, and the chevron at its right edge is what says so.
 //!
-//! The two lines say different kinds of thing on purpose. The first is where
-//! the *work* stands — a status word in bold, and the lifecycle state beside it
-//! understated, because the state alone has never been the answer to "is
-//! something happening?" and the status alone has never said what the work is
-//! in the middle of. The second is where the *machine* stands, which is a
-//! different question and a quieter one: what is running, said the way every
-//! other place that says who runs a session says it — "Claude Code Fable 5 —
-//! Work" rather than a profile id and `claude-fable-5`.
+//! **Under the pinned cards rather than over them**, which is the other thing
+//! it does: the sticky block ends where this button ends, and a line of chrome
+//! along that edge is what says so. Over them it was the first thing in the
+//! block and the boundary at the bottom was drawn by nothing.
 //!
-//! That reading is not this pane's own and is not composed here: it is the
-//! shared one in [`../agents`], read off what the session recorded as it
-//! started. This line said the Profile's name first for as long as it was the
-//! only place saying any of this; a page that says one thing three ways is a
-//! page whose reader has to learn three, so the convention went with the
-//! second and third sites arriving.
+//! **One line**, which is where the *work* stands — a status word in bold, and
+//! the lifecycle state beside it understated, because the state alone has never
+//! been the answer to "is something happening?" and the status alone has never
+//! said what the work is in the middle of.
+//!
+//! There was a second line under it, saying where the *machine* stood: the
+//! backend, the model and the account of whatever was running. It has gone to
+//! the pinned block, which now holds the running session's own card — the same
+//! reading, on the card that is about that run, and the only moment the button
+//! would have had anything to say is the moment that card is pinned. See
+//! `Timeline.tsx`.
+//!
+//! Which leaves one thing the card cannot say: the out-of-window stop, where a
+//! resume waits on the same press *and* an account. The word here stays
+//! *Stopped*, and the whole sentence is on the resume row of the menu this
+//! button drops.
 //!
 //! The accent is spent on the two statuses that need somebody: *Waiting on you*
 //! and *Blocked*. Everything else is the ordinary text colour, including
@@ -40,15 +45,7 @@ import { Show, createMemo, type JSX } from "solid-js";
 import { faChevronDown } from "@fortawesome/free-solid-svg-icons";
 
 import { Icon } from "../Icon";
-import { ran, reading } from "../agents";
-import { listProfiles } from "../api/client";
-import type {
-  AgentOutputEvent,
-  ConversationView,
-  ProfileEntry,
-} from "../api/types";
-import { useReading } from "../freshness";
-import { HarnessMark } from "../HarnessMark";
+import type { ConversationView } from "../api/types";
 import { Actions } from "./Actions";
 import { WAITING_ON_CHECKS } from "./conditions";
 import { ENDED, STATE } from "./states";
@@ -132,88 +129,11 @@ export function status(conversation: ConversationView): Status {
   return { word: null, state, attention: false };
 }
 
-/// The session running now, where there is one: the last output on the record
-/// that is still being written to.
-///
-/// The last, because a Conversation runs one session at a time — a record is a
-/// column of finished sessions with at most one live one at the end of it.
-export function running(
-  conversation: ConversationView,
-): AgentOutputEvent | undefined {
-  return conversation.timeline
-    .flatMap((event) =>
-      "AgentOutput" in event && event.AgentOutput.running
-        ? [event.AgentOutput]
-        : [],
-    )
-    .at(-1);
-}
-
-/// What the second line says: the agent running, or what there is instead of
-/// one.
-///
-/// The shared reading of the three facts the session wrote down as it started —
-/// the backend, the model and the Profile's name where that is what tells two
-/// runs apart. All three come off the record rather than off the Pairing the
-/// Conversation is configured with: what is running is what was launched, and a
-/// Pairing repicked since does not change it.
-///
-/// `saved` is only for the last of the three — whether the Profile's name is
-/// worth saying — and is `undefined` until the list has been read.
-///
-/// The out-of-window line is the one stop that says something a resume cannot:
-/// every other stop waits for the same press, and this one waits for the same
-/// press *and* an account. The short form of it, the sentence itself being the
-/// resume row's.
-export function agent(
-  conversation: ConversationView,
-  saved: ProfileEntry[] | undefined,
-): string {
-  const session = running(conversation);
-
-  if (session) {
-    // A session from before Verkstead wrote any of the three down reads as
-    // nothing at all. There is one running and nothing true to say about it,
-    // which is exactly what this says instead.
-    return reading(ran(session), saved) || "Agent running";
-  }
-
-  if (conversation.resets !== null) {
-    return `Out of window until ${conversation.resets}`;
-  }
-
-  return "No agent running";
-}
-
-/// The button itself: the two lines, the chevron, and the menu behind them.
+/// The button itself: the line, the chevron, and the menu behind them.
 export function StatusButton(props: {
   conversation: ConversationView;
 }): JSX.Element {
   const said = createMemo(() => status(props.conversation));
-
-  // The saved Profiles, for the one thing the reading needs them for: whether
-  // the account behind the running session is the only one on its backend, and
-  // so whether its name is said after the model. The same query the pickers
-  // make, so the cache is what a second caller pays — and the reading says the
-  // name while it is still in flight, saying it being the answer that can never
-  // misattribute a run.
-  //
-  // Read here rather than passed in, so the button is whole wherever it is
-  // drawn — and never in a share, which draws no status button at all and so
-  // makes no request for this.
-  const profiles = useReading(() => ({
-    queryKey: ["profiles"],
-    queryFn: listProfiles,
-    freshness: { reconcile: "id" },
-  }));
-
-  // And the harness that session was launched under, for the mark in front of
-  // the words. Off the same record the words are read from, so the two cannot
-  // disagree: no session running, or one that recorded no harness, is no mark —
-  // which is the same nothing the line's own reading says about it.
-  const under = createMemo(
-    () => running(props.conversation)?.agent_type ?? null,
-  );
 
   return (
     <Actions
@@ -248,11 +168,6 @@ export function StatusButton(props: {
               <Show when={props.conversation.trimmed}>
                 <span class={styles.trimmed}>Trimmed</span>
               </Show>
-            </span>
-
-            <span class={styles.agent}>
-              <HarnessMark of={under()} class={styles.harness!} />
-              {agent(props.conversation, profiles.data)}
             </span>
           </span>
 

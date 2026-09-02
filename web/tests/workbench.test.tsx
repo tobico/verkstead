@@ -188,13 +188,14 @@ import { STATE } from "../src/workbench/states";
 import setup from "../src/workbench/Setup.module.css";
 import setupCss from "../src/workbench/Setup.module.css?raw";
 import steerModal from "../src/workbench/Steer.module.css";
-// The status button at the head of the Conversation pane, both ways: the hashed
-// names its two lines are queried by, and the source of the paint that says
-// which of them is in the accent.
+// The status button at the foot of the sticky block over the Conversation pane,
+// both ways: the hashed names its line is queried by, and the source of the
+// paint that says when it is in the accent.
 import statusButton from "../src/workbench/StatusButton.module.css";
 import statusButtonCss from "../src/workbench/StatusButton.module.css?raw";
 import timeline from "../src/workbench/Timeline.module.css";
 import timelineCss from "../src/workbench/Timeline.module.css?raw";
+import truncatedCss from "../src/Truncated.module.css?raw";
 // And the frame the three panes stand in, both ways: it holds the layout rules
 // jsdom lays nothing out for, and the pane names everything else is found by.
 import shell from "../src/Panes.module.css";
@@ -433,13 +434,6 @@ async function standing(container: ParentNode): Promise<{
   };
 }
 
-/// And its second line: what is running, or what there is instead of one.
-async function saidRunning(container: ParentNode): Promise<string | null> {
-  return (
-    await drawn(container, `.${statusButton.status} .${statusButton.agent}`)
-  ).textContent;
-}
-
 /// The gear at the head of the sidebar, which is what the rest of Verkstead is
 /// behind. Found by the name it is read aloud by, an icon saying nothing for
 /// itself.
@@ -546,6 +540,23 @@ describe("the workbench", () => {
         (row) => row.textContent,
       ),
     ).toEqual(SIDEBAR.map((entry) => titled(entry)));
+  });
+
+  /// Each row's name is held to one line and cut at the front, exactly as the
+  /// header of the pane it opens cuts the same name: a sidebar is a list to run
+  /// an eye down, and a wrapping name made every row a different height. The
+  /// whole of it is in the tooltip.
+  it("holds each row's name to one line, cut at the front", async () => {
+    theWorkbench();
+    const { container } = mount();
+
+    const row = await drawn(
+      container,
+      `.${sidebar.conversationRow} .${sidebar.title}`,
+    );
+
+    expect(row.getAttribute("title")).toBe(titled(SIDEBAR[0]!));
+    expect(row.querySelector("bdi")!.textContent).toBe(titled(SIDEBAR[0]!));
   });
 
   it("says of each conversation which repo it is in", async () => {
@@ -1065,7 +1076,7 @@ describe("how a card says where its conversation has got to", () => {
       ".conversationRow.ended .open {\n  opacity: 0.45;\n}",
     );
     expect(pressableCss).toContain(
-      ".open {\n  --ground: var(--card);\n\n  background: var(--card);\n}",
+      ".open {\n  background: var(--card);\n}",
     );
     expect(
       sidebarCss,
@@ -2213,16 +2224,17 @@ describe("a conversation's timeline", () => {
     );
   });
 
-  /// The subtitle is understated rather than a second title, and it wraps: the
-  /// header row also carries the way back and the way on at phone widths, so a
-  /// long branch beside a long Repo name goes onto a second line rather than
-  /// pushing either control off the edge. The stylesheet's, jsdom laying
+  /// The subtitle is understated rather than a second title, and neither half
+  /// of the name wraps: the header row carries the pane's own controls at its
+  /// far end, and a heading that grew downwards was what pushed them onto a
+  /// line of their own. The branch is what gives way instead — cut, not wrapped
+  /// — and the Repo keeps its place beside it. The stylesheet's, jsdom laying
   /// nothing out.
-  it("draws the repo quietly and wraps rather than overflowing", () => {
+  it("draws the repo quietly and holds the name to one line", () => {
     expect(timelineCss).toContain(
       ".paneName {\n" +
         "  display: flex;\n" +
-        "  flex-wrap: wrap;\n" +
+        "  flex-wrap: nowrap;\n" +
         "  align-items: baseline;\n" +
         "  gap: 0 0.5rem;\n" +
         "  min-width: 0;\n" +
@@ -2230,10 +2242,55 @@ describe("a conversation's timeline", () => {
     );
     expect(timelineCss).toContain(
       ".paneName .paneRepo {\n" +
+        "  flex: none;\n" +
         "  font-size: 0.9rem;\n" +
         "  font-weight: 400;\n" +
-        "  color: var(--ink-soft);\n",
+        "  color: var(--ink-soft);\n" +
+        "  white-space: nowrap;\n" +
+        "}",
     );
+  });
+
+  /// And the controls stay at the top right of the pane however long the branch
+  /// is called: the group does not shrink, the heading is allowed to, and the
+  /// cutting happens inside the name.
+  it("holds the pane's controls at the end of the header row", () => {
+    expect(timelineCss).toContain(
+      ".paneControls {\n" +
+        "  display: flex;\n" +
+        "  flex: none;\n" +
+        "  align-items: center;\n" +
+        "  gap: 0.8rem;\n" +
+        "}",
+    );
+    // The zero basis is the load-bearing half: a wrapping row decides where to
+    // break on each item's basis, before any shrinking, so an `auto` basis puts
+    // the controls on their own line the moment the title alone is wider than
+    // the row — however narrow it would then have been allowed to become.
+    expect(paneHeadCss).toContain(
+      ".head h1 {\n  flex: 1 1 0;\n  min-width: 0;\n  margin: 0;\n}",
+    );
+  });
+
+  /// The branch itself is cut at the front, with the whole of it in a tooltip:
+  /// what tells two branch names apart is their tails, so an ellipsis at the end
+  /// would be a column of names that all read the same. The `<bdi>` inside is
+  /// what keeps the name the right way round in the right-to-left line the cut
+  /// is made with — see `Truncated.tsx`.
+  it("cuts a long branch name at the front and keeps the whole in a tooltip", async () => {
+    const branch = "timeline-pinned-polish-and-then-some-more-of-it-2026";
+
+    theRecordedWith({ branch, branch_named: true });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const title = await drawn(
+      container,
+      `.${shell.middlePane} .${paneHead.head} h1 .${timeline.paneTitle}`,
+    );
+
+    expect(title.getAttribute("title")).toBe(branch);
+    expect(title.querySelector("bdi")!.textContent).toBe(branch);
+    expect(truncatedCss).toContain("  direction: rtl;");
   });
 
   it("says what to do with a conversation nobody has picked", async () => {
@@ -5075,6 +5132,45 @@ function theGrillingOutput(
   );
 }
 
+/// The same again with the session still being written to, which is what the
+/// server pins the card on: the altered Event on the record *and* the same Event
+/// at the head of the pinned list, exactly as the pinned block in
+/// `crates/server/src/ui.rs` hands it over.
+///
+/// Composed here rather than in a fixture for the reason a running session is
+/// altered here at all: nothing is writing into a fixture, so a fixture that
+/// carried a pinned run would be a payload claiming a session that stopped in
+/// 2026 is still going.
+function theGrillingRunning(
+  over: Partial<AgentOutputEvent>,
+  ...answers: Parameters<typeof serving>
+) {
+  const running = { ...OUTPUT, ...over, running: true };
+
+  const altered: TimelineEvent[] = GRILLING.timeline.map((event) =>
+    "AgentOutput" in event ? { AgentOutput: running } : event,
+  );
+
+  return serving(
+    whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+    whenever("/api/ui/repos", json(REPOS)),
+    whenever("/api/ui/profiles", json(PROFILES)),
+    whenever(
+      `/api/ui/conversations/${GRILLING.id}`,
+      json({
+        ...GRILLING,
+        timeline: altered,
+        pinned: [{ AgentOutput: running }, ...GRILLING.pinned],
+      }),
+    ),
+    whenever(TRANSCRIPT_OF_IT, json(SAID_NOTHING)),
+    whenever(CAPTURE_OF_IT, json(CAPTURE)),
+    whenever(SCREEN_OF_IT, json(SCREEN)),
+    ...answers,
+  );
+}
+
 /// The same conversation after a Cleanup has been through it: every card where
 /// it was, and the session's own output taken out from under the one that opens
 /// on it.
@@ -5628,14 +5724,16 @@ describe("a move on the timeline", () => {
 });
 
 describe("a session's output on the timeline", () => {
-  /// The design's summary: how far the conversation has got, and the last thing
-  /// the agent said. An hour of terminal output does not go in the middle pane.
+  /// The design's summary: what it is, how far the conversation has got, and
+  /// what it was run under. An hour of terminal output does not go in the middle
+  /// pane, and neither does a line of it — reading output is the details pane's,
+  /// which is what pressing the card opens.
   ///
   /// Turns rather than the lines it printed. A full-screen interface redraws
   /// itself with cursor moves rather than newlines, so a line count read 0 for
   /// every real session — and what a reader wanted from it was how much of a
   /// conversation there is to open, which is what a turn is.
-  it("summarises as a turn count and the latest statement", async () => {
+  it("summarises as a turn count, and draws nothing the session printed", async () => {
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
@@ -5645,22 +5743,38 @@ describe("a session's output on the timeline", () => {
     expect(output.querySelector(`.${timeline.turns}`)!.textContent).toBe(
       `${OUTPUT.turns} turns`,
     );
-    expect(output.querySelector(`.${timeline.latest}`)!.textContent).toBe(OUTPUT.latest);
 
-    // Nothing of the Capture itself: it is fetched by the pane that shows
-    // it, and only once one is opened.
+    // Neither the last thing it said nor the Capture behind it: both are the
+    // details pane's, and only once one is opened.
+    expect(OUTPUT.latest).not.toBe("");
+    expect(output.textContent).not.toContain(OUTPUT.latest);
     expect(output.textContent).not.toContain("Reading the brief");
   });
 
-  /// And the head names the run rather than the kind of thing it is: the shared
-  /// reading of what the session was launched under, off the three facts it
-  /// wrote down as it started. A record holding a session per resume is a
-  /// column of cards, and *Agent run* was the same three words on every one.
+  /// The head says what the card is, in the words every other card on this pane
+  /// says its own kind in. What tells one run from another is the line under it.
+  it("heads the card with the words Agent run", async () => {
+    theGrillingOutput({
+      agent_type: "Claude",
+      profile: "Work",
+      model: "claude-fable-5",
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const output = await drawn(container, `.${timeline.timelineEvent} .${timeline.agentOutput}`);
+
+    expect(output.querySelector(`.${timeline.what}`)!.textContent).toBe(
+      "Agent run",
+    );
+  });
+
+  /// And the line under it is the shared reading of what the session was
+  /// launched under, off the three facts it wrote down as it started.
   ///
   /// The account's name is said here because the saved list holds three Claude
   /// Code accounts and none of them is this one — a name the list no longer
   /// holds keeps its own, dropping it being a run attributed to whoever is left.
-  it("names the run at the head of the card", async () => {
+  it("says what the run was launched under on the line under it", async () => {
     theGrillingOutput({
       agent_type: "Claude",
       profile: "Work",
@@ -5671,7 +5785,7 @@ describe("a session's output on the timeline", () => {
     const output = await drawn(container, `.${timeline.timelineEvent} .${timeline.agentOutput}`);
 
     await waitFor(() =>
-      expect(output.querySelector(`.${timeline.what}`)!.textContent).toBe(
+      expect(output.querySelector(`.${timeline.ranAs}`)!.textContent).toBe(
         "Claude Code Fable 5 — Work",
       ),
     );
@@ -5691,15 +5805,16 @@ describe("a session's output on the timeline", () => {
     const output = await drawn(container, `.${timeline.timelineEvent} .${timeline.agentOutput}`);
 
     await waitFor(() =>
-      expect(output.querySelector(`.${timeline.what}`)!.textContent).toBe(
+      expect(output.querySelector(`.${timeline.ranAs}`)!.textContent).toBe(
         "Fable 5 — Work",
       ),
     );
   });
 
-  /// And a session that recorded none of the three keeps the words: there is
-  /// nothing to name it by, and the card is still a card.
-  it("says Agent run where the record kept nothing to name it by", async () => {
+  /// And a session that recorded none of the three has nothing to say there, so
+  /// the line is not drawn at all: no bare mark, and no empty row under the
+  /// head. The card is still a card.
+  it("draws no second line where the record kept nothing to name the run by", async () => {
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
@@ -5709,6 +5824,8 @@ describe("a session's output on the timeline", () => {
     expect(output.querySelector(`.${timeline.what}`)!.textContent).toBe(
       "Agent run",
     );
+    expect(output.querySelector(`.${timeline.ranAs}`)).toBeNull();
+    expect(output.querySelector(`.${harnessMark.mark}`)).toBeNull();
   });
 
   /// The details pane is titled the same way, for the reason its summary line
@@ -6667,10 +6784,9 @@ describe("a session's output on the timeline", () => {
 /// The reading says who runs a session and the mark is what makes a column of
 /// those readings scannable: a reader picks the Claude run out of five by its
 /// shape before reading a word of any of them. So it is drawn everywhere the
-/// reading is and JSX can put an `svg` — the card, the pane it opens, the status
-/// button's running line and the Brief's three pairing facts — and it is one
-/// component, so those four cannot come to draw four different pictures of the
-/// one harness.
+/// reading is and JSX can put an `svg` — the card's second line, the pane it
+/// opens, and the Brief's three pairing facts — and it is one component, so
+/// those three cannot come to draw three different pictures of the one harness.
 ///
 /// What is asserted is the drawing rather than a class: the four files are read
 /// here exactly as lobehub published them, so a mark drawn from the wrong file
@@ -6686,8 +6802,8 @@ describe("the mark of the harness a session ran under", () => {
     ["OpenCode", opencodeMarkFile],
   ] satisfies Array<[AgentType, string]>;
 
-  /// The Agent run card on the record, which is where a reader meets a run
-  /// first.
+  /// The Agent run card on the record, on the line saying what the run was
+  /// launched under, which is where a reader meets a run first.
   it.each(MARKS)(
     "draws %s's own mark on the card that names the run",
     async (harness, file) => {
@@ -6696,7 +6812,7 @@ describe("the mark of the harness a session ran under", () => {
 
       const head = await drawn(
         container,
-        `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.what}`,
+        `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.ranAs}`,
       );
 
       await waitFor(() => expect(marked(head)).toBe(art(file)));
@@ -6722,40 +6838,6 @@ describe("the mark of the harness a session ran under", () => {
 
     await waitFor(() => expect(marked(head)).toBe(art(opencodeMarkFile)));
     expect(head.textContent).toBe("OpenCode Minimax M2.1 — Work");
-  });
-
-  /// The status button's second line, off the same record: what is running is
-  /// what was launched, and the mark says which harness launched it.
-  it("marks the harness on the status button's running line", async () => {
-    theGrillingOutput({
-      running: true,
-      agent_type: "Grok",
-      profile: "Work",
-      model: "grok-4.6",
-    });
-    const { container } = mount(`/conversations/${GRILLING.id}`);
-
-    const line = await drawn(
-      container,
-      `.${statusButton.status} .${statusButton.agent}`,
-    );
-
-    await waitFor(() => expect(marked(line)).toBe(art(grokMarkFile)));
-  });
-
-  /// A line saying nothing is running has no harness to mark, which is the same
-  /// nothing its words say.
-  it("marks nothing on a line with no session behind it", async () => {
-    theRecordedWith();
-    const { container } = mount(`/conversations/${OPEN.id}`);
-
-    const line = await drawn(
-      container,
-      `.${statusButton.status} .${statusButton.agent}`,
-    );
-
-    expect(line.textContent).toBe("No agent running");
-    expect(line.querySelector(`.${harnessMark.mark}`)).toBeNull();
   });
 
   /// And the Brief's three pairing facts, which say what each role *will* run
@@ -6805,7 +6887,7 @@ describe("the mark of the harness a session ran under", () => {
 
     const head = await drawn(
       container,
-      `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.what}`,
+      `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.ranAs}`,
     );
 
     await waitFor(() => expect(head.textContent).toBe("Fable 5 — Work"));
@@ -6821,7 +6903,7 @@ describe("the mark of the harness a session ran under", () => {
 
     const head = await drawn(
       container,
-      `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.what}`,
+      `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.ranAs}`,
     );
 
     const path = await drawn(head, `.${harnessMark.mark} path`);
@@ -6832,8 +6914,8 @@ describe("the mark of the harness a session ran under", () => {
   });
 
   /// And the other three follow the ink of whatever line they were put beside,
-  /// the way an `Icon` does: soft on the status button's second line, the
-  /// heading's own on a card.
+  /// the way an `Icon` does: the ordinary ink on a card's second line, and the
+  /// heading's own in the pane it opens.
   it.each(MARKS.filter(([harness]) => harness !== "Claude"))(
     "leaves %s's mark in the ink around it",
     async (harness, _file) => {
@@ -6842,7 +6924,7 @@ describe("the mark of the harness a session ran under", () => {
 
       const head = await drawn(
         container,
-        `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.what}`,
+        `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.ranAs}`,
       );
 
       const svg = await drawn(head, `.${harnessMark.mark} svg`);
@@ -6900,19 +6982,26 @@ describe("the foot of the timeline pane", () => {
     ).toBeNull();
   });
 
-  /// And the status button says what the strip said, which is why it could go:
-  /// the running session, named rather than marked.
+  /// And the head of the pane says what the strip said, which is why it could
+  /// go: the running session's own card, pinned while it runs and naming the
+  /// run rather than marking it.
   it("says what is running at the head of the pane instead", async () => {
-    theGrillingOutput({
-      running: true,
+    theGrillingRunning({
       agent_type: "Claude",
       profile: "Work",
       model: "claude-fable-5",
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
+    const card = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.agentOutput}`,
+    );
+
     await waitFor(() =>
-      expect(saidRunning(container)).resolves.toBe("Claude Code Fable 5 — Work"),
+      expect(card.querySelector(`.${timeline.ranAs}`)!.textContent).toBe(
+        "Claude Code Fable 5 — Work",
+      ),
     );
   });
 });
@@ -9962,42 +10051,49 @@ describe("a commit on the timeline", () => {
     );
   });
 
-  /// The card's own account of the commit, under the counts. Clamped by the
-  /// stylesheet, so what is asked here is that the prose is on the card at all
-  /// and that it is prose — the fixture's summary opens with a Diagram, and a
-  /// card filled with the words of the fence would be the whole of what is left
-  /// to read.
-  it("carries a snippet of what the commit said about itself", async () => {
-    theCommits();
-    const { container } = mount(`/conversations/${BUILDING.id}`);
+  /// And the two counts take the app's own green and red, in both places a
+  /// commit is drawn — the card here and the header of the pane it opens. They
+  /// were a pair of hexes written twice: a green of their own, and a red that
+  /// was very nearly unreadable against the dark scheme, the tokens being the
+  /// only colours in the app that follow it.
+  ///
+  /// The stylesheet's, jsdom laying nothing out and computing no variable.
+  it("colours the counts with the tokens the diff itself is coloured with", () => {
+    for (const css of [timelineCss, commitPaneCss]) {
+      expect(css).toContain("  color: var(--added);\n  font-weight: 600;");
+      expect(css).toContain("  color: var(--removed);\n  font-weight: 600;");
+    }
 
-    await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`);
+    // The pair they replaced, gone from both.
+    expect(timelineCss).not.toContain("#1a7f37");
+    expect(commitPaneCss).not.toContain("#1a7f37");
+    expect(commitPaneCss).not.toContain("#b3382c");
 
-    const said = COMMITS.find((commit) => commit.snippet !== null)!;
-    const row = [
-      ...container.querySelectorAll(`.${timeline.timelineEvent} > .${timeline.commit}`),
-    ].find((card) => card.querySelector(`.${timeline.subject}`)!.textContent === said.subject)!;
-
-    expect(row.querySelector(`.${timeline.snippet}`)!.textContent).toBe(said.snippet);
-    expect(row.querySelector(`.${timeline.snippet}`)!.textContent).not.toContain(
-      "flowchart",
-    );
+    // And both tokens follow the scheme, which is the whole of what the change
+    // buys: the hardcoded red never did.
+    expect(base).toContain("--added: #2f7d4f;");
+    expect(base).toContain("--removed: #b3382c;");
+    expect(base).toContain("--added: #79c48f;");
+    expect(base).toContain("--removed: #e0857a;");
   });
 
-  /// Every bookkeeping commit and every commit recorded before summaries were
-  /// kept. Nothing marks the absence: the card is the one it has always been.
-  it("draws the card it always drew for a commit that said nothing", async () => {
+  /// The whole card, and nothing of what the commit said about itself: the
+  /// Summary was clamped here under the counts and is the details pane's whole
+  /// now, so the card is the line, the hash and the size of the change.
+  ///
+  /// Asserted as the markup, which is what says nothing else crept back in: a
+  /// missing snippet reads the same as a snippet nobody wrote.
+  it("draws the line and the counts, and nothing the commit said", async () => {
     theCommits();
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`);
 
-    const silent = COMMITS.find((commit) => commit.snippet === null)!;
+    const silent = COMMITS[0]!;
     const row = [
       ...container.querySelectorAll(`.${timeline.timelineEvent} > .${timeline.commit}`),
     ].find((card) => card.querySelector(`.${timeline.subject}`)!.textContent === silent.subject)!;
 
-    expect(row.querySelector(`.${timeline.snippet}`)).toBeNull();
     expect(row.innerHTML).toBe(
       `<span class="${timeline.eventHead}">` +
         `<span class="${timeline.what}">Commit</span>` +
@@ -10914,7 +11010,7 @@ describe("the pinned task list", () => {
 
     for (const rule of [
       ".pressable {\n  cursor: pointer;\n}",
-      ".open {\n  --ground: var(--card);\n\n  background: var(--card);\n}",
+      ".open {\n  background: var(--card);\n}",
       "  .pressable:hover {",
     ]) {
       expect(pressableCss).toContain(rule);
@@ -12009,21 +12105,45 @@ describe("a run stopped because an account ran out of window", () => {
   });
 
   /// The one thing that tells this stop from any other is when the account
-  /// comes back, and it is said on the status button's second line — where what
-  /// is running is said, this being a stop with nothing running and a reason of
-  /// its own for it. See *the status button* below, which is where that line is
-  /// asked about.
+  /// comes back, and it is said on the resume row of the actions menu — the row
+  /// the press is on, this being a stop that waits for the press *and* for an
+  /// account. In the words the session printed them in, and in front of the
+  /// sentence every resume row says, because *when* is the half the human does
+  /// not already know.
   ///
+  /// Nowhere on the status button, which says its status word either way: the
+  /// button has one line and the work to say it about.
+  it("says on the resume row when the account comes back", async () => {
+    thePaused();
+    const { container } = mount(`/conversations/${WAITING.id}`);
+
+    const resume = await drawn(await openActions(container), `.${actions.resume}`);
+
+    expect(resume.querySelector(`.${actions.says}`)!.textContent).toBe(
+      "Out of window until 3pm. Work out what should be running from where the work stands, and start it.",
+    );
+
+    // And nothing of it on the button that drops the menu.
+    expect(
+      (await drawn(container, `.${statusButton.status} .${statusButton.what}`))
+        .textContent,
+    ).not.toContain("Out of window");
+  });
+
   /// A conversation stopped by a press carries no such words, which is the whole
-  /// of the difference between the two.
+  /// of the difference between the two: the row says what the press does and
+  /// nothing about when, there being nothing to wait for but the press.
   it("is the only thing a conversation stopped by a press draws differently", async () => {
     expect(STOPPED.resets).toBeNull();
 
     theStopped();
     const { container } = mount(`/conversations/${STOPPED.id}`);
 
-    expect(await saidRunning(container)).toBe("No agent running");
-    await drawn(await openActions(container), `.${actions.resume}`);
+    const resume = await drawn(await openActions(container), `.${actions.resume}`);
+
+    expect(resume.querySelector(`.${actions.says}`)!.textContent).toBe(
+      "Work out what should be running from where the work stands, and start it.",
+    );
   });
 
   /// The record is kept and read rather than rewritten (ADR-0006): a Pause a
@@ -12115,8 +12235,8 @@ describe("a run stopped because an account ran out of window", () => {
   });
 });
 
-/// The one place the Conversation pane says where the work stands: a two-line
-/// button in the sticky block under the title, and behind its press everything
+/// The one place the Conversation pane says where the work stands: a one-line
+/// button at the foot of the sticky block, and behind its press everything
 /// there is to do about the Conversation.
 ///
 /// It replaced five pieces of chrome that had each been put where there was
@@ -12125,7 +12245,9 @@ describe("a run stopped because an account ran out of window", () => {
 /// there is one of it, that it is where the eye lands, and that the press that
 /// used to be a mark at the end of the header row is the whole button now.
 describe("the status button", () => {
-  it("stands in the sticky chrome, under the title and over the pinned cards", async () => {
+  /// Last in the block rather than first: the sticky area ends where this
+  /// button ends, and a control along that edge is what says so.
+  it("stands in the sticky chrome, under the pinned cards and last in it", async () => {
     theTasked();
     const { container } = mount(`/conversations/${TASKED.id}`);
 
@@ -12136,11 +12258,12 @@ describe("the status button", () => {
 
     const inside = [...chrome.children];
     expect(inside.indexOf(chrome.querySelector(`.${paneHead.head}`)!)).toBeLessThan(
-      inside.indexOf(button),
-    );
-    expect(inside.indexOf(button)).toBeLessThan(
       inside.indexOf(chrome.querySelector(`.${timeline.pinned}`)!),
     );
+    expect(
+      inside.indexOf(chrome.querySelector(`.${timeline.pinned}`)!),
+    ).toBeLessThan(inside.indexOf(button));
+    expect(inside.indexOf(button)).toBe(inside.length - 1);
   });
 
   /// The press is the whole button rather than a mark at the end of a row,
@@ -12188,10 +12311,10 @@ describe("the status button", () => {
     ).toBeNull();
   });
 
-  /// The second line: the Profile and the model the session was launched under,
-  /// off the record rather than off the Pairing the Conversation is configured
-  /// with — what is running is what was launched.
-  it("names the agent running, as every other site names one", async () => {
+  /// One line and no second. What was running used to be said under the status
+  /// word; it is the running session's own pinned card that says it now, in the
+  /// same words, and the button says where the *work* stands and nothing else.
+  it("says the status and the state and nothing under them", async () => {
     theGrillingOutput({
       running: true,
       agent_type: "Claude",
@@ -12200,42 +12323,29 @@ describe("the status button", () => {
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    await waitFor(() =>
-      expect(saidRunning(container)).resolves.toBe("Claude Code Fable 5 — Work"),
-    );
+    const said = await drawn(container, `.${statusButton.status} .${statusButton.what}`);
+
+    // The status line and nothing after it: no second line, and so no mark for
+    // the harness that line used to carry.
+    expect([...said.children]).toEqual([
+      said.querySelector(`.${statusButton.standing}`),
+    ]);
+    expect(said.querySelector(`.${harnessMark.mark}`)).toBeNull();
+    expect(said.textContent).not.toContain("Claude Code");
   });
 
-  /// And a session from before the backend was written down says the half the
-  /// record kept, with no backend guessed for it.
-  it("leaves out a backend the running session never recorded", async () => {
-    theGrillingOutput({
-      running: true,
-      agent_type: null,
-      profile: "Work",
-      model: "claude-fable-5",
-    });
-    const { container } = mount(`/conversations/${GRILLING.id}`);
-
-    await waitFor(() =>
-      expect(saidRunning(container)).resolves.toBe("Fable 5 — Work"),
-    );
-  });
-
-  /// And on the one stop that waits for something a press cannot supply, when
-  /// the account it was spending comes back — in the words the session printed
-  /// them in.
-  it("says when the account comes back on a stop a window made", async () => {
+  /// The out-of-window stop said its own sentence there, being the one stop a
+  /// resume cannot clear on its own. Nothing of it is on the button now — the
+  /// sentence is on the resume row of the menu this button drops, see *a run
+  /// stopped because an account ran out of window* above.
+  it("says nothing about a window the run is waiting on", async () => {
     thePaused();
     const { container } = mount(`/conversations/${WAITING.id}`);
 
-    expect(await saidRunning(container)).toBe("Out of window until 3pm");
-  });
+    const said = await drawn(container, `.${statusButton.status} .${statusButton.what}`);
 
-  it("says nothing is running in every other quiet moment", async () => {
-    theRecordedWith();
-    const { container } = mount(`/conversations/${OPEN.id}`);
-
-    expect(await saidRunning(container)).toBe("No agent running");
+    expect(said.textContent).not.toContain("Out of window");
+    expect(said.textContent).not.toContain("3pm");
   });
 });
 
@@ -13075,6 +13185,126 @@ function swipe(card: Element, from: number, to: number) {
 }
 
 describe("the pinned carousel", () => {
+  /// The session running now leads the deck: it is what the Conversation is
+  /// doing, where everything else pinned is something the work is against.
+  it("leads with the running session where there is one", async () => {
+    theWrapping({
+      pinned: [{ AgentOutput: { ...OUTPUT, running: true } }, ...ALL_THREE],
+    });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const dots = await drawn(container, `.${timeline.pinned} .${timeline.carousel} > .${timeline.dots}`);
+
+    expect(
+      [...dots.querySelectorAll("button")].map((dot) =>
+        dot.getAttribute("aria-label"),
+      ),
+    ).toEqual(["Agent run", "Pull request", "Task list", "Roadmap"]);
+  });
+
+  /// And it is the same card the record holds, drawn a second time rather than
+  /// moved: pressing either opens the one details pane, and both read as open
+  /// while it is — the arrangement the pull request beside it already has.
+  it("draws the running session's own card, opening the one pane", async () => {
+    theGrillingRunning({
+      agent_type: "Claude",
+      profile: "Work",
+      model: "claude-fable-5",
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const card = await drawn(container, `.${timeline.pinned} .${timeline.agentOutput}`);
+
+    expect(card.querySelector(`.${timeline.what}`)!.textContent).toBe(
+      "Agent run",
+    );
+    await waitFor(() =>
+      expect(card.querySelector(`.${timeline.ranAs}`)!.textContent).toBe(
+        "Claude Code Fable 5 — Work",
+      ),
+    );
+
+    fireEvent.click(card);
+
+    // Both copies read as the open one, there being one session behind them.
+    await waitFor(() =>
+      expect(
+        [...container.querySelectorAll(`.${timeline.agentOutput}`)].every(
+          (drawn) => drawn.getAttribute("aria-pressed") === "true",
+        ),
+      ).toBe(true),
+    );
+
+    // And the pane behind it is that session's, titled by the same reading.
+    const head = await drawn(container, `.${shell.detailsPane} .${paneHead.head} h1`);
+    await waitFor(() =>
+      expect(head.textContent).toBe("Claude Code Fable 5 — Work"),
+    );
+  });
+
+  /// Nothing running is nothing pinned for it, which is what keeps a finished
+  /// Conversation from carrying the last run it ever made for good.
+  it("pins no session where nothing is writing into one", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.timelineEvent} .${timeline.agentOutput}`);
+
+    expect(
+      container.querySelector(`.${timeline.pinned} .${timeline.agentOutput}`),
+    ).toBeNull();
+  });
+
+  /// Which is why the deck holds its place by which card it is rather than by
+  /// where it sits. The session leads the list and comes and goes with the run,
+  /// so a reader who turned to the backlog would otherwise find the pull request
+  /// under them the moment a session started, having pressed nothing — and the
+  /// backlog again the moment it ended.
+  it("keeps the reader on the card they turned to as a session comes and goes", async () => {
+    let standing: ConversationView = { ...WRAPPING, pinned: ALL_THREE };
+
+    serving(
+      whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+      whenever("/api/ui/repos", json(REPOS)),
+      whenever("/api/ui/profiles", json(PROFILES)),
+      whenever(`/api/ui/conversations/${WRAPPING.id}`, () => json(standing)()),
+      whenever(WHAT_IS_ON_IT, json(CARRIED)),
+    );
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const dots = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.carousel} > .${timeline.dots}`,
+    );
+    const named = () =>
+      dots
+        .querySelector("button[aria-current='true']")!
+        .getAttribute("aria-label");
+
+    fireEvent.click(
+      [...dots.querySelectorAll("button")].find(
+        (dot) => dot.getAttribute("aria-label") === "Task list",
+      )!,
+    );
+    await waitFor(() => expect(named()).toBe("Task list"));
+
+    // A session starts, and goes in at the head of the list.
+    standing = {
+      ...WRAPPING,
+      pinned: [{ AgentOutput: { ...OUTPUT, running: true } }, ...ALL_THREE],
+    };
+    readAgain();
+    await waitFor(() => expect(dots.querySelectorAll("button").length).toBe(4));
+    expect(named()).toBe("Task list");
+
+    // And ends, taking it out from under the rest again.
+    standing = { ...WRAPPING, pinned: ALL_THREE };
+    readAgain();
+    await waitFor(() => expect(dots.querySelectorAll("button").length).toBe(3));
+    expect(named()).toBe("Task list");
+  });
+
   it("shows one of several pinned cards at a time", async () => {
     theWrapping({ pinned: ALL_THREE });
     const { container } = mount(`/conversations/${WRAPPING.id}`);
@@ -13168,14 +13398,20 @@ describe("the pinned carousel", () => {
     );
   });
 
-  /// The arrows lie over the card's own edges, so the card stands back from
-  /// them — and only where there are arrows to stand back from.
-  it("gives the cards room for the arrows where there are arrows", async () => {
+  /// Each arrow straddles the edge of the card it turns the deck across: half
+  /// its own width outside, which puts its centre on the edge line. The room is
+  /// the pane's own padding, and no card is padded for them — the cards are
+  /// borderless at rest, so an arrow lying inside one had nothing to lie
+  /// against and the inset it was given read as a card indented for nothing.
+  it("straddles each card's edge with its arrow, and pads no card for them", () => {
     const [, hovering] = timelineCss.split("@media (hover: hover) {");
 
-    expect(hovering).toContain(
-      "  .deck .taskList,\n  .deck .stageList,\n  .deck .pullRequest {\n    padding-inline: 2.4rem;\n  }",
-    );
+    // Half of the 1.75rem circle above, which is what centres it on the edge.
+    expect(hovering).toContain("    width: 1.75rem;");
+    expect(hovering).toContain("  .deck > .back {\n    left: -0.875rem;\n  }");
+    expect(hovering).toContain("  .deck > .on {\n    right: -0.875rem;\n  }");
+
+    expect(timelineCss).not.toContain("padding-inline");
   });
 
   /// The slide is the stylesheet's, gated the way the record's tab indicator
@@ -13810,11 +14046,11 @@ describe("what a refused press says", () => {
 /// wrote, and the instruction a steer sent a session off with.
 ///
 /// Each of them is as long as whoever wrote it made it, so the card shows the
-/// first five lines under a fade and the whole of it is a press away. Where the
-/// fifth line falls is a fact about a laid-out box and jsdom has no layout, so
-/// the clamp itself is asserted off the stylesheet — the way a drawn diagram's
-/// rules are — and what is asked here is that each document is put inside it and
-/// that pressing the card opens the whole.
+/// first three lines and ends in an ellipsis, and the whole of it is a press
+/// away. Where the third line falls is a fact about a laid-out box and jsdom has
+/// no layout, so the clamp itself is asserted off the stylesheet — the way a
+/// drawn diagram's rules are — and what is asked here is that each document
+/// wears it and that pressing the card opens the whole.
 describe("the documents on a timeline", () => {
   /// The details pane, and what it has drawn.
   const details = () => screen.getByLabelText("Details");
@@ -13829,7 +14065,7 @@ describe("the documents on a timeline", () => {
 
     const brief = await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`);
 
-    expect(brief.querySelector(`.${timeline.clamp} > .${timeline.briefBody}`)).toBeTruthy();
+    expect(brief.querySelector(`.${timeline.clamp}.${timeline.briefBody}`)).toBeTruthy();
 
     fireEvent.click(brief);
 
@@ -13850,7 +14086,7 @@ describe("the documents on a timeline", () => {
 
     const handoff = await drawn(container, `.${timeline.timelineEvent} > .${timeline.handoff}`);
 
-    expect(handoff.querySelector(`.${timeline.clamp} > .${timeline.handoffBody}`)).toBeTruthy();
+    expect(handoff.querySelector(`.${timeline.clamp}.${timeline.handoffBody}`)).toBeTruthy();
 
     fireEvent.click(handoff);
 
@@ -13927,7 +14163,7 @@ describe("the documents on a timeline", () => {
 
     const brief = await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`);
 
-    expect(brief.querySelector(`.${timeline.clamp} > .${timeline.briefBody}`)).toBeTruthy();
+    expect(brief.querySelector(`.${timeline.clamp}.${timeline.briefBody}`)).toBeTruthy();
     expect(brief.querySelector("textarea")).toBeNull();
     expect(brief.getAttribute("role")).toBe("button");
     expect(brief.classList.contains(pressable.pressable!)).toBe(true);
@@ -13949,9 +14185,12 @@ describe("the documents on a timeline", () => {
   });
 
   /// A notice is a sentence rather than a document, so its card is cut at one
-  /// line with an ellipsis rather than clamped at five under a fade. The whole
-  /// of it is still a press away — see the notice's own pane below.
-  it("cuts a notice off at a line rather than clamping it", async () => {
+  /// line where a document's is cut at three. The same kind of cut either way,
+  /// which it was not: a document was clamped to a height under a gradient, and
+  /// a fade at the foot of the sticky block read as the block itself trailing
+  /// off. The whole of it is still a press away — see the notice's own pane
+  /// below.
+  it("cuts a notice off at a line where a document is cut at three", async () => {
     theStaged();
     const { container } = mount(`/conversations/${STAGED.id}`);
 
@@ -13960,9 +14199,12 @@ describe("the documents on a timeline", () => {
     expect(notice.querySelector(`.${timeline.clamp}`)).toBeNull();
     expect(notice.querySelector(`.${timeline.noticeBody}`)).toBeTruthy();
 
-    // How far it is cut is the stylesheet's, and jsdom lays nothing out.
+    // How far each of them is cut is the stylesheet's, and jsdom lays nothing
+    // out.
     expect(timelineCss).toContain("-webkit-line-clamp: 1;");
     expect(timelineCss).toContain("line-clamp: 1;");
+    expect(timelineCss).toContain("-webkit-line-clamp: 3;");
+    expect(timelineCss).toContain("line-clamp: 3;");
   });
 });
 
@@ -14256,39 +14498,35 @@ describe("a clamped document", () => {
     return timelineCss.slice(opened, timelineCss.indexOf("}", opened));
   }
 
-  /// The page is set at a line height of 1.5, which is what turns a count of
-  /// lines into a height. The two halves are written down in different languages
-  /// and this is where they are held to each other.
-  const LINE_HEIGHT = 1.5;
-
-  it("shows five lines of it and hides the rest", () => {
+  /// Three lines, counted as line boxes rather than measured as a height: the
+  /// count in the stylesheet and the one the module exports are the same number
+  /// written in two languages, and this is where they are held to each other.
+  it("shows three lines of it and cuts the rest with an ellipsis", () => {
     const clamp = block(".clamp");
 
-    expect(CLAMPED_LINES).toBe(5);
-    expect(clamp).toContain(`max-height: ${CLAMPED_LINES * LINE_HEIGHT}em`);
+    expect(CLAMPED_LINES).toBe(3);
+    expect(clamp).toContain(`-webkit-line-clamp: ${CLAMPED_LINES}`);
+    expect(clamp).toContain(`line-clamp: ${CLAMPED_LINES}`);
     expect(clamp).toContain("overflow: hidden");
 
-    // And that line height is the body's, rather than a number this test made
-    // up: a page set looser or tighter would clamp at a different height.
-    expect(base).toContain(`font: 16px/${LINE_HEIGHT} system-ui`);
+    // The ellipsis comes with the clamp, so there is nothing to measure and
+    // nothing to draw over the last line: a document that fits shows whole, and
+    // one that does not ends in the mark that says so.
+    expect(clamp).not.toContain("max-height");
   });
 
-  it("fades the cut into the card, and only where there is a cut", () => {
-    const cut = block(".clamp.cut::after");
-
-    // Into whatever the card is standing in rather than into a colour named
-    // here: a flat card is the paper and a card pointed at or opened is the
-    // fill, and `CardButton` is what hands the difference down.
-    expect(cut).toContain(
-      "linear-gradient(to bottom, transparent, var(--ground, var(--card)))",
-    );
-    expect(pressableCss).toContain("--ground: var(--paper);");
-    // The fade must not swallow the press: the whole card opens the pane.
-    expect(cut).toContain("pointer-events: none");
-
-    // On `.cut` and nowhere else, which is what makes a short document show
-    // whole with no fade over its last line.
+  /// Nothing fades. The cut was a gradient over the last line, drawn where a
+  /// `ResizeObserver` had found the document went on — a soft edge at the foot
+  /// of the sticky block, where the eye needs a hard one to tell the block's own
+  /// end from a card trailing off.
+  it("draws no fade, and keeps no card colour for one", () => {
+    expect(timelineCss).not.toContain("linear-gradient");
+    expect(timelineCss).not.toContain(".clamp.cut");
     expect(timelineCss).not.toContain(".clamp::after");
+
+    // And the variable the fade read the card's own colour through, which had
+    // no other reader.
+    expect(pressableCss).not.toContain("--ground");
   });
 });
 

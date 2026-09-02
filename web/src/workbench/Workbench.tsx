@@ -527,7 +527,7 @@ function DetailsPane(props: {
   /// as; a commit, whose full self is its diff; the pull request, whose full
   /// self is what is on it at GitHub right now; and the three documents — the
   /// Brief, the handoff and the instruction a steer carried — whose full self
-  /// is the markdown their card shows five lines of. The kind travels with it,
+  /// is the markdown their card shows three lines of. The kind travels with it,
   /// because it is what decides which pane is drawn.
   ///
   /// A Brief still being drafted is here too, and nothing ever selects it: the
@@ -667,7 +667,7 @@ function DetailsPane(props: {
                   )}
                 </Match>
                 {/* And the three documents, each the whole of what its
-                    card showed five lines of. The handoff and the
+                    card showed three lines of. The handoff and the
                     instruction are one pane — rendered markdown under the
                     heading the card carries — and the Brief has two of its
                     own, because a Brief is a document only once its round is
