@@ -27,6 +27,13 @@ const DEFAULT_SERVER: &str = "http://127.0.0.1:8422";
 #[derive(Debug, Parser)]
 #[command(
     name = "verkstead",
+    // What the usage lines say this command is called, said rather than taken
+    // from the file that was run. Clap otherwise names it after `argv[0]`,
+    // which on Windows is `verkstead.exe` — so `verkstead ask --help` there
+    // would print a usage line no document in this repository spells, the
+    // Guide's quoted CLI contract included, and a Windows human types
+    // `verkstead` at the prompt either way.
+    bin_name = "verkstead",
     version,
     about = "Put a Question Set to the human and wait for the answer.\n\n\
              Run `verkstead guide` — or `verkstead` with no arguments — for \

@@ -531,6 +531,34 @@ fn the_guide_names_both_kinds_of_ask_and_when_to_use_each() {
     );
 }
 
+/// And the name in those usage lines is the command's own rather than the
+/// file's, which is what lets the quotation above hold on every platform.
+///
+/// Clap otherwise reads `argv[0]`, and on Windows that is `verkstead.exe` — a
+/// usage line no document in this repository spells. Proved by running the
+/// binary under that very name, which any machine can do and which a Windows
+/// one does without being asked.
+#[test]
+fn the_usage_lines_name_the_command_rather_than_the_file_that_was_run() {
+    let under = tempfile::tempdir().unwrap();
+    let renamed = under.path().join("verkstead.exe");
+    std::fs::copy(env!("CARGO_BIN_EXE_verkstead"), &renamed).unwrap();
+
+    let said = String::from_utf8(
+        Command::new(&renamed)
+            .args(["ask", "--help"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap();
+
+    assert!(
+        said.contains("Usage: verkstead ask"),
+        "the usage line should name `verkstead` however the file is called, got:\n{said}"
+    );
+}
+
 #[test]
 fn the_guides_quoted_cli_contract_is_the_real_one() {
     let guide = stdout(&run(&["guide"]));
