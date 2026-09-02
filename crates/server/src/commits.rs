@@ -22,8 +22,8 @@
 //!
 //! A branch is swept whole rather than followed from where the last sweep got
 //! to. What makes that cheap is the store: it already knows which commits are on
-//! the Timeline, so the reading of git that costs anything — a message and a set
-//! of counts per commit — happens only for the ones that are not. And what makes
+//! the Timeline, so the reading of git that costs anything — a message and a
+//! patch per commit — happens only for the ones that are not. And what makes
 //! it *correct* is the same thing, because a branch is not a queue: one that was
 //! amended, reset or rebased has commits before its tip that no sweep has seen.
 //!
@@ -469,10 +469,18 @@ fn counterpart(named: &str) -> String {
 /// What one commit is, as its Timeline row says it: the message git recorded,
 /// and how much of the repository it moved.
 ///
-/// Two reads rather than one that says both. `--numstat` and a format string can
-/// be asked for together, but then the counts arrive underneath a header that
-/// has to be told apart from them — and the counts are the half that has to be
-/// parsed exactly.
+/// Two reads rather than one that says both: the message, and the patch the
+/// counts are taken off. That patch is the one [`patch`] gives the details
+/// pane, so a row and the pane under it are two readings of one diff and
+/// cannot disagree about what the commit moved.
+///
+/// Counted off the patch rather than asked of `--numstat`, and merges are why.
+/// A merge is described by its combined diff, which is the hunks that differ
+/// from *both* parents — the resolution the agent actually made. `--numstat`
+/// prunes nothing, so a resolution session's merge would draw with every file
+/// the base branch brought in beside the one it settled. Counting the patch
+/// counts what is in it, and on a commit with one parent the two agree line
+/// for line — which is every commit but the merge.
 ///
 /// The message is one read all the same. `%s` is a single line whatever the
 /// commit did to its first paragraph, so the subject is everything before the
@@ -495,37 +503,7 @@ fn describe(repo: &Path, sha: &str) -> Option<store::Commit> {
 
     let (subject, body) = message.split_once('\n').unwrap_or((message.as_str(), ""));
 
-    let counted = git(
-        repo,
-        &[
-            "diff-tree",
-            "--no-commit-id",
-            "--numstat",
-            // The one flag that makes a repository's first commit describable:
-            // it has no parent to be compared against, and without this git
-            // compares it with nothing and says nothing changed.
-            "--root",
-            "--end-of-options",
-            sha,
-        ],
-    )?;
-
-    let mut files = 0;
-    let mut insertions = 0;
-    let mut deletions = 0;
-
-    for line in counted.lines().filter(|line| !line.trim().is_empty()) {
-        let mut columns = line.split('\t');
-
-        // Added, removed, path. A binary file has `-` for both counts, which
-        // parses as nothing and counts as a file — which is what it is.
-        let added = columns.next().unwrap_or_default();
-        let removed = columns.next().unwrap_or_default();
-
-        files += 1;
-        insertions += added.parse::<i64>().unwrap_or(0);
-        deletions += removed.parse::<i64>().unwrap_or(0);
-    }
+    let (files, insertions, deletions) = counts(&patch(repo, sha)?);
 
     Some(store::Commit {
         sha: sha.to_owned(),
@@ -539,6 +517,51 @@ fn describe(repo: &Path, sha: &str) -> Option<store::Commit> {
         // The name here is what a read gives back for drawing.
         repo: None,
     })
+}
+
+/// How much of the repository a patch moves: files, then lines put in, then
+/// lines taken out.
+///
+/// git's own arithmetic done here rather than asked for: a file per `diff`
+/// header, and a line per `+` or `-` inside a hunk. Held to the hunks on
+/// purpose — the `---` and `+++` above one are a file's header rather than
+/// lines of it, and so is a deleted `---` of front matter, which arrives as
+/// `----` and is a deletion that anything reading the first three characters
+/// would lose.
+///
+/// A combined diff counts by the same rule. Every line of one carries a column
+/// per parent, so what stands in the first column is what the merge did to the
+/// branch it was made on, and the files are the ones the combined diff kept:
+/// what the agent resolved, rather than everything the other parent brought
+/// along with it.
+///
+/// A binary file counts as a file and no lines, which is what `--numstat` says
+/// of one too.
+fn counts(patch: &str) -> (i64, i64, i64) {
+    let mut files = 0;
+    let mut insertions = 0;
+    let mut deletions = 0;
+    let mut hunk = false;
+
+    for line in patch.lines() {
+        // `diff --git` for an ordinary file and `diff --cc` for a merge's, and
+        // never a line of a hunk: those carry a column per parent in front of
+        // whatever they hold.
+        if line.starts_with("diff --") {
+            files += 1;
+            hunk = false;
+        } else if line.starts_with("@@") {
+            hunk = true;
+        } else if hunk {
+            match line.as_bytes().first() {
+                Some(b'+') => insertions += 1,
+                Some(b'-') => deletions += 1,
+                _ => {}
+            }
+        }
+    }
+
+    (files, insertions, deletions)
 }
 
 /// What a commit says about itself: its message body with the trailing trailer
@@ -653,8 +676,16 @@ pub(crate) fn touched(repo: &Path, base: &str, branch: &str) -> bool {
 /// is why what a commit was called comes off its Event instead. `diff-tree` says
 /// only the patch, where `git show` says the message too.
 ///
-/// `--root` for the reason [`describe`] has it: a repository's first commit has
-/// no parent, and without this git compares it against nothing.
+/// `--root` because a repository's first commit has no parent, and without it
+/// git compares that commit against nothing and says it changed nothing.
+///
+/// `--cc` because a merge commit is the other one git says nothing about
+/// unasked. What it gives back for one is the combined diff: the hunks that
+/// differ from *both* parents, which on the merge a resolution session leaves
+/// behind is the conflicts the agent settled and not the whole of what the base
+/// branch brought in. The flag is passed unconditionally because it costs
+/// nothing to — on a commit with one parent, a root commit included, the output
+/// is the ordinary diff byte for byte.
 ///
 /// `None` where the repository will not say — a commit that has been garbage
 /// collected, or a repository that has moved out from under Verkstead.
@@ -665,6 +696,7 @@ pub(crate) fn patch(repo: &Path, sha: &str) -> Option<String> {
             "diff-tree",
             "--no-commit-id",
             "-p",
+            "--cc",
             "--root",
             "--end-of-options",
             sha,
@@ -706,6 +738,19 @@ mod tests {
         assert!(output.status.success(), "git {args:?} failed");
 
         String::from_utf8(output.stdout).unwrap()
+    }
+
+    /// The same run, for a git that is expected to fail: a merge that conflicts
+    /// exits non-zero, and the conflict is the point of asking for it.
+    fn attempt(dir: &Path, args: &[&str]) {
+        Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("git should be on the PATH for these tests");
     }
 
     fn head(dir: &Path) -> String {
@@ -959,6 +1004,85 @@ mod tests {
         assert!(!patch.contains("docs: say more"), "{patch:?}");
         assert!(!patch.contains("Author:"), "{patch:?}");
         assert!(patch.starts_with("diff --git"), "{patch:?}");
+    }
+
+    /// The merge a resolution session leaves behind carries the conflicts it
+    /// settled, which is the agent's work and belongs on the Timeline. git says
+    /// nothing at all about a merge unless it is asked for the combined diff,
+    /// and what that says is the hunks that differ from both parents: what was
+    /// resolved, and not the files the base branch brought in on its own.
+    #[test]
+    fn a_merge_is_described_by_what_it_resolved_and_renders() {
+        let dir = repository();
+        let path = dir.path();
+
+        // The Conversation's own branch, and one commit of its work.
+        run(path, &["checkout", "-b", "the-work"]);
+        std::fs::write(path.join("README.md"), "# a repository\n\nThe work.\n").unwrap();
+        run(path, &["commit", "-am", "feat: the work"]);
+
+        // What the base branch gained meanwhile: a file nobody here touched,
+        // and an edit to the one this branch is holding.
+        run(path, &["checkout", "main"]);
+        std::fs::write(path.join("README.md"), "# a repository\n\nThe base.\n").unwrap();
+        std::fs::write(path.join("unrelated.md"), "one\ntwo\nthree\n").unwrap();
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "-m", "docs: the base moves on"]);
+
+        // And the resolution session: merge the base in, settle the conflict,
+        // commit the merge.
+        run(path, &["checkout", "the-work"]);
+        attempt(path, &["merge", "main"]);
+        std::fs::write(path.join("README.md"), "# a repository\n\nResolved.\n").unwrap();
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "-m", "merge: settle the conflicts"]);
+
+        let described = describe(path, &head(path)).expect("a merge is still a commit");
+
+        assert_eq!(
+            described.files, 1,
+            "the file the agent resolved, and not the one the base brought in",
+        );
+        assert_eq!(described.insertions, 1);
+        assert_eq!(described.deletions, 1);
+
+        let patch = patch(path, &head(path)).expect("and it still has a patch");
+
+        assert!(
+            patch.contains("Resolved."),
+            "the hunk the agent settled is in it: {patch:?}",
+        );
+        assert!(
+            !patch.contains("unrelated.md"),
+            "and what the base brought in on its own is not: {patch:?}",
+        );
+        assert!(
+            verkstead_render::commit_pane(None, &patch).diff.is_some(),
+            "and the pane has something to show",
+        );
+    }
+
+    /// The counting is held to the hunks, because a patch's first three
+    /// characters do not say what a line is. A deleted `---` — front matter, or
+    /// the rule under a heading — arrives as `----`, and anything that read it
+    /// as the `---` of a file header would drop a deletion the human can see.
+    #[test]
+    fn a_deleted_dashed_line_is_counted_as_a_deletion() {
+        let patch = "diff --git a/notes.md b/notes.md\n\
+                     index 1111111..2222222 100644\n\
+                     --- a/notes.md\n\
+                     +++ b/notes.md\n\
+                     @@ -1,3 +1,1 @@\n\
+                     ----\n\
+                     -title: notes\n\
+                     ----\n\
+                     +# notes\n";
+
+        assert_eq!(
+            counts(patch),
+            (1, 1, 3),
+            "one file, the heading put in, and the three lines of front matter taken out",
+        );
     }
 
     /// What a sweep is: everything on the branch past where it started, oldest
