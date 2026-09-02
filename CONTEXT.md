@@ -74,7 +74,7 @@ is started on a name Verkstead invented, because there has to be a branch to cut
 and nobody has thought about the work yet — and a name nobody chose says nothing
 about the work, so while it is a Draft none of it is drawn anywhere: the sidebar
 row, the pane header and the row read aloud all call it **Draft**, and the
-branch field on the setup card stands empty under *Automatically select*. Whose
+branch field on the composer stands empty under *Automatically select*. Whose
 the name is is kept in the record rather than read off the name's shape. Typing
 one settles it, and it is the title from that moment; clearing the field hands
 the naming back, and the name the Conversation started on stands again rather
@@ -97,9 +97,9 @@ and the row read aloud go on saying *Draft* through the first minutes of
 Grilling or Implementing — and say the branch the moment the name is settled.
 Two things settle it and both are final: the session renames the branch and
 Verkstead follows it, or the session ends having left the name alone, and the
-name it left is the Conversation's. The setup card is not part of this: the
+name it left is the Conversation's. The composer is not part of this: the
 branch is a plan while the Conversation drafts and a fact from the moment it is
-cut, so the field goes when the card does, whatever the name on it turns out to
+cut, so the field goes when the pane does, whatever the name on it turns out to
 be.
 _Avoid_: task, session, job, thread, ticket
 
@@ -201,7 +201,7 @@ big its compiled half may grow, is the human's, in the workbench settings. The
 one control there that only ever *closes* a hole — the **Sandbox
 Configuration** beside it opens them, and does so only for what somebody typed.
 Without an sccache it is still a cache — the crate downloads are shared —
-and the setup card says so on a repository that builds Rust.
+and the composer says so on a repository that builds Rust.
 _Avoid_: sccache, cargo cache, artifact cache, shared target dir
 
 **Compile Server**:
@@ -228,7 +228,7 @@ Conversation's own Repo is refused — it is the work's repository already, and 
 second checkout of it in one sandbox is not a companion — and so is a Repo
 added twice.
 
-**Configured beside the branch while the Brief drafts**, on the setup card and
+**Configured beside the branch while the Brief drafts**, on the composer and
 by the setup's own rules: freely added, edited and taken away, and frozen at
 grill start along with the branch and the base. What is configured is the mode,
 the branch the checkout comes off — that repository's default branch where none
@@ -243,7 +243,7 @@ the work goes on in, because what that settles is the sandbox the sessions to
 come run in rather than a property of one state. Never the other way: nothing
 removes a companion and nothing puts one back to read-only, so what a session
 was once given is never taken back mid-Conversation. What is added at a steer
-answers the setup card's questions again, and what is opened up is cut its
+answers the composer's questions again, and what is opened up is cut its
 branch off the base its row already names, re-resolved at that moment — the
 repository is joining the work now, so it starts from now rather than from the
 commit its detached checkout was left at.
@@ -1096,7 +1096,7 @@ for a wrap-up: that both builds and reviews, so the one pick reaches the Review
 Pairing as well — but only to **fill** one nothing was picked for, never to
 replace one that was. The picker is labelled for the state's own work and
 prefilled with what builds, so a human who changes nothing on it has said
-nothing about the review, and an account they chose on the setup card to be a
+nothing about the review, and an account they chose on the composer to be a
 fresh set of eyes stays that.
 
 **And the submit resumes in the same press.** The stop the click left is

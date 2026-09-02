@@ -602,12 +602,6 @@
   pointer-events: none;
 }
 
-/* What a save cannot do, said under the field it happened in. */
-.brief > .failure {
-  margin: 0.5rem 0 0;
-  font-size: 0.9rem;
-}
-
 /* A move: the conversation changing hands, written as the transition itself —
    `Grilling → Implementing`. A line rather than a card, because there is nothing
    to it but the fact, so it is drawn out of the run of cards the other events
@@ -1014,39 +1008,6 @@
   color: var(--ink-soft);
 }
 
-/* What happens next, under everything that has happened so far. Outside the
-   list, because it is not an event — and an event is exactly what it would look
-   like sitting at the end of one. */
-.startGrilling {
-  margin-top: 1rem;
-}
-
-.startGrilling .start {
-  padding: 0.5rem 1rem;
-  font: inherit;
-  font-weight: 600;
-  color: var(--paper);
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: 0.4rem;
-  cursor: pointer;
-}
-
-/* Two ways of not being pressable, drawn the same because they read the same:
-   a press already in flight, and a conversation that is not ready yet. The
-   second one is only `aria-disabled`, so it still takes the press — and what it
-   does with it is say what is missing. */
-.startGrilling .start:disabled,
-.startGrilling .start.inert {
-  cursor: not-allowed;
-  opacity: 0.65;
-}
-
-.startGrilling .failure {
-  margin: 0.5rem 0 0;
-  font-size: 0.9rem;
-}
-
 /* Under the pointer, everything on this pane that can be pressed. Together at
    the foot of the file rather than each beside its own card: a hover state has
    to be inside a query like this one — see `styles/base.css`, where the scheme
@@ -1064,11 +1025,7 @@
    carousel are text and a small outline, and take the accent. The dots are
    neither: what is drawn is a mark rather than a control, so the one under the
    pointer darkens by a step of ink — the accent is what says which card is
-   showing, and a dot that took it under the pointer would be saying that.
-
-   The one filled button left here deepens its accent. Never while it is
-   refusing the press: the start has two ways of doing that and this excludes
-   both. */
+   showing, and a dot that took it under the pointer would be saying that. */
 @media (hover: hover) {
   .paneForward:hover {
     text-decoration: underline;
@@ -1076,10 +1033,5 @@
 
   .dots button:not([aria-current]):hover::before {
     background: var(--ink-soft);
-  }
-
-  .startGrilling .start:not(:disabled):not(.inert):hover {
-    background: var(--accent-deep);
-    border-color: var(--accent-deep);
   }
 }

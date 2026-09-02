@@ -1,0 +1,67 @@
+/* Where a Conversation is drafted: the Brief, the setup under it and the press
+   that starts the work. See `Composer.tsx`.
+
+   The look this pane is heading for — a box with its options along the bottom
+   edge — is the next task's; what is here is what came off the Timeline card,
+   drawn in a pane instead of on it. */
+
+.composer > :last-child {
+  margin-bottom: 0;
+}
+
+/* The Brief where it is a document rather than a field — an adopting
+   Conversation's, which is the stage's own. At the width prose is read at
+   everywhere else, which is the width the field beside it takes from `.grow`. */
+.written {
+  max-width: var(--measure);
+}
+
+/* What a save cannot do, said under the box it happened in. */
+.failure {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+/* What happens next, under everything there is to settle. */
+.startGrilling {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--edge);
+}
+
+.startGrilling .start {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+/* Two ways of not being pressable, drawn the same because they read the same:
+   a press already in flight, and a conversation that is not ready yet. The
+   second one is only `aria-disabled`, so it still takes the press — and what it
+   does with it is say what is missing. */
+.startGrilling .start:disabled,
+.startGrilling .start.inert {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.startGrilling .failure {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
+
+/* Under the pointer, the one filled button on the pane: it deepens its accent.
+   Never while it is refusing the press — the start has two ways of doing that
+   and this excludes both — and inside a query, because a hover state has to be
+   (see `styles/base.css`). */
+@media (hover: hover) {
+  .startGrilling .start:not(:disabled):not(.inert):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}

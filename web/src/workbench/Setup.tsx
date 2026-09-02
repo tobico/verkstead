@@ -7,12 +7,13 @@
 //! and every one of them is the human's to change for as long as it is still
 //! drafting.
 //!
-//! Under the Brief rather than in a pane of its own, because setting a
-//! Conversation up and kicking it off are one act and both belong where the work
-//! is read: the Brief is the headline and the setup follows it. Once grilling
-//! starts none of this is drawn at all — the server freezes every one of them at
-//! that moment, so nothing taken away was still actionable, and the card goes
-//! back to being the Brief alone.
+//! Under the Brief on the composer, because setting a Conversation up and
+//! kicking it off are one act and both belong where the Brief is written: the
+//! Brief is the headline and the setup follows it, with the press that starts
+//! the work under both — see [`Composer`](./Composer.tsx). Once grilling starts
+//! none of this is drawn at all: the server freezes every one of them at that
+//! moment, so nothing taken away was still actionable, and a Brief past
+//! drafting opens the record of what it was configured with instead.
 //!
 //! The three pairings are separate choices because they are genuinely separate
 //! accounts — grill on fable, implement on opus, review on whatever did not

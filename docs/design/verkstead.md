@@ -424,7 +424,7 @@ flowchart LR
     and started again when the size changes because sccache reads it once.
     Without one it degrades rather
     than failing: the downloads are still shared, a startup line says the
-    compiling is not, and the setup card warns on a repo with a root
+    compiling is not, and the composer warns on a repo with a root
     `Cargo.toml`. `CARGO_INCREMENTAL` is deliberately untouched — cargo builds
     dependencies non-incrementally already, which is exactly what sccache can
     cache, and the workspace's own crates stay incremental in the worktree's
@@ -549,16 +549,20 @@ with the newest thing marked open, never carried past the record into the
 details.
 
 What a Conversation needs settling before it runs — branch, base commit, both
-Pairings, the readiness verdict — rides under the Brief on its timeline card
-instead, disappearing entirely once grilling starts, since the server freezes
-all of it at that moment. The repo name, the worktree path and the conversation
-state are drawn nowhere: the record tells that story.
+Pairings, the readiness verdict — stands under the Brief on the **composer**,
+which is the details pane a drafting Brief opens: the document as the field it
+is written in, the setup under it, and the press that starts the work. It is
+the pane for a Conversation while it drafts, whatever the Brief's own freeze —
+an adopting draft gets it with the box locked to the stage's rendering and the
+Adopt press where the start would be. Past drafting a frozen Brief opens the
+read-only pane instead, and the repo name, the worktree path and the
+conversation state are drawn nowhere on the record: it tells that story itself.
 
 Timeline events:
 
 | Event | In timeline | In details pane |
 |---|---|---|
-| Brief | inline, always: a field that saves itself while drafting, a rendering once frozen; setup under it while drafting | — |
+| Brief | inline, always: the server's rendering clamped to five lines, drafting or frozen | the composer while its round drafts — the field that saves itself, the setup, the start; the frozen document and what the round was configured with, once it is past drafting |
 | Agent output | turn count, latest statement, liveness mark | Transcript or Screen |
 | Question set | table of #, question, answer | full answer-set document |
 | Commit | +/− and changed-line counts, clamped summary snippet | boxed Message (diagram drawn) above the server-rendered diff viewer |

@@ -80,6 +80,7 @@ import { Asked } from "./Asked";
 import { Backlog } from "./Backlog";
 import { Brief } from "./Brief";
 import { Commit } from "./Commit";
+import { Composer, composing } from "./Composer";
 import { Conversations } from "./Conversations";
 import { Document } from "./Document";
 import { Hatch } from "./Hatch";
@@ -607,16 +608,33 @@ function DetailsPane(props: {
                 {/* And the three documents, each the whole of what its
                     card showed five lines of. The handoff and the
                     instruction are one pane — rendered markdown under the
-                    heading the card carries — and the Brief has one of its
-                    own, because it carries the summary of what the
-                    Conversation was configured with as well. */}
+                    heading the card carries — and the Brief has two of its
+                    own, because a Brief is a document only once its round is
+                    past writing it.
+
+                    While that round drafts, the pane is the composer: the
+                    Brief as a field, the setup under it, and the press that
+                    starts the work. Once the work has started from it, it is
+                    the record of what that round was built from, with the
+                    configuration frozen alongside it. */}
                 <Match when={briefIn(open())}>
                   {(brief) => (
-                    <Brief
-                      conversation={conversation()}
-                      brief={brief()}
-                      back={() => props.pane("middle")}
-                    />
+                    <Show
+                      when={composing(conversation(), brief())}
+                      fallback={
+                        <Brief
+                          conversation={conversation()}
+                          brief={brief()}
+                          back={() => props.pane("middle")}
+                        />
+                      }
+                    >
+                      <Composer
+                        conversation={conversation()}
+                        brief={brief()}
+                        back={() => props.pane("middle")}
+                      />
+                    </Show>
                   )}
                 </Match>
                 <Match when={handoffIn(open())}>

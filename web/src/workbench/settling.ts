@@ -2,11 +2,11 @@
 //! it, and what happens to a keystroke that lands while a save is in the air.
 //!
 //! One of each, shared by every self-saving field on a drafting Conversation —
-//! the Brief and the branch name — because they are the same card, and a human
+//! the Brief and the branch name — because they are the same pane, and a human
 //! typing across both should meet neither two ideas of what a pause is nor two
-//! ideas of when what they typed goes out. Its own module because the Brief's
-//! card draws the setup the branch stands in, so neither of the two files can
-//! own it without the other importing it back.
+//! ideas of when what they typed goes out. Its own module because the composer
+//! draws the setup the branch stands in, so neither of the two files can own it
+//! without the other importing it back.
 
 import { onCleanup } from "solid-js";
 

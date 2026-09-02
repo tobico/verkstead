@@ -2,10 +2,10 @@
    the base commit, the repos the work runs alongside and the pairings. See
    `Setup.tsx`.
 
-   Drawn under the brief it belongs to, on the same card, which is why the block
+   Drawn under the brief it belongs to, on the composer, which is why the block
    opens with a rule rather than with a heading of its own. */
 
-/* Ruled off from the prose above it, because the brief is the card's headline
+/* Ruled off from the prose above it, because the brief is the pane's headline
    and this is the setup that follows it — and gone entirely once grilling
    starts, which is why nothing here is ever drawn disabled. */
 .conversationSetup {
@@ -14,7 +14,7 @@
   border-top: 1px solid var(--edge);
 }
 
-/* The gap under the last of them is the card's own padding, rather than that
+/* The gap under the last of them is the pane's own padding, rather than that
    plus the one every section keeps below itself. */
 .conversationSetup > :last-child {
   margin-bottom: 0;
@@ -327,8 +327,8 @@
   color: var(--ink);
 }
 
-/* The build cache a Rust repository will not get, said at the foot of the setup
-   card — the last thing read before the work is started. Drawn as the settings
+/* The build cache a Rust repository will not get, said at the foot of the
+   setup — the last thing read before the work is started. Drawn as the settings
    page draws a missing credential: the stopped red down one edge, because it is
    the same "this is waiting on you" and not a failure. */
 .conversationSetup .uncached {

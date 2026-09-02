@@ -117,9 +117,10 @@ import adoption from "../src/workbench/Adoption.module.css";
 // The detail panes, each a module of its own: the brief and what the
 // conversation was configured with, a commit, a document read whole, one
 // session's record and the terminal it was printed on, and a pull request.
-// What the summary under a frozen Brief says of a branch nobody has named.
-import { UNNAMED } from "../src/workbench/Brief";
 import briefPane from "../src/workbench/Brief.module.css";
+// The composer, which is the details pane a conversation is drafted in: the
+// brief as a field, the setup under it and the press that starts the work.
+import composer from "../src/workbench/Composer.module.css";
 import commitPane from "../src/workbench/Commit.module.css";
 import commitPaneCss from "../src/workbench/Commit.module.css?raw";
 // The Diff section the commit pane draws, which is the Set page's own component
@@ -352,6 +353,20 @@ function frame(container: ParentNode): HTMLElement {
 /// stale link does. There is no Event 0, so this is one.
 function unopened(conversation: { id: number }): string {
   return `/conversations/${conversation.id}/events/0`;
+}
+
+/// Walk into the composer, the way the human does: press the Brief card, which
+/// selects it and takes a narrow window on to the details level.
+///
+/// Which level is showing matters to a test that asks about roles rather than
+/// classes: the frame draws one pane at a time and the rest are `display: none`,
+/// and an accessible name is only found in the one being shown.
+async function openComposer(container: ParentNode): Promise<HTMLElement> {
+  fireEvent.click(
+    await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`),
+  );
+
+  return drawn(container, `.${shell.detailsPane} .${composer.composer}`);
 }
 
 /// Open the conversation's action menu: press the trigger, and wait for what it
@@ -1815,7 +1830,11 @@ describe("what a right-click on a card offers", () => {
     rightClick(await grillingCard(container));
     await opened(container);
 
-    expect(history.get()).toBe(`/conversations/${OPEN.id}`);
+    // The Draft it was opened at, still standing on its composer: the
+    // right-click moved neither the selection nor the pane.
+    expect(history.get()).toBe(
+      `/conversations/${OPEN.id}/events/${BRIEF.id}`,
+    );
     expect(
       askedFor(fetching, "/api/ui/conversations/order"),
       "nothing was dragged, so there is nothing to save",
@@ -2198,6 +2217,7 @@ describe("the adoption page", () => {
     theAdoption();
     const { container } = mount(`/conversations/${ADOPTING.id}`);
 
+    await openComposer(container);
     await drawn(container, `.${adoption.adoption}`);
 
     await waitFor(() => screen.getByLabelText("Grilling"));
@@ -2217,7 +2237,7 @@ describe("the adoption page", () => {
     await drawn(container, `.${adoption.adoption}`);
 
     expect(screen.queryByLabelText("Brief")).toBeNull();
-    expect(container.querySelector(`.${timeline.startGrilling}`)).toBeNull();
+    expect(container.querySelector(`.${composer.startGrilling}`)).toBeNull();
     expect(screen.queryByLabelText("Branch")).toBeNull();
   });
 
@@ -2810,8 +2830,124 @@ describe("the escape hatch on a conversation that will not load", () => {
   });
 });
 
+/// The composer: the details pane a Conversation is drafted in, which is where
+/// the brief is written, the setup settled and the work started from.
+///
+/// A pane like every other, reached by pressing the Brief card and standing at a
+/// path of its own — and the only home of the start button, which the foot of
+/// the timeline no longer draws.
+describe("the composer pane", () => {
+  it("opens at a path of its own, on a cold load of it", async () => {
+    theWorkbench();
+    const { container } = mount(
+      `/conversations/${OPEN.id}/events/${BRIEF.id}`,
+    );
+
+    const pane = await drawn(
+      container,
+      `.${shell.detailsPane} .${composer.composer}`,
+    );
+
+    // The whole of what setting a piece of work up is: the brief as a field,
+    // everything that has to be settled, and the press.
+    expect(
+      (pane.querySelector("textarea") as HTMLTextAreaElement).value,
+    ).toBe(BRIEF.markdown);
+    await drawn(pane, `.${setup.conversationSetup}`);
+    expect(pane.querySelector(`.${composer.startGrilling}`)).toBeTruthy();
+  });
+
+  /// The button was under the record, at the end of everything that had
+  /// happened. It is under the setup now, and the timeline draws nothing of it:
+  /// the pane is its only home.
+  it("takes the start button off the foot of the timeline", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const start = await drawn(
+      container,
+      `.${shell.detailsPane} .${composer.startGrilling}`,
+    );
+
+    expect(
+      container
+        .querySelector(`.${shell.middlePane}`)!
+        .querySelector(`.${composer.startGrilling}`),
+    ).toBeNull();
+
+    // Under everything there is to settle, which is what it is waiting on.
+    expect(
+      container
+        .querySelector(`.${setup.conversationSetup}`)!
+        .compareDocumentPosition(start) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  /// An adopting draft's brief is the stage's own and comes down frozen, so
+  /// there is nothing here to type into: the box is the rendering, and the
+  /// adoption stands where the start button would.
+  it("locks the box on an adopting draft, and adopts where it would start", async () => {
+    const written: ConversationView = {
+      ...ADOPTING,
+      timeline: ADOPTING.timeline.map((event) =>
+        "Brief" in event
+          ? {
+              Brief: {
+                ...event.Brief,
+                markdown: "# The stage\n",
+                html: "<h1>The stage</h1>",
+              },
+            }
+          : event,
+      ),
+    };
+    theWorkbench(
+      whenever(`/api/ui/conversations/${ADOPTING.id}`, json(written)),
+    );
+    const { container } = mount(`/conversations/${ADOPTING.id}`);
+
+    const pane = await drawn(
+      container,
+      `.${shell.detailsPane} .${composer.composer}`,
+    );
+
+    expect(pane.querySelector(`.${composer.written}`)!.innerHTML).toBe(
+      "<h1>The stage</h1>",
+    );
+    expect(pane.querySelector("textarea")).toBeNull();
+    expect(pane.querySelector(`.${adoption.adoption}`)).toBeTruthy();
+    expect(pane.querySelector(`.${composer.startGrilling}`)).toBeNull();
+  });
+
+  /// And a round whose branch was cut long ago draws what is still the human's
+  /// and nothing else: the branch and the base froze when the first round's
+  /// work started, and the pairings are re-settled every time work starts.
+  it("omits what froze when the branch was cut, and keeps the pairings", async () => {
+    theWorkbenchWith({
+      worktree: {
+        path: "/var/lib/verkstead/worktrees/verkstead-open",
+        missing: false,
+      },
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await drawn(container, `.${shell.detailsPane} .${composer.composer}`);
+    await waitFor(() => screen.getByLabelText("Grilling"));
+
+    expect(container.querySelector(`.${setup.branches}`)).toBeNull();
+    expect(container.querySelector(`.${setup.companions}`)).toBeNull();
+    expect(screen.queryByLabelText("Branch")).toBeNull();
+    expect(screen.queryByLabelText("Base branch")).toBeNull();
+
+    // And the press it is all for is still there.
+    expect(container.querySelector(`.${composer.startGrilling}`)).toBeTruthy();
+  });
+});
+
 /// The brief while the Conversation is drafting: a field that is always there
-/// and saves itself, rather than a rendering with a way into a form.
+/// and saves itself, rather than a rendering with a way into a form. On the
+/// composer, which is the details pane a Draft opens on — the record's own card
+/// is the rendering of it, drafting or frozen.
 describe("writing the brief", () => {
   const field = () => screen.getByLabelText("Brief") as HTMLTextAreaElement;
 
@@ -2820,8 +2956,8 @@ describe("writing the brief", () => {
 
   it("is a field on what was last written, with nothing to press to open it", async () => {
     theWorkbench();
-    mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await drawn(container, `.${shell.detailsPane} .${composer.composer}`);
 
     // The markdown, not the HTML: the source travels beside the rendering for
     // exactly this, so the field needs no parser to fill itself in.
@@ -2838,7 +2974,7 @@ describe("writing the brief", () => {
     await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
 
     const growing = container.querySelector(
-      `.${timeline.brief} .${app.grow}`,
+      `.${composer.composer} .${app.grow}`,
     )!;
     expect(growing.getAttribute("data-value")).toBe(BRIEF.markdown);
 
@@ -3041,17 +3177,18 @@ describe("writing the brief", () => {
 });
 
 /// Setting a conversation up: what has to be settled before anything will run
-/// it, drawn under the brief it belongs to.
+/// it, drawn under the brief it is for — on the composer, which is where the
+/// brief is written.
 describe("a conversation's setup", () => {
-  /// The brief is the card's headline and the setup follows it, because setting
-  /// the work up and kicking it off are one act and both happen in the record.
-  it("stands on the brief card, under the brief itself", async () => {
+  /// The brief is the pane's headline and the setup follows it, because setting
+  /// the work up and kicking it off are one act and both happen here.
+  it("stands on the composer, under the brief itself", async () => {
     theWorkbench();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const card = await drawn(
       container,
-      `.${timeline.timelineEvent} > .${timeline.brief} .${setup.conversationSetup}`,
+      `.${shell.detailsPane} .${composer.composer} .${setup.conversationSetup}`,
     );
 
     expect(card.querySelector(`.${setup.branchName}`)).toBeTruthy();
@@ -3064,9 +3201,10 @@ describe("a conversation's setup", () => {
     expect(row.querySelector(`.${setup.branchName}`)).toBeTruthy();
     expect(row.querySelector(`.${setup.baseBranch}`)).toBeTruthy();
 
-    // Under the words rather than over them: the brief is what the card is,
-    // and while it is a draft the words are the field they are typed into.
-    const body = container.querySelector(`.${timeline.brief} .${app.grow}`)!;
+    // Under the words rather than over them: the brief is what the pane is
+    // for, and while it is a draft the words are the field they are typed
+    // into.
+    const body = container.querySelector(`.${composer.composer} .${app.grow}`)!;
     expect(
       body.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -3131,10 +3269,13 @@ describe("a conversation's setup", () => {
     });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`);
+    // The record itself, which is what tells the story: where the checkout is
+    // stands on the Brief's own pane, under the configuration it was frozen
+    // with, and nowhere else.
+    const record = await drawn(container, `.${shell.middlePane}`);
 
-    expect(container.textContent).not.toContain(OPEN.repo.path);
-    expect(container.textContent).not.toContain(
+    expect(record.textContent).not.toContain(OPEN.repo.path);
+    expect(record.textContent).not.toContain(
       "/var/lib/verkstead/worktrees/verkstead-open",
     );
   });
@@ -3485,6 +3626,8 @@ describe("a conversation's companion repos", () => {
   /// The two presses it takes to get to the list of repos: the ⋯ at the end of
   /// the branch row, and then the row that opens the level they are listed in.
   async function openTheList(container: ParentNode): Promise<void> {
+    await openComposer(container);
+
     fireEvent.click(
       await drawn<HTMLButtonElement>(
         container,
@@ -3580,7 +3723,8 @@ describe("a conversation's companion repos", () => {
     const companion = OPEN.companions[0]!;
     const removing = `/api/ui/conversations/${OPEN.id}/companions/${companion.repo.id}/remove`;
     const fetching = theWorkbench(whenever(removing, json("Removed"), "POST"));
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openComposer(container);
 
     fireEvent.click(
       await waitFor(() =>
@@ -3596,6 +3740,7 @@ describe("a conversation's companion repos", () => {
     const removing = `/api/ui/conversations/${OPEN.id}/companions/${companion.repo.id}/remove`;
     theWorkbench(whenever(removing, json("NotDrafting"), "POST"));
     const { container } = mount(`/conversations/${OPEN.id}`);
+    await openComposer(container);
 
     fireEvent.click(
       await waitFor(() =>
@@ -4374,10 +4519,11 @@ describe("the panes on a narrow window", () => {
       expect(frame(container).dataset.pane).toBe("middle"),
     );
 
-    // The third level is the open Event's own, and nothing is open: there is
-    // nothing to page into, so nothing offers to.
+    // The third level is the open Event's own, and a Draft opens on the
+    // composer its Brief is written in — so there is something to page into,
+    // and the way on is offered.
     await waitFor(() => screen.getByRole("heading", { name: "Brief" }));
-    expect(screen.queryByRole("button", { name: "Details →" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Details →" })).toBeTruthy();
 
     // The way back out is a navigation — it takes the Conversation off the URL
     // — so the level changes when the router has moved rather than when the
@@ -4983,7 +5129,7 @@ describe("starting the work", () => {
     theWorkbench();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    const start = await drawn(container, `.${timeline.startGrilling} .${timeline.start}`);
+    const start = await drawn(container, `.${composer.startGrilling} .${composer.start}`);
 
     expect(OPEN.ready_to_grill).toBe(true);
     expect(start.textContent).toContain("Start work");
@@ -5006,11 +5152,11 @@ describe("starting the work", () => {
 
     const start = await drawn<HTMLButtonElement>(
       container,
-      `.${timeline.startGrilling} .${timeline.start}`,
+      `.${composer.startGrilling} .${composer.start}`,
     );
 
     expect(start.textContent).toContain("Start work");
-    expect(start.classList).toContain(timeline.inert);
+    expect(start.classList).toContain(composer.inert);
     expect(start.getAttribute("aria-disabled")).toBe("true");
     expect(start.disabled).toBe(false);
 
@@ -5031,7 +5177,7 @@ describe("starting the work", () => {
     );
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    fireEvent.click(await drawn(container, `.${timeline.startGrilling} .${timeline.start}`));
+    fireEvent.click(await drawn(container, `.${composer.startGrilling} .${composer.start}`));
 
     await waitFor(() => screen.getByText(/This needs a brief/));
     expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
@@ -5043,7 +5189,7 @@ describe("starting the work", () => {
     theWorkbenchWith({ ready_to_grill: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    const start = await drawn(container, `.${timeline.startGrilling} .${timeline.start}`);
+    const start = await drawn(container, `.${composer.startGrilling} .${composer.start}`);
 
     fireEvent.mouseEnter(start);
     await waitFor(() => screen.getByText(/This needs a brief/));
@@ -5064,7 +5210,7 @@ describe("starting the work", () => {
     );
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    fireEvent.click(await drawn(container, `.${timeline.startGrilling} .${timeline.start}`));
+    fireEvent.click(await drawn(container, `.${composer.startGrilling} .${composer.start}`));
 
     await waitFor(() =>
       expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toEqual(
@@ -5097,7 +5243,7 @@ describe("starting the work", () => {
       );
       const { container } = mount(`/conversations/${OPEN.id}`);
 
-      fireEvent.click(await drawn(container, `.${timeline.startGrilling} .${timeline.start}`));
+      fireEvent.click(await drawn(container, `.${composer.startGrilling} .${composer.start}`));
 
       await waitFor(() => screen.getByText(said));
     },
@@ -5110,7 +5256,7 @@ describe("starting the work", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await waitFor(() => screen.getByText("Draft → Grilling"));
-    expect(container.querySelector(`.${timeline.startGrilling}`)).toBeNull();
+    expect(container.querySelector(`.${composer.startGrilling}`)).toBeNull();
   });
 });
 
@@ -7193,7 +7339,7 @@ describe("a second round", () => {
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     await drawn(container, `.${timeline.timeline}`);
-    expect(container.querySelector(`.${timeline.startGrilling}`)).toBeNull();
+    expect(container.querySelector(`.${composer.startGrilling}`)).toBeNull();
 
     await openActions(container);
     await drawn(container, `.${actions.conversationActions} .${actions.steer}`);
@@ -13306,23 +13452,32 @@ describe("the documents on a timeline", () => {
     await drawn(details(), `.${documentPane.document}`);
   });
 
-  /// The brief while it is still a draft is a field with the setup under it, and
-  /// every press on that card belongs to one of those.
-  it("leaves the drafting brief a field, unclamped and unpressable", async () => {
+  /// The brief while it is still a draft is the same card as the frozen one: no
+  /// field on the record, the rendering in the same clamp, and the press that
+  /// opens it. What it opens is the composer rather than the read-only pane —
+  /// the whole of the document, and under it the setup and the start.
+  it("clamps the drafting brief too, and opens the composer", async () => {
     theWorkbench();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     const brief = await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`);
-    await drawn(container, `.${timeline.brief} .${app.grow} textarea`);
 
-    expect(brief.querySelector(`.${timeline.clamp}`)).toBeNull();
-    expect(brief.getAttribute("role")).toBeNull();
-    expect(brief.getAttribute("tabindex")).toBeNull();
-    expect(brief.classList.contains(pressable.pressable!)).toBe(false);
+    expect(brief.querySelector(`.${timeline.clamp} > .${timeline.briefBody}`)).toBeTruthy();
+    expect(brief.querySelector("textarea")).toBeNull();
+    expect(brief.getAttribute("role")).toBe("button");
+    expect(brief.classList.contains(pressable.pressable!)).toBe(true);
 
     fireEvent.click(brief);
 
-    expect(details().querySelector(`.${documentPane.document}`)).toBeNull();
+    const opened = await drawn(details(), `.${composer.composer}`);
+
+    expect(details().querySelector("h1")!.textContent).toBe("Brief");
+    // The markdown in the field rather than the rendering: what the pane opens
+    // on is the document as it is written.
+    expect(
+      (opened.querySelector("textarea") as HTMLTextAreaElement).value,
+    ).toBe(BRIEF.markdown);
+    expect(details().querySelector(`.${timeline.clamp}`)).toBeNull();
   });
 
   /// A notice is a sentence rather than a document, so its card is cut at one
@@ -13430,22 +13585,6 @@ describe("the configuration on the brief's pane", () => {
     },
     base_commit: "0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e76f32b11a",
   };
-
-  /// A conversation nobody has named has no branch to report: the name it is
-  /// carrying is Verkstead's own, and what the summary says is what will become
-  /// of it rather than a name nobody chose.
-  ///
-  /// Drawn on the adopting draft, whose brief is frozen from the start — which
-  /// is what makes it the one draft with a pane to open at all.
-  it("reports a branch nobody has named as one still to be chosen", async () => {
-    theWorkbench(
-      whenever(`/api/ui/conversations/${ADOPTING.id}`, json(ADOPTING)),
-    );
-    await openBrief(ADOPTING);
-
-    expect(configuration().Branch).toBe(UNNAMED);
-    expect(summary()!.textContent).not.toContain(ADOPTING.branch);
-  });
 
   it("says the repo, the branch, the base commit, the worktree and the pairings", async () => {
     theGrilling();
@@ -13916,19 +14055,19 @@ describe("landing on the end of the record", () => {
     await drawn(container, `.${shell.detailsPane} .${documents.section}`);
   });
 
-  /// A record with nothing openable on it selects nothing and the pane stays
-  /// bare paper — which is a Draft whose Brief is still being written, and the
-  /// state every Conversation starts in.
-  it("selects nothing on a record with nothing to open", async () => {
+  /// Every Conversation starts on a Brief, so a Draft with nothing else on its
+  /// record lands on the composer that Brief is written in — which is where the
+  /// human is going next in any case.
+  it("lands a draft on the composer its brief is written in", async () => {
     theWorkbench();
     const { container, history } = mount(`/conversations/${OPEN.id}`);
 
-    await drawn(container, `.${timeline.timeline}`);
-
-    expect(history.get()).toBe(`/conversations/${OPEN.id}`);
-    expect(
-      container.querySelector(`.${shell.detailsPane} .${paneHead.head}`),
-    ).toBeNull();
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${OPEN.id}/events/${BRIEF.id}`,
+      ),
+    );
+    await drawn(container, `.${shell.detailsPane} .${composer.composer}`);
   });
 
   /// And a path that already names a pane is a cold load of that pane — a

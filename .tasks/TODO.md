@@ -20,7 +20,7 @@ unsaved state, and it creates by replaying the existing endpoints.
 
 ## Tasks
 
-- [ ] 01: The composer pane — [details](01-composer-pane.md)
+- [x] 01: The composer pane — [details](01-composer-pane.md)
 - [ ] 02: The composer look — [details](02-composer-look.md)
 - [ ] 03: Switching a draft's repo — [details](03-switching-a-drafts-repo.md)
 - [ ] 04: The one-event layout — [details](04-one-event-layout.md)
