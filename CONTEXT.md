@@ -316,21 +316,30 @@ What is *not* the human's again on a later round is the branch and the base
 commit: the branch has been worked, and the second round carries on from what is
 on it.
 
-Written where it is read: while its round is drafting, the Brief on its card
-*is* the field — raw markdown, always open, keeping itself whenever the typing
-stops for a moment and whenever the field is left, and saying nothing about it
-either way.
-There is no Edit, no Save and no word about saving, because there is no other
-thing the Brief could be doing while it is a draft. Once it freezes it is the
-server's rendering of it and nothing else.
+Written on the **composer**, which is the details pane its Timeline card opens
+while its round is drafting: the Brief there *is* the field — raw markdown,
+always open, keeping itself whenever the typing stops for a moment and whenever
+the field is left, and saying nothing about it either way. There is no Edit, no
+Save and no word about saving, because there is no other thing the Brief could
+be doing while it is a draft. The card itself is the server's rendering clamped
+to five lines the whole time, drafting or frozen, and once the round is past
+drafting the pane is that rendering and what the round was configured with.
 
-While it is still a draft its card carries the whole of the Conversation's
-setup under it — the branch, the base commit, the Pairings and the readiness
-verdict — because setting the work up and kicking it off are one act, and both
-belong where the work is read. Every one of those freezes at the same moment
-the Brief does, so once grilling starts the card is the Brief alone; on a
-later round the branch and the base commit are frozen already, and what the
-card carries under the new Brief is the Pairings.
+**The composer is drawn as the composer of a chat app**, because the act is the
+same one: one box at the app's own measure, centred in the pane, holding the
+Brief — and the whole of the Conversation's setup along the inside of that box's
+bottom edge, as a row of borderless dropdowns that read as part of it. Each is a
+dimmed label over its value. **Repo** comes first and is one flat panel holding
+everything that is a fact about the repository — the branch, the base commit,
+what the work runs alongside and how far into each of those it may reach — and
+the three role Pairings follow it, the role as the label and the Pairing as the
+value. The press that starts the work is the one thing outside the box, under it
+and against its right edge, and it carries the readiness verdict.
+
+Every one of those freezes at the same moment the Brief does, so once grilling
+starts none of it is drawn; on a later round the branch and the base commit are
+frozen already, so the Repo option goes with them and what the row offers under
+the new Brief is the Pairings alone. What a control cannot do it does not draw.
 _Avoid_: description, prompt, spec, issue body
 
 **Timeline**:

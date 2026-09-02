@@ -1,19 +1,82 @@
-/* Where a Conversation is drafted: the Brief, the setup under it and the press
-   that starts the work. See `Composer.tsx`.
+/* Where a Conversation is drafted: the box the Brief is written in, the setup
+   along the inside of its bottom edge, and the press that starts the work under
+   it. See `Composer.tsx`.
 
-   The look this pane is heading for — a box with its options along the bottom
-   edge — is the next task's; what is here is what came off the Timeline card,
-   drawn in a pane instead of on it. */
+   The look is the composer of a chat app, because the act is the same one: a
+   piece of work is described in a box, a few options about how it is to be run
+   sit inside that box's edge, and one button underneath sends it. What is *in*
+   the row is `Setup.module.css`; what is here is the box around it. */
+
+/* The column the whole of it stands in, centred in the pane and capped at the
+   measure prose is read at everywhere else — the pane is as wide as the human
+   dragged it, and a box the full width of a wide one would be a paragraph
+   nobody could read a line of. */
+.composer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.composer > * {
+  width: 100%;
+  max-width: var(--measure);
+}
 
 .composer > :last-child {
   margin-bottom: 0;
 }
 
+/* The box: one surface holding the field and the options, with the border it
+   draws standing in for the field's own — see the field below, which gives its
+   border up so there is one box here rather than a box inside a box. */
+.box {
+  padding: 0.5rem 0.25rem 0.35rem;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.9rem;
+}
+
+/* Which of the two is being typed in is the box's to say, the field inside it
+   having nothing left to say it with. */
+.box:focus-within {
+  border-color: var(--accent);
+}
+
+/* The field, drawn as the box rather than as a field inside it: no paper of its
+   own and no border, and the border kept at its width so the copy that gives
+   the field its height goes on measuring the same line breaks — see `.grow` in
+   `App.module.css`.
+
+   As tall as a few lines before anything is typed, because what it is asking
+   for is a description rather than a line. */
+.box .grow {
+  min-height: 5.5rem;
+  max-width: none;
+}
+
+.box textarea {
+  background: none;
+  border-color: transparent;
+}
+
+/* And nothing under the pointer or the caret either: the box around it is
+   already saying both. Inside the query every hover rule in the app is written
+   in — see `styles/base.css`. */
+.box textarea:focus-visible {
+  border-color: transparent;
+}
+
+@media (hover: hover) {
+  .box textarea:hover {
+    border-color: transparent;
+  }
+}
+
 /* The Brief where it is a document rather than a field — an adopting
-   Conversation's, which is the stage's own. At the width prose is read at
-   everywhere else, which is the width the field beside it takes from `.grow`. */
+   Conversation's, which is the stage's own. At the padding the field beside it
+   is read at, so the box reads the same whichever it is holding. */
 .written {
-  max-width: var(--measure);
+  padding: 0.5rem 0.6rem;
 }
 
 /* What a save cannot do, said under the box it happened in. */
@@ -22,11 +85,12 @@
   font-size: 0.9rem;
 }
 
-/* What happens next, under everything there is to settle. */
+/* What happens next, under the box and against its far edge: it is what becomes
+   of what is in the box rather than another thing to fill in, which is the whole
+   of why it is the one control drawn outside. */
 .startGrilling {
-  margin-top: 1.25rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--edge);
+  margin-top: 0.85rem;
+  text-align: end;
 }
 
 .startGrilling .start {

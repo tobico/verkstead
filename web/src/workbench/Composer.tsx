@@ -7,11 +7,19 @@
 //! Timeline's Brief card is the five-line rendering of the document at all
 //! times, drafting or frozen, and pressing it opens this.
 //!
+//! **Drawn as the composer of a chat app**, because that is what it is: one box
+//! at the app's own measure, centred in the pane, with the Brief written inside
+//! it and the whole of the setup along the inside of its bottom edge — a row of
+//! borderless dropdowns, each a dimmed label over its value, that read as part
+//! of the box rather than as a form under it. The press that starts the work is
+//! the one thing outside: under the box, against its right edge, because it is
+//! what happens to what is in the box rather than something else to fill in.
+//!
 //! It serves a Conversation *while it drafts*, whatever the Brief's own freeze
 //! — which is three shapes rather than one:
 //!
 //! - the ordinary draft, whose Brief is the human's to write, with the whole
-//!   setup under it and `Start work` at the foot;
+//!   setup along the box's bottom edge and `Start work` under it;
 //! - an adopting draft, whose only Brief is the stage's and arrives frozen, so
 //!   the box is the rendering rather than a field and the Adoption control
 //!   stands where the start button would;
@@ -51,7 +59,7 @@ import { Empty, ErrorLine, Note } from "../notices";
 import { Adoption } from "./Adoption";
 import styles from "./Composer.module.css";
 import { PaneHead } from "./PaneHead";
-import { Setup } from "./Setup";
+import { Setup, SetupNotes } from "./Setup";
 import { keeping } from "./settling";
 import { BRIEF_REFUSAL, grillRefusal } from "./Timeline";
 
@@ -90,9 +98,18 @@ export function Composer(props: {
       </PaneSticky>
 
       <div class={styles.composer}>
-        <Written conversation={props.conversation} brief={props.brief} />
+        {/* The box, which is the whole of what there is to fill in: the Brief
+            inside it, and the setup as a row of dropdowns along the inside of
+            its bottom edge. */}
+        <div class={styles.box}>
+          <Written conversation={props.conversation} brief={props.brief} />
 
-        <Setup conversation={props.conversation} />
+          <Setup conversation={props.conversation} />
+        </div>
+
+        {/* What the setup has to say that is not a control, under the box
+            rather than inside it. */}
+        <SetupNotes conversation={props.conversation} />
 
         {/* And the press the whole pane is arranged for. Only one of the two is
             ever drawn — each is for a different kind of draft — so they read as

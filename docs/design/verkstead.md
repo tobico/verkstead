@@ -549,20 +549,24 @@ with the newest thing marked open, never carried past the record into the
 details.
 
 What a Conversation needs settling before it runs — branch, base commit, both
-Pairings, the readiness verdict — stands under the Brief on the **composer**,
-which is the details pane a drafting Brief opens: the document as the field it
-is written in, the setup under it, and the press that starts the work. It is
-the pane for a Conversation while it drafts, whatever the Brief's own freeze —
-an adopting draft gets it with the box locked to the stage's rendering and the
-Adopt press where the start would be. Past drafting a frozen Brief opens the
-read-only pane instead, and the repo name, the worktree path and the
-conversation state are drawn nowhere on the record: it tells that story itself.
+Pairings, the readiness verdict — stands on the **composer**, which is the
+details pane a drafting Brief opens, drawn as the composer of a chat app: one
+box at the app's measure holding the document as the field it is written in,
+the setup as a row of borderless label-over-value dropdowns along the inside of
+its bottom edge — Repo first, whose one flat panel holds the branch, the base
+and the companions, then the three role Pairings — and the press that starts
+the work under the box, against its right edge. It is the pane for a
+Conversation while it drafts, whatever the Brief's own freeze — an adopting
+draft gets it with the box locked to the stage's rendering and the Adopt press
+where the start would be. Past drafting a frozen Brief opens the read-only pane
+instead, and the repo name, the worktree path and the conversation state are
+drawn nowhere on the record: it tells that story itself.
 
 Timeline events:
 
 | Event | In timeline | In details pane |
 |---|---|---|
-| Brief | inline, always: the server's rendering clamped to five lines, drafting or frozen | the composer while its round drafts — the field that saves itself, the setup, the start; the frozen document and what the round was configured with, once it is past drafting |
+| Brief | inline, always: the server's rendering clamped to five lines, drafting or frozen | the composer while its round drafts — one box holding the field that saves itself with the setup along its bottom edge, and the start under it; the frozen document and what the round was configured with, once it is past drafting |
 | Agent output | turn count, latest statement, liveness mark | Transcript or Screen |
 | Question set | table of #, question, answer | full answer-set document |
 | Commit | +/− and changed-line counts, clamped summary snippet | boxed Message (diagram drawn) above the server-rendered diff viewer |

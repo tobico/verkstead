@@ -369,6 +369,19 @@ async function openComposer(container: ParentNode): Promise<HTMLElement> {
   return drawn(container, `.${shell.detailsPane} .${composer.composer}`);
 }
 
+/// And on into the Repo panel, which is where the branch, the base and the
+/// companion repos are settled: the first option of the composer's row, and one
+/// flat card rather than a menu of levels.
+async function openRepo(container: ParentNode): Promise<HTMLElement> {
+  await openComposer(container);
+
+  fireEvent.click(
+    await drawn<HTMLButtonElement>(container, `.${setup.repoOption} > button`),
+  );
+
+  return drawn(container, `.${setup.repoOption} > [role="group"]`);
+}
+
 /// Open the conversation's action menu: press the trigger, and wait for what it
 /// drops.
 async function openActions(container: ParentNode): Promise<HTMLElement> {
@@ -2222,6 +2235,10 @@ describe("the adoption page", () => {
 
     await waitFor(() => screen.getByLabelText("Grilling"));
     expect(screen.getByLabelText("Implementation")).toBeTruthy();
+
+    // And the base inside the Repo panel, which is where every fact about the
+    // repository is settled.
+    await openRepo(container);
     expect(screen.getByLabelText("Base branch")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Adopt" })).toBeTruthy();
   });
@@ -2280,6 +2297,7 @@ describe("the adoption page", () => {
       ),
     );
 
+    await openRepo(container);
     fireEvent.change(await waitFor(() => screen.getByLabelText("Base branch")), {
       target: { value: elsewhere.base_commit },
     });
@@ -2853,7 +2871,7 @@ describe("the composer pane", () => {
     expect(
       (pane.querySelector("textarea") as HTMLTextAreaElement).value,
     ).toBe(BRIEF.markdown);
-    await drawn(pane, `.${setup.conversationSetup}`);
+    await drawn(pane, `.${composer.box} .${setup.options}`);
     expect(pane.querySelector(`.${composer.startGrilling}`)).toBeTruthy();
   });
 
@@ -2875,12 +2893,64 @@ describe("the composer pane", () => {
         .querySelector(`.${composer.startGrilling}`),
     ).toBeNull();
 
-    // Under everything there is to settle, which is what it is waiting on.
+    // Under the box everything there is to settle stands in, which is what it
+    // is waiting on.
     expect(
       container
-        .querySelector(`.${setup.conversationSetup}`)!
+        .querySelector(`.${composer.box}`)!
         .compareDocumentPosition(start) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+
+  /// The look: one box holding the brief and, along the inside of its bottom
+  /// edge, the whole of the setup as a row of dropdowns — each a dimmed label
+  /// over its value, the repo first and then the three roles.
+  it("draws every option as a label over its value, inside the box", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const row = await drawn(container, `.${composer.box} > .${setup.options}`);
+
+    await waitFor(() =>
+      expect(
+        [...row.querySelectorAll(`.${setup.optionLabel}`)].map(
+          (label) => label.textContent,
+        ),
+      ).toEqual(["Repo", "Grilling", "Implementation", "Review"]),
+    );
+
+    // Over the value rather than beside it: the repo's label is the first line
+    // of its own trigger, and each role's names the listbox under it.
+    const repo = row.querySelector(`.${setup.repoOption} > button`)!;
+    expect(
+      repo
+        .querySelector(`.${setup.optionLabel}`)!
+        .compareDocumentPosition(repo.querySelector(`.${setup.optionValue}`)!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    for (const role of ["grilling", "implementation", "review"]) {
+      const label = row.querySelector<HTMLLabelElement>(
+        `label.${setup.optionLabel}[for="${role}-pairing"]`,
+      )!;
+      expect(
+        label.compareDocumentPosition(
+          document.getElementById(`${role}-pairing`)!,
+        ) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
+  });
+
+  /// And the one control that is not part of the box: what happens to what is
+  /// in it rather than something else to fill in.
+  it("keeps the start button outside the box", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const pane = await drawn(container, `.${composer.composer}`);
+    const start = await drawn(pane, `.${composer.startGrilling}`);
+
+    expect(pane.querySelector(`.${composer.box}`)!.contains(start)).toBe(false);
   });
 
   /// An adopting draft's brief is the stage's own and comes down frozen, so
@@ -2934,7 +3004,9 @@ describe("the composer pane", () => {
     await drawn(container, `.${shell.detailsPane} .${composer.composer}`);
     await waitFor(() => screen.getByLabelText("Grilling"));
 
-    expect(container.querySelector(`.${setup.branches}`)).toBeNull();
+    // The whole Repo option is gone with them: every control behind it is one
+    // the server would refuse, and what a control cannot do it does not draw.
+    expect(container.querySelector(`.${setup.repoOption}`)).toBeNull();
     expect(container.querySelector(`.${setup.companions}`)).toBeNull();
     expect(screen.queryByLabelText("Branch")).toBeNull();
     expect(screen.queryByLabelText("Base branch")).toBeNull();
@@ -3177,56 +3249,84 @@ describe("writing the brief", () => {
 });
 
 /// Setting a conversation up: what has to be settled before anything will run
-/// it, drawn under the brief it is for — on the composer, which is where the
-/// brief is written.
+/// it, drawn along the inside of the bottom edge of the box the brief is
+/// written in — on the composer, which is where the brief is written.
 describe("a conversation's setup", () => {
-  /// The brief is the pane's headline and the setup follows it, because setting
-  /// the work up and kicking it off are one act and both happen here.
-  it("stands on the composer, under the brief itself", async () => {
+  /// The brief is what the box holds and the options are its bottom edge,
+  /// because setting the work up and kicking it off are one act and both happen
+  /// in the one box.
+  it("stands inside the box, under the brief itself", async () => {
     theWorkbench();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    const card = await drawn(
+    const row = await drawn(
       container,
-      `.${shell.detailsPane} .${composer.composer} .${setup.conversationSetup}`,
+      `.${shell.detailsPane} .${composer.box} > .${setup.options}`,
     );
 
-    expect(card.querySelector(`.${setup.branchName}`)).toBeTruthy();
-    expect(card.querySelector(`.${setup.baseBranch}`)).toBeTruthy();
-    expect(card.querySelector(`.${setup.conversationProfiles}`)).toBeTruthy();
-
-    // The two branch fields are one row's to lay out, the way the pairings
-    // below them are; the stylesheet is what wraps it where the pane is narrow.
-    const row = card.querySelector(`.${setup.branches}`)!;
-    expect(row.querySelector(`.${setup.branchName}`)).toBeTruthy();
-    expect(row.querySelector(`.${setup.baseBranch}`)).toBeTruthy();
+    // Four options, the repo first and then the three roles.
+    expect(row.querySelector(`.${setup.repoOption}`)).toBeTruthy();
+    await waitFor(() =>
+      expect(row.querySelectorAll(`.${setup.profileChoice}`)).toHaveLength(3),
+    );
+    expect(
+      [...row.children].indexOf(row.querySelector(`.${setup.repoOption}`)!),
+      "the repo is what everything after it is a fact about",
+    ).toBe(0);
 
     // Under the words rather than over them: the brief is what the pane is
     // for, and while it is a draft the words are the field they are typed
     // into.
     const body = container.querySelector(`.${composer.composer} .${app.grow}`)!;
     expect(
-      body.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING,
+      body.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+
+  /// The branch, the base and the companion repos are all answers to *which
+  /// code*, so they are one dropdown rather than four — and one flat panel
+  /// rather than a menu walked a level at a time.
+  it("puts everything about the repo behind the first option", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openComposer(container);
+
+    // What the trigger reads: the repo, and how many others the work runs
+    // alongside.
+    const trigger = await drawn(container, `.${setup.repoOption} > button`);
+    expect(trigger.textContent).toContain("Repo");
+    expect(trigger.textContent).toContain(OPEN.repo.name);
+    expect(OPEN.companions.length).toBe(1);
+    expect(trigger.textContent).toContain("+1");
+
+    // And nothing of it on the pane until it is pressed.
+    expect(screen.queryByLabelText("Branch")).toBeNull();
+
+    const panel = await openRepo(container);
+    expect(panel.querySelector(`.${setup.branchName}`)).toBeTruthy();
+    expect(panel.querySelector(`.${setup.baseBranch}`)).toBeTruthy();
+    expect(panel.querySelector(`.${setup.addCompanion}`)).toBeTruthy();
+    expect(panel.querySelector(`.${setup.companions}`)).toBeTruthy();
   });
 
   /// A Rust repository on a server with no sccache: the work will run, and
   /// every dependency in it will be compiled again. Said at the foot of the
   /// card, which is the last thing read before the work is started — and said
   /// as a note, because nothing here is broken and nothing is gated on it.
-  it("warns at the foot of the card where compiles will not be cached", async () => {
+  it("warns under the box where compiles will not be cached", async () => {
     theWorkbenchWith({ compiles_uncached: true });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    const card = await drawn(container, `.${setup.conversationSetup}`);
-    const warning = card.querySelector(`.${setup.uncached}`)!;
+    const pane = await drawn(container, `.${composer.composer}`);
+    const warning = await drawn(pane, `.${setup.uncached}`);
 
     expect(warning.textContent).toMatch(/No sccache is installed/);
     expect(
-      card
-        .querySelector(`.${setup.conversationProfiles}`)!
+      pane
+        .querySelector(`.${composer.box}`)!
         .compareDocumentPosition(warning) & Node.DOCUMENT_POSITION_FOLLOWING,
-      "the last thing on the card, under everything there is to settle",
+      "under the box, which is everything there is to settle",
     ).toBeTruthy();
   });
 
@@ -3237,7 +3337,7 @@ describe("a conversation's setup", () => {
     theWorkbenchWith({ compiles_uncached: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    await drawn(container, `.${setup.conversationSetup}`);
+    await drawn(container, `.${setup.options}`);
 
     expect(container.querySelector(`.${setup.uncached}`)).toBeNull();
   });
@@ -3251,7 +3351,7 @@ describe("a conversation's setup", () => {
 
     await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`);
 
-    expect(container.querySelector(`.${setup.conversationSetup}`)).toBeNull();
+    expect(container.querySelector(`.${setup.options}`)).toBeNull();
     expect(screen.queryByLabelText("Branch")).toBeNull();
     expect(screen.queryByLabelText("Base branch")).toBeNull();
     expect(screen.queryByLabelText("Grilling")).toBeNull();
@@ -3284,8 +3384,8 @@ describe("a conversation's setup", () => {
   /// to press, and leaving the field is what sends what is in it.
   it("offers the branch name the server prefilled, and sends a new one", async () => {
     const fetching = theWorkbench(json("Renamed"));
-    mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Branch"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     const field = screen.getByLabelText("Branch") as HTMLInputElement;
     expect(field.value).toBe(OPEN.branch);
@@ -3308,7 +3408,7 @@ describe("a conversation's setup", () => {
   it("leaves the branch field empty where the name is Verkstead's own", async () => {
     theWorkbenchWith({ branch_named: false });
     const { container } = mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Branch"));
+    await openRepo(container);
 
     const field = screen.getByLabelText("Branch") as HTMLInputElement;
     expect(field.value).toBe("");
@@ -3362,8 +3462,8 @@ describe("a conversation's setup", () => {
   /// but the empty field.
   it("hands the name back when the field is emptied", async () => {
     const fetching = theWorkbench(json("Renamed"));
-    mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Branch"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     const field = screen.getByLabelText("Branch") as HTMLInputElement;
     expect(field.value).toBe(OPEN.branch);
@@ -3380,8 +3480,8 @@ describe("a conversation's setup", () => {
 
   it("saves a typed branch name after a pause in the typing", async () => {
     const fetching = theWorkbench(json("Renamed"));
-    mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Branch"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
     const naming = `/api/ui/conversations/${OPEN.id}/branch`;
 
     vi.useFakeTimers();
@@ -3409,8 +3509,8 @@ describe("a conversation's setup", () => {
     const naming = `/api/ui/conversations/${OPEN.id}/branch`;
     const answering = holding(json("Renamed"));
     const fetching = theWorkbench(whenever(naming, answering.held, "POST"));
-    mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Branch"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     fireEvent.input(screen.getByLabelText("Branch"), {
       target: { value: "counter-in" },
@@ -3443,8 +3543,8 @@ describe("a conversation's setup", () => {
         "POST",
       ),
     );
-    mount(`/conversations/${OPEN.id}`);
-    await waitFor(() => screen.getByLabelText("Branch"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     fireEvent.input(screen.getByLabelText("Branch"), {
       target: { value: "two..dots" },
@@ -3496,7 +3596,8 @@ describe("a conversation's setup", () => {
   /// there is no longer anything to pin to but a branch.
   it("offers the default rule and then every branch of the repo", async () => {
     theWorkbench();
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     const picker = (await waitFor(() =>
       screen.getByLabelText("Base branch"),
@@ -3517,7 +3618,8 @@ describe("a conversation's setup", () => {
 
   it("records the branch that was picked, by name", async () => {
     const fetching = theWorkbench(json("Recorded"));
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     fireEvent.change(await basePicker("origin/main"), {
       target: { value: "origin/main" },
@@ -3535,7 +3637,8 @@ describe("a conversation's setup", () => {
   /// a dropdown entry cannot say when it will resolve.
   it("takes the override away when the rule is picked", async () => {
     const fetching = theWorkbench(json("Recorded"));
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     fireEvent.change(await basePicker("origin/main"), {
       target: { value: "" },
@@ -3560,7 +3663,8 @@ describe("a conversation's setup", () => {
       whenever(`/api/ui/repos/${OPEN.repo.id}/branches`, json(["main"])),
       whenever(`/api/ui/conversations/${OPEN.id}`, json(OPEN)),
     );
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     const picker = await basePicker("main");
 
@@ -3587,6 +3691,7 @@ describe("a conversation's setup", () => {
       whenever(`/api/ui/conversations/${OPEN.id}`, json(rule)),
     );
     const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     const picker = (await waitFor(() =>
       screen.getByLabelText("Base branch"),
@@ -3604,7 +3709,7 @@ describe("a conversation's setup", () => {
   it("says nothing under the dropdown about when the base resolves", async () => {
     theWorkbench();
     const { container } = mount(`/conversations/${OPEN.id}`);
-
+    await openRepo(container);
     await waitFor(() => screen.getByLabelText("Base branch"));
 
     expect(
@@ -3614,8 +3719,8 @@ describe("a conversation's setup", () => {
   });
 });
 
-/// The other repositories a conversation works alongside: added from the ⋯ at
-/// the end of the branch row, and drawn as a row apiece under it.
+/// The other repositories a conversation works alongside: added from a picker
+/// inside the Repo panel, and drawn as a row apiece under it.
 ///
 /// Whether a repository may be added at all is the server's — its own repo and
 /// one already there are refused over there, and the tests in
@@ -3623,39 +3728,37 @@ describe("a conversation's setup", () => {
 /// that the press goes out, that the row is drawn, and that a refusal is said in
 /// words where it was made.
 describe("a conversation's companion repos", () => {
-  /// The two presses it takes to get to the list of repos: the ⋯ at the end of
-  /// the branch row, and then the row that opens the level they are listed in.
-  async function openTheList(container: ParentNode): Promise<void> {
-    await openComposer(container);
+  /// The control they are added from, inside the Repo panel with the branch and
+  /// the base they belong beside.
+  async function theAdder(container: ParentNode): Promise<HTMLSelectElement> {
+    await openRepo(container);
 
-    fireEvent.click(
-      await drawn<HTMLButtonElement>(
-        container,
-        `.${setup.setupMenu} > button`,
-      ),
-    );
-    fireEvent.click(
-      screen.getByRole("menuitem", { name: /Add companion repo/ }),
-    );
+    return (await waitFor(() =>
+      screen.getByLabelText("Works alongside"),
+    )) as HTMLSelectElement;
   }
 
-  it("lists the registered repos in a level of the one menu", async () => {
+  it("offers every registered repo under the invitation to add one", async () => {
     theWorkbenchWith({ companions: [] });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    await openTheList(container);
+    const adder = await theAdder(container);
 
-    // Every registered repo, including this conversation's own: what may be
-    // added is the server's to say, and a list that quietly left one out would
-    // send the human hunting for a repo that is registered.
-    for (const repo of REPOS) {
-      expect(screen.getByRole("menuitem", { name: repo.name })).toBeTruthy();
-    }
+    // The invitation first, which is what the control shows while nothing has
+    // been picked — and then every registered repo, including this
+    // conversation's own: what may be added is the server's to say, and a list
+    // that quietly left one out would send the human hunting for a repo that is
+    // registered.
+    expect([...adder.options].map((option) => option.textContent)).toEqual([
+      "Add a repo…",
+      ...REPOS.map((repo) => repo.name),
+    ]);
+    expect(adder.value).toBe("");
 
-    // One card and one wash, because a level is a place in this menu rather
-    // than a menu of its own.
-    expect(container.querySelectorAll(`.${dropdown.drop}`)).toHaveLength(1);
-    expect(container.querySelectorAll(`.${dropdown.backdrop}`)).toHaveLength(1);
+    // And it is a flat panel rather than a menu walked a level at a time.
+    expect(
+      container.querySelector(`.${dropdown.drop} [role="menuitem"]`),
+    ).toBeNull();
   });
 
   it("sends the repo that was pressed", async () => {
@@ -3666,8 +3769,8 @@ describe("a conversation's companion repos", () => {
     ));
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    await openTheList(container);
-    fireEvent.click(screen.getByRole("menuitem", { name: REPOS[1]!.name }));
+    const adder = await theAdder(container);
+    fireEvent.change(adder, { target: { value: String(REPOS[1]!.id) } });
 
     await waitFor(() =>
       expect(
@@ -3675,16 +3778,18 @@ describe("a conversation's companion repos", () => {
       ).toEqual({ repo_id: REPOS[1]!.id }),
     );
 
-    // The menu is a way to say which repository, and the row appearing under
-    // the branch is the confirmation — so the card comes back.
-    await waitFor(() => expect(container.querySelector(`.${dropdown.drop}`)).toBeNull());
+    // The panel stays where it is — the row appearing under the control is the
+    // confirmation — and the control goes back to the invitation, what was
+    // picked having been done rather than held.
+    expect(container.querySelector(`.${dropdown.drop}`)).toBeTruthy();
+    await waitFor(() => expect(adder.value).toBe(""));
   });
 
   /// A refusal is not an error: it is a sentence about the repository that was
-  /// pressed, and it is said in the level the press was made in — which is
-  /// still open, because a menu that shut would take the only place it had left
-  /// to be said.
-  it("says a refusal where the press was made, and stays open to say it", async () => {
+  /// picked, and it is said under the control it was picked from — which is
+  /// still open, because a panel that shut would take the only place it had
+  /// left to be said.
+  it("says a refusal where the pick was made, and stays open to say it", async () => {
     theWorkbenchWith({ companions: [] }, whenever(
       `/api/ui/conversations/${OPEN.id}/companions`,
       json("OwnRepo"),
@@ -3692,30 +3797,33 @@ describe("a conversation's companion repos", () => {
     ));
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    await openTheList(container);
-    fireEvent.click(screen.getByRole("menuitem", { name: OPEN.repo.name }));
+    const adder = await theAdder(container);
+    fireEvent.change(adder, { target: { value: String(OPEN.repo.id) } });
 
     await waitFor(() =>
-      expect(container.textContent).toContain(COMPANION_REFUSAL.OwnRepo),
+      expect(
+        container.querySelector(`.${setup.addCompanion} .${setup.failure}`)
+          ?.textContent,
+      ).toBe(COMPANION_REFUSAL.OwnRepo),
     );
     expect(container.querySelector(`.${dropdown.drop}`)).toBeTruthy();
   });
 
-  /// A row apiece under the branch row, naming the repository.
-  it("draws a row per companion under the branch row", async () => {
+  /// A row apiece in the Repo panel, naming the repository.
+  it("draws a row per companion under the control they were added from", async () => {
     theWorkbench();
     const { container } = mount(`/conversations/${OPEN.id}`);
+    const panel = await openRepo(container);
 
-    const rows = await drawn(container, `.${setup.companions}`);
+    const rows = await drawn(panel, `.${setup.companions}`);
     expect([...rows.querySelectorAll(`.${setup.companionName}`)].map(
       (name) => name.textContent,
     )).toEqual(OPEN.companions.map((companion) => companion.repo.name));
 
-    // Under the two fields rather than over them: the branch row is what they
-    // were added from.
-    const branches = container.querySelector(`.${setup.branches}`)!;
+    // Under the control rather than over it: it is what they were added from.
+    const adder = panel.querySelector(`.${setup.addCompanion}`)!;
     expect(
-      branches.compareDocumentPosition(rows) & Node.DOCUMENT_POSITION_FOLLOWING,
+      adder.compareDocumentPosition(rows) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 
@@ -3724,7 +3832,7 @@ describe("a conversation's companion repos", () => {
     const removing = `/api/ui/conversations/${OPEN.id}/companions/${companion.repo.id}/remove`;
     const fetching = theWorkbench(whenever(removing, json("Removed"), "POST"));
     const { container } = mount(`/conversations/${OPEN.id}`);
-    await openComposer(container);
+    await openRepo(container);
 
     fireEvent.click(
       await waitFor(() =>
@@ -3740,7 +3848,7 @@ describe("a conversation's companion repos", () => {
     const removing = `/api/ui/conversations/${OPEN.id}/companions/${companion.repo.id}/remove`;
     theWorkbench(whenever(removing, json("NotDrafting"), "POST"));
     const { container } = mount(`/conversations/${OPEN.id}`);
-    await openComposer(container);
+    await openRepo(container);
 
     fireEvent.click(
       await waitFor(() =>
@@ -3762,13 +3870,18 @@ describe("a conversation's companion repos", () => {
     theWorkbenchWith({ companions: [] });
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    await drawn(container, `.${setup.branches}`);
+    const panel = await openRepo(container);
 
-    expect(container.querySelector(`.${setup.companions}`)).toBeNull();
+    expect(panel.querySelector(`.${setup.companions}`)).toBeNull();
 
     // And the way to add one is still there: having none is the state most
     // conversations are in rather than a thing to be locked out of.
-    expect(container.querySelector(`.${setup.setupMenu}`)).toBeTruthy();
+    expect(panel.querySelector(`.${setup.addCompanion}`)).toBeTruthy();
+
+    // The trigger says the repo alone, there being nothing to count.
+    expect(
+      container.querySelector(`.${setup.repoOption} > button`)!.textContent,
+    ).not.toContain("+");
   });
 
   /// The rows freeze with the branch and the base, because the server freezes
@@ -3781,7 +3894,7 @@ describe("a conversation's companion repos", () => {
     await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`);
 
     expect(container.querySelector(`.${setup.companions}`)).toBeNull();
-    expect(container.querySelector(`.${setup.setupMenu}`)).toBeNull();
+    expect(container.querySelector(`.${setup.repoOption}`)).toBeNull();
   });
 });
 
@@ -3823,7 +3936,7 @@ describe("configuring a companion repo", () => {
 
   /// What one of that row's controls is called: the words on the label, and
   /// the repository it belongs to, which the label carries where nobody sees
-  /// it — a card with two companions on it has two of every control.
+  /// it — a panel with two companions in it has two of every control.
   const named = (control: string) => `${control} for ${ASKANCE.repo.name}`;
 
   /// The branch field on the companion's row, which is told from the
@@ -3837,7 +3950,8 @@ describe("configuring a companion repo", () => {
   /// different repository with a default branch and a list of its own.
   it("offers the companion repo's own rule and then its own branches", async () => {
     theCompanion({});
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     const picker = (await waitFor(() =>
       screen.getByLabelText(named("Base")),
@@ -3858,7 +3972,8 @@ describe("configuring a companion repo", () => {
 
   it("records the base branch that was picked, by name", async () => {
     const fetching = theCompanion({}, whenever(BASE, json("Recorded"), "POST"));
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     const picker = (await waitFor(() =>
       screen.getByLabelText(named("Base")),
@@ -3882,6 +3997,7 @@ describe("configuring a companion repo", () => {
   it("flips to read-write, and there is nothing to name until it is on", async () => {
     const fetching = theCompanion({}, whenever(MODE, json("Chosen"), "POST"));
     const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     const toggle = (await waitFor(() =>
       screen.getByLabelText(named("Read-write")),
@@ -3903,7 +4019,8 @@ describe("configuring a companion repo", () => {
   /// branch, so what they read is what they will get.
   it("prefills a mirroring branch with the conversation's own name", async () => {
     theCompanion({ mode: "ReadWrite", branch: "" });
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     await waitFor(() => expect(branchField().value).toBe(OPEN.branch));
   });
@@ -3922,7 +4039,8 @@ describe("configuring a companion repo", () => {
         json(COMPANION_BRANCHES),
       ),
     );
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     await waitFor(() => expect(branchField().value).toBe("counter-in-redis"));
   });
@@ -3930,7 +4048,8 @@ describe("configuring a companion repo", () => {
   /// A name that has been typed stands on its own and stops following.
   it("leaves a named branch where it is, whatever the conversation's is called", async () => {
     theCompanion({ mode: "ReadWrite", branch: "alongside" });
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     await waitFor(() => expect(branchField().value).toBe("alongside"));
     expect(branchField().value).not.toBe(OPEN.branch);
@@ -3943,7 +4062,8 @@ describe("configuring a companion repo", () => {
       { mode: "ReadWrite", branch: "" },
       whenever(NAMING, json("Renamed"), "POST"),
     );
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
     await waitFor(() => branchField());
 
     expect(screen.queryByRole("button", { name: "Rename" })).toBeNull();
@@ -3987,7 +4107,8 @@ describe("configuring a companion repo", () => {
         "POST",
       ),
     );
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
     await waitFor(() => expect(branchField().value).toBe("alongside"));
 
     fireEvent.input(branchField(), { target: { value: "" } });
@@ -4003,6 +4124,7 @@ describe("configuring a companion repo", () => {
   it("says why a change was refused, on the row it was refused for", async () => {
     theCompanion({}, whenever(MODE, json("NotDrafting"), "POST"));
     const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
 
     fireEvent.click(await waitFor(() => screen.getByLabelText(named("Read-write"))));
 
@@ -4024,7 +4146,8 @@ describe("configuring a companion repo", () => {
       { mode: "ReadWrite", branch: "" },
       whenever(NAMING, () => json(outcome)(), "POST"),
     );
-    mount(`/conversations/${OPEN.id}`);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
     await waitFor(() => branchField());
 
     fireEvent.input(branchField(), { target: { value: "two..dots" } });
@@ -4449,14 +4572,18 @@ describe("a conversation's pairings", () => {
     expect(screen.queryByText("Ready to grill.")).toBeNull();
   });
 
-  /// One row where the pane is wide enough for them, which is the stylesheet's
-  /// half of it; what this holds is that they are the one row's to lay out.
-  it("draws the pickers as a single row", async () => {
+  /// The three stand in the option row beside the Repo, with no heading of
+  /// their own: the role is written on each one, so a word over all three would
+  /// be the row saying what its labels already say.
+  it("draws the pickers as three options of the one row", async () => {
     theWorkbench();
     const { container } = mount(`/conversations/${OPEN.id}`);
 
-    const row = await drawn(container, `.${setup.conversationProfiles} .${setup.pairings}`);
-    expect(row.querySelectorAll(`.${setup.profileChoice}`)).toHaveLength(3);
+    const row = await drawn(container, `.${setup.options}`);
+    await waitFor(() =>
+      expect(row.querySelectorAll(`.${setup.profileChoice}`)).toHaveLength(3),
+    );
+    expect(row.querySelector("h3")).toBeNull();
   });
 
   /// A profile whose pair has gone is not one to launch a session under. What is
