@@ -15,7 +15,7 @@ component.
 
 ## Tasks
 
-- [ ] 01: Directory listing endpoint — [details](01-directory-listing-endpoint.md)
+- [x] 01: Directory listing endpoint — [details](01-directory-listing-endpoint.md)
 - [ ] 02: Browse dropdown on the Paths section — [details](02-browse-dropdown-paths-section.md)
 - [ ] 03: The Repos' form browses — [details](03-repos-form-browses.md)
 - [ ] 04: Agent Profile account paths browse — [details](04-profile-account-paths-browse.md)

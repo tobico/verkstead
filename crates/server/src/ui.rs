@@ -29,9 +29,9 @@ use axum::routing::{get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView, CheckRollup,
-    CommentedOn, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
-    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView,
+    Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, BrowseScope, BuildCacheView,
+    CheckRollup, CommentedOn, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
+    CompanionMode, CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView,
     ConflictResolutionEdit, ConversationArchived, ConversationClosed, ConversationEntry,
     ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Cursor,
     GrillingStarted, IgnoreRule, IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut,
@@ -312,6 +312,12 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // read and the save being the same page's two halves — and one save for
         // the author and the token together, because the page has one button.
         .route("/api/ui/settings", get(settings).post(save_settings))
+        // One directory of the filesystem, for a path field's browse dropdown.
+        // Not a route under anything it belongs to: it serves every field that
+        // takes a path — the settings' own, the Repos' form, an Agent Profile's
+        // account — and what bounds it is the scope asked for rather than
+        // whatever page is asking.
+        .route("/api/ui/directories", get(directories))
         .route("/api/ui/update", get(update))
 }
 
@@ -3712,6 +3718,60 @@ fn last_four(token: &str) -> String {
     let from = characters.len().saturating_sub(4);
 
     characters[from..].iter().collect()
+}
+
+/// Which directory a path field is asking about, and in what scope.
+///
+/// The path is optional because a field standing empty is where a browse
+/// begins, and an empty one is read as no path at all: `?path=` is what a
+/// cleared input sends, and it names the same nothing.
+///
+/// The scope is not optional. A field is one kind or the other and knows which
+/// it is, so an ask that says nothing about it is a caller with a bug rather
+/// than a browse to answer — and answering it in either scope would be answering
+/// a different question from the one asked.
+#[derive(Debug, serde::Deserialize)]
+struct Browsing {
+    scope: BrowseScope,
+    path: Option<String>,
+}
+
+/// `GET /api/ui/directories?scope=<scope>&path=<path>` — what one directory
+/// holds, for the dropdown a path field browses with.
+///
+/// One directory per request and no walking: the field asks again for every
+/// level somebody drills into, so a browse costs one `read_dir` at a time
+/// whatever is under it.
+///
+/// Every refusal is a named outcome in the body rather than a status, the way
+/// registering a Repo refuses: a path that is relative, missing, not a
+/// directory, outside the Watched Paths or unreadable is a line the dropdown
+/// draws where its rows would be. Most of them are the ordinary state of a field
+/// halfway through being typed into.
+///
+/// What decides where the ask may look is [`BrowseScope`] — see
+/// [`crate::browsing`], where the boundary is consulted for one of the two.
+async fn directories(
+    State(state): State<AppState>,
+    Query(browsing): Query<Browsing>,
+) -> HttpResponse {
+    let watched = state.watched.clone();
+    let path = browsing
+        .path
+        .filter(|path| !path.is_empty())
+        .map(std::path::PathBuf::from);
+
+    // Off the runtime: reading the boundary is a file and a `canonicalize` per
+    // entry in it, and opening a directory is a read of its own.
+    match tokio::task::spawn_blocking(move || crate::browsing::list(&watched, browsing.scope, path))
+        .await
+    {
+        Ok(listing) => Json(listing).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "listing a directory failed");
+            unavailable("the directory could not be listed")
+        }
+    }
 }
 
 /// `GET /api/ui/update` — whether a newer Verkstead has been released than
