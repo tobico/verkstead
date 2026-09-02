@@ -970,6 +970,30 @@ pub(crate) async fn conversation_view(
         }
     };
 
+    // And the register again, now the Timeline it is read against is in hand.
+    // The read above closes the window at a session's end; this one closes the
+    // window at its start, which is the same mistake from the other side.
+    //
+    // A session's Event is opened by [`store::start_capture`] a moment before
+    // the register learns of the session writing into it — see
+    // [`crate::sessions::Sessions::start`], where the two are a few lines
+    // apart. A Timeline read in between carries an Event the read above cannot
+    // name, and drawing it as stopped is the `0 lines` and nothing this whole
+    // ordering exists to prevent: a page saying a session never said anything,
+    // about one that has only just started saying it.
+    //
+    // Either read naming it is enough, because both windows are wrong the same
+    // way round — a live session drawn as a finished one — and the cost of
+    // being wrong the other way is the one already accepted above: an Event
+    // drawn as running that has just stopped is right again on the next read.
+    let writing_now = state.sessions.writing(id);
+
+    // Whether the Event named is the one a session is printing into, by either
+    // reading of the register. What this still does not cover is a session that
+    // both started and ended between the two reads, which is a session no
+    // reading of the register taken here ever saw.
+    let printing_into = |event_id| writing == Some(event_id) || writing_now == Some(event_id);
+
     // The Pairings are read as rows rather than as ids: what the pane says
     // about a Profile, and whether it can still be run under, is the same
     // reading the Profile list gets.
@@ -1438,7 +1462,7 @@ pub(crate) async fn conversation_view(
         // A fix session actively working a red check is a wrap-up getting on
         // with it, so the label is drawn only where nothing is running — the
         // same reading `working` below is.
-        waiting_on_checks: narrowed_to_checks && writing.is_none(),
+        waiting_on_checks: narrowed_to_checks && writing.is_none() && writing_now.is_none(),
         resets,
         archived,
         trimmed,
@@ -1448,7 +1472,7 @@ pub(crate) async fn conversation_view(
         // something is running, and one Event of a session's is not the question
         // — a Conversation whose session has ended is not working, whichever
         // Event it was writing into.
-        working: writing.is_some(),
+        working: writing.is_some() || writing_now.is_some(),
         // And the register beside it, read raw: what is holding this
         // Conversation as of now, whatever state it is in. The rule about which
         // states ought to have one is `ready_to_resume`'s a few lines up — this
@@ -1497,7 +1521,7 @@ pub(crate) async fn conversation_view(
                             summary.lines,
                             summary.turns,
                             summary.latest,
-                            writing == Some(event.id),
+                            printing_into(event.id),
                             idling,
                             profile,
                             model,
