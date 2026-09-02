@@ -9855,6 +9855,32 @@ describe("a commit on the timeline", () => {
     );
   });
 
+  /// And the two counts take the app's own green and red, in both places a
+  /// commit is drawn — the card here and the header of the pane it opens. They
+  /// were a pair of hexes written twice: a green of their own, and a red that
+  /// was very nearly unreadable against the dark scheme, the tokens being the
+  /// only colours in the app that follow it.
+  ///
+  /// The stylesheet's, jsdom laying nothing out and computing no variable.
+  it("colours the counts with the tokens the diff itself is coloured with", () => {
+    for (const css of [timelineCss, commitPaneCss]) {
+      expect(css).toContain("  color: var(--added);\n  font-weight: 600;");
+      expect(css).toContain("  color: var(--removed);\n  font-weight: 600;");
+    }
+
+    // The pair they replaced, gone from both.
+    expect(timelineCss).not.toContain("#1a7f37");
+    expect(commitPaneCss).not.toContain("#1a7f37");
+    expect(commitPaneCss).not.toContain("#b3382c");
+
+    // And both tokens follow the scheme, which is the whole of what the change
+    // buys: the hardcoded red never did.
+    expect(base).toContain("--added: #2f7d4f;");
+    expect(base).toContain("--removed: #b3382c;");
+    expect(base).toContain("--added: #79c48f;");
+    expect(base).toContain("--removed: #e0857a;");
+  });
+
   /// The whole card, and nothing of what the commit said about itself: the
   /// Summary was clamped here under the counts and is the details pane's whole
   /// now, so the card is the line, the hash and the size of the change.

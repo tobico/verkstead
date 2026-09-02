@@ -1015,13 +1015,19 @@
   color: inherit;
 }
 
+/* In the app's own green and red rather than a pair of hexes written here: the
+   same two the pane this card opens colours its counts and its patch with — see
+   `--added` and `--removed` in `styles/base.css` — so one commit says which way
+   it moved in one voice wherever it is drawn. The hardcoded pair had a green of
+   its own and a red that was very nearly unreadable in the dark scheme, the
+   tokens being the only colours here that follow it. */
 .commit .added {
-  color: #1a7f37;
+  color: var(--added);
   font-weight: 600;
 }
 
 .commit .removed {
-  color: #b3382c;
+  color: var(--removed);
   font-weight: 600;
 }
 
