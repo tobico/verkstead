@@ -18,7 +18,9 @@
 //! that branch in, and everything it has gained since the work was cut arrives
 //! with it — none of which is this Conversation's work, and all of which would
 //! bury what is. So the branch it was cut off is recorded beside the commit, and
-//! the listing leaves out everything reachable from it. See [`excluded`].
+//! the listing leaves out everything reachable from it — that branch and the
+//! Repo's default branch both, the two being the same one only where nobody
+//! picked. See [`excluded`].
 //!
 //! A branch is swept whole rather than followed from where the last sweep got
 //! to, and a sweep subtracts as well as adds. What makes that cheap is the
@@ -533,23 +535,37 @@ fn forgotten(branch: &Branch, recorded: &[String]) -> Vec<String> {
 }
 
 /// The branches whose commits a sweep leaves out: the one the work was cut off
-/// and its counterpart across `origin`.
+/// and the Repo's default branch, each with its counterpart across `origin`.
 ///
-/// Both, because an agent told to fetch and merge the base branch in may end up
-/// on either — `git merge origin/main` and `git merge main` are the same
-/// instruction followed two ways, and only the branch it actually merged holds
-/// the commits to leave out.
+/// Both sides of `origin`, because an agent told to fetch and merge the base
+/// branch in may end up on either — `git merge origin/main` and `git merge main`
+/// are the same instruction followed two ways, and only the branch it actually
+/// merged holds the commits to leave out.
 ///
-/// No fetch is made for it. This runs every couple of seconds, and a resolution
-/// session fetches before it merges: origin's copy is already as current as the
-/// merge that put anything here to leave out.
+/// **And the default branch whether or not a base was picked**, because the
+/// branch the work was cut off and the branch it is merged back into are not
+/// always the same one. Nothing here passes `--base` to `gh pr create`, so every
+/// pull request opens against the repository's default branch — and what a
+/// resolution session is told to bring in is the *pull request's* base branch,
+/// which for a Conversation started off a picked branch is the default and not
+/// the pick. Excluding only what was recorded would put every commit the default
+/// branch had gained onto that Conversation's Timeline, which is the whole of
+/// what this is for. It costs nothing the other way round: a commit the default
+/// branch already holds was never this Conversation's work, whatever it was cut
+/// off.
 ///
-/// The fallbacks, in order. A record naming no branch — every Conversation
-/// started before the name was kept — and one whose name has stopped resolving
-/// both fall to the Repo's default branch as origin holds it, which is the rule
-/// an unpicked base started under anyway. A Repo where that does not resolve
-/// either excludes nothing, and the sweep is `<base commit>..<branch>` exactly
-/// as it always was.
+/// A stacked stage is the one case where the two differ and the recorded name is
+/// the right one — `gh stack submit` puts its pull request against the
+/// predecessor's branch, which is what [`crate::continuing`] records — and it is
+/// covered by being one of the two rather than by being chosen between.
+///
+/// No fetch is made for any of it. This runs every couple of seconds, and a
+/// resolution session fetches before it merges: origin's copy is already as
+/// current as the merge that put anything here to leave out.
+///
+/// Where nothing at all resolves — a Repo with no default branch and a
+/// Conversation whose recorded name has gone — the sweep is
+/// `<base commit>..<branch>` exactly as it always was.
 ///
 /// A ref that will not resolve is dropped rather than passed on: git refuses the
 /// whole listing over one argument it cannot make sense of, and a sweep that
@@ -558,22 +574,28 @@ fn forgotten(branch: &Branch, recorded: &[String]) -> Vec<String> {
 ///
 /// Blocking, like everything that shells out to git.
 fn excluded(branch: &Branch) -> Vec<String> {
-    let named: Vec<String> = branch
+    let mut excluding: Vec<String> = Vec::new();
+
+    for named in branch
         .base_ref
         .iter()
-        .flat_map(|named| [named.clone(), counterpart(named)])
-        .filter(|named| crate::worktrees::resolve(&branch.repo, named).is_some())
-        .collect();
+        .map(String::as_str)
+        .chain([branch.default_branch.as_str()])
+        .flat_map(|named| [named.to_owned(), counterpart(named)])
+    {
+        // The same branch reached two ways — a base nobody picked is the default
+        // branch, and its counterpart is the default's — so a name already here
+        // is one git would be handed twice.
+        if excluding.contains(&named) {
+            continue;
+        }
 
-    if !named.is_empty() {
-        return named;
+        if crate::worktrees::resolve(&branch.repo, &named).is_some() {
+            excluding.push(named);
+        }
     }
 
-    let default = crate::worktrees::default_ref(&branch.repo, &branch.default_branch);
-
-    crate::worktrees::resolve(&branch.repo, &default)
-        .map(|_| vec![default])
-        .unwrap_or_default()
+    excluding
 }
 
 /// The same branch on the other side of `origin`: `main` for `origin/main`, and
@@ -1458,6 +1480,63 @@ mod tests {
             ],
             "a Repo with no base branch that resolves at all sweeps by the base \
              commit, exactly as it did before any of this",
+        );
+    }
+
+    /// And the Repo's default branch is left out whether or not a base was
+    /// picked, because the branch the work was cut off and the branch it is
+    /// merged back into are not always the same one.
+    ///
+    /// Nothing here passes `--base` to `gh pr create`, so a pull request opens
+    /// against the repository's default branch — and what a resolution session
+    /// brings in is the *pull request's* base. The record here names the branch
+    /// the human picked, and what was merged is the default.
+    #[test]
+    fn a_sweep_leaves_out_the_default_branch_as_well_as_the_one_that_was_picked() {
+        let dir = repository();
+        let path = dir.path();
+
+        // The branch the human picked, off which the work is cut.
+        run(path, &["checkout", "--quiet", "-b", "release-1.4"]);
+        std::fs::write(path.join("release.rs"), "fn release() {}\n").unwrap();
+        run(path, &["add", "release.rs"]);
+        run(path, &["commit", "-m", "chore: cut the release branch"]);
+
+        let base = head(path);
+
+        run(path, &["checkout", "--quiet", "-b", "rate-limiting"]);
+        std::fs::write(path.join("limiter.rs"), "fn allow() {}\n").unwrap();
+        run(path, &["add", "limiter.rs"]);
+        run(path, &["commit", "-m", "feat: rate limiting"]);
+
+        // What the default branch gained meanwhile, which is what the pull
+        // request is against and so what the resolution session merges in.
+        run(path, &["checkout", "--quiet", "main"]);
+        std::fs::write(path.join("elsewhere.rs"), "fn elsewhere() {}\n").unwrap();
+        run(path, &["add", "elsewhere.rs"]);
+        run(path, &["commit", "-m", "feat: somebody else's work"]);
+
+        run(path, &["checkout", "--quiet", "rate-limiting"]);
+        run(path, &["merge", "--no-ff", "-m", "merge: main", "main"]);
+
+        let branch = Branch {
+            repo_id: 1,
+            repo: path.to_owned(),
+            branch: "rate-limiting".to_owned(),
+            following: Following::Nothing,
+            base,
+            base_ref: Some("release-1.4".to_owned()),
+            default_branch: "main".to_owned(),
+        };
+
+        assert_eq!(
+            since(&branch, &[])
+                .iter()
+                .map(|it| it.subject.as_str())
+                .collect::<Vec<_>>(),
+            vec!["feat: rate limiting", "merge: main"],
+            "the default branch's own commit is left out too, though the record \
+             names another branch entirely",
         );
     }
 

@@ -381,12 +381,13 @@ base branch in to settle a pull request's conflicts drags every commit the base
 has gained since the work started along with it, and none of that is this
 Conversation's work. The merge commit itself stays, being the hunks the agent
 resolved rather than anybody else's work. Which branch that is, is the name
-recorded beside the base commit when the work started — the branch the human
-picked, or the Repo's default branch where they picked none — and its `origin/`
-copy counts as the same branch, an agent told to merge the base in landing on
-either. A Conversation from before the name was kept, or one whose branch has
-since gone, reads by the Repo's default branch as origin holds it; a repository
-where that does not resolve either sweeps by the base commit alone.
+recorded beside the base commit when the work started **and** the Repo's default
+branch — the two being one branch wherever nobody picked, and the pull request
+opening against the default whatever the work was cut off. Each counts with its
+`origin/` copy, an agent told to merge the base in landing on either. A
+Conversation from before the name was kept, or one whose branch has since gone,
+reads by the default branch alone; a repository where nothing resolves sweeps by
+the base commit alone.
 **And that merge's card says it is one.** What it holds is the resolution and
 nothing else — a file or two, a handful of lines — so it reads as an ordinary
 small commit unless something says otherwise: the word sits beside the hash, in
