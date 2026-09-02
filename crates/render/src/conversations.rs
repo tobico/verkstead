@@ -939,21 +939,36 @@ pub struct StageListReached {
 
 /// An Event the Timeline keeps in view rather than letting scroll past.
 ///
-/// A fixed set — a task list, a stage list and a PR — and no manual pin or
-/// unpin: what is pinned is decided by what kind of thing it is, so there is no
-/// state here to flip and no route to flip it with. A tagged kind for the reason
-/// [`TimelineEvent`] is one: what gets drawn turns on which kind it is.
+/// A fixed set — a running session, a task list, a stage list and a PR — and no
+/// manual pin or unpin: what is pinned is decided by what kind of thing it is,
+/// so there is no state here to flip and no route to flip it with. A tagged kind
+/// for the reason [`TimelineEvent`] is one: what gets drawn turns on which kind
+/// it is.
 ///
-/// All three are on the record as well, each at the moment it arrived there, and
+/// All four are on the record as well, each at the moment it arrived there, and
 /// each is one card drawn twice rather than two cards.
 ///
-/// The list they arrive in is ordered, and the viewer draws it in that order: a
-/// pull request first, then a task list, then a roadmap. The ordering is done
-/// where the list is built rather than here — see the pinned block in
-/// `crates/server/src/ui.rs`.
+/// The list they arrive in is ordered, and the viewer draws it in that order:
+/// the running session first, then a pull request, then a task list, then a
+/// roadmap. The ordering is done where the list is built rather than here — see
+/// the pinned block in `crates/server/src/ui.rs`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum PinnedEvent {
+    /// The session running in the Worktree now, where there is one.
+    ///
+    /// The one of the four that comes and goes with the work rather than
+    /// arriving and staying: it is pinned while a session is being written to,
+    /// idle included, and nothing is pinned here the rest of the time. A
+    /// Conversation Verkstead has finished with would otherwise carry the last
+    /// run it ever made at the head of its pane for good, which is a card
+    /// saying something that stopped being true.
+    ///
+    /// At most one, a Conversation running one session at a time — see
+    /// `writing` in the pinned block in `crates/server/src/ui.rs`, which is
+    /// what decides it.
+    AgentOutput(AgentOutputEvent),
+
     /// The backlog the Conversation's Worktree holds, and how far through it the
     /// work has got.
     TaskList(TaskListEvent),
@@ -1939,40 +1954,71 @@ pub fn proposal_view(proposal: &verkstead_schema::Proposal) -> ProposalView {
     }
 }
 
-/// A session's output as an Event. Nothing to render either — the summary was
-/// worked out as the output arrived — and here for the same reason as the move.
+/// A session's output as an Event on the record. Nothing to render either — the
+/// summary was worked out as the output arrived — and here for the same reason
+/// as the move.
+pub fn agent_output_event(session: AgentSession) -> TimelineEvent {
+    TimelineEvent::AgentOutput(agent_output(session))
+}
+
+/// And the same session as the Event that gets pinned, which is what a session
+/// still being written to is.
 ///
-/// The arguments are the Event's own columns rather than a list somebody chose,
-/// which is what makes them many — gathering them into a struct would be a
-/// second shape to keep true beside the one it was read out of.
-#[allow(clippy::too_many_arguments)]
-pub fn agent_output_event(
-    id: i64,
-    at: String,
-    lines: i64,
-    turns: Option<i64>,
-    latest: String,
-    running: bool,
-    idle: bool,
-    profile: Option<String>,
-    model: Option<String>,
-    agent_type: Option<crate::AgentType>,
-) -> TimelineEvent {
-    TimelineEvent::AgentOutput(AgentOutputEvent {
-        id,
-        at,
-        lines,
-        turns,
-        latest,
-        running,
-        profile,
-        model,
-        agent_type,
+/// Made by the same call as the one on the record, because the two are one card
+/// in two places — the arrangement the pull request beside it already has, and
+/// for the same reason: a Timeline that built them separately could come to hand
+/// over two accounts of one run.
+pub fn agent_output_pinned(session: AgentSession) -> PinnedEvent {
+    PinnedEvent::AgentOutput(agent_output(session))
+}
+
+/// The session itself, which each of the two above wraps in its own kind.
+fn agent_output(session: AgentSession) -> AgentOutputEvent {
+    AgentOutputEvent {
+        id: session.id,
+        at: session.at,
+        lines: session.lines,
+        turns: session.turns,
+        latest: session.latest,
+        running: session.running,
+        profile: session.profile,
+        model: session.model,
+        agent_type: session.agent_type,
         // Idle is a thing a running session is, and the caller reads the two
         // off different places — so the pair is made consistent here rather
         // than at each of them.
-        idle: running && idle,
-    })
+        idle: session.running && session.idle,
+    }
+}
+
+/// What the callers of [`agent_output_event`] and [`agent_output_pinned`] hand
+/// over: one session as the store holds it, plus the two facts about it that are
+/// the running server's rather than the record's.
+///
+/// A struct rather than ten arguments, which is why it exists: two call sites
+/// build the one card now, and a positional list of that length — five of them
+/// nullable, three of them the same shape — is a list a call could get out of
+/// order and still compile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentSession {
+    pub id: i64,
+    pub at: String,
+    pub lines: i64,
+    pub turns: Option<i64>,
+    pub latest: String,
+
+    /// Whether anything is writing into this Event now, which is the register's
+    /// answer rather than the record's.
+    pub running: bool,
+
+    /// And whether it has stopped printing, which is only ever true of one that
+    /// is running — see [`agent_output`], which is where the pair is made
+    /// consistent.
+    pub idle: bool,
+
+    pub profile: Option<String>,
+    pub model: Option<String>,
+    pub agent_type: Option<crate::AgentType>,
 }
 
 /// A Question Set as an Event, summarised on the way.

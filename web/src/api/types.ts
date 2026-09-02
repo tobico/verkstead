@@ -1884,20 +1884,21 @@ export type PickedView = "Nothing" | "Skipped" | { "Under": PairingView };
 /**
  * An Event the Timeline keeps in view rather than letting scroll past.
  *
- * A fixed set — a task list, a stage list and a PR — and no manual pin or
- * unpin: what is pinned is decided by what kind of thing it is, so there is no
- * state here to flip and no route to flip it with. A tagged kind for the reason
- * [`TimelineEvent`] is one: what gets drawn turns on which kind it is.
+ * A fixed set — a running session, a task list, a stage list and a PR — and no
+ * manual pin or unpin: what is pinned is decided by what kind of thing it is,
+ * so there is no state here to flip and no route to flip it with. A tagged kind
+ * for the reason [`TimelineEvent`] is one: what gets drawn turns on which kind
+ * it is.
  *
- * All three are on the record as well, each at the moment it arrived there, and
+ * All four are on the record as well, each at the moment it arrived there, and
  * each is one card drawn twice rather than two cards.
  *
- * The list they arrive in is ordered, and the viewer draws it in that order: a
- * pull request first, then a task list, then a roadmap. The ordering is done
- * where the list is built rather than here — see the pinned block in
- * `crates/server/src/ui.rs`.
+ * The list they arrive in is ordered, and the viewer draws it in that order:
+ * the running session first, then a pull request, then a task list, then a
+ * roadmap. The ordering is done where the list is built rather than here — see
+ * the pinned block in `crates/server/src/ui.rs`.
  */
-export type PinnedEvent = { "TaskList": TaskListEvent } | { "StageList": StageListEvent } | { "PullRequest": PullRequestEvent };
+export type PinnedEvent = { "AgentOutput": AgentOutputEvent } | { "TaskList": TaskListEvent } | { "StageList": StageListEvent } | { "PullRequest": PullRequestEvent };
 
 /**
  * The account a Profile names, in the shape the agent type running it keeps

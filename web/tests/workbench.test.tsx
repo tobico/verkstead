@@ -422,13 +422,6 @@ async function standing(container: ParentNode): Promise<{
   };
 }
 
-/// And its second line: what is running, or what there is instead of one.
-async function saidRunning(container: ParentNode): Promise<string | null> {
-  return (
-    await drawn(container, `.${statusButton.status} .${statusButton.agent}`)
-  ).textContent;
-}
-
 /// The gear at the head of the sidebar, which is what the rest of Verkstead is
 /// behind. Found by the name it is read aloud by, an icon saying nothing for
 /// itself.
@@ -4952,6 +4945,45 @@ function theGrillingOutput(
   );
 }
 
+/// The same again with the session still being written to, which is what the
+/// server pins the card on: the altered Event on the record *and* the same Event
+/// at the head of the pinned list, exactly as the pinned block in
+/// `crates/server/src/ui.rs` hands it over.
+///
+/// Composed here rather than in a fixture for the reason a running session is
+/// altered here at all: nothing is writing into a fixture, so a fixture that
+/// carried a pinned run would be a payload claiming a session that stopped in
+/// 2026 is still going.
+function theGrillingRunning(
+  over: Partial<AgentOutputEvent>,
+  ...answers: Parameters<typeof serving>
+) {
+  const running = { ...OUTPUT, ...over, running: true };
+
+  const altered: TimelineEvent[] = GRILLING.timeline.map((event) =>
+    "AgentOutput" in event ? { AgentOutput: running } : event,
+  );
+
+  return serving(
+    whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+    whenever("/api/ui/repos", json(REPOS)),
+    whenever("/api/ui/profiles", json(PROFILES)),
+    whenever(
+      `/api/ui/conversations/${GRILLING.id}`,
+      json({
+        ...GRILLING,
+        timeline: altered,
+        pinned: [{ AgentOutput: running }, ...GRILLING.pinned],
+      }),
+    ),
+    whenever(TRANSCRIPT_OF_IT, json(SAID_NOTHING)),
+    whenever(CAPTURE_OF_IT, json(CAPTURE)),
+    whenever(SCREEN_OF_IT, json(SCREEN)),
+    ...answers,
+  );
+}
+
 /// The same conversation after a Cleanup has been through it: every card where
 /// it was, and the session's own output taken out from under the one that opens
 /// on it.
@@ -5496,14 +5528,16 @@ describe("a move on the timeline", () => {
 });
 
 describe("a session's output on the timeline", () => {
-  /// The design's summary: how far the conversation has got, and the last thing
-  /// the agent said. An hour of terminal output does not go in the middle pane.
+  /// The design's summary: what it is, how far the conversation has got, and
+  /// what it was run under. An hour of terminal output does not go in the middle
+  /// pane, and neither does a line of it — reading output is the details pane's,
+  /// which is what pressing the card opens.
   ///
   /// Turns rather than the lines it printed. A full-screen interface redraws
   /// itself with cursor moves rather than newlines, so a line count read 0 for
   /// every real session — and what a reader wanted from it was how much of a
   /// conversation there is to open, which is what a turn is.
-  it("summarises as a turn count and the latest statement", async () => {
+  it("summarises as a turn count, and draws nothing the session printed", async () => {
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
@@ -5513,22 +5547,38 @@ describe("a session's output on the timeline", () => {
     expect(output.querySelector(`.${timeline.turns}`)!.textContent).toBe(
       `${OUTPUT.turns} turns`,
     );
-    expect(output.querySelector(`.${timeline.latest}`)!.textContent).toBe(OUTPUT.latest);
 
-    // Nothing of the Capture itself: it is fetched by the pane that shows
-    // it, and only once one is opened.
+    // Neither the last thing it said nor the Capture behind it: both are the
+    // details pane's, and only once one is opened.
+    expect(OUTPUT.latest).not.toBe("");
+    expect(output.textContent).not.toContain(OUTPUT.latest);
     expect(output.textContent).not.toContain("Reading the brief");
   });
 
-  /// And the head names the run rather than the kind of thing it is: the shared
-  /// reading of what the session was launched under, off the three facts it
-  /// wrote down as it started. A record holding a session per resume is a
-  /// column of cards, and *Agent run* was the same three words on every one.
+  /// The head says what the card is, in the words every other card on this pane
+  /// says its own kind in. What tells one run from another is the line under it.
+  it("heads the card with the words Agent run", async () => {
+    theGrillingOutput({
+      agent_type: "Claude",
+      profile: "Work",
+      model: "claude-fable-5",
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const output = await drawn(container, `.${timeline.timelineEvent} .${timeline.agentOutput}`);
+
+    expect(output.querySelector(`.${timeline.what}`)!.textContent).toBe(
+      "Agent run",
+    );
+  });
+
+  /// And the line under it is the shared reading of what the session was
+  /// launched under, off the three facts it wrote down as it started.
   ///
   /// The account's name is said here because the saved list holds three Claude
   /// Code accounts and none of them is this one — a name the list no longer
   /// holds keeps its own, dropping it being a run attributed to whoever is left.
-  it("names the run at the head of the card", async () => {
+  it("says what the run was launched under on the line under it", async () => {
     theGrillingOutput({
       agent_type: "Claude",
       profile: "Work",
@@ -5539,7 +5589,7 @@ describe("a session's output on the timeline", () => {
     const output = await drawn(container, `.${timeline.timelineEvent} .${timeline.agentOutput}`);
 
     await waitFor(() =>
-      expect(output.querySelector(`.${timeline.what}`)!.textContent).toBe(
+      expect(output.querySelector(`.${timeline.ranAs}`)!.textContent).toBe(
         "Claude Code Fable 5 — Work",
       ),
     );
@@ -5559,15 +5609,16 @@ describe("a session's output on the timeline", () => {
     const output = await drawn(container, `.${timeline.timelineEvent} .${timeline.agentOutput}`);
 
     await waitFor(() =>
-      expect(output.querySelector(`.${timeline.what}`)!.textContent).toBe(
+      expect(output.querySelector(`.${timeline.ranAs}`)!.textContent).toBe(
         "Fable 5 — Work",
       ),
     );
   });
 
-  /// And a session that recorded none of the three keeps the words: there is
-  /// nothing to name it by, and the card is still a card.
-  it("says Agent run where the record kept nothing to name it by", async () => {
+  /// And a session that recorded none of the three has nothing to say there, so
+  /// the line is not drawn at all: no bare mark, and no empty row under the
+  /// head. The card is still a card.
+  it("draws no second line where the record kept nothing to name the run by", async () => {
     theGrilling();
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
@@ -5577,6 +5628,8 @@ describe("a session's output on the timeline", () => {
     expect(output.querySelector(`.${timeline.what}`)!.textContent).toBe(
       "Agent run",
     );
+    expect(output.querySelector(`.${timeline.ranAs}`)).toBeNull();
+    expect(output.querySelector(`.${harnessMark.mark}`)).toBeNull();
   });
 
   /// The details pane is titled the same way, for the reason its summary line
@@ -6535,10 +6588,9 @@ describe("a session's output on the timeline", () => {
 /// The reading says who runs a session and the mark is what makes a column of
 /// those readings scannable: a reader picks the Claude run out of five by its
 /// shape before reading a word of any of them. So it is drawn everywhere the
-/// reading is and JSX can put an `svg` — the card, the pane it opens, the status
-/// button's running line and the Brief's three pairing facts — and it is one
-/// component, so those four cannot come to draw four different pictures of the
-/// one harness.
+/// reading is and JSX can put an `svg` — the card's second line, the pane it
+/// opens, and the Brief's three pairing facts — and it is one component, so
+/// those three cannot come to draw three different pictures of the one harness.
 ///
 /// What is asserted is the drawing rather than a class: the four files are read
 /// here exactly as lobehub published them, so a mark drawn from the wrong file
@@ -6554,8 +6606,8 @@ describe("the mark of the harness a session ran under", () => {
     ["OpenCode", opencodeMarkFile],
   ] satisfies Array<[AgentType, string]>;
 
-  /// The Agent run card on the record, which is where a reader meets a run
-  /// first.
+  /// The Agent run card on the record, on the line saying what the run was
+  /// launched under, which is where a reader meets a run first.
   it.each(MARKS)(
     "draws %s's own mark on the card that names the run",
     async (harness, file) => {
@@ -6564,7 +6616,7 @@ describe("the mark of the harness a session ran under", () => {
 
       const head = await drawn(
         container,
-        `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.what}`,
+        `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.ranAs}`,
       );
 
       await waitFor(() => expect(marked(head)).toBe(art(file)));
@@ -6590,40 +6642,6 @@ describe("the mark of the harness a session ran under", () => {
 
     await waitFor(() => expect(marked(head)).toBe(art(opencodeMarkFile)));
     expect(head.textContent).toBe("OpenCode Minimax M2.1 — Work");
-  });
-
-  /// The status button's second line, off the same record: what is running is
-  /// what was launched, and the mark says which harness launched it.
-  it("marks the harness on the status button's running line", async () => {
-    theGrillingOutput({
-      running: true,
-      agent_type: "Grok",
-      profile: "Work",
-      model: "grok-4.6",
-    });
-    const { container } = mount(`/conversations/${GRILLING.id}`);
-
-    const line = await drawn(
-      container,
-      `.${statusButton.status} .${statusButton.agent}`,
-    );
-
-    await waitFor(() => expect(marked(line)).toBe(art(grokMarkFile)));
-  });
-
-  /// A line saying nothing is running has no harness to mark, which is the same
-  /// nothing its words say.
-  it("marks nothing on a line with no session behind it", async () => {
-    theRecordedWith();
-    const { container } = mount(`/conversations/${OPEN.id}`);
-
-    const line = await drawn(
-      container,
-      `.${statusButton.status} .${statusButton.agent}`,
-    );
-
-    expect(line.textContent).toBe("No agent running");
-    expect(line.querySelector(`.${harnessMark.mark}`)).toBeNull();
   });
 
   /// And the Brief's three pairing facts, which say what each role *will* run
@@ -6673,7 +6691,7 @@ describe("the mark of the harness a session ran under", () => {
 
     const head = await drawn(
       container,
-      `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.what}`,
+      `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.ranAs}`,
     );
 
     await waitFor(() => expect(head.textContent).toBe("Fable 5 — Work"));
@@ -6689,7 +6707,7 @@ describe("the mark of the harness a session ran under", () => {
 
     const head = await drawn(
       container,
-      `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.what}`,
+      `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.ranAs}`,
     );
 
     const path = await drawn(head, `.${harnessMark.mark} path`);
@@ -6700,8 +6718,8 @@ describe("the mark of the harness a session ran under", () => {
   });
 
   /// And the other three follow the ink of whatever line they were put beside,
-  /// the way an `Icon` does: soft on the status button's second line, the
-  /// heading's own on a card.
+  /// the way an `Icon` does: the ordinary ink on a card's second line, and the
+  /// heading's own in the pane it opens.
   it.each(MARKS.filter(([harness]) => harness !== "Claude"))(
     "leaves %s's mark in the ink around it",
     async (harness, _file) => {
@@ -6710,7 +6728,7 @@ describe("the mark of the harness a session ran under", () => {
 
       const head = await drawn(
         container,
-        `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.what}`,
+        `.${timeline.timelineEvent} .${timeline.agentOutput} .${timeline.ranAs}`,
       );
 
       const svg = await drawn(head, `.${harnessMark.mark} svg`);
@@ -6768,19 +6786,26 @@ describe("the foot of the timeline pane", () => {
     ).toBeNull();
   });
 
-  /// And the status button says what the strip said, which is why it could go:
-  /// the running session, named rather than marked.
+  /// And the head of the pane says what the strip said, which is why it could
+  /// go: the running session's own card, pinned while it runs and naming the
+  /// run rather than marking it.
   it("says what is running at the head of the pane instead", async () => {
-    theGrillingOutput({
-      running: true,
+    theGrillingRunning({
       agent_type: "Claude",
       profile: "Work",
       model: "claude-fable-5",
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
+    const card = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.agentOutput}`,
+    );
+
     await waitFor(() =>
-      expect(saidRunning(container)).resolves.toBe("Claude Code Fable 5 — Work"),
+      expect(card.querySelector(`.${timeline.ranAs}`)!.textContent).toBe(
+        "Claude Code Fable 5 — Work",
+      ),
     );
   });
 });
@@ -11877,10 +11902,9 @@ describe("a run stopped because an account ran out of window", () => {
   });
 
   /// The one thing that tells this stop from any other is when the account
-  /// comes back, and it is said on the status button's second line — where what
-  /// is running is said, this being a stop with nothing running and a reason of
-  /// its own for it. See *the status button* below, which is where that line is
-  /// asked about.
+  /// comes back, and it is said on the resume row of the actions menu — the row
+  /// the press is on, this being a stop that waits for the press *and* for an
+  /// account. Nowhere on the status button, which says *Stopped* either way.
   ///
   /// A conversation stopped by a press carries no such words, which is the whole
   /// of the difference between the two.
@@ -11890,8 +11914,8 @@ describe("a run stopped because an account ran out of window", () => {
     theStopped();
     const { container } = mount(`/conversations/${STOPPED.id}`);
 
-    expect(await saidRunning(container)).toBe("No agent running");
-    await drawn(await openActions(container), `.${actions.resume}`);
+    const resume = await drawn(await openActions(container), `.${actions.resume}`);
+    expect(resume.textContent).not.toContain("Out of window");
   });
 
   /// The record is kept and read rather than rewritten (ADR-0006): a Pause a
@@ -11983,8 +12007,8 @@ describe("a run stopped because an account ran out of window", () => {
   });
 });
 
-/// The one place the Conversation pane says where the work stands: a two-line
-/// button in the sticky block under the title, and behind its press everything
+/// The one place the Conversation pane says where the work stands: a one-line
+/// button at the foot of the sticky block, and behind its press everything
 /// there is to do about the Conversation.
 ///
 /// It replaced five pieces of chrome that had each been put where there was
@@ -11993,7 +12017,9 @@ describe("a run stopped because an account ran out of window", () => {
 /// there is one of it, that it is where the eye lands, and that the press that
 /// used to be a mark at the end of the header row is the whole button now.
 describe("the status button", () => {
-  it("stands in the sticky chrome, under the title and over the pinned cards", async () => {
+  /// Last in the block rather than first: the sticky area ends where this
+  /// button ends, and a control along that edge is what says so.
+  it("stands in the sticky chrome, under the pinned cards and last in it", async () => {
     theTasked();
     const { container } = mount(`/conversations/${TASKED.id}`);
 
@@ -12004,11 +12030,12 @@ describe("the status button", () => {
 
     const inside = [...chrome.children];
     expect(inside.indexOf(chrome.querySelector(`.${paneHead.head}`)!)).toBeLessThan(
-      inside.indexOf(button),
-    );
-    expect(inside.indexOf(button)).toBeLessThan(
       inside.indexOf(chrome.querySelector(`.${timeline.pinned}`)!),
     );
+    expect(
+      inside.indexOf(chrome.querySelector(`.${timeline.pinned}`)!),
+    ).toBeLessThan(inside.indexOf(button));
+    expect(inside.indexOf(button)).toBe(inside.length - 1);
   });
 
   /// The press is the whole button rather than a mark at the end of a row,
@@ -12056,10 +12083,10 @@ describe("the status button", () => {
     ).toBeNull();
   });
 
-  /// The second line: the Profile and the model the session was launched under,
-  /// off the record rather than off the Pairing the Conversation is configured
-  /// with — what is running is what was launched.
-  it("names the agent running, as every other site names one", async () => {
+  /// One line and no second. What was running used to be said under the status
+  /// word; it is the running session's own pinned card that says it now, in the
+  /// same words, and the button says where the *work* stands and nothing else.
+  it("says the status and the state and nothing under them", async () => {
     theGrillingOutput({
       running: true,
       agent_type: "Claude",
@@ -12068,42 +12095,29 @@ describe("the status button", () => {
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    await waitFor(() =>
-      expect(saidRunning(container)).resolves.toBe("Claude Code Fable 5 — Work"),
-    );
+    const said = await drawn(container, `.${statusButton.status} .${statusButton.what}`);
+
+    // The status line and nothing after it: no second line, and so no mark for
+    // the harness that line used to carry.
+    expect([...said.children]).toEqual([
+      said.querySelector(`.${statusButton.standing}`),
+    ]);
+    expect(said.querySelector(`.${harnessMark.mark}`)).toBeNull();
+    expect(said.textContent).not.toContain("Claude Code");
   });
 
-  /// And a session from before the backend was written down says the half the
-  /// record kept, with no backend guessed for it.
-  it("leaves out a backend the running session never recorded", async () => {
-    theGrillingOutput({
-      running: true,
-      agent_type: null,
-      profile: "Work",
-      model: "claude-fable-5",
-    });
-    const { container } = mount(`/conversations/${GRILLING.id}`);
-
-    await waitFor(() =>
-      expect(saidRunning(container)).resolves.toBe("Fable 5 — Work"),
-    );
-  });
-
-  /// And on the one stop that waits for something a press cannot supply, when
-  /// the account it was spending comes back — in the words the session printed
-  /// them in.
-  it("says when the account comes back on a stop a window made", async () => {
+  /// The out-of-window stop said its own sentence there, being the one stop a
+  /// resume cannot clear on its own. Nothing of it is on the button now — the
+  /// sentence is on the resume row of the menu this button drops, see *a run
+  /// stopped because an account ran out of window* above.
+  it("says nothing about a window the run is waiting on", async () => {
     thePaused();
     const { container } = mount(`/conversations/${WAITING.id}`);
 
-    expect(await saidRunning(container)).toBe("Out of window until 3pm");
-  });
+    const said = await drawn(container, `.${statusButton.status} .${statusButton.what}`);
 
-  it("says nothing is running in every other quiet moment", async () => {
-    theRecordedWith();
-    const { container } = mount(`/conversations/${OPEN.id}`);
-
-    expect(await saidRunning(container)).toBe("No agent running");
+    expect(said.textContent).not.toContain("Out of window");
+    expect(said.textContent).not.toContain("3pm");
   });
 });
 
@@ -12943,6 +12957,76 @@ function swipe(card: Element, from: number, to: number) {
 }
 
 describe("the pinned carousel", () => {
+  /// The session running now leads the deck: it is what the Conversation is
+  /// doing, where everything else pinned is something the work is against.
+  it("leads with the running session where there is one", async () => {
+    theWrapping({
+      pinned: [{ AgentOutput: { ...OUTPUT, running: true } }, ...ALL_THREE],
+    });
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const dots = await drawn(container, `.${timeline.pinned} .${timeline.carousel} > .${timeline.dots}`);
+
+    expect(
+      [...dots.querySelectorAll("button")].map((dot) =>
+        dot.getAttribute("aria-label"),
+      ),
+    ).toEqual(["Agent run", "Pull request", "Task list", "Roadmap"]);
+  });
+
+  /// And it is the same card the record holds, drawn a second time rather than
+  /// moved: pressing either opens the one details pane, and both read as open
+  /// while it is — the arrangement the pull request beside it already has.
+  it("draws the running session's own card, opening the one pane", async () => {
+    theGrillingRunning({
+      agent_type: "Claude",
+      profile: "Work",
+      model: "claude-fable-5",
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const card = await drawn(container, `.${timeline.pinned} .${timeline.agentOutput}`);
+
+    expect(card.querySelector(`.${timeline.what}`)!.textContent).toBe(
+      "Agent run",
+    );
+    await waitFor(() =>
+      expect(card.querySelector(`.${timeline.ranAs}`)!.textContent).toBe(
+        "Claude Code Fable 5 — Work",
+      ),
+    );
+
+    fireEvent.click(card);
+
+    // Both copies read as the open one, there being one session behind them.
+    await waitFor(() =>
+      expect(
+        [...container.querySelectorAll(`.${timeline.agentOutput}`)].every(
+          (drawn) => drawn.getAttribute("aria-pressed") === "true",
+        ),
+      ).toBe(true),
+    );
+
+    // And the pane behind it is that session's, titled by the same reading.
+    const head = await drawn(container, `.${shell.detailsPane} .${paneHead.head} h1`);
+    await waitFor(() =>
+      expect(head.textContent).toBe("Claude Code Fable 5 — Work"),
+    );
+  });
+
+  /// Nothing running is nothing pinned for it, which is what keeps a finished
+  /// Conversation from carrying the last run it ever made for good.
+  it("pins no session where nothing is writing into one", async () => {
+    theGrilling();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${timeline.timelineEvent} .${timeline.agentOutput}`);
+
+    expect(
+      container.querySelector(`.${timeline.pinned} .${timeline.agentOutput}`),
+    ).toBeNull();
+  });
+
   it("shows one of several pinned cards at a time", async () => {
     theWrapping({ pinned: ALL_THREE });
     const { container } = mount(`/conversations/${WRAPPING.id}`);

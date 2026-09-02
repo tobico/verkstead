@@ -4234,6 +4234,79 @@ async fn a_running_sessions_row_says_when_it_has_stopped_talking() {
     assert_eq!(fixture.close().await, ConversationClosed::Closed);
 }
 
+/// And while it runs, the same card is pinned above the record — first of
+/// everything pinned, because it is what the Conversation is *doing* where the
+/// rest is what the work is against.
+///
+/// One card drawn twice rather than two cards, the arrangement a pull request
+/// already has: the pinned copy and the copy on the record are the same Event,
+/// made by the same call.
+///
+/// It comes and goes with the run, which is the whole reason the pin is read off
+/// what is being written into rather than off the latest session on the record.
+/// A Conversation Verkstead has finished with would otherwise carry the last run
+/// it ever made at the head of its pane for good — a card saying *running* about
+/// a worktree that has been taken away.
+#[tokio::test]
+async fn the_session_being_written_into_is_pinned_above_the_record() {
+    let fixture = grilling(
+        r#"
+        printf 'Reading the brief.\n'
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let running = fixture.running().await;
+
+    let view = fixture
+        .until(|view| pinned_session(view).map(|_| view.clone()))
+        .await;
+
+    let card = pinned_session(&view).unwrap();
+
+    assert_eq!(
+        card.id, running,
+        "the pinned card is the session being written into"
+    );
+    assert!(
+        card.running,
+        "and it says so, as the copy on the record does"
+    );
+    assert_eq!(
+        Some(card),
+        output(&view),
+        "the two copies are the one Event, made by the one call"
+    );
+    assert!(
+        matches!(view.pinned.first(), Some(PinnedEvent::AgentOutput(_))),
+        "and it leads what is pinned: {:?}",
+        view.pinned,
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+
+    // Closing takes the session down, and nothing is being written into
+    // anything after that: the record keeps the run, and the pinned block has
+    // nothing to say about it.
+    let after = fixture
+        .until(|view| pinned_session(view).is_none().then(|| view.clone()))
+        .await;
+
+    assert!(
+        output(&after).is_some(),
+        "the run is still on the record, which is where it happened",
+    );
+}
+
+/// The session card a view has pinned, where it has one.
+fn pinned_session(view: &ConversationView) -> Option<&AgentOutputEvent> {
+    view.pinned.iter().find_map(|event| match event {
+        PinnedEvent::AgentOutput(output) => Some(output),
+        _ => None,
+    })
+}
+
 /// And the crossing is announced, because it is the one change a session makes
 /// by doing nothing.
 ///

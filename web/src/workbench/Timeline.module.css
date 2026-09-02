@@ -8,11 +8,12 @@
    selector says only what it is about — the card an entry belongs to, and
    nothing about the rest of the app.
 
-   The block the header, the status button and the pinned cards are wrapped in
+   The block the header, the pinned cards and the status button are wrapped in
    is the Workbench's: what a pane sticks to its top edge is the frame's
    business, so `Timeline.tsx` wears `paneChrome` out of `Panes.module.css`
-   rather than naming a block of its own. The status button standing in it is
-   painted where it is built, in `StatusButton.module.css`, and nothing this
+   rather than naming a block of its own. The status button standing at the foot
+   of it is painted where it is built, in `StatusButton.module.css`, and nothing
+   this
    pane says about where the Conversation stands is drawn from here any more.
 
    Two components draw into this vocabulary from their own files: `Pause`, whose
@@ -34,8 +35,8 @@
    beside it. The title/subtitle pattern the sidebar's card draws the same two
    facts in — see `.conversationRow .title` and `.meta` in
    `Conversations.module.css` — so the card and the header of the pane it opens
-   read as the one name said twice, and the status button under them says its
-   own two lines in the same voice.
+   read as the one name said twice, and the status button at the foot of the
+   block says its own line in the same voice.
 
    Inside the `<h1>` rather than under it, because the Repo is part of what this
    pane is called rather than a caption on it: on a Draft the title is the word
@@ -126,14 +127,15 @@
    moment in the record. What keeps them in view is the chrome block they share
    with the header, which sticks the two of them to the top edge as one and
    carries the paper the record passes behind; all this rule is now is the air
-   they keep above and below themselves.
+   under them, which is the gap between the last pinned card and the status
+   button that ends the block.
 
    One card is ever inside it: with more than one pinned the carousel below is
    what is here, and the card is inside that. */
 .pinned {
   display: flex;
   flex-direction: column;
-  padding: 0 0 1rem;
+  padding: 0 0 0.75rem;
 }
 
 /* The carousel, which is what more than one pinned card is: they are held above
@@ -752,11 +754,12 @@
 .notice.blocking {
 }
 
-/* What a session has printed, summarised. A `CardButton`, because the whole of
-   it is in the details pane and this is how it is opened — so it is a card that
-   says it can be pressed rather than one with a control in it. That it can be
-   pressed, and that it is the one open, are that component's to draw; what is
-   left here is the line inside it. */
+/* A session, summarised: the words *Agent run*, how far it got and whether it is
+   still going, over the line saying what it was run under. A `CardButton`,
+   because the whole of it is in the details pane and this is how it is opened —
+   so it is a card that says it can be pressed rather than one with a control in
+   it. That it can be pressed, and that it is the one open, are that component's
+   to draw; what is left here is the two lines inside it. */
 .agentOutput .eventHead {
   margin-bottom: 0.35rem;
   justify-content: flex-start;
@@ -775,29 +778,32 @@
   font-weight: 600;
 }
 
-/* The harness's mark, in front of the words that name the run. A margin rather
-   than a gap, the heading being a run of text rather than a flex row — and so a
-   card whose run recorded no harness leaves no space where a mark would have
-   been, there being no element to carry the margin. */
-.agentOutput .harness {
-  margin-inline-end: 0.4em;
-}
-
 .agentOutput .turns {
   font-size: 0.9rem;
   color: var(--ink-soft);
 }
 
-/* The last thing the agent said, on one line: what it said before that is what
-   the details pane is for. */
-.agentOutput .latest {
+/* What the run was launched under, on the line under the words: the backend, the
+   model and the account, in the shared reading every other site says the same
+   run in — see `reading` in `../agents.ts`.
+
+   The ordinary weight and the ordinary ink, because it is a fact about the run
+   rather than a caption on the title above it. The line the card used to end on
+   was the last thing the session printed, set small and monospaced; reading
+   output is the details pane's job, and one line of a terminal was the card's
+   least useful part dressed as its content. */
+.agentOutput .ranAs {
   display: block;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.85rem;
-  color: var(--ink-soft);
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+/* The harness's mark, in front of the words that name what ran. A margin rather
+   than a gap, the line being a run of text rather than a flex row — and so a
+   card whose run recorded no harness leaves no space where a mark would have
+   been, there being no element to carry the margin. */
+.agentOutput .harness {
+  margin-inline-end: 0.4em;
 }
 
 /* A Question Set the session put to the human, read as the interview it was: a

@@ -5,21 +5,28 @@
 //! and the commits a session lands on the branch — drawn as a list of Events
 //! rather than as a Brief with a list under it.
 //!
-//! Above the list are the pinned Events, which are a fixed set — the backlog
-//! now, the stage list and the PR as those stages arrive — and which are drawn
-//! in one order however they arrived: the pull request, then the task list, then
-//! the roadmap. They do not scroll with the record: each is the current state of
-//! something the work is against, and is worth having on screen whichever part
-//! of the record is being read.
+//! Above the list are the pinned Events, which are a fixed set — the session
+//! running now, the backlog, the stage list and the PR as those arrive — and
+//! which are drawn in one order however they arrived: the running session, then
+//! the pull request, then the task list, then the roadmap. They do not scroll
+//! with the record: each is the current state of something the work is against
+//! or is doing, and is worth having on screen whichever part of the record is
+//! being read.
+//!
+//! The session is the one of them that comes and goes. It is pinned while
+//! something is writing into it and nowhere at all the rest of the time — a
+//! Conversation Verkstead has finished with would otherwise carry the last run
+//! it ever made at the head of its pane for good.
 //! More than one of them is a carousel rather than a stack, because everything
 //! pinned is held above the record and a stack of them is what the record is
 //! pushed down by.
 //!
-//! Each of them is a moment as well — the pull request the finish step opened,
-//! and the backlog and the roadmap at the moment they landed on the branch — so
-//! each is drawn in both places: the same card in the pinned block and on the
-//! record where it happened. A second appearance rather than a move: what the
-//! record says happened should stay on it.
+//! Each of them is a moment as well — the session at the moment it started, the
+//! pull request the finish step opened, and the backlog and the roadmap at the
+//! moment they landed on the branch — so each is drawn in both places: the same
+//! card in the pinned block and on the record where it happened. A second
+//! appearance rather than a move: what the record says happened should stay on
+//! it, and a record holding a session per resume keeps every one of them.
 //!
 //! The two lists differ from the pull request in where the card's content comes
 //! from. A PR is three facts the record holds; a backlog and a roadmap are read
@@ -54,9 +61,10 @@
 //! Nothing is held against the foot of the pane, and nothing at the foot of the
 //! record. A strip for the session running
 //! now used to be — the title and the liveness mark, a way back to a card that a
-//! long record had scrolled away from — and the status button at the head of the
-//! pane says what is running, in more words than the strip ever did and where
-//! the eye lands rather than at the far end of the pane. `Start work` was there
+//! long record had scrolled away from — and the pinned block at the head of the
+//! pane holds that run's own card while it runs, which says more than the strip
+//! ever did and says it where the eye lands rather than at the far end of the
+//! pane. `Start work` was there
 //! too, at the end of everything that had happened and under the Brief it would
 //! freeze, and it is on the composer now, under the setup it is waiting on:
 //! setting a piece of work up and kicking it off are one act, and both happen
@@ -339,8 +347,8 @@ function Openable(props: {
 ///
 /// The two facts the sidebar's card says in the same order and the same voice,
 /// so the card and the header of the pane it opens read as the one name said
-/// twice — and the status button under them goes on in that voice with its own
-/// two lines.
+/// twice — and the status button at the foot of the block goes on in that voice
+/// with its own status and state.
 ///
 /// Drawn in every state, a Draft's included. A Conversation nobody has named is
 /// called *Draft* on both, which is what it is; the Repo beside it is then the
@@ -386,8 +394,8 @@ export function Timeline(props: {
   /// which is what a share is.
   ///
   /// What it takes off is everything that is not a moment on the record: the
-  /// status button, which is where the work stands and what is running in it
-  /// and the whole of the actions menu behind one press; the share icon, which
+  /// status button, which is where the work stands and the whole of the
+  /// actions menu behind one press; the share icon, which
   /// offers a reader a publish of somebody else's Conversation; and the block
   /// that says what happens next. The cards themselves are untouched — a share
   /// is read by opening them, exactly as the workbench is.
@@ -517,27 +525,28 @@ export function Timeline(props: {
           </div>
         </PaneHead>
 
-        {/* And under the title, where the eye lands: where the work stands,
-            what is running in it, and behind its press everything there is to
-            do about it. Above the pinned cards because it is about the
-            Conversation rather than about anything the work is against, and
-            inside the same block so that it stays in view with them.
-
-            Not in a share, where all three of those are answers about a
-            workbench the reader is not sitting at: nothing is running in a
-            file, everything the menu offers is done to a Conversation they do
-            not hold, and where the work stands is what the record under it
-            says. */}
-        <Show when={!props.readOnly}>
-          <StatusButton conversation={props.conversation} />
-        </Show>
-
         <Pinned
           conversation={props.conversation}
+          profiles={profiles.data}
           selected={props.selected}
           select={props.select}
           details={props.details}
         />
+
+        {/* And under the pinned cards, at the foot of the block: where the work
+            stands, and behind its press everything there is to do about it.
+            Last rather than first, so the line of chrome the sticky block ends
+            on is a control rather than the bottom edge of whichever card
+            happens to be pinned — the block ends where this button ends, and it
+            says so.
+
+            Not in a share, where both of those are answers about a workbench
+            the reader is not sitting at: everything the menu offers is done to
+            a Conversation they do not hold, and where the work stands is what
+            the record under it says. */}
+        <Show when={!props.readOnly}>
+          <StatusButton conversation={props.conversation} />
+        </Show>
       </PaneSticky>
 
       <ol class={styles.timeline} ref={record}>
@@ -725,12 +734,15 @@ export function Timeline(props: {
 /// order; each of these is the current state of something the work is against,
 /// and is worth having on screen whichever part of the record is being read.
 ///
-/// Pinning is the fixed set — a task list, a stage list and the pull request —
-/// so there is nothing to pin, nothing to unpin, and no control for either.
+/// Pinning is the fixed set — the running session, a task list, a stage list and
+/// the pull request — so there is nothing to pin, nothing to unpin, and no
+/// control for either.
 ///
-/// They come in one order and are drawn in it: the pull request, then the task
-/// list, then the roadmap. The server is what puts them in it — see the pinned
-/// block in `crates/server/src/ui.rs`.
+/// They come in one order and are drawn in it: the running session, then the
+/// pull request, then the task list, then the roadmap. The server is what puts
+/// them in it — see the pinned block in `crates/server/src/ui.rs`, which is also
+/// what decides that a session is pinned only while something is writing into
+/// it.
 ///
 /// One card at a time once there is more than one of them: they are held above
 /// the record, so a stack of them is a stack the record is pushed down by, and
@@ -739,6 +751,10 @@ export function Timeline(props: {
 /// is furniture around a card nothing can be turned to.
 function Pinned(props: {
   conversation: ConversationView;
+  /// The Profiles as they stand, for the one pinned card that reads them: a
+  /// session's own, whose second line says the account's name only where that
+  /// is what tells two runs apart. `undefined` until the list has been read.
+  profiles: ProfileEntry[] | undefined;
   selected: Opening | null;
   select: (opening: Opening) => void;
   details: () => void;
@@ -751,6 +767,7 @@ function Pinned(props: {
           fallback={
             <Card
               event={props.conversation.pinned[0]!}
+              profiles={props.profiles}
               selected={props.selected}
               select={props.select}
               details={props.details}
@@ -759,6 +776,7 @@ function Pinned(props: {
         >
           <Carousel
             conversation={props.conversation}
+            profiles={props.profiles}
             selected={props.selected}
             select={props.select}
             details={props.details}
@@ -820,6 +838,8 @@ type Pane = {
 /// whoever is holding it.
 function Carousel(props: {
   conversation: ConversationView;
+  /// Handed straight down to the card — see [`Pinned`].
+  profiles: ProfileEntry[] | undefined;
   selected: Opening | null;
   select: (opening: Opening) => void;
   details: () => void;
@@ -941,6 +961,7 @@ function Carousel(props: {
                 <div class={parting(pane)}>
                   <Card
                     event={card()}
+                    profiles={props.profiles}
                     selected={props.selected}
                     select={props.select}
                     details={props.details}
@@ -1022,6 +1043,9 @@ function fronting(conversation: ConversationView): number {
 /// not tell apart. The work's own stays unlabelled, by the rule the card itself
 /// follows.
 function named(event: PinnedEvent): string {
+  if ("AgentOutput" in event) {
+    return "Agent run";
+  }
   if ("TaskList" in event) {
     return "Task list";
   }
@@ -1034,22 +1058,43 @@ function named(event: PinnedEvent): string {
   return "Pull request";
 }
 
-/// One pinned card, whichever of the three kinds it is.
+/// One pinned card, whichever of the four kinds it is.
 ///
-/// All three open. A pull request has a full self, which is what is on it right
-/// now; a task list opens the documents its entries name and a roadmap the
-/// briefs its stages name, which is each list read at a second depth.
+/// All four open. A session and a pull request each have a full self, which is
+/// what is on them right now; a task list opens the documents its entries name
+/// and a roadmap the briefs its stages name, which is each list read at a second
+/// depth.
 ///
-/// Each of the three is on the record as well, at the moment it arrived there,
+/// Each of the four is on the record as well, at the moment it arrived there,
 /// and the card drawn there is this same card — see the module docs.
 function Card(props: {
   event: PinnedEvent;
+  /// For the session's card, which is the one of the four that reads them —
+  /// see [`Pinned`].
+  profiles: ProfileEntry[] | undefined;
   selected: Opening | null;
   select: (opening: Opening) => void;
   details: () => void;
 }): JSX.Element {
   return (
     <Switch>
+      {/* The session running now, which is the one pinned card that comes and
+          goes: it is here while something is writing into it and nowhere at all
+          the rest of the time. The same card the record holds at the moment the
+          session started, so opening either opens the one details pane. */}
+      <Match when={"AgentOutput" in props.event && props.event.AgentOutput}>
+        {(output) => (
+          <AgentOutput
+            output={output()}
+            saved={props.profiles}
+            selected={props.selected === output().id}
+            open={() => {
+              props.select(output().id);
+              props.details();
+            }}
+          />
+        )}
+      </Match>
       <Match when={"TaskList" in props.event && props.event.TaskList}>
         {(tasks) => (
           <TaskList
@@ -1598,24 +1643,37 @@ function ConflictsResolved(): JSX.Element {
   return <p class={styles.pressed}>You asked for the conflict to be resolved</p>;
 }
 
-/// What a session has printed: who ran it, how much of it there is, and the
-/// last thing it said.
+/// What a session has printed: what it is, how much of it there is, and what it
+/// was run under.
 ///
 /// A button, because the whole of it is in the details pane and this is how it
-/// is opened — the summary is a line, and a grilling session's Capture is an
+/// is opened — the summary is two lines, and a grilling session's Capture is an
 /// hour of terminal output nobody wants in the middle pane.
 ///
-/// The head names the run rather than the kind of thing it is. *Agent run* was
-/// the same three words over every card on a record that may hold a dozen of
-/// them, and what tells one from another is what it was run under — so the head
-/// is the shared reading in [`../agents`], off the three facts the session wrote
-/// down as it started, with the harness's mark in front of it. A session from
-/// before Verkstead wrote any of them down has nothing to be named by, and keeps
-/// the words — and no mark, there being no harness to draw one for.
+/// **The head is the words *Agent run***, which is what the card is: the head
+/// line of every other card on this pane says which kind of thing it is, and a
+/// column of session cards each titled by its own backend was the one card
+/// reading differently from all of them. What tells one run from another is on
+/// the line under it.
+///
+/// **That second line is the shared reading in [`../agents`]**, off the three
+/// facts the session wrote down as it started — "Claude Code Fable 5 — Work" —
+/// with the harness's mark in front of it, which is what makes a column of these
+/// scannable: a reader picks the Claude run out of five by its shape before
+/// reading a word of any of them. Its elisions are kept, so the card and every
+/// other site say the same words about the same run. A run recorded with none of
+/// the three has nothing to say there, and the line is not drawn at all — no
+/// bare mark and no empty row.
+///
+/// **Nothing of what the session printed.** A line of it was here, and reading
+/// output is what the details pane is for: one line of a terminal is a line
+/// somebody has to open the pane to make sense of anyway, and it read as the
+/// card's content when it was the card's least useful part.
 ///
 /// It moves while the session runs, which is the point: the page hears the world
 /// moved and reads this back, so a session that has just asked something says so
-/// here rather than at the end of an hour.
+/// here rather than at the end of an hour. And while one runs, this same card is
+/// pinned above the record as well — see [`Pinned`].
 function AgentOutput(props: {
   output: AgentOutputEvent;
   /// The Profiles as they stand, which says whether the account's own name is
@@ -1624,6 +1682,8 @@ function AgentOutput(props: {
   selected: boolean;
   open: () => void;
 }): JSX.Element {
+  const under = () => reading(ran(props.output), props.saved);
+
   return (
     <CardButton
       class={styles.agentOutput!}
@@ -1631,15 +1691,7 @@ function AgentOutput(props: {
       press={props.open}
     >
       <span class={styles.eventHead}>
-        <span class={styles.what}>
-          {/* The harness's own mark in front of the words, which is what makes a
-              column of these scannable: a reader picks the Claude run out of
-              five by its shape before reading a word of any of them. Inside the
-              heading rather than beside it, so the two stay together where the
-              head wraps. */}
-          <HarnessMark of={props.output.agent_type} class={styles.harness!} />
-          {reading(ran(props.output), props.saved) || "Agent run"}
-        </span>
+        <span class={styles.what}>Agent run</span>
         {/* How far the conversation has got. A session with no Transcript to
             count has no metric at all rather than a zero: there is nothing here
             that took turns, and a `0 turns` would be a claim about it. */}
@@ -1656,14 +1708,17 @@ function AgentOutput(props: {
           class={styles.rowMark}
         />
       </span>
-      <span class={styles.latest}>
-        <Show
-          when={props.output.latest !== ""}
-          fallback={<Empty inline>Nothing printed yet.</Empty>}
-        >
-          {props.output.latest}
-        </Show>
-      </span>
+      {/* What it was run under, in the ordinary voice: this is a fact about the
+          run rather than a caption on the title, and the reading is the one
+          every other site says about the same session. */}
+      <Show when={under()}>
+        {(said) => (
+          <span class={styles.ranAs}>
+            <HarnessMark of={props.output.agent_type} class={styles.harness!} />
+            {said()}
+          </span>
+        )}
+      </Show>
     </CardButton>
   );
 }
