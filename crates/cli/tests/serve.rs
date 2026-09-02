@@ -69,8 +69,12 @@ impl Serve {
             .env_remove("RUST_LOG")
             // Before the caller's own, which is applied below and wins: a
             // machine that happens to have Verkstead configured for real must
-            // not be what a test about the boundary reads.
+            // not be what a test about the boundary reads. The data directory
+            // for the same reason and one more — unsaid it is now resolved from
+            // the environment, so a variable nobody meant would send a test's
+            // database somewhere nobody looks.
             .env_remove("VERKSTEAD_WATCHED_PATHS")
+            .env_remove("VERKSTEAD_DATA_DIR")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -467,6 +471,51 @@ fn the_listen_address_and_data_directory_come_from_the_environment_too() {
     );
 
     serving.stop();
+}
+
+/// Started with nothing said about it, the Data Directory is the platform's own
+/// rather than whatever directory the server was launched from — which is what
+/// lets a Verkstead started from an icon keep its work where the next one will
+/// find it. The XDG variable stands in for the platform here so that the test
+/// reads a directory of its own; which directory each platform answers with is
+/// [`verkstead_server::platform`]'s own unit tests.
+#[test]
+fn the_data_directory_defaults_to_the_platform_directory() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let xdg = home.join("data");
+    std::fs::create_dir_all(&xdg).unwrap();
+    let port = free_port();
+
+    let mut serving = Serve::start(
+        tmp.path(),
+        port,
+        &["--listen", &format!("127.0.0.1:{port}")],
+        &[
+            ("HOME", home.to_str().unwrap()),
+            ("XDG_DATA_HOME", xdg.to_str().unwrap()),
+        ],
+    );
+
+    let logged = uncoloured(&serving.stop());
+    let chosen = xdg.join("verkstead");
+
+    assert!(
+        chosen.join("verkstead.db").exists(),
+        "the database should be in the platform directory at {}, and the server \
+         said it was going to {logged}",
+        chosen.display()
+    );
+    assert!(
+        !tmp.path().join("verkstead.db").exists(),
+        "nothing should have been written to the directory the server was \
+         started from"
+    );
+    assert!(
+        logged.contains(&format!("data_dir={}", chosen.display())),
+        "the startup line is where a human finds out which directory was \
+         chosen, got:\n{logged}"
+    );
 }
 
 #[test]

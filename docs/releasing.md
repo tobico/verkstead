@@ -2,11 +2,43 @@
 
 A release is a tag and nothing else.
 [`release.yml`](../.github/workflows/release.yml) fires on `v*`: it builds the
-viewer once, then one binary per platform on a runner of that platform's own
-architecture, runs each binary it built, publishes the four as a GitHub Release
-under the tag, and finally commits [`nix/release.json`](../nix/release.json) to
-`main` so the flake fetches what was just published. None of that is
-hand-driven, and nothing in it is hand-edited afterwards.
+viewer once, then the bare CLI binary for each platform on a runner of that
+platform's own architecture, and beside them one desktop app per desktop
+platform — the Linux one as `Verkstead-x86_64.AppImage`, the macOS one as
+`Verkstead-universal.dmg`. Every leg runs what it built, all of it is
+published as a GitHub Release under the tag, and finally the workflow commits
+[`nix/release.json`](../nix/release.json) to `main` so the flake fetches what
+was just published. None of that is hand-driven, and nothing in it is
+hand-edited afterwards.
+
+The CLI legs each run on a runner of their own architecture; the Linux desktop
+leg runs in an `ubuntu:22.04` container on top of one. That is the whole of what
+decides the AppImage's floor — a bundle carries the libraries it links but not
+the C runtime, so a downloader's loader has to satisfy the glibc the file was
+compiled against, and 22.04's 2.35 reaches Ubuntu 22.04, Debian 12 and
+everything above them. The leg reads the symbols back afterwards and fails on
+anything higher, so the floor and the promise
+[adoption.md](adoption.md#the-desktop-app-on-a-linux-machine) makes about it
+cannot drift apart. Move the image and both move.
+
+The macOS desktop leg is one runner for both Macs: `macos-15` is the Apple
+silicon image, an Apple host cross-compiles to the other Apple architecture, and
+[`tools/build-macos-dmg.sh`](../tools/build-macos-dmg.sh) builds both halves,
+`lipo`s them into one executable and packs the bundle into the image. Its floor
+is written into the bundle rather than inherited from a runner —
+`LSMinimumSystemVersion`, 11.0, which is the Apple silicon half's own and the
+higher of the two — and it is the number
+[adoption.md](adoption.md#the-desktop-app-on-a-mac) gives a downloader. Both
+desktop legs then assert the artifact itself rather than what was lying beside
+it: the AppImage is run as the file that is uploaded, and the dmg is mounted and
+run out of the mount.
+
+The manifest is the CLI binaries alone, and that is the one place a count is
+still the right question: what the flake and the NixOS module run is the
+headless daemon, so nothing fetches a desktop bundle through nix and four stays
+four however many desktop artifacts a Release carries. The desktop assets are
+checked by name instead, in `publish`, which is the one place those names are
+written down.
 
 A tag with a hyphen in it — `v0.1.0-rc.1` — is semver's own spelling of a
 pre-release, and the workflow marks the Release as one. That is the difference
@@ -61,7 +93,33 @@ newcomer actually follows.
 2. **That binary, downloaded and run** somewhere `verkstead` is not already on
    the `PATH`. Then `verkstead --version`, which prints the tag without its `v`.
 
-3. **The flake, refreshed past nix's cache** — after the manifest commit has
+3. **The AppImage, downloaded and run** on a Linux desktop — the same way, and
+   made executable first because a Release asset carries no mode:
+
+   ```console
+   $ curl -fsSL -O \
+       https://github.com/tobico/verkstead/releases/latest/download/Verkstead-x86_64.AppImage
+   $ chmod +x Verkstead-x86_64.AppImage
+   $ ./Verkstead-x86_64.AppImage --version
+   ```
+
+   Then run it with no arguments: it serves, opens the viewer in the browser,
+   and puts an icon in the tray. A desktop with no tray host shows no icon and
+   is serving all the same, which is
+   [what a downloader is told](adoption.md#the-desktop-app-on-a-linux-machine).
+
+4. **The dmg, downloaded in a browser and opened** on a Mac. In a browser
+   deliberately: the `com.apple.quarantine` flag Gatekeeper reads is set by
+   whatever did the downloading, and `curl` sets nothing — an app fetched with
+   it opens with no refusal at all, and that refusal is the one part of this
+   install no workflow can rehearse.
+
+   Drag Verkstead into Applications, double-click it, and walk the three steps
+   through System Settings → Privacy & Security that
+   [a downloader is told](adoption.md#the-desktop-app-on-a-mac). The icon lands
+   in the menu bar and the viewer opens in the browser.
+
+5. **The flake, refreshed past nix's cache** — after the manifest commit has
    landed on `main`, which is a job later than the Release itself:
 
    ```console
@@ -70,13 +128,13 @@ newcomer actually follows.
 
    What it prints is the manifest's version, and so the tag's.
 
-4. **The manifest on `main`** names the new version and carries all four nix
+6. **The manifest on `main`** names the new version and carries all four nix
    systems, committed by `github-actions[bot]` as
    `chore: release manifest for <tag>`. That commit deliberately starts no CI
    run — [the git workflow](agents/git-workflow.md#exception-the-release-manifest)
    records why it is the one write to `main` that skips review.
 
-5. **The Update Notice**, on a server still running the previous version: the
+7. **The Update Notice**, on a server still running the previous version: the
    Repo list gains a banner naming the new one, and the README's `## Updating`
    section is where its link lands — so that section has to exist by then. The
    server asks GitHub at startup and daily after, so restart the old server

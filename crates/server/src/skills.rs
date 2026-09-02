@@ -3,10 +3,17 @@
 //! A session's behaviour should be the product's rather than whatever happens
 //! to be installed on the machine it runs on. So Verkstead carries its own
 //! skills, embedded in the binary as the viewer is (ADR-0004), writes them out
-//! under the Data Directory at startup, and every sandbox binds that directory
-//! read-only at [`INSIDE`]. Nothing beside the executable has to be there, and
-//! nothing of the host's is bound in for a session to find — the checkout of
-//! the skills the host keeps for its own agents is not reachable at all.
+//! under the Data Directory at startup, and every sandbox reaches that
+//! directory read-only — at [`INSIDE`] where a bind can make that path, and
+//! where they were really written where none can. Nothing beside the
+//! executable has to be there, and nothing of the host's is reachable for a
+//! session to find — the checkout of the skills the host keeps for its own
+//! agents is not inside at all.
+//!
+//! **A skill saying where another one is says where it really is.** Two of them
+//! send a session into a third by naming its path, so the text is a statement
+//! about the directory as much as the prompts here are — and it is made to say
+//! the same thing they do as the file is written out. See [`said_at`].
 //!
 //! An account's own skills are hidden rather than merged with: Verkstead's fork
 //! is what a Conversation is grilled by, and a Profile is an account to run as
@@ -25,11 +32,14 @@
 //! human and never say how, because on a workstation the global `CLAUDE.md`
 //! said it instead.
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use rust_embed::Embed;
 
+use crate::handoffs;
+use crate::platform::Platform;
 use crate::store;
 
 /// The skills as they are written in this repository, one directory per skill.
@@ -41,7 +51,8 @@ use crate::store;
 #[folder = "$CARGO_MANIFEST_DIR/skills"]
 struct Bundled;
 
-/// Where the skills are mounted inside a sandbox.
+/// Where the skills are mounted inside a sandbox, on the platform whose
+/// sandbox mounts anything.
 ///
 /// A directory of Verkstead's own, beside the `/verkstead/bin` the executable
 /// reaches a sandbox in and made by its bind exactly as that one is, so what is
@@ -49,53 +60,66 @@ struct Bundled;
 /// no backend owns rather than the one whichever backend is running discovers
 /// skills in: what a session reads is named by the prompt, and a prompt can say
 /// any path (ADR-0011).
+///
+/// Where no bind can make it — a Mac, whose root volume nothing may be created
+/// on — a session reads them where they were really written, and this is what
+/// is rewritten to that as they are written out. See
+/// [`crate::sandbox::own_directory`] for the whole of that difference, and
+/// [`Skills::inside`] for which of the two a session got.
 pub(crate) const INSIDE: &str = "/verkstead/skills";
+
+/// And what the directory is called under whichever of them it turns out to be
+/// — the last name of [`INSIDE`], and the one the skills are written into
+/// under the Data Directory.
+const DIRECTORY: &str = "skills";
 
 /// And where a Claude session would otherwise find skills of its own, under
 /// whatever HOME a sandbox has: the account's, kept in the Profile's directory,
 /// which [`Skills::nothing`] is bound over instead.
 pub(crate) const CLAUDE_INSIDE_HOME: &str = ".claude/skills";
 
-/// And what [`INSIDE`] makes the grilling skill's path, as a session is told to
-/// find it. Spelled out rather than written against a home: the mount is at a
-/// path of Verkstead's own, absolute and the same for every session.
-const GRILLING: &str = "/verkstead/skills/grilling/SKILL.md";
+/// The grilling skill, as a session is told to find it.
+///
+/// Relative to the directory the skills are in, because that directory is not
+/// one thing: what a session is told to read is [`Skills::named`], which is
+/// this under whichever of the two [`Skills::inside`] turned out to be.
+const GRILLING: &str = "grilling/SKILL.md";
 
 /// The implementation skill's, the same way.
-const IMPLEMENTING: &str = "/verkstead/skills/implementing/SKILL.md";
+const IMPLEMENTING: &str = "implementing/SKILL.md";
 
 /// And the staging skill's — Verkstead's fork of to-roadmap, which is what the
 /// roadmap direction runs instead of building anything itself.
-const STAGING: &str = "/verkstead/skills/staging/SKILL.md";
+const STAGING: &str = "staging/SKILL.md";
 
 /// And the fork of next-stage, which the one session a roadmap stage starts
 /// with runs inside: the session that re-grounds the stage's brief and writes
 /// the backlog the runner then works.
-const NEXT_STAGE: &str = "/verkstead/skills/next-stage/SKILL.md";
+const NEXT_STAGE: &str = "next-stage/SKILL.md";
 
 /// And the fork of next-task, which every session the runner launches is put
 /// inside — the task sessions and the finish one alike, because which of them it
 /// is, is read off `.tasks/` rather than told.
-const NEXT_TASK: &str = "/verkstead/skills/next-task/SKILL.md";
+const NEXT_TASK: &str = "next-task/SKILL.md";
 
 /// And the submitting skill's, which the one session launched over a finish
 /// that left no pull request runs inside: the work is built and committed, and
 /// the pull request it should have gone for review on is the one thing missing.
-const SUBMITTING: &str = "/verkstead/skills/submitting/SKILL.md";
+const SUBMITTING: &str = "submitting/SKILL.md";
 
 /// And the addressing skill's, which every fix session of a wrap-up runs
 /// inside — whichever of the three kinds of feedback dispatched it.
-const ADDRESSING: &str = "/verkstead/skills/addressing/SKILL.md";
+const ADDRESSING: &str = "addressing/SKILL.md";
 
 /// And the reviewing skill's, which the one session a wrap-up starts with runs
 /// inside: the fresh context that reads the branch none of the sessions that
 /// wrote it ever saw.
-const REVIEWING: &str = "/verkstead/skills/reviewing/SKILL.md";
+const REVIEWING: &str = "reviewing/SKILL.md";
 
 /// And the responding skill's, which a batch of comments left on the pull
 /// request after the review is answered inside: the review's propose-then-fix
 /// shape again, about what somebody has just said rather than about the branch.
-const RESPONDING: &str = "/verkstead/skills/responding/SKILL.md";
+const RESPONDING: &str = "responding/SKILL.md";
 
 /// And the instruction skill's, which the session a steer into Implementing
 /// writes its way into runs inside.
@@ -104,7 +128,7 @@ const RESPONDING: &str = "/verkstead/skills/responding/SKILL.md";
 /// what follows it is whatever the branch then holds, rather than a
 /// Conversation left standing beside the work its session did — see
 /// [`crate::runner::instructed`].
-const INSTRUCTION: &str = "/verkstead/skills/instruction/SKILL.md";
+const INSTRUCTION: &str = "instruction/SKILL.md";
 
 /// And the following-up skill's, which the session a steer into Follow-up
 /// launches runs inside.
@@ -113,7 +137,7 @@ const INSTRUCTION: &str = "/verkstead/skills/instruction/SKILL.md";
 /// and then rounds of ordinary Question Sets go back and forth until they have
 /// nothing else. What ends one is the system's business rather than the
 /// session's, so the skill says nothing about it.
-const FOLLOWING_UP: &str = "/verkstead/skills/following-up/SKILL.md";
+const FOLLOWING_UP: &str = "following-up/SKILL.md";
 
 /// The bundled skills, installed on the host, ready for a sandbox to bind.
 #[derive(Debug, Clone)]
@@ -123,6 +147,10 @@ pub struct Skills {
     /// And an empty directory beside them, which is what covers the account's
     /// own — see [`Skills::nothing`].
     nothing: PathBuf,
+
+    /// And where a session reads them, which is `path` itself wherever nothing
+    /// can be mounted anywhere else — see [`Skills::inside`].
+    inside: PathBuf,
 }
 
 impl Skills {
@@ -143,7 +171,18 @@ impl Skills {
     /// there, and a server that starts anyway would be one whose every
     /// Conversation fails at the far end of the button.
     pub fn installed(data_dir: &Path) -> Result<Skills> {
-        let path = data_dir.join("skills");
+        let path = data_dir.join(DIRECTORY);
+
+        // Where a session will read them, which is what the files themselves
+        // are made to say below: a skill that sends a session into another one
+        // names it by the path it is at, and on a platform where that is not
+        // the mount the sentence has to name the other place instead.
+        let inside = crate::sandbox::own_directory(Platform::HERE, data_dir).join(DIRECTORY);
+
+        // And how the same files name the handoff directory, which is the other
+        // path they send a session to — see [`said_at`] for why that one is
+        // said through a variable rather than spelled out.
+        let handoffs = handoffs::said(Platform::HERE);
 
         match std::fs::remove_dir_all(&path) {
             Ok(()) => {}
@@ -168,7 +207,7 @@ impl Skills {
                     .with_context(|| format!("making {}", parent.display()))?;
             }
 
-            std::fs::write(&written, file.data)
+            std::fs::write(&written, said_at(&file.data, &inside, handoffs))
                 .with_context(|| format!("installing the skill {}", written.display()))?;
 
             installed += 1;
@@ -188,12 +227,33 @@ impl Skills {
         std::fs::create_dir_all(&nothing)
             .with_context(|| format!("making {}", nothing.display()))?;
 
-        Ok(Skills { path, nothing })
+        Ok(Skills {
+            path,
+            nothing,
+            inside,
+        })
     }
 
-    /// Where they landed, which is what a sandbox binds at [`INSIDE`].
+    /// Where they landed, which is what a sandbox reaches for.
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// And where a session reads them: [`INSIDE`] where a bind makes that path,
+    /// and the directory they were written to where none can.
+    ///
+    /// The one place the two are the same thing is a Mac, where nothing can be
+    /// created at `/` at all — see [`crate::sandbox::own_directory`]. What that
+    /// costs is the path being the Data Directory's rather than nobody's; what
+    /// keeps it Verkstead's is the policy, which reaches this directory and no
+    /// other part of that one.
+    pub fn inside(&self) -> &Path {
+        &self.inside
+    }
+
+    /// One skill's path, as the session told to read it will see it.
+    pub(crate) fn named(&self, skill: &str) -> String {
+        self.inside.join(skill).display().to_string()
     }
 
     /// And an empty directory of Verkstead's own, which a sandbox binds
@@ -210,15 +270,67 @@ impl Skills {
     }
 }
 
+/// A skill's own text, saying where the two directories it names really are.
+///
+/// A skill that sends a session into another one, or tells it where to write
+/// the handoff, names an absolute path — the sentence a session reads has to be
+/// one it can open. So the text is as much a statement about those directories
+/// as the prompts here are, and it has to say the same thing they do. Where a
+/// mount makes both, the file already says exactly that and this changes
+/// nothing at all; where none does, each is rewritten to what a session on this
+/// installation really finds.
+///
+/// **The two are rewritten differently, because only one of them is one path.**
+/// The skills are written out once for the whole installation, so where they
+/// went is an absolute name this can spell — [`Skills::inside`]. A
+/// Conversation's handoff directory is a different directory per Conversation
+/// and no id exists when this runs, so what goes in is the variable that
+/// already differs per Conversation — see [`handoffs::said`], and [`handoffs`]
+/// itself for why that directory is under HOME on the platform with no mounts.
+///
+/// Bytes rather than text, because an embedded file is bytes: a skill that
+/// turned out not to be UTF-8 is installed as it is rather than mangled into
+/// something a session would read.
+fn said_at<'a>(text: &'a [u8], inside: &Path, handoffs: &str) -> Cow<'a, [u8]> {
+    let (mount, skills) = (INSIDE.as_bytes(), inside.as_os_str().as_encoded_bytes());
+    let (tmp, said) = (handoffs::INSIDE.as_bytes(), handoffs.as_bytes());
+
+    // Which is every platform whose sandbox mounts both of them: the file says
+    // what a session will find already, and is installed as it shipped.
+    if skills == mount && said == tmp {
+        return Cow::Borrowed(text);
+    }
+
+    Cow::Owned(instead_of(&instead_of(text, mount, skills), tmp, said))
+}
+
+/// `text` with every `word` in it replaced by `instead`.
+fn instead_of(text: &[u8], word: &[u8], instead: &[u8]) -> Vec<u8> {
+    let mut said = Vec::with_capacity(text.len());
+    let mut rest = text;
+
+    while let Some(at) = rest.windows(word.len()).position(|found| found == word) {
+        said.extend_from_slice(&rest[..at]);
+        said.extend_from_slice(instead);
+        rest = &rest[at + word.len()..];
+    }
+
+    said.extend_from_slice(rest);
+
+    said
+}
+
 /// What a grilling session is started on: the Brief, under the line that sends
 /// the agent into the bundled grilling skill.
 ///
 /// Said in the prompt rather than left to the sandbox to configure, because the
 /// prompt is the one thing a session is certain to read. The Brief goes last and
 /// whole — it is the human's own markdown, and nothing here interprets it.
-pub(crate) fn grilling(brief: &str) -> String {
+pub(crate) fn grilling(skills: &Skills, brief: &str) -> String {
+    let skill = skills.named(GRILLING);
+
     format!(
-        "Read {GRILLING} and grill me about the Brief below, the way it says. \
+        "Read {skill} and grill me about the Brief below, the way it says. \
          Nothing else in this session tells you how to reach me.\n\n{brief}"
     )
 }
@@ -239,16 +351,16 @@ pub(crate) fn grilling(brief: &str) -> String {
 /// A Conversation with nothing answered yet is the Brief and nothing else. A
 /// heading over an empty digest would tell the session that something had been
 /// said.
-pub(crate) fn grilling_again(brief: &str, settled: &str) -> String {
+pub(crate) fn grilling_again(skills: &Skills, brief: &str, settled: &str) -> String {
     let settled = settled.trim();
 
     if settled.is_empty() {
-        return grilling(brief);
+        return grilling(skills, brief);
     }
 
     format!(
         "{}\n\n# What has already been asked, and what I said\n\n{settled}\n",
-        grilling(brief).trim_end(),
+        grilling(skills, brief).trim_end(),
     )
 }
 
@@ -265,9 +377,11 @@ pub(crate) fn grilling_again(brief: &str, settled: &str) -> String {
 /// primed with the Brief alone. Not a refusal: the work is still described, and
 /// an implementation that never started because a document was missing would be
 /// a Conversation stuck with nothing to press.
-pub(crate) fn implementing(brief: &str, handoff: Option<&str>) -> String {
+pub(crate) fn implementing(skills: &Skills, brief: &str, handoff: Option<&str>) -> String {
+    let skill = skills.named(IMPLEMENTING);
+
     on_the_documents(
-        &format!("Read {IMPLEMENTING} and build the work described below, the way it says."),
+        &format!("Read {skill} and build the work described below, the way it says."),
         brief,
         handoff,
     )
@@ -294,7 +408,7 @@ pub(crate) fn implementing(brief: &str, handoff: Option<&str>) -> String {
 /// there. The split is deliberate — the skill is where a session learns what
 /// kind of run this is, and the prompt is where it is told what to do about it,
 /// because only the prompt knows which kind this one is.
-pub(crate) fn ungrilled(brief: &str) -> String {
+pub(crate) fn ungrilled(skills: &Skills, brief: &str) -> String {
     format!(
         "{}\n# Nothing was grilled\n\nThis work was not put through a grilling: \
          the Brief above is the whole of the plan, and there is no handoff \
@@ -302,7 +416,7 @@ pub(crate) fn ungrilled(brief: &str) -> String {
          Where it leaves a real decision open — one that changes what gets built \
          rather than how it is spelled — put that to me as an ordinary ask rather \
          than guessing at it.\n",
-        implementing(brief, None),
+        implementing(skills, brief, None),
     )
 }
 
@@ -315,10 +429,12 @@ pub(crate) fn ungrilled(brief: &str) -> String {
 /// is the grilling session reading on with the whole thread still in its context
 /// and no prompt sent at all; this is Resume, which grounds itself in the Brief
 /// and the repository.
-pub(crate) fn staging(brief: &str) -> String {
+pub(crate) fn staging(skills: &Skills, brief: &str) -> String {
+    let skill = skills.named(STAGING);
+
     on_the_documents(
         &format!(
-            "Read {STAGING} and stage the work described below into a roadmap, the way it says."
+            "Read {skill} and stage the work described below into a roadmap, the way it says."
         ),
         brief,
         None,
@@ -341,9 +457,11 @@ pub(crate) fn staging(brief: &str) -> String {
 /// repository: a branch says what it is descended from, not what somebody meant
 /// by it, and what the session does about it — registering the stack the way the
 /// repository records — turns on which of the two this is.
-pub(crate) fn next_stage(brief: &str, stacked_on: Option<&str>) -> String {
+pub(crate) fn next_stage(skills: &Skills, brief: &str, stacked_on: Option<&str>) -> String {
+    let skill = skills.named(NEXT_STAGE);
+
     let prompt = on_the_documents(
-        &format!("Read {NEXT_STAGE} and plan the roadmap stage described below, the way it says."),
+        &format!("Read {skill} and plan the roadmap stage described below, the way it says."),
         brief,
         None,
     );
@@ -372,10 +490,12 @@ pub(crate) fn next_stage(brief: &str, stacked_on: Option<&str>) -> String {
 /// still the work: the task file says where this session stops, and the two
 /// documents say what it is a slice of. A session that had only the first would
 /// be building to a description written for somebody who had read the other two.
-pub(crate) fn next_task(brief: &str, handoff: Option<&str>) -> String {
+pub(crate) fn next_task(skills: &Skills, brief: &str, handoff: Option<&str>) -> String {
+    let skill = skills.named(NEXT_TASK);
+
     on_the_documents(
         &format!(
-            "Read {NEXT_TASK} and work the next task of the backlog for the work described \
+            "Read {skill} and work the next task of the backlog for the work described \
              below, the way it says."
         ),
         brief,
@@ -392,10 +512,12 @@ pub(crate) fn next_task(brief: &str, handoff: Option<&str>) -> String {
 /// the work it carries, and what that work was for is written in the Brief and
 /// the handoff rather than anywhere the branch could say it. The commits say
 /// what was built; these two say what it was meant to be.
-pub(crate) fn submitting(brief: &str, handoff: Option<&str>) -> String {
+pub(crate) fn submitting(skills: &Skills, brief: &str, handoff: Option<&str>) -> String {
+    let skill = skills.named(SUBMITTING);
+
     on_the_documents(
         &format!(
-            "Read {SUBMITTING} and get the work already committed on this branch onto a \
+            "Read {skill} and get the work already committed on this branch onto a \
              pull request, the way it says."
         ),
         brief,
@@ -437,14 +559,17 @@ pub(crate) fn submitting(brief: &str, handoff: Option<&str>) -> String {
 /// has written on carries none of it, rather than a heading saying nothing was
 /// said.
 pub(crate) fn reviewing(
+    skills: &Skills,
     brief: &str,
     handoff: Option<&str>,
     on: Option<&str>,
     said: Option<&str>,
 ) -> String {
+    let skill = skills.named(REVIEWING);
+
     let mut prompt = on_the_documents(
         &format!(
-            "Read {REVIEWING} and review the branch this worktree is on, the way it says. The \
+            "Read {skill} and review the branch this worktree is on, the way it says. The \
              work described below is what it was meant to be."
         ),
         brief,
@@ -488,10 +613,17 @@ pub(crate) fn reviewing(
 /// `said` is never empty here, unlike the review's. A batch session exists
 /// because something was said, so there is no version of this prompt with
 /// nothing under the heading.
-pub(crate) fn responding(brief: &str, handoff: Option<&str>, said: &str) -> String {
+pub(crate) fn responding(
+    skills: &Skills,
+    brief: &str,
+    handoff: Option<&str>,
+    said: &str,
+) -> String {
+    let skill = skills.named(RESPONDING);
+
     let prompt = on_the_documents(
         &format!(
-            "Read {RESPONDING} and answer what has just been said on the pull request named \
+            "Read {skill} and answer what has just been said on the pull request named \
              at the end of this prompt, the way it says. The work described below is what it \
              was meant to be."
         ),
@@ -520,10 +652,17 @@ pub(crate) fn responding(brief: &str, handoff: Option<&str>, said: &str) -> Stri
 /// reason everything written under them goes there: it is the newest thing said
 /// and the least general. The documents say what the work is; this says what is
 /// wrong with it.
-pub(crate) fn addressing(brief: &str, handoff: Option<&str>, feedback: &str) -> String {
+pub(crate) fn addressing(
+    skills: &Skills,
+    brief: &str,
+    handoff: Option<&str>,
+    feedback: &str,
+) -> String {
+    let skill = skills.named(ADDRESSING);
+
     let prompt = on_the_documents(
         &format!(
-            "Read {ADDRESSING} and address the feedback at the end of this prompt, the way it \
+            "Read {skill} and address the feedback at the end of this prompt, the way it \
              says."
         ),
         brief,
@@ -547,10 +686,17 @@ pub(crate) fn addressing(brief: &str, handoff: Option<&str>, feedback: &str) -> 
 /// the reason everything written under them goes there: it is the newest thing
 /// said and the least general. The documents say what the work is; this says
 /// what to do about it now.
-pub(crate) fn instruction(brief: &str, handoff: Option<&str>, instruction: &str) -> String {
+pub(crate) fn instruction(
+    skills: &Skills,
+    brief: &str,
+    handoff: Option<&str>,
+    instruction: &str,
+) -> String {
+    let skill = skills.named(INSTRUCTION);
+
     let prompt = on_the_documents(
         &format!(
-            "Read {INSTRUCTION} and do what I have asked for at the end of this prompt, the \
+            "Read {skill} and do what I have asked for at the end of this prompt, the \
              way it says."
         ),
         brief,
@@ -586,15 +732,16 @@ pub(crate) fn instruction(brief: &str, handoff: Option<&str>, instruction: &str)
 /// nothing here: a heading over an empty digest would tell the session that
 /// something had already been said.
 pub(crate) fn following_up(
+    skills: &Skills,
     brief: &str,
     handoff: Option<&str>,
     follow_up: &str,
     settled: &str,
 ) -> String {
+    let skill = skills.named(FOLLOWING_UP);
+
     let prompt = on_the_documents(
-        &format!(
-            "Read {FOLLOWING_UP} and follow up on this branch's pull request, the way it says."
-        ),
+        &format!("Read {skill} and follow up on this branch's pull request, the way it says."),
         brief,
         handoff,
     );
@@ -781,9 +928,30 @@ mod tests {
     /// The one mount path no prompt here names. Nothing launches a session into
     /// the breakdown: the grilling session reads on into it, in the grilling
     /// skill's own words, so what this is for is holding that promise to a test.
-    const BREAKING_DOWN: &str = "/verkstead/skills/breaking-down/SKILL.md";
+    const BREAKING_DOWN: &str = "breaking-down/SKILL.md";
 
     use super::*;
+
+    /// The skills as a session finds them where a bind makes the path, which is
+    /// what a test about a *prompt* is about: what these hold to is the
+    /// sentence a session reads, and the directory named in it is one thing on
+    /// the platform the suite runs on.
+    ///
+    /// Nothing is installed anywhere. A prompt is a string built from a path,
+    /// so a fixture that wrote out a hundred files to get one would be proving
+    /// something else.
+    fn mounted() -> Skills {
+        Skills {
+            path: PathBuf::from(INSIDE),
+            nothing: PathBuf::new(),
+            inside: PathBuf::from(INSIDE),
+        }
+    }
+
+    /// And one skill's path as that session reads it.
+    fn at(skill: &str) -> String {
+        mounted().named(skill)
+    }
 
     /// What the skill is read as, whichever way this build carries it.
     fn skill(name: &str) -> String {
@@ -801,10 +969,9 @@ mod tests {
 
     /// Every path a session is sent to, which is every skill this binary ships.
     ///
-    /// The constants spell the mount out rather than being built from [`INSIDE`]
-    /// — a `const` cannot be concatenated from another at compile time — so the
-    /// prefix is typed once per skill and this is the only thing holding the
-    /// twelve of them to the one directory a sandbox binds.
+    /// The constants are relative to the directory the skills are in, which is
+    /// not one path — see [`Skills::inside`] — so this is the list of what is
+    /// under it, and what holds each of them to a skill that is really there.
     const NAMED: [&str; 12] = [
         GRILLING,
         BREAKING_DOWN,
@@ -820,6 +987,71 @@ mod tests {
         FOLLOWING_UP,
     ];
 
+    /// A skill installed where a mount will put both paths says what it always
+    /// said.
+    #[test]
+    fn a_skill_at_the_mount_is_installed_word_for_word() {
+        let said = b"Read /verkstead/skills/staging/SKILL.md, then write \
+                     /tmp/verkstead/handoff.md.\n";
+
+        assert_eq!(
+            said_at(said, Path::new(INSIDE), handoffs::INSIDE).as_ref(),
+            said,
+            "the platform whose mounts make those paths needs nothing said differently",
+        );
+    }
+
+    /// And one installed where none does says where each of them really is.
+    ///
+    /// Every mention of either, because a skill names as many of its neighbours
+    /// as it sends a session to — the skills by the directory they were
+    /// installed in, which is one path for the installation, and the handoff
+    /// through HOME, which is the one thing about it that differs per
+    /// Conversation. And nothing else about the text at all.
+    #[test]
+    fn a_skill_installed_off_the_mount_names_the_paths_a_session_would_find() {
+        let inside = Path::new("/Users/you/Library/Application Support/Verkstead/skills");
+
+        let said = said_at(
+            b"Read /verkstead/skills/staging/SKILL.md, then \
+              /verkstead/skills/breaking-down/SKILL.md, and write \
+              /tmp/verkstead/handoff.md.\n",
+            inside,
+            handoffs::SAID_INSIDE_HOME,
+        );
+
+        assert_eq!(
+            String::from_utf8(said.into_owned()).unwrap(),
+            "Read /Users/you/Library/Application Support/Verkstead/skills/staging/SKILL.md, \
+             then /Users/you/Library/Application Support/Verkstead/skills/breaking-down/SKILL.md, \
+             and write $HOME/verkstead/handoff.md.\n",
+            "a session told to read or write a path has to be told one it can open",
+        );
+    }
+
+    /// And what a session is told to read is the same directory, said the same
+    /// way — the prompt and the skill text being two halves of one instruction.
+    #[test]
+    fn what_a_prompt_names_is_where_the_skills_were_installed() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills = Skills::installed(dir.path()).expect("this binary carries skills");
+
+        assert!(
+            grilling(&skills, "# Rate limiting\n").contains(&skills.named(GRILLING)),
+            "a prompt names the skill by the path this installation put it at",
+        );
+        // And there is a file at the far end of it. Held against what was
+        // written rather than against what the prompt says, because the two are
+        // the same file seen from two sides: on a Mac the prompt names the host
+        // path and this reads that, and on Linux it names the mount, which the
+        // bind makes for the sandbox and which the host running this has no
+        // reason to have.
+        assert!(
+            skills.path().join(GRILLING).is_file(),
+            "and that path is a file a session can open",
+        );
+    }
+
     /// Each of those paths is a skill this binary carries, under the mount.
     ///
     /// A prompt naming a path nothing is mounted at is a session told to read a
@@ -827,15 +1059,9 @@ mod tests {
     /// far end of the button, and failing for a typo nothing else would catch.
     #[test]
     fn every_skill_a_session_is_sent_to_is_one_this_binary_ships_at_the_mount() {
-        let under = format!("{INSIDE}/");
-
         for path in NAMED {
-            let named = path
-                .strip_prefix(&under)
-                .unwrap_or_else(|| panic!("{path} is not under the mount at {INSIDE}"));
-
             assert!(
-                Bundled::get(named).is_some(),
+                Bundled::get(path).is_some(),
                 "{path} names a skill this binary does not carry, so a session \
                  sent there is one handed a path to nothing"
             );
@@ -848,7 +1074,7 @@ mod tests {
     fn every_skill_this_binary_ships_has_a_path_a_session_reaches_it_by() {
         for name in Bundled::iter() {
             assert!(
-                NAMED.iter().any(|path| path.ends_with(&format!("/{name}"))),
+                NAMED.contains(&name.as_ref()),
                 "{name} is shipped and nothing names it, so no session can be \
                  sent into it and nothing holds its path to the mount"
             );
@@ -999,7 +1225,7 @@ mod tests {
         let grilling = skill("grilling/SKILL.md");
 
         assert!(
-            grilling.contains(BREAKING_DOWN),
+            grilling.contains(&at(BREAKING_DOWN)),
             "the branch is a skill to read, named by the path the sandbox mounts it at: \
              {grilling}"
         );
@@ -1019,7 +1245,7 @@ mod tests {
         let grilling = skill("grilling/SKILL.md");
 
         assert!(
-            grilling.contains(STAGING),
+            grilling.contains(&at(STAGING)),
             "the branch is a skill to read, named by the path the sandbox mounts it at: \
              {grilling}"
         );
@@ -1039,10 +1265,10 @@ mod tests {
     /// sandbox says what it is for.
     #[test]
     fn a_grilling_session_is_started_by_naming_the_skill() {
-        let prompt = grilling("# Rate limiting\n\nThe API has none.\n");
+        let prompt = grilling(&mounted(), "# Rate limiting\n\nThe API has none.\n");
 
         assert!(
-            prompt.contains(GRILLING),
+            prompt.contains(&at(GRILLING)),
             "the skill is named by the path it is mounted at: {prompt:?}"
         );
         assert!(
@@ -1406,14 +1632,14 @@ mod tests {
     /// is the whole of what sends a session one way or another.
     #[test]
     fn a_roadmap_session_is_started_on_the_brief_inside_the_fork() {
-        let prompt = staging("# Rate limiting\n\nThe API has none.\n");
+        let prompt = staging(&mounted(), "# Rate limiting\n\nThe API has none.\n");
 
         assert!(
-            prompt.contains(STAGING),
+            prompt.contains(&at(STAGING)),
             "the fork is named by the path it is mounted at: {prompt:?}"
         );
         assert!(
-            !prompt.contains(IMPLEMENTING) && !prompt.contains(BREAKING_DOWN),
+            !prompt.contains(&at(IMPLEMENTING)) && !prompt.contains(&at(BREAKING_DOWN)),
             "and nothing sends this session to build or slice the work instead: {prompt:?}"
         );
         assert!(
@@ -1536,10 +1762,14 @@ mod tests {
     /// grilling of its own to have written a handoff.
     #[test]
     fn a_stage_session_is_started_on_its_brief_inside_the_fork() {
-        let prompt = next_stage("# 05. Roadmap direction\n\nThe third Direction.\n", None);
+        let prompt = next_stage(
+            &mounted(),
+            "# 05. Roadmap direction\n\nThe third Direction.\n",
+            None,
+        );
 
         assert!(
-            prompt.contains(NEXT_STAGE),
+            prompt.contains(&at(NEXT_STAGE)),
             "the fork is named by the path it is mounted at: {prompt:?}"
         );
         assert!(
@@ -1551,7 +1781,7 @@ mod tests {
             "nothing is said about a document a stage never had: {prompt:?}"
         );
         assert!(
-            !prompt.contains(BREAKING_DOWN) && !prompt.contains(NEXT_TASK),
+            !prompt.contains(&at(BREAKING_DOWN)) && !prompt.contains(&at(NEXT_TASK)),
             "and nothing sends this session to break down a feature or work a task: \
              {prompt:?}"
         );
@@ -1561,14 +1791,14 @@ mod tests {
     /// cannot read out of the repository, so it is the one thing it is told.
     #[test]
     fn a_stage_session_is_told_whether_its_branch_is_stacked() {
-        let stacked = next_stage("# 05. Roadmap direction\n", Some("wrap-up"));
+        let stacked = next_stage(&mounted(), "# 05. Roadmap direction\n", Some("wrap-up"));
 
         assert!(
             stacked.contains("`wrap-up`"),
             "the predecessor is named, because registering the stack needs it: {stacked:?}"
         );
 
-        let alone = next_stage("# 05. Roadmap direction\n", None);
+        let alone = next_stage(&mounted(), "# 05. Roadmap direction\n", None);
 
         assert!(
             alone.contains("default branch") && !alone.contains("stacks on"),
@@ -1793,12 +2023,13 @@ mod tests {
     #[test]
     fn a_submitting_session_is_started_on_the_documents_inside_the_skill() {
         let prompt = submitting(
+            &mounted(),
             "# Rate limiting\n\nThe API has none.\n",
             Some("# Handoff\n\nA fixed window.\n"),
         );
 
         assert!(
-            prompt.contains(SUBMITTING),
+            prompt.contains(&at(SUBMITTING)),
             "the skill is named by the path it is mounted at: {prompt:?}"
         );
         assert!(
@@ -1806,7 +2037,7 @@ mod tests {
             "and both documents are what it is primed with: {prompt:?}"
         );
         assert!(
-            !prompt.contains(NEXT_TASK) && !prompt.contains(IMPLEMENTING),
+            !prompt.contains(&at(NEXT_TASK)) && !prompt.contains(&at(IMPLEMENTING)),
             "and nothing sends this session to work a task or build the feature again: \
              {prompt:?}"
         );
@@ -1990,13 +2221,14 @@ mod tests {
     #[test]
     fn a_fix_session_is_started_on_the_documents_with_the_feedback_last() {
         let prompt = addressing(
+            &mounted(),
             "# Rate limiting\n\nThe API has none.\n",
             Some("# What we settled\n\nIn-process counter.\n"),
             "The Rust check is failing.",
         );
 
         assert!(
-            prompt.contains(ADDRESSING),
+            prompt.contains(&at(ADDRESSING)),
             "the skill is named by the path it is mounted at: {prompt:?}"
         );
         assert!(
@@ -2282,6 +2514,7 @@ mod tests {
     #[test]
     fn a_review_session_is_started_on_the_documents_inside_the_skill() {
         let prompt = reviewing(
+            &mounted(),
             "# Rate limiting\n\nThe API has none.\n",
             Some("# What we settled\n\nIn-process counter.\n"),
             None,
@@ -2289,7 +2522,7 @@ mod tests {
         );
 
         assert!(
-            prompt.contains(REVIEWING),
+            prompt.contains(&at(REVIEWING)),
             "the skill is named by the path it is mounted at: {prompt:?}"
         );
         assert!(
@@ -2297,7 +2530,7 @@ mod tests {
             "both documents go in whole: {prompt:?}"
         );
         assert!(
-            !prompt.contains(ADDRESSING) && !prompt.contains(NEXT_TASK),
+            !prompt.contains(&at(ADDRESSING)) && !prompt.contains(&at(NEXT_TASK)),
             "and no other skill is named: what this session does once it has reviewed \
              is the reviewing skill's own — {prompt:?}"
         );
@@ -2319,6 +2552,7 @@ mod tests {
     #[test]
     fn a_review_session_is_told_what_was_said_on_the_pull_request_last() {
         let prompt = reviewing(
+            &mounted(),
             "# Rate limiting\n\nThe API has none.\n",
             Some("# What we settled\n\nIn-process counter.\n"),
             None,
@@ -2347,6 +2581,7 @@ mod tests {
     #[test]
     fn a_review_session_is_told_every_pull_request_the_work_is_on() {
         let prompt = reviewing(
+            &mounted(),
             "# Rate limiting\n\nThe API has none.\n",
             Some("# What we settled\n\nIn-process counter.\n"),
             Some(
@@ -2474,13 +2709,14 @@ mod tests {
     #[test]
     fn a_batch_session_is_started_on_the_documents_with_the_comments_last() {
         let prompt = responding(
+            &mounted(),
             "# Rate limiting\n\nThe API has none.\n",
             Some("# What we settled\n\nIn-process counter.\n"),
             "**tobico** said on `src/window.rs` line 12:\n\nThis is the wrong way round.",
         );
 
         assert!(
-            prompt.contains(RESPONDING),
+            prompt.contains(&at(RESPONDING)),
             "the skill is named by the path it is mounted at: {prompt:?}"
         );
         assert!(
@@ -2498,7 +2734,7 @@ mod tests {
              somebody has just said about it — {prompt:?}"
         );
         assert!(
-            !prompt.contains(ADDRESSING) && !prompt.contains(REVIEWING),
+            !prompt.contains(&at(ADDRESSING)) && !prompt.contains(&at(REVIEWING)),
             "and no other skill is named: a batch is neither a fix nor a review — \
              {prompt:?}"
         );
@@ -2509,12 +2745,13 @@ mod tests {
     #[test]
     fn an_implementation_session_is_started_on_the_brief_and_the_handoff() {
         let prompt = implementing(
+            &mounted(),
             "# Rate limiting\n\nThe API has none.\n",
             Some("# What we settled\n\nIn-process counter.\n"),
         );
 
         assert!(
-            prompt.contains(IMPLEMENTING),
+            prompt.contains(&at(IMPLEMENTING)),
             "the skill is named by the path it is mounted at: {prompt:?}"
         );
         assert!(
@@ -2530,7 +2767,7 @@ mod tests {
     /// A grilling that skipped half its closing move still leaves work to do.
     #[test]
     fn an_implementation_without_a_handoff_is_started_on_the_brief_alone() {
-        let prompt = implementing("# Rate limiting\n\nThe API has none.\n", None);
+        let prompt = implementing(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
 
         assert!(prompt.contains("The API has none."));
         assert!(
@@ -2544,10 +2781,10 @@ mod tests {
     /// plan, and what it leaves open is asked about rather than guessed at.
     #[test]
     fn an_ungrilled_implementation_is_told_the_brief_is_the_whole_plan() {
-        let prompt = ungrilled("# Rate limiting\n\nThe API has none.\n");
+        let prompt = ungrilled(&mounted(), "# Rate limiting\n\nThe API has none.\n");
 
         assert!(
-            prompt.contains(IMPLEMENTING),
+            prompt.contains(&at(IMPLEMENTING)),
             "the same skill an ordinary inline run reads: {prompt:?}"
         );
         assert!(
@@ -2637,17 +2874,18 @@ mod tests {
     #[test]
     fn an_instruction_session_is_started_on_the_documents_and_the_instruction() {
         let prompt = instruction(
+            &mounted(),
             "# Rate limiting\n\nThe API has none.\n",
             Some("# What we settled\n\nIn-process counter.\n"),
             "Move the counter into Redis.\n",
         );
 
         assert!(
-            prompt.contains(INSTRUCTION),
+            prompt.contains(&at(INSTRUCTION)),
             "the skill is named by the path it is mounted at: {prompt:?}"
         );
         assert!(
-            !prompt.contains(IMPLEMENTING),
+            !prompt.contains(&at(IMPLEMENTING)),
             "and not the inline implementation's, which says something else about \
              what follows: {prompt:?}"
         );
@@ -2764,6 +3002,7 @@ mod tests {
     #[test]
     fn a_follow_up_session_is_started_on_the_documents_and_the_brief() {
         let prompt = following_up(
+            &mounted(),
             "# Rate limiting\n\nThe API has none.\n",
             Some("# What we settled\n\nIn-process counter.\n"),
             "Why is the window a minute? And add a header saying when it resets.\n",
@@ -2771,11 +3010,11 @@ mod tests {
         );
 
         assert!(
-            prompt.contains(FOLLOWING_UP),
+            prompt.contains(&at(FOLLOWING_UP)),
             "the skill is named by the path it is mounted at: {prompt:?}"
         );
         assert!(
-            !prompt.contains(INSTRUCTION) && !prompt.contains(RESPONDING),
+            !prompt.contains(&at(INSTRUCTION)) && !prompt.contains(&at(RESPONDING)),
             "and no other skill is named: a follow-up is neither a one-shot \
              instruction nor a batch of comments — {prompt:?}"
         );
@@ -2799,6 +3038,7 @@ mod tests {
     #[test]
     fn a_relaunched_follow_up_is_told_what_it_has_already_asked() {
         let prompt = following_up(
+            &mounted(),
             "# Rate limiting\n\nThe API has none.\n",
             None,
             "Why is the window a minute?\n",
@@ -2824,6 +3064,7 @@ mod tests {
     fn deferred_answers_fold_into_a_following_up_prompt() {
         let prompt = folded(
             &following_up(
+                &mounted(),
                 "# Rate limiting\n\nThe API has none.\n",
                 None,
                 "Add a header saying when the window resets.\n",
@@ -2849,12 +3090,13 @@ mod tests {
     #[test]
     fn a_relaunched_grilling_is_told_what_has_already_been_settled() {
         let prompt = grilling_again(
+            &mounted(),
             "# Rate limiting\n\nThe API has none.\n",
             "## How it counts\n\n**Q1** Per key or per address?\n\nPer key\n",
         );
 
         assert!(
-            prompt.contains(GRILLING),
+            prompt.contains(&at(GRILLING)),
             "it is a grilling, started the way every grilling is: {prompt:?}"
         );
         assert!(
@@ -2879,8 +3121,8 @@ mod tests {
         let brief = "# Rate limiting\n\nThe API has none.\n";
 
         assert_eq!(
-            grilling_again(brief, "   \n"),
-            grilling(brief),
+            grilling_again(&mounted(), brief, "   \n"),
+            grilling(&mounted(), brief),
             "nothing is added to the prompt at all",
         );
     }
@@ -2890,7 +3132,7 @@ mod tests {
     #[test]
     fn deferred_answers_are_folded_under_the_documents() {
         let prompt = folded(
-            &next_task("# Rate limiting\n\nThe API has none.\n", None),
+            &next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None),
             "## The wording\n\n**Q9** Which status?\n\n429 Too Many Requests\n",
         );
 
@@ -2908,7 +3150,7 @@ mod tests {
     /// would tell one that something had been decided.
     #[test]
     fn a_session_with_nothing_to_fold_is_started_on_the_prompt_as_it_stands() {
-        let prompt = next_task("# Rate limiting\n\nThe API has none.\n", None);
+        let prompt = next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
 
         assert_eq!(folded(&prompt, "  \n"), prompt);
     }
@@ -2947,7 +3189,7 @@ mod tests {
     #[test]
     fn every_companion_is_named_with_its_path_its_branch_and_its_write_status() {
         let prompt = alongside(
-            &next_task("# Rate limiting\n\nThe API has none.\n", None),
+            &next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None),
             "rate-limiting",
             &[
                 companion(
@@ -2997,7 +3239,10 @@ mod tests {
     /// branch, under whatever it was already being told.
     #[test]
     fn the_first_session_of_an_unnamed_conversation_is_told_to_name_the_branch() {
-        let prompt = naming(&grilling("# Rate limiting\n\nThe API has none.\n"), true);
+        let prompt = naming(
+            &grilling(&mounted(), "# Rate limiting\n\nThe API has none.\n"),
+            true,
+        );
 
         assert!(
             prompt.contains("# Rate limiting"),
@@ -3021,7 +3266,7 @@ mod tests {
     /// rename is read off the checkout, so there is nobody to ask.
     #[test]
     fn the_naming_instruction_asks_for_nothing_back() {
-        let prompt = naming(&ungrilled("# Rate limiting\n"), true);
+        let prompt = naming(&ungrilled(&mounted(), "# Rate limiting\n"), true);
 
         assert!(
             prompt.contains("There is nobody to ask and nothing to report"),
@@ -3039,7 +3284,11 @@ mod tests {
     /// gone.
     #[test]
     fn a_session_on_a_settled_branch_is_told_nothing_about_naming_it() {
-        let built = implementing("# Rate limiting\n", Some("Use a token bucket.\n"));
+        let built = implementing(
+            &mounted(),
+            "# Rate limiting\n",
+            Some("Use a token bucket.\n"),
+        );
 
         assert_eq!(
             naming(&built, false),
@@ -3106,7 +3355,7 @@ mod tests {
     /// configured.
     #[test]
     fn a_conversation_with_no_companions_is_started_on_the_prompt_as_it_stands() {
-        let prompt = next_task("# Rate limiting\n\nThe API has none.\n", None);
+        let prompt = next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
 
         assert_eq!(alongside(&prompt, "rate-limiting", &[]), prompt);
     }

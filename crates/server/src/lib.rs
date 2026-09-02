@@ -2,7 +2,7 @@
 //! SQLite store and out of one binary.
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -64,6 +64,14 @@ mod nudging;
 /// reads them: which of the two places said each one, and whether the server can
 /// see it.
 mod paths;
+/// Where a directory of Verkstead's own goes when nobody has said: the
+/// platform's own place for the Data Directory, and the environment values it
+/// is resolved out of.
+///
+/// Public for the reason [`sandbox`] is — where Verkstead keeps what it makes is
+/// the product's business rather than an endpoint's, and the default is one rule
+/// for every binary that parses a [`Config`] rather than the server's alone.
+pub mod platform;
 mod profiles;
 /// Putting a share where a link reaches it, which is Verkstead's own write to
 /// GitHub.
@@ -296,16 +304,21 @@ pub struct Config {
     ///
     /// This is the Data Directory. Not a Watched Path and not one to point at a
     /// directory the human works in: the Watched Paths bound what Verkstead may
-    /// be pointed at, and this is Verkstead's own. It defaults to the working
-    /// directory, which is what running the server out of a checkout means
-    /// everywhere else here.
-    #[arg(
-        long,
-        env = "VERKSTEAD_DATA_DIR",
-        default_value = ".",
-        value_name = "DIR"
-    )]
-    pub data_dir: PathBuf,
+    /// be pointed at, and this is Verkstead's own.
+    ///
+    /// Unsaid, it is the platform's own place for it — `~/.local/share/verkstead`
+    /// on Linux, `~/Library/Application Support/Verkstead` on macOS,
+    /// `%APPDATA%\Verkstead` on Windows — so that a Verkstead started from an
+    /// icon and one started from a shell keep their work in the same place. A
+    /// developer running out of a checkout says `--data-dir .` for what that
+    /// used to be by default.
+    ///
+    /// What is held here is what was *said*, which is why it is an option and
+    /// not a resolved path: a machine with nowhere to resolve to is refused at
+    /// startup, where a refusal has somewhere to be worded — see
+    /// [`platform::data_dir`].
+    #[arg(long, env = "VERKSTEAD_DATA_DIR", value_name = "DIR")]
+    pub data_dir: Option<PathBuf>,
 
     /// Address and port to bind. Bind a tailnet address to reach the server
     /// from other devices.
@@ -404,13 +417,16 @@ impl Config {
     pub fn releases(&self) -> Option<&'static str> {
         (!self.no_update_check).then_some(updates::LATEST_RELEASE)
     }
+}
 
-    /// The SQLite file, which is [`DATABASE_NAME`] inside the Data Directory
-    /// and is never anywhere else: one directory is what an operator says, and
-    /// everything in it is Verkstead's to name.
-    pub fn database(&self) -> PathBuf {
-        self.data_dir.join(DATABASE_NAME)
-    }
+/// The SQLite file, which is [`DATABASE_NAME`] inside the Data Directory and is
+/// never anywhere else: one directory is what an operator says, and everything
+/// in it is Verkstead's to name.
+///
+/// Taking the directory rather than the [`Config`], because the directory is
+/// what was resolved and the configuration only holds what was said.
+pub fn database(data_dir: &Path) -> PathBuf {
+    data_dir.join(DATABASE_NAME)
 }
 
 /// Everything the server answers in a serialised format: the agents' contract
@@ -698,7 +714,31 @@ pub fn router_with_viewer<V: Embed + 'static>(pool: SqlitePool) -> Router {
     router(pool).fallback(viewer::serve::<V>)
 }
 
-/// Open the database and serve until the process is stopped.
+/// Take the address, open the database, and serve until the process is stopped.
+///
+/// **The socket is taken before anything is made.** Everything below makes
+/// something — the Data Directory, the Skills written into it, the Build Cache,
+/// the database — and an address somebody else is already listening on is no
+/// reason to have made any of it. So the bind is the first thing that can fail,
+/// and a second Verkstead is refused by the socket rather than after it has
+/// written over the first one's directory.
+///
+/// [`run_on`] is the same thing on a socket the caller bound, which is where the
+/// desktop binary starts: a taken address is the one failure it draws a dialog
+/// for, and a dialog wants the failure before the side effects rather than after
+/// them.
+pub async fn run(config: Config) -> Result<()> {
+    let listener = std::net::TcpListener::bind(config.listen)
+        .with_context(|| format!("binding {}", config.listen))?;
+
+    run_on(listener, config).await
+}
+
+/// The same, on a socket that is already bound.
+///
+/// The listener is the standard library's rather than tokio's, because a caller
+/// that has one bound it before there was a runtime to bind it on — see [`run`]
+/// for why the address is settled first.
 ///
 /// The installation's Watched Paths are resolved before anything else: a
 /// directory that is not there is a misconfiguration to report at startup,
@@ -706,7 +746,7 @@ pub fn router_with_viewer<V: Embed + 'static>(pool: SqlitePool) -> Router {
 /// Being given none of them is not a misconfiguration — the settings file says
 /// Watched Paths too, and a standalone install starts with nothing configured
 /// anywhere and admits nothing until it is.
-pub async fn run(config: Config) -> Result<()> {
+pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<()> {
     let watched = WatchedPaths::resolve(&config.watched_paths)?;
 
     // Both resolved at startup for the reason the Watched Paths are: a bind that
@@ -717,17 +757,26 @@ pub async fn run(config: Config) -> Result<()> {
     // all.
     let binds = sandbox::SandboxConfig::resolve(&config.sandbox_binds)?;
 
-    let home = sandbox::Home::of_the_server().context(
+    // Resolved and then made at startup, for the reason the Watched Paths are
+    // resolved at startup: a machine with nowhere to keep a Data Directory, and
+    // a directory Verkstead cannot write to, are misconfigurations to report now
+    // rather than ones to discover as a failed grilling weeks later. Where the
+    // flag said nothing this is the platform's own directory — see
+    // [`platform::data_dir`] — so the startup line below is now the only place a
+    // human finds out which one that turned out to be.
+    let data_dir = platform::data_dir(config.data_dir.as_deref())?;
+    std::fs::create_dir_all(&data_dir)
+        .with_context(|| format!("creating data directory {}", data_dir.display()))?;
+
+    // And where a session's HOME comes from, which wants the Data Directory
+    // above on the platform that makes a real one under it — see
+    // [`sandbox::Homes`]. Refused for the reason the Watched Paths are: a HOME
+    // the unit never said is a misconfiguration to report now rather than a
+    // session that fails to start weeks later with nobody watching.
+    let homes = sandbox::Homes::of_the_server(&data_dir).context(
         "no HOME is set: a session's `~` is the home directory of whoever runs Verkstead, \
          and the machine's git identity is read out of it, so the unit has to say what it is",
     )?;
-
-    // Made at startup for the reason the Watched Paths are resolved at startup:
-    // a directory Verkstead cannot write to is a misconfiguration to report now
-    // rather than one to discover as a failed grilling weeks later.
-    let data_dir = config.data_dir.clone();
-    std::fs::create_dir_all(&data_dir)
-        .with_context(|| format!("creating data directory {}", data_dir.display()))?;
 
     // And the skills written out into it, before anything can ask for a session:
     // they are what a grilling session is pointed at, and this binary's are what
@@ -754,7 +803,7 @@ pub async fn run(config: Config) -> Result<()> {
     // cannot say what it is running has nothing to equip a session with, and
     // which session that costs is the thing worth reporting — so it is said as
     // one is started rather than here, where there is nothing to name.
-    let verkstead = sandbox::Executable::of_the_server();
+    let verkstead = sandbox::Executable::of_the_server(&data_dir);
 
     // And where a Conversation's handoff document is written, which is a root
     // under the same directory: each Conversation's own is made as its first
@@ -768,11 +817,13 @@ pub async fn run(config: Config) -> Result<()> {
     // through the settings page applies without a restart — see [`settings`].
     let settings = settings::Settings::in_data_dir(&data_dir);
 
-    let pool = open_database(&config.database()).await?;
+    let pool = open_database(&database(&data_dir)).await?;
 
-    let listener = tokio::net::TcpListener::bind(config.listen)
-        .await
-        .with_context(|| format!("binding {}", config.listen))?;
+    listener
+        .set_nonblocking(true)
+        .context("putting the listening socket into the mode the runtime reads it in")?;
+    let listener = tokio::net::TcpListener::from_std(listener)
+        .context("handing the listening socket to the runtime")?;
 
     // The syntax definitions built on a blocking thread while the server comes
     // up, rather than under the first Diff somebody opens. Nothing waits on it:
@@ -787,7 +838,7 @@ pub async fn run(config: Config) -> Result<()> {
         update_check = config.releases().is_some(),
         watched = ?watched.paths(),
         settings_watched = ?settings.config().watched_paths(),
-        home = %home.path.display(),
+        home = %homes.servers().display(),
         sandbox_binds = binds.count(),
         build_cache = ?cache.dir(),
         caches_compiles = cache.caches_compiles(),
@@ -804,7 +855,7 @@ pub async fn run(config: Config) -> Result<()> {
             watched,
             data_dir,
             Agents::new(
-                home,
+                homes,
                 sandbox::Reachable::at(config.listen),
                 binds,
                 cache,

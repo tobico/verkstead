@@ -1,0 +1,93 @@
+[package]
+name = "verkstead-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "verkstead_desktop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "verkstead-desktop"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+# The server, run in-process out of a second binary rather than a second
+# artifact of the first one (ADR-0012). The headless `verkstead` links the same
+# library and carries none of what is below.
+verkstead-server = { path = "../server" }
+# What the viewer is handed to: whatever this desktop opens a URL with.
+open = "5"
+# The tray takes its icon as pixels, so the PNG in `assets/icons/` is decoded on
+# the way in — see `tray::rgba`. Already in the build under `tray-icon`, which
+# writes those pixels back out as a PNG for the panel to load.
+png = "0.18"
+# The runtime the server is given, built here for the reason `crates/cli` builds
+# its own: where it runs is the starting binary's call, and this one keeps it off
+# the main thread — see `Desktop::run`.
+tokio.workspace = true
+# Where the server's `tracing` goes is the starting binary's call as well.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# The icon in the tray and the menu on it (ADR-0012), and `muda` under it.
+# Default features off because both of them are Linux's — see the Linux table
+# below, which is where the backend is turned on.
+tray-icon = { version = "0.24", default-features = false }
+
+# The Linux half of the toolkit: GTK, which is what draws the icon, the menu on
+# it and the two dialogs — see `toolkit` and `dialog`.
+[target.'cfg(target_os = "linux")'.dependencies]
+# The loop the tray lives on here, which wants the main thread — see
+# `Desktop::run`. The same 0.18 `muda` draws its menu with, so the build carries
+# one GTK crate rather than two, and the same one the two dialogs are drawn with
+# — see `dialog`, which has to draw on the loop's own thread and so cannot hand
+# the job to a toolkit somebody else started.
+gtk = "0.18"
+# The `gtk` feature is the Linux backend — an appindicator, drawn with the
+# toolkit `dialog` is already drawing with. The other default feature, `libxdo`,
+# stays off: `muda` wants it only for the accelerators on its predefined items,
+# this menu has neither, and carrying it would put a system library into CI, the
+# dev shell and the AppImage for nothing.
+tray-icon = { version = "0.24", default-features = false, features = ["gtk"] }
+
+# And the macOS half: AppKit, reached through the `objc2` bindings `tray-icon`
+# already builds on this platform, so the two halves of the app speak to one set
+# of them rather than two.
+[target.'cfg(target_os = "macos")'.dependencies]
+# The main queue, which is how a thread that is not the main one asks the loop
+# to end — see `toolkit::stop_from_elsewhere`, and `gtk::glib::idle_add_once`
+# beside it for what it is the answer to.
+dispatch2 = { version = "0.3", default-features = false, features = ["alloc"] }
+# `MainThreadMarker`: what AppKit is spoken to with, and what says at compile
+# time that it was spoken to from the right thread.
+objc2 = "0.6"
+# `NSApplication` — the loop, and the app told it is a menu-bar app — and
+# `NSAlert`, which is what the two dialogs are here. One header's worth of
+# feature per thing named, which is how this crate is cut up; `NSGraphicsContext`
+# is not drawn with, it is the argument the event `toolkit` ends the loop with
+# takes as nil.
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+  "std",
+  "NSAlert",
+  "NSApplication",
+  "NSEvent",
+  "NSGraphicsContext",
+  "NSResponder",
+  "NSRunningApplication",
+] }
+# `NSString`, which is what a dialog's words are handed over as, and `NSPoint`,
+# which that same event has to be given somewhere to have happened.
+objc2-foundation = { version = "0.3", default-features = false, features = [
+  "std",
+  "NSGeometry",
+  "NSString",
+  "objc2-core-foundation",
+] }
+
+[dev-dependencies]
+# The tests run the real binary, so what they check is what an icon starts.
+tempfile = "3"
+ureq = "3"

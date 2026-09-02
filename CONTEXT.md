@@ -167,21 +167,27 @@ The one directory Verkstead keeps what it makes in — the database, at
 `verkstead.db` inside it, the Worktrees, the installed Skills, the handoff
 directories, the settings files it is told the human's credentials and identity
 in, and whatever later stages need to put somewhere. Said once, as
-`--data-dir`, and the working directory when nothing says otherwise; everything
-in it is named by Verkstead rather than by whoever started it. Not a Watched
-Path and not the same kind of thing: a Watched Path bounds what the human may
-point Verkstead at, and this is Verkstead's own.
+`--data-dir`, and the platform's own place for it when nothing says otherwise —
+`~/.local/share/verkstead` on Linux, `~/Library/Application Support/Verkstead`
+on macOS, `%APPDATA%\Verkstead` on Windows, whichever binary was started, so
+that a Verkstead launched from an icon finds what one launched from a shell
+left. A run out of a checkout asks for the old behaviour by name, with
+`--data-dir .`. Everything in it is named by Verkstead rather than by whoever
+started it. Not a Watched Path and not the same kind of thing: a Watched Path
+bounds what the human may point Verkstead at, and this is Verkstead's own. The
+**Build Cache** and the **Log Directory** are Verkstead's own too, and neither
+of them is in here.
 _Avoid_: state directory, work dir, scratch space, cache
 
 **Sandbox**:
 What a session runs inside: its Conversation's Worktree, the Repo's git
 directory and the Conversation's handoff directory writable, the Agent
-Profile's pair at `~/.claude` and `~/.claude.json`, the system, the Skills at
-`/verkstead/skills` and the Verkstead executable read-only, and nothing else of
-the machine at all — not even the checkout the Worktree was made from. An empty
-directory read-only over `~/.claude/skills` goes with the Skills' own mount:
-the account's are hidden rather than merged with, and a mount at a path no
-backend owns hides nothing by itself. Each Companion Repo the
+Profile's pair at `~/.claude` and `~/.claude.json`, the system, the Skills and
+the Verkstead executable read-only in a directory of Verkstead's own, and
+nothing else of the machine at all — not even the checkout the Worktree was
+made from. Nothing at all stands where the account's own skills would be found:
+they are hidden rather than merged with, and where the mechanism has no mount
+to hide one with it refuses the path instead. Each Companion Repo the
 Conversation was configured with is inside as well: its Worktree and the git
 directory behind it, both at that companion's own mode, so a read-only one is
 read-only through both. The **Build Cache** is inside as well, writable, with
@@ -242,6 +248,50 @@ and the Build Cache, and nothing else Verkstead keeps: `rustc` runs proc macros
 while it compiles, so the database and the settings files stay outside its
 reach.
 _Avoid_: daemon, sccache daemon, build server, compiler service
+
+**Log Directory**:
+The other directory of Verkstead's own outside the Data Directory: where the
+desktop app writes the server's log file, because the stdout of a tray app
+launched from an icon goes nowhere and a file has to have somewhere to be.
+Where it is is the platform's and nothing says otherwise —
+`~/.local/state/verkstead` on Linux (`$XDG_STATE_HOME` where that is set to an
+absolute path), `~/Library/Logs/Verkstead` on macOS, `%LOCALAPPDATA%\Verkstead`
+on Windows, the local rather than the roaming application data because a log
+file follows nobody between machines. The three platforms disagree about what
+such a directory even *is*, which is why it is named here for what it is **for**
+rather than for what any one of them calls it. **The desktop app makes it**,
+as the Build Cache makes its own where it uses it, and what it holds is the log
+and the log before it: `verkstead.log`, rolled over to `verkstead.log.1` at a
+few megabytes and kept no further back than that, so a machine that has been
+running Verkstead for months is not handed a log nobody can open. **View Logs**
+on the tray menu is what opens it. The server itself keeps logging to stdout
+wherever it was started from — where the events go is the starting binary's
+call — and `RUST_LOG` filters the file exactly as it filters that stdout.
+**A machine that names nowhere to put one is not refused**: it gets no file, the
+app says so and logs to standard error instead, and the menu item says the same
+rather than opening nothing — a Verkstead with nowhere for a log file has only
+lost the log, where one with nowhere for a Data Directory has nothing to serve.
+Not the Data Directory and not settable beside it: what `--data-dir` says has
+nothing to do with where this is.
+_Avoid_: state directory, logs dir, log file (that's what goes *in* it), cache
+
+**Startup Registration**:
+What says Verkstead comes up when the machine's desktop session does, and what
+**Launch on Startup** on the tray menu ticks and unticks. The platform's own,
+and the platform's alone: an XDG autostart entry named for the app id on Linux
+(`~/.config/autostart/net.tobico.Verkstead.desktop`), the Run key on Windows, a
+launch agent on macOS. **It is the state rather than a copy of it** — the box
+is drawn from reading it, checking writes it and unchecking removes it, and
+neither settings file has an entry for this or ever will: a human who turns it
+off with their desktop's own settings has unchecked the box, and Verkstead
+agrees with them rather than argues. **Every launch rewrites it while it is
+there**, with the path of the executable that is running, so a binary that was
+moved — downloaded again elsewhere, an AppImage put somewhere else — heals its
+own registration the next time it is started by hand; a machine that never
+asked for one is left alone. What it starts is an ordinary launch of the app
+with the browser left alone, because a login is not a moment to be handed a
+browser window.
+_Avoid_: autostart setting, startup preference, run at login option
 
 **Companion Repo**:
 Another registered Repo a Conversation is given to work alongside its own,
@@ -323,13 +373,14 @@ _Avoid_: submodule, dependency, linked repo, sibling checkout, secondary repo
 One of the workflows Verkstead runs its sessions by — grilling, implementing,
 breaking down, working a Step and following up now, the rest as the stages that
 need them arrive. Verkstead's own: shipped inside the binary, installed under
-the Data Directory at startup and mounted read-only at `/verkstead/skills` — a
-path no backend owns, beside the Verkstead executable's — so a session's
-behaviour is the product's rather than whatever the machine or the account
-happens to keep. What the account keeps is hidden by an empty directory bound
-over `~/.claude/skills`, which is the mounting the Skills used to do there. A
-session is put inside one by the prompt it is started on, which names the Skill
-above the Brief.
+the Data Directory at startup and read-only inside at a path no backend owns,
+beside the Verkstead executable's — so a session's behaviour is the product's
+rather than whatever the machine or the account happens to keep. That path is
+`/verkstead/skills` where the sandbox can mount one there and the directory
+they were installed in where it cannot, which is the whole of the difference: a
+session is put inside a Skill by the prompt it is started on, which names it
+above the Brief, and what a prompt names is where the file really is. What the
+account keeps under its own skills is not reachable at all.
 _Avoid_: prompt, instructions, plugin, workflow file
 
 **Brief**:

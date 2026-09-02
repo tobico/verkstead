@@ -13,6 +13,14 @@
 //! the three is attempted rather than asked of the metadata: a read-only bind
 //! and a directory somebody has no write permission on look identical to
 //! `test -w`, and only one of them is the surface being described.
+//!
+//! **This is the Linux half.** What the same description comes to on a Mac is
+//! `tests/sandbox_macos.rs`, which asks the same questions of Apple's own
+//! mechanism and reads a different answer back from the paths a session may not
+//! reach. Neither suite runs on the other's machine: what is asserted here is a
+//! mount namespace, and there is none of one to probe anywhere else.
+
+#![cfg(target_os = "linux")]
 
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -23,8 +31,9 @@ use std::process::{Command, Stdio};
 
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
+use verkstead_server::platform::Platform;
 use verkstead_server::sandbox::{
-    Bind, Executable, Home, Reachable, Sandbox, SandboxConfig, under_dev_shell,
+    Bind, Executable, Homes, Reachable, Sandbox, SandboxConfig, under_dev_shell,
 };
 use verkstead_server::settings::{RustBuildCache, Settings};
 use verkstead_server::skills::Skills;
@@ -143,11 +152,15 @@ impl Grilling {
         let dir = self.cache_dir();
         std::fs::create_dir_all(&dir).unwrap();
 
-        BuildCache::at(dir, compiling.then(|| self.sccache()), self.worktrees_dir())
+        BuildCache::at(
+            dir,
+            compiling.then(|| self.sccache()),
+            self.state.path().to_owned(),
+        )
     }
 
-    /// The Worktrees directory the compile server is given, which is where this
-    /// fixture's own worktree already is.
+    /// The Worktrees directory the compile server is shown of that Data
+    /// Directory, which is where this fixture's own worktree already is.
     fn worktrees_dir(&self) -> PathBuf {
         self.state.path().join("worktrees")
     }
@@ -244,7 +257,7 @@ fi
         Sandbox::for_conversation(
             &self.conversation,
             profile,
-            self.home(),
+            &self.homes(),
             &Reachable::at(listening),
             &self.skills,
             &self.verkstead,
@@ -363,10 +376,12 @@ fi
 
     /// The host home a sandbox is built around — the fixture's rather than
     /// whoever is running the tests, so what `~` holds is decided here.
-    fn home(&self) -> Home {
-        Home {
-            path: self.home.path().to_owned(),
-        }
+    fn homes(&self) -> Homes {
+        Homes::on(
+            Platform::HERE,
+            self.home.path().to_owned(),
+            self.state.path(),
+        )
     }
 
     /// Where `~` is, as the probe will see it.
@@ -593,11 +608,15 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
 
     // The executable a session is equipped with, somewhere no session can reach
     // it except through the bind — see [`SAYS_WHICH_BUILD`].
-    let image = state.path().join("bin/verkstead");
+    // Not under `bin/`, which is where a platform with no binds to make one
+    // with puts what a session finds: the two are different places, and a
+    // fixture that stood the image in the second of them would be proving
+    // nothing about how it got there.
+    let image = state.path().join("image/verkstead");
     std::fs::create_dir_all(image.parent().unwrap()).unwrap();
     std::fs::write(&image, SAYS_WHICH_BUILD).unwrap();
     std::fs::set_permissions(&image, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let verkstead = Executable::at(image).expect("the executable was just written");
+    let verkstead = Executable::at(image, state.path()).expect("the executable was just written");
 
     Grilling {
         watched,

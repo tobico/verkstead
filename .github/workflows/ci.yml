@@ -52,6 +52,18 @@ jobs:
           sudo apt-get install -y bubblewrap
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
+      # What `crates/desktop` links: the toolkit the tray icon and the app's one
+      # dialog are drawn with, and the tray protocol over it (ADR-0012). This
+      # job builds the whole workspace, so the first push of that crate is the
+      # first build that needs them — installed by a step of their own rather
+      # than left to whatever the runner image happens to carry, which is a
+      # thing that can be taken away without anybody deciding to. The same two
+      # are what the AppImage carries and what the dev shell grew with the
+      # crate. The package index is the one the step above just updated.
+      - name: Install the desktop app's toolkit
+        run: |
+          sudo apt-get install -y pkg-config libgtk-3-dev libayatana-appindicator3-dev
+
       # For the dev-shell autodetection alone: it decides whether to wrap a
       # session's command in `nix develop` by evaluating a flake attribute, so
       # the test covering it needs a `nix` that answers. Pinned to the version
@@ -112,6 +124,40 @@ jobs:
             git diff
             exit 1
           fi
+
+  # What the same sandbox comes to on a Mac, asked of a Mac. What a session may
+  # reach is one description said once, and `sandbox-exec` is the second
+  # rendering of it — so what settles whether that rendering holds is a probe
+  # inside a real sandbox on a real Apple machine, exactly as the Linux suite
+  # settles bubblewrap's. Nothing but a Mac can answer it, which is what this
+  # job is for.
+  #
+  # One suite rather than the workspace: everything else in it stands on
+  # bubblewrap and a Linux kernel, and a Mac has neither. The rest of what this
+  # stage's code says — the policy a description renders to, read as text — is
+  # unit-tested in the Rust job above, which is where a mistake in it shows up
+  # in seconds rather than on a runner that has to be waited for.
+  macos-sandbox:
+    name: macOS sandbox
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      # The same pin as every other job, for the same reason.
+      - name: Install Rust 1.91.1
+        uses: dtolnay/rust-toolchain@1.91.1
+
+      # A key of its own: this is an Apple dependency tree, and one shared with
+      # the Linux job would have the two evicting each other.
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: macos-sandbox
+
+      # No `web/dist` is fetched and none is needed: the embed is
+      # `allow_missing`, so the server compiles without the viewer — and what
+      # this suite probes is a filesystem boundary rather than anything served.
+      - name: The boundary suite
+        run: cargo test -p verkstead-server --test sandbox_macos
 
   # The viewer's own checks, on the viewer's own sources. Nothing here waits on
   # the Rust job and nothing there waits on this one: neither produces anything

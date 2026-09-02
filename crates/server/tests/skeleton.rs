@@ -3,14 +3,15 @@
 //! defaults.
 
 use std::net::{IpAddr, Ipv4Addr};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use clap::Parser;
 use http_body_util::BodyExt;
 use tower::ServiceExt;
-use verkstead_server::{Config, open_database, router};
+use verkstead_server::platform::{Environment, Platform, default_log_dir, log_dir};
+use verkstead_server::{Config, database, open_database, router};
 
 #[tokio::test]
 async fn opening_the_database_creates_a_missing_file() {
@@ -70,10 +71,11 @@ fn config_defaults_to_localhost() {
 
     assert_eq!(config.listen.ip(), IpAddr::V4(Ipv4Addr::LOCALHOST));
 
-    // The working directory, so a dev run out of a checkout keeps everything it
-    // makes there — with the database at the one name it is ever kept under.
-    assert_eq!(config.data_dir.to_str().unwrap(), ".");
-    assert_eq!(config.database().to_str().unwrap(), "./verkstead.db");
+    // And nothing at all for the Data Directory, which is the flag holding what
+    // was said rather than where that resolves to: the platform's own directory
+    // is what a run with nothing said gets, and where that is is resolved at
+    // startup — see `verkstead_server::platform`.
+    assert_eq!(config.data_dir, None);
 }
 
 #[test]
@@ -89,10 +91,14 @@ fn config_is_overridable_by_flag() {
     ]);
 
     assert_eq!(config.listen.to_string(), "0.0.0.0:9999");
-    assert_eq!(config.data_dir.to_str().unwrap(), "/srv/verkstead");
     assert_eq!(
-        config.database().to_str().unwrap(),
-        "/srv/verkstead/verkstead.db"
+        config.data_dir.as_deref(),
+        Some(Path::new("/srv/verkstead"))
+    );
+    assert_eq!(
+        database(Path::new("/srv/verkstead")).to_str().unwrap(),
+        "/srv/verkstead/verkstead.db",
+        "the database is that one name inside whichever directory won",
     );
 }
 
@@ -130,4 +136,35 @@ fn watched_paths_are_a_list_however_they_are_given() {
         repeated.watched_paths,
         [PathBuf::from("/srv/repos"), PathBuf::from("/srv/scratch")]
     );
+}
+
+/// The Log Directory, asked for the way stage 02's desktop binary will ask —
+/// from outside this crate, where it is the only caller there is ever going to
+/// be. Nothing in the server turns on the answer: it goes on logging to stdout,
+/// and the directory stands empty and uncreated until there is a binary with a
+/// log file to open in it.
+#[test]
+fn the_log_directory_is_reachable_from_another_crate() {
+    let env = Environment {
+        home: Some(PathBuf::from("/home/you")),
+        ..Environment::default()
+    };
+
+    assert_eq!(
+        default_log_dir(Platform::Linux, &env),
+        Some(PathBuf::from("/home/you/.local/state/verkstead")),
+    );
+
+    // And the read of the real environment, which is what that binary calls.
+    // Whether this machine answers at all is the machine's business — nowhere
+    // to resolve to is an answer of nothing rather than a failure of anything —
+    // but an answer is a path the platform named, so it is absolute.
+    if let Some(dir) = log_dir() {
+        assert!(
+            dir.is_absolute(),
+            "{} is where a log file would go, so it cannot depend on the \
+             directory the app was launched from",
+            dir.display(),
+        );
+    }
 }

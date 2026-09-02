@@ -1072,15 +1072,13 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // bundled grilling skill: a sandbox has no global `CLAUDE.md` to say what a
     // session is for, so the prompt is where it is said — see [`crate::skills`].
     if let Some(pairing) = conversation.grilling_pairing.pairing().cloned()
+        && let Some(prompt) = state
+            .sessions
+            .skills()
+            .map(|skills| skills::grilling(skills, &brief))
         && let Err(error) = state
             .sessions
-            .start(
-                pool,
-                &state.nudges,
-                &conversation,
-                &pairing,
-                &skills::grilling(&brief),
-            )
+            .start(pool, &state.nudges, &conversation, &pairing, &prompt)
             .await
     {
         tracing::error!(error = ?error, conversation_id = id, "a grilling session could not be started");
