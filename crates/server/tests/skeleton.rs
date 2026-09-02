@@ -2,6 +2,7 @@
 //! answers a health check, and it can be pointed somewhere other than the
 //! defaults.
 
+use std::ffi::OsStr;
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
 
@@ -95,9 +96,13 @@ fn config_is_overridable_by_flag() {
         config.data_dir.as_deref(),
         Some(Path::new("/srv/verkstead"))
     );
+    // Spelled as a join rather than as a string, because the separator between
+    // the directory and the name is the platform's: a literal `/` here asserts
+    // that Verkstead is on Unix rather than that the name is inside the
+    // directory.
     assert_eq!(
-        database(Path::new("/srv/verkstead")).to_str().unwrap(),
-        "/srv/verkstead/verkstead.db",
+        database(Path::new("/srv/verkstead")),
+        Path::new("/srv/verkstead").join("verkstead.db"),
         "the database is that one name inside whichever directory won",
     );
 }
@@ -125,10 +130,16 @@ fn watched_paths_are_a_list_however_they_are_given() {
         "--watched-path",
         "/srv/scratch",
     ]);
+    // Written the way the platform writes `PATH`, which is what the flag is
+    // parsed with: `join_paths` puts a `:` between them on Unix and a `;` on
+    // Windows, where a literal `:` would be a drive letter's punctuation and
+    // would leave the two directories as one string nobody split.
+    let together = std::env::join_paths(["/srv/repos", "/srv/scratch"])
+        .expect("two plain directories go into one list");
     let separated = Config::parse_from([
-        "verkstead serve",
-        "--watched-path",
-        "/srv/repos:/srv/scratch",
+        OsStr::new("verkstead serve"),
+        OsStr::new("--watched-path"),
+        together.as_os_str(),
     ]);
 
     assert_eq!(repeated.watched_paths, separated.watched_paths);
