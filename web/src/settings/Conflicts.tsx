@@ -37,7 +37,7 @@ import { Empty, ErrorLine, Note } from "../notices";
 import { Picker } from "../picking";
 import { PaneHead } from "../workbench/PaneHead";
 import styles from "./Conflicts.module.css";
-import { heldPaths } from "./held";
+import { heldCleanup, heldPaths } from "./held";
 
 /// What each strategy is called where a human reads it, and what it does said
 /// in one line.
@@ -163,6 +163,9 @@ export function ConflictsPane(props: {
             ? (settings?.rust_build_cache.size ?? "")
             : "",
         },
+        // And what becomes of an archived Conversation, which is the section
+        // under this one — see [`heldCleanup`].
+        cleanup: heldCleanup(settings),
         conflict_resolution,
         // And whether Done shares the record to its pull request, which is the
         // GitHub section's switch and none of this one's business.

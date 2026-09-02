@@ -1,7 +1,8 @@
 //! What Verkstead is told, over the viewer's namespace: reading the git author,
-//! the presence of a GitHub token, how the shared Rust build cache is set,
-//! whether Done shares the record to the pull request and what paths it has
-//! been given, and writing any of them.
+//! the presence of a GitHub token, how the shared Rust build cache is set, what
+//! the Cleanup does to an archived Conversation, whether Done shares the record
+//! to the pull request and what paths it has been given, and writing any of
+//! them.
 //!
 //! The paths are the one thing here said in two places at once — the
 //! installation's flags and the file this page writes — so what those tests ask
@@ -118,6 +119,7 @@ async fn save_author(app: &Router, name: &str, email: &str) -> SettingsSaved {
             "git_author": { "name": name, "email": email },
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
+            "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "watched_paths": [],
@@ -137,6 +139,7 @@ async fn save_token(app: &Router, token: &str) -> SettingsSaved {
             "git_author": { "name": "", "email": "" },
             "github_token": { "Set": { "token": token } },
             "rust_build_cache": { "enabled": true, "size": "" },
+            "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "watched_paths": [],
@@ -154,6 +157,45 @@ async fn clear_token(app: &Router) -> SettingsSaved {
             "git_author": { "name": "", "email": "" },
             "github_token": "Clear",
             "rust_build_cache": { "enabled": true, "size": "" },
+            "cleanup": cleanup_unset(),
+            "conflict_resolution": "Merge",
+            "share_on_done": false,
+            "watched_paths": [],
+            "sandbox_binds": [],
+            "ignored_comments": "Keep",
+        }),
+    )
+    .await
+}
+
+/// The Cleanup as a save that is not about it sends it: both rows where nobody
+/// has put them, which is the trim on and the delete off, with neither duration
+/// typed.
+///
+/// One request writes the whole of `config.yaml`, so every save carries every
+/// section — the viewer's own sections do the same thing with what the last read
+/// told them, and these tests are about the other settings rather than about
+/// this one.
+fn cleanup_unset() -> serde_json::Value {
+    serde_json::json!({
+        "trim": { "enabled": true, "days": "" },
+        "delete": { "enabled": false, "days": "" },
+    })
+}
+
+/// Save a Cleanup and leave everything else alone, which is what the Cleanup
+/// pane's own two presses send.
+async fn save_cleanup(app: &Router, trim: (bool, &str), delete: (bool, &str)) -> SettingsSaved {
+    save(
+        app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "rust_build_cache": { "enabled": true, "size": "" },
+            "cleanup": {
+                "trim": { "enabled": trim.0, "days": trim.1 },
+                "delete": { "enabled": delete.0, "days": delete.1 },
+            },
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "watched_paths": [],
@@ -270,6 +312,7 @@ async fn the_token_appears_in_no_answer_this_endpoint_gives() {
             "git_author": { "name": "Tobias Cohen", "email": "tobi@tobico.net" },
             "github_token": { "Set": { "token": "ghp_averysecrettoken" } },
             "rust_build_cache": { "enabled": true, "size": "" },
+            "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "watched_paths": [],
@@ -496,6 +539,7 @@ async fn a_save_carrying_the_paths_as_they_stand_leaves_them() {
             "git_author": { "name": "Tobias Cohen", "email": "tobi@tobico.net" },
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
+            "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "watched_paths": ["/home/ada/src"],
@@ -569,6 +613,7 @@ async fn the_build_cache_switch_and_size_go_in_and_come_back() {
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
             "rust_build_cache": { "enabled": false, "size": "5G" },
+            "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "watched_paths": [],
@@ -592,6 +637,137 @@ async fn the_build_cache_switch_and_size_go_in_and_come_back() {
     let read_back = settings(&app).await.rust_build_cache;
     assert!(!read_back.enabled);
     assert_eq!(read_back.size, "5G");
+}
+
+/// What the Cleanup does where nobody has said: it trims at three days and
+/// deletes never.
+///
+/// The two halves of the section fall back the two different ways, which is
+/// what a page reading this has to draw — and both durations come back as the
+/// default with the flag beside them saying nobody chose it.
+#[tokio::test]
+async fn a_cleanup_nobody_has_configured_trims_and_never_deletes() {
+    let (_dir, app) = app().await;
+
+    let cleanup = settings(&app).await.cleanup;
+
+    assert!(cleanup.trim.enabled, "on is what an untouched trim means");
+    assert_eq!(cleanup.trim.days, 3);
+    assert!(
+        !cleanup.trim.days_configured,
+        "the default is shown rather than chosen"
+    );
+
+    assert!(
+        !cleanup.delete.enabled,
+        "and off is what an untouched delete means, this being the half that \
+         forgets"
+    );
+    assert_eq!(cleanup.delete.days, 30);
+    assert!(!cleanup.delete.days_configured);
+}
+
+/// And what a save of it says: the two rows go into the file the sweep reads,
+/// and come back off it — including from a router started afresh on the same
+/// directory, which is what a restart is.
+#[tokio::test]
+async fn the_cleanup_switches_and_durations_go_in_and_come_back() {
+    let (dir, app) = app().await;
+
+    let saved = save_cleanup(&app, (false, "5"), (true, "90")).await;
+
+    assert!(!saved.settings.cleanup.trim.enabled);
+    assert_eq!(saved.settings.cleanup.trim.days, 5);
+    assert!(saved.settings.cleanup.trim.days_configured);
+    assert!(saved.settings.cleanup.delete.enabled);
+    assert_eq!(saved.settings.cleanup.delete.days, 90);
+    assert!(saved.settings.cleanup.delete.days_configured);
+
+    // In the file the sweep reads, rather than only in the answer.
+    let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+    assert!(
+        written.contains("cleanup:") && written.contains("days: 90"),
+        "the switches and the durations are in config.yaml: {written}"
+    );
+
+    let read_back = settings(&app).await.cleanup;
+    assert!(!read_back.trim.enabled);
+    assert_eq!(read_back.trim.days, 5);
+
+    // And to a server that has just come up on the same Data Directory, which
+    // is the whole of what surviving a restart means here.
+    let restarted = restarted(dir.path()).await;
+    assert!(settings(&restarted).await.cleanup.delete.enabled);
+}
+
+/// A delete sooner than the trim saves like anything else: the two clocks run
+/// from the archiving independently, so what it says is that the Conversation
+/// goes before it was ever trimmed.
+#[tokio::test]
+async fn a_delete_sooner_than_the_trim_is_saved_as_it_was_typed() {
+    let (_dir, app) = app().await;
+
+    let saved = save_cleanup(&app, (true, "30"), (true, "2")).await;
+
+    assert_eq!(saved.settings.cleanup.trim.days, 30);
+    assert_eq!(saved.settings.cleanup.delete.days, 2);
+    assert!(
+        saved.refused.is_empty(),
+        "there is nothing here to refuse: {:?}",
+        saved.refused
+    );
+}
+
+/// Clearing a duration is asking for the default back rather than for a
+/// cleanup no days after the archiving — and so is anything that is not a
+/// whole number of days, because the page sends what was typed.
+#[tokio::test]
+async fn a_cleanup_duration_cleared_is_the_default_again() {
+    let (_dir, app) = app().await;
+
+    save_cleanup(&app, (true, "5"), (true, "90")).await;
+
+    let saved = save_cleanup(&app, (true, "  "), (true, "a fortnight")).await;
+
+    assert_eq!(saved.settings.cleanup.trim.days, 3);
+    assert!(!saved.settings.cleanup.trim.days_configured);
+    assert_eq!(saved.settings.cleanup.delete.days, 30);
+    assert!(!saved.settings.cleanup.delete.days_configured);
+}
+
+/// A save from another section carries the Cleanup as it stands, and that is
+/// what leaves it alone: one request writes the whole of `config.yaml`, so a
+/// section saying nothing about a setting would be a section that unset it.
+#[tokio::test]
+async fn a_save_carrying_the_cleanup_as_it_stands_leaves_it() {
+    let (_dir, app) = app().await;
+
+    save_cleanup(&app, (false, "5"), (true, "90")).await;
+
+    // The build cache section's own save, which is about the size and carries
+    // the Cleanup exactly as the page last read it.
+    let saved = save(
+        &app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "rust_build_cache": { "enabled": true, "size": "5G" },
+            "cleanup": {
+                "trim": { "enabled": false, "days": "5" },
+                "delete": { "enabled": true, "days": "90" },
+            },
+            "conflict_resolution": "Merge",
+            "share_on_done": false,
+            "watched_paths": [],
+            "sandbox_binds": [],
+            "ignored_comments": "Keep",
+        }),
+    )
+    .await;
+
+    assert_eq!(saved.settings.rust_build_cache.size, "5G");
+    assert!(!saved.settings.cleanup.trim.enabled, "the switch stands");
+    assert_eq!(saved.settings.cleanup.delete.days, 90, "and the duration");
 }
 
 /// How a conflict is resolved where nobody has said: a merge, which is the half
@@ -622,6 +798,7 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
+            "cleanup": cleanup_unset(),
             "conflict_resolution": "Rebase",
             "share_on_done": false,
             "watched_paths": [],
@@ -657,6 +834,7 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
+            "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "watched_paths": [],
@@ -698,6 +876,7 @@ async fn sharing_on_done_goes_in_and_comes_back() {
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
+            "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": true,
             "watched_paths": [],
@@ -738,6 +917,7 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
+            "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": true,
             "watched_paths": [],
@@ -755,6 +935,7 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "5G" },
+            "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": true,
             "watched_paths": [],
@@ -798,6 +979,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "5G" },
+            "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "watched_paths": [],
@@ -813,6 +995,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "  " },
+            "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "watched_paths": [],
@@ -866,6 +1049,7 @@ async fn save_paths(app: &Router, watched: &[&str], binds: &[&str]) -> SettingsS
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
+            "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "watched_paths": watched,
@@ -1164,6 +1348,7 @@ async fn save_rules(app: &Router, rules: serde_json::Value) -> SettingsSaved {
             "git_author": { "name": "", "email": "" },
             "github_token": "Keep",
             "rust_build_cache": { "enabled": true, "size": "" },
+            "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "watched_paths": [],
@@ -1326,6 +1511,7 @@ async fn a_refused_save_writes_nothing_at_all() {
             "git_author": { "name": "Tobias Cohen", "email": "tobi@tobico.net" },
             "github_token": { "Set": { "token": "ghp_thetoken" } },
             "rust_build_cache": { "enabled": true, "size": "" },
+            "cleanup": cleanup_unset(),
             "conflict_resolution": "Merge",
             "share_on_done": false,
             "watched_paths": [],

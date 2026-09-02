@@ -25,6 +25,7 @@ pub mod build_cache;
 mod capture;
 mod checklist;
 mod checks;
+mod cleanup;
 mod commenting;
 mod comments;
 mod commits;
@@ -685,6 +686,11 @@ fn routed(
     // branch nobody is working on, and a wrap-up's watchers stop at Done. See
     // [`merges`].
     merges::sweeping(&state);
+
+    // And the Conversations the human has archived and finished looking at,
+    // which is the one sweep that takes something away rather than writing
+    // something down. See [`cleanup`].
+    cleanup::sweeping(&state);
 
     // And a listener on the one channel a Set is settled through, so that a
     // session idling on a stored ask is told its Answers have landed whether the

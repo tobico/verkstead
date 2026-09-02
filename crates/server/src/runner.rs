@@ -184,6 +184,13 @@ pub struct Pace {
     /// waiting to be merged is one of the things it looks at.
     pub merges: Duration,
 
+    /// And how often the archived Conversations are looked over for one with
+    /// a cleanup due on it — see [`crate::cleanup`].
+    ///
+    /// Here for [`Pace::merges`]'s reason again, and slower than any of the
+    /// rest: what it is watching is a clock counted in days.
+    pub cleanup: Duration,
+
     /// And how often every Conversation is looked over for one that has
     /// Stalled — see [`crate::stalls`].
     ///
@@ -205,6 +212,7 @@ impl Default for Pace {
             long_stop: Duration::from_secs(300),
             stalls: crate::stalls::SWEPT_EVERY,
             merges: crate::merges::SWEPT_EVERY,
+            cleanup: crate::cleanup::SWEPT_EVERY,
             reviewing: Duration::ZERO,
         }
     }

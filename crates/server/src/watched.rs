@@ -475,6 +475,7 @@ mod tests {
             .save_config(&crate::settings::Config::of(
                 crate::settings::GitAuthor::default(),
                 crate::settings::RustBuildCache::default(),
+                crate::settings::Cleanup::default(),
                 crate::store::ConflictResolution::Merge,
                 false,
                 vec![],

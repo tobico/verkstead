@@ -30,21 +30,24 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
     Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, BrowseScope, BuildCacheView,
-    CheckRollup, CommentedOn, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
-    CompanionMode, CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView,
-    ConflictResolutionEdit, ConversationArchived, ConversationClosed, ConversationEntry,
-    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Cursor,
-    GrillingStarted, IgnoreRule, IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut,
-    NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry,
-    PushKey, Registration, RepoEntry, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
-    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
-    SharedCommit, SharedConversation, ShowingArchived, Standing, SteerOpened, SteerSubmission,
-    Submitted, Subscribed, Subscription, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet,
-    Unsubscribe, UpdateNotice, Verified,
+    CheckRollup, CleanupStepView, CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded,
+    CompanionBranchRenamed, CompanionMode, CompanionModeChoice, CompanionModeChosen,
+    CompanionRemoved, CompanionView, ConflictResolutionEdit, ConversationArchived,
+    ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
+    ConversationUnarchived, ConversationView, Cursor, GrillingStarted, IgnoreRule,
+    IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion,
+    NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
+    RepoEntry, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, SetReading, SetView,
+    SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit,
+    SharedConversation, ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted,
+    Subscribed, Subscription, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe,
+    UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
-use crate::settings::{Config, GitAuthor, RuleTrouble, RustBuildCache, Secrets};
+use crate::settings::{
+    Cleanup, CleanupStep, Config, GitAuthor, RuleTrouble, RustBuildCache, Secrets,
+};
 use crate::{AppState, store};
 
 /// The viewer's routes, over the state the agent API is already holding: a
@@ -1297,6 +1300,23 @@ pub(crate) async fn conversation_view(
         }
     };
 
+    // And whether the Cleanup has been through it since, which is the other
+    // sidecar beside the archivings — read the same way and for the same kind
+    // of reason: the page has to be able to say why a session's drill-down is
+    // missing.
+    //
+    // A read that fails reads as *not trimmed*, which is the way round that
+    // says nothing rather than the way round that says something untrue: the
+    // record is drawn as it always was, and the worst of it is a card that
+    // opens on nothing with no word for why.
+    let trimmed = match store::trimmed(&state.pool, id).await {
+        Ok(trimmed) => trimmed,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading whether a Conversation was trimmed failed");
+            false
+        }
+    };
+
     // And where the latest share of it was published, where anybody has
     // published one — the link the workbench draws beside the Share row. Read
     // the way the archive mark is: a row beside the Conversation rather than a
@@ -1372,6 +1392,7 @@ pub(crate) async fn conversation_view(
         waiting_on_checks: narrowed_to_checks && writing.is_none(),
         resets,
         archived,
+        trimmed,
         shared,
         // The same reading the Events above are drawn against, said as a fact
         // about the Conversation: the Timeline offers Force stop exactly where
@@ -3519,6 +3540,15 @@ async fn save_settings(
                 edit.rust_build_cache.enabled,
                 Some(edit.rust_build_cache.size),
             ),
+            // And the Cleanup's two rows, each a switch and a duration as it
+            // was typed — an empty field is the default asked for back, and so
+            // is anything that is not a whole number of days. Nothing here is
+            // refused, a delete sooner than the trim included: the two clocks
+            // run from the archiving independently.
+            Cleanup::of(
+                CleanupStep::of(edit.cleanup.trim.enabled, Some(edit.cleanup.trim.days)),
+                CleanupStep::of(edit.cleanup.delete.enabled, Some(edit.cleanup.delete.days)),
+            ),
             // And how a conflict is resolved where the Repo it is in says
             // nothing, which is one of two words and never absent: there is no
             // third state for a page to send.
@@ -3630,6 +3660,7 @@ fn as_told(
     let config = settings.config();
     let author = config.git_author();
     let cache = config.rust_build_cache();
+    let cleanup = config.cleanup();
 
     SettingsView {
         git_author: Author {
@@ -3646,6 +3677,22 @@ fn as_told(
             // Not out of the files at all: this is the server's own
             // environment, and the one thing on this page the human cannot set.
             compiles_cached: caches_compiles,
+        },
+        // And the Cleanup's two rows, each read the way the size above is: the
+        // days configured where somebody typed them, and the fallback with the
+        // flag beside it saying so, because a value nobody chose should be
+        // drawn as a placeholder rather than as a choice.
+        cleanup: CleanupView {
+            trim: CleanupStepView {
+                enabled: cleanup.trims(),
+                days: cleanup.trim_after(),
+                days_configured: cleanup.trim_after_configured().is_some(),
+            },
+            delete: CleanupStepView {
+                enabled: cleanup.deletes(),
+                days: cleanup.delete_after(),
+                days_configured: cleanup.delete_after_configured().is_some(),
+            },
         },
         // Where the setting sits rather than whether anybody has been here:
         // nothing configured is a merge, and there is no third state to draw.

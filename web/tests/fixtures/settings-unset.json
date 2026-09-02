@@ -1,4 +1,16 @@
 {
+  "cleanup": {
+    "delete": {
+      "days": 30,
+      "days_configured": false,
+      "enabled": false
+    },
+    "trim": {
+      "days": 3,
+      "days_configured": false,
+      "enabled": true
+    }
+  },
   "conflict_resolution": "Merge",
   "git_author": {
     "email": "",

@@ -18,6 +18,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
+use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
     Adopted, AgentType, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved, CheckRollup,
@@ -38,6 +39,16 @@ use verkstead_server::{
 /// One directory holds both, which is what the real server does: the database is
 /// `verkstead.db` inside the Data Directory.
 async fn app_watching(watched: &Path) -> (tempfile::TempDir, Router) {
+    let (dir, _pool, app) = app_and_pool_watching(watched).await;
+
+    (dir, app)
+}
+
+/// The same, with the pool beside it — for the tests about a fact the viewer
+/// reads and no endpoint of this namespace writes. A Cleanup's trim is the one
+/// of those: the sweep does it in the background, and what the page has to say
+/// about it is read back here.
+async fn app_and_pool_watching(watched: &Path) -> (tempfile::TempDir, SqlitePool, Router) {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))
         .await
@@ -45,7 +56,7 @@ async fn app_watching(watched: &Path) -> (tempfile::TempDir, Router) {
     let watched = WatchedPaths::resolve(&[watched.to_owned()]).unwrap();
     let data_dir = dir.path().to_owned();
 
-    (dir, router_watching(pool, watched, data_dir))
+    (dir, pool.clone(), router_watching(pool, watched, data_dir))
 }
 
 /// A git repository at `path`, with one commit on `main` so it has a branch to
@@ -93,6 +104,27 @@ async fn workbench() -> (tempfile::TempDir, tempfile::TempDir, Router, PathBuf, 
     let repo_id = listed_repos(&app).await;
 
     (watched, dir, app, repo, repo_id)
+}
+
+/// The same, with the pool beside it — see [`app_and_pool_watching`].
+async fn workbench_and_pool() -> (
+    tempfile::TempDir,
+    tempfile::TempDir,
+    Router,
+    SqlitePool,
+    i64,
+) {
+    let watched = tempfile::tempdir().unwrap();
+    let (dir, pool, app) = app_and_pool_watching(watched.path()).await;
+    let repo = repository(watched.path().join("verkstead"));
+
+    let registered: Registered =
+        post(&app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
+    assert_eq!(registered, Registered::Added);
+
+    let repo_id = listed_repos(&app).await;
+
+    (watched, dir, app, pool, repo_id)
 }
 
 /// A watched directory holding one registered repository that was *cloned* from
@@ -3930,6 +3962,46 @@ async fn unarchiving_returns_a_conversation_to_the_ordinary_list() {
     let view = opened(&app, id).await;
     assert!(!view.archived);
     assert_eq!(view.state, Lifecycle::Closed);
+}
+
+/// And what a Cleanup has taken is on the view too, which is what lets the page
+/// name the record Trimmed and a session's card say why its drill-down is
+/// missing.
+///
+/// Trimmed through the store rather than through an endpoint, because there is
+/// no endpoint: a trim is the sweep's, and the viewer only ever reads what it
+/// did.
+#[tokio::test]
+async fn a_trimmed_conversation_says_so_on_its_page() {
+    let (watched, _dir, app, pool, repo_id) = workbench_and_pool().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    close(&app, id).await;
+    archive(&app, id).await;
+
+    assert!(
+        !opened(&app, id).await.trimmed,
+        "nothing has been taken out of it yet",
+    );
+
+    assert_eq!(
+        store::trim_conversation(&pool, id).await.unwrap(),
+        store::Trimming::Trimmed,
+    );
+
+    let view = opened(&app, id).await;
+    assert!(view.trimmed);
+    assert!(view.archived, "and it is still put away");
+
+    // And the mark outlasts the archiving it was made under: what was taken is
+    // gone, so the page goes on being able to account for it.
+    assert_eq!(
+        unarchive(&app, id).await,
+        ConversationUnarchived::Unarchived
+    );
+
+    let view = opened(&app, id).await;
+    assert!(view.trimmed);
+    assert!(!view.archived);
 }
 
 /// Unarchiving one that was never put away is not an error — what the human

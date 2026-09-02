@@ -197,6 +197,21 @@ export function Output(props: {
     freshness: over ? "static" : { reconcile: "id" },
   }));
 
+  /// Whether what this pane came to draw was taken by a Cleanup.
+  ///
+  /// The Conversation's mark *and* an empty record, rather than the mark alone.
+  /// A trim takes what every session of the life it swept had printed, and a
+  /// Conversation steered back to life afterwards keeps the mark and prints
+  /// again — so the mark says a trim happened somewhere on this record, and the
+  /// emptiness says this session is one of the ones it reached.
+  ///
+  /// Which makes it the same reading for both halves of the switch: the
+  /// Transcript, the Capture standing in for it, and the Screen those bytes
+  /// would paint are one session's output read three ways, and the trim took
+  /// all three. What is left of the session is the card it was opened from.
+  const trimmed = () =>
+    props.conversation.trimmed && !spoke() && capture.data?.text === "";
+
   // Who ran the session, for the header: the same read the record's own card
   // makes, so opening a card names the run that card named. The list decides
   // one thing only — whether the account's own name is said after the model —
@@ -320,7 +335,9 @@ export function Output(props: {
       <Show
         when={showing() === "transcript"}
         fallback={
-          <Screen conversation={props.conversation} output={props.output} />
+          <Show when={!trimmed()} fallback={<Trimmed />}>
+            <Screen conversation={props.conversation} output={props.output} />
+          </Show>
         }
       >
         <Switch>
@@ -342,6 +359,13 @@ export function Output(props: {
               Could not read this capture: {capture.error?.message}
             </ErrorLine>
           </Match>
+          {/* Nothing to draw and a reason for it, which is the difference
+              between a record that was taken and a session that never said
+              anything. Above the Capture rather than inside its fallback,
+              because it answers for the Screen as well. */}
+          <Match when={trimmed()}>
+            <Trimmed />
+          </Match>
           <Match when={capture.data}>
             {(capture) => (
               <Show
@@ -358,6 +382,28 @@ export function Output(props: {
         </Switch>
       </Show>
     </>
+  );
+}
+
+/// What stands where a session's output was, once a Cleanup has taken it.
+///
+/// The loss explaining itself, which is the whole of what the workbench says
+/// about a trim on this pane: an empty terminal and a blank record are what a
+/// broken pane looks like, and the one thing that tells them apart is a
+/// sentence. Nothing here warns of a trim to come — the Conversation's own page
+/// names it Trimmed once one has happened, and this says which session it
+/// reached.
+///
+/// One component for both readings. The Transcript, the Capture behind it and
+/// the Screen those bytes would paint went in the same sweep, so a reader who
+/// switches finds the same answer rather than a second kind of nothing.
+function Trimmed(): JSX.Element {
+  return (
+    <Empty class={styles.trimmed}>
+      This session's record was trimmed. A cleanup takes what only this pane
+      showed, some days after the conversation is archived; the timeline keeps
+      the rest.
+    </Empty>
   );
 }
 

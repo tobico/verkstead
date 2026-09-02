@@ -129,6 +129,15 @@
   border-radius: 0.6rem;
 }
 
+/* And the sentence that stands where a Cleanup took the record. An `Empty`
+   notice like every other nothing in this pane, and painted no differently: the
+   pane has one voice for having nothing to show, and a trim is a reason rather
+   than a fault. All this carries is room to sit in, which the notice has no
+   opinion about. */
+.trimmed {
+  padding: 0.75rem;
+}
+
 /* And the session read the other way: what it was saying rather than how it
    looked. A list of turns down the pane, each one drawn as what it is — because
    what makes a Transcript readable is telling a person's turn from a tool's

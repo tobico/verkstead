@@ -65,6 +65,15 @@
   color: var(--ink-soft);
 }
 
+/* And the word for what a Cleanup took, in the same voice: a trim is a fact
+   about the record rather than about the work, so it is understated beside the
+   state and never in the accent. Nothing is waiting on anybody about it — it is
+   the loss saying so, on a Conversation the human archived themselves. */
+.status .trimmed {
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
 /* And the whole of the first line in the accent where something is waiting on
    the human, the state beside it included: what is being marked is the line
    rather than the word, and a subtitle left grey under an accented title would

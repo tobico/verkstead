@@ -1457,8 +1457,12 @@ in one press, for a Conversation the human is finished with and finished
 looking at; it refuses what closing refuses and nothing more.
 
 Reversible, which is what tells it from **Locked**: nothing is confirmed,
-because nothing is lost. The two words are not each other's — one is a Question
-Set settling for good, this is a Conversation leaving a list.
+because the archiving itself loses nothing. The two words are not each other's
+— one is a Question Set settling for good, this is a Conversation leaving a
+list. What archiving does start is the Cleanup's clocks — a **Trimmed**
+Conversation some days on, a **Deleted** one later where the settings turn
+that on — and unarchiving stops them; what a cleanup has taken by then stays
+taken, which is those two entries' story rather than this one's.
 
 Two ways back, and they are different things. **Unarchive** takes it out for
 good, and the Conversation is on the sidebar again as it was. **Show archived
@@ -1469,6 +1473,32 @@ beside the archivings and read back on every load.
 _Avoid_: locked (the Question Set word), deleted, hidden, closed (the state
 being archived, not the archiving), done, restore or unhide (the word is
 unarchive)
+
+**Trimmed**:
+An **Archived** Conversation the Cleanup has taken the bulk out of: the full
+agent output, the transcripts and the session records are gone, while every
+card on the Timeline stays — the Brief, the Question Sets, the commit
+summaries, the pull request — so the record still reads whole, and a Share of
+it is the Share it always was, a Share never having included what trimming
+takes. Named on the Conversation's page, and a card whose drill-down is gone
+says so rather than breaking; nothing anywhere announces a trim to come, only
+one that has happened. On by default, three days after the archiving, with the
+switch and the days in the settings' Cleanup section; a fresh archiving makes
+a Conversation trimmable again, so one steered back to life and put away again
+has its new bulk taken too.
+_Avoid_: pruned, compacted, cleaned (the sweep's word, not the state's)
+
+**Deleted**:
+A Conversation the Cleanup has removed for good: every row it owned, Timeline
+and all, gone from the sidebar even under Show archived, its URL answering
+plainly that there is no such conversation. The one thing in Verkstead that
+forgets, so it ships off — thirty days after the archiving where the settings
+turn it on, and never anything the human did not archive first. It touches
+nothing outside Verkstead's own record: the git branch stays, because a branch
+is the repository's and may hold work worth reading, and a published Share
+stays published, because publishing it was deliberate.
+_Avoid_: purged, erased, removed, archived (deletion is the end of an archived
+Conversation, not a kind of archiving)
 
 **Unseen**:
 A Conversation Verkstead has told the human about and they have not looked at

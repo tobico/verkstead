@@ -216,10 +216,19 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 }
 
 /// The two tables a Verkstead of before kept a stopped Conversation in, named
-/// here and nowhere else: both are read once and never written, and nothing
-/// else in this build knows either word.
+/// here and nowhere else: both are read once and never written, and no other
+/// module in this build spells either word.
 const HALTS: &str = "halts";
 const ASKED: &str = "stops_asked";
+
+/// The same two as a list, for the one thing that has to reach them without
+/// knowing what they are called.
+///
+/// A delete takes every row naming one Conversation — see
+/// [`super::delete_conversation`] — and on a database old enough to still have
+/// these, a row left in one of them is one of those rows. It asks for the names
+/// rather than holding them, so that they go on being this module's word.
+pub(crate) const CARRIED: &[&str] = &[HALTS, ASKED];
 
 /// Read the stops a Verkstead of before kept beside the Conversations onto the
 /// Conversations themselves.

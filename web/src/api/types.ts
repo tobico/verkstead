@@ -567,6 +567,66 @@ export type CheckRollup = "Passed" | "Running" | "Failed";
 export type Checked = "Passed" | "Running" | "Failed";
 
 /**
+ * And the Cleanup as the human has just set it.
+ *
+ * The days are a string because that is what a form holds, and an empty one is
+ * *no duration configured* rather than a duration of nothing — which is what
+ * clearing the field means and what puts the default back. So is anything that
+ * is not a whole number of days: the page sends what was typed, and nothing
+ * here is refused over it.
+ */
+export type CleanupEdit = { trim: CleanupStepEdit, delete: CleanupStepEdit, };
+
+/**
+ * One row of it: the switch, and the days as they were typed.
+ */
+export type CleanupStepEdit = { enabled: boolean, days: string, };
+
+/**
+ * One of those two: whether it happens, and how long after the archiving.
+ *
+ * The switch is never null, the way the build cache's is not: what comes back
+ * is where the switch *sits* rather than whether anybody has touched it. The
+ * days are always a number for the same reason, with the flag beside them
+ * saying whether it is one somebody chose — which is what lets the field draw
+ * the default as a placeholder.
+ */
+export type CleanupStepView = { enabled: boolean, 
+/**
+ * How many days after the archiving, counted from the archiving itself
+ * rather than from the other step: the two clocks are independent, so a
+ * delete sooner than a trim is a Conversation deleted before it was ever
+ * trimmed rather than anything to put right.
+ */
+days: number, 
+/**
+ * Whether those days are ones somebody typed, rather than the default
+ * being shown.
+ */
+days_configured: boolean, };
+
+/**
+ * The Cleanup as the settings page draws it: the two things that happen to an
+ * archived Conversation, and when.
+ *
+ * Two rows of the same shape and two different answers with nothing
+ * configured, which is what the page has to draw: the trim is on at three
+ * days, and the delete is off at thirty.
+ */
+export type CleanupView = { 
+/**
+ * The bulk taken out of an archived Conversation: the full agent output,
+ * the Transcripts and the session names, which is everything a Share never
+ * carried.
+ */
+trim: CleanupStepView, 
+/**
+ * And the whole of it taken away, which is the one thing here that
+ * forgets.
+ */
+delete: CleanupStepView, };
+
+/**
  * One pull request the comment landed on.
  */
 export type CommentedOn = { 
@@ -1372,6 +1432,22 @@ timeline: Array<TimelineEvent>,
  * was, because being off the sidebar is the whole of what archiving does.
  */
 archived: boolean, 
+/**
+ * Whether the Cleanup has taken the bulk out of it — see the store's
+ * `cleanup` module, and **Trimmed** in the glossary.
+ *
+ * Two things on the page turn on it, and each of them is the loss
+ * explaining itself rather than a warning of one to come: the record names
+ * itself Trimmed where it says how the work ended, and a session's card —
+ * drawn from the summary that survived — says the detail was trimmed
+ * instead of opening on an empty pane.
+ *
+ * The mark rather than the clock. It stays true through an unarchiving and
+ * through a fresh archiving after one, because what was taken is gone
+ * whatever the Conversation does next, and a card whose drill-down is
+ * missing needs its explanation for as long as it is on the Timeline.
+ */
+trimmed: boolean, 
 /**
  * The Events that stay in view rather than scrolling past with the record.
  *
@@ -2639,6 +2715,12 @@ export type SettingsEdit = { git_author: Author, github_token: TokenEdit,
  */
 rust_build_cache: BuildCacheEdit, 
 /**
+ * And what the Cleanup is to do after an archiving, as values for that
+ * reason again: two switches and two durations, and a save says where each
+ * of them is to stand.
+ */
+cleanup: CleanupEdit, 
+/**
  * And how a conflicted pull request is resolved where its Repo says
  * nothing, as a value for the same reason: there are two answers and a save
  * says which of them this is to be.
@@ -2732,6 +2814,11 @@ github_token: TokenSaved | null,
  * And how the shared Rust build cache stands.
  */
 rust_build_cache: BuildCacheView, 
+/**
+ * And what the Cleanup does to an archived Conversation, and how long
+ * after the archiving it does it.
+ */
+cleanup: CleanupView, 
 /**
  * And how a conflicted pull request is resolved in every Repo that has not
  * said otherwise.

@@ -628,6 +628,21 @@ pub struct ConversationView {
     /// was, because being off the sidebar is the whole of what archiving does.
     pub archived: bool,
 
+    /// Whether the Cleanup has taken the bulk out of it — see the store's
+    /// `cleanup` module, and **Trimmed** in the glossary.
+    ///
+    /// Two things on the page turn on it, and each of them is the loss
+    /// explaining itself rather than a warning of one to come: the record names
+    /// itself Trimmed where it says how the work ended, and a session's card —
+    /// drawn from the summary that survived — says the detail was trimmed
+    /// instead of opening on an empty pane.
+    ///
+    /// The mark rather than the clock. It stays true through an unarchiving and
+    /// through a fresh archiving after one, because what was taken is gone
+    /// whatever the Conversation does next, and a card whose drill-down is
+    /// missing needs its explanation for as long as it is on the Timeline.
+    pub trimmed: bool,
+
     /// The Events that stay in view rather than scrolling past with the record.
     ///
     /// Apart from the Timeline rather than in it, because that is what pinning

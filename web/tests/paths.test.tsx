@@ -88,6 +88,12 @@ const REST = {
     enabled: TOLD.rust_build_cache.enabled,
     size: TOLD.rust_build_cache.size,
   },
+  // And the Cleanup as the read left it, each duration as the string a form
+  // holds — see [`heldCleanup`].
+  cleanup: {
+    trim: { enabled: true, days: "5" },
+    delete: { enabled: true, days: "90" },
+  },
   conflict_resolution: TOLD.conflict_resolution,
   share_on_done: TOLD.share_on_done,
 };

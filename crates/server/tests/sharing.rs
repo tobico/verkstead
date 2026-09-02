@@ -385,6 +385,82 @@ async fn a_share_carries_what_was_asked_answered_and_built() {
     }
 }
 
+/// A trimmed Conversation shares exactly as it did before the trim.
+///
+/// The two halves of one rule, asked from the other side: what a trim takes is
+/// what only a drill-down shows, and a share never carried any of that. So the
+/// file a colleague opens is the same file whether it was made the day the work
+/// finished or a month after the Cleanup swept — which is what makes trimming
+/// safe to do unasked.
+///
+/// Shared on both sides of the trim rather than compared against a written-out
+/// expectation, because the claim is *the same*, and every field of it is one a
+/// later stage might add to.
+#[tokio::test]
+async fn trimming_leaves_the_share_exactly_as_it_was() {
+    let (_dir, pool, app) = app().await;
+    let id = everything(&pool).await;
+
+    // Something for the trim to take: a share of a Conversation with no bulk on
+    // it would come back the same for the wrong reason.
+    let printed = store::timeline(&pool, id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find_map(|event| matches!(event.event, store::Event::AgentOutput(..)).then_some(event.id))
+        .expect("a session printed into that Conversation");
+
+    store::append_capture(
+        &pool,
+        printed,
+        "the session said a great deal\n",
+        &store::Summary {
+            lines: 1,
+            turns: Some(2),
+            latest: "the session said a great deal".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+
+    store::append_transcript(&pool, printed, &[r#"{"type":"assistant"}"#.to_owned()])
+        .await
+        .unwrap();
+
+    store::close_conversation(&pool, id).await.unwrap();
+    assert_eq!(
+        store::archive_conversation(&pool, id).await.unwrap(),
+        store::Archiving::Archived,
+    );
+
+    let before = share(&app, id).await;
+
+    assert_eq!(
+        store::trim_conversation(&pool, id).await.unwrap(),
+        store::Trimming::Trimmed,
+    );
+
+    assert_eq!(
+        store::capture(&pool, id, printed).await.unwrap(),
+        Some(String::new()),
+        "which really took what it was there to take",
+    );
+
+    let after = share(&app, id).await;
+
+    assert_eq!(
+        SharedConversation {
+            // The one field that is meant to differ: a share is a moment, and
+            // these are two of them.
+            exported_at: before.exported_at.clone(),
+            ..after
+        },
+        before,
+        "the record, every sheet and every pane, exactly as it was before the \
+         bulk was taken",
+    );
+}
+
 #[tokio::test]
 async fn a_share_has_nothing_left_on_it_to_act_on() {
     let (_dir, pool, app) = app().await;

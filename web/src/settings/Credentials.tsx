@@ -91,7 +91,7 @@ import type {
 import { Empty, ErrorLine, Note } from "../notices";
 import { utcStamp } from "../set/when";
 import { PaneHead } from "../workbench/PaneHead";
-import { heldPaths } from "./held";
+import { heldCleanup, heldPaths } from "./held";
 import styles from "./Credentials.module.css";
 
 /// The two files as they stand, read once for the two panes that draw them.
@@ -271,6 +271,9 @@ export function GithubPane(props: {
         ? (told()?.rust_build_cache.size ?? "")
         : "",
     },
+    // And what becomes of an archived Conversation, likewise — see
+    // [`heldCleanup`].
+    cleanup: heldCleanup(told()),
     // And how a conflicted pull request is resolved, likewise.
     conflict_resolution: told()?.conflict_resolution ?? "Merge",
     // And the Watched Paths and the binds the settings hold, again for that

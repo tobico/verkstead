@@ -2900,6 +2900,15 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             // build cache that has been configured rather than only its
             // defaults — `settings-unset.json` above is the other half.
             "rust_build_cache": { "enabled": true, "size": "50G" },
+            // And a Cleanup somebody has been through: both durations typed and
+            // the delete turned on, for the reason the size above is typed —
+            // this is the fixture of a Verkstead that has been told everything,
+            // and `settings-unset.json` is the one holding the defaults the page
+            // draws as placeholders.
+            "cleanup": {
+                "trim": { "enabled": true, "days": "5" },
+                "delete": { "enabled": true, "days": "90" },
+            },
             // And a rebase configured, for the reason the size above is typed:
             // the fixture of a Verkstead that has been told everything carries
             // the answer somebody chose, and `settings-unset.json` is the one

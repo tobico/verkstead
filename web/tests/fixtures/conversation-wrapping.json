@@ -158,6 +158,7 @@
       }
     }
   ],
+  "trimmed": false,
   "waiting": false,
   "waiting_on_checks": false,
   "working": false,
