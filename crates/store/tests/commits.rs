@@ -14,7 +14,7 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Commit, Event, add_companion, commit, commit_repo, open_database, record_commit,
+    Commit, Event, add_companion, commit, commit_repo, forget_commit, open_database, record_commit,
     recorded_commits, register_repo, start_conversation, timeline,
 };
 
@@ -560,5 +560,134 @@ async fn a_commit_says_which_repository_to_read_it_out_of() {
         commit_repo(&pool, id + 1, theirs).await.unwrap(),
         None,
         "and it is reached through the Timeline it is on, like the commit itself",
+    );
+}
+
+/// The other half of a sweep. A branch whose commits have been rewritten —
+/// rebased to settle a conflict, or amended — carries the same work under new
+/// shas, and what the Timeline holds under the old ones is taken off it.
+///
+/// Everything hanging off the Event goes with it: the commit row the Timeline
+/// draws from, and the Commit Summary the details pane renders above the diff.
+#[tokio::test]
+async fn a_forgotten_commit_takes_its_event_and_its_summary_with_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let (id, repo) = conversation(&pool).await;
+
+    let written = summarised("a1b2c3d", "feat: rate limiting", "A bucket per account.");
+
+    let event = record_commit(&pool, id, repo, &written)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let kept = record_commit(&pool, id, repo, &landed("9f8e7d6", "feat: the other half"))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        forget_commit(&pool, id, repo, "a1b2c3d").await.unwrap(),
+        Some(event),
+        "the Event it was, which is what the sweep logs",
+    );
+
+    assert_eq!(
+        on_the_timeline(&pool, id).await,
+        vec![landed("9f8e7d6", "feat: the other half")],
+        "the Timeline is left with the commit the branch still carries",
+    );
+    assert_eq!(
+        commit(&pool, id, event).await.unwrap(),
+        None,
+        "and the commit row it was drawn from has gone with its Event",
+    );
+    assert!(
+        commit(&pool, id, kept).await.unwrap().is_some(),
+        "which is the one Event and not the Timeline",
+    );
+
+    // The summary is what would be left behind: it hangs off the Event by id,
+    // so a row surviving it would attach itself to whatever Event was written
+    // next.
+    let recorded = record_commit(&pool, id, repo, &landed("1a2b3c4", "feat: rate limiting"))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        commit(&pool, id, recorded).await.unwrap().unwrap().summary,
+        None,
+        "the forgotten commit's summary went with it",
+    );
+}
+
+/// A commit that is not there is nothing to forget, which is the answer
+/// `record_commit` gives for one that already is: a sweep offers the whole of
+/// what it read, and being wrong about either costs nothing.
+#[tokio::test]
+async fn forgetting_a_commit_that_is_not_there_is_nothing() {
+    let (_dir, pool) = fresh_pool().await;
+    let (id, repo) = conversation(&pool).await;
+
+    record_commit(&pool, id, repo, &landed("a1b2c3d", "feat: rate limiting"))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        forget_commit(&pool, id, repo, "9f8e7d6").await.unwrap(),
+        None,
+        "a sha this Conversation never recorded",
+    );
+    assert!(
+        forget_commit(&pool, id, repo, "a1b2c3d")
+            .await
+            .unwrap()
+            .is_some(),
+        "the one it did",
+    );
+    assert_eq!(
+        forget_commit(&pool, id, repo, "a1b2c3d").await.unwrap(),
+        None,
+        "and forgetting it a second time is nothing either",
+    );
+}
+
+/// A sha is the commit's identity only with the Conversation and the Repo beside
+/// it: two repositories are two histories, and two Conversations off one branch
+/// hold the same shas.
+#[tokio::test]
+async fn forgetting_one_conversations_commit_leaves_anothers_alone() {
+    let (_dir, pool) = fresh_pool().await;
+    let (id, own) = conversation(&pool).await;
+
+    let askance = registered(&pool, "askance").await;
+    add_companion(&pool, id, askance).await.unwrap();
+
+    record_commit(&pool, id, own, &landed("a1b2c3d", "feat: rate limiting"))
+        .await
+        .unwrap()
+        .unwrap();
+    record_commit(
+        &pool,
+        id,
+        askance,
+        &landed("a1b2c3d", "feat: the other half"),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    forget_commit(&pool, id, own, "a1b2c3d").await.unwrap();
+
+    assert_eq!(
+        recorded_commits(&pool, id, own).await.unwrap(),
+        Vec::<String>::new(),
+    );
+    assert_eq!(
+        recorded_commits(&pool, id, askance).await.unwrap(),
+        vec!["a1b2c3d".to_owned()],
+        "the companion's commit is another repository's history",
     );
 }

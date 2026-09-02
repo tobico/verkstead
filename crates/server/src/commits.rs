@@ -21,11 +21,13 @@
 //! the listing leaves out everything reachable from it. See [`excluded`].
 //!
 //! A branch is swept whole rather than followed from where the last sweep got
-//! to. What makes that cheap is the store: it already knows which commits are on
-//! the Timeline, so the reading of git that costs anything — a message and a
-//! patch per commit — happens only for the ones that are not. And what makes
-//! it *correct* is the same thing, because a branch is not a queue: one that was
-//! amended, reset or rebased has commits before its tip that no sweep has seen.
+//! to, and a sweep subtracts as well as adds. What makes that cheap is the
+//! store: it already knows which commits are on the Timeline, so the reading of
+//! git that costs anything — a message and a patch per commit — happens only for
+//! the ones that are not. And what makes it *correct* is the same thing, because
+//! a branch is not a queue: one that was amended or rebased carries the same work
+//! under new shas, so the sweep records those and forgets the recorded commits
+//! the branch has stopped carrying. See [`forgotten`].
 //!
 //! One session may be watching several branches. A Conversation's own is one of
 //! them and each read-write companion is another — see [`watched`] — and each
@@ -231,8 +233,15 @@ pub(crate) fn watched(conversation: &store::Conversation) -> Vec<Branch> {
     watching
 }
 
-/// Take one look at the branch, and record whatever is on it that is not on the
-/// Timeline yet.
+/// Take one look at the branch: record whatever is on it that is not on the
+/// Timeline yet, and forget whatever is on the Timeline that the branch no
+/// longer carries.
+///
+/// Both halves, because a branch is not a queue. A rebase or an amend leaves the
+/// same work under new shas, and a sweep that only ever added would put it on
+/// the Timeline a second time beside originals the repository has stopped
+/// holding — see [`since`] for what is added and [`forgotten`] for what is taken
+/// away.
 ///
 /// What the branch is called is asked before it is read, because it may have
 /// moved since the watcher was spawned — see [`now`], and [`crate::renames`] for
@@ -256,10 +265,18 @@ async fn sweep(pool: &SqlitePool, nudges: &Nudges, conversation_id: i64, branch:
         }
     };
 
-    let landed = {
+    // Both halves of the sweep in one hop off the runtime: what the branch has
+    // gained and what it has stopped carrying are two readings of the same set
+    // of shas, and a second `spawn_blocking` would be a second thread for a git
+    // read that costs what this one does.
+    let (landed, rewritten) = {
         let branch = branch.clone();
-        match tokio::task::spawn_blocking(move || since(&branch, &recorded)).await {
-            Ok(landed) => landed,
+        match tokio::task::spawn_blocking(move || {
+            (since(&branch, &recorded), forgotten(&branch, &recorded))
+        })
+        .await
+        {
+            Ok(swept) => swept,
             Err(error) => {
                 tracing::error!(error = ?error, conversation_id, "sweeping a branch failed");
                 return;
@@ -267,13 +284,42 @@ async fn sweep(pool: &SqlitePool, nudges: &Nudges, conversation_id: i64, branch:
         }
     };
 
-    // Nothing new, which is what nearly every sweep finds: no store write, and
-    // nobody told the world moved.
-    if landed.is_empty() {
+    // Nothing either way, which is what nearly every sweep finds: no store
+    // write, and nobody told the world moved.
+    if landed.is_empty() && rewritten.is_empty() {
         return;
     }
 
-    let mut recorded_any = false;
+    let mut moved = false;
+
+    // What the branch has stopped carrying goes first, so that a rebase's
+    // Timeline is never seen holding the work twice: the commits that replaced
+    // these are in `landed` below, and this sweep is what puts them there.
+    for sha in rewritten {
+        match store::forget_commit(pool, conversation_id, branch.repo_id, &sha).await {
+            Ok(Some(event_id)) => {
+                tracing::info!(
+                    conversation_id,
+                    event_id,
+                    sha,
+                    repo = %branch.repo.display(),
+                    "a rewritten commit came off the Timeline"
+                );
+                moved = true;
+            }
+            // Forgotten by another sweep between the read above and this write,
+            // which costs nothing to be wrong about for the reason recording one
+            // twice does.
+            Ok(None) => {}
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id, sha, "forgetting a commit failed");
+                // Gone on from rather than stopped, unlike the recording below:
+                // these are Events being taken away rather than put in order, so
+                // one that will not go says nothing about the next. The branch
+                // still does not carry it, and the next sweep offers it again.
+            }
+        }
+    }
 
     for commit in landed {
         match store::record_commit(pool, conversation_id, branch.repo_id, &commit).await {
@@ -285,7 +331,7 @@ async fn sweep(pool: &SqlitePool, nudges: &Nudges, conversation_id: i64, branch:
                     repo = %branch.repo.display(),
                     "a commit landed on the Timeline"
                 );
-                recorded_any = true;
+                moved = true;
             }
             // Recorded by another sweep between the read above and this write.
             // One watcher per repository per Conversation makes that unlikely
@@ -303,7 +349,7 @@ async fn sweep(pool: &SqlitePool, nudges: &Nudges, conversation_id: i64, branch:
         }
     }
 
-    if recorded_any {
+    if moved {
         nudges.announce(Nudge::Commit {
             conversation: conversation_id,
         });
@@ -406,6 +452,83 @@ fn since(branch: &Branch, recorded: &[String]) -> Vec<store::Commit> {
         .filter(|sha| !sha.is_empty())
         .filter(|sha| !recorded.iter().any(|known| known == sha))
         .filter_map(|sha| describe(&branch.repo, sha))
+        .collect()
+}
+
+/// The recorded commits the branch has stopped carrying, which are the ones to
+/// take off the Timeline.
+///
+/// A Repo whose conflicts are settled by rebasing has every commit of the branch
+/// rewritten under a new sha when one is, and an amend does the same to one
+/// commit on any Repo. The rewritten work arrives through [`since`] as commits
+/// no sweep has seen, so without this the Timeline would hold it twice: once
+/// under the shas the branch carries, and once under shas the repository has let
+/// go of.
+///
+/// One read for the whole set rather than one per commit: `--no-walk` says each
+/// argument stands for itself rather than for its history, so what comes back is
+/// exactly the recorded shas the branch no longer holds.
+///
+/// **Ancestry, and not the listing [`since`] makes.** What decides this is
+/// whether git still has the commit on the branch — never whether it survived
+/// the base branch's exclusion. A Conversation whose pull request has been
+/// merged is wholly reachable from its base branch, and one swept by the listing
+/// would have its entire Timeline taken away the first time a Follow-up session
+/// ran. It also leaves the base-branch commits already recorded on older
+/// Timelines exactly where they are.
+///
+/// `--ignore-missing` for the shas, so that one git has garbage collected does
+/// not fail the whole read. Such a sha is simply not reported, and its Event
+/// stays — which is the safe way round: a commit nothing can be said about is
+/// better drawn than silently taken off the record.
+///
+/// The branch is resolved before it is asked about, and that is the same care
+/// the other way round. `--ignore-missing` drops whatever it cannot make sense
+/// of, the exclusion included, so a branch that has been deleted would come back
+/// as *every commit is gone* and empty the Timeline. A branch that will not
+/// resolve forgets nothing instead.
+///
+/// Blocking, like everything that shells out to git.
+fn forgotten(branch: &Branch, recorded: &[String]) -> Vec<String> {
+    if recorded.is_empty() {
+        return Vec::new();
+    }
+
+    let Some(carrying) = crate::worktrees::resolve(&branch.repo, &branch.branch) else {
+        tracing::warn!(
+            repo = %branch.repo.display(),
+            branch = branch.branch,
+            "the repository has no such branch, so nothing is taken off the Timeline",
+        );
+        return Vec::new();
+    };
+
+    let mut listing = vec![
+        "rev-list".to_owned(),
+        "--ignore-missing".to_owned(),
+        "--no-walk".to_owned(),
+        "--end-of-options".to_owned(),
+    ];
+
+    listing.extend(recorded.iter().cloned());
+    listing.push(format!("^{carrying}"));
+
+    let arguments: Vec<&str> = listing.iter().map(String::as_str).collect();
+
+    let Some(listed) = git(&branch.repo, &arguments) else {
+        tracing::warn!(
+            repo = %branch.repo.display(),
+            branch = branch.branch,
+            "the repository would not say which of these commits it still holds"
+        );
+        return Vec::new();
+    };
+
+    listed
+        .lines()
+        .map(str::trim)
+        .filter(|sha| !sha.is_empty())
+        .map(str::to_owned)
         .collect()
 }
 
@@ -1442,5 +1565,377 @@ mod tests {
         };
 
         assert!(since(&branch, &[]).is_empty());
+    }
+
+    /// A pool, a registered Repo and a Conversation on it: what the sweeps that
+    /// write to a Timeline need beside the repository they read.
+    ///
+    /// The database goes inside `.git`, which is the one directory in a
+    /// repository that no `git add -A` or rebase in these tests will look at.
+    async fn recording(repo: &Path) -> (SqlitePool, i64, i64) {
+        let pool = crate::open_database(&repo.join(".git/verkstead.db"))
+            .await
+            .unwrap();
+
+        let repo_id = store::register_repo(&pool, repo, "verkstead", "main")
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+
+        let conversation = store::start_conversation(&pool, repo_id, "rate-limiting")
+            .await
+            .unwrap()
+            .unwrap();
+
+        (pool, conversation, repo_id)
+    }
+
+    /// The commits on a Conversation's Timeline, as the sha and the subject each
+    /// card draws.
+    async fn on_the_timeline(pool: &SqlitePool, conversation: i64) -> Vec<(String, String)> {
+        store::timeline(pool, conversation)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter_map(|event| match event.event {
+                store::Event::Commit(commit) => Some((commit.sha, commit.subject)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Every commit the branch carries past `base`, oldest first.
+    fn carrying(repo: &Path, base: &str, branch: &str) -> Vec<String> {
+        run(
+            repo,
+            &["rev-list", "--reverse", &format!("{base}..{branch}")],
+        )
+        .lines()
+        .map(str::to_owned)
+        .collect()
+    }
+
+    /// A Repo whose conflicts are settled by rebasing has every commit of the
+    /// branch rewritten under a new sha when one is. The rewritten work arrives
+    /// as commits no sweep has seen, so a sweep that only ever added would put
+    /// the work on the Timeline twice — once under shas the repository has let
+    /// go of.
+    #[tokio::test]
+    async fn a_rebase_leaves_each_commit_on_the_timeline_once() {
+        let dir = repository();
+        let path = dir.path();
+        let base = head(path);
+
+        let (pool, conversation, repo_id) = recording(path).await;
+
+        run(path, &["checkout", "--quiet", "-b", "rate-limiting"]);
+        for (file, message) in [("one.txt", "feat: one"), ("two.txt", "feat: two")] {
+            std::fs::write(path.join(file), "x\n").unwrap();
+            run(path, &["add", file]);
+            run(path, &["commit", "-m", message]);
+        }
+
+        let branch = Branch {
+            repo_id,
+            repo: path.to_owned(),
+            branch: "rate-limiting".to_owned(),
+            following: Following::Nothing,
+            base: base.clone(),
+            base_ref: Some("main".to_owned()),
+            default_branch: "main".to_owned(),
+        };
+
+        sweep(&pool, &Nudges::new(), conversation, &branch).await;
+
+        let before = carrying(path, &base, "rate-limiting");
+
+        assert_eq!(
+            on_the_timeline(&pool, conversation)
+                .await
+                .into_iter()
+                .map(|(sha, _)| sha)
+                .collect::<Vec<_>>(),
+            before,
+            "the two commits as the branch first carried them",
+        );
+
+        // What the base branch gained, and the rebase that settles it: every
+        // commit of the branch is rewritten under a new sha.
+        run(path, &["checkout", "--quiet", "main"]);
+        std::fs::write(path.join("elsewhere.rs"), "fn elsewhere() {}\n").unwrap();
+        run(path, &["add", "elsewhere.rs"]);
+        run(path, &["commit", "-m", "feat: somebody else's work"]);
+
+        run(path, &["checkout", "--quiet", "rate-limiting"]);
+        run(path, &["rebase", "--quiet", "main"]);
+
+        sweep(&pool, &Nudges::new(), conversation, &branch).await;
+
+        let after = carrying(path, "main", "rate-limiting");
+
+        assert_ne!(after, before, "the rebase rewrote both of them");
+        assert_eq!(
+            on_the_timeline(&pool, conversation).await,
+            vec![
+                (after[0].clone(), "feat: one".to_owned()),
+                (after[1].clone(), "feat: two".to_owned()),
+            ],
+            "each commit is on the Timeline once, under the sha the branch now \
+             carries",
+        );
+    }
+
+    /// The same on any Repo, without a resolution strategy coming into it: an
+    /// amended commit is a commit rewritten under a new sha, and it replaces the
+    /// one it rewrote rather than joining it.
+    #[tokio::test]
+    async fn an_amended_commit_replaces_the_one_it_rewrote() {
+        let dir = repository();
+        let path = dir.path();
+        let base = head(path);
+
+        let (pool, conversation, repo_id) = recording(path).await;
+
+        run(path, &["checkout", "--quiet", "-b", "rate-limiting"]);
+        std::fs::write(path.join("limiter.rs"), "fn allow() {}\n").unwrap();
+        run(path, &["add", "limiter.rs"]);
+        run(path, &["commit", "-m", "feat: rate limitting"]);
+
+        let branch = Branch {
+            repo_id,
+            repo: path.to_owned(),
+            branch: "rate-limiting".to_owned(),
+            following: Following::Nothing,
+            base: base.clone(),
+            base_ref: Some("main".to_owned()),
+            default_branch: "main".to_owned(),
+        };
+
+        sweep(&pool, &Nudges::new(), conversation, &branch).await;
+
+        run(
+            path,
+            &["commit", "--quiet", "--amend", "-m", "feat: rate limiting"],
+        );
+
+        sweep(&pool, &Nudges::new(), conversation, &branch).await;
+
+        assert_eq!(
+            on_the_timeline(&pool, conversation).await,
+            vec![(head(path), "feat: rate limiting".to_owned())],
+            "the commit the branch carries, and not the typo it was amended from",
+        );
+    }
+
+    /// What decides that a commit is gone is whether git still holds it on the
+    /// branch, and never whether it survived the base branch's exclusion.
+    ///
+    /// A Conversation whose pull request has been merged is wholly reachable
+    /// from its base branch, so one swept by the listing would take its entire
+    /// Timeline away the first time a Follow-up session ran.
+    #[tokio::test]
+    async fn a_conversation_whose_branch_was_merged_keeps_its_whole_timeline() {
+        let dir = repository();
+        let path = dir.path();
+        let base = head(path);
+
+        let (pool, conversation, repo_id) = recording(path).await;
+
+        run(path, &["checkout", "--quiet", "-b", "rate-limiting"]);
+        std::fs::write(path.join("limiter.rs"), "fn allow() {}\n").unwrap();
+        run(path, &["add", "limiter.rs"]);
+        run(path, &["commit", "-m", "feat: rate limiting"]);
+
+        let branch = Branch {
+            repo_id,
+            repo: path.to_owned(),
+            branch: "rate-limiting".to_owned(),
+            following: Following::Nothing,
+            base,
+            base_ref: Some("main".to_owned()),
+            default_branch: "main".to_owned(),
+        };
+
+        sweep(&pool, &Nudges::new(), conversation, &branch).await;
+
+        let recorded = on_the_timeline(&pool, conversation).await;
+        assert_eq!(recorded.len(), 1, "the work's own commit");
+
+        // The pull request merging, which is what puts the whole branch on the
+        // base branch — and what a Follow-up session sweeps after.
+        run(path, &["checkout", "--quiet", "main"]);
+        run(
+            path,
+            &[
+                "merge",
+                "--quiet",
+                "--no-ff",
+                "-m",
+                "Merge pull request",
+                "rate-limiting",
+            ],
+        );
+        run(path, &["checkout", "--quiet", "rate-limiting"]);
+
+        sweep(&pool, &Nudges::new(), conversation, &branch).await;
+
+        assert_eq!(
+            on_the_timeline(&pool, conversation).await,
+            recorded,
+            "the branch still carries it, whatever the base branch has swallowed",
+        );
+    }
+
+    /// A recorded sha the repository has stopped holding at all — garbage
+    /// collected after a rebase, or a repository restored from somewhere older —
+    /// leaves its Event where it is.
+    ///
+    /// The safe way round: a commit nothing can be said about is better drawn
+    /// than silently taken off the record.
+    #[tokio::test]
+    async fn a_sha_git_no_longer_holds_at_all_leaves_its_event_alone() {
+        let dir = repository();
+        let path = dir.path();
+        let base = head(path);
+
+        let (pool, conversation, repo_id) = recording(path).await;
+
+        run(path, &["checkout", "--quiet", "-b", "rate-limiting"]);
+        std::fs::write(path.join("limiter.rs"), "fn allow() {}\n").unwrap();
+        run(path, &["add", "limiter.rs"]);
+        run(path, &["commit", "-m", "feat: rate limiting"]);
+
+        // A commit on the Timeline that this repository has never heard of.
+        store::record_commit(
+            &pool,
+            conversation,
+            repo_id,
+            &store::Commit {
+                sha: "0000000000000000000000000000000000000000".to_owned(),
+                subject: "feat: collected away".to_owned(),
+                files: 1,
+                insertions: 1,
+                deletions: 0,
+                summary: None,
+                repo: None,
+                merge: false,
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        let branch = Branch {
+            repo_id,
+            repo: path.to_owned(),
+            branch: "rate-limiting".to_owned(),
+            following: Following::Nothing,
+            base,
+            base_ref: Some("main".to_owned()),
+            default_branch: "main".to_owned(),
+        };
+
+        sweep(&pool, &Nudges::new(), conversation, &branch).await;
+
+        let subjects: Vec<String> = on_the_timeline(&pool, conversation)
+            .await
+            .into_iter()
+            .map(|(_, subject)| subject)
+            .collect();
+
+        assert_eq!(
+            subjects,
+            vec![
+                "feat: collected away".to_owned(),
+                "feat: rate limiting".to_owned(),
+            ],
+            "the sha git cannot answer for is not reported gone, so its Event stays",
+        );
+    }
+
+    /// And the branch itself is resolved before git is asked which commits it
+    /// carries, because `--ignore-missing` drops whatever it cannot make sense
+    /// of — the exclusion included. A branch that has been deleted would
+    /// otherwise come back as *every commit is gone*.
+    #[test]
+    fn a_branch_that_will_not_resolve_forgets_nothing() {
+        let dir = repository();
+        let path = dir.path();
+        let base = head(path);
+
+        run(path, &["checkout", "--quiet", "-b", "rate-limiting"]);
+        std::fs::write(path.join("limiter.rs"), "fn allow() {}\n").unwrap();
+        run(path, &["add", "limiter.rs"]);
+        run(path, &["commit", "-m", "feat: rate limiting"]);
+
+        let recorded = vec![head(path)];
+
+        let branch = Branch {
+            repo_id: 1,
+            repo: path.to_owned(),
+            branch: "no-such-branch".to_owned(),
+            following: Following::Nothing,
+            base,
+            base_ref: Some("main".to_owned()),
+            default_branch: "main".to_owned(),
+        };
+
+        assert!(
+            forgotten(&branch, &recorded).is_empty(),
+            "a branch there is nothing to ask about is a branch nothing is \
+             forgotten from",
+        );
+    }
+
+    /// The page is told, so a Timeline open on the Conversation re-reads and a
+    /// details pane on a forgotten Event has something to recover from.
+    ///
+    /// Swept after a reset, which is the one shape where a sweep forgets and
+    /// records nothing: what says the page was told is this Nudge and nothing
+    /// else.
+    #[tokio::test]
+    async fn the_page_is_told_when_a_commit_is_forgotten() {
+        let dir = repository();
+        let path = dir.path();
+        let base = head(path);
+
+        let (pool, conversation, repo_id) = recording(path).await;
+
+        run(path, &["checkout", "--quiet", "-b", "rate-limiting"]);
+        std::fs::write(path.join("limiter.rs"), "fn allow() {}\n").unwrap();
+        run(path, &["add", "limiter.rs"]);
+        run(path, &["commit", "-m", "feat: rate limiting"]);
+
+        let branch = Branch {
+            repo_id,
+            repo: path.to_owned(),
+            branch: "rate-limiting".to_owned(),
+            following: Following::Nothing,
+            base: base.clone(),
+            base_ref: Some("main".to_owned()),
+            default_branch: "main".to_owned(),
+        };
+
+        sweep(&pool, &Nudges::new(), conversation, &branch).await;
+
+        run(path, &["reset", "--quiet", "--hard", &base]);
+
+        let nudges = Nudges::new();
+        let mut listening = nudges.subscribe();
+
+        sweep(&pool, &nudges, conversation, &branch).await;
+
+        assert!(
+            on_the_timeline(&pool, conversation).await.is_empty(),
+            "the commit the branch stopped carrying came off the Timeline",
+        );
+        assert!(
+            matches!(
+                listening.try_recv(),
+                Ok(Nudge::Commit { conversation: told }) if told == conversation
+            ),
+            "and the pages were told to look again",
+        );
     }
 }

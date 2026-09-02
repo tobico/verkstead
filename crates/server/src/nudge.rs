@@ -74,7 +74,9 @@ impl Nudges {
         let _ = self.0.send(moved);
     }
 
-    fn subscribe(&self) -> broadcast::Receiver<Nudge> {
+    /// Listen to what is announced. The stream is one listener; a test that
+    /// wants to know whether a caller told the pages anything is another.
+    pub(crate) fn subscribe(&self) -> broadcast::Receiver<Nudge> {
         self.0.subscribe()
     }
 }

@@ -268,14 +268,90 @@ pub async fn record_commit(
     Ok(Some(event_id))
 }
 
+/// Take a commit off a Conversation's Timeline, and say which Event it was.
+///
+/// The other half of a sweep. A branch whose commits have been rewritten —
+/// rebased to settle a conflict, or amended — carries the same work under new
+/// shas, and a Timeline that only ever gained would hold both: the work twice
+/// over, half of it under shas the repository no longer has. So a sweep that
+/// finds a recorded commit the branch has stopped carrying forgets it, and
+/// records the rewritten one in its place — see the server's `commits` module
+/// for what decides which those are.
+///
+/// `None` is a commit that is not there, which is the same answer
+/// [`record_commit`] gives for one that already is: neither is a failure, and
+/// both are what a sweep run twice over the same branch runs into.
+///
+/// One transaction, for the reason recording is one: the Event, the commit row
+/// and the Commit Summary are one thing on the Timeline, and an Event left
+/// behind with no commit row under it is one [`Event::read`] refuses rather
+/// than draws. And an immediate one, the same way and for the same reason —
+/// this runs in the sweep that records, against a database a session ending is
+/// having every one of its branches swept in at once.
+pub async fn forget_commit(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    repo_id: i64,
+    sha: &str,
+) -> Result<Option<i64>> {
+    let mut tx = super::writing(pool, "forgetting a commit").await?;
+
+    // Asked inside the transaction, so that the Event it finds is the Event the
+    // deletes below act on. The Conversation and the Repo are asked along with
+    // the sha because the three of them together are the commit's identity: a
+    // sha on its own names a commit on somebody else's Timeline just as well.
+    let recorded: Option<(i64,)> = sqlx::query_as(
+        "SELECT event_id FROM commits
+         WHERE conversation_id = ? AND repo_id = ? AND sha = ?",
+    )
+    .bind(conversation_id)
+    .bind(repo_id)
+    .bind(sha)
+    .fetch_optional(&mut *tx)
+    .await
+    .with_context(|| {
+        format!("looking for commit {sha} of Repo {repo_id} on Conversation {conversation_id}")
+    })?;
+
+    let Some((event_id,)) = recorded else {
+        return Ok(None);
+    };
+
+    // What hangs off the Event first, then the commit row, then the Event
+    // itself: each of the three points at the one above it, so this is the order
+    // that never leaves a row naming something that has gone.
+    sqlx::query("DELETE FROM commit_summaries WHERE event_id = ?")
+        .bind(event_id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("forgetting the summary of Event {event_id}"))?;
+
+    sqlx::query("DELETE FROM commits WHERE event_id = ?")
+        .bind(event_id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("forgetting commit {sha} of Event {event_id}"))?;
+
+    sqlx::query("DELETE FROM timeline_events WHERE id = ?")
+        .bind(event_id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("taking Event {event_id} off the Timeline"))?;
+
+    tx.commit().await.context("forgetting a commit")?;
+
+    Ok(Some(event_id))
+}
+
 /// Which commits a Conversation already has on its Timeline out of one Repo.
 ///
-/// What a sweep of a branch asks before it goes reading git: the shas it comes
-/// back with are the ones there is nothing left to do about, and everything else
-/// on the branch is a commit to describe and record. Asked as a set rather than
-/// as "the last one recorded", because the last one is not a place in a branch —
-/// a branch that was amended or reset has commits before its tip that this has
-/// never seen.
+/// What a sweep of a branch asks before it goes reading git, and it is both of
+/// the sweep's questions: everything on the branch that is not among these is a
+/// commit to describe and record, and everything among these the branch no
+/// longer carries is a commit to forget — see [`forget_commit`]. Asked as a set
+/// rather than as "the last one recorded", because the last one is not a place
+/// in a branch: one that was amended or rebased carries neither the commits this
+/// has seen nor them in the order it saw them.
 ///
 /// Per Repo and not per Conversation, because that is what a sweep is: one
 /// watcher reads one branch of one repository, and the commits on another repo's

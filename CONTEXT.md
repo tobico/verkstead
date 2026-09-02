@@ -392,6 +392,16 @@ nothing else — a file or two, a handful of lines — so it reads as an ordinar
 small commit unless something says otherwise: the word sits beside the hash, in
 the register a companion Repo's name is drawn in. Every other commit is
 unlabelled, and so is every commit recorded before the record could say.
+**And it is an Event for as long as the branch carries it.** A Repo whose
+conflicts are resolved by rebasing has every commit of the branch rewritten
+under a new sha when one is settled, and an amend does the same to one commit on
+any Repo: the sweep records the rewritten commit and forgets what the branch has
+stopped carrying, so the work is on the Timeline once rather than twice. What
+decides that is git's own ancestry rather than the rule above — a Conversation
+whose pull request has been merged is wholly reachable from its base branch, and
+it keeps its whole Timeline. A sha the repository no longer holds at all keeps
+its Event too: a commit nothing can be said about is better drawn than silently
+taken off the record.
 _Avoid_: item, record, message, step
 
 **Share**:

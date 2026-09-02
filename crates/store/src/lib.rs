@@ -57,7 +57,9 @@ pub use archives::{
     unarchive_conversation,
 };
 pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
-pub use commits::{Commit, commit, commit_repo, commits_landed, record_commit, recorded_commits};
+pub use commits::{
+    Commit, commit, commit_repo, commits_landed, forget_commit, record_commit, recorded_commits,
+};
 pub use companions::{
     Adding, Change, Companion, CompanionMode, CompanionWorktree, Configured, Joining, Opening,
     Removing, add_companion, companions, configure_companion, remove_companion,
