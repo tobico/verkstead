@@ -8,11 +8,33 @@
 //! registration naming a binary that has moved, and it refuses an address
 //! somebody else is already listening on without having made anything on the
 //! way.
+//!
+//! **Half of that is a Unix machine's**, and the half that is says so at each
+//! test rather than here. Two things are what divide them. The browser is
+//! started through the desktop's own opener, and on a Unix that is a program on
+//! the `PATH` a test can put a stand-in in front of, while on Windows it is
+//! `powershell.exe` and `explorer.exe` by name — which Windows finds in its own
+//! system directory whatever the `PATH` says, so there is nothing to stand in
+//! front of and nothing there can watch what would have been opened. **What
+//! keeps a browser shut on Windows is `--no-open`**, on every test that runs
+//! there, and a test written for that machine without it opens a real browser
+//! on whoever is running it. And the dialogs: a Verkstead that could not take
+//! its address draws one, which a session with no screen never reaches — the
+//! session every test here has on a Unix, and not what a Windows machine with
+//! somebody signed into it is.
+//!
+//! **The registration is the machine's own on Windows**, which is the one thing
+//! these cannot keep to themselves there: it is a value in this user's
+//! registry, and no variable redirects that the way `HOME` redirects a file. A
+//! run of these tests on a machine whose box is ticked repoints that value at
+//! the test binary — which is a Verkstead that runs, and which the next launch
+//! of the real one puts back, that being what the rewriting is for. The
+//! registration's own behaviour is unit-tested against a key of the suite's own
+//! instead; see `crates/desktop/src/startup/run_key.rs`.
 
 use std::net::TcpListener;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Output, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 /// How long a test waits on the app it just started before calling it dead.
@@ -29,19 +51,32 @@ fn free_port() -> u16 {
         .port()
 }
 
-/// What the app finds when it goes looking for a browser: an `xdg-open` that
-/// writes down what it was asked to open and exits.
+/// What the app finds when it goes looking for a browser: on a Unix an
+/// `xdg-open` that writes down what it was asked to open and exits, and on
+/// Windows a directory with nothing in it at all.
 ///
-/// The first thing on the list the opener tries, and the only thing on the
-/// `PATH` the app is started with — so what is written here is what a browser
-/// would have been shown, and an empty file is a browser that was never asked.
+/// It is the whole of the `PATH` the app is started with either way, and on a
+/// Unix that is what makes it work: the opener tries `xdg-open` first, so what
+/// is written here is what a browser would have been shown and an empty file is
+/// a browser that was never asked.
+///
+/// **It buys nothing on Windows**, and the directory is there to keep the two
+/// arms one shape rather than to stop anything. The Windows opener starts
+/// `powershell.exe` and then `explorer.exe`, and Windows finds both in its own
+/// system directory before it ever reads the `PATH` — so a stand-in cannot be
+/// put in front of them and an empty directory does not keep them from running.
+/// What keeps a browser shut there is `--no-open`; see this file's own docs.
 struct Opener {
     bin: PathBuf,
+    #[cfg(unix)]
     opened: PathBuf,
 }
 
 impl Opener {
+    #[cfg(unix)]
     fn in_dir(dir: &Path) -> Opener {
+        use std::os::unix::fs::PermissionsExt;
+
         let bin = dir.join("bin");
         let opened = dir.join("opened");
         std::fs::create_dir_all(&bin).unwrap();
@@ -60,12 +95,22 @@ impl Opener {
         Opener { bin, opened }
     }
 
+    #[cfg(not(unix))]
+    fn in_dir(dir: &Path) -> Opener {
+        let bin = dir.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+
+        Opener { bin }
+    }
+
     /// What the app asked for, or nothing where it has asked for nothing.
+    #[cfg(unix)]
     fn asked_for(&self) -> Option<String> {
         std::fs::read_to_string(&self.opened).ok()
     }
 
     /// Wait for the app to ask for `url`, which it does as it comes up.
+    #[cfg(unix)]
     fn await_asked_for(&self, url: &str) {
         let deadline = Instant::now() + PATIENCE;
         while !self.asked_for().is_some_and(|asked| asked.contains(url)) {
@@ -90,14 +135,9 @@ impl App {
     /// Start the app with `args`, and block until it answers.
     ///
     /// The environment is cut down to what a desktop session gives it and no
-    /// more: `PATH` is the stand-in browser alone, so nothing on this machine is
-    /// really opened, and everything Verkstead reads out of the environment is
-    /// dropped, so a machine with Verkstead configured for real is not what a
-    /// test reads.
-    ///
-    /// `DISPLAY` and `WAYLAND_DISPLAY` go with them, which is what says there is
-    /// no screen here — see [`verkstead_desktop::dialog`]. A test that left them
-    /// would be one that popped a dialog up in front of whoever was running it.
+    /// more: `PATH` is the stand-in browser's directory alone, and everything
+    /// Verkstead reads out of the environment is a directory of the test's own
+    /// or is dropped — see [`profile`].
     ///
     /// `env` is what a test puts back, which is only ever what it is about.
     fn start(port: u16, opener: &Opener, home: &Path, args: &[&str], env: &[(&str, &str)]) -> App {
@@ -136,6 +176,10 @@ impl App {
     ///
     /// Read once it has gone rather than while it runs: the pipe is where it
     /// writes, and reading to the end of one is what says there is no more.
+    ///
+    /// The one test that reads stderr from a running app is a Unix machine's,
+    /// so this is too rather than being carried unused.
+    #[cfg(unix)]
     fn stop_saying(&mut self) -> String {
         let Some(mut child) = self.child.take() else {
             return String::new();
@@ -169,8 +213,32 @@ fn command(opener: &Opener, home: &Path, env: &[(&str, &str)]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_verkstead-desktop"));
     command
         .env("PATH", &opener.bin)
-        .env("HOME", home)
         .env_remove("RUST_LOG")
+        .env_remove("VERKSTEAD_LISTEN")
+        .env_remove("VERKSTEAD_DATA_DIR")
+        .env_remove("VERKSTEAD_WATCHED_PATHS");
+    profile(&mut command, home);
+    for (name, value) in env {
+        command.env(name, value);
+    }
+    command
+}
+
+/// The home directory the app is pointed at, said in the variables this
+/// platform keeps its parts in — and everything of this machine's that would
+/// otherwise be read instead, taken away.
+///
+/// The point of both halves is the same: a run of these tests reads and writes
+/// a directory of the test's own, and a machine with Verkstead configured for
+/// real is not what a test reads.
+#[cfg(unix)]
+fn profile(command: &mut Command, home: &Path) {
+    command
+        .env("HOME", home)
+        // `DISPLAY` and `WAYLAND_DISPLAY` go, which is what says there is no
+        // screen here — see `verkstead_desktop::dialog`. A test that left them
+        // would be one that popped a dialog up in front of whoever was running
+        // it.
         .env_remove("DISPLAY")
         .env_remove("WAYLAND_DISPLAY")
         .env_remove("XDG_DATA_HOME")
@@ -185,14 +253,25 @@ fn command(opener: &Opener, home: &Path, env: &[(&str, &str)]) -> Command {
         // An AppImage says where the file the human has is, and a machine
         // running these tests out of one would otherwise have the registration
         // named for it rather than for the binary the test built.
-        .env_remove("APPIMAGE")
-        .env_remove("VERKSTEAD_LISTEN")
-        .env_remove("VERKSTEAD_DATA_DIR")
-        .env_remove("VERKSTEAD_WATCHED_PATHS");
-    for (name, value) in env {
-        command.env(name, value);
-    }
+        .env_remove("APPIMAGE");
+}
+
+/// Windows keeps the same answer in three variables rather than one, and every
+/// directory Verkstead resolves comes out of them: `%USERPROFILE%` is what
+/// `HOME` is here, `%APPDATA%` is where the Data Directory goes and
+/// `%LOCALAPPDATA%` is where the Log Directory and the Build Cache do — see
+/// `verkstead_server::platform`. So a profile of the test's own is those three,
+/// laid out under `home` the way a real one is laid out under a real profile.
+///
+/// There is no screen to take away, and none is taken: what says whether a
+/// Windows session has one is the window station rather than anything in the
+/// environment — see `verkstead_desktop::screen`.
+#[cfg(windows)]
+fn profile(command: &mut Command, home: &Path) {
     command
+        .env("USERPROFILE", home)
+        .env("APPDATA", home.join("AppData").join("Roaming"))
+        .env("LOCALAPPDATA", home.join("AppData").join("Local"));
 }
 
 /// The flags a test starts the app with: its own address and its own Data
@@ -212,6 +291,11 @@ fn as_args(flags: &[String; 4]) -> Vec<&str> {
 
 /// Started with nothing said about opening, the app serves the viewer and hands
 /// it to the browser: the whole of what double-clicking an icon is for.
+///
+/// A Unix machine's, for the browser: the opener there is a program on the
+/// `PATH` and the stand-in is what says what was handed over. What a Windows
+/// machine has instead is the human who double-clicks the exe.
+#[cfg(unix)]
 #[test]
 fn the_app_serves_the_viewer_and_opens_it() {
     let tmp = tempfile::tempdir().unwrap();
@@ -244,16 +328,15 @@ fn the_app_serves_the_viewer_and_opens_it() {
 
 /// Told nothing about where its work goes, the app keeps it in the platform's
 /// own Data Directory — which is the whole reason an icon and a shell start the
-/// same Verkstead. The XDG variable stands in for the platform here so the test
-/// reads a directory of its own; which directory each platform answers with is
-/// [`verkstead_server::platform`]'s own unit tests.
+/// same Verkstead. The home directory of the test's own is what makes that a
+/// directory of the test's own on every platform; which directory each platform
+/// answers with is [`verkstead_server::platform`]'s own unit tests, and where
+/// that leaves it under a home is [`platform_data_dir`].
 #[test]
 fn nothing_said_puts_the_work_in_the_platform_data_directory() {
     let tmp = tempfile::tempdir().unwrap();
     let opener = Opener::in_dir(tmp.path());
     let home = tmp.path().join("home");
-    let xdg = home.join("data");
-    std::fs::create_dir_all(&xdg).unwrap();
     let port = free_port();
 
     let mut app = App::start(
@@ -261,10 +344,10 @@ fn nothing_said_puts_the_work_in_the_platform_data_directory() {
         &opener,
         &home,
         &["--listen", &format!("127.0.0.1:{port}"), "--no-open"],
-        &[("XDG_DATA_HOME", xdg.to_str().unwrap())],
+        &[],
     );
 
-    let chosen = xdg.join("verkstead");
+    let chosen = platform_data_dir(&home);
     assert!(
         chosen.join("verkstead.db").exists(),
         "the database belongs in the platform directory at {}",
@@ -274,8 +357,29 @@ fn nothing_said_puts_the_work_in_the_platform_data_directory() {
     app.stop();
 }
 
+/// Where the Data Directory goes under a home that says nothing else about
+/// itself, which is what every one of these tests gives the app.
+#[cfg(target_os = "linux")]
+fn platform_data_dir(home: &Path) -> PathBuf {
+    home.join(".local/share/verkstead")
+}
+
+#[cfg(target_os = "macos")]
+fn platform_data_dir(home: &Path) -> PathBuf {
+    home.join("Library/Application Support/Verkstead")
+}
+
+#[cfg(windows)]
+fn platform_data_dir(home: &Path) -> PathBuf {
+    home.join("AppData").join("Roaming").join("Verkstead")
+}
+
 /// `--no-open` is about the window appearing and nothing else: the server comes
 /// up exactly as it otherwise would, and no browser is asked for.
+///
+/// A Unix machine's for the second half of that, which is the half a stand-in
+/// can see — see [`the_app_serves_the_viewer_and_opens_it`].
+#[cfg(unix)]
 #[test]
 fn no_open_serves_just_the_same_and_opens_nothing() {
     let tmp = tempfile::tempdir().unwrap();
@@ -304,6 +408,15 @@ fn no_open_serves_just_the_same_and_opens_nothing() {
 /// it is found before the app has made anything: there is a second Verkstead on
 /// this machine, and the one that lost is not the one that should have written
 /// to its directory.
+///
+/// A Unix machine's, because of the drawing: the refusal is a dialog wherever
+/// there is a screen to put one on, and this test waits for the process to end.
+/// These tests have no screen on a Unix and every Windows session somebody is
+/// signed into has one, so the same run there is a message box waiting for a
+/// dismissal that a test cannot give it. What settles it on Windows is the
+/// human at the machine; the words that dialog carries are the crate's own unit
+/// test, which needs no machine at all.
+#[cfg(unix)]
 #[test]
 fn a_taken_address_is_refused_by_the_port_it_names_and_makes_nothing() {
     let tmp = tempfile::tempdir().unwrap();
@@ -371,6 +484,10 @@ fn the_help_names_the_flag_and_the_server_options_it_sits_beside() {
 /// no tray and every other reason to go on serving. The screen every other test
 /// here has is *no* screen, which is the case the app never even asks the
 /// toolkit about; this is the other one, where it asks and is refused.
+///
+/// Linux's, because `DISPLAY` is: the other two platforms name no screen in the
+/// environment at all.
+#[cfg(target_os = "linux")]
 #[test]
 fn a_screen_that_is_named_and_is_not_there_serves_without_a_tray() {
     let tmp = tempfile::tempdir().unwrap();
@@ -395,9 +512,24 @@ fn a_screen_that_is_named_and_is_not_there_serves_without_a_tray() {
 }
 
 /// Where the log file goes on a machine that says nothing but where its home
-/// is, which is the Linux default and the case every desktop actually has.
+/// is, which is each platform's own default and the case every desktop actually
+/// has.
+#[cfg(target_os = "linux")]
 fn log_file(home: &Path) -> PathBuf {
     home.join(".local/state/verkstead/verkstead.log")
+}
+
+#[cfg(target_os = "macos")]
+fn log_file(home: &Path) -> PathBuf {
+    home.join("Library/Logs/Verkstead/verkstead.log")
+}
+
+#[cfg(windows)]
+fn log_file(home: &Path) -> PathBuf {
+    home.join("AppData")
+        .join("Local")
+        .join("Verkstead")
+        .join("verkstead.log")
 }
 
 /// A tray app has no stdout anybody will ever read, so the server's log goes to
@@ -460,10 +592,14 @@ fn rust_log_filters_the_file_as_it_filters_the_clis_stdout() {
 
 /// A machine with nowhere to keep a log file has only lost the log, which is
 /// nothing like a machine with nowhere to keep a Data Directory: the app says
-/// where the logging went instead and goes on serving. A relative home is how a
-/// Unix machine gets there — see `verkstead_server::platform`, where a directory
-/// resolved against wherever the app was launched from is the thing the platform
-/// default replaces.
+/// where the logging went instead and goes on serving.
+///
+/// A Unix machine's, and the reason is in what gets it there: a relative home —
+/// see `verkstead_server::platform`, where a directory resolved against wherever
+/// the app was launched from is the thing the platform default replaces. Windows
+/// reaches the same state by naming no `%LOCALAPPDATA%` at all, which is not a
+/// profile anybody has.
+#[cfg(unix)]
 #[test]
 fn nowhere_to_keep_a_log_file_serves_and_says_where_the_log_went() {
     let tmp = tempfile::tempdir().unwrap();
@@ -507,7 +643,11 @@ fn nowhere_to_keep_a_log_file_serves_and_says_where_the_log_went() {
 /// the Data Directory that cannot be written and the machine with no `HOME`.
 ///
 /// The dialog beside it is the one part of this no test here can see, wanting a
-/// screen that these deliberately do not have.
+/// screen that these deliberately do not have — which is what makes this a Unix
+/// machine's, for the reason
+/// [`a_taken_address_is_refused_by_the_port_it_names_and_makes_nothing`] is:
+/// this failure is drawn too, and a Windows session has a screen to draw it on.
+#[cfg(unix)]
 #[test]
 fn a_startup_that_fails_after_the_address_says_so_in_the_log() {
     let tmp = tempfile::tempdir().unwrap();
@@ -552,13 +692,16 @@ fn a_startup_that_fails_after_the_address_says_so_in_the_log() {
     );
 }
 
-fn stderr(output: &Output) -> String {
+#[cfg(unix)]
+fn stderr(output: &std::process::Output) -> String {
     String::from_utf8_lossy(&output.stderr).into_owned()
 }
 
 /// Where the startup registration goes on a machine that says nothing but where
 /// its home is, which is the platform's own default and the case every desktop
 /// actually has: the XDG autostart entry here, and the launch agent on macOS.
+/// Windows keeps its own in the registry rather than under a home, which is
+/// what leaves the two tests below a Unix machine's — see this file's own docs.
 #[cfg(target_os = "linux")]
 fn registration(home: &Path) -> PathBuf {
     home.join(".config/autostart/net.tobico.Verkstead.desktop")
@@ -592,6 +735,7 @@ fn naming_somewhere_else() -> &'static str {
 /// and the next launch by hand is where that is put right — the whole of why
 /// this is "rewritten every launch" rather than "written once". The launch is an
 /// ordinary one in every other way: it serves, and it opens the viewer.
+#[cfg(unix)]
 #[test]
 fn a_launch_rewrites_a_startup_registration_that_names_somewhere_else() {
     let tmp = tempfile::tempdir().unwrap();
@@ -629,6 +773,7 @@ fn a_launch_rewrites_a_startup_registration_that_names_somewhere_else() {
 /// And a machine nobody asked to be started on is left alone: a launch rewrites
 /// what somebody asked for rather than deciding it for them, and the box is the
 /// only thing that ever registers Verkstead.
+#[cfg(unix)]
 #[test]
 fn a_launch_registers_nothing_nobody_asked_for() {
     let tmp = tempfile::tempdir().unwrap();
@@ -649,4 +794,48 @@ fn a_launch_registers_nothing_nobody_asked_for() {
     );
 
     app.stop();
+}
+
+/// The exe carries its own icon, which is what Explorer, the taskbar and
+/// Alt-Tab draw it with — and the whole of what a portable file with nothing
+/// beside it can be drawn from.
+///
+/// Read out of the built binary rather than out of the build's own log: the
+/// icon is compiled in by a resource compiler that `crates/desktop/build.rs`
+/// runs, and a run of it that found nothing to do would otherwise be a green
+/// build and an exe with a default icon. The resource compiler copies each
+/// image out of the `.ico` as it stands, so what says the icon arrived is the
+/// image's own bytes being in there.
+///
+/// Two of the seven sizes rather than all of them: what can go wrong here is
+/// the whole icon being absent or the file being a different one, and the
+/// smallest and the largest between them say both. Searching a debug binary is
+/// not free.
+#[cfg(windows)]
+#[test]
+fn the_exe_carries_the_icon_it_was_built_with() {
+    let ico = std::fs::read(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packaging/net.tobico.Verkstead.ico"),
+    )
+    .expect("packaging/ should hold the committed icon");
+    let exe =
+        std::fs::read(env!("CARGO_BIN_EXE_verkstead-desktop")).expect("the exe should be built");
+
+    // An icon file is a directory and then the images: two bytes saying how
+    // many, and sixteen per entry, of which the last eight are the image's
+    // length and where in the file it starts.
+    let images = u16::from_le_bytes([ico[4], ico[5]]) as usize;
+    assert!(images >= 2, "the icon should hold every size, got {images}");
+
+    for image in [0, images - 1] {
+        let entry = 6 + image * 16;
+        let size = u32::from_le_bytes(ico[entry + 8..entry + 12].try_into().unwrap()) as usize;
+        let at = u32::from_le_bytes(ico[entry + 12..entry + 16].try_into().unwrap()) as usize;
+        let drawn = &ico[at..at + size];
+
+        assert!(
+            exe.windows(drawn.len()).any(|carried| carried == drawn),
+            "the exe should carry image {image} of packaging/net.tobico.Verkstead.ico"
+        );
+    }
 }

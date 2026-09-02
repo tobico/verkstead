@@ -1047,6 +1047,14 @@
   font-size: 0.9rem;
 }
 
+/* And what stands where the button would be on a Verkstead that runs no
+   sessions: the same size as the note under a button, because that is what it
+   is — the state, said in words, where there is nothing to press. */
+.startGrilling .noSessions {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
 /* Under the pointer, everything on this pane that can be pressed. Together at
    the foot of the file rather than each beside its own card: a hover state has
    to be inside a query like this one — see `styles/base.css`, where the scheme

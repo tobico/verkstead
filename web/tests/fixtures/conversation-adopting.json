@@ -35,6 +35,7 @@
   },
   "resets": null,
   "review_pairing": "Nothing",
+  "sessions": "Run",
   "shared": null,
   "state": "Draft",
   "stop_asked": false,

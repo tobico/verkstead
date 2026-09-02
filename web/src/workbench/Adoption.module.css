@@ -50,6 +50,14 @@
   font-size: 0.9rem;
 }
 
+/* And what stands where the press would be on a Verkstead that runs no
+   sessions, drawn as the note under a button is: the state in words, where
+   there is nothing to press. */
+.noSessions {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
 /* Under the pointer, the accent it is filled with taken one step deeper — the
    same step every filled button in the app takes. */
 @media (hover: hover) {

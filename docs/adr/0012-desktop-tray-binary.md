@@ -60,26 +60,50 @@ The desktop app is deliberately plain about its limits:
   sign of it going. A risk taken with open eyes: the day it goes, Mac sessions
   go with it until something replaces them.
 
-  Windows is untouched by any of this. Its session machinery stays cfg-gated
-  out, and the UI state that says sessions need Linux is still built for it.
+  Windows is untouched by any of this. The UI state the bullet above promised
+  — the one saying a session cannot be started here — is not something this
+  port built either: it stayed a decision with nothing behind it until the
+  Windows port, which is the stage that built it.
+
+  Amended: **the Windows port gates at the leaf call sites rather than around
+  the modules.** Measured against the tree when that port was planned, the code
+  that will not compile there is the pseudo-terminal and four call sites under
+  it; everything above them — the sessions module, the runner, the Screen, the
+  Capture, the transcript readers — is ordinary portable Rust. So it goes on
+  being built there, and what stands between a Windows Verkstead and a session
+  it cannot run is one honest refusal where a session would start. `HOME` and
+  the Build Cache resolve there from `%USERPROFILE%` and `%LOCALAPPDATA%`
+  rather than being skipped on a platform that runs none: both are what a
+  session will want when one arrives. And the state says **Windows**, and says
+  **not yet** — a Mac runs sessions now, and a stage after the port brings them
+  to Windows as well.
 - **A taken port is an error.** If `127.0.0.1:8422` is already bound — a second
   copy, or the NixOS-module daemon — the app shows an error dialog and exits
   rather than fronting the running server or picking another port.
 - **Unsigned on macOS and Windows.** The Gatekeeper approval dance is
   documented; SmartScreen's "run anyway" is left to the reader. Signing is a
   cost decision to revisit, not an architectural one.
+
+  Amended: **SmartScreen's is written out as well.** The stage that shipped the
+  exe put its two clicks beside the download in `docs/adoption.md`, where
+  Gatekeeper's three already were: a reader stopped by a blue window whose only
+  button says *Don't run* is not one to leave to work it out. What stands is the
+  decision to ship unsigned; what changed is that both platforms' way past it is
+  now written down.
 - **Update checking gains nothing.** The server's daily poll and the viewer's
   banner (public-release stage 05) already cover the desktop; the tray adds no
   notifier and no self-update.
 
 Packaging: a Windows portable exe, a universal (`lipo`) macOS app bundle in a
 dmg, and a Linux x86_64 AppImage, each built by its own leg of the release
-workflow beside the four bare-CLI legs. **Flatpak is deferred**: Flatpak's own
-sandbox refuses the nested namespaces bubblewrap needs, so a working Flatpak
-must run the bundled server on the host through `flatpak-spawn --host` — a
-workaround stack not worth shipping in the first release. When demand appears it
-ships as a `.flatpak` bundle on GitHub releases, not Flathub. The nix flake
-stays daemon-only. The app identifier everywhere is `net.tobico.Verkstead`.
+workflow beside the bare-CLI legs — four of those until the Windows port, which
+adds a fifth for the same reason it is nearly free: once the server compiles
+there, so does the CLI. **Flatpak is deferred**: Flatpak's own sandbox refuses
+the nested namespaces bubblewrap needs, so a working Flatpak must run the
+bundled server on the host through `flatpak-spawn --host` — a workaround stack
+not worth shipping in the first release. When demand appears it ships as a
+`.flatpak` bundle on GitHub releases, not Flathub. The nix flake stays
+daemon-only. The app identifier everywhere is `net.tobico.Verkstead`.
 
 With a tray app launched from an icon rather than a shell, two defaults that
 assumed a terminal move too: the Data Directory's default becomes the platform

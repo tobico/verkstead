@@ -268,7 +268,10 @@ fn unscoped(said: &str) -> bool {
         || said.contains("not found")
 }
 
-#[cfg(test)]
+/// The same shell-script `gh` [`crate::github`]'s own tests run, and asked on
+/// the same platforms — and a git remote made on the local filesystem beside
+/// it, which is what lets a publish be proved without a network.
+#[cfg(all(test, unix))]
 mod tests {
     use std::path::PathBuf;
 

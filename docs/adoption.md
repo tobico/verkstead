@@ -46,14 +46,16 @@ Nothing has been released under this name yet, so what follows is what a `v*`
 tag produces rather than something to fetch today — [releasing.md](releasing.md)
 says what a tag builds and where it puts it.
 
-There are three ways in, and they are three different things rather than three
+There are four ways in, and they are four different things rather than four
 spellings of one. **The flake and the NixOS module run the headless daemon**, on
 a machine that is always on and answering from wherever you are. **The AppImage
 is the same server started from an icon**, on the Linux desktop in front of you,
 with the viewer in your browser and a tray icon over it. **The dmg is that same
-app for a Mac**, with the icon in the menu bar instead. Which one you want is
-which of those machines you were describing; two at once is two Verksteads, and
-the second to reach port 8422 says so in a dialog and exits.
+app for a Mac**, with the icon in the menu bar instead. **The exe is that same
+app for Windows**, and is the whole download rather than something to install.
+Which one you want is which of those machines you were describing; two at once
+is two Verksteads, and the second to reach port 8422 says so in a dialog and
+exits.
 
 ### The daemon, on NixOS
 
@@ -274,6 +276,70 @@ applied to the app itself rather than to a child it spawns. ADR-0012 takes that
 with open eyes, and it is the one thing here that could stop working without
 anybody touching Verkstead: the day the command goes, Mac sessions go with it
 until something replaces them.
+
+### The desktop app, on Windows
+
+`Verkstead-x86_64.exe` is the whole download and the whole install: the server,
+the viewer and everything the tray is drawn with in one file, with no installer
+and no MSI behind it (ADR-0012). It is portable — put it wherever you keep such
+things, a folder of your own or a stick, and double-click it. x86_64 only, which
+is every Intel and AMD machine, and an arm64 one runs it under the emulation
+Windows does for exactly this.
+
+**The first launch is then stopped, and that is expected.** The exe is unsigned
+— there is no code-signing certificate behind it, which is
+[ADR-0012](adr/0012-desktop-tray-binary.md)'s decision rather than an oversight
+— and Windows marks a file that arrived from the internet, so SmartScreen puts a
+blue **Windows protected your PC** window in front of it with a **Don't run**
+button and nothing else that looks like a way on. There is a way on, and it is
+two clicks:
+
+1. Click **More info**, which is the line under the message and the whole of
+   what is hidden here.
+2. It names the file and says *Unknown publisher*, and a **Run anyway** button
+   appears at the bottom. Click that.
+
+Once, rather than at every launch: what was allowed through is that copy of the
+file, and starting it again — by hand, or from Launch on Startup — is ordinary.
+A newer download is a different file and wants the same two clicks. The other
+way round is to take the mark off before the first launch instead: right-click
+the exe, **Properties**, and tick **Unblock** at the bottom of the **General**
+tab.
+
+What is on the screen after that is an icon in the notification area, and the
+menu on it is the Linux tray's four: **Open** brings the viewer back, and is
+what a double-click on the icon does; **View Logs** opens the file under
+`%LOCALAPPDATA%\Verkstead` that the server's logging goes to when there is no
+console to print it in; **Launch on Startup** is a checkbox over a
+`net.tobico.Verkstead` value under
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`; and **Exit** stops the
+server. **Windows hides an icon it has not seen before**, in the flyout the `^`
+on the taskbar opens — dragging it out of there onto the taskbar is what pins
+it, and until you do, the app is running with its icon one click further away
+than this describes.
+
+**A moved exe repoints its own registration.** Every launch rewrites the Run
+value while it is there, with the path of the file that is running, so a
+portable exe that has been moved to another folder heals the entry the next time
+you start it by hand — and a machine that never ticked the box is never
+registered. What the box cannot see is Windows' own second opinion: the
+**Startup apps** tab in Task Manager, which Explorer records separately, so
+switching Verkstead off there leaves the box ticked and the value where it was.
+
+`--no-open` starts it without the browser and `--data-dir` moves the Data
+Directory off `%APPDATA%\Verkstead`, both of them for a run from a terminal — an
+app started from Explorer is started with no arguments at all. It is a
+windows-subsystem binary, so double-clicking it opens no console window, and a
+run from PowerShell prints nothing where you started it: the log file is the
+account of a run either way.
+
+**Sessions do not run on Windows**, and the workbench says so where one would be
+started rather than failing to start one: *Verkstead does not run sessions on
+Windows yet: an agent works in a terminal, and Windows has none to give it.*
+Everything else there works — the Repos, the Briefs, the Question Sets, the
+Timeline, the pull requests — and a Conversation whose sessions should run is a
+Conversation for a Linux machine or a Mac. Bringing them here is a later stage's
+work, and nothing about this download changes when it lands.
 
 Out of a checkout instead — the same server, told `--data-dir .` so that
 `verkstead.db` and the rest land in the checkout rather than in the platform

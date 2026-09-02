@@ -840,6 +840,17 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         return Ok(GrillingStarted::NotDrafting);
     }
 
+    // And in front of everything this press makes, on a build that runs no
+    // sessions: the branch, the worktree and the frozen Brief are what a session
+    // is started *into*, and making all three for a launch that cannot happen
+    // would leave the human a Conversation grilling with nothing grilling it.
+    // The pane draws the state rather than the button — see
+    // [`crate::sessions::run_on`] — and this is that rule asked again on
+    // arrival.
+    if state.sessions.here().absent() {
+        return Ok(GrillingStarted::NotOnWindowsYet);
+    }
+
     // Read as rows rather than judged off the ids, which is the same reading the
     // pane gets — a Profile whose pair has gone is not one to launch a session
     // under, and the id alone cannot say so.
@@ -1380,6 +1391,14 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // one.
     if conversation.worktree.is_some() {
         return Ok(Adopted::NotDrafting);
+    }
+
+    // And the same stand-down the press beside this one makes, in the same place
+    // and for the same reason: what adopting makes is where a session works, and
+    // a stage taken up on a build that runs none is a stage nothing will start
+    // on. See [`start_grilling`].
+    if state.sessions.here().absent() {
+        return Ok(Adopted::NotOnWindowsYet);
     }
 
     // The one thing about the roadmap that is Verkstead's, and the whole of what

@@ -473,32 +473,63 @@ fn the_listen_address_and_data_directory_come_from_the_environment_too() {
     serving.stop();
 }
 
-/// Started with nothing said about it, the Data Directory is the platform's own
-/// rather than whatever directory the server was launched from — which is what
-/// lets a Verkstead started from an icon keep its work where the next one will
-/// find it. The XDG variable stands in for the platform here so that the test
-/// reads a directory of its own; which directory each platform answers with is
-/// [`verkstead_server::platform`]'s own unit tests.
+/// Started with nothing said about them, the Data Directory and the Build Cache
+/// are the platform's own rather than whatever directory the server was
+/// launched from — which is what lets a Verkstead started from an icon keep its
+/// work where the next one will find it.
+///
+/// The platform's own variables stand in for the platform here so that the test
+/// reads directories of its own: the XDG pair on a Unix and the application-data
+/// pair on Windows, which are the ones each of them keeps the answer in. Which
+/// directory each platform answers with is [`verkstead_server::platform`]'s own
+/// unit tests; what this adds is that a server started with nothing set goes
+/// there and says so.
+///
+/// It is also the whole of what a stock Windows machine needed: both of these
+/// were refused there for the want of a `HOME`, so a server could not start at
+/// all.
 #[test]
-fn the_data_directory_defaults_to_the_platform_directory() {
+fn the_directories_default_to_the_platform_directories() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");
-    let xdg = home.join("data");
-    std::fs::create_dir_all(&xdg).unwrap();
+    let data = home.join("data");
+    let cache = home.join("cache");
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::create_dir_all(&cache).unwrap();
     let port = free_port();
+
+    // Which variables those are, and the name Verkstead's own directory takes
+    // under them: the binary's name in lowercase where the XDG conventions are
+    // read, and the product's name where the application-data ones are.
+    let (says_data, says_cache) = match cfg!(windows) {
+        true => ("APPDATA", "LOCALAPPDATA"),
+        false => ("XDG_DATA_HOME", "XDG_CACHE_HOME"),
+    };
 
     let mut serving = Serve::start(
         tmp.path(),
         port,
         &["--listen", &format!("127.0.0.1:{port}")],
         &[
+            // Both names for the same thing, so that whichever of them this
+            // platform reads is the temporary home rather than the account's
+            // own — see `platform::home_dir`.
             ("HOME", home.to_str().unwrap()),
-            ("XDG_DATA_HOME", xdg.to_str().unwrap()),
+            ("USERPROFILE", home.to_str().unwrap()),
+            (says_data, data.to_str().unwrap()),
+            (says_cache, cache.to_str().unwrap()),
         ],
     );
 
     let logged = uncoloured(&serving.stop());
-    let chosen = xdg.join("verkstead");
+    let chosen = match cfg!(windows) {
+        true => data.join("Verkstead"),
+        false => data.join("verkstead"),
+    };
+    let cached = match cfg!(windows) {
+        true => cache.join("Verkstead").join("Cache"),
+        false => cache.join("verkstead"),
+    };
 
     assert!(
         chosen.join("verkstead.db").exists(),
@@ -515,6 +546,16 @@ fn the_data_directory_defaults_to_the_platform_directory() {
         logged.contains(&format!("data_dir={}", chosen.display())),
         "the startup line is where a human finds out which directory was \
          chosen, got:\n{logged}"
+    );
+    assert!(
+        cached.is_dir(),
+        "the Build Cache should have been made at {}, and the server said it \
+         was going to {logged}",
+        cached.display()
+    );
+    assert!(
+        logged.contains("build_cache=Some("),
+        "and the same line is where they find out where that went, got:\n{logged}"
     );
 }
 

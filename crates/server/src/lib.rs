@@ -291,6 +291,22 @@ pub(crate) struct AppState {
 /// Verkstead at, and a file inside it is Verkstead's own business.
 const DATABASE_NAME: &str = "verkstead.db";
 
+/// How several directories are separated when one environment variable holds
+/// more than one: however the platform writes `PATH`. A `:` on Unix; a `;` on
+/// Windows, where a `:` is a drive letter's own punctuation and splitting on
+/// it would cut `C:\src` into a drive that is not a path and a path that is
+/// not absolute.
+///
+/// clap applies a delimiter to the flag as well as to the variable, so this is
+/// what `--watched-path` is parsed with too: wrong on Windows, it refuses
+/// every startup that names a real directory.
+#[cfg(windows)]
+const PATH_LIST_SEPARATOR: char = ';';
+
+/// See the Windows one above.
+#[cfg(not(windows))]
+const PATH_LIST_SEPARATOR: char = ':';
+
 /// How the server is pointed at its data directory and its socket. There is no
 /// app-level auth: the tailnet is the perimeter, so the defaults keep the
 /// server on the loopback interface until told otherwise.
@@ -326,7 +342,8 @@ pub struct Config {
     pub listen: SocketAddr,
 
     /// A directory Verkstead may operate inside. Repeat the flag, or separate
-    /// several with `:` in the environment variable, as `PATH` is written.
+    /// several in the environment variable the way the platform writes `PATH` —
+    /// `:` on Unix, `;` on Windows.
     ///
     /// This is a security boundary and not a convenience: nothing outside these
     /// directories is ever touched, and a Repo is registered only from within
@@ -342,14 +359,14 @@ pub struct Config {
     #[arg(
         long = "watched-path",
         env = "VERKSTEAD_WATCHED_PATHS",
-        value_delimiter = ':',
+        value_delimiter = PATH_LIST_SEPARATOR,
         value_name = "DIR"
     )]
     pub watched_paths: Vec<PathBuf>,
 
     /// An extra read-write bind every sandbox gets, or `name=DIR` for one only
     /// the Repo registered under that name gets. Repeat the flag, or separate
-    /// several with `:` in the environment variable.
+    /// several in the environment variable the way the platform writes `PATH`.
     ///
     /// This is the Sandbox Configuration: the package registries and the caches
     /// a session needs beyond its own worktree that Verkstead does not provide
@@ -369,7 +386,7 @@ pub struct Config {
     #[arg(
         long = "sandbox-bind",
         env = "VERKSTEAD_SANDBOX_BINDS",
-        value_delimiter = ':',
+        value_delimiter = PATH_LIST_SEPARATOR,
         value_name = "DIR|NAME=DIR"
     )]
     pub sandbox_binds: Vec<String>,
@@ -464,6 +481,35 @@ pub fn router_watching(pool: SqlitePool, watched: WatchedPaths, data_dir: PathBu
         nothing_bound(),
         data_dir,
         sessions::Sessions::none(),
+        Gh::on_path(),
+    )
+}
+
+/// The same again, answering as a build with no session to run does — which
+/// today is a Windows one.
+///
+/// The arm the machine running these tests will never be, stood up so that they
+/// can ask it: every way into a session refuses in front of everything it would
+/// otherwise make, and the Conversation the viewer is handed says so where the
+/// press would have been. A rule about the build rather than about the
+/// platform's filesystem, so it is asked wherever the suite runs — see
+/// [`sessions::run_on`], which is where a real server's own answer comes from.
+///
+/// Watching `watched` and keeping what it makes in `data_dir`, as
+/// [`router_watching`] does: what these tests press is a Conversation with a
+/// Repo behind it, and the refusals are about what the press did *not* make.
+pub fn router_running_no_sessions(
+    pool: SqlitePool,
+    watched: WatchedPaths,
+    data_dir: PathBuf,
+) -> Router {
+    routed(
+        pool,
+        updates::Updates::nothing_learned(),
+        watched,
+        nothing_bound(),
+        data_dir,
+        sessions::Sessions::without_sessions(),
         Gh::on_path(),
     )
 }
@@ -773,10 +819,14 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
     // [`sandbox::Homes`]. Refused for the reason the Watched Paths are: a HOME
     // the unit never said is a misconfiguration to report now rather than a
     // session that fails to start weeks later with nobody watching.
-    let homes = sandbox::Homes::of_the_server(&data_dir).context(
-        "no HOME is set: a session's `~` is the home directory of whoever runs Verkstead, \
-         and the machine's git identity is read out of it, so the unit has to say what it is",
-    )?;
+    let homes = sandbox::Homes::of_the_server(&data_dir).with_context(|| {
+        format!(
+            "no {} is set: a session's `~` is the home directory of whoever runs Verkstead, \
+             and the machine's git identity is read out of it, so whatever starts the \
+             server has to say what it is",
+            platform::home_variable(platform::Platform::HERE),
+        )
+    })?;
 
     // And the skills written out into it, before anything can ask for a session:
     // they are what a grilling session is pointed at, and this binary's are what

@@ -193,6 +193,9 @@ import timelineCss from "../src/workbench/Timeline.module.css?raw";
 // jsdom lays nothing out for, and the pane names everything else is found by.
 import shell from "../src/Panes.module.css";
 import shellCss from "../src/Panes.module.css?raw";
+// And the one sentence a Verkstead with no session to start says, wherever it
+// says it — the fifth thing every press that wanted a session comes back with.
+import { NO_SESSIONS } from "../src/workbench/sessions";
 import { ABBREVIATED, CLAMPED_LINES, SWIPE } from "../src/workbench/Timeline";
 import {
   COMPANION_BRANCH_REFUSAL,
@@ -14058,5 +14061,133 @@ describe("the timeline following its bottom", () => {
       ).toHaveLength(record.length),
     );
     expect(scrolled.mock.calls.length).toBeGreaterThan(landed);
+  });
+});
+
+/// A Verkstead with no session to run: the state where a session would start,
+/// and no press that would start one.
+///
+/// The server says so on every conversation it sends — a Windows build has no
+/// terminal for an agent to work in — and this is the whole of what the page
+/// does about it. Asked here rather than on a Windows machine, which is the
+/// point of the fact being a value: the fixture says the server runs none, and
+/// what the page draws is drawn on whatever is running these tests.
+describe("a Verkstead that runs no sessions", () => {
+  /// The drafting conversation as such a server would send it.
+  const ABSENT: Partial<ConversationView> = { sessions: "NotOnWindowsYet" };
+
+  it("says so where the work would be started, and offers no press", async () => {
+    theWorkbenchWith(ABSENT);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const under = await drawn(container, `.${timeline.startGrilling}`);
+
+    expect(under.textContent).toContain(NO_SESSIONS);
+    expect(
+      under.querySelector(`.${timeline.start}`),
+      "and no Start work to press, ready or not",
+    ).toBeNull();
+  });
+
+  /// And the press beside it, on the page a conversation started from the
+  /// abandoned-roadmaps notice opens on: the same sentence, in the place the
+  /// same press would have been.
+  it("says the same where a stage would be adopted, and offers no press", async () => {
+    theWorkbench(
+      whenever(
+        `/api/ui/conversations/${ADOPTING.id}`,
+        json({ ...ADOPTING, ...ABSENT }),
+      ),
+    );
+    const { container } = mount(`/conversations/${ADOPTING.id}`);
+
+    const panel = await drawn(container, `.${adoption.adoption}`);
+
+    expect(panel.textContent).toContain(NO_SESSIONS);
+    expect(screen.queryByRole("button", { name: "Adopt" })).toBeNull();
+  });
+
+  /// And Resume goes off the menu, on a conversation the server still says
+  /// there is driving to start again for: what the press works out is which
+  /// session should be running, and there are none.
+  it("offers no resume, on a conversation the server says is ready for one", async () => {
+    theGrillingStanding(ABSENT);
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const menu = await openActions(container);
+    await drawn(menu, `.${actions.close}`);
+
+    expect(GRILLING.ready_to_resume).toBe(true);
+    expect(menu.querySelector(`.${actions.resume}`)).toBeNull();
+    expect(
+      menu.querySelector(`.${actions.steer}`),
+      "and the steer row stays: done is still somewhere to steer into",
+    ).toBeTruthy();
+  });
+
+  /// The steer modal is the one place where some of what it offers still works.
+  /// Four of the five targets run a session and are held shut with the reason
+  /// above them; done runs nothing, and is the move this build can still make.
+  it("holds the steer shut on every target that runs, and says why", async () => {
+    theGrillingStanding(ABSENT, whenever(STEERING, OVER_NOTHING, "POST"));
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(container);
+    const press = (await drawn(
+      modal,
+      `.${steerModal.steerButtons} .${steerModal.steer}`,
+    )) as HTMLButtonElement;
+
+    for (const target of ["Grilling", "Implementing"]) {
+      fireEvent.click(
+        await drawn(modal, `.${steerModal.steerTarget} input[value="${target}"]`),
+      );
+
+      await waitFor(() => expect(press.disabled).toBe(true));
+      expect(modal.textContent).toContain(NO_SESSIONS);
+    }
+
+    fireEvent.click(
+      await drawn(modal, `.${steerModal.steerTarget} input[value="Done"]`),
+    );
+
+    await waitFor(() => expect(press.disabled).toBe(false));
+    expect(
+      modal.textContent,
+      "and nothing is said about sessions where none would run",
+    ).not.toContain(NO_SESSIONS);
+  });
+
+  /// And every press that could still be made and refused says one thing.
+  ///
+  /// Five ways into a session and one answer: which press asked for one is not
+  /// something the human has to be told about, and five wordings of it would be
+  /// five people's guesses at the same sentence.
+  it("says one thing, whichever press asked for a session", () => {
+    expect(ADOPT_REFUSAL.NotOnWindowsYet).toBe(NO_SESSIONS);
+    expect(RESUME_REFUSAL.NotOnWindowsYet).toBe(NO_SESSIONS);
+    expect(STEER_REFUSAL.NotOnWindowsYet).toBe(NO_SESSIONS);
+    expect(RESOLVE_REFUSAL.NotOnWindowsYet).toBe(NO_SESSIONS);
+  });
+
+  /// And a start that was refused all the same — the page is only as fresh as
+  /// its last read, so a conversation that was drawn before the server said
+  /// anything about sessions still has a button to press.
+  it("answers a start that was refused with the same sentence", async () => {
+    theWorkbenchWith(
+      {},
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/grill`,
+        json("NotOnWindowsYet" satisfies GrillingStarted),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${timeline.startGrilling} .${timeline.start}`),
+    );
+
+    await waitFor(() => screen.getByText(NO_SESSIONS));
   });
 });

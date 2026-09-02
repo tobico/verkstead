@@ -17,6 +17,12 @@
 //! GitHub is a shell script here, standing where `gh` goes. What a token
 //! verifies as is what that script says, which is what lets a test have a good
 //! token and a bad one without an account or a network — see [`app_asking`].
+//!
+//! **On the platforms with a shell at `/bin/sh`.** Everything here reaches
+//! GitHub through a script standing where `gh` goes, and a script is what a
+//! machine with a shell can be handed. What is asserted — which token verifies,
+//! what a save writes — is nothing a platform changes.
+#![cfg(unix)]
 
 use std::path::Path;
 

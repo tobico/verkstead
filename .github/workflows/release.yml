@@ -1,10 +1,10 @@
 # What a `v*` tag ships: one bare binary per platform the project ships, and
 # beside them the desktop app as the file each desktop is installed from — the
-# Linux one as an AppImage, the macOS one as a dmg — each with the viewer inside
-# it, published as a GitHub Release under the tag that triggered the run. Every
-# leg builds its artifact and then runs it, so a target that will not build, or
-# that builds something that will not run, fails the run rather than reaching a
-# Release.
+# Linux one as an AppImage, the macOS one as a dmg, the Windows one as the exe
+# itself — each with the viewer inside it, published as a GitHub Release under
+# the tag that triggered the run. Every leg builds its artifact and then runs
+# it, so a target that will not build, or that builds something that will not
+# run, fails the run rather than reaching a Release.
 #
 # A last job then records the bare binaries in `nix/release.json` and commits
 # it to `main`, which is the whole interface to the binary flake.
@@ -95,10 +95,28 @@ jobs:
           - asset: verkstead-macos-arm64
             runner: macos-15
             target: aarch64-apple-darwin
+          # The fifth, which arrived with the Windows port: the same headless
+          # server, on the one platform whose executables carry an extension —
+          # `.exe` in the asset name because a browser download without one is
+          # a file Windows will not run, where the other four are chmodded and
+          # started. `exe` is what puts it on the file cargo wrote as well; the
+          # four rows above have no such key and the expression that reads it
+          # comes out empty for them.
+          - asset: verkstead-windows-x64.exe
+            runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            exe: .exe
+    # Every `run` below is a shell script — a `case`, a parameter expansion, a
+    # backgrounded server — and Windows would otherwise be handed them as
+    # PowerShell. Said once here rather than on each step, and it is the shell
+    # the other four legs were already getting.
+    defaults:
+      run:
+        shell: bash
     env:
       # Where cargo leaves it, said once: every step below either runs this file
       # or asks something of it.
-      BINARY: target/${{ matrix.target }}/release/verkstead
+      BINARY: target/${{ matrix.target }}/release/verkstead${{ matrix.exe }}
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -174,15 +192,27 @@ jobs:
       #
       # `--retry-connrefused` rather than a sleep — the server is up when it
       # answers, which is a moment after the fork and not a fixed one.
+      #
+      # **Its output goes to a file and it is killed outright**, both of them
+      # Windows'. A backgrounded process inherits the step's own standard
+      # output there as everywhere, and the shell running the step will not
+      # finish while anything still holds that pipe — so a server writing to it
+      # would hold this leg open long after the assertion had passed. And the
+      # bash here is a Windows program's idea of one: a polite signal to a
+      # native child is not something it can always deliver, where `-9` is a
+      # handle and a call. Both are harmless on the four legs that never needed
+      # them, and the file is `cat`ed either way, so what the server said is
+      # still in this log.
       - name: The viewer is inside the binary
         run: |
           ./"$BINARY" serve --listen 127.0.0.1:8422 \
-            --data-dir "$RUNNER_TEMP" &
+            --data-dir "$RUNNER_TEMP" > server.log 2>&1 &
           server=$!
           document=$(curl --fail --silent --show-error \
             --retry 10 --retry-delay 1 --retry-connrefused \
             http://127.0.0.1:8422/)
-          kill "$server"
+          kill -9 "$server"
+          cat server.log
           # An absent viewer is a 503, which `--fail` has already caught. This
           # is the rest of it: the document vite wrote names the hashed bundle
           # vite wrote beside it, and the fallback names nothing.
@@ -244,8 +274,8 @@ jobs:
   # matrix above, because nothing about it is that matrix's shape — it is
   # dynamic where those are static, it wants the toolkit's development packages
   # where those want musl, and what it uploads is a bundle rather than a bare
-  # binary. `desktop-macos` is the next leg along, and stage 05 of the desktop
-  # roadmap adds one more beside the two.
+  # binary. `desktop-macos` is the next leg along and `desktop-windows` the
+  # third, one per desktop the app is drawn on.
   #
   # x86_64 only, per ADR-0012: an arm64 Linux user has the bare CLI.
   desktop-linux:
@@ -682,6 +712,191 @@ jobs:
           path: ${{ env.DMG }}
           if-no-files-found: error
 
+  # The Windows desktop artifact, which is the exe and nothing around it. There
+  # is no AppDir here and no bundle: Windows has no packaging in this project's
+  # story at all (ADR-0012), so what a human downloads is the file cargo wrote,
+  # carrying its own icon and its own version information as resources
+  # `crates/desktop/build.rs` compiled in. Which makes this the shortest of the
+  # three desktop legs — build it, run it, upload what was run — and the one
+  # with no build script of its own for the dev shell to share.
+  #
+  # A leg of its own all the same, for the reason the other two are: what it
+  # uploads is the desktop app rather than a bare CLI, and it is a seventh
+  # dependency tree — the Windows host target with the GUI crates in it, which
+  # the `verkstead-windows-x64.exe` row of the matrix above builds none of.
+  #
+  # x86_64 only, as the AppImage is: Windows on arm64 runs an x86_64 exe under
+  # emulation, so a machine without the native build is a machine that still
+  # runs this one.
+  desktop-windows:
+    name: Verkstead-x86_64.exe
+    needs: viewer
+    runs-on: windows-2025
+    # Every `run` below is a shell script, as in the `build` job above: said
+    # once here rather than left to the PowerShell a Windows runner defaults
+    # to, so that this leg's assertions read as the other two legs' do.
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Where cargo leaves it, and where this leg puts it under the name it
+      # will be downloaded as. Both said once: the build step writes the first
+      # and every step after it runs the second, which is how this leg keeps
+      # the promise the other two make — what the assertions run is the file
+      # that is uploaded rather than something lying beside it. No target
+      # triple in either path, because this leg builds for the runner it is on.
+      BUILT: target/release/verkstead-desktop.exe
+      EXE: upload/Verkstead-x86_64.exe
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      # As every other leg does, and for the same reason: the viewer is
+      # embedded at compile time out of `web/dist`, which the checkout leaves
+      # empty. The desktop app is the server in-process, so it carries the
+      # viewer too.
+      - name: Fetch the viewer
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: viewer
+          path: web/dist
+
+      # The same pin as everywhere else, and no `targets`: this leg builds for
+      # the runner it is on. MSVC and the Windows SDK are the image's own — the
+      # C in the dependency tree is compiled with the first, and the icon and
+      # version information with the second's `rc.exe`.
+      - name: Install Rust 1.91.1
+        uses: dtolnay/rust-toolchain@1.91.1
+
+      # A cache key of its own, as every leg has, and not the `windows` key
+      # `ci.yml` uses: that one holds a whole workspace built with
+      # `--all-targets`, and this is the release profile of one package.
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: exe
+
+      # The package by name, as the matrix legs build theirs: what this leg
+      # ships is `verkstead-desktop` and a workspace-wide build would unify
+      # feature flags across crates that are no part of it — see the matrix's
+      # own build step for the one that matters.
+      - name: Build the exe
+        run: >
+          cargo build --release --locked --package verkstead-desktop
+
+      # Before it is run rather than after, which is this leg's own order: what
+      # a Windows human downloads is `Verkstead-x86_64.exe` — the AppImage's
+      # naming, with the architecture in it for the same reason and the
+      # extension Windows needs to run a download at all — and everything below
+      # asserts that file, so that nothing is uploaded which was not run.
+      - name: Name the exe for the asset it will be
+        run: |
+          mkdir -p upload
+          cp ./"$BUILT" ./"$EXE"
+
+      # Which prints where a windows-subsystem binary prints — into the
+      # redirected stream this step hands it, rather than onto a console it
+      # deliberately does not attach to. See `crates/desktop/src/main.rs`.
+      - name: The exe runs
+        run: ./"$EXE" --help
+
+      # The two halves of what a human downloads this file for, asserted on one
+      # run of it: an icon in the notification area, and the viewer behind it.
+      #
+      # **No screen to arrange**, as on macOS and unlike the AppImage's leg: a
+      # Windows runner has a window station of its own, and `screen` asks the
+      # station rather than the environment — see
+      # `crates/desktop/src/screen.rs`. So the app takes its tray path with
+      # nothing started in front of it.
+      #
+      # **The log is where the answer is**, as in both other legs: nothing about
+      # the tray is visible from outside the process, so the app says so itself
+      # — one line on the way up, and a warning on each of the ways it can end
+      # without an icon. The Log Directory on Windows is
+      # `%LOCALAPPDATA%\Verkstead` — see `crates/server/src/platform.rs` — so
+      # that variable is pointed at a directory of this run's own, which is
+      # both where the file will be and a guarantee that the line found in it
+      # is this run's.
+      #
+      # **Two shapes of the same path**, which is this leg's own wrinkle: the
+      # exe is a Windows program and wants `D:\…`, while the `grep` below is an
+      # MSYS one and wants `/d/…`. `cygpath` is what turns the first into the
+      # second, rather than either of them being written out twice.
+      #
+      # `--no-open` stays: there is a browser on this machine and nobody at it.
+      #
+      # `--retry-connrefused` rather than a sleep, as in every other leg: the
+      # app is up when it answers.
+      #
+      # **Bounded**, for the reason the other two are: the failures this app
+      # draws it has a screen for are drawn as dialogs, and a dialog nobody
+      # dismisses would hold the job until the runner's own six hours were up
+      # rather than failing in front of whoever tagged.
+      #
+      # And its output goes to a file and it is killed outright, for the reason
+      # the matrix's serving assertion says: a background process holding this
+      # step's standard output is a step that does not end, and a polite signal
+      # is not something the shell here can always deliver to a native child.
+      - name: The tray comes up, and the viewer is inside the exe
+        timeout-minutes: 5
+        env:
+          LOCALAPPDATA: ${{ runner.temp }}\state
+        run: |
+          log="$(cygpath -u "$LOCALAPPDATA")/Verkstead/verkstead.log"
+
+          ./"$EXE" --no-open --listen 127.0.0.1:8422 \
+            --data-dir "$RUNNER_TEMP/desktop" > app.log 2>&1 &
+          app=$!
+          document=$(curl --fail --silent --show-error \
+            --retry 10 --retry-delay 1 --retry-connrefused \
+            http://127.0.0.1:8422/)
+
+          # The icon is raised on the main thread while the server comes up on
+          # another, so the viewer answering is no promise that the tray has
+          # finished either way yet. Waited for here rather than read after the
+          # kill, where whichever won the race would be the answer.
+          for _ in $(seq 50); do
+            if grep -q "Verkstead is in the tray" "$log" 2> /dev/null; then
+              break
+            fi
+            sleep 0.2
+          done
+
+          kill -9 "$app"
+          cat app.log
+
+          # As in every other leg: an absent viewer is a 503 that `--fail` has
+          # already caught, and this is the rest of it — the document vite wrote
+          # names the hashed bundle beside it, and the fallback names nothing.
+          case "$document" in
+            */assets/*) ;;
+            *)
+              echo "::error::The exe served a document with no bundle in it."
+              printf '%s\n' "$document"
+              exit 1
+              ;;
+          esac
+
+          # And the tray, out of the app's own log. Read for the line rather
+          # than against the warnings, so that a log which was never written
+          # fails here rather than passing for want of anything to find in it.
+          if ! grep -q "Verkstead is in the tray" "$log" 2> /dev/null; then
+            echo "::error::The exe did not raise a tray icon."
+            cat "$log" 2> /dev/null || echo "There is no log at $log."
+            exit 1
+          fi
+          cat "$log"
+
+      # Under the `desktop-` artifact prefix, for the reason both other desktop
+      # uploads give: that prefix is what keeps a desktop asset out of the count
+      # `publish` makes of the bare binaries, and this is the one file where
+      # that mattered rather than being a precaution — an exe named in the CLI's
+      # scheme is exactly what the fifth row of the matrix above uploads.
+      - name: Upload the exe
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: desktop-windows
+          path: ${{ env.EXE }}
+          if-no-files-found: error
+
   # The Release, once every leg has succeeded — the desktop ones as much as the
   # matrix. `needs` is the whole of that rule: a matrix job has failed if any of
   # its legs did, and a job whose `needs` failed does not run — so a tag that
@@ -689,7 +904,7 @@ jobs:
   # that looks complete until somebody reaches for what is not in it.
   publish:
     name: Publish
-    needs: [build, desktop-linux, desktop-macos]
+    needs: [build, desktop-linux, desktop-macos, desktop-windows]
     # A pushed tag, or nothing at all. A run started by hand has built every
     # artifact and run every assertion by the time it reaches here, and stops:
     # there is nothing left to rehearse, and publishing is the one thing a
@@ -708,12 +923,14 @@ jobs:
     permissions:
       contents: write
     steps:
-      # The four bare binaries, and neither the viewer artifact this run is
+      # The five bare binaries, and neither the viewer artifact this run is
       # also holding nor the desktop ones: `pattern` is what leaves both
       # behind, and every desktop leg names its artifact `desktop-…` precisely
-      # so that it cannot land here and be counted as a fifth binary.
+      # so that it cannot land here and be counted as a sixth binary. Which is
+      # a real hazard rather than a precaution since the Windows port: the
+      # desktop artifact there is an exe, and so is the CLI one.
       # `merge-multiple` unwraps the per-artifact directories, so what lands in
-      # `binaries/` is four files under the names the legs gave them — which
+      # `binaries/` is five files under the names the legs gave them — which
       # are the names the assets carry, and the names the README's install
       # command will spell.
       - name: Fetch the CLI binaries
@@ -725,21 +942,23 @@ jobs:
 
       # What the pattern matched, counted before anything is published, and
       # counted through the same glob the upload below hands to `gh`. `needs`
-      # says all four legs passed; this says all four arrived, which a
+      # says all five legs passed; this says all five arrived, which a
       # mistyped pattern would not.
       #
-      # Four is this set's own number and stays four however many desktop
-      # artifacts a release carries: those are the step below's, checked by
-      # name, because a count is the wrong question to ask of them.
-      - name: All four CLI binaries are here
+      # Five is this set's own number — one bare binary per platform the
+      # project builds one for, which the Windows port made five of — and it
+      # stays five however many desktop artifacts a release carries: those are
+      # the step below's, checked by name, because a count is the wrong
+      # question to ask of them.
+      - name: All five CLI binaries are here
         run: |
           ls -l binaries
           # So that a glob matching nothing counts as none, rather than as the
           # one unexpanded pattern bash would otherwise leave behind.
           shopt -s nullglob
           binaries=(binaries/verkstead-*)
-          if [ "${#binaries[@]}" -ne 4 ]; then
-            echo "::error::Expected four binaries, found ${#binaries[@]}."
+          if [ "${#binaries[@]}" -ne 5 ]; then
+            echo "::error::Expected five binaries, found ${#binaries[@]}."
             exit 1
           fi
 
@@ -758,7 +977,7 @@ jobs:
       # what an install line and the documentation spell out — and any count
       # would be satisfied by a leg that uploaded `verkstead-desktop.AppImage`.
       # So this is the one place the desktop asset names are written down, and
-      # stage 05 adds the last line to it and nothing else in this job.
+      # there is one line per desktop leg.
       #
       # Read both ways round: every name here arrived, and nothing arrived that
       # is not named here. Without the second, a leg this job has never been
@@ -768,6 +987,7 @@ jobs:
           DESKTOP_ASSETS: |
             Verkstead-x86_64.AppImage
             Verkstead-universal.dmg
+            Verkstead-x86_64.exe
         run: |
           expected=$(printf '%s\n' "$DESKTOP_ASSETS" | sed '/^[[:space:]]*$/d' | sort)
           found=$(ls -1 desktop 2> /dev/null | sort)
@@ -824,9 +1044,12 @@ jobs:
   # nothing about it is hand-edited, so this job is the only thing standing
   # between a release and a flake that still points at the version before it.
   #
-  # The desktop artifacts are no part of it, and four stays the right number
-  # here as more of them arrive: what the flake and the NixOS module run is the
-  # headless daemon, and nothing fetches a desktop bundle through nix.
+  # **Four here, where `publish` counts five and three.** The desktop artifacts
+  # are no part of this — what the flake and the NixOS module run is the
+  # headless daemon, and nothing fetches a bundle through nix — and neither is
+  # the Windows CLI binary, for the plainer reason that there is no nix system
+  # to key it under. This job is a map from nix's names to urls, so what it
+  # carries is the platforms nix has, whatever else a Release holds.
   #
   # It runs after `publish` rather than beside it because the assets it hashes
   # are the published ones — see the hashing step for why that distinction is
@@ -846,9 +1069,9 @@ jobs:
       contents: write
     env:
       TAG: ${{ github.ref_name }}
-      # Where the four assets now live. Built once here because both the step
-      # that hashes them and the manifest it writes need the same urls, and a
-      # url the manifest only resembles is a url nobody checked.
+      # Where the four assets this job hashes now live. Built once here because
+      # both the step that hashes them and the manifest it writes need the same
+      # urls, and a url the manifest only resembles is a url nobody checked.
       DOWNLOAD_BASE: >-
         ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}
     steps:

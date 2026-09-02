@@ -38,12 +38,18 @@
 //! Conversation is grilled by the product's skills rather than the account's,
 //! and that holds either way.
 //!
-//! **Built everywhere and run on one machine.** Every test here is compiled on
-//! the Linux runner and *ignored* there rather than left out of the build: what
-//! they run is `sandbox-exec` and what they assert is a policy only a Mac
+//! **Built on both Unixes and run on one machine.** Every test here is compiled
+//! on the Linux runner and *ignored* there rather than left out of the build:
+//! what they run is `sandbox-exec` and what they assert is a policy only a Mac
 //! enforces, but a test nobody compiles is one that rots against the types it
 //! is written for. So the Linux job reports them ignored, and the `macos-15`
 //! job runs them.
+//!
+//! Not on Windows, which is where "everywhere" stops. The rendering these are
+//! about is not compiled there — see `sandbox`, which is where that is decided
+//! — and the paths a probe reaches for are Unix paths that a Windows machine
+//! could say nothing about either way.
+#![cfg(unix)]
 
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};

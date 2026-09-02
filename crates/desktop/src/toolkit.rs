@@ -18,17 +18,19 @@
 //!
 //! **One toolkit for the whole binary on each platform**, which is what makes
 //! the dialogs [`crate::dialog`] draws the same toolkit's as the menu: GTK on
-//! Linux, which is also what `muda` draws the menu with, and AppKit on macOS,
-//! which is what `tray-icon` puts the status item in. A binary with two would be
-//! two answers to what a machine has to carry to build it, and a dialog that
-//! could not be raised from inside the loop's own dispatch.
+//! Linux, which is also what `muda` draws the menu with, AppKit on macOS, which
+//! is what `tray-icon` puts the status item in, and Win32 itself on Windows,
+//! where the icon is a notification-area icon on a window of `tray-icon`'s own.
+//! A binary with two would be two answers to what a machine has to carry to
+//! build it, and a dialog that could not be raised from inside the loop's own
+//! dispatch.
 
 use anyhow::Result;
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 compile_error!(
-    "verkstead-desktop draws its tray with GTK on Linux and with AppKit on macOS, and this is \
-     neither — the Windows arm is stage 05's."
+    "verkstead-desktop draws its tray with GTK on Linux, with AppKit on macOS and with Win32 on \
+     Windows, and this is none of the three."
 );
 
 /// Start the toolkit, on the thread the loop is to run on.
@@ -45,8 +47,8 @@ pub fn start() -> Result<()> {
 /// it.
 ///
 /// Called on the thread [`start`] was called on, which is the main thread.
-/// Anywhere else there is no loop to be running, because [`start`] refused
-/// there, and this returns at once.
+/// Anywhere else there is no loop to be running — the toolkit refused there, or
+/// the loop is another thread's — and this returns at once.
 pub fn run() {
     platform::run();
 }
@@ -192,5 +194,126 @@ mod platform {
             0,
             0,
         )
+    }
+}
+
+/// Win32: the toolkit on Windows, and the notification-area icon the tray is
+/// drawn as.
+///
+/// **The loop is the thread's own message queue**, which is what makes this the
+/// shortest of the three arms and the one with the most to say about threads.
+/// There is nothing to start: `tray-icon` makes a window of its own for the
+/// icon to hang off, and a window's messages are delivered to the thread that
+/// made it and to no other. So what [`start`] does is write that thread down,
+/// [`run`] is the pump, and the two endings are the two ways WM_QUIT gets into
+/// a queue — posted by the thread itself, or posted at it from outside.
+#[cfg(windows)]
+mod platform {
+    use std::ptr;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    use anyhow::Result;
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        DispatchMessageW, GetMessageW, MSG, PostQuitMessage, PostThreadMessageW, TranslateMessage,
+        WM_QUIT,
+    };
+
+    /// The thread the loop is on, or zero before [`start`] has been called.
+    ///
+    /// Written once and read from anywhere: [`stop_from_elsewhere`] is called
+    /// from the runtime's threads, and a thread cannot be posted to without
+    /// being named. Zero is no thread — Win32 numbers threads from one — which
+    /// is what leaves the untouched value meaning what it should.
+    static LOOP: AtomicU32 = AtomicU32::new(0);
+
+    /// Write down the thread the loop is to run on.
+    ///
+    /// Idempotent, and the first caller is the one recorded: every caller here
+    /// is the main thread, and a second answer would be a second thread's queue
+    /// to end a loop that is not in it.
+    pub(super) fn start() -> Result<()> {
+        let _ = LOOP.compare_exchange(0, us(), Ordering::SeqCst, Ordering::SeqCst);
+
+        Ok(())
+    }
+
+    /// Take messages off this thread's queue and deliver them until one of them
+    /// is WM_QUIT.
+    ///
+    /// `GetMessageW` answers zero for that message and −1 for a queue it could
+    /// not read at all, and neither is a message to dispatch — the second of
+    /// them cannot happen to a thread asking about its own queue with no window
+    /// filter, and is a loop that would spin for ever if it were ignored.
+    pub(super) fn run() {
+        if LOOP.load(Ordering::SeqCst) != us() {
+            // The loop is not this thread's, so there is nothing here to be
+            // running — the reading the other two arms give the same question.
+            return;
+        }
+
+        let mut message = MSG {
+            hwnd: ptr::null_mut(),
+            message: 0,
+            wParam: 0,
+            lParam: 0,
+            time: 0,
+            pt: POINT { x: 0, y: 0 },
+        };
+
+        // SAFETY: the three calls read and write the one message this thread
+        // owns, and each is being made on the thread whose queue it is about.
+        unsafe {
+            while GetMessageW(&mut message, ptr::null_mut(), 0, 0) > 0 {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
+        }
+    }
+
+    /// WM_QUIT into this thread's own queue, which is what `PostQuitMessage`
+    /// is.
+    ///
+    /// Called from a menu item's handler, which runs inside the dispatch
+    /// [`run`] is in — so the message is read at the top of the loop after the
+    /// handler has returned, and a menu that is still on the screen closes on
+    /// its own way out.
+    pub(super) fn stop() {
+        if LOOP.load(Ordering::SeqCst) != us() {
+            // Not this thread's to end, so it is asked for rather than done —
+            // which is the other function, and no reason to refuse the caller.
+            stop_from_elsewhere();
+            return;
+        }
+
+        // SAFETY: a message posted to the calling thread's own queue.
+        unsafe { PostQuitMessage(0) };
+    }
+
+    /// And WM_QUIT into the loop thread's queue from outside it, which is what
+    /// `PostThreadMessageW` is.
+    ///
+    /// A thread's queue takes a message from anywhere; what may not happen from
+    /// another thread is touching the windows on it, which this does not.
+    /// Nothing is reported: a loop that was never started is a Verkstead
+    /// serving without a tray, and it has no loop to be ending.
+    pub(super) fn stop_from_elsewhere() {
+        let loop_thread = LOOP.load(Ordering::SeqCst);
+        if loop_thread == 0 {
+            return;
+        }
+
+        // SAFETY: a message posted to a thread by id, with nothing of that
+        // thread's touched.
+        unsafe { PostThreadMessageW(loop_thread, WM_QUIT, 0, 0) };
+    }
+
+    /// The thread asking, which is what each of the four above compares against
+    /// the one that was written down.
+    fn us() -> u32 {
+        // SAFETY: it asks the operating system about the calling thread and
+        // hands back a number.
+        unsafe { GetCurrentThreadId() }
     }
 }

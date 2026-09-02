@@ -27,4 +27,4 @@ Windows is the only platform without sessions, and building it is 05's alone.
 - [x] 02: The desktop crate and the Linux tray — [brief](02-desktop-crate.md)
 - [x] 03: AppImage and the release legs — [brief](03-appimage.md)
 - [x] 04: macOS bundle and dmg — [brief](04-macos-dmg.md)
-- [ ] 05: Windows port and portable exe — [brief](05-windows-exe.md)
+- [x] 05: Windows port and portable exe — [brief](05-windows-exe.md)

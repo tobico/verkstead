@@ -5,8 +5,9 @@ A release is a tag and nothing else.
 viewer once, then the bare CLI binary for each platform on a runner of that
 platform's own architecture, and beside them one desktop app per desktop
 platform — the Linux one as `Verkstead-x86_64.AppImage`, the macOS one as
-`Verkstead-universal.dmg`. Every leg runs what it built, all of it is
-published as a GitHub Release under the tag, and finally the workflow commits
+`Verkstead-universal.dmg`, the Windows one as `Verkstead-x86_64.exe`. Every leg
+runs what it built, all of it is published as a GitHub Release under the tag,
+and finally the workflow commits
 [`nix/release.json`](../nix/release.json) to `main` so the flake fetches what
 was just published. None of that is hand-driven, and nothing in it is
 hand-edited afterwards.
@@ -28,17 +29,33 @@ silicon image, an Apple host cross-compiles to the other Apple architecture, and
 is written into the bundle rather than inherited from a runner —
 `LSMinimumSystemVersion`, 11.0, which is the Apple silicon half's own and the
 higher of the two — and it is the number
-[adoption.md](adoption.md#the-desktop-app-on-a-mac) gives a downloader. Both
-desktop legs then assert the artifact itself rather than what was lying beside
-it: the AppImage is run as the file that is uploaded, and the dmg is mounted and
-run out of the mount.
+[adoption.md](adoption.md#the-desktop-app-on-a-mac) gives a downloader.
 
-The manifest is the CLI binaries alone, and that is the one place a count is
+The Windows desktop leg is the shortest of the three and has no build script
+behind it, because a Windows download has nothing around it: cargo writes
+`verkstead-desktop.exe` with the icon and the version information compiled in as
+resources, and the leg renames that file and uploads it. There is no floor to
+hold it to either — what an AppImage promises about glibc and a bundle about
+macOS 11, an exe gets from the C runtime Windows itself ships.
+
+Each desktop leg then asserts the artifact itself rather than what was lying
+beside it: the AppImage is run as the file that is uploaded, the dmg is mounted
+and run out of the mount, and the exe is renamed before it is run so that the
+file the assertions start is the file that goes to the Release. What they assert
+is the same three things — it starts, it serves a document with the viewer's
+bundle named in it, and its own log says an icon went up — and each of them is
+bounded, because the failures these apps draw are dialogs and a dialog nobody
+dismisses would hold a runner for six hours.
+
+The manifest is the nix systems alone, and that is the one place a count is
 still the right question: what the flake and the NixOS module run is the
-headless daemon, so nothing fetches a desktop bundle through nix and four stays
-four however many desktop artifacts a Release carries. The desktop assets are
-checked by name instead, in `publish`, which is the one place those names are
-written down.
+headless daemon, so nothing fetches a desktop bundle through nix — and nothing
+fetches the Windows CLI binary through it either, there being no nix system to
+key one under. Four stays four however many assets a Release carries. The
+desktop assets are checked by name instead, in `publish`, which is the one place
+those names are written down, and the bare binaries are counted there: five of
+them since the Windows port, held apart from the desktop exe by the artifact
+each leg uploaded under rather than by the name of the file inside it.
 
 A tag with a hyphen in it — `v0.1.0-rc.1` — is semver's own spelling of a
 pre-release, and the workflow marks the Release as one. That is the difference
@@ -119,7 +136,18 @@ newcomer actually follows.
    [a downloader is told](adoption.md#the-desktop-app-on-a-mac). The icon lands
    in the menu bar and the viewer opens in the browser.
 
-5. **The flake, refreshed past nix's cache** — after the manifest commit has
+5. **The exe, downloaded in a browser and double-clicked** on a Windows
+   machine. In a browser deliberately, for the reason the dmg is: the mark
+   SmartScreen reads is put on the file by whatever downloaded it, and `curl`
+   puts on nothing — an exe fetched with it starts with no warning at all, and
+   that warning is the one part of this install no workflow can rehearse.
+
+   Click **More info** and then **Run anyway**, which is what
+   [a downloader is told](adoption.md#the-desktop-app-on-windows). The viewer
+   opens in the browser and the icon lands in the notification area — inside
+   the flyout the `^` opens, until it is dragged out onto the taskbar.
+
+6. **The flake, refreshed past nix's cache** — after the manifest commit has
    landed on `main`, which is a job later than the Release itself:
 
    ```console
@@ -128,13 +156,13 @@ newcomer actually follows.
 
    What it prints is the manifest's version, and so the tag's.
 
-6. **The manifest on `main`** names the new version and carries all four nix
+7. **The manifest on `main`** names the new version and carries all four nix
    systems, committed by `github-actions[bot]` as
    `chore: release manifest for <tag>`. That commit deliberately starts no CI
    run — [the git workflow](agents/git-workflow.md#exception-the-release-manifest)
    records why it is the one write to `main` that skips review.
 
-7. **The Update Notice**, on a server still running the previous version: the
+8. **The Update Notice**, on a server still running the previous version: the
    Repo list gains a banner naming the new one, and the README's `## Updating`
    section is where its link lands — so that section has to exist by then. The
    server asks GitHub at startup and daily after, so restart the old server

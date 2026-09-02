@@ -90,6 +90,7 @@
       }
     }
   },
+  "sessions": "Run",
   "shared": null,
   "state": "Draft",
   "stop_asked": false,

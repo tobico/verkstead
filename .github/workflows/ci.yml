@@ -159,6 +159,66 @@ jobs:
       - name: The boundary suite
         run: cargo test -p verkstead-server --test sandbox_macos
 
+  # And what the same workspace comes to on Windows, asked of Windows. The
+  # session machinery is compiled there like everything else — what a Windows
+  # build has not got is the pseudo-terminal under it, and four leaf call sites
+  # around that — so what settles whether the port holds is the compiler and the
+  # suite on a real Windows machine.
+  #
+  # `cargo check --target` from Linux is not that: MSVC needs a Windows host to
+  # link against, and a check that never links proves less than it looks like it
+  # does. This job is the Windows machine this project has, and it is what will
+  # say the port goes on holding.
+  #
+  # The desktop crate is in it, which is where the exe comes from: its tray, its
+  # dialogs and its Run key are Win32, and this is the machine that compiles
+  # them. Its own suite says at each test what a Windows machine can be asked —
+  # see `crates/desktop/tests/desktop.rs`, and the registry tests in
+  # `crates/desktop/src/startup/run_key.rs`, which run nowhere else.
+  windows:
+    name: Windows
+    runs-on: windows-2025
+    steps:
+      # Before the checkout, because it is the checkout this is about. Git for
+      # Windows converts line endings on the way out of the repository by
+      # default, and half of what this suite asserts is text: a fixture, a
+      # rendered document, a skill written out byte for byte. A file that
+      # arrived with carriage returns nobody committed is a test failing about
+      # the runner rather than about the code.
+      - name: Check the repository out as it was committed
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v7.0.1
+
+      # The same pin as every other job, for the same reason. MSVC and the
+      # Windows SDK are the runner image's own — SQLite and ring are C, and this
+      # is the host that can compile them for this target.
+      - name: Install Rust 1.91.1
+        uses: dtolnay/rust-toolchain@1.91.1
+
+      # A key of its own, as the macOS job has: this is a third dependency tree,
+      # and one shared with either of the others would have them evicting each
+      # other.
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: windows
+
+      # No `web/dist` here either — the embed is `allow_missing`, so the crates
+      # compile without the viewer.
+      #
+      # The desktop crate's build script compiles the icon and the version
+      # information into the exe with the SDK's `rc.exe`, which is the runner
+      # image's own — see `crates/desktop/build.rs`.
+      - name: Build
+        run: cargo build --workspace --all-targets
+
+      # What is left out of the run is left out of the build above: a suite that
+      # stands on a mount namespace, on Apple's sandbox or on a pseudo-terminal
+      # is `cfg`-gated at its own file, so this is the whole of what a Windows
+      # Verkstead has to say for itself.
+      - name: Test
+        run: cargo test --workspace
+
   # The viewer's own checks, on the viewer's own sources. Nothing here waits on
   # the Rust job and nothing there waits on this one: neither produces anything
   # the other reads, so they run side by side.

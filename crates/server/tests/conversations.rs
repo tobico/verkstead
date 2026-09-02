@@ -25,10 +25,12 @@ use verkstead_render::{
     CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationUnarchived,
     ConversationView, GrillingStarted, Lifecycle, Merging, PickedView, PinnedEvent, ProfileChosen,
-    ProfileSaved, Registered, Resolved, RoadmapPane, ShowingArchived, Standing, Started,
-    SteerCompanionRefusal, SteerOpened, TimelineEvent,
+    ProfileSaved, Registered, Resolved, Resumed, RoadmapPane, SessionsHere, ShowingArchived,
+    Standing, Started, SteerCompanionRefusal, SteerOpened, TimelineEvent,
 };
-use verkstead_server::{WatchedPaths, open_database, router_watching, store};
+use verkstead_server::{
+    WatchedPaths, open_database, router_running_no_sessions, router_watching, store,
+};
 
 /// A router watching `watched`, plus the directory holding its database and its
 /// data directory alive.
@@ -8251,4 +8253,235 @@ async fn starting_with_no_grilling_lands_the_conversation_implementing_inline() 
         PickedView::Skipped,
         "so what it started under is exactly where it was",
     );
+}
+
+/// A watched directory holding one registered repository, and a Verkstead that
+/// runs no sessions over both.
+///
+/// [`workbench`]'s own, on the other router: same directory, same repository,
+/// same registration, and a build that has nowhere to run an agent — see
+/// `router_running_no_sessions`, which is the arm this machine will never be
+/// and every one of these tests calls.
+async fn workbench_running_no_sessions()
+-> (tempfile::TempDir, tempfile::TempDir, Router, PathBuf, i64) {
+    let watched = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+    let app = router_running_no_sessions(
+        pool,
+        WatchedPaths::resolve(&[watched.path().to_owned()]).unwrap(),
+        dir.path().to_owned(),
+    );
+
+    let repo = repository(watched.path().join("verkstead"));
+    let registered: Registered =
+        post(&app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
+    assert_eq!(registered, Registered::Added);
+
+    let repo_id = listed_repos(&app).await;
+
+    (watched, dir, app, repo, repo_id)
+}
+
+/// What every Conversation such a server sends says about itself, which is the
+/// one thing the page needs to draw the state: this build runs no sessions, and
+/// it names Windows saying so.
+///
+/// A fact about the build rather than about the Conversation, so it is the same
+/// answer on a Draft as on anything else — and the ordinary server says the
+/// opposite, which is what keeps every other platform where it was.
+#[tokio::test]
+async fn a_build_that_runs_no_sessions_says_so_on_every_conversation() {
+    let (watched, _dir, app, _repo, repo_id) = workbench_running_no_sessions().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    assert_eq!(
+        opened(&app, id).await.sessions,
+        SessionsHere::NotOnWindowsYet,
+    );
+
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    assert_eq!(
+        opened(&app, id).await.sessions,
+        SessionsHere::Run,
+        "and a Verkstead that runs them says nothing has changed",
+    );
+}
+
+/// Starting the work on such a build is refused, and refused in front of
+/// everything the press would otherwise make.
+///
+/// Which is the whole point of refusing it here rather than under the spawn: a
+/// branch cut, a worktree made and a Brief frozen for a session that was never
+/// going to start would leave the human a Conversation grilling with nothing
+/// grilling it, and no way back to the draft it was.
+#[tokio::test]
+async fn a_build_that_runs_no_sessions_starts_no_grilling_and_makes_nothing() {
+    let (watched, _dir, app, repo, repo_id) = workbench_running_no_sessions().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::NotOnWindowsYet);
+
+    let view = opened(&app, id).await;
+    assert_eq!(
+        view.state,
+        Lifecycle::Draft,
+        "the Conversation is where the press found it",
+    );
+    assert_eq!(view.worktree, None, "and it was given nowhere to work");
+    assert_eq!(
+        worktrees(&repo),
+        vec![repo.clone()],
+        "and git was left holding the repository and nothing else",
+    );
+    assert_eq!(
+        write_brief(&app, id, "# Something else\n").await,
+        BriefSaved::Saved,
+        "and the Brief never froze, this Conversation still being a draft",
+    );
+}
+
+/// And so is adopting a stage, which is the press beside it: the same refusal
+/// under its own name, and the roadmap left exactly as it was found.
+#[tokio::test]
+async fn a_build_that_runs_no_sessions_adopts_no_stage() {
+    let (watched, _dir, app, repo, repo_id) = workbench_running_no_sessions().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+    let id = ready_to_adopt(&app, watched.path(), repo_id, "mvp").await;
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::NotOnWindowsYet);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.worktree, None);
+    assert_eq!(
+        brief(&view).markdown,
+        "",
+        "and the stage brief never became this Conversation's Brief",
+    );
+}
+
+/// And a steer into anything a session runs in — which is four of the five
+/// targets. Done is the fifth, and it is still steered into: nothing runs
+/// there, so it is the one move this build can still make.
+#[tokio::test]
+async fn a_build_that_runs_no_sessions_steers_into_nothing_that_runs() {
+    let (watched, _dir, app, _repo, repo_id) = workbench_running_no_sessions().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    assert_eq!(
+        steer_grilling(&app, id, Some("# A fresh round\n")).await,
+        ConversationSteered::NotOnWindowsYet,
+    );
+    assert_eq!(
+        steer_instructed(&app, id, "carry this on").await,
+        ConversationSteered::NotOnWindowsYet,
+        "and the target that would build it",
+    );
+    assert_eq!(
+        opened(&app, id).await.state,
+        Lifecycle::Draft,
+        "neither of which moved it",
+    );
+
+    assert_eq!(
+        steer_into(&app, id, "Done", false).await,
+        ConversationSteered::Steered,
+        "and the human can still say they are finished with it",
+    );
+    assert_eq!(opened(&app, id).await.state, Lifecycle::Done);
+}
+
+/// And Resume, on a Conversation such a build could only have inherited: a Data
+/// Directory that came from a machine that does run sessions is the one way one
+/// of these has a Conversation mid-run at all.
+///
+/// Walked into Grilling through the store, because the press that would have put
+/// it there is refused: what is under test is the answer Resume gives, and the
+/// state it gives it about is not this server's to have made.
+#[tokio::test]
+async fn a_build_that_runs_no_sessions_resumes_nothing() {
+    let (watched, dir, app, _repo, repo_id) = workbench_running_no_sessions().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    store::start_grilling(&pool, id, "HEAD", &dir.path().join("worktree"), &[])
+        .await
+        .unwrap();
+
+    assert_eq!(opened(&app, id).await.state, Lifecycle::Grilling);
+    assert_eq!(press_resume(&app, id).await, Resumed::NotOnWindowsYet);
+
+    pool.close().await;
+}
+
+/// And the press that sends a finished Conversation's conflict back to its
+/// wrap-up, which is the fifth way in: what it starts is the resolution session,
+/// and there is none to start.
+#[tokio::test]
+async fn a_build_that_runs_no_sessions_resolves_no_conflict() {
+    let (watched, dir, app, _repo, repo_id) = workbench_running_no_sessions().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    store::start_grilling(&pool, id, "HEAD", &dir.path().join("worktree"), &[])
+        .await
+        .unwrap();
+    store::record_pull_request(
+        &pool,
+        id,
+        repo_id,
+        &store::PullRequest {
+            number: 41,
+            title: "Rate limiting".to_owned(),
+            url: "https://github.com/tobico/verkstead/pull/41".to_owned(),
+            repo: None,
+        },
+    )
+    .await
+    .unwrap();
+    store::record_merging(&pool, id, repo_id, store::Merging::Conflicting)
+        .await
+        .unwrap();
+
+    for waiting_on in store::WAITED_ON.into_iter().chain([
+        store::WaitingOn::Checks(repo_id),
+        store::WaitingOn::Comments(repo_id),
+        store::WaitingOn::Mergeable(repo_id),
+    ]) {
+        store::settle_wrap_up(&pool, id, waiting_on).await.unwrap();
+    }
+    store::finish_wrap_up(&pool, id).await.unwrap();
+
+    assert_eq!(resolving(&app, id).await, Resolved::NotOnWindowsYet);
+    assert_eq!(
+        opened(&app, id).await.state,
+        Lifecycle::Done,
+        "and the Conversation is where the press found it",
+    );
+
+    pool.close().await;
+}
+
+/// Press **Resume**, the way the row on the actions menu does. Nothing goes with
+/// it: what to start is worked out from where the work stands.
+async fn press_resume(app: &Router, id: i64) -> Resumed {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/resume"),
+        &serde_json::json!({}),
+    )
+    .await
 }

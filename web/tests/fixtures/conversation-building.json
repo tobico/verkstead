@@ -93,6 +93,7 @@
       }
     }
   },
+  "sessions": "Run",
   "shared": null,
   "state": "Implementing",
   "stop_asked": false,

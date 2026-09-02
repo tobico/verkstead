@@ -11,6 +11,13 @@
 //! that is what is read. A screen that is *named* and is not there is a
 //! different question and one only GTK can answer — see [`crate::tray::show`],
 //! which is where the answer arrives.
+//!
+//! Windows says it nowhere in the environment and is asked instead: a process
+//! belongs to a **window station**, and only one of a session's stations is the
+//! one a human is looking at. A Verkstead started by a service or by a
+//! scheduled task with nobody logged in is on one of the others, where a window
+//! can be made and nothing can be seen or dismissed — which is the same
+//! misfortune as a Linux session with no `$DISPLAY`, and the same answer.
 
 #[cfg(target_os = "linux")]
 use std::ffi::OsStr;
@@ -27,12 +34,63 @@ pub fn there_is_one() -> bool {
     )
 }
 
-/// The same question where the answer is always yes: macOS and Windows draw
-/// through the window server every session has, and neither says so in the
-/// environment.
-#[cfg(not(target_os = "linux"))]
+/// The same question where the answer is always yes: macOS draws through the
+/// window server every logged-in session has, and says so nowhere.
+#[cfg(not(any(target_os = "linux", windows)))]
 pub fn there_is_one() -> bool {
     true
+}
+
+/// And on Windows, whether this process's window station is one somebody can
+/// see.
+///
+/// `WSF_VISIBLE` is what the flag means: the station has a desktop on the
+/// screen, which is every logged-in session's `WinSta0` and none of the
+/// stations a service is given. Windows will make a window on either — what it
+/// will not do is show one on the second, so a message box there is a wait for
+/// a dismissal that cannot arrive, and a tray icon is an icon in a
+/// notification area no shell is drawing.
+///
+/// **A question that could not be asked is a screen.** Every reason this call
+/// fails is about this process rather than about the station, and the answer
+/// that costs least when it is wrong is the one that leaves the tray to
+/// [`crate::tray::show`] to fail at — which is where a tray that cannot be
+/// raised is already handled, and already logged.
+#[cfg(windows)]
+pub fn there_is_one() -> bool {
+    use windows_sys::Win32::System::StationsAndDesktops::{
+        GetProcessWindowStation, GetUserObjectInformationW, UOI_FLAGS, USEROBJECTFLAGS,
+    };
+
+    /// The station has a desktop that is drawn on a screen. Windows names the
+    /// flag in a header rather than in the metadata `windows-sys` is generated
+    /// from, so it is written out here.
+    const WSF_VISIBLE: u32 = 0x0001;
+
+    let mut flags = USEROBJECTFLAGS {
+        fInherit: 0,
+        fReserved: 0,
+        dwFlags: 0,
+    };
+    let mut answered = 0;
+
+    // SAFETY: the station handle is this process's own and is not ours to
+    // close, and the call is handed a buffer of exactly the size it is told.
+    let asked = unsafe {
+        GetUserObjectInformationW(
+            GetProcessWindowStation(),
+            UOI_FLAGS,
+            (&raw mut flags).cast(),
+            size_of::<USEROBJECTFLAGS>() as u32,
+            &mut answered,
+        )
+    };
+
+    if asked == 0 {
+        return true;
+    }
+
+    flags.dwFlags & WSF_VISIBLE != 0
 }
 
 /// Whether `display` and `wayland` — `$DISPLAY` and `$WAYLAND_DISPLAY` as they

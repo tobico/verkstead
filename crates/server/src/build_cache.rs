@@ -206,9 +206,9 @@ impl BuildCache {
             Some(dir) => dir.to_owned(),
             None => crate::platform::cache_dir().ok_or_else(|| {
                 anyhow::anyhow!(
-                    "there is nowhere to put the shared Rust build cache: neither \
-                     XDG_CACHE_HOME nor HOME is set to an absolute path, so say where \
-                     it goes with --build-cache-dir"
+                    "there is nowhere to put the shared Rust build cache: {}, so say \
+                     where it goes with --build-cache-dir",
+                    crate::platform::nothing_says_where_to_cache(crate::platform::Platform::HERE),
                 )
             })?,
         };

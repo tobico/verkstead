@@ -1372,7 +1372,11 @@ fn drawn(check: &Check) -> verkstead_render::PullRequestCheck {
     }
 }
 
-#[cfg(test)]
+/// Every test here runs a `gh` that is a shell script — see [`tests::stub`] —
+/// because the whole of what this module does is read a program's stdout, its
+/// stderr and its status. So they are asked on the platforms with a shell at
+/// `/bin/sh`, which is both Unixes and not Windows.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

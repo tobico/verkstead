@@ -99,6 +99,15 @@ pub(crate) async fn resolve(state: &AppState, conversation_id: i64) -> anyhow::R
         return Ok(Resolved::NotDone);
     }
 
+    // And nothing is sent back to a wrap-up on a build that runs no sessions:
+    // what this press is for is the resolution session the watchers dispatch,
+    // and there is none to dispatch here. In front of the checkout below for the
+    // reason the state is: what follows is somebody's repository being worked
+    // on for a move that is about to be refused. See [`crate::sessions::run_on`].
+    if state.sessions.here().absent() {
+        return Ok(Resolved::NotOnWindowsYet);
+    }
+
     // Every state past drafting has a Worktree, so one missing from the record
     // is a record that cannot be true: there is nowhere for the resolution
     // session to work and nothing to make a checkout from either, the path being

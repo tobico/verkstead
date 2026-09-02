@@ -51,7 +51,6 @@
 //! keeper of its own to remember.
 
 use std::io;
-use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 
 use crate::platform::Platform;
@@ -125,9 +124,21 @@ pub(crate) fn in_its_own_group(platform: Platform, command: &mut Command) {
         return;
     }
 
-    // Between the fork and the exec, where a syscall and nothing else is
-    // allowed — the same window `Terminal::spawn` makes a session's own
-    // terminal in.
+    leading_a_group(command);
+}
+
+/// Ask for that group between the fork and the exec, where a syscall and
+/// nothing else is allowed — the same window `Terminal::spawn` makes a
+/// session's own terminal in.
+///
+/// One of the handful of calls in the server that a platform has to have its
+/// own answer to, and Windows' answer is that it has none: there are no process
+/// groups of this kind there, no `pre_exec` to ask for one in, and nothing on a
+/// Windows machine is a Mac — so the arm below is compiled and never reached.
+#[cfg(unix)]
+fn leading_a_group(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+
     unsafe {
         command.pre_exec(|| {
             rustix::process::setpgid(None, None)?;
@@ -135,6 +146,10 @@ pub(crate) fn in_its_own_group(platform: Platform, command: &mut Command) {
         });
     }
 }
+
+/// And where there is no group to lead — see the arm above.
+#[cfg(not(unix))]
+fn leading_a_group(_command: &mut Command) {}
 
 /// Start one, and reap the shell that forked it.
 fn kept(sandbox: u32, server: u32) -> io::Result<()> {
@@ -155,12 +170,7 @@ fn kept(sandbox: u32, server: u32) -> io::Result<()> {
 
     // In a session of its own — see this module's own documentation for what
     // that is for.
-    unsafe {
-        keeper.pre_exec(|| {
-            rustix::process::setsid()?;
-            Ok(())
-        });
-    }
+    in_a_session_of_its_own(&mut keeper);
 
     // Waited for, and what is waited for is not the keeper: the shell started
     // here forks the loop and exits at once, so this reaps a shell that has
@@ -180,6 +190,25 @@ fn kept(sandbox: u32, server: u32) -> io::Result<()> {
 
     Ok(())
 }
+
+/// Put the keeper in a session of its own, in the same window between the fork
+/// and the exec that [`leading_a_group`] asks in — and gated for the same
+/// reason, which is written there.
+#[cfg(unix)]
+fn in_a_session_of_its_own(keeper: &mut Command) {
+    use std::os::unix::process::CommandExt;
+
+    unsafe {
+        keeper.pre_exec(|| {
+            rustix::process::setsid()?;
+            Ok(())
+        });
+    }
+}
+
+/// And where there are no sessions to be put in — see the arm above.
+#[cfg(not(unix))]
+fn in_a_session_of_its_own(_keeper: &mut Command) {}
 
 /// The keeper itself: a loop that ends when the server does, or when there is
 /// nothing left to keep.
@@ -203,7 +232,11 @@ fn watching(sandbox: u32, server: u32) -> String {
     )
 }
 
-#[cfg(test)]
+/// Run wherever the suite is rather than on a Mac alone, for the reason each
+/// test says: a keeper is a shell script and a process group, and both are the
+/// same on either Unix. Not on Windows, which has neither — and no
+/// [`in_its_own_group`] to make one with, so there would be nothing to assert.
+#[cfg(all(test, unix))]
 mod tests {
     use std::process::Child;
     use std::time::{Duration, Instant};
