@@ -276,8 +276,15 @@ pub enum SessionsHere {
 impl SessionsHere {
     /// Whether there is no session to be started here — the question every way
     /// into one asks before it makes anything.
+    ///
+    /// **Asked as *anything but running***, rather than as the one platform
+    /// that has none, so that a platform named later is read as one without
+    /// sessions rather than as one with them. What this guards is a press, and
+    /// the wrong way round is a press that spawns nothing — which is why the
+    /// viewer's half of the same fact is asked the same way; see
+    /// `web/src/workbench/sessions.tsx`.
     pub fn absent(self) -> bool {
-        matches!(self, SessionsHere::NotOnWindowsYet)
+        !matches!(self, SessionsHere::Run)
     }
 }
 
