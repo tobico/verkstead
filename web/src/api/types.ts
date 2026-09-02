@@ -2205,7 +2205,7 @@ export type RepoRemoved = "Removed" | "NoSuchRepo" | "InUse";
 /**
  * What became of moving a Conversation onto another Repo.
  */
-export type RepoSwitched = "Switched" | "NoSuchConversation" | "NotDrafting" | "NoSuchRepo";
+export type RepoSwitched = "Switched" | "NoSuchConversation" | "NotDrafting" | "Adopting" | "NoSuchRepo";
 
 /**
  * One registered Repo opened: everything the card cannot hold, read at the

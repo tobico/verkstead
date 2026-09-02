@@ -660,14 +660,16 @@ pub(crate) async fn set_base_branch(
 /// Thin over the store, and for [`add_companion`]'s reason with one more behind
 /// it: everything a switch decides — which repository, what its base goes back
 /// to, and which companion is no longer one — is a question about the rows, and
-/// nothing has been checked out to ask git about. The refusal that matters is
-/// the one that says something *has* been, which the store answers off the
-/// worktree it wrote.
+/// nothing has been checked out to ask git about. The two refusals that matter
+/// are the ones saying something *has* been settled elsewhere: a worktree, which
+/// the store answers off the row it wrote, and an adoption, whose repository was
+/// settled by the roadmap rather than by the human.
 pub(crate) async fn switch_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<RepoSwitched> {
     Ok(match store::switch_repo(pool, id, repo_id).await? {
         store::Switched::Switched => RepoSwitched::Switched,
         store::Switched::NoSuchConversation => RepoSwitched::NoSuchConversation,
         store::Switched::NotDrafting => RepoSwitched::NotDrafting,
+        store::Switched::Adopting => RepoSwitched::Adopting,
         store::Switched::NoSuchRepo => RepoSwitched::NoSuchRepo,
     })
 }

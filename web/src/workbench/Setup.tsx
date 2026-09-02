@@ -112,6 +112,8 @@ export const REPO_SWITCH_REFUSAL: Record<RepoSwitched, string> = {
   NoSuchConversation: "This conversation is gone.",
   NotDrafting:
     "The branch exists by now, so which repo the work is in is settled.",
+  Adopting:
+    "The stage being adopted is in this repo, so the work cannot be moved off it.",
   NoSuchRepo: "That repo is not registered any more.",
 };
 
@@ -262,13 +264,28 @@ function RepoOption(props: { conversation: ConversationView }): JSX.Element {
   /// them.
   const branched = () => props.conversation.worktree !== null;
 
+  /// And whether which repository this work is in was settled by the roadmap it
+  /// is adopting rather than by the human.
+  ///
+  /// A roadmap is a file in a repository and only its *name* is kept, so a
+  /// conversation moved off the repo it was started against would go looking for
+  /// that name over there — and find nothing to adopt, or a roadmap of the same
+  /// name that is not the one anybody picked. The server refuses it for that
+  /// reason, and the picker says so by being disabled: what is the human's here
+  /// is composing work of their own instead, which is the compose page's to
+  /// offer.
+  const adopting = () => props.conversation.adopting !== null;
+
   return (
     <RepoOptions name={props.conversation.repo.name} alongside={alongside()}>
       {() => (
         <>
           {/* Which repository, first: everything under it is a fact about the
               one this picks. */}
-          <RepoPicker conversation={props.conversation} disabled={branched()} />
+          <RepoPicker
+            conversation={props.conversation}
+            disabled={branched() || adopting()}
+          />
 
           <Show when={!branched()}>
             {/* No branch field where the conversation is adopting a roadmap: a
@@ -348,11 +365,13 @@ export function RepoOptions(props: {
 /// is asked for here: the server does it, and this panel reads the result off
 /// the Conversation it re-reads.
 ///
-/// Disabled once the branch has been cut, which is the one control in this
-/// panel that is drawn in that state rather than taken away. A checkout is of
-/// one repository, so what it says then is a fact about the work — *this is the
-/// repo, and it is settled* — and a fact is worth reading where a refused field
-/// is not.
+/// Disabled once the branch has been cut, and on a conversation adopting a
+/// roadmap — the one control in this panel that is drawn in either state rather
+/// than taken away. A checkout is of one repository and a roadmap is a file in
+/// one, so what it says then is a fact about the work — *this is the repo, and
+/// it is settled* — and a fact is worth reading where a refused field is not.
+/// The server refuses both, so the disabling is what the record says rather than
+/// this panel's own rule.
 ///
 /// **Nothing is filtered out of the list**, for [`AddCompanion`]'s reason: the
 /// repo the Conversation is already on is in it, and picking it is a switch

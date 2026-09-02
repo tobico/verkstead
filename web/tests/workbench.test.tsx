@@ -3543,6 +3543,27 @@ describe("switching a draft's repo", () => {
     expect(screen.queryByLabelText("Base branch")).toBeNull();
     expect(screen.queryByLabelText("Works alongside")).toBeNull();
   });
+
+  /// And on a draft adopting a roadmap, which has no worktree at all: a roadmap
+  /// is a file in the repo it was found in and only its name is kept, so work
+  /// moved elsewhere would be adopting a name rather than a roadmap. The base
+  /// and the companions are still the human's here — it is the repo alone that
+  /// the roadmap settled.
+  it("reads disabled on a draft adopting a roadmap", async () => {
+    theWorkbench(
+      whenever(`/api/ui/conversations/${ADOPTING.id}`, json(ADOPTING)),
+    );
+    const { container } = mount(`/conversations/${ADOPTING.id}`);
+    await openRepo(container);
+
+    const picker = (await waitFor(() =>
+      screen.getByLabelText("Repo"),
+    )) as HTMLSelectElement;
+
+    expect(picker.disabled).toBe(true);
+    expect(ADOPTING.worktree).toBeNull();
+    expect(screen.getByLabelText("Base branch")).toBeTruthy();
+  });
 });
 /// The other repositories a conversation works alongside: added from a picker
 /// inside the Repo panel, and drawn as a row apiece under it.

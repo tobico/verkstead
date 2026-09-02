@@ -2955,10 +2955,11 @@ pub async fn set_base_commit(pool: &SqlitePool, id: i64, commit: Option<&str>) -
 
 /// What became of moving a drafting Conversation onto another Repo.
 ///
-/// [`Edited`]'s two refusals with the registry's own added, rather than that
-/// enum reused: which Repo a Conversation is on is picked out of the registry,
-/// so a Repo that has been taken off it is a refusal the three edits above have
-/// no way of giving.
+/// [`Edited`]'s two refusals with the registry's own and the adoption's added,
+/// rather than that enum reused: which Repo a Conversation is on is picked out
+/// of the registry, so a Repo that has been taken off it is a refusal the three
+/// edits above have no way of giving — and so is a Conversation whose repository
+/// was settled by the roadmap it is adopting rather than by the human.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Switched {
     /// Moved.
@@ -2971,6 +2972,11 @@ pub enum Switched {
     /// out of is settled.
     NotDrafting,
 
+    /// It is adopting a roadmap, and the roadmap is a file in the repository it
+    /// is on: moving the work would leave it adopting a name rather than a
+    /// roadmap.
+    Adopting,
+
     /// There is no Repo with that id on the registry.
     NoSuchRepo,
 }
@@ -2982,6 +2988,16 @@ pub enum Switched {
 /// the second matters more here than anywhere: a checkout is of one repository,
 /// and moving the work would leave a worktree of a repository the record no
 /// longer names.
+///
+/// And off a third the other two never have to ask: **whether it is adopting a
+/// roadmap.** Only the roadmap's *name* is kept — what it is is read off the
+/// repository at the base commit every time the page is drawn — so a
+/// Conversation moved onto another Repo would go looking for that name over
+/// there, and find either nothing to adopt or, where the two repositories each
+/// hold an `mvp`, a stage of an entirely different roadmap. Which repository an
+/// adoption is in was settled by the row that started it rather than by the
+/// human, so it is not theirs to change afterwards; what is, is putting the
+/// roadmap down and composing work of their own.
 ///
 /// Three things follow from the move, and they are here rather than in the
 /// caller because a Conversation between them would be one nothing could read:
@@ -3004,6 +3020,10 @@ pub async fn switch_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<Swi
 
     if branch_made(pool, id).await? {
         return Ok(Switched::NotDrafting);
+    }
+
+    if adopting(pool, id).await?.is_some() {
+        return Ok(Switched::Adopting);
     }
 
     // On the registry rather than merely in the table, for the reason a

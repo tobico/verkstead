@@ -729,6 +729,34 @@ async fn a_repo_switch_is_refused_once_the_branch_has_been_cut() {
     );
 }
 
+/// And the other freeze, which has nothing to do with a checkout: a
+/// Conversation adopting a roadmap is in the repository that roadmap is written
+/// in, and only the roadmap's name is kept — so moving the work would leave it
+/// adopting a name rather than a roadmap, and finding either nothing or a
+/// different roadmap of the same name.
+#[tokio::test]
+async fn a_repo_switch_is_refused_while_a_roadmap_is_being_adopted() {
+    let (_dir, pool) = fresh_pool().await;
+    let verkstead = repo(&pool, "verkstead").await;
+    let askance = repo(&pool, "askance").await;
+
+    let id = start_adoption(&pool, verkstead, "amber-kestrel", "mvp")
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        switch_repo(&pool, id, askance).await.unwrap(),
+        Switched::Adopting
+    );
+
+    // And nothing moved: the roadmap is still being read off the repository it
+    // is written in.
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(conversation.repo.name, "verkstead");
+    assert_eq!(adopting(&pool, id).await.unwrap().as_deref(), Some("mvp"));
+}
+
 /// The two refusals about the asking rather than about the state.
 #[tokio::test]
 async fn switching_onto_a_repo_that_is_not_registered_says_so() {

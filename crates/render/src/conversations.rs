@@ -2630,6 +2630,13 @@ pub enum RepoSwitched {
     /// work that has already been done.
     NotDrafting,
 
+    /// The Conversation is adopting a roadmap, which is a file in the Repo it is
+    /// on: only the roadmap's name is kept, so work moved elsewhere would go
+    /// looking for that name in a repository that has no such roadmap — or has a
+    /// different one under the same name. What is the human's here is putting
+    /// the roadmap down, not carrying it across.
+    Adopting,
+
     /// There is no registered Repo with that id — taken off the registry between
     /// the panel listing it and the press that picked it.
     NoSuchRepo,

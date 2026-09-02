@@ -571,7 +571,10 @@ in, the branch, the base and the companions, then the three role Pairings — an
 the press that starts the work under the box, against its right edge. Switching
 a draft's repo resets its base to the new repo's default and drops a companion
 that has become its own repo, leaving the branch name and the Pairings alone;
-it is refused, and the picker reads disabled, from the moment a worktree exists.
+it is refused, and the picker reads disabled, from the moment a worktree exists —
+and on a draft adopting a roadmap, whose repo the roadmap settled rather than the
+human: only the roadmap's name is kept, so work moved off would be adopting a
+name rather than a roadmap.
 It is the pane for a Conversation while it drafts, whatever the Brief's own
 freeze — an adopting draft gets it with the box locked to the stage's rendering
 and the Adopt press where the start would be. Past drafting a frozen Brief opens

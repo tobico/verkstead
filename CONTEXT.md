@@ -344,6 +344,12 @@ follow from a switch: the base commit goes back to the new repository's
 default-branch rule, a companion that has just become the Conversation's own
 Repo is dropped — a Conversation is never a companion of itself — and the branch
 name and the Pairings are left exactly where the human left them.
+Refused where the work is adopting a roadmap, and the picker reads disabled: the
+roadmap is a file in the repository it was found in and only its **name** is
+kept, so a Conversation moved off would go looking for that name elsewhere and
+find nothing to adopt — or a different roadmap called the same thing. Which
+repository an adoption is in was settled by the row that started it; what is
+still the human's is putting the roadmap down and composing work of their own.
 
 **And the same composer with nothing behind it is the compose page**, reached
 from *New conversation* at the head of the sidebar — which is the whole of what
