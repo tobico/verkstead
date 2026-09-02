@@ -283,8 +283,11 @@ export function Listbox<T>(
     ///
     /// It becomes the control's accessible name, which is what keeps the
     /// trigger called "Grilling" rather than "Grilling Fable 5 — Work": a
-    /// combobox is named by its label and says its value separately. Everywhere
-    /// else the `<label for=…>` contract at the head of this file is untouched.
+    /// combobox is named by its label and says its value separately. Which is
+    /// also why it is drawn `aria-hidden` — a combobox that is not an input
+    /// says its value out of its own contents, and a label left in them would
+    /// be read as part of the value it is the name of. Everywhere else the
+    /// `<label for=…>` contract at the head of this file is untouched.
     heading?: { words: string; class?: string };
 
     /// The anchor's own class, for the caller with the field around it to lay
@@ -372,11 +375,20 @@ export function Listbox<T>(
         onKeyDown={key}
       >
         {/* The label, where it lives in the handle rather than above it: part
-            of what is pressed, so the whole of the two lines is one target. */}
+            of what is pressed, so the whole of the two lines is one target.
+
+            And hidden from the contents, because a combobox that is not an
+            input says its *value* out of them: left visible it would be read
+            into the value as well as being the name, and the trigger would
+            announce as "Grilling" holding "Grilling Fable 5 — Work". A node
+            named directly by `aria-labelledby` is still read for the name
+            however it is hidden, which is what makes this the whole of the
+            fix. */}
         <Show when={props.heading}>
           {(heading) => (
             <span
               id={`${props.id}-label`}
+              aria-hidden="true"
               class={[styles.heading, heading().class].filter(Boolean).join(" ")}
             >
               {heading().words}

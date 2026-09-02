@@ -397,6 +397,15 @@ describe("the listbox with its label in the handle", () => {
     );
     // The value is still the value, said where every other control says it.
     expect(showing("Grilling")).toBe("Grok 4.6");
+
+    // And out of the contents the value is read from, so that the name is not
+    // read into it as well: a node named directly by `aria-labelledby` is
+    // still read for the name however it is hidden, which is what leaves this
+    // control called "Grilling" and showing "Grok 4.6" rather than called
+    // "Grilling" and showing "Grilling Grok 4.6".
+    expect(
+      document.getElementById("grilling-pairing-label")!.getAttribute("aria-hidden"),
+    ).toBe("true");
   });
 
   /// And a press on the label is a press on the trigger, the label being part
