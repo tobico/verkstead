@@ -12480,16 +12480,19 @@ describe("the pinned pull request", () => {
   });
   });
 
-/// A conversation with all three kinds pinned at once: the backlog it was built
-/// from, the roadmap the branch wrote to, and the pull request it ended on.
+/// A conversation with all three kinds pinned at once: the pull request it ended
+/// on, the backlog it was built from, and the roadmap the branch wrote to.
+///
+/// In that order, which is the order the server hands them over in — see the
+/// pinned block in `crates/server/src/ui.rs`.
 ///
 /// Composed rather than a fixture of its own, because what is being read here is
 /// how the timeline draws several pinned cards, and each of the three is already
 /// a golden fixture the server wrote.
 const ALL_THREE = [
+  { PullRequest: OPENED },
   { TaskList: BACKLOG },
   { StageList: ROADMAP },
-  { PullRequest: OPENED },
 ];
 
 /// A finger going down or coming up at a place across the card.
@@ -12520,7 +12523,7 @@ describe("the pinned carousel", () => {
     expect(
       pinned.querySelectorAll(`.${timeline.taskList}, .${timeline.stageList}, .${timeline.pullRequest}`),
     ).toHaveLength(1);
-    expect(pinned.querySelector(`.${timeline.taskList}`)).not.toBeNull();
+    expect(pinned.querySelector(`.${timeline.pullRequest}`)).not.toBeNull();
   });
 
   /// The dots are the whole of what the carousel says about itself: how many
@@ -12542,9 +12545,9 @@ describe("the pinned carousel", () => {
     expect(dots.nextElementSibling?.className).toContain(timeline.deck);
 
     expect(buttons.map((dot) => dot.getAttribute("aria-label"))).toEqual([
+      "Pull request",
       "Task list",
       "Roadmap",
-      "Pull request",
     ]);
     expect(buttons.map((dot) => dot.getAttribute("aria-current"))).toEqual([
       "true",
@@ -12561,12 +12564,12 @@ describe("the pinned carousel", () => {
     fireEvent.click(dots.querySelectorAll("button")[2]!);
 
     await waitFor(() =>
-      expect(container.querySelector(`.${timeline.pinned} .${timeline.pullRequest}`)).not.toBeNull(),
+      expect(container.querySelector(`.${timeline.pinned} .${timeline.stageList}`)).not.toBeNull(),
     );
     // The card it turned off is held in the deck while the slide runs, and gone
     // once it has.
     await waitFor(() =>
-      expect(container.querySelector(`.${timeline.pinned} .${timeline.taskList}`)).toBeNull(),
+      expect(container.querySelector(`.${timeline.pinned} .${timeline.pullRequest}`)).toBeNull(),
     );
     expect(
       dots.querySelectorAll("button")[2]!.getAttribute("aria-current"),
@@ -12583,14 +12586,14 @@ describe("the pinned carousel", () => {
 
     fireEvent.click(carousel.querySelector(`.${timeline.step}.${timeline.on}`)!);
     await waitFor(() =>
-      expect(carousel.querySelector(`.${timeline.stageList}`)).not.toBeNull(),
+      expect(carousel.querySelector(`.${timeline.taskList}`)).not.toBeNull(),
     );
 
     // Back past the front, which is the far end of the list.
     fireEvent.click(carousel.querySelector(`.${timeline.step}.${timeline.back}`)!);
     fireEvent.click(carousel.querySelector(`.${timeline.step}.${timeline.back}`)!);
     await waitFor(() =>
-      expect(carousel.querySelector(`.${timeline.pullRequest}`)).not.toBeNull(),
+      expect(carousel.querySelector(`.${timeline.stageList}`)).not.toBeNull(),
     );
   });
 
@@ -12644,11 +12647,11 @@ describe("the pinned carousel", () => {
     // arrow is pressed, and one of them is gone again a fifth of a second later.
     const leaving = deck.querySelector(`.${timeline.leaving}`);
     expect(leaving?.className).toContain(timeline.onward);
-    expect(leaving?.querySelector(`.${timeline.taskList}`)).not.toBeNull();
+    expect(leaving?.querySelector(`.${timeline.pullRequest}`)).not.toBeNull();
 
     const arriving = deck.querySelector(`.${timeline.arriving}`);
     expect(arriving?.className).toContain(timeline.onward);
-    expect(arriving?.querySelector(`.${timeline.stageList}`)).not.toBeNull();
+    expect(arriving?.querySelector(`.${timeline.taskList}`)).not.toBeNull();
 
     // And back the other way, which the pair say too.
     await waitFor(() => expect(deck.querySelector(`.${timeline.leaving}`)).toBeNull());
@@ -12660,7 +12663,7 @@ describe("the pinned carousel", () => {
 
     await waitFor(() => expect(deck.querySelector(`.${timeline.leaving}`)).toBeNull());
     expect(deck.querySelector(`.${timeline.arriving}`)).toBeNull();
-    expect(deck.querySelector(`.${timeline.taskList}`)).not.toBeNull();
+    expect(deck.querySelector(`.${timeline.pullRequest}`)).not.toBeNull();
   });
 
   it("turns the card on a swipe across it", async () => {
@@ -12672,35 +12675,43 @@ describe("the pinned carousel", () => {
     // Leftwards is onwards, the way a page turns.
     swipe(deck, 200, 200 - SWIPE);
     await waitFor(() =>
-      expect(deck.querySelector(`.${timeline.stageList}`)).not.toBeNull(),
+      expect(deck.querySelector(`.${timeline.taskList}`)).not.toBeNull(),
     );
 
     swipe(deck, 200, 200 + SWIPE);
     await waitFor(() =>
-      expect(deck.querySelector(`.${timeline.taskList}`)).not.toBeNull(),
+      expect(deck.querySelector(`.${timeline.pullRequest}`)).not.toBeNull(),
     );
 
     // A press that slid a little is still a press, and turns nothing.
     await waitFor(() => expect(deck.querySelector(`.${timeline.leaving}`)).toBeNull());
     swipe(deck, 200, 200 - (SWIPE - 1));
-    expect(deck.querySelector(`.${timeline.stageList}`)).toBeNull();
+    expect(deck.querySelector(`.${timeline.taskList}`)).toBeNull();
   });
 
   /// Which card the reader is put in front of: the one the work has stopped on,
-  /// which is what they opened the conversation to deal with.
+  /// which is what they opened the conversation to deal with. Only a pull
+  /// request can be one, so it only picks a card out where there is more than
+  /// one of those — a companion's over the work's own here.
   it("fronts the card the work is blocked on", async () => {
-    theWrapping({ pinned: ALL_THREE, blocked_on: OPENED.id });
+    theWrapping({
+      pinned: [...ALL_THREE, BESIDE_IT],
+      blocked_on: BESIDE_IT.PullRequest.id,
+    });
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
-    const pinned = await drawn(container, `.${timeline.pinned}`);
+    const repo = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.pullRequest} .${timeline.repo}`,
+    );
 
-    expect(pinned.querySelector(`.${timeline.pullRequest}`)).not.toBeNull();
-    expect(pinned.querySelector(`.${timeline.taskList}`)).toBeNull();
+    expect(repo.textContent).toBe("askance");
   });
 
   /// And with nothing stopping it, the fixed order — which is the order the
-  /// server hands them over in, and the order the work goes through them in.
-  it("otherwise fronts the first, which is the task list", async () => {
+  /// server hands them over in, the pull request leading it as the one of the
+  /// three with anything on it to answer.
+  it("otherwise fronts the first, which is the pull request", async () => {
     expect(WRAPPING.blocked_on).toBeNull();
 
     theWrapping({ pinned: ALL_THREE });
@@ -12708,19 +12719,20 @@ describe("the pinned carousel", () => {
 
     const pinned = await drawn(container, `.${timeline.pinned}`);
 
-    expect(pinned.querySelector(`.${timeline.taskList}`)).not.toBeNull();
+    expect(pinned.querySelector(`.${timeline.pullRequest}`)).not.toBeNull();
   });
 
-  /// And with no backlog to be first, the roadmap — the order is the server's,
-  /// which is the order the work goes through them in.
-  it("fronts the roadmap where there is no backlog before it", async () => {
+  /// And with no pull request to be first, the task list — the order is the
+  /// server's, and what is behind the pull request is the order the work goes
+  /// through the two lists in.
+  it("fronts the task list where there is no pull request before it", async () => {
     theWrapping({ pinned: ALL_THREE.slice(1) });
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
     const pinned = await drawn(container, `.${timeline.pinned}`);
 
-    expect(pinned.querySelector(`.${timeline.stageList}`)).not.toBeNull();
-    expect(pinned.querySelector(`.${timeline.pullRequest}`)).toBeNull();
+    expect(pinned.querySelector(`.${timeline.taskList}`)).not.toBeNull();
+    expect(pinned.querySelector(`.${timeline.stageList}`)).toBeNull();
   });
 
   /// One pinned card is not a carousel: there is nothing to turn to, and dots
@@ -12751,6 +12763,8 @@ describe("the pinned carousel", () => {
 
     const dots = carousel.querySelector(`.${timeline.dots}`)!;
     fireEvent.click(dots.querySelectorAll("button")[2]!);
+    await drawn(container, `.${timeline.pinned} .${timeline.stageList}`);
+    fireEvent.click(dots.querySelectorAll("button")[0]!);
 
     const opened = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
     fireEvent.click(opened);

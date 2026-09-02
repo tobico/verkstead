@@ -1730,6 +1730,11 @@ export type PickedView = "Nothing" | "Skipped" | { "Under": PairingView };
  *
  * All three are on the record as well, each at the moment it arrived there, and
  * each is one card drawn twice rather than two cards.
+ *
+ * The list they arrive in is ordered, and the viewer draws it in that order: a
+ * pull request first, then a task list, then a roadmap. The ordering is done
+ * where the list is built rather than here — see the pinned block in
+ * `crates/server/src/ui.rs`.
  */
 export type PinnedEvent = { "TaskList": TaskListEvent } | { "StageList": StageListEvent } | { "PullRequest": PullRequestEvent };
 

@@ -969,24 +969,6 @@ pub(crate) async fn conversation_view(
     )
     .await;
 
-    // Each of those goes in two places — pinned above the record, and on the
-    // record at the row that says it landed — and this is the one reading behind
-    // both. The rows are stamped where the runner sees the landing; a
-    // Conversation from before there were rows to stamp keeps the pinned card
-    // alone, which is what it has always had.
-    let mut pinned: Vec<verkstead_render::PinnedEvent> = backlog
-        .clone()
-        .map(verkstead_render::task_list_event)
-        .into_iter()
-        .collect();
-
-    pinned.extend(
-        roadmaps
-            .iter()
-            .cloned()
-            .map(verkstead_render::stage_list_event),
-    );
-
     // And how the pull request's checks were the last time anything asked, which
     // is the one thing about a pull request that is written down and moves. Read
     // once for the two cards drawn from it below, both being the one card in the
@@ -1029,30 +1011,60 @@ pub(crate) async fn conversation_view(
         }
     };
 
-    // And every pull request the work ended up on, which are pinned beside them.
-    // These *are* on the record — the Conversation's own repository's is what
-    // moved the Conversation into Wrapping, and a companion's is that wrap-up
-    // covering the repository it also committed in — so they are read off the
-    // Timeline for the reason the Brief is: they are already here. All of them
-    // rather than the last one found: a Conversation ends on one pull request per
-    // repository it was worked in, and the human wraps up all of them at once.
-    // What is not read here is what a PR holds, which is a request of its own;
-    // see [`pull_request`].
-    pinned.extend(timeline.iter().filter_map(|event| match &event.event {
-        store::Event::PullRequest(opened) => Some(verkstead_render::pull_request_event(
-            event.id,
-            event.at.clone(),
-            verkstead_render::PullRequestSummary {
-                number: opened.number,
-                title: opened.title.clone(),
-                url: opened.url.clone(),
-                repo: opened.repo.clone(),
-                checks: own_checks(&opened.repo, checks),
-                merging: merges.get(&event.id).copied().map(merging),
-            },
-        )),
-        _ => None,
-    }));
+    // What is pinned, in the order the carousel turns through it: every pull
+    // request the work ended up on, then the backlog, then the roadmap.
+    //
+    // The pull request leads because it is the one of the three with anything on
+    // it to answer — a review waiting, checks gone red, a merge that stopped —
+    // where a backlog and a roadmap are lists read off the worktree with nothing
+    // on them to do. The two lists follow in the order the work goes through
+    // them: a backlog is this piece of work's own tasks, and a roadmap is the
+    // stages around it.
+    //
+    // Which card fronts when a Conversation is opened is not settled here. That
+    // is the viewer's, and this order is what it falls back to where nothing is
+    // blocking — see `fronting` in `web/src/workbench/Timeline.tsx`.
+    //
+    // The pull requests *are* on the record — the Conversation's own
+    // repository's is what moved the Conversation into Wrapping, and a
+    // companion's is that wrap-up covering the repository it also committed in —
+    // so they are read off the Timeline for the reason the Brief is: they are
+    // already here. All of them rather than the last one found: a Conversation
+    // ends on one pull request per repository it was worked in, and the human
+    // wraps up all of them at once. What is not read here is what a PR holds,
+    // which is a request of its own; see [`pull_request`].
+    let mut pinned: Vec<verkstead_render::PinnedEvent> = timeline
+        .iter()
+        .filter_map(|event| match &event.event {
+            store::Event::PullRequest(opened) => Some(verkstead_render::pull_request_event(
+                event.id,
+                event.at.clone(),
+                verkstead_render::PullRequestSummary {
+                    number: opened.number,
+                    title: opened.title.clone(),
+                    url: opened.url.clone(),
+                    repo: opened.repo.clone(),
+                    checks: own_checks(&opened.repo, checks),
+                    merging: merges.get(&event.id).copied().map(merging),
+                },
+            )),
+            _ => None,
+        })
+        .collect();
+
+    // And the two lists behind it. Each goes in two places — pinned here, and on
+    // the record at the row that says it landed — and this is the one reading
+    // behind both. The rows are stamped where the runner sees the landing; a
+    // Conversation from before there were rows to stamp keeps the pinned card
+    // alone, which is what it has always had.
+    pinned.extend(backlog.clone().map(verkstead_render::task_list_event));
+
+    pinned.extend(
+        roadmaps
+            .iter()
+            .cloned()
+            .map(verkstead_render::stage_list_event),
+    );
 
     // Whether the worktree is still on disk, which is a look at the filesystem
     // rather than anything the store knows.

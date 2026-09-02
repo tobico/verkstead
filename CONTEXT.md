@@ -361,7 +361,10 @@ _Avoid_: feed, log, history, activity stream
 One entry in a Timeline — a Brief, agent output, a Question Set, a Handoff, a
 commit, a task list, a stage list, a PR, a Notice. Each shows a summary in the
 Timeline and its full self in the details pane. Task lists, stage lists and PRs
-are **pinned**: a fixed set, with no manual pin or unpin.
+are **pinned**: a fixed set, with no manual pin or unpin. Where more than one is
+pinned they are drawn in one order — the pull request, then the task list, then
+the roadmap — the pull request leading as the only one of the three with
+anything on it to answer.
 _Avoid_: item, record, message, step
 
 **Share**:
