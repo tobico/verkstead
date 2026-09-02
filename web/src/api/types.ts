@@ -642,7 +642,21 @@ snippet: string | null,
  * means the repo the Conversation is in, and the label earns its place when
  * a Timeline carries more than one repository's commits.
  */
-repo: string | null, };
+repo: string | null, 
+/**
+ * Whether it is a merge: the commit a resolution session left behind where
+ * it brought the base branch in and settled the conflicts.
+ *
+ * What it carries is the hunks the agent resolved, so its counts and its
+ * diff are an ordinary small commit's and it would read as one. The card
+ * labels it instead, beside the hash and in the register the Repo label
+ * above is drawn in — a quiet word saying which of two things this row is,
+ * rather than anything waiting on the human.
+ *
+ * `false` is the ordinary commit, and also every commit recorded before
+ * this was kept: those draw the card they have always drawn.
+ */
+merge: boolean, };
 
 /**
  * One commit, as the details pane receives it: what it said about itself, and

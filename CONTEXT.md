@@ -387,6 +387,11 @@ copy counts as the same branch, an agent told to merge the base in landing on
 either. A Conversation from before the name was kept, or one whose branch has
 since gone, reads by the Repo's default branch as origin holds it; a repository
 where that does not resolve either sweeps by the base commit alone.
+**And that merge's card says it is one.** What it holds is the resolution and
+nothing else — a file or two, a handful of lines — so it reads as an ordinary
+small commit unless something says otherwise: the word sits beside the hash, in
+the register a companion Repo's name is drawn in. Every other commit is
+unlabelled, and so is every commit recorded before the record could say.
 _Avoid_: item, record, message, step
 
 **Share**:

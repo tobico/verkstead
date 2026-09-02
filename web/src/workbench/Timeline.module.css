@@ -946,6 +946,23 @@
   color: var(--ink-soft);
 }
 
+/* And that the commit is a merge, on the other side of the hash. The same
+   outline the repo label above is drawn in, because it is the same kind of
+   thing: which of several a row is about, rather than anything waiting on the
+   human.
+
+   Only a merge carries it, so a column of unlabelled cards is a branch nobody
+   has had to bring the base into — and the one label in it is where a
+   resolution session settled the conflicts, which reads as an ordinary small
+   commit otherwise. */
+.commit .merge {
+  padding: 0.05rem 0.35rem;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
 /* The hash, shortened for reading. Monospaced wherever it appears, because it
    is a thing to type into git rather than a thing to read as words — the pane
    the row opens says the same of its own. */

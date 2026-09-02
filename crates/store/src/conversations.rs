@@ -2282,11 +2282,12 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
     // none.
     let mut pull_requests = super::pull_requests::on_timeline(pool, conversation_id).await?;
 
-    // And the Commit Summaries, for the same arithmetic. The commit itself is
-    // joined into the query above; what the agent wrote under its subject is one
-    // more read, and a Timeline of bookkeeping commits answers it with nothing.
-    let mut summaries_of_commits =
-        super::commits::summaries_on_timeline(pool, conversation_id).await?;
+    // And what each commit carries that the query above has no column left for,
+    // for the same arithmetic: what the agent wrote under its subject, and
+    // whether the commit is a merge. One read for both, since it is one join
+    // either way — see [`super::commits::beside_commits_on_timeline`].
+    let mut beside_commits =
+        super::commits::beside_commits_on_timeline(pool, conversation_id).await?;
 
     // And the Pauses, for the arithmetic again and at the pull request's cost:
     // an account running out of window is the rare Event, so this is one more
@@ -2326,6 +2327,14 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
 
             let commit = match (sha, subject, files, insertions, deletions) {
                 (Some(sha), Some(subject), Some(files), Some(insertions), Some(deletions)) => {
+                    // The summary and the merge flag both, off the one read the
+                    // query above had no columns left to hold. That read is over
+                    // this Conversation's commits, so every row this arm reaches
+                    // has an entry in it — and what stands in for one that
+                    // somehow does not is the ordinary commit: no summary, and
+                    // no merge.
+                    let beside = beside_commits.remove(&id).unwrap_or_default();
+
                     Some(super::Commit {
                         sha,
                         subject,
@@ -2334,11 +2343,15 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
                         deletions,
                         // Absent for most commits, which is what a commit that
                         // said nothing about itself looks like.
-                        summary: summaries_of_commits.remove(&id),
+                        summary: beside.summary,
                         // And absent for every commit in the Conversation's own
                         // repository, which is what the join above says: a label
                         // is drawn where repos mix and nowhere else.
                         repo,
+                        // False for every commit but the one a resolution
+                        // session left behind, and for every commit recorded
+                        // before the column existed.
+                        merge: beside.merge,
                     })
                 }
                 // Every column of that row is `NOT NULL`, so the only way to be

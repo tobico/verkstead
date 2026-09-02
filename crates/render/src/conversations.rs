@@ -1389,6 +1389,19 @@ pub struct CommitEvent {
     /// means the repo the Conversation is in, and the label earns its place when
     /// a Timeline carries more than one repository's commits.
     pub repo: Option<String>,
+
+    /// Whether it is a merge: the commit a resolution session left behind where
+    /// it brought the base branch in and settled the conflicts.
+    ///
+    /// What it carries is the hunks the agent resolved, so its counts and its
+    /// diff are an ordinary small commit's and it would read as one. The card
+    /// labels it instead, beside the hash and in the register the Repo label
+    /// above is drawn in — a quiet word saying which of two things this row is,
+    /// rather than anything waiting on the human.
+    ///
+    /// `false` is the ordinary commit, and also every commit recorded before
+    /// this was kept: those draw the card they have always drawn.
+    pub merge: bool,
 }
 
 /// One commit, as the details pane receives it: what it said about itself, and
@@ -2027,7 +2040,7 @@ pub fn brief_event(id: i64, at: String, markdown: String, frozen: bool) -> Timel
     })
 }
 
-/// A commit as an Event: five facts git counted, and the snippet of what the
+/// A commit as an Event: what git counted of it, and the snippet of what the
 /// commit said about itself that its card clamps.
 ///
 /// Here beside the move for the reason that one is: one place knows how a
@@ -2049,6 +2062,7 @@ pub fn commit_event(id: i64, at: String, commit: CommitRecord) -> TimelineEvent 
             .map(crate::markdown::to_prose)
             .filter(|prose| !prose.is_empty()),
         repo: commit.repo,
+        merge: commit.merge,
     })
 }
 
@@ -2074,6 +2088,9 @@ pub struct CommitRecord {
     /// What the repository it landed in is called, where that is not the
     /// Conversation's own — see [`CommitEvent::repo`].
     pub repo: Option<String>,
+
+    /// Whether it is a merge — see [`CommitEvent::merge`].
+    pub merge: bool,
 }
 
 /// One commit as the details pane receives it, rendered on the way.

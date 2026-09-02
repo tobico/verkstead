@@ -482,10 +482,15 @@ fn counterpart(named: &str) -> String {
 /// counts what is in it, and on a commit with one parent the two agree line
 /// for line — which is every commit but the merge.
 ///
-/// The message is one read all the same. `%s` is a single line whatever the
-/// commit did to its first paragraph, so the subject is everything before the
-/// first newline and the body is the rest — and asking for the body separately
-/// would be a third git process per commit for a string git already had open.
+/// The message is one read all the same, and it carries the parents with it.
+/// `%P` and `%s` are a single line each whatever the commit did to its first
+/// paragraph, so the parents are the first line, the subject the second and the
+/// body the rest — and asking for any of them separately would be another git
+/// process per commit for a string git already had open.
+///
+/// Whether it is a merge is read here rather than whenever a page looks, for the
+/// reason the subject and the counts are: it is kept beside the commit, and a
+/// Timeline that asked git per row would be a git process per commit of it.
 ///
 /// `None` where the repository will not say, which is a commit that has gone
 /// between being listed and being asked about.
@@ -495,13 +500,14 @@ fn describe(repo: &Path, sha: &str) -> Option<store::Commit> {
         &[
             "show",
             "--no-patch",
-            "--format=%s%n%b",
+            "--format=%P%n%s%n%b",
             "--end-of-options",
             sha,
         ],
     )?;
 
-    let (subject, body) = message.split_once('\n').unwrap_or((message.as_str(), ""));
+    let (parents, message) = message.split_once('\n').unwrap_or((message.as_str(), ""));
+    let (subject, body) = message.split_once('\n').unwrap_or((message, ""));
 
     let (files, insertions, deletions) = counts(&patch(repo, sha)?);
 
@@ -516,6 +522,10 @@ fn describe(repo: &Path, sha: &str) -> Option<store::Commit> {
         // and the row is written with its id — see [`store::record_commit`].
         // The name here is what a read gives back for drawing.
         repo: None,
+        // A merge is a commit with more than one parent, which is what `%P`
+        // says: one hash for an ordinary commit, none at all for a root one,
+        // and two or more for the merge a resolution session left behind.
+        merge: parents.split_whitespace().count() > 1,
     })
 }
 
@@ -865,6 +875,10 @@ mod tests {
         assert_eq!(described.files, 2);
         assert_eq!(described.insertions, 5);
         assert_eq!(described.deletions, 0);
+        assert!(
+            !described.merge,
+            "and it is the ordinary commit, which is what a card draws unlabelled",
+        );
     }
 
     /// What the agent wrote under the subject is the Commit Summary, and the
@@ -975,6 +989,10 @@ mod tests {
         assert_eq!(described.subject, "first");
         assert_eq!(described.files, 1);
         assert_eq!(described.insertions, 1);
+        assert!(
+            !described.merge,
+            "a commit with no parent at all is no merge either",
+        );
 
         let patch = patch(path, &root).expect("and it still has a patch");
 
@@ -1045,6 +1063,11 @@ mod tests {
         );
         assert_eq!(described.insertions, 1);
         assert_eq!(described.deletions, 1);
+        assert!(
+            described.merge,
+            "and it says it is a merge, which is what its card is labelled from: \
+             the counts above are an ordinary small commit's",
+        );
 
         let patch = patch(path, &head(path)).expect("and it still has a patch");
 

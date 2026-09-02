@@ -2194,14 +2194,15 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // file's subject, and whether watching a branch notices one is
     // `tests/sessions.rs`'s.
     //
-    // Two of them, because a Timeline row has to read as one of several rather
-    // than as a lone event — and on the Conversation that has been through a
-    // grilling, because that is where a branch first has anything on it. One of
-    // each kind, too: the bookkeeping commit that says only what it was, and the
-    // one that delivered work and wrote a Commit Summary about it.
-    // Three of them: two out of the Conversation's own repository and one out of
-    // the companion, because a labelled card is only worth drawing where a
-    // Timeline carries both — and the label is what tells them apart.
+    // Several of them, because a Timeline row has to read as one of several
+    // rather than as a lone event — and on the Conversation that has been
+    // through a grilling, because that is where a branch first has anything on
+    // it. One of each kind the card is drawn differently for: the bookkeeping
+    // commit that says only what it was, the one that delivered work and wrote a
+    // Commit Summary about it, the one out of the companion repo, and the merge
+    // a resolution session left behind. Every label the card can carry is worth
+    // drawing only where a Timeline holds both kinds, and these are what tells
+    // them apart.
     for (repo, commit) in [
         (
             repos[0].id,
@@ -2213,6 +2214,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
                 deletions: 3,
                 summary: None,
                 repo: None,
+                merge: false,
             },
         ),
         (
@@ -2231,6 +2233,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
                         .to_owned(),
                 ),
                 repo: None,
+                merge: false,
             },
         ),
         (
@@ -2243,6 +2246,23 @@ async fn the_viewers_own_tests_are_fed_from_here() {
                 deletions: 12,
                 summary: None,
                 repo: None,
+                merge: false,
+            },
+        ),
+        (
+            repos[0].id,
+            store::Commit {
+                sha: "e2b7c4d90a15f836b4e0c7a2d9f31846b5c0e7a4".to_owned(),
+                subject: "Merge branch 'main' into usage-limit-pause".to_owned(),
+                // The counts a merge carries are the hunks the agent resolved,
+                // which is what makes it read as an ordinary small commit — and
+                // what the label on the card is for.
+                files: 1,
+                insertions: 4,
+                deletions: 4,
+                summary: None,
+                repo: None,
+                merge: true,
             },
         ),
     ] {
@@ -2326,6 +2346,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             deletions: 0,
             summary: None,
             repo: None,
+            merge: false,
         },
     )
     .await
@@ -2583,6 +2604,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             deletions: 24,
             summary: None,
             repo: None,
+            merge: false,
         },
     )
     .await

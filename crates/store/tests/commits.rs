@@ -55,7 +55,8 @@ async fn registered(pool: &SqlitePool, name: &str) -> i64 {
 /// summaries were kept looks like.
 ///
 /// Unlabeled, which is what the sweep offers and what the Conversation's own
-/// repository reads back as.
+/// repository reads back as. And an ordinary commit rather than a merge, which
+/// is what all but one commit on any branch is.
 fn landed(sha: &str, subject: &str) -> Commit {
     Commit {
         sha: sha.to_owned(),
@@ -65,6 +66,7 @@ fn landed(sha: &str, subject: &str) -> Commit {
         deletions: 4,
         summary: None,
         repo: None,
+        merge: false,
     }
 }
 
@@ -72,6 +74,15 @@ fn landed(sha: &str, subject: &str) -> Commit {
 fn summarised(sha: &str, subject: &str, summary: &str) -> Commit {
     Commit {
         summary: Some(summary.to_owned()),
+        ..landed(sha, subject)
+    }
+}
+
+/// And the same as a merge: what a resolution session leaves behind where it
+/// brought the base branch in and settled the conflicts.
+fn merged(sha: &str, subject: &str) -> Commit {
+    Commit {
+        merge: true,
         ..landed(sha, subject)
     }
 }
@@ -163,6 +174,47 @@ async fn a_commit_with_no_summary_has_none() {
         None
     );
     assert_eq!(on_the_timeline(&pool, id).await[0].summary, None);
+}
+
+/// Whether a commit is a merge is read off git once, when the sweep describes
+/// it, and kept beside the commit: the Timeline the card is drawn on and the
+/// pane it opens both read it back rather than asking git again.
+#[tokio::test]
+async fn a_merge_comes_back_a_merge() {
+    let (_dir, pool) = fresh_pool().await;
+    let (id, repo) = conversation(&pool).await;
+
+    let event = record_commit(&pool, id, repo, &merged("a1b2c3d", "Merge branch 'main'"))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert!(
+        on_the_timeline(&pool, id).await[0].merge,
+        "the card the Timeline draws is the one that says it is a merge",
+    );
+
+    assert!(
+        commit(&pool, id, event).await.unwrap().unwrap().merge,
+        "and so is the pane it opens",
+    );
+}
+
+/// And the ordinary commit, which is every commit but the one a resolution
+/// session left behind: nothing marks it, and the card is the one that has
+/// always been drawn.
+#[tokio::test]
+async fn an_ordinary_commit_is_no_merge() {
+    let (_dir, pool) = fresh_pool().await;
+    let (id, repo) = conversation(&pool).await;
+
+    let event = record_commit(&pool, id, repo, &landed("a1b2c3d", "feat: rate limiting"))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert!(!on_the_timeline(&pool, id).await[0].merge);
+    assert!(!commit(&pool, id, event).await.unwrap().unwrap().merge);
 }
 
 /// One summary per commit, because the summary is written in the commit's own

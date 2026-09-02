@@ -251,6 +251,7 @@ async fn everything(pool: &SqlitePool) -> i64 {
             deletions: 3,
             summary: Some("The record travels as the viewer built to one file.".to_owned()),
             repo: None,
+            merge: false,
         },
     )
     .await
@@ -796,6 +797,7 @@ async fn a_commit_that_drew_the_delta_says_the_share_needs_the_renderer_too() {
             deletions: 0,
             summary: Some("What it does:\n\n```mermaid\nflowchart LR\n  a --> b\n```\n".to_owned()),
             repo: None,
+            merge: false,
         },
     )
     .await
@@ -1003,6 +1005,7 @@ async fn a_share_carries_the_whole_diff_of_every_commit_on_it() {
                     "Step {n}.\n\n```mermaid\nflowchart LR\n  a --> b\n```\n"
                 )),
                 repo: None,
+                merge: false,
             },
         )
         .await
@@ -1112,6 +1115,7 @@ async fn a_companions_commit_carries_its_own_repositorys_diff() {
                 deletions: 0,
                 summary: None,
                 repo: None,
+                merge: false,
             },
         )
         .await
@@ -1186,6 +1190,7 @@ async fn a_commit_the_repository_has_lost_says_so_rather_than_stopping_the_expor
                 deletions: 0,
                 summary: summary.map(ToOwned::to_owned),
                 repo: None,
+                merge: false,
             },
         )
         .await

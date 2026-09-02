@@ -672,6 +672,7 @@ mod tests {
             deletions,
             snippet: None,
             repo: None,
+            merge: false,
         })
     }
 

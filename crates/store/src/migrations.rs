@@ -12,12 +12,13 @@
 //! about, and which pull request a comment somebody was sent to deal with was
 //! left on, are all a pull request's rather than a Conversation's now.
 //!
-//! Five of them are a column arriving rather than rows moving between tables —
+//! Six of them are a column arriving rather than rows moving between tables —
 //! the Review role's Profile, the branch name somebody settled on, whether a
 //! branch is still waiting to be named, whether a session is idling on a stored
-//! ask, and the branch a Conversation's base was resolved through — which is the
-//! same kind of one-time rewrite: the rows already there are given the value
-//! that says what was true of them before the column existed.
+//! ask, the branch a Conversation's base was resolved through, and whether a
+//! commit is a merge — which is the same kind of one-time rewrite: the rows
+//! already there are given the value that says what was true of them before the
+//! column existed.
 //!
 //! Each is written to be safe against a database that has already had it, and
 //! what says whether there is anything to do is the presence of what it
@@ -43,7 +44,45 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     conversations_whose_branch_name_had_no_owner(pool).await?;
     conversations_whose_branch_nobody_was_naming(pool).await?;
     stored_asks_nobody_was_idling_on(pool).await?;
-    conversations_that_recorded_no_base_branch(pool).await
+    conversations_that_recorded_no_base_branch(pool).await?;
+    commits_that_never_said_they_were_merges(pool).await
+}
+
+/// Give every commit recorded before a merge was told apart from an ordinary
+/// commit the column that says which it is.
+///
+/// None of them says it is a merge. Whether a commit is one is read off git when
+/// the commit is described and kept beside it — see [`super::Commit::merge`] —
+/// and every row this reaches was described before there was anything to read it
+/// into. So the column's own default is the whole of the rewrite, and there is
+/// no `UPDATE` under it: those commits draw the unlabelled card they have always
+/// drawn, which is the ordinary one.
+///
+/// Asking git for them now would be the alternative, and it is a worse answer
+/// than the default: a Timeline's worth of git processes at the moment a
+/// database opens, over commits a rebase or a collection may have taken away
+/// entirely.
+///
+/// Safe to run twice: what says whether there is anything to do is the column
+/// being absent, and after the first run it is there.
+async fn commits_that_never_said_they_were_merges(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('commits') WHERE name = ?")
+            .bind("merge")
+            .fetch_optional(pool)
+            .await
+            .context("looking for whether a commit says it is a merge")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    sqlx::query("ALTER TABLE commits ADD COLUMN merge INTEGER NOT NULL DEFAULT 0")
+        .execute(pool)
+        .await
+        .context("giving the commits recorded before this something to say they are not merges")?;
+
+    Ok(())
 }
 
 /// Give every Conversation written before the base's branch was kept the column

@@ -34,6 +34,12 @@
 //! beside it now. Nothing knows what branch the Conversations from before came
 //! off, so the column arrives empty and they sweep by the Repo's default branch.
 //!
+//! And one column added holding its default: a merge used to be an ordinary
+//! commit as far as the record went, and says which it is now. Nothing knows
+//! whether the commits from before were merges without asking git about every
+//! one of them, so the column arrives saying they are not — which is the card
+//! they have always drawn.
+//!
 //! And one column added: a branch name used to be one thing, prefilled randomly
 //! and typed over or not, and is now two — the name Verkstead invented and the
 //! name somebody settled on, of which only the second is drawn. Every
@@ -979,6 +985,7 @@ async fn the_rebuilt_commits_table_keeps_one_commit_per_conversation_per_repo() 
         deletions: 4,
         summary: None,
         repo: None,
+        merge: false,
     };
 
     assert_eq!(
@@ -1622,6 +1629,86 @@ async fn a_conversation_from_before_the_base_branch_was_kept_records_none() {
             "nothing recorded a branch before there was a column to record it in",
         );
         assert_eq!(conversation.base_commit.as_deref(), Some("c0ffee"));
+
+        pool.close().await;
+    }
+}
+
+/// And a commit recorded before a merge was told apart from an ordinary commit
+/// says it is not one, which is the card it has always drawn.
+///
+/// Whether a commit is a merge is read off git when the sweep describes it, and
+/// every row this reaches was described before there was anywhere to put the
+/// answer. So the column arrives with its default and nothing under it says so a
+/// second time: asking git about those commits now would be a Timeline's worth of
+/// git processes at the moment a database opens, over commits a rebase may have
+/// taken away.
+#[tokio::test]
+async fn a_commit_from_before_merges_were_told_apart_is_no_merge() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let id = start_conversation(&pool, repo, "rate-limiting")
+        .await
+        .unwrap()
+        .unwrap();
+
+    record_commit(
+        &pool,
+        id,
+        repo,
+        &Commit {
+            sha: "a1b2c3d".to_owned(),
+            subject: "feat: rate limiting".to_owned(),
+            files: 2,
+            insertions: 31,
+            deletions: 4,
+            summary: None,
+            repo: None,
+            merge: false,
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    // The column off, which is the whole of what says this database is one from
+    // before: a commit was what it changed, and nothing said which kind it was.
+    sqlx::query("ALTER TABLE commits DROP COLUMN merge")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    pool.close().await;
+
+    for opening in [
+        "it opens, which is most of what this is about",
+        "it opens again",
+    ] {
+        let pool = open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        let landed = commits(&pool, id).await;
+
+        assert_eq!(landed.len(), 1, "{opening}");
+        assert!(
+            !landed[0].merge,
+            "nothing said it was a merge before there was a column to say it in",
+        );
+        assert_eq!(
+            landed[0].subject, "feat: rate limiting",
+            "and the rest of the commit is where it was",
+        );
+        assert_eq!(landed[0].files, 2);
 
         pool.close().await;
     }
