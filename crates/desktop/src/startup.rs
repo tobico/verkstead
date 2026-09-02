@@ -30,18 +30,22 @@
 //! entry, which is the `xdg` module; macOS with a launch agent plist, which is
 //! the `launchd` one — one file that is there or is not, either way; and
 //! Windows with a value under the Run key, which is the `run_key` module and
-//! the same shape again in the one place Windows keeps this answer. A platform
-//! that is none of the three has nowhere to keep a registration, which is the
-//! `nowhere` module and a state this file already draws: the item greyed rather
-//! than a box that ticks and does nothing.
+//! the same shape again in the one place Windows keeps this answer. Those are
+//! the three, and there is no fourth arm behind them: a platform that is none
+//! of them is one [`crate::toolkit`] refuses to compile at all, having no
+//! toolkit there to draw a menu with.
+//!
+//! **A machine with nowhere to keep a registration is a state this file draws**
+//! all the same — the item greyed rather than a box that ticks and does
+//! nothing. It is an arm's own answer about a machine rather than a platform
+//! without an arm: a Linux machine that names no configuration directory to put
+//! an entry in has nowhere, and that is [`Startup`] carrying `None`.
 
 // Built wherever the tests are rather than on macOS alone: everything in it is
 // path and text, so the arm this Linux runner will never run is still an arm
 // its tests call — see the module's own docs.
 #[cfg(any(target_os = "macos", test))]
 mod launchd;
-#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-mod nowhere;
 // And the same, for the half of the Windows arm that is text: what a Run value
 // holds is a command line, and a command line is written and read on any
 // machine — see that module's own docs for what waits for a Windows one.
@@ -54,8 +58,6 @@ use anyhow::{Context, Result, bail};
 
 #[cfg(target_os = "macos")]
 use launchd::Entry;
-#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-use nowhere::Entry;
 #[cfg(windows)]
 use run_key::Entry;
 #[cfg(target_os = "linux")]
