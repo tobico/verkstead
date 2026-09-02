@@ -307,6 +307,44 @@ describe("changing the cleanup", () => {
     await waitFor(() => expect(theTrim().checked).toBe(false));
   });
 
+  /// And a switch never commits a duration nobody pressed Save on.
+  ///
+  /// One request writes the whole file, so a flip has to say something about
+  /// both durations — and what it says is what the server last gave it. Typing
+  /// the `1` of a `10` and then reaching for the other row's switch would
+  /// otherwise save a one-day trim nobody asked for.
+  it("sends the server's durations when a switch is flipped, not what is typed", async () => {
+    const fetching = theSettings(
+      TOLD,
+      json(answering(step(TOLD, "delete", { enabled: false }))),
+    );
+    mountPane();
+
+    const field = await waitFor(() => screen.getByLabelText(/before trimming/));
+    fireEvent.input(field, { target: { value: "1" } });
+
+    fireEvent.click(theDelete());
+
+    await waitFor(() =>
+      expect(sent(fetching)).toEqual({
+        ...REST,
+        cleanup: {
+          // Five, which is what the server holds — not the `1` sitting unsaved
+          // in the box.
+          trim: { enabled: true, days: "5" },
+          delete: { enabled: false, days: "90" },
+        },
+      }),
+    );
+
+    // And what was typed is still there to finish typing: the flip did not
+    // commit it, so the field did not let go of it either.
+    await waitFor(() => expect(theDelete().checked).toBe(false));
+    expect(
+      (screen.getByLabelText(/before trimming/) as HTMLInputElement).value,
+    ).toBe("1");
+  });
+
   it("saves the moment the delete is switched on", async () => {
     const on = step(UNSET, "delete", { enabled: true });
     const fetching = theSettings(UNSET, json(answering(on)));

@@ -28,10 +28,18 @@
 //! endpoint, which writes both files — so the author, the token and the rest
 //! ride along as they stand.
 //!
-//! Two ways to save, because there are two kinds of control, and the build
-//! cache's own for the same reasons: a switch saves itself the moment it is
-//! flipped, and a duration is typed, so it saves on a press of its own — nothing
-//! is committed while somebody is halfway through writing `30`.
+//! Two ways to save, because there are two kinds of control: a switch saves
+//! itself the moment it is flipped, and a duration is typed, so it saves on a
+//! press of its own — nothing is committed while somebody is halfway through
+//! writing `30`.
+//!
+//! Which is why **a switch sends the durations the server last gave it** rather
+//! than what the fields hold. One request writes the whole file, so a flip has
+//! to say something about both durations, and saying what is in the boxes would
+//! commit a half-typed number nobody pressed Save on — the `1` of a `10`, and on
+//! the *other* row at that, there being two of them here. What was typed stays
+//! typed: the flip did not save it, so the field goes on holding it and its own
+//! Save is still what commits it.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Match, Show, Switch as Choose, createSignal, type JSX } from "solid-js";
@@ -50,7 +58,7 @@ import type {
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
-import { heldPaths } from "./held";
+import { heldCleanup, heldPaths } from "./held";
 import styles from "./Cleanup.module.css";
 
 /// The settings as they stand, read once for the two panes that draw them — the
@@ -177,16 +185,25 @@ export function CleanupPane(props: {
   const trimDays = () => held(cleanup()?.trim, trimTyped());
   const deleteDays = () => held(cleanup()?.delete, deleteTyped());
 
-  /// The two rows as they stand on the page, which is what every save sends:
-  /// one request writes the whole of `config.yaml`, so the row this press is
-  /// not about rides along as it is.
+  /// The two rows as they stand on the page, typed durations and all, which is
+  /// what a duration's own Save sends: one request writes the whole of
+  /// `config.yaml`, so the row this press is not about rides along as it is.
   const rows = (): CleanupEdit => ({
     trim: { enabled: cleanup()?.trim.enabled ?? true, days: trimDays() },
     delete: { enabled: cleanup()?.delete.enabled ?? false, days: deleteDays() },
   });
 
+  /// What a save is asked to do: the two rows, and whether the durations in
+  /// them are ones the human pressed Save on.
+  ///
+  /// The second half is what says whether the typed text has been committed —
+  /// and so whether the fields should let go of it and follow the server again.
+  /// A switch's save carries the durations as they stand on the server, so it
+  /// commits nothing anybody typed and leaves the boxes alone.
+  type Asked = { edit: CleanupEdit; committed: boolean };
+
   const save = useMutation(() => ({
-    mutationFn: (edit: CleanupEdit) => {
+    mutationFn: ({ edit }: Asked) => {
       const author = told()?.git_author ?? { name: "", email: "" };
 
       return saveSettings({
@@ -219,10 +236,14 @@ export function CleanupPane(props: {
         ignored_comments: "Keep",
       });
     },
-    onSuccess: (saved: SettingsSaved) => {
-      // What was typed goes, because the answer is now what the fields follow.
-      setTrimTyped(null);
-      setDeleteTyped(null);
+    onSuccess: (saved: SettingsSaved, asked: Asked) => {
+      // What was typed goes, because the answer is now what the fields follow —
+      // and only where this save was the one that committed it. A switch's was
+      // not, so what somebody is halfway through writing is still theirs.
+      if (asked.committed) {
+        setTrimTyped(null);
+        setDeleteTyped(null);
+      }
 
       // The save's answer *is* a fresh read of both files, so a second read
       // would learn nothing and could only disagree with what is on screen.
@@ -231,17 +252,22 @@ export function CleanupPane(props: {
   }));
 
   /// A switch flipped, which saves itself: the row it is on takes the new
-  /// answer and the other rides along as it stands.
+  /// answer, the other rides along as it stands, and both durations go as the
+  /// server last gave them — see this module's header.
   const flip = (which: keyof CleanupEdit, enabled: boolean) => {
-    const asked = rows();
-    save.mutate({ ...asked, [which]: { ...asked[which], enabled } });
+    const standing = heldCleanup(told());
+
+    save.mutate({
+      edit: { ...standing, [which]: { ...standing[which], enabled } },
+      committed: false,
+    });
   };
 
   /// And a duration pressed, which sends both rows as the page holds them —
   /// the field it was pressed from included.
   const commit = (ev: SubmitEvent) => {
     ev.preventDefault();
-    save.mutate(rows());
+    save.mutate({ edit: rows(), committed: true });
   };
 
   return (
