@@ -4,7 +4,7 @@
 //! wrote, what a steer sent a session off with (an instruction, or the brief a
 //! follow-up was opened on), and a Notice Verkstead wrote on its own account.
 //! Each card is cut down so that a long one stops pushing the record down —
-//! the two documents to five lines under a fade, a notice to one line under an
+//! the two documents to three lines, a notice to one, each ending in an
 //! ellipsis — which makes the rest of any of them something to open; and what
 //! is opened is the same markdown uncut, so one component draws all three.
 //!

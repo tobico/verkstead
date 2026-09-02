@@ -48,9 +48,9 @@
 //! their own. Three of them are documents — the Brief, the handoff and the
 //! instruction a
 //! steer carried — and a document's summary is its own opening: the card shows
-//! [`CLAMPED_LINES`] of it under a fade, and the pane holds the whole. A Notice
-//! is read the same way and cut differently: what it has to say is a sentence
-//! rather than a document, so its card shows one line under an ellipsis.
+//! [`CLAMPED_LINES`] of it and ends in an ellipsis, and the pane holds the
+//! whole. A Notice is read the same way and cut shorter: what it has to say is a
+//! sentence rather than a document, so its card shows one line.
 //!
 //! The Brief is a document here whatever its round has come to, and the pane
 //! behind it is the one that differs: a round still being drafted opens the
@@ -95,7 +95,6 @@ import {
   createMemo,
   createSignal,
   onCleanup,
-  onMount,
   type JSX,
 } from "solid-js";
 
@@ -253,22 +252,23 @@ function movedFrom(timeline: TimelineEvent[], index: number): Lifecycle {
 
 /// How many lines of a document a card shows before it is cut off.
 ///
-/// Five: enough for the opening of a handoff or an instruction to say what it is
-/// about, and not enough for either to push the record off the screen. Where the
-/// fifth line ends is a fact about the laid-out box rather than about the
-/// markdown — how wide the pane is decides it — so the clamp is a height in the
-/// stylesheet and this is what that height is written from.
-export const CLAMPED_LINES = 5;
+/// Three: enough for the opening of a handoff or an instruction to say what it
+/// is about, and few enough that the block of pinned cards over the record ends
+/// where the eye expects it to. Five was the count while the cut was a fade, and
+/// a fade is a soft edge in a place that wanted a hard one.
+///
+/// A count rather than a height, which is the other half of that: the cut is a
+/// `line-clamp` now — three line boxes, wherever the rendering's own blocks put
+/// them — and the ellipsis it draws is what says the document goes on.
+export const CLAMPED_LINES = 3;
 
 /// A document's markdown on a card, cut off at [`CLAMPED_LINES`].
 ///
-/// The fade over the last line is drawn only where the document goes on under
-/// it: it says there is more, and a card that already shows the whole thing
-/// would be saying something untrue. Whether it overflows is another fact about
-/// the laid-out box, so it is measured rather than counted — the observer
-/// watches the markdown inside the clamp, whose height is the document's own, so
-/// a rendering that changed and a pane that was resized both come back through
-/// it.
+/// A classed div and nothing else. It measured itself once, to know whether to
+/// draw the fade over its last line — the fade being a thing that had to be true
+/// of the box rather than of the markdown — and with the fade gone there is
+/// nothing left to measure: `line-clamp` draws its own ellipsis, and draws none
+/// where the document already fits.
 function Clamped(props: {
   /// The module's name for whichever document this is, put on the rendering
   /// rather than on the cut around it: the three of them are read at the
@@ -276,34 +276,8 @@ function Clamped(props: {
   class: string;
   html: string;
 }): JSX.Element {
-  let clamp: HTMLDivElement | undefined;
-  let body: HTMLDivElement | undefined;
-
-  const [cut, setCut] = createSignal(false);
-
-  onMount(() => {
-    const measure = () => {
-      if (clamp) {
-        // A pixel of slack: a line height that is not a whole number of pixels
-        // rounds either way, and a card faded over the last pixel of a document
-        // that fits would read as one with something after it.
-        setCut(clamp.scrollHeight - clamp.clientHeight > 1);
-      }
-    };
-
-    const watching = new ResizeObserver(measure);
-
-    if (body) {
-      watching.observe(body);
-    }
-
-    onCleanup(() => watching.disconnect());
-  });
-
   return (
-    <div class={styles.clamp} classList={{ [styles.cut!]: cut() }} ref={clamp}>
-      <div class={`${props.class} markdown`} innerHTML={props.html} ref={body} />
-    </div>
+    <div class={`${styles.clamp} ${props.class} markdown`} innerHTML={props.html} />
   );
 }
 
@@ -1490,11 +1464,11 @@ function Handoff(props: {
 /// the card is a line and the whole of it is a press away, which is what the
 /// handoff and the instruction beside it already do.
 ///
-/// One line rather than the five a document's card shows, because a notice is
+/// One line rather than the three a document's card shows, because a notice is
 /// not a document: what it has to say is a sentence, and the sentence is what
-/// tells one notice from another down a column of them. It is cut with an
-/// ellipsis rather than faded, which is the difference between a line that goes
-/// on and a document that does.
+/// tells one notice from another down a column of them. The same ellipsis
+/// either way — it was the fade over a document that used to tell the two
+/// apart, and the documents have come round to the ellipsis as well.
 ///
 /// It is rendered markdown, because what it names — a branch, a stage, a file
 /// the repository records its process in — reads better set apart from the

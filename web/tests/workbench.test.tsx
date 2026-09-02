@@ -1064,7 +1064,7 @@ describe("how a card says where its conversation has got to", () => {
       ".conversationRow.ended .open {\n  opacity: 0.45;\n}",
     );
     expect(pressableCss).toContain(
-      ".open {\n  --ground: var(--card);\n\n  background: var(--card);\n}",
+      ".open {\n  background: var(--card);\n}",
     );
     expect(
       sidebarCss,
@@ -10788,7 +10788,7 @@ describe("the pinned task list", () => {
 
     for (const rule of [
       ".pressable {\n  cursor: pointer;\n}",
-      ".open {\n  --ground: var(--card);\n\n  background: var(--card);\n}",
+      ".open {\n  background: var(--card);\n}",
       "  .pressable:hover {",
     ]) {
       expect(pressableCss).toContain(rule);
@@ -13743,11 +13743,11 @@ describe("what a refused press says", () => {
 /// wrote, and the instruction a steer sent a session off with.
 ///
 /// Each of them is as long as whoever wrote it made it, so the card shows the
-/// first five lines under a fade and the whole of it is a press away. Where the
-/// fifth line falls is a fact about a laid-out box and jsdom has no layout, so
-/// the clamp itself is asserted off the stylesheet — the way a drawn diagram's
-/// rules are — and what is asked here is that each document is put inside it and
-/// that pressing the card opens the whole.
+/// first three lines and ends in an ellipsis, and the whole of it is a press
+/// away. Where the third line falls is a fact about a laid-out box and jsdom has
+/// no layout, so the clamp itself is asserted off the stylesheet — the way a
+/// drawn diagram's rules are — and what is asked here is that each document
+/// wears it and that pressing the card opens the whole.
 describe("the documents on a timeline", () => {
   /// The details pane, and what it has drawn.
   const details = () => screen.getByLabelText("Details");
@@ -13762,7 +13762,7 @@ describe("the documents on a timeline", () => {
 
     const brief = await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`);
 
-    expect(brief.querySelector(`.${timeline.clamp} > .${timeline.briefBody}`)).toBeTruthy();
+    expect(brief.querySelector(`.${timeline.clamp}.${timeline.briefBody}`)).toBeTruthy();
 
     fireEvent.click(brief);
 
@@ -13783,7 +13783,7 @@ describe("the documents on a timeline", () => {
 
     const handoff = await drawn(container, `.${timeline.timelineEvent} > .${timeline.handoff}`);
 
-    expect(handoff.querySelector(`.${timeline.clamp} > .${timeline.handoffBody}`)).toBeTruthy();
+    expect(handoff.querySelector(`.${timeline.clamp}.${timeline.handoffBody}`)).toBeTruthy();
 
     fireEvent.click(handoff);
 
@@ -13860,7 +13860,7 @@ describe("the documents on a timeline", () => {
 
     const brief = await drawn(container, `.${timeline.timelineEvent} > .${timeline.brief}`);
 
-    expect(brief.querySelector(`.${timeline.clamp} > .${timeline.briefBody}`)).toBeTruthy();
+    expect(brief.querySelector(`.${timeline.clamp}.${timeline.briefBody}`)).toBeTruthy();
     expect(brief.querySelector("textarea")).toBeNull();
     expect(brief.getAttribute("role")).toBe("button");
     expect(brief.classList.contains(pressable.pressable!)).toBe(true);
@@ -13879,9 +13879,12 @@ describe("the documents on a timeline", () => {
   });
 
   /// A notice is a sentence rather than a document, so its card is cut at one
-  /// line with an ellipsis rather than clamped at five under a fade. The whole
-  /// of it is still a press away — see the notice's own pane below.
-  it("cuts a notice off at a line rather than clamping it", async () => {
+  /// line where a document's is cut at three. The same kind of cut either way,
+  /// which it was not: a document was clamped to a height under a gradient, and
+  /// a fade at the foot of the sticky block read as the block itself trailing
+  /// off. The whole of it is still a press away — see the notice's own pane
+  /// below.
+  it("cuts a notice off at a line where a document is cut at three", async () => {
     theStaged();
     const { container } = mount(`/conversations/${STAGED.id}`);
 
@@ -13890,9 +13893,12 @@ describe("the documents on a timeline", () => {
     expect(notice.querySelector(`.${timeline.clamp}`)).toBeNull();
     expect(notice.querySelector(`.${timeline.noticeBody}`)).toBeTruthy();
 
-    // How far it is cut is the stylesheet's, and jsdom lays nothing out.
+    // How far each of them is cut is the stylesheet's, and jsdom lays nothing
+    // out.
     expect(timelineCss).toContain("-webkit-line-clamp: 1;");
     expect(timelineCss).toContain("line-clamp: 1;");
+    expect(timelineCss).toContain("-webkit-line-clamp: 3;");
+    expect(timelineCss).toContain("line-clamp: 3;");
   });
 });
 
@@ -14186,39 +14192,35 @@ describe("a clamped document", () => {
     return timelineCss.slice(opened, timelineCss.indexOf("}", opened));
   }
 
-  /// The page is set at a line height of 1.5, which is what turns a count of
-  /// lines into a height. The two halves are written down in different languages
-  /// and this is where they are held to each other.
-  const LINE_HEIGHT = 1.5;
-
-  it("shows five lines of it and hides the rest", () => {
+  /// Three lines, counted as line boxes rather than measured as a height: the
+  /// count in the stylesheet and the one the module exports are the same number
+  /// written in two languages, and this is where they are held to each other.
+  it("shows three lines of it and cuts the rest with an ellipsis", () => {
     const clamp = block(".clamp");
 
-    expect(CLAMPED_LINES).toBe(5);
-    expect(clamp).toContain(`max-height: ${CLAMPED_LINES * LINE_HEIGHT}em`);
+    expect(CLAMPED_LINES).toBe(3);
+    expect(clamp).toContain(`-webkit-line-clamp: ${CLAMPED_LINES}`);
+    expect(clamp).toContain(`line-clamp: ${CLAMPED_LINES}`);
     expect(clamp).toContain("overflow: hidden");
 
-    // And that line height is the body's, rather than a number this test made
-    // up: a page set looser or tighter would clamp at a different height.
-    expect(base).toContain(`font: 16px/${LINE_HEIGHT} system-ui`);
+    // The ellipsis comes with the clamp, so there is nothing to measure and
+    // nothing to draw over the last line: a document that fits shows whole, and
+    // one that does not ends in the mark that says so.
+    expect(clamp).not.toContain("max-height");
   });
 
-  it("fades the cut into the card, and only where there is a cut", () => {
-    const cut = block(".clamp.cut::after");
-
-    // Into whatever the card is standing in rather than into a colour named
-    // here: a flat card is the paper and a card pointed at or opened is the
-    // fill, and `CardButton` is what hands the difference down.
-    expect(cut).toContain(
-      "linear-gradient(to bottom, transparent, var(--ground, var(--card)))",
-    );
-    expect(pressableCss).toContain("--ground: var(--paper);");
-    // The fade must not swallow the press: the whole card opens the pane.
-    expect(cut).toContain("pointer-events: none");
-
-    // On `.cut` and nowhere else, which is what makes a short document show
-    // whole with no fade over its last line.
+  /// Nothing fades. The cut was a gradient over the last line, drawn where a
+  /// `ResizeObserver` had found the document went on — a soft edge at the foot
+  /// of the sticky block, where the eye needs a hard one to tell the block's own
+  /// end from a card trailing off.
+  it("draws no fade, and keeps no card colour for one", () => {
+    expect(timelineCss).not.toContain("linear-gradient");
+    expect(timelineCss).not.toContain(".clamp.cut");
     expect(timelineCss).not.toContain(".clamp::after");
+
+    // And the variable the fade read the card's own colour through, which had
+    // no other reader.
+    expect(pressableCss).not.toContain("--ground");
   });
 });
 

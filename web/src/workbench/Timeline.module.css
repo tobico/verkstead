@@ -576,47 +576,48 @@
 /* The documents on a timeline — the frozen brief, the handoff the grilling
    wrote, and the instruction a steer carried. All of them are prose, and read
    at the measure like every other block of it, on the card and in the pane the
-   card opens — where `.document` says the same thing again. */
+   card opens — where `.document` says the same thing again.
+
+   The same element the clamp above is on: the card holds one block per document
+   rather than a rendering inside a box around it, there being nothing left for
+   the box to do. */
 .brief .briefBody,
 .handoff .handoffBody,
 .steeredWith .steerBody {
   max-width: var(--measure);
 }
 
-/* On the card, each of them is cut off at five lines: enough to say what the
-   document is about, and never enough to push the record off the screen. The
-   whole of it is in the details pane, which is what pressing the card opens.
+/* On the card, each of them is cut off at three lines with an ellipsis: enough
+   to say what the document is about, and few enough that the block of pinned
+   cards over the record ends where the eye expects it to. The whole of it is in
+   the details pane, which is what pressing the card opens.
 
-   The height is written in `em` rather than in lines, because what is clamped is
-   a rendering rather than a paragraph — a heading, a list and a fence are all in
-   there and no two of them are one line high. Five lines of body text is the
-   measure of it, and a document whose first block is taller simply shows less of
-   itself. */
+   `line-clamp` counts line boxes wherever they are, so the rendering keeps its
+   own blocks — a heading, a list, a fence — and the first three lines of them
+   are what shows. It was a height in `em` under a gradient before, which is the
+   same cut said two ways: five lines of body text measured out, and a fade over
+   the last of them drawn only where a `ResizeObserver` had found the document
+   went on. The ellipsis says the same thing and says it hard, which is what the
+   foot of a sticky block wants — a fade there read as the block itself trailing
+   off, and the eye had nothing to tell the two edges apart with. It is the cut
+   the notice below already takes, at one line rather than three. */
 .clamp {
-  position: relative;
-  max-height: 7.5em;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
   overflow: hidden;
 }
 
-/* The cut, drawn only where the document goes on under it — `Clamped` in
-   `Timeline.tsx` is what measures. The last line fades into the card rather than
-   stopping at a straight edge, so what is missing reads as missing rather than
-   as the end of the document.
+/* And the rendering's own outer margins taken off, the clamp being the card's
+   own block now rather than a box around one: a document whose first block came
+   with a margin above it would push itself down out of its own first line. */
+.clamp > :first-child {
+  margin-top: 0;
+}
 
-   Into whatever colour the card is standing in, which is the card's own to say:
-   `--ground` comes down from `CardButton.module.css` and is the paper until the
-   card is pointed at or opened and the fill until it is let go. A fade that
-   named a colour itself would be a strip of the wrong one across every card
-   nobody was pointing at. */
-.clamp.cut::after {
-  content: "";
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  height: 2.5em;
-  background: linear-gradient(to bottom, transparent, var(--ground, var(--card)));
-  pointer-events: none;
+.clamp > :last-child {
+  margin-bottom: 0;
 }
 
 /* A move: the conversation changing hands, written as the transition itself —
@@ -719,17 +720,17 @@
 
 /* One line of what it says, cut with an ellipsis where there is more.
 
-   One rather than the five a document's card shows, because these are not
+   One rather than the three a document's card shows, because these are not
    documents: what a notice has to say is a sentence, and the sentence is what
    tells one from another down a column of them. A stop is the exception that
    makes the case — a paragraph and two blocks of terminal output, which is a
    card to be scrolled past rather than read.
 
-   The ellipsis rather than the fade the documents take, and for the same
-   reason: a fade says *this document goes on*, and a line that ends in an
-   ellipsis says *this line was cut*. `line-clamp` counts line boxes wherever
-   they are, so the markdown inside keeps its own blocks and the first line of
-   the first of them is what shows. */
+   The same cut the documents take, at a third of the length: `line-clamp` counts
+   line boxes wherever they are, so the markdown inside keeps its own blocks and
+   the first line of the first of them is what shows. It was the only card cut
+   this way while the documents were cut under a fade — see `.clamp` above, which
+   came round to it. */
 .notice .noticeBody {
   display: -webkit-box;
   -webkit-box-orient: vertical;
