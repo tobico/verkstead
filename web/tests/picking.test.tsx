@@ -461,10 +461,13 @@ describe("where the listbox is drawn at all", () => {
   /// branches, the merge strategy — because a control the app draws itself has
   /// to be given the keyboard, the roles and the tap targets back, and none of
   /// those rows has a mark to justify it.
+  /// Read for the element rather than for the word: the browsing path field
+  /// names this control in its own header, having borrowed the chrome and the
+  /// keyboard off it, and naming one is not drawing one.
   it("is drawn by the three modules whose rows carry marks", () => {
     const drawing = Object.entries(SOURCES)
       .filter(([path]) => path !== "../src/picking.tsx")
-      .filter(([, source]) => /\bListbox\b/.test(source))
+      .filter(([, source]) => /<Listbox\b/.test(source))
       .map(([path]) => path)
       .sort();
 

@@ -75,7 +75,7 @@
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
-/* Registering a repo: a path typed, and the button that sends it. The label
+/* Registering a repo: a path written, and the button that sends it. The label
    stands over the field, because what has to be understood before typing is that
    the path is an absolute one. It is the details pane now rather than a modal
    over the page, so there is nothing around it but the pane's own head. */
@@ -86,10 +86,13 @@
   color: var(--ink-soft);
 }
 
+/* The box itself, which is the browsing field's — see `PathField.tsx`. The look
+   is this form's and the room it takes is the field's: the input stands on a
+   line beside the press that drops its rows, so it takes what is left of that
+   line rather than the whole of one. */
 .form input {
-  display: block;
-  width: 100%;
-  margin-bottom: 0.85rem;
+  flex: 1;
+  min-width: 0;
   font: inherit;
   font-family: ui-monospace, SFMono-Regular, monospace;
   color: inherit;
@@ -99,9 +102,13 @@
   padding: 0.5rem 0.6rem;
 }
 
+/* The room under the field, which is the press's rather than the box's now: a
+   margin under an input standing in a row would push the press beside it out of
+   line with it. */
 .buttons {
   display: flex;
   gap: 0.5rem;
+  margin-top: 0.85rem;
 }
 
 .buttons button {

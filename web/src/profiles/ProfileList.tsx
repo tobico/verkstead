@@ -1,11 +1,21 @@
 //! The Agent Profiles Verkstead can run a session under, as the cards that read
 //! them and the pane that adds or rewrites one.
 //!
-//! Typed rather than picked out of a browser, like a repo's path and for the
-//! same reason: the watched paths are a security boundary and nothing here scans
-//! the filesystem to offer choices from it. What the form is for is naming a
-//! pair, and what the server does about it is the only thing that decides
-//! whether it is taken.
+//! The account's paths are written into the shared path field — see
+//! [`../PathField.tsx`](../PathField.tsx) — which is the box they were always
+//! typed into with a dropdown under it that browses the filesystem a directory
+//! at a time. What the form is for has not moved: it names an account, and what
+//! the server does about the paths is still the only thing that decides whether
+//! it is taken. The browse is bounded the way these fields are, in the watched
+//! scope, so it offers nothing the save would turn away.
+//!
+//! Two things about these fields are their own, and both come off what they are
+//! for. They point at dotfiles — a `.claude` beside a `.claude.json` — so they
+//! are the fields that show them, every other path field in the workbench
+//! leaving them out. And one of them names a file rather than a directory, so
+//! that one shows the files as well: [`AccountField`] says which, beside the
+//! label and the example, because it is a fact about the field the same way
+//! those are.
 //!
 //! One form does both saving and rewriting. A profile is a handful of fields
 //! with nothing built from them yet, so editing one is filling the same form in
@@ -85,6 +95,7 @@ import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 import { CardButton } from "../CardButton";
 import { IconButton } from "../IconButton";
 import { PaneSticky } from "../Panes";
+import { PathField } from "../PathField";
 import {
   createProfile,
   deleteProfile,
@@ -157,11 +168,19 @@ export const BROKEN: Record<Broken, string> = {
 };
 
 /// One path an account of some agent type is: the key it is held under, what the
-/// label over it says, and an example to type into it.
+/// label over it says, an example to type into it, and whether the path it names
+/// is a file.
+///
+/// That last one is the field's browse rather than anything the form does with
+/// what is typed: a field naming a file offers the files beside the directories
+/// and stops at one, and every other field here offers directories only. The
+/// server is what holds a saved path to being the one or the other — `NotAFile`
+/// and `NotADirectory` are two of its refusals above.
 type AccountField = {
   key: string;
   label: JSX.Element;
   placeholder: string;
+  file?: boolean;
 };
 
 /// What a profile of each agent type is asked for.
@@ -195,6 +214,7 @@ const ACCOUNT_FIELDS: Record<AgentType, AccountField[]> = {
         </>
       ),
       placeholder: "/home/you/accounts/work/.claude.json",
+      file: true,
     },
   ],
   Codex: [
@@ -771,18 +791,20 @@ export function ProfilePane(props: {
               {(field) => (
                 <>
                   <label for={`profile-${field.key}`}>{field.label}</label>
-                  <input
+                  {/* Browsed or typed, which the form cannot tell apart and has
+                      no reason to: what Save sends is whatever the box holds,
+                      and the server's answer about it is unchanged. Inside the
+                      Watched Paths, because that is where an account may be —
+                      and showing the dotfiles these fields exist to point at,
+                      with the files as well where the field names one. */}
+                  <PathField
                     id={`profile-${field.key}`}
-                    type="text"
-                    inputmode="url"
-                    autocapitalize="off"
-                    autocorrect="off"
-                    spellcheck={false}
+                    scope="watched"
+                    dotfiles
+                    files={field.file}
                     placeholder={field.placeholder}
                     value={path(form().account, field.key)}
-                    onInput={(ev) =>
-                      typedPath(field.key)(ev.currentTarget.value)
-                    }
+                    write={typedPath(field.key)}
                   />
                 </>
               )}

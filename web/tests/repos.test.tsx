@@ -17,6 +17,13 @@
 //! Watched Path is turned away — and this side's whole job is to say which of
 //! them happened in words the human can act on, inside the pane the path is
 //! about to be corrected in.
+//!
+//! And that the browse writes the same box the typing does. The field is the
+//! shared one — how the dropdown itself behaves is `browsing.test.tsx`'s, where
+//! it is driven on its own — so what is asked here is what this form made of it:
+//! the two fixtures the server wrote for a browse bounded by the Watched Paths,
+//! browsed down to the repository in them, and registered exactly as a typed
+//! path is.
 
 import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
@@ -24,6 +31,7 @@ import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  DirectoryListing,
   Registered,
   RepoEntry,
   RepoView,
@@ -36,10 +44,20 @@ import { RepoDetails, RepoList, RepoPane } from "../src/repos/RepoList";
 import styles from "../src/repos/RepoList.module.css";
 import head from "../src/workbench/PaneHead.module.css";
 import { drawn } from "./bench";
+import {
+  browse,
+  held,
+  listingAt,
+  marked,
+  rows as offered,
+  tap,
+} from "./fields";
 import { json, serving, whenever } from "./serving";
 import repos from "./fixtures/repos.json" with { type: "json" };
 import opened from "./fixtures/repo.json" with { type: "json" };
 import settings from "./fixtures/settings.json" with { type: "json" };
+import listing from "./fixtures/directories.json" with { type: "json" };
+import roots from "./fixtures/directories-roots.json" with { type: "json" };
 
 const REPOS = repos as RepoEntry[];
 const FIRST = REPOS[0]!;
@@ -789,5 +807,107 @@ describe("the pane the plus opens", () => {
     expect(
       fetching.mock.calls.filter(([, init]) => init && "method" in init),
     ).toHaveLength(0);
+  });
+});
+
+describe("browsing for one", () => {
+  /// The Watched Paths as the browse bounded by them begins, and what is under
+  /// the one root they hold — both fixtures the server's own tests wrote, so
+  /// what this form is filled in from is what the endpoint really answers with.
+  const ROOTS = roots as DirectoryListing;
+  const SRC = listing as DirectoryListing;
+
+  /// The label the field is found by, which is the one the form has always had.
+  const FIELD = "Absolute path of a git repository";
+
+  /// The list behind the pane, the two levels of the filesystem this browse
+  /// goes through, and whatever the registration itself is answered by.
+  function theBrowse(...answers: Array<() => Promise<Response>>) {
+    return serving(
+      whenever("/api/ui/repos", json(REPOS)),
+      whenever(listingAt(null, "watched"), json(ROOTS)),
+      whenever(listingAt("/home/ada/src", "watched"), json(SRC)),
+      ...answers,
+    );
+  }
+
+  /// Browse the empty field down to the repository under the watched root,
+  /// which is the whole of what this form asks of a browse.
+  async function browsedToTheRepo(): Promise<void> {
+    browse(FIELD);
+
+    await waitFor(() => expect(offered(FIELD)).toEqual(["src"]));
+    tap(FIELD, "src");
+
+    await waitFor(() => expect(offered(FIELD)).toContain("verkstead"));
+    tap(FIELD, "verkstead");
+  }
+
+  /// Bounded, because a Repo may only be registered from inside a Watched Path:
+  /// a dropdown offering what the press would turn away would be offering a
+  /// wasted press.
+  it("opens on the watched roots and fills the field from them", async () => {
+    theBrowse();
+    mountPane();
+
+    await browsedToTheRepo();
+
+    expect(held(FIELD)).toBe("/home/ada/src/verkstead");
+  });
+
+  /// And marked, because a repository is what this form is being filled in
+  /// with — and a leaf, because there is nothing under one it is after.
+  it("marks the repository among the directories and stops there", async () => {
+    theBrowse();
+    mountPane();
+
+    browse(FIELD);
+    await waitFor(() => expect(offered(FIELD)).toEqual(["src"]));
+    tap(FIELD, "src");
+
+    await waitFor(() =>
+      expect(offered(FIELD)).toEqual(["assets", "verkstead"]),
+    );
+    expect(marked(FIELD)).toEqual(["verkstead"]);
+
+    tap(FIELD, "verkstead");
+
+    // Where it was, rather than inside what it took: the browse has arrived.
+    expect(offered(FIELD)).toEqual(["verkstead"]);
+  });
+
+  /// The point of the whole component: registering a browsed path is
+  /// registering a typed one. Add sends the box, and what the server makes of
+  /// it goes on deciding everything.
+  it("registers a browsed path exactly as a typed one", async () => {
+    const fetching = theBrowse(json("Added"));
+    const { done } = mountPane();
+
+    await browsedToTheRepo();
+    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+
+    await waitFor(() =>
+      expect(fetching).toHaveBeenCalledWith(
+        "/api/ui/repos",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ path: "/home/ada/src/verkstead" }),
+        }),
+      ),
+    );
+    await waitFor(() => expect(done).toHaveBeenCalled());
+  });
+
+  /// And a refusal is still the server's: what the browse offered is not a
+  /// promise about what the press will do.
+  it("says a refusal of a browsed path the way it says a typed one's", async () => {
+    theBrowse(json("NotARepository"));
+    mountPane();
+
+    await browsedToTheRepo();
+    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+
+    await waitFor(() => screen.getByText(/not a git repository/i));
+    expect(held(FIELD)).toBe("/home/ada/src/verkstead");
   });
 });

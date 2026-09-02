@@ -19,6 +19,11 @@
 //! see all look the same in a text field, and all three are an entry that does
 //! nothing.
 //!
+//! The field an entry is written into browses. It is the shared path field —
+//! see `PathField.tsx` — so what fills it is the same dropdown wherever the
+//! workbench asks for a path, and the typing it extends is untouched: a press
+//! sends whatever the box holds, tapped together or typed straight in.
+//!
 //! And every press is a save of the whole of `config.yaml` with the rest of it
 //! riding along as it stands. There is nothing to commit afterwards, and — the
 //! point of doing it this way — the answer to the save is what says whether the
@@ -28,6 +33,7 @@
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Show, createSignal, type JSX } from "solid-js";
 
+import { PathField } from "../PathField";
 import { QuietButton } from "../QuietButton";
 import { loadSettings, saveSettings } from "../api/client";
 import type {
@@ -247,9 +253,17 @@ export function Rows(props: {
 
 /// And the field another is written into, with the press that saves it.
 ///
-/// Typed rather than picked out of a browser, for the reason the Repos' form is
-/// typed: nothing here scans a filesystem to offer choices from it, and what the
-/// server makes of the path is the only thing that decides what it does.
+/// A browsing field rather than a bare box — see `PathField.tsx`. What the form
+/// is has not moved: the path is still typed, Add still sends whatever the field
+/// holds, and what the server makes of that path is still the only thing that
+/// decides what it does. What browsing adds is the one thing a text field never
+/// had, which is a look at what is actually there — and that is exactly what
+/// somebody answering the workbench from a phone cannot do for themselves.
+///
+/// Anywhere rather than inside the Watched Paths, for all three of them. A
+/// watched path is how that boundary is *said*, so a field bounded by it could
+/// only ever offer what is already watched; and a bind is a directory the
+/// boundary has nothing to say about at all.
 export function Adding(props: {
   /// What the field is called on the page, and what its label points at.
   id: string;
@@ -278,15 +292,12 @@ export function Adding(props: {
     <form class={styles.adding} onSubmit={commit}>
       <label for={props.id}>{props.label}</label>
       <div class={styles.field}>
-        <input
+        <PathField
           id={props.id}
-          type="text"
-          autocapitalize="off"
-          autocorrect="off"
-          spellcheck={false}
+          scope="anywhere"
           placeholder={props.placeholder}
           value={typed()}
-          onInput={(ev) => setTyped(ev.currentTarget.value)}
+          write={(path) => setTyped(path)}
         />
         <button type="submit" disabled={props.saving}>
           Add
