@@ -1215,7 +1215,16 @@ mod tests {
             .unwrap();
 
         let mut read = Vec::new();
-        connection.read_to_end(&mut read).unwrap();
+
+        match connection.read_to_end(&mut read) {
+            // Gone is gone, and the two platforms say it differently: a socket
+            // that went with the process holding it ends the stream on Unix and
+            // arrives as a reset on Windows. Anything else — the read timeout
+            // above all — is a git still on the other end of it.
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::ConnectionReset => {}
+            Err(error) => panic!("the connection outlived the git that held it: {error}"),
+        }
     }
 
     /// And a repository with a remote that answers is fetched as it always was:

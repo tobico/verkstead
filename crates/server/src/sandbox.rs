@@ -227,6 +227,20 @@ pub fn own_directory(platform: Platform, data_dir: &Path) -> PathBuf {
 /// What that directory is where a bind makes it.
 const OWN_DIRECTORY: &str = "/verkstead";
 
+/// A path under one of the directories a session reaches, composed the way the
+/// session that reads it will read it.
+///
+/// [`Path::join`] is the wrong tool for this and looks like the right one: it
+/// composes with the *host's* separator, and these are paths a session opens
+/// inside its sandbox rather than paths this process opens. On the two
+/// platforms that run sessions the two characters are the same one, so nothing
+/// has ever turned on the difference — but a Windows host composing one gets a
+/// backslash in the middle of a POSIX path, and these are the paths the skills'
+/// own text is written out of and that a session is told in prose.
+pub(crate) fn under(directory: &Path, name: &str) -> PathBuf {
+    PathBuf::from(format!("{}/{name}", directory.display()))
+}
+
 /// And the two things inside it: the directory the executables are in, which
 /// goes first on a session's `PATH`, and what the server's own image is called
 /// there.
@@ -349,7 +363,7 @@ pub const AGENT_TYPE: &str = "VERKSTEAD_AGENT";
 /// is why it is a function of where the Data Directory is rather than a name.
 /// See [`path`], [`Executable`] and [`crate::build_cache`].
 pub(crate) fn own_bin(platform: Platform, data_dir: &Path) -> PathBuf {
-    own_directory(platform, data_dir).join(BIN)
+    under(&own_directory(platform, data_dir), BIN)
 }
 
 /// What a session's `PATH` is inside: `ours` first, and then the machine's own.
@@ -641,7 +655,7 @@ impl Executable {
 
         path.is_file().then_some(Executable {
             path,
-            inside: own_bin(Platform::HERE, data_dir).join(VERKSTEAD),
+            inside: under(&own_bin(Platform::HERE, data_dir), VERKSTEAD),
         })
     }
 

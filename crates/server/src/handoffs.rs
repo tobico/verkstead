@@ -62,7 +62,7 @@ pub(crate) const SAID_INSIDE_HOME: &str = "$HOME/verkstead";
 /// ask for, and this one decides a path a session is told about in prose.
 pub(crate) fn inside(platform: Platform, home: &Path) -> PathBuf {
     match platform {
-        Platform::MacOs => home.join(INSIDE_HOME),
+        Platform::MacOs => crate::sandbox::under(home, INSIDE_HOME),
         Platform::Linux | Platform::Windows => PathBuf::from(INSIDE),
     }
 }

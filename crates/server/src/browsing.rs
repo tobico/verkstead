@@ -367,7 +367,7 @@ mod tests {
         assert!(
             entries
                 .iter()
-                .all(|row| row.kind == EntryKind::Directory && row.path.starts_with('/'))
+                .all(|row| row.kind == EntryKind::Directory && Path::new(&row.path).is_absolute())
         );
     }
 
