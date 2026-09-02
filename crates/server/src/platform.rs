@@ -343,18 +343,27 @@ fn xdg(variable: Option<&Path>, home: Option<&Path>, under: &str) -> Option<Path
 /// empty — as the XDG specification says of its own variables, and for the
 /// reason this whole module exists: a directory resolved against wherever the
 /// server happened to be started is the thing the platform default replaces.
+///
+/// Asked as `Path::has_root` rather than `Path::is_absolute`, which is the
+/// same question of the Unixes this check is for — a Unix path is absolute
+/// exactly when it begins with `/` — and the only one of the two that keeps
+/// its answer where the arm is compiled somewhere else. `is_absolute` answers
+/// by the rules of the platform the code was compiled for, so `/home/you` put
+/// through it on the Windows runner comes back relative and a Linux arm this
+/// module exists to test resolves to nowhere. See [`set`], which is the same
+/// crossing read from the Windows side.
 fn absolute(value: Option<&Path>) -> Option<&Path> {
-    value.filter(|dir| dir.is_absolute())
+    value.filter(|dir| dir.has_root())
 }
 
 /// `value` where the machine set it to anything at all.
 ///
-/// What the Windows arm has instead of [`absolute`], deliberately.
-/// `Path::is_absolute` answers by the rules of the platform the code was
-/// compiled for, so `C:\Users\you\AppData\Roaming` put through it on the Linux
-/// runner comes back relative — and a check that holds on one platform and
-/// misfires on the other is worse than the one Windows does not need, its
-/// application-data variables being absolute or absent.
+/// What the Windows arm has instead of [`absolute`], deliberately. There is no
+/// reading of `C:\Users\you\AppData\Roaming` that says the same thing on every
+/// platform this is compiled for, `Path` having no Windows rule a Unix host
+/// applies — and a check that holds on one platform and misfires on the other
+/// is worse than the one Windows does not need, its application-data variables
+/// being absolute or absent.
 fn set(value: Option<&Path>) -> Option<&Path> {
     value.filter(|dir| !dir.as_os_str().is_empty())
 }
