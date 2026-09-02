@@ -1861,20 +1861,18 @@ function UnreadableSet(props: {
   );
 }
 
-/// A commit a session landed on the branch: what it was called, how much of the
-/// repository it moved, and the opening of what it said about itself.
+/// A commit a session landed on the branch: what it was called, and how much of
+/// the repository it moved.
 ///
 /// A button, as a session's output and a question set are, and for the same
 /// reason: the whole of it — the summary drawn out and the diff — is in the
 /// details pane, and this is how it is opened.
 ///
-/// Which is also why the snippet is text rather than a rendering, where the
-/// three document cards are rendered markdown: markdown cannot live inside a
-/// button, and this card is a button first. The server sends the prose with the
-/// Diagram already taken out — see `to_prose` — so what is clamped here is what
-/// the summary says rather than the fence it opens with. A commit that said
-/// nothing draws the card that has always been drawn, with nothing marking the
-/// absence.
+/// Nothing of what the commit said about itself. A few lines of the Commit
+/// Summary were clamped here under the counts, and they are the details pane's
+/// whole: the card is the line and the size of the change, which is what a
+/// column of commits is read down for, and the account of the change is read at
+/// the depth it was written for.
 ///
 /// Which repository it landed in is drawn beside the word, and only where that
 /// is not the conversation's own: an unlabeled card means the work's own repo,
@@ -1926,15 +1924,6 @@ function Commit(props: {
         <span class={styles.added}>+{props.commit.insertions}</span>
         <span class={styles.removed}>−{props.commit.deletions}</span>
       </span>
-
-      {/* Under the counts, because the counts are how much moved and this is
-          what the moving was for: the eye reads the line, then the size of it,
-          then the account. Clamped to CLAMPED_LINES, as a document's card is,
-          and by the stylesheet alone — plain prose is lines of one height, so
-          there is nothing here for an observer to measure. */}
-      <Show when={props.commit.snippet}>
-        {(snippet) => <span class={styles.snippet}>{snippet()}</span>}
-      </Show>
     </CardButton>
   );
 }

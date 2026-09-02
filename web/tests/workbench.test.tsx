@@ -9855,42 +9855,23 @@ describe("a commit on the timeline", () => {
     );
   });
 
-  /// The card's own account of the commit, under the counts. Clamped by the
-  /// stylesheet, so what is asked here is that the prose is on the card at all
-  /// and that it is prose — the fixture's summary opens with a Diagram, and a
-  /// card filled with the words of the fence would be the whole of what is left
-  /// to read.
-  it("carries a snippet of what the commit said about itself", async () => {
+  /// The whole card, and nothing of what the commit said about itself: the
+  /// Summary was clamped here under the counts and is the details pane's whole
+  /// now, so the card is the line, the hash and the size of the change.
+  ///
+  /// Asserted as the markup, which is what says nothing else crept back in: a
+  /// missing snippet reads the same as a snippet nobody wrote.
+  it("draws the line and the counts, and nothing the commit said", async () => {
     theCommits();
     const { container } = mount(`/conversations/${BUILDING.id}`);
 
     await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`);
 
-    const said = COMMITS.find((commit) => commit.snippet !== null)!;
-    const row = [
-      ...container.querySelectorAll(`.${timeline.timelineEvent} > .${timeline.commit}`),
-    ].find((card) => card.querySelector(`.${timeline.subject}`)!.textContent === said.subject)!;
-
-    expect(row.querySelector(`.${timeline.snippet}`)!.textContent).toBe(said.snippet);
-    expect(row.querySelector(`.${timeline.snippet}`)!.textContent).not.toContain(
-      "flowchart",
-    );
-  });
-
-  /// Every bookkeeping commit and every commit recorded before summaries were
-  /// kept. Nothing marks the absence: the card is the one it has always been.
-  it("draws the card it always drew for a commit that said nothing", async () => {
-    theCommits();
-    const { container } = mount(`/conversations/${BUILDING.id}`);
-
-    await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`);
-
-    const silent = COMMITS.find((commit) => commit.snippet === null)!;
+    const silent = COMMITS[0]!;
     const row = [
       ...container.querySelectorAll(`.${timeline.timelineEvent} > .${timeline.commit}`),
     ].find((card) => card.querySelector(`.${timeline.subject}`)!.textContent === silent.subject)!;
 
-    expect(row.querySelector(`.${timeline.snippet}`)).toBeNull();
     expect(row.innerHTML).toBe(
       `<span class="${timeline.eventHead}">` +
         `<span class="${timeline.what}">Commit</span>` +

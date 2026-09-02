@@ -690,7 +690,6 @@ mod tests {
             files,
             insertions,
             deletions,
-            snippet: None,
             repo: None,
             merge: false,
         })

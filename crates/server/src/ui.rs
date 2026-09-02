@@ -1559,12 +1559,10 @@ pub(crate) async fn conversation_view(
                     store::Event::Handoff(markdown) => {
                         verkstead_render::handoff_event(event.id, event.at, &markdown)
                     }
-                    // The counts, the subject and what the commit said about
-                    // itself, and not the diff: the diff is in the repository,
-                    // and what fetches it is the pane that shows it. The summary
-                    // goes over whole and comes out as the snippet the card
-                    // clamps — the renderer's, so that the cutting of a commit's
-                    // own words happens where every other rendering of them does.
+                    // The subject and the counts, and neither the summary nor
+                    // the diff: what the commit said about itself is drawn whole
+                    // in the pane the card opens, and the diff is in the
+                    // repository for that same pane to fetch.
                     store::Event::Commit(commit) => verkstead_render::commit_event(
                         event.id,
                         event.at,
@@ -1574,7 +1572,6 @@ pub(crate) async fn conversation_view(
                             files: commit.files,
                             insertions: commit.insertions,
                             deletions: commit.deletions,
-                            summary: commit.summary,
                             // Which repository it came out of, where that is not
                             // this Conversation's own. The store decides that,
                             // because it is the store that knows both.

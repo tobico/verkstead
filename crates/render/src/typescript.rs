@@ -180,9 +180,10 @@ fn the_viewers_types_are_written_from_these() {
     ShowingArchived::export_all(&config).unwrap();
     Watching::export_all(&config).unwrap();
 
-    // And what a session committed. The snippet rides on the Timeline too; the
-    // diff is its own payload, rendered by the same renderer an attached Diff
-    // goes through — which is why this writes no new Diff types.
+    // And what a session committed: the summary drawn out, and the diff, both of
+    // which are this payload's alone — the Timeline's own card is the subject
+    // and the counts. The diff goes through the same renderer an attached Diff
+    // does, which is why this writes no new Diff types.
     CommitPane::export_all(&config).unwrap();
 
     // And the backlog opened, which is every task document of it: the entries

@@ -251,23 +251,6 @@ pub fn to_plain(markdown: &str) -> String {
     words(flattened(Parser::new_ext(markdown, dialect())))
 }
 
-/// Render `markdown` as the prose alone: [`to_plain`]'s one line, with every
-/// Diagram left out of it.
-///
-/// For the snippet a commit's Timeline card clamps. A Commit Summary draws its
-/// delta as a Diagram — that is what the skills ask for — so a card handed the
-/// words of the source would run into `flowchart LR` wherever the fence sits.
-/// The glance a Diagram gives belongs to the pane that draws it; the card gets
-/// what the summary *says*.
-///
-/// Only a Diagram goes. A fence naming a language is code the prose is talking
-/// about, and reads on the card as it reads in the message.
-pub fn to_prose(markdown: &str) -> String {
-    words(flattened(
-        undiagrammed(Parser::new_ext(markdown, dialect())).into_iter(),
-    ))
-}
-
 /// The words of already-flattened markdown and nothing else: what both the
 /// renderings above come down to once there is one line left to write.
 fn words(events: Vec<Event<'_>>) -> String {
@@ -284,34 +267,6 @@ fn words(events: Vec<Event<'_>>) -> String {
 
     // The same trailing gap `to_inline_html` leaves, for the same reason.
     plain.trim().to_owned()
-}
-
-/// The same markdown with every Diagram dropped, fence and source alike.
-///
-/// Before [`flattened`] rather than after it: that pass turns a fenced block
-/// into the code span it would have been written inline as, and by the time it
-/// has run there is nothing left saying which fence the span was.
-fn undiagrammed<'a>(events: impl Iterator<Item = Event<'a>>) -> Vec<Event<'a>> {
-    let mut out: Vec<Event<'a>> = Vec::new();
-
-    // True from a Diagram's start to its end, which is the whole of what is
-    // dropped: a code block holds nothing but its own text.
-    let mut dropping = false;
-
-    for event in events {
-        match &event {
-            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info)))
-                if matches!(asked_for(info), Some(Fence::Diagram)) =>
-            {
-                dropping = true;
-            }
-            Event::End(TagEnd::CodeBlock) if dropping => dropping = false,
-            _ if dropping => {}
-            _ => out.push(event),
-        }
-    }
-
-    out
 }
 
 /// The tags an Option's rendered text may keep: the ones that read as markup
@@ -440,7 +395,7 @@ fn gap(inlined: &mut Vec<Event<'_>>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{holds_diagram, to_html, to_inline_html, to_plain, to_prose};
+    use super::{holds_diagram, to_html, to_inline_html, to_plain};
 
     #[test]
     fn prose_becomes_the_html_it_describes() {
@@ -767,54 +722,5 @@ mod tests {
             !plain.contains('<'),
             "nothing that could be read back as markup survives: {plain}",
         );
-    }
-
-    /// A summary that opens with its Diagram — which is how the skills asked
-    /// for one until the ordering was flipped, and how every summary written
-    /// before that still reads. A card given the fence's source would be
-    /// `flowchart LR` down to the fifth line.
-    #[test]
-    fn prose_leaves_out_a_diagram_the_summary_leads_with() {
-        let prose = to_prose(
-            "```mermaid\nflowchart LR\n  stderr --> reader --> pause\n```\n\n\
-             The relay reads the limit error off stderr.",
-        );
-
-        assert_eq!(prose, "The relay reads the limit error off stderr.");
-    }
-
-    /// Wherever it sits — and under the prose is where the skills ask for it:
-    /// a summary that says its piece and draws the delta underneath is the
-    /// shape the rule mostly meets.
-    #[test]
-    fn prose_leaves_out_a_diagram_wherever_it_sits() {
-        let prose = to_prose(
-            "The relay reads it off stderr.\n\n\
-             ```mermaid\nflowchart LR\n  stderr --> reader\n```\n\n\
-             The runner is handed a time to wake at.",
-        );
-
-        assert_eq!(
-            prose, "The relay reads it off stderr. The runner is handed a time to wake at.",
-            "the prose either side of it runs on as prose",
-        );
-    }
-
-    /// A fence naming a language is not a Diagram: it is code the prose is
-    /// talking about, and it reads on a card as it reads in the message.
-    #[test]
-    fn prose_keeps_a_fence_that_is_not_a_diagram() {
-        let prose = to_prose("Ask for it:\n\n```console\n$ verkstead ask\n```\n");
-
-        assert_eq!(prose, "Ask for it: $ verkstead ask");
-    }
-
-    /// A summary that is a Diagram and nothing else has nothing to say, and a
-    /// card is told so by being handed nothing.
-    #[test]
-    fn a_summary_of_nothing_but_a_diagram_is_no_prose_at_all() {
-        let prose = to_prose("```mermaid\nflowchart LR\n  in --> out\n```\n");
-
-        assert_eq!(prose, "");
     }
 }

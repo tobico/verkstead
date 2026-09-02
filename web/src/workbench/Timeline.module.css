@@ -1024,28 +1024,6 @@
   font-weight: 600;
 }
 
-/* And under those, the opening of what the commit said about itself. Cut off at
-   the five lines a document's card is cut off at — `CLAMPED_LINES` in
-   `Timeline.tsx` — and the whole of it, drawn, is in the pane the card opens.
-
-   A line clamp rather than the height `.clamp` uses, because this is prose and
-   nothing else: every line of it is one line high, so five lines is a count
-   here where a rendering with a heading and a fence in it can only be measured.
-   Which is also what pays for the ellipsis — it says the summary goes on,
-   exactly as the fade over a document does, and neither the markup nor a
-   measurement is needed to draw it. */
-.commit .snippet {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 5;
-  line-clamp: 5;
-  overflow: hidden;
-  max-width: var(--measure);
-  margin: 0.45rem 0 0;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-}
-
 /* Under the pointer, everything on this pane that can be pressed. Together at
    the foot of the file rather than each beside its own card: a hover state has
    to be inside a query like this one — see `styles/base.css`, where the scheme

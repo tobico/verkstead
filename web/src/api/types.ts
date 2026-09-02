@@ -680,22 +680,6 @@ sha: string,
  */
 subject: string, files: number, insertions: number, deletions: number, 
 /**
- * What the commit said about itself, as prose alone: its Commit Summary
- * flattened to a line with the Diagram left out, for the card to clamp —
- * see [`crate::markdown::to_prose`].
- *
- * The prose and not the rendering, unlike every other document on a card.
- * A commit's card is a button, rendered markdown cannot live inside one,
- * and the summary is on the card to be read rather than to be read *at*:
- * what it looks like whole is the pane's, and the card says what it says.
- *
- * `None` where the commit carried no summary — which is every bookkeeping
- * commit and every commit recorded before summaries were kept — and where
- * what it carried was a Diagram and nothing else. Both draw the card that
- * has always been drawn.
- */
-snippet: string | null, 
-/**
  * Which repository it landed in, where that is not the Conversation's own.
  *
  * `None` is the work's own repository and draws nothing: an unlabeled card
