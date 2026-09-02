@@ -13,6 +13,14 @@
 //! off; *Save as draft* stops after the fields. Both land in the Conversation
 //! they made, which is where the work is read from that moment on.
 //!
+//! Which is why they are not pressable on the same things. A repo is the whole
+//! of what creating needs, so *Save as draft* waits on that alone; *Start work*
+//! carries a grilling start as well, and waits on what one has always waited on
+//! — a brief, and the three roles answered. Short of that it draws inert and
+//! says what is missing when it is pressed, exactly as the composer's own start
+//! does: a press that created the Conversation and then reported the grilling
+//! refused would be doing the opposite of what the line under it promised.
+//!
 //! No Timeline beside it, for the reason a Conversation whose record is the one
 //! Event has none: there is nothing yet to read. So the page is the sidebar and
 //! this, and the frame widens exactly as it does there — see `Workbench.tsx`,
@@ -240,6 +248,42 @@ function Compose(props: {
   /// a conversation drafts. A roadmap carries its own repo, so a page loaded
   /// with one is ready by holding it.
   const ready = () => on(state()) !== null;
+
+  /// And whether *Start work* would actually start anything, which is more:
+  /// creating a Conversation and kicking the work off are one press here, and
+  /// the second half has the conditions it has always had — a brief to grill
+  /// from, and each of the three roles answered.
+  ///
+  /// The same questions `ready_to_grill` asks, less the one this side cannot
+  /// see: whether the account behind a chosen pairing is still where it was
+  /// left. So this decides how the press *behaves* rather than what is true, and
+  /// the server checks every one of them again — see [`create`], which carries
+  /// whatever it is refused to the draft it made.
+  ///
+  /// A roadmap answers the brief for itself: the stage's own arrives with the
+  /// adoption, which is why there is nothing to write in the box while one is
+  /// loaded. Nothing chosen for a role is the empty string on all three pickers
+  /// — the row that runs no session is a choice like any other, and it lets the
+  /// work start.
+  const startable = () =>
+    ready() &&
+    (adopting() !== null || state().brief.trim() !== "") &&
+    showing("grilling") !== "" &&
+    showing("implementation") !== "" &&
+    showing("review") !== "";
+
+  /// What starting is waiting on, in the words the composer's own start says
+  /// them in — the brief left out where a roadmap answers for it.
+  const waiting = () =>
+    adopting() === null
+      ? "Starting needs a brief, and every role picked and working."
+      : "Starting needs every role picked and working.";
+
+  // Whether that explanation is out: pressed, it stays out, because it was asked
+  // for; hovered, it comes and goes with the pointer. The composer's own start
+  // holds the same two signals for the same reason.
+  const [asked, setAsked] = createSignal(false);
+  const [hovered, setHovered] = createSignal(false);
 
   const [gone, setGone] = createSignal(false);
 
@@ -566,8 +610,18 @@ function Compose(props: {
             <button
               type="button"
               class={styles.start}
+              classList={{ [styles.inert!]: !startable() }}
+              // Truly `disabled` for the two things that leave the press
+              // nothing to answer with: no repo, which is said above the row
+              // without anybody having to press anything, and a press already
+              // in flight. Not being ready to *start* is the other thing
+              // entirely — the composer's own start draws inert and says what
+              // is missing, and so does this.
               disabled={!ready() || make.isPending}
-              onClick={() => make.mutate(true)}
+              aria-disabled={!startable()}
+              onClick={() => (startable() ? make.mutate(true) : setAsked(true))}
+              onMouseEnter={() => setHovered(true)}
+              onMouseLeave={() => setHovered(false)}
             >
               {make.isPending ? "Starting…" : "Start work"}
             </button>
@@ -584,21 +638,40 @@ function Compose(props: {
             }
           >
             <Show
-              when={adopting()}
+              when={startable()}
               fallback={
-                <Note>
-                  Starting creates the conversation, its branch and its worktree,
-                  and freezes the brief. Saving it as a draft creates it and
-                  leaves it to be started.
-                </Note>
+                // What the press that *can* act does, since the other cannot
+                // yet: a note describing a start that would be refused is the
+                // page saying it will do something it will not.
+                <>
+                  <Note>
+                    Saving this as a draft creates the conversation and leaves it
+                    to be started.
+                  </Note>
+                  <Show when={asked() || hovered()}>
+                    <Note>{waiting()}</Note>
+                  </Show>
+                </>
               }
             >
-              <Note>
-                Starting creates the conversation and adopts the stage: its
-                branch and its worktree are made, and the stage brief becomes the
-                brief. Saving it as a draft creates it and leaves the stage to be
-                adopted. All three pairings have to be chosen before adopting.
-              </Note>
+              <Show
+                when={adopting()}
+                fallback={
+                  <Note>
+                    Starting creates the conversation, its branch and its
+                    worktree, and freezes the brief. Saving it as a draft creates
+                    it and leaves it to be started.
+                  </Note>
+                }
+              >
+                <Note>
+                  Starting creates the conversation and adopts the stage: its
+                  branch and its worktree are made, and the stage brief becomes
+                  the brief. Saving it as a draft creates it and leaves the stage
+                  to be adopted. All three pairings are carried, because the
+                  stages after this one inherit them from it.
+                </Note>
+              </Show>
             </Show>
           </Show>
 

@@ -359,9 +359,13 @@ kept per device the way a half-filled answer sheet is, so a reload loses nothing
 and nothing exists on the server until a press — **Start** creates the
 Conversation, puts every field the human touched on it through the endpoints the
 composer uses and kicks the work off, and **Save as draft** stops after the
-fields. Either way the page lands in the Conversation it made and this device
-stops holding anything. A field the server refuses leaves the rest of the work on
-that draft, and the refusal is said on the draft's own composer.
+fields. So they wait on different things: creating needs a Repo and nothing else,
+while starting carries a grilling with it and needs what one needs — a Brief and
+the three roles answered — drawing inert short of that and saying what is missing
+when it is pressed, the way the press on a draft's own composer does. Either way
+the page lands in the Conversation it made and this device stops holding
+anything. A field the server refuses leaves the rest of the work on that draft,
+and the refusal is said on the draft's own composer.
 
 **Adopting a roadmap is that page too**, from an **Adopt a roadmap** dropdown
 under the box, at the near edge of the row the two presses are at the far edge

@@ -589,9 +589,12 @@ pairings — is kept on the device the way an answer sheet's draft is, so a relo
 or a closed tab loses nothing, and nothing reaches the server until a press.
 **Start** creates the Conversation, replays every touched field through the
 per-field setup endpoints and kicks the work off; **Save as draft**, quieter and
-beside it, stops after the fields. Both need a repo and nothing else, both land
-in the Conversation they made, and a successful create clears what the device was
-holding. There is no batched create and no second set of validation rules: a
+beside it, stops after the fields. Creating needs a repo and nothing else, so the
+quieter press waits on that alone; the other carries a grilling start and waits
+on what one has always waited on — a brief and the three roles — drawing inert
+short of that and saying what is missing when it is pressed, exactly as the
+composer's own start does. Both land in the Conversation they made, and a
+successful create clears what the device was holding. There is no batched create and no second set of validation rules: a
 field the server refuses leaves the rest of the work on a part-set draft, and the
 refusal is carried to that draft's own composer to be read where the field is.
 Its three role pickers stand on what the picked repo was last grilled with, read

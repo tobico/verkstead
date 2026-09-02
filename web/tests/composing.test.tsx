@@ -61,11 +61,43 @@ function writes(fetching: ReturnType<typeof serving>, path: string): number {
   ).length;
 }
 
+/// What one Repo remembers, as the endpoint writes it: a pairing per role, off
+/// the fixture's own profiles so the rows a test names are rows the picker
+/// really offers.
+const remembering = (
+  grilling: ProfileEntry,
+  implementation: ProfileEntry,
+  review: ProfileEntry,
+): RepoPairingsView => ({
+  grilling: { Under: { profile: grilling, model: grilling.models[0]! } },
+  implementation: {
+    profile: implementation,
+    model: implementation.models[0]!,
+  },
+  review: { Under: { profile: review, model: review.models[0]! } },
+});
+
+/// Every registered Repo remembering something, which is what a workbench that
+/// has grilled anything looks like — and what the three role pickers stand on
+/// when nobody has touched them.
+///
+/// Served under the presses rather than in the bench, because it is what makes
+/// *Start work* pressable: the press carries a grilling with it, and a grilling
+/// with no roles answered is one the server would refuse. A test about a Repo
+/// with nothing to remember serves the bench's own `NO_PAIRINGS` instead.
+const REMEMBERED = REPOS.map((repo) =>
+  whenever(
+    `/api/ui/repos/${repo.id}/pairings`,
+    json(remembering(PROFILES[0]!, PROFILES[1]!, PROFILES[2]!)),
+  ),
+);
+
 /// The endpoints a create walks through, all answering yes — with whatever the
 /// test is about handed in last, an answer named twice being the later of the
 /// two.
 function creating(...answers: Parameters<typeof serving>) {
   return theWorkbench(
+    ...REMEMBERED,
     whenever(
       "/api/ui/conversations",
       json({ Started: { id: OPEN.id } }),
@@ -85,6 +117,19 @@ function creating(...answers: Parameters<typeof serving>) {
 /// The compose page, drawn and waited for.
 async function composing(container: ParentNode): Promise<HTMLTextAreaElement> {
   return drawn<HTMLTextAreaElement>(container, `.${composer.box} textarea`);
+}
+
+/// Wait until all three role pickers are standing on something, which is what
+/// *Start work* waits on as well.
+///
+/// The press carries a grilling with it, so it draws inert until every role is
+/// answered — and the answer they arrive with is the repo's own memory, which is
+/// a read of its own. A test pressing before it lands would be pressing a button
+/// that has nothing to do but say what is missing.
+async function rolesAnswered(): Promise<void> {
+  for (const role of ["Grilling", "Implementation", "Review"]) {
+    await waitFor(() => expect(showing(role)).not.toBe("Not chosen"));
+  }
 }
 
 /// Open the Repo panel, which is where the repo is picked and everything under
@@ -223,8 +268,61 @@ describe("the compose page", () => {
 
     await pickRepo(container, REPOS[1]!.id);
 
-    await waitFor(() => expect((start as HTMLButtonElement).disabled).toBe(false));
-    expect((draft as HTMLButtonElement).disabled).toBe(false);
+    await waitFor(() => expect((draft as HTMLButtonElement).disabled).toBe(false));
+    expect((start as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  /// And the two presses part company there. Creating is the whole of what the
+  /// quieter one does, so a repo is the whole of what it waits on; the other
+  /// carries a grilling with it and waits on what one waits on — a brief, and
+  /// the three roles answered.
+  ///
+  /// Inert rather than disabled, exactly as the composer's own start is: a
+  /// disabled button takes no press to answer with, and what this one has to
+  /// say is what is missing.
+  it("draws Start inert until there is a brief and three roles, and says what is missing", async () => {
+    const fetching = creating();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await pickRepo(container, REPOS[1]!.id);
+    await rolesAnswered();
+
+    // The roles are answered by the repo's own memory; the brief is not.
+    const start = screen.getByRole("button", { name: "Start work" });
+    expect(start.getAttribute("aria-disabled")).toBe("true");
+    expect((start as HTMLButtonElement).disabled).toBe(false);
+    expect(start.classList.contains(composer.inert!)).toBe(true);
+
+    // Pressed, it says what it is waiting on and creates nothing at all — the
+    // whole of what was wrong with a press that made the conversation and then
+    // reported the grilling refused.
+    fireEvent.click(start);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "Starting needs a brief, and every role picked and working.",
+        ),
+      ).toBeTruthy(),
+    );
+    expect(writes(fetching, "/api/ui/conversations")).toBe(0);
+
+    // And nothing about the other press: creating is all it does, and it can.
+    expect(
+      (screen.getByRole("button", { name: "Save as draft" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+
+    // A brief typed is the last of it, and the press goes live.
+    fireEvent.input(await composing(container), {
+      target: { value: "Make the widget" },
+    });
+
+    await waitFor(() =>
+      expect(start.getAttribute("aria-disabled")).toBe("false"),
+    );
+    expect(start.classList.contains(composer.inert!)).toBe(false);
   });
 
   it("creates, replays every touched field, kicks off and lands in the draft", async () => {
@@ -235,6 +333,7 @@ describe("the compose page", () => {
       target: { value: "Make the widget" },
     });
     await pickRepo(container, REPOS[1]!.id);
+    await rolesAnswered();
 
     fireEvent.click(screen.getByRole("button", { name: "Start work" }));
 
@@ -270,8 +369,11 @@ describe("the compose page", () => {
     const fetching = creating();
     const { container } = mount("/compose");
 
-    await composing(container);
+    fireEvent.input(await composing(container), {
+      target: { value: "Make the widget" },
+    });
     await pickRepo(container, REPOS[1]!.id);
+    await rolesAnswered();
 
     fireEvent.input(await drawn(container, "#branch"), {
       target: { value: "widget-work" },
@@ -324,6 +426,7 @@ describe("the compose page", () => {
       target: { value: "Make the widget" },
     });
     await pickRepo(container, REPOS[1]!.id);
+    await rolesAnswered();
 
     fireEvent.input(await drawn(container, "#branch"), {
       target: { value: "not a branch name" },
@@ -349,14 +452,14 @@ describe("the compose page", () => {
   });
 
   it("says that the repo has gone, and creates nothing", async () => {
-    theWorkbench(
-      whenever("/api/ui/conversations", json("NoSuchRepo"), "POST"),
-      json(null),
-    );
+    creating(whenever("/api/ui/conversations", json("NoSuchRepo"), "POST"));
     const { container, history } = mount("/compose");
 
-    await composing(container);
+    fireEvent.input(await composing(container), {
+      target: { value: "Make the widget" },
+    });
     await pickRepo(container, REPOS[1]!.id);
+    await rolesAnswered();
 
     fireEvent.click(screen.getByRole("button", { name: "Start work" }));
 
@@ -370,22 +473,6 @@ describe("the compose page", () => {
 
     // Still on the page, still holding what was composed.
     expect(history.get()).toBe("/compose");
-  });
-
-  /// What one Repo remembers, as the endpoint writes it: a pairing per role,
-  /// off the fixture's own profiles so the rows a test names are rows the
-  /// picker really offers.
-  const remembering = (
-    grilling: ProfileEntry,
-    implementation: ProfileEntry,
-    review: ProfileEntry,
-  ): RepoPairingsView => ({
-    grilling: { Under: { profile: grilling, model: grilling.models[0]! } },
-    implementation: {
-      profile: implementation,
-      model: implementation.models[0]!,
-    },
-    review: { Under: { profile: review, model: review.models[0]! } },
   });
 
   /// The workbench with one Repo remembering something and the rest of them
@@ -478,7 +565,9 @@ describe("the compose page", () => {
     );
     const { container } = mount("/compose");
 
-    await composing(container);
+    fireEvent.input(await composing(container), {
+      target: { value: "Make the widget" },
+    });
     await pickRepo(container, REPOS[1]!.id);
 
     await waitFor(() =>
@@ -540,6 +629,10 @@ describe("adopting a roadmap from the compose page", () => {
   /// through — the adoption started, and the stage adopted.
   function adopting(...answers: Parameters<typeof serving>) {
     return theWorkbench(
+      // Adopting needs all three roles answered exactly as grilling does — the
+      // stages after this one inherit them — so the repos remember something
+      // here too, and *Start work* is a press with an answer to give.
+      ...REMEMBERED,
       whenever("/api/ui/abandoned-roadmaps", json(ABANDONED)),
       whenever("/api/ui/adoptions", json({ Started: { id: OPEN.id } }), "POST"),
       whenever(
@@ -742,8 +835,8 @@ describe("adopting a roadmap from the compose page", () => {
 
     await composing(container);
     await loadRoadmap(container, 2);
+    await rolesAnswered();
 
-    await waitFor(() => expect(screen.getByLabelText("Review")).toBeTruthy());
     pick("Review", "No review");
 
     fireEvent.click(screen.getByRole("button", { name: "Start work" }));
@@ -820,6 +913,7 @@ describe("adopting a roadmap from the compose page", () => {
 
     await composing(container);
     await loadRoadmap(container, 0);
+    await rolesAnswered();
 
     fireEvent.click(screen.getByRole("button", { name: "Start work" }));
 
