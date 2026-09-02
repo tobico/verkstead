@@ -142,13 +142,18 @@ title: string,
 stage: AdoptedStage | null, };
 
 /**
- * A session's output as the Timeline shows it: how far its conversation has
- * got, the last thing that was said, and whether more is coming.
+ * A session's output as the Timeline carries it: how far its conversation has
+ * got, the last thing that was said, what it was run under, and whether more
+ * is coming.
  *
  * The summary and not the Capture. A grilling session prints megabytes over
  * an hour, and the Timeline is re-read every time an open page hears the world
- * moved — so what a Conversation carries is these two lines, and the Capture
- * is fetched by the pane that shows it.
+ * moved — so what a Conversation carries is this handful of facts, and the
+ * Capture is fetched by the pane that shows it.
+ *
+ * Carries rather than shows, because the card draws some of it: the turns, the
+ * liveness, and the reading of the Pairing it ran under. What it printed is not
+ * drawn anywhere — see [`latest`](AgentOutputEvent::latest).
  */
 export type AgentOutputEvent = { id: number, 
 /**
@@ -173,6 +178,14 @@ turns: number | null,
  * The last thing the agent said, off its own log — or, where it kept none,
  * the last line it printed with the terminal's control sequences taken
  * out. Empty where it has said nothing yet.
+ *
+ * **No card draws this**, and one did: it was the line a session's card
+ * ended on until the card gave the room to what the run was launched
+ * under, reading output being the details pane's job. It stays because it
+ * is the summarising itself — that the line quoted is what the *agent*
+ * said and not what a tool or the backend did — and this payload is the
+ * only place that reading can be seen from outside, which is what the
+ * sessions suite reads it as.
  */
 latest: string, 
 /**

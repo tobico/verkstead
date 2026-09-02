@@ -688,9 +688,9 @@ function actions(): {
 /// The trigger is the caller's, which is the one thing that makes this menu
 /// different from every other one on a pane. What drops it is the StatusButton
 /// — a button saying where the work stands, at the foot of the sticky block —
-/// so the mark
-/// and the paint that the menu draws for a ⋯ would both be in the way, and the
-/// caller hands in what its trigger reads as and a class to paint it by.
+/// so the mark and the paint that the menu draws for a ⋯ would both be in the
+/// way, and the caller hands in what its trigger reads as and a class to paint
+/// it by.
 ///
 /// The class is handed to the anchor *beside* this menu's own, rather than in
 /// place of it: what the card the rows come down as looks like belongs with the
