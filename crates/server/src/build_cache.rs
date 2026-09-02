@@ -89,7 +89,10 @@ const COMPILING_HOME: &str = "home";
 
 /// Where that is, for a server keeping its things under `data_dir`.
 fn compiling_home(data_dir: &Path) -> PathBuf {
-    sandbox::own_directory(Platform::HERE, data_dir).join(COMPILING_HOME)
+    sandbox::under(
+        &sandbox::own_directory(Platform::HERE, data_dir),
+        COMPILING_HOME,
+    )
 }
 
 /// The build cache this server hands out: where it is, and what it can offer.

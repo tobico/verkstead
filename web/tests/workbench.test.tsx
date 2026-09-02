@@ -9832,7 +9832,7 @@ describe("a commit on the timeline", () => {
       ...container.querySelectorAll(`.${timeline.timelineEvent} > .${timeline.commit} .${timeline.subject}`),
     ].map((it) => it.textContent);
 
-    expect(COMMITS).toHaveLength(3);
+    expect(COMMITS).toHaveLength(4);
     expect(subjects).toEqual(COMMITS.map((commit) => commit.subject));
   });
 
@@ -9856,6 +9856,34 @@ describe("a commit on the timeline", () => {
     ].map((it) => it.textContent);
 
     expect(drawnLabels).toEqual([labelled[0]!.repo]);
+  });
+
+  /// A merge is where a resolution session brought the base branch in and
+  /// settled its conflicts. Its counts and its diff are the hunks the agent
+  /// resolved, which is an ordinary small commit's worth — so the card says
+  /// which it is, and every other card on the fixture's timeline says nothing.
+  it("labels a merge, and only the merge", async () => {
+    theCommits();
+    const { container } = mount(`/conversations/${BUILDING.id}`);
+
+    await drawn(container, `.${timeline.timelineEvent} > .${timeline.commit}`);
+
+    const merges = COMMITS.filter((commit) => commit.merge);
+    expect(merges).toHaveLength(1);
+
+    const labelled = [
+      ...container.querySelectorAll(
+        `.${timeline.timelineEvent} > .${timeline.commit}`,
+      ),
+    ].filter((card) => card.querySelector(`.${timeline.merge}`) !== null);
+
+    expect(labelled).toHaveLength(1);
+    expect(labelled[0]!.querySelector(`.${timeline.subject}`)!.textContent).toBe(
+      merges[0]!.subject,
+    );
+    expect(labelled[0]!.querySelector(`.${timeline.merge}`)!.textContent).toBe(
+      "Merge",
+    );
   });
 
   /// There is nothing to decide about a commit. The design gives it no

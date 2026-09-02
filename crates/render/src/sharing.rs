@@ -137,9 +137,10 @@ pub struct SharedCommit {
 pub fn shared_commit(id: i64, summary: Option<&str>, patch: Option<&str>) -> SharedCommit {
     SharedCommit {
         id,
-        // No patch renders as no diff, which is also what a merge or an empty
-        // commit renders as — the flag beside it is what tells the reader which
-        // of the two kinds of nothing they are looking at.
+        // No patch renders as no diff, which is also what an empty commit and a
+        // merge that resolved nothing render as — the flag beside it is what
+        // tells the reader which of the two kinds of nothing they are looking
+        // at.
         pane: crate::conversations::commit_pane(summary, patch.unwrap_or_default()),
         held: patch.is_some(),
     }
@@ -691,6 +692,7 @@ mod tests {
             deletions,
             snippet: None,
             repo: None,
+            merge: false,
         })
     }
 

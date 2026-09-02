@@ -491,6 +491,35 @@ are **pinned**: a fixed set, with no manual pin or unpin. Where more than one is
 pinned they are drawn in one order — the pull request, then the task list, then
 the roadmap — the pull request leading as the only one of the three with
 anything on it to answer.
+**A commit is an Event when the base branch does not already hold it.** Every
+commit that lands on a watched branch reaches the Timeline, minus everything the
+branch the work was cut off is carrying: a resolution session that merges the
+base branch in to settle a pull request's conflicts drags every commit the base
+has gained since the work started along with it, and none of that is this
+Conversation's work. The merge commit itself stays, being the hunks the agent
+resolved rather than anybody else's work. Which branch that is, is the name
+recorded beside the base commit when the work started **and** the Repo's default
+branch — the two being one branch wherever nobody picked, and the pull request
+opening against the default whatever the work was cut off. Each counts with its
+`origin/` copy, an agent told to merge the base in landing on either. A
+Conversation from before the name was kept, or one whose branch has since gone,
+reads by the default branch alone; a repository where nothing resolves sweeps by
+the base commit alone.
+**And that merge's card says it is one.** What it holds is the resolution and
+nothing else — a file or two, a handful of lines — so it reads as an ordinary
+small commit unless something says otherwise: the word sits beside the hash, in
+the register a companion Repo's name is drawn in. Every other commit is
+unlabelled, and so is every commit recorded before the record could say.
+**And it is an Event for as long as the branch carries it.** A Repo whose
+conflicts are resolved by rebasing has every commit of the branch rewritten
+under a new sha when one is settled, and an amend does the same to one commit on
+any Repo: the sweep records the rewritten commit and forgets what the branch has
+stopped carrying, so the work is on the Timeline once rather than twice. What
+decides that is git's own ancestry rather than the rule above — a Conversation
+whose pull request has been merged is wholly reachable from its base branch, and
+it keeps its whole Timeline. A sha the repository no longer holds at all keeps
+its Event too: a commit nothing can be said about is better drawn than silently
+taken off the record.
 _Avoid_: item, record, message, step
 
 **Share**:

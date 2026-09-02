@@ -3,8 +3,10 @@
 //! Server-only, like the Preface's markdown: the browser gets the rendered
 //! result, so no diff parser and no highlighter ship to the client.
 //!
-//! Stage 01 stores the Diff as one raw unified-diff string, so the parsing
-//! happens here — per file, per hunk, per line. Every scrap of text from the
+//! Stage 01 stores the Diff as one raw diff string, so the parsing happens
+//! here — per file, per hunk, per line. Unified and combined alike: a merge
+//! commit is described by the combined diff of its parents, which says the same
+//! things with one marker column per parent. Every scrap of text from the
 //! Diff is escaped on its way out; the HTML around it is ours, which is why
 //! this output is not run through a sanitiser the way the Preface's is (a
 //! sanitiser would take the class attributes the colouring depends on with it).
@@ -21,8 +23,10 @@ use crate::highlight::{escaped, for_path};
 /// in the table of contents alike, since both name the same fold.
 const AS_IT_ARRIVED: &str = "The Diff, as it arrived";
 
-/// Render a unified diff to HTML, or `None` when there is nothing in it to
-/// show.
+/// Render a diff to HTML, or `None` when there is nothing in it to show.
+///
+/// Unified or combined: a merge commit's patch is the combined diff of its
+/// parents, and draws as files and hunks like any other.
 ///
 /// Each file's section is anchored by its position in the Diff — `diff-1`,
 /// `diff-2`, … — rather than by its path, which would have to be squeezed into
@@ -145,18 +149,27 @@ impl Kind {
     }
 }
 
-/// Split a unified diff into its files.
+/// Split a diff into its files, unified or combined.
 ///
 /// Line counts from each `@@` header say how long the hunk is, so content that
 /// looks like a diff header — a patch inside a patch, which this repository's
 /// own tests are full of — is read as content and not as the start of another
 /// file.
+///
+/// A merge is described by its combined diff, which says the same things in a
+/// wider shape: the file opens `diff --cc <path>`, the hunk header fences its
+/// ranges with one `@` per parent plus one, and every line carries one marker
+/// column per parent rather than one. So the same book-keeping runs over a list
+/// of parents rather than a single old side, and a unified diff is that list
+/// with one entry in it.
 fn files(diff: &str) -> Vec<FileDiff> {
     let mut files: Vec<FileDiff> = Vec::new();
 
-    // What the open hunk still owes, from each side. Zero on both means the
-    // hunk is finished and the next line is a header again.
-    let (mut old_left, mut new_left) = (0usize, 0usize);
+    // What the open hunk still owes: one count per parent, and the result
+    // side's. All of them spent means the hunk is finished and the next line is
+    // a header again.
+    let mut parents_left: Vec<usize> = Vec::new();
+    let mut new_left = 0usize;
 
     // The number the next line of the new side will carry, counting on from
     // where the open hunk's header said the new side starts.
@@ -170,7 +183,8 @@ fn files(diff: &str) -> Vec<FileDiff> {
         // The missing-newline note trails the last line of its hunk, by which
         // point the counts have run out — so it is hunk content whether or not
         // anything is still owed.
-        let in_hunk = old_left > 0 || new_left > 0 || line.starts_with('\\');
+        let in_hunk =
+            new_left > 0 || parents_left.iter().any(|&left| left > 0) || line.starts_with('\\');
 
         if let Some(file) = files.last_mut()
             && in_hunk
@@ -179,25 +193,20 @@ fn files(diff: &str) -> Vec<FileDiff> {
             // Inside a hunk. A line that cannot be hunk content means the counts
             // were wrong, so the hunk ends here and the line is reconsidered as
             // a header below.
-            if let Some(kind) = content(line) {
-                match kind {
-                    Kind::Added => new_left = new_left.saturating_sub(1),
-                    Kind::Removed => old_left = old_left.saturating_sub(1),
-                    Kind::Context => {
-                        old_left = old_left.saturating_sub(1);
-                        new_left = new_left.saturating_sub(1);
-                    }
-                    // The missing-newline note belongs to the line before it and
-                    // counts for neither side.
-                    Kind::Aside => {}
+            // One marker column per parent: one for an ordinary diff, N for a
+            // merge of N. Never none, because a hunk header always names at
+            // least one side.
+            if let Some((kind, width)) = content(line, parents_left.len()) {
+                // The missing-newline note belongs to the line before it and
+                // counts against nothing.
+                if kind != Kind::Aside {
+                    spend(line, &mut parents_left, &mut new_left);
                 }
 
-                let text = match kind {
-                    Kind::Aside => line.to_owned(),
-                    // One marker character, and the rest is the line. An empty
-                    // line is a context line whose marker git left off.
-                    _ => line.get(1..).unwrap_or_default().to_owned(),
-                };
+                // The markers, and the rest of the line is its text. The note
+                // carries none of them and so is kept whole; so is an empty
+                // line, which is a context line git wrote without them.
+                let text = line.get(width..).unwrap_or_default().to_owned();
 
                 // Only what survives into the new file takes a number, and takes
                 // the next one.
@@ -216,17 +225,27 @@ fn files(diff: &str) -> Vec<FileDiff> {
                 continue;
             }
 
-            (old_left, new_left) = (0, 0);
+            parents_left.clear();
+            new_left = 0;
         }
 
-        if let Some(rest) = line.strip_prefix("diff --git ") {
+        // `diff --git a/<path> b/<path>` opens an ordinary file and
+        // `diff --cc <path>` a merge's. The combined one names the path once,
+        // because however many parents it has it leaves one result behind.
+        let opened = line
+            .strip_prefix("diff --git ")
+            .map(header_path)
+            .or_else(|| line.strip_prefix("diff --cc ").map(str::to_owned));
+
+        if let Some(path) = opened {
             files.push(FileDiff {
-                path: header_path(rest),
+                path,
                 status: None,
                 note: None,
                 hunks: Vec::new(),
             });
-            (old_left, new_left) = (0, 0);
+            parents_left.clear();
+            new_left = 0;
             removed_path = None;
             continue;
         }
@@ -238,7 +257,7 @@ fn files(diff: &str) -> Vec<FileDiff> {
 
         if line.starts_with("@@") {
             let span = span(line);
-            (old_left, new_left) = (span.old, span.new);
+            (parents_left, new_left) = (span.parents, span.new);
             numbering = span.start;
             file.hunks.push(Hunk {
                 header: line.to_owned(),
@@ -264,29 +283,91 @@ fn files(diff: &str) -> Vec<FileDiff> {
     files
 }
 
-/// What kind of hunk line this is, or `None` if it is not one.
-fn content(line: &str) -> Option<Kind> {
-    match line.chars().next() {
-        Some('+') => Some(Kind::Added),
-        Some('-') => Some(Kind::Removed),
-        Some(' ') => Some(Kind::Context),
-        Some('\\') => Some(Kind::Aside),
-        // A line git wrote as empty rather than as a bare marker.
-        None => Some(Kind::Context),
-        _ => None,
+/// What kind of hunk line this is and how many characters its markers take, or
+/// `None` if it is not a hunk line at all.
+///
+/// `columns` is one marker per parent — one for an ordinary diff, N for a
+/// combined diff of N parents. The columns collapse: any `+` in any of them is
+/// an added line, any `-` a removed one, and all spaces context. Which parent a
+/// line differed from is not what the pane is read for, and a line cannot be
+/// both — it is either in the result, and so carries no `-` anywhere, or it is
+/// not, and so carries no `+`.
+fn content(line: &str, columns: usize) -> Option<(Kind, usize)> {
+    // git's aside about the line above it, which carries no markers.
+    if line.starts_with('\\') {
+        return Some((Kind::Aside, 0));
+    }
+
+    // A line git wrote as empty rather than as bare markers.
+    if line.is_empty() {
+        return Some((Kind::Context, 0));
+    }
+
+    let (mut added, mut removed, mut width) = (false, false, 0);
+    for marker in line.chars().take(columns) {
+        match marker {
+            '+' => added = true,
+            '-' => removed = true,
+            ' ' => {}
+            _ => return None,
+        }
+        width += 1;
+    }
+
+    let kind = if added {
+        Kind::Added
+    } else if removed {
+        Kind::Removed
+    } else {
+        Kind::Context
+    };
+    Some((kind, width))
+}
+
+/// Take off what one hunk line owes: from the result side, and from each parent
+/// it is in.
+///
+/// A line with no `-` in any column is in the result and spends the result
+/// side's count. A parent's count is spent by a line that is in *that parent*,
+/// which its column says in two ways — `-` is in the parent and not in the
+/// result, and a space on a line the result kept is in both.
+///
+/// A space against a line the result did *not* keep says the opposite: the line
+/// is in neither, so that parent owes nothing for it. That is the case a merge
+/// has and a unified diff does not, and reading it the other way would spend a
+/// parent's count early and cut the hunk off before its end.
+///
+/// On one marker column this is the unified diff's rule unchanged: `+` spends
+/// the new side, `-` the old, and a space spends both.
+fn spend(line: &str, parents_left: &mut [usize], new_left: &mut usize) {
+    // A missing column is a space — git writes an empty line rather than bare
+    // markers — and a marker is ASCII wherever git does write one.
+    let marker = |parent: usize| line.as_bytes().get(parent).copied().unwrap_or(b' ');
+
+    let kept = !(0..parents_left.len()).any(|parent| marker(parent) == b'-');
+    if kept {
+        *new_left = new_left.saturating_sub(1);
+    }
+
+    for (parent, left) in parents_left.iter_mut().enumerate() {
+        if marker(parent) == b'-' || (kept && marker(parent) == b' ') {
+            *left = left.saturating_sub(1);
+        }
     }
 }
 
 /// What a hunk header says about the lines beneath it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Span {
-    /// How many lines the old side contributes.
-    old: usize,
+    /// How many lines each parent contributes — one entry for an ordinary
+    /// diff's old side, and one per parent for a merge's. Never empty, so the
+    /// count of them is also the count of marker columns each line carries.
+    parents: Vec<usize>,
 
-    /// How many the new side does.
+    /// How many the result side contributes.
     new: usize,
 
-    /// The number of the new side's first line — where the gutter starts
+    /// The number of the result side's first line — where the gutter starts
     /// counting.
     start: usize,
 }
@@ -295,27 +376,57 @@ struct Span {
 /// side and four from the new, the new side's first being line 2. A count left
 /// off means one.
 ///
-/// A hunk header can carry the enclosing function's name after the second `@@`,
-/// and a word of that could begin with `-` or `+` — so only the first two
-/// sign-prefixed fields are read, which are the two ranges.
+/// A merge's header says the same in a wider shape — `@@@ -1,3 -1,3 +1,4 @@@`
+/// is one range per parent and then the result's — and the fence is what says
+/// how many parents there are: one `@` per parent, plus one for the result.
+///
+/// A hunk header can carry the enclosing function's name after the closing
+/// fence, and a word of that could begin with `-` or `+`, so the ranges are
+/// read from between the two fences rather than from the line.
 fn span(header: &str) -> Span {
-    let mut ranges = header
-        .split_whitespace()
-        .filter_map(|field| {
-            let field = field
-                .strip_prefix('-')
-                .or_else(|| field.strip_prefix('+'))?;
-            Some(match field.split_once(',') {
+    let fence: String = header.chars().take_while(|&at| at == '@').collect();
+    let parents = fence.len().saturating_sub(1).max(1);
+
+    let rest = header.strip_prefix(&fence).unwrap_or(header);
+    let ranges = match rest.find(&fence) {
+        Some(close) => &rest[..close],
+        None => rest,
+    };
+
+    let mut counts = Vec::with_capacity(parents);
+    let (mut new, mut start) = (0, 0);
+
+    let fields = ranges.split_whitespace().filter_map(|field| {
+        let (result, range) = match field.strip_prefix('-') {
+            Some(range) => (false, range),
+            None => (true, field.strip_prefix('+')?),
+        };
+        Some((
+            result,
+            match range.split_once(',') {
                 Some((start, count)) => (start.parse().unwrap_or(1), count.parse().unwrap_or(1)),
-                None => (field.parse().unwrap_or(1), 1),
-            })
-        })
-        .take(2);
+                None => (range.parse().unwrap_or(1), 1),
+            },
+        ))
+    });
 
-    let (_, old) = ranges.next().unwrap_or_default();
-    let (start, new) = ranges.next().unwrap_or_default();
+    for (result, (first, count)) in fields.take(parents + 1) {
+        if result {
+            (start, new) = (first, count);
+        } else if counts.len() < parents {
+            counts.push(count);
+        }
+    }
 
-    Span { old, new, start }
+    // A header that named fewer sides than its fence promised still gets a
+    // column per parent, so a line's markers are read as the width they are.
+    counts.resize(parents, 0);
+
+    Span {
+        parents: counts,
+        new,
+        start,
+    }
 }
 
 /// The path from a `diff --git a/<path> b/<path>` line.
@@ -475,7 +586,7 @@ fn numbered(number: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{files, numbered, to_html};
+    use super::{AS_IT_ARRIVED, files, numbered, to_html};
 
     /// The markup for a Diff that has something in it — what most of these
     /// tests are looking at, the paths beside it being their own two tests.
@@ -875,6 +986,134 @@ mod tests {
             ["src/lib.rs", "notes.txt"],
             "the table of contents names the folds by these, so the nth path \
              has to be what `diff-n` shows",
+        );
+    }
+
+    /// What `git diff-tree -p --cc` says about a resolution session's merge: a
+    /// conflicted file settled one way, and a line the resolution added on top.
+    /// Two marker columns, one per parent, and a `@@@` fence over them.
+    ///
+    /// The ordinary file after it is there to be reached: the hunk's counts are
+    /// the only thing that says where a combined hunk ends, and a wrong reading
+    /// of them swallows the file below.
+    const MERGE: &str = concat!(
+        "diff --cc f.txt\n",
+        "index 6e8d6bb,6addb9b..20b5b51\n",
+        "--- a/f.txt\n",
+        "+++ b/f.txt\n",
+        "@@@ -1,4 -1,4 +1,5 @@@\n",
+        "  one\n",
+        "- twoo\n",
+        " -TWO\n",
+        "++MERGED\n",
+        "  three\n",
+        "  four\n",
+        "++extra\n",
+        "diff --git a/after.txt b/after.txt\n",
+        "--- a/after.txt\n",
+        "+++ b/after.txt\n",
+        "@@ -1 +1 @@\n",
+        "-before\n",
+        "+after\n",
+    );
+
+    #[test]
+    fn a_merge_draws_as_files_and_hunks_like_any_other_diff() {
+        let html = rendered(MERGE);
+
+        assert!(
+            !html.contains(AS_IT_ARRIVED),
+            "a combined diff is git's own, so it is parsed rather than dropped \
+             into the section for what git did not write:\n{html}"
+        );
+        assert_eq!(
+            paths(MERGE),
+            ["f.txt", "after.txt"],
+            "`diff --cc` opens a file the way `diff --git` does, and the hunk's \
+             counts are what let the file after it be reached",
+        );
+        assert!(
+            html.contains("@@@ -1,4 -1,4 +1,5 @@@"),
+            "expected the combined hunk header:\n{html}"
+        );
+    }
+
+    #[test]
+    fn a_merges_columns_collapse_into_one_kind_a_line() {
+        let html = rendered(MERGE);
+
+        assert_eq!(
+            html.matches(r#"diffLine add"#).count(),
+            3,
+            "`++MERGED` and `++extra` are in neither parent, and `+after` is \
+             the ordinary file's:\n{html}"
+        );
+        assert_eq!(
+            html.matches(r#"diffLine del"#).count(),
+            3,
+            "`- twoo` is gone from one parent and ` -TWO` from the other, and \
+             either way the merge does not keep it:\n{html}"
+        );
+        assert_eq!(
+            html.matches(r#"diffLine ctx"#).count(),
+            3,
+            "a line both parents and the merge agree on is context:\n{html}"
+        );
+
+        assert!(
+            html.contains(">MERGED<") && html.contains(">twoo<"),
+            "the text is the line with all of its markers taken off:\n{html}"
+        );
+    }
+
+    #[test]
+    fn a_merges_lines_are_numbered_by_what_the_merge_kept() {
+        assert_eq!(
+            numbers(MERGE, 0, 0),
+            [Some(1), None, None, Some(2), Some(3), Some(4), Some(5)],
+            "only what is in the result takes a number, and a line removed \
+             relative to either parent is not in it",
+        );
+    }
+
+    #[test]
+    fn a_merge_of_three_parents_is_read_by_its_fence_and_not_mistaken_for_content() {
+        // Three ranges and then the result's, under a four-`@` fence — so every
+        // line below carries three marker columns.
+        let diff = concat!(
+            "diff --cc f.txt\n",
+            "index e6d2236,9615e15,20965f8..31a524f\n",
+            "--- a/f.txt\n",
+            "+++ b/f.txt\n",
+            "@@@@ -1,3 -1,3 -1,3 +1,4 @@@@\n",
+            "   one\n",
+            "-  m\n",
+            " - a\n",
+            "  -b\n",
+            "+++ALL\n",
+            "   three\n",
+            "+++new\n",
+        );
+
+        let files = files(diff);
+
+        assert_eq!(files.len(), 1, "{files:#?}");
+        assert_eq!(files[0].hunks.len(), 1, "{files:#?}");
+        assert_eq!(
+            files[0].hunks[0].lines.len(),
+            7,
+            "every line of the hunk belongs to it: `+++ALL` and `   one` carry \
+             three marker columns rather than being a `+++` file header and a \
+             line of its own:\n{files:#?}"
+        );
+        assert_eq!(
+            files[0].hunks[0]
+                .lines
+                .iter()
+                .map(|line| line.text.as_str())
+                .collect::<Vec<_>>(),
+            ["one", "m", "a", "b", "ALL", "three", "new"],
+            "three columns come off each line, not one:\n{files:#?}"
         );
     }
 

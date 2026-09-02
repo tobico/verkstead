@@ -253,7 +253,7 @@ async fn following_up(pool: &SqlitePool, conversation: i64) {
                 instruction: Some("Does it count the 429s it sends?\n"),
                 direction: None,
                 worktree: None,
-                base_commit: None,
+                base: None,
                 companions: &[],
                 opened: &[],
                 checkouts: &[],

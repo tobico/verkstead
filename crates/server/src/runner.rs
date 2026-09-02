@@ -1351,8 +1351,8 @@ async fn follow_inline(
 ) {
     let event_id = session.event_id;
 
-    // Taken before the waiting starts, so it is a count of what the run had
-    // landed before this session rather than including what it goes on to do.
+    // Read before the waiting starts, so it is where the run stood before this
+    // session rather than somewhere that includes what it goes on to do.
     let already = match store::commits_landed(&state.pool, conversation_id).await {
         Ok(landed) => landed,
         Err(error) => {
@@ -1558,9 +1558,8 @@ pub(crate) async fn instructed(
     instruction: String,
     driving: Driving,
 ) {
-    // Taken before the session starts, so it is a count of what the branch
-    // carried before the instruction rather than one that includes what it goes
-    // on to do.
+    // Read before the session starts, so it is where the branch stood before the
+    // instruction rather than somewhere that includes what it goes on to do.
     let already = match store::commits_landed(&state.pool, conversation_id).await {
         Ok(landed) => landed,
         Err(error) => {
@@ -1836,10 +1835,10 @@ pub(crate) async fn following_up(
     follow_up: FollowUp,
     driving: Driving,
 ) {
-    // Taken before the session starts, so what it lands is counted as this
-    // follow-up's own: whether the wrap-up's checks go back to waiting turns on
-    // whether *this* follow-up pushed anything, and a Conversation on a pull
-    // request has a run of commits behind it already.
+    // Read before the session starts, so what it lands is this follow-up's own:
+    // whether the wrap-up's checks go back to waiting turns on whether *this*
+    // follow-up pushed anything, and a Conversation on a pull request has a run
+    // of commits behind it already.
     let already = match store::commits_landed(&state.pool, conversation_id).await {
         Ok(landed) => landed,
         Err(error) => {
@@ -1992,19 +1991,20 @@ const NOBODY_FOLLOWING_UP: &str = "nobody is left to ask you anything or to act 
 /// wrap-up's own settling rule and nothing decided here.
 ///
 /// **The checks go back to waiting where the follow-up pushed.** `already` is
-/// what the Conversation had committed before the session started, so more than
-/// it now is a follow-up that gave GitHub a new run to make up its mind about —
-/// and a settle standing over it is yesterday's green, which the settling loop
-/// could reach Done on before the checks watcher's first poll had looked. A
-/// follow-up that was questions and answers alone lands with everything settled
-/// and passes straight through to Done. A count that will not read counts as
+/// where the Conversation's commits stood before the session started, so
+/// standing past it now is a follow-up that gave GitHub a new run to make up its
+/// mind about — and a settle standing over it is yesterday's green, which the
+/// settling loop could reach Done on before the checks watcher's first poll had
+/// looked. A follow-up that was questions and answers alone lands with
+/// everything settled and passes straight through to Done. A marker that will
+/// not read counts as
 /// *pushed*, which is the right way round: the cost is one poll of GitHub, and
 /// the cost the other way is a wrap-up finished over a suite nobody watched.
 ///
 /// The session is ended first, because the Worktree is about to be handed to the
 /// wrap-up's own watchers: a review queueing behind an agent that has nothing
 /// left to do would wait for a session Verkstead is finished with.
-async fn over(state: &AppState, conversation_id: i64, already: usize, driving: Driving) {
+async fn over(state: &AppState, conversation_id: i64, already: i64, driving: Driving) {
     tracing::info!(
         conversation_id,
         "the human has nothing else, so the follow-up is over and its session is being ended",
@@ -2292,8 +2292,8 @@ async fn follow_roadmap(
 /// a stop of its own for when they run out. So the rescue ends the session and
 /// the wrap-up carries on from the check, which is still red.
 pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &str) -> Option<i64> {
-    // Taken before the session starts, so it is a count of what the branch
-    // carried before this fix rather than one that includes it.
+    // Read before the session starts, so it is where the branch stood before this
+    // fix rather than somewhere that includes it.
     let already = match store::commits_landed(&state.pool, conversation_id).await {
         Ok(landed) => landed,
         Err(error) => {
@@ -2632,7 +2632,7 @@ async fn asking(state: &AppState, conversation_id: i64, event_id: i64) -> bool {
     }
 }
 
-/// Wait until the Conversation has more commits than `already` *and* the session
+/// Wait until the Conversation's commits stand past `already` *and* the session
 /// has been quiet for the grace period.
 ///
 /// The store rather than git, unlike a backlog step's landing: the branch watcher
@@ -2642,7 +2642,7 @@ async fn asking(state: &AppState, conversation_id: i64, event_id: i64) -> bool {
 async fn committed_and_quiet(
     state: &AppState,
     conversation_id: i64,
-    already: usize,
+    already: i64,
     idle: &Idle,
     pace: Pace,
 ) {
@@ -2667,23 +2667,27 @@ async fn committed_and_quiet(
     }
 }
 
-/// Whether the Conversation has more commits on it than the `already` a session
-/// started over.
+/// Whether the Conversation's commits stand past the `already` a session started
+/// over.
 ///
 /// The store rather than git, for [`committed_and_quiet`]'s reason: the branch
 /// watcher is sweeping this branch for as long as the session runs and putting
 /// what lands on the Timeline, so the Timeline is where a fresh commit shows up
 /// first.
 ///
+/// **Past rather than more than**, because a sweep takes commits off the
+/// Timeline as well as putting them on — see [`store::commits_landed`], which is
+/// what makes a marker rather than a count the thing to compare. A session that
+/// rebased the branch or amended its commit left the same work under new shas,
+/// which is a session that committed: counted, it would come back to the number
+/// it started at, and this would wait for ever on a session that had done
+/// exactly what it was sent for.
+///
 /// A store that will not answer reads as *nothing new*, which is the right way
 /// round for both things this decides — a session ended, and a session left
 /// alone rather than spoken to. See [`crate::rescues::Done::Committed`], which
 /// is the other reader.
-pub(crate) async fn committed_since(
-    state: &AppState,
-    conversation_id: i64,
-    already: usize,
-) -> bool {
+pub(crate) async fn committed_since(state: &AppState, conversation_id: i64, already: i64) -> bool {
     match store::commits_landed(&state.pool, conversation_id).await {
         Ok(landed) => landed > already,
         Err(error) => {

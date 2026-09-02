@@ -122,6 +122,7 @@ async fn worked(pool: &SqlitePool, branch: &str) -> Worked {
             deletions: 3,
             summary: Some("The counter moves out of the process.".to_owned()),
             repo: None,
+            merge: false,
         },
     )
     .await
@@ -613,6 +614,7 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
             deletions: 3,
             summary: Some("The counter moves out of the process.".to_owned()),
             repo: None,
+            merge: false,
         },
     )
     .await

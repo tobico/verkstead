@@ -177,7 +177,10 @@ impl Skills {
         // are made to say below: a skill that sends a session into another one
         // names it by the path it is at, and on a platform where that is not
         // the mount the sentence has to name the other place instead.
-        let inside = crate::sandbox::own_directory(Platform::HERE, data_dir).join(DIRECTORY);
+        let inside = crate::sandbox::under(
+            &crate::sandbox::own_directory(Platform::HERE, data_dir),
+            DIRECTORY,
+        );
 
         // And how the same files name the handoff directory, which is the other
         // path they send a session to — see [`said_at`] for why that one is
@@ -253,7 +256,9 @@ impl Skills {
 
     /// One skill's path, as the session told to read it will see it.
     pub(crate) fn named(&self, skill: &str) -> String {
-        self.inside.join(skill).display().to_string()
+        crate::sandbox::under(&self.inside, skill)
+            .display()
+            .to_string()
     }
 
     /// And an empty directory of Verkstead's own, which a sandbox binds

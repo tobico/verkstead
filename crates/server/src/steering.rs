@@ -314,7 +314,10 @@ pub(crate) async fn submit(
         instruction: instruction.or(follow_up),
         direction: directing(&conversation, instruction),
         worktree: made.worktree.as_deref(),
-        base_commit: made.base_commit.as_deref(),
+        base: made.base_commit.as_deref().map(|commit| store::Base {
+            commit,
+            named: made.base_ref.as_deref(),
+        }),
         companions: &joining,
         opened: &opening,
         checkouts: &made.checkouts,
@@ -1427,6 +1430,7 @@ async fn plan(
 
             let mut checkouts = Vec::new();
             let mut base_commit = None;
+            let mut base_ref = None;
 
             // The Conversation's own first, so that whatever directory it takes
             // is taken before any companion asks for one.
@@ -1439,6 +1443,7 @@ async fn plan(
                         };
 
                         base_commit = Some(commit.clone());
+                        base_ref = Some(named.clone());
 
                         Holding::Cut(branch.clone(), commit)
                     }
@@ -1471,6 +1476,7 @@ async fn plan(
             Ok(Planned {
                 worktree: Some(path),
                 base_commit,
+                base_ref,
                 checkouts,
                 branch: Some(branch),
             })
@@ -1634,6 +1640,7 @@ async fn make(planned: Planned) -> anyhow::Result<Making> {
     let Planned {
         worktree,
         base_commit,
+        base_ref,
         branch,
         checkouts,
     } = planned;
@@ -1700,6 +1707,7 @@ async fn make(planned: Planned) -> anyhow::Result<Making> {
         Ok(checkouts) => Making::Ready(Made {
             worktree,
             base_commit,
+            base_ref,
             branch,
             checkouts,
         }),
@@ -1835,6 +1843,11 @@ struct Planned {
     /// What its branch will be cut from, where this steer is what cuts it.
     base_commit: Option<String>,
 
+    /// And the branch that commit was resolved through, which is recorded with
+    /// it — see [`store::Conversation::base_ref`]. Set exactly where
+    /// [`Self::base_commit`] is, the two being one answer.
+    base_ref: Option<String>,
+
     /// The name the work will be on, where this steer is what settles
     /// it — the name the Conversation was carrying, or another invented
     /// one where a repository already answered to that. `None` where
@@ -1867,6 +1880,10 @@ struct Made {
     /// Conversation that had a branch already: what it branched from was
     /// resolved once, and it is not resolved again.
     base_commit: Option<String>,
+
+    /// And the branch it was resolved through, recorded beside it — see
+    /// [`Planned::base_ref`].
+    base_ref: Option<String>,
 
     /// The name the work is on, where this steer settled it — see
     /// [`Planned::branch`].

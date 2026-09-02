@@ -204,13 +204,15 @@ pub(crate) enum Done {
         landing: Landing,
     },
 
-    /// An instruction or a fix: more commits on the Conversation than it carried
-    /// when the session started. There is no path to watch — an instruction can
-    /// ask for anything — and a commit is the one report an agent cannot half
-    /// make.
+    /// An instruction or a fix: the Conversation's commits standing somewhere
+    /// past where they stood when the session started. There is no path to watch
+    /// — an instruction can ask for anything — and a commit is the one report an
+    /// agent cannot half make.
     Committed {
-        /// What the Conversation had committed before the session started.
-        already: usize,
+        /// Where the Conversation's commits stood before the session started —
+        /// see [`store::commits_landed`], which is what a marker like this
+        /// means.
+        already: i64,
     },
 
     /// A follow-up: the newest round the human answered carries the

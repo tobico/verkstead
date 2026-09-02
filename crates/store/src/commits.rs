@@ -76,6 +76,22 @@ pub struct Commit {
     /// unlabeled card means the work's own repo, and the label earns its place
     /// when repos mix.
     pub repo: Option<String>,
+
+    /// Whether it is a merge: the commit a resolution session leaves behind
+    /// where it brought the base branch in and settled the conflicts.
+    ///
+    /// Kept beside the commit rather than asked of git whenever a page looks,
+    /// for the reason the subject and the counts are kept: a Timeline is read
+    /// every time an open page hears the world moved, and a repository asked
+    /// once per row would be a git process per commit of it.
+    ///
+    /// A merge reads as an ordinary small commit otherwise — what it carries is
+    /// the hunks the agent resolved, which is a handful of lines — so the card
+    /// says which it is. `false` is that ordinary commit, and it is what every
+    /// commit recorded before this was kept comes back as: the column's own
+    /// default, and the only thing that can be said of a commit nobody asked
+    /// git about.
+    pub merge: bool,
 }
 
 /// The commits table. It hangs off a Timeline Event, as a Capture does: a
@@ -103,6 +119,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              files           INTEGER NOT NULL,
              insertions      INTEGER NOT NULL,
              deletions       INTEGER NOT NULL,
+             merge           INTEGER NOT NULL DEFAULT 0,
              UNIQUE (conversation_id, repo_id, sha)
          ) STRICT",
     )
@@ -111,10 +128,14 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .context("creating the commits table")?;
 
     // The Commit Summary, beside the commit rather than in it. A column on the
-    // table above would need every row that is already there to grow one, and
-    // there is no migration machinery here to do that with — where a table of its
-    // own is simply absent for the commits recorded before it existed, which is
-    // exactly what "that commit carries no summary" means.
+    // table above would have needed every row already there to grow one, and
+    // there was no migration machinery here to do that with when this arrived —
+    // where a table of its own is simply absent for the commits recorded before
+    // it existed, which is exactly what "that commit carries no summary" means.
+    //
+    // There is machinery now, and it is how the merge flag above became a
+    // column — see [`super::migrations`]. Moving the summary into the table
+    // would be a rewrite of every row to say what an absent one already says.
     //
     // Keyed by the Event and not by the Conversation and sha: the commit row
     // above is what owns the identity, and this hangs off the same Event it does.
@@ -213,8 +234,9 @@ pub async fn record_commit(
 
     sqlx::query(
         "INSERT INTO commits
-             (event_id, conversation_id, repo_id, sha, subject, files, insertions, deletions)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+             (event_id, conversation_id, repo_id, sha, subject, files, insertions,
+              deletions, merge)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(event_id)
     .bind(conversation_id)
@@ -224,6 +246,7 @@ pub async fn record_commit(
     .bind(commit.files)
     .bind(commit.insertions)
     .bind(commit.deletions)
+    .bind(commit.merge)
     .execute(&mut *tx)
     .await
     .with_context(|| format!("recording commit {} of Event {event_id}", commit.sha))?;
@@ -245,14 +268,90 @@ pub async fn record_commit(
     Ok(Some(event_id))
 }
 
+/// Take a commit off a Conversation's Timeline, and say which Event it was.
+///
+/// The other half of a sweep. A branch whose commits have been rewritten —
+/// rebased to settle a conflict, or amended — carries the same work under new
+/// shas, and a Timeline that only ever gained would hold both: the work twice
+/// over, half of it under shas the repository no longer has. So a sweep that
+/// finds a recorded commit the branch has stopped carrying forgets it, and
+/// records the rewritten one in its place — see the server's `commits` module
+/// for what decides which those are.
+///
+/// `None` is a commit that is not there, which is the same answer
+/// [`record_commit`] gives for one that already is: neither is a failure, and
+/// both are what a sweep run twice over the same branch runs into.
+///
+/// One transaction, for the reason recording is one: the Event, the commit row
+/// and the Commit Summary are one thing on the Timeline, and an Event left
+/// behind with no commit row under it is one [`Event::read`] refuses rather
+/// than draws. And an immediate one, the same way and for the same reason —
+/// this runs in the sweep that records, against a database a session ending is
+/// having every one of its branches swept in at once.
+pub async fn forget_commit(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    repo_id: i64,
+    sha: &str,
+) -> Result<Option<i64>> {
+    let mut tx = super::writing(pool, "forgetting a commit").await?;
+
+    // Asked inside the transaction, so that the Event it finds is the Event the
+    // deletes below act on. The Conversation and the Repo are asked along with
+    // the sha because the three of them together are the commit's identity: a
+    // sha on its own names a commit on somebody else's Timeline just as well.
+    let recorded: Option<(i64,)> = sqlx::query_as(
+        "SELECT event_id FROM commits
+         WHERE conversation_id = ? AND repo_id = ? AND sha = ?",
+    )
+    .bind(conversation_id)
+    .bind(repo_id)
+    .bind(sha)
+    .fetch_optional(&mut *tx)
+    .await
+    .with_context(|| {
+        format!("looking for commit {sha} of Repo {repo_id} on Conversation {conversation_id}")
+    })?;
+
+    let Some((event_id,)) = recorded else {
+        return Ok(None);
+    };
+
+    // What hangs off the Event first, then the commit row, then the Event
+    // itself: each of the three points at the one above it, so this is the order
+    // that never leaves a row naming something that has gone.
+    sqlx::query("DELETE FROM commit_summaries WHERE event_id = ?")
+        .bind(event_id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("forgetting the summary of Event {event_id}"))?;
+
+    sqlx::query("DELETE FROM commits WHERE event_id = ?")
+        .bind(event_id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("forgetting commit {sha} of Event {event_id}"))?;
+
+    sqlx::query("DELETE FROM timeline_events WHERE id = ?")
+        .bind(event_id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("taking Event {event_id} off the Timeline"))?;
+
+    tx.commit().await.context("forgetting a commit")?;
+
+    Ok(Some(event_id))
+}
+
 /// Which commits a Conversation already has on its Timeline out of one Repo.
 ///
-/// What a sweep of a branch asks before it goes reading git: the shas it comes
-/// back with are the ones there is nothing left to do about, and everything else
-/// on the branch is a commit to describe and record. Asked as a set rather than
-/// as "the last one recorded", because the last one is not a place in a branch —
-/// a branch that was amended or reset has commits before its tip that this has
-/// never seen.
+/// What a sweep of a branch asks before it goes reading git, and it is both of
+/// the sweep's questions: everything on the branch that is not among these is a
+/// commit to describe and record, and everything among these the branch no
+/// longer carries is a commit to forget — see [`forget_commit`]. Asked as a set
+/// rather than as "the last one recorded", because the last one is not a place
+/// in a branch: one that was amended or rebased carries neither the commits this
+/// has seen nor them in the order it saw them.
 ///
 /// Per Repo and not per Conversation, because that is what a sweep is: one
 /// watcher reads one branch of one repository, and the commits on another repo's
@@ -275,23 +374,40 @@ pub async fn recorded_commits(
     Ok(rows.into_iter().map(|(sha,)| sha).collect())
 }
 
-/// How many commits a Conversation has landed, in every repository it is being
-/// worked in.
+/// Where a Conversation's commits stand: the newest commit Event on its
+/// Timeline, in every repository it is being worked in, and `0` where it has
+/// none.
 ///
-/// What the runner counts before a session and again after it, to say whether
-/// the session committed anything at all. Across the repositories rather than
-/// per Repo, because that is the question: a session that committed only in a
+/// What the runner reads before a session and again after it, to say whether the
+/// session committed anything at all. Across the repositories rather than per
+/// Repo, because that is the question: a session that committed only in a
 /// read-write companion has done work, and a run told otherwise would call it a
 /// session that came to nothing.
-pub async fn commits_landed(pool: &SqlitePool, conversation_id: i64) -> Result<usize> {
-    let (landed,): (i64,) =
-        sqlx::query_as("SELECT count(*) FROM commits WHERE conversation_id = ?")
+///
+/// **The newest Event rather than how many there are**, because a sweep
+/// subtracts as well as adds — see [`forget_commit`]. A branch that was rebased
+/// or amended carries the same work under new shas, so the sweep forgets as many
+/// commits as it records and a count comes back to where it started: a
+/// resolution session on a Repo that rebases would read as one that committed
+/// nothing, and the runner would go on waiting for a number that never moves.
+///
+/// An Event id moves under that, because `timeline_events` autoincrements and so
+/// never hands an id out twice: whatever a sweep records is numbered above
+/// everything the Conversation was already holding, and a rewrite records. It is
+/// a marker rather than a number to do arithmetic on — every reader holds one
+/// from before the session and compares it with one from after, and nothing
+/// counts anything.
+pub async fn commits_landed(pool: &SqlitePool, conversation_id: i64) -> Result<i64> {
+    let (landed,): (Option<i64>,) =
+        sqlx::query_as("SELECT max(event_id) FROM commits WHERE conversation_id = ?")
             .bind(conversation_id)
             .fetch_one(pool)
             .await
-            .with_context(|| format!("counting the commits of Conversation {conversation_id}"))?;
+            .with_context(|| {
+                format!("reading where the commits of Conversation {conversation_id} stand")
+            })?;
 
-    Ok(landed.max(0) as usize)
+    Ok(landed.unwrap_or(0))
 }
 
 /// The commit one of a Conversation's Events is, or `None` where that
@@ -314,6 +430,7 @@ pub async fn commit(
         i64,
         Option<String>,
         Option<String>,
+        bool,
     );
 
     // The summary left-joined, because a commit with no summary is the ordinary
@@ -327,7 +444,8 @@ pub async fn commit(
     // back for the work's own. A Repo taken off the registry is nothing to draw
     // either, which is the same unlabeled card.
     let row: Option<Row> = sqlx::query_as(
-        "SELECT c.sha, c.subject, c.files, c.insertions, c.deletions, s.summary, r.name
+        "SELECT c.sha, c.subject, c.files, c.insertions, c.deletions, s.summary, r.name,
+                c.merge
          FROM commits c
          JOIN conversations v ON v.id = c.conversation_id
          LEFT JOIN commit_summaries s ON s.event_id = c.event_id
@@ -341,7 +459,7 @@ pub async fn commit(
     .with_context(|| format!("reading the commit of Event {event_id}"))?;
 
     Ok(row.map(
-        |(sha, subject, files, insertions, deletions, summary, repo)| Commit {
+        |(sha, subject, files, insertions, deletions, summary, repo, merge)| Commit {
             sha,
             subject,
             files,
@@ -349,6 +467,7 @@ pub async fn commit(
             deletions,
             summary,
             repo,
+            merge,
         },
     ))
 }
@@ -389,27 +508,56 @@ pub async fn commit_repo(
     }))
 }
 
-/// The Commit Summaries on a Conversation's Timeline, by the Event each one
-/// belongs to.
+/// What a commit on a Conversation's Timeline carries that the Timeline's own
+/// query has no column left to hold.
 ///
-/// Its own read rather than a column on the Timeline's own query, for the reason
+/// Two things rather than a summary alone, and one read rather than two: that
+/// query is at the number of columns a tuple can be read back as, so whatever
+/// arrives after it is a read of its own — and a second read for a boolean
+/// beside a table this one is already joining would be a query per Timeline for
+/// nothing.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct BesideCommit {
+    /// The Commit Summary, or `None` where the commit carried none — which is
+    /// every bookkeeping commit and every commit recorded before summaries were
+    /// kept.
+    pub summary: Option<String>,
+
+    /// Whether the commit is a merge — see [`Commit::merge`].
+    pub merge: bool,
+}
+
+/// What each commit on a Conversation's Timeline carries beside its row, by the
+/// Event it belongs to.
+///
+/// Its own read rather than columns on the Timeline's own query, for the reason
 /// a Capture's summaries are: that query is at the number of columns a tuple can
 /// be read back as, and there is no position left to put one in. One more read
-/// for the whole Timeline, and most Timelines answer it with nothing.
-pub(crate) async fn summaries_on_timeline(
+/// for the whole Timeline, and a Timeline with no commit on it answers it with
+/// nothing.
+///
+/// Driven off the commits rather than off the summaries, because the merge flag
+/// is a column of the commit and every commit has one: the summary is what is
+/// left-joined, and most of them come back without.
+pub(crate) async fn beside_commits_on_timeline(
     pool: &SqlitePool,
     conversation_id: i64,
-) -> Result<HashMap<i64, String>> {
-    let rows: Vec<(i64, String)> = sqlx::query_as(
-        "SELECT s.event_id, s.summary
-         FROM commit_summaries s
-         JOIN commits c ON c.event_id = s.event_id
+) -> Result<HashMap<i64, BesideCommit>> {
+    let rows: Vec<(i64, Option<String>, bool)> = sqlx::query_as(
+        "SELECT c.event_id, s.summary, c.merge
+         FROM commits c
+         LEFT JOIN commit_summaries s ON s.event_id = c.event_id
          WHERE c.conversation_id = ?",
     )
     .bind(conversation_id)
     .fetch_all(pool)
     .await
-    .with_context(|| format!("reading the commit summaries of Conversation {conversation_id}"))?;
+    .with_context(|| {
+        format!("reading the commits on the Timeline of Conversation {conversation_id}")
+    })?;
 
-    Ok(rows.into_iter().collect())
+    Ok(rows
+        .into_iter()
+        .map(|(event_id, summary, merge)| (event_id, BesideCommit { summary, merge }))
+        .collect())
 }

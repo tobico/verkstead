@@ -14,8 +14,8 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Commit, Event, add_companion, commit, commit_repo, open_database, record_commit,
-    recorded_commits, register_repo, start_conversation, timeline,
+    Commit, Event, add_companion, commit, commit_repo, commits_landed, forget_commit,
+    open_database, record_commit, recorded_commits, register_repo, start_conversation, timeline,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -55,7 +55,8 @@ async fn registered(pool: &SqlitePool, name: &str) -> i64 {
 /// summaries were kept looks like.
 ///
 /// Unlabeled, which is what the sweep offers and what the Conversation's own
-/// repository reads back as.
+/// repository reads back as. And an ordinary commit rather than a merge, which
+/// is what all but one commit on any branch is.
 fn landed(sha: &str, subject: &str) -> Commit {
     Commit {
         sha: sha.to_owned(),
@@ -65,6 +66,7 @@ fn landed(sha: &str, subject: &str) -> Commit {
         deletions: 4,
         summary: None,
         repo: None,
+        merge: false,
     }
 }
 
@@ -72,6 +74,15 @@ fn landed(sha: &str, subject: &str) -> Commit {
 fn summarised(sha: &str, subject: &str, summary: &str) -> Commit {
     Commit {
         summary: Some(summary.to_owned()),
+        ..landed(sha, subject)
+    }
+}
+
+/// And the same as a merge: what a resolution session leaves behind where it
+/// brought the base branch in and settled the conflicts.
+fn merged(sha: &str, subject: &str) -> Commit {
+    Commit {
+        merge: true,
         ..landed(sha, subject)
     }
 }
@@ -163,6 +174,47 @@ async fn a_commit_with_no_summary_has_none() {
         None
     );
     assert_eq!(on_the_timeline(&pool, id).await[0].summary, None);
+}
+
+/// Whether a commit is a merge is read off git once, when the sweep describes
+/// it, and kept beside the commit: the Timeline the card is drawn on and the
+/// pane it opens both read it back rather than asking git again.
+#[tokio::test]
+async fn a_merge_comes_back_a_merge() {
+    let (_dir, pool) = fresh_pool().await;
+    let (id, repo) = conversation(&pool).await;
+
+    let event = record_commit(&pool, id, repo, &merged("a1b2c3d", "Merge branch 'main'"))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert!(
+        on_the_timeline(&pool, id).await[0].merge,
+        "the card the Timeline draws is the one that says it is a merge",
+    );
+
+    assert!(
+        commit(&pool, id, event).await.unwrap().unwrap().merge,
+        "and so is the pane it opens",
+    );
+}
+
+/// And the ordinary commit, which is every commit but the one a resolution
+/// session left behind: nothing marks it, and the card is the one that has
+/// always been drawn.
+#[tokio::test]
+async fn an_ordinary_commit_is_no_merge() {
+    let (_dir, pool) = fresh_pool().await;
+    let (id, repo) = conversation(&pool).await;
+
+    let event = record_commit(&pool, id, repo, &landed("a1b2c3d", "feat: rate limiting"))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert!(!on_the_timeline(&pool, id).await[0].merge);
+    assert!(!commit(&pool, id, event).await.unwrap().unwrap().merge);
 }
 
 /// One summary per commit, because the summary is written in the commit's own
@@ -508,5 +560,204 @@ async fn a_commit_says_which_repository_to_read_it_out_of() {
         commit_repo(&pool, id + 1, theirs).await.unwrap(),
         None,
         "and it is reached through the Timeline it is on, like the commit itself",
+    );
+}
+
+/// The other half of a sweep. A branch whose commits have been rewritten —
+/// rebased to settle a conflict, or amended — carries the same work under new
+/// shas, and what the Timeline holds under the old ones is taken off it.
+///
+/// Everything hanging off the Event goes with it: the commit row the Timeline
+/// draws from, and the Commit Summary the details pane renders above the diff.
+#[tokio::test]
+async fn a_forgotten_commit_takes_its_event_and_its_summary_with_it() {
+    let (_dir, pool) = fresh_pool().await;
+    let (id, repo) = conversation(&pool).await;
+
+    let written = summarised("a1b2c3d", "feat: rate limiting", "A bucket per account.");
+
+    let event = record_commit(&pool, id, repo, &written)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let kept = record_commit(&pool, id, repo, &landed("9f8e7d6", "feat: the other half"))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        forget_commit(&pool, id, repo, "a1b2c3d").await.unwrap(),
+        Some(event),
+        "the Event it was, which is what the sweep logs",
+    );
+
+    assert_eq!(
+        on_the_timeline(&pool, id).await,
+        vec![landed("9f8e7d6", "feat: the other half")],
+        "the Timeline is left with the commit the branch still carries",
+    );
+    assert_eq!(
+        commit(&pool, id, event).await.unwrap(),
+        None,
+        "and the commit row it was drawn from has gone with its Event",
+    );
+    assert!(
+        commit(&pool, id, kept).await.unwrap().is_some(),
+        "which is the one Event and not the Timeline",
+    );
+
+    // The summary is what would be left behind: it hangs off the Event by id,
+    // so a row surviving it would attach itself to whatever Event was written
+    // next.
+    let recorded = record_commit(&pool, id, repo, &landed("1a2b3c4", "feat: rate limiting"))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        commit(&pool, id, recorded).await.unwrap().unwrap().summary,
+        None,
+        "the forgotten commit's summary went with it",
+    );
+}
+
+/// A commit that is not there is nothing to forget, which is the answer
+/// `record_commit` gives for one that already is: a sweep offers the whole of
+/// what it read, and being wrong about either costs nothing.
+#[tokio::test]
+async fn forgetting_a_commit_that_is_not_there_is_nothing() {
+    let (_dir, pool) = fresh_pool().await;
+    let (id, repo) = conversation(&pool).await;
+
+    record_commit(&pool, id, repo, &landed("a1b2c3d", "feat: rate limiting"))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        forget_commit(&pool, id, repo, "9f8e7d6").await.unwrap(),
+        None,
+        "a sha this Conversation never recorded",
+    );
+    assert!(
+        forget_commit(&pool, id, repo, "a1b2c3d")
+            .await
+            .unwrap()
+            .is_some(),
+        "the one it did",
+    );
+    assert_eq!(
+        forget_commit(&pool, id, repo, "a1b2c3d").await.unwrap(),
+        None,
+        "and forgetting it a second time is nothing either",
+    );
+}
+
+/// A sha is the commit's identity only with the Conversation and the Repo beside
+/// it: two repositories are two histories, and two Conversations off one branch
+/// hold the same shas.
+#[tokio::test]
+async fn forgetting_one_conversations_commit_leaves_anothers_alone() {
+    let (_dir, pool) = fresh_pool().await;
+    let (id, own) = conversation(&pool).await;
+
+    let askance = registered(&pool, "askance").await;
+    add_companion(&pool, id, askance).await.unwrap();
+
+    record_commit(&pool, id, own, &landed("a1b2c3d", "feat: rate limiting"))
+        .await
+        .unwrap()
+        .unwrap();
+    record_commit(
+        &pool,
+        id,
+        askance,
+        &landed("a1b2c3d", "feat: the other half"),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    forget_commit(&pool, id, own, "a1b2c3d").await.unwrap();
+
+    assert_eq!(
+        recorded_commits(&pool, id, own).await.unwrap(),
+        Vec::<String>::new(),
+    );
+    assert_eq!(
+        recorded_commits(&pool, id, askance).await.unwrap(),
+        vec!["a1b2c3d".to_owned()],
+        "the companion's commit is another repository's history",
+    );
+}
+
+/// Where a Conversation's commits stand is what the runner reads before a
+/// session and again after it, and it has to move for work a sweep *replaced*
+/// rather than added.
+///
+/// A branch that was rebased or amended carries the same work under new shas, so
+/// the sweep forgets as many commits as it records. Counted, that comes back to
+/// the number it started at and the session reads as one that committed nothing
+/// — which is exactly the resolution session on a Repo that rebases.
+#[tokio::test]
+async fn where_commits_stand_moves_when_a_sweep_replaces_one() {
+    let (_dir, pool) = fresh_pool().await;
+    let (id, repo) = conversation(&pool).await;
+
+    assert_eq!(
+        commits_landed(&pool, id).await.unwrap(),
+        0,
+        "a Conversation with nothing on its Timeline stands at nothing",
+    );
+
+    record_commit(&pool, id, repo, &landed("a1b2c3d", "feat: rate limitting"))
+        .await
+        .unwrap()
+        .unwrap();
+
+    let before = commits_landed(&pool, id).await.unwrap();
+    assert!(before > 0, "and one with a commit on it stands past that");
+
+    // The amend, as a sweep does it: the sha the branch stopped carrying comes
+    // off, and the one it carries now goes on. One commit either side of it.
+    forget_commit(&pool, id, repo, "a1b2c3d").await.unwrap();
+    record_commit(&pool, id, repo, &landed("9f8e7d6", "feat: rate limiting"))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        on_the_timeline(&pool, id).await.len(),
+        1,
+        "the Timeline holds what it held, which is what a count would read",
+    );
+    assert!(
+        commits_landed(&pool, id).await.unwrap() > before,
+        "and where those commits stand has moved, because the sweep recorded",
+    );
+}
+
+/// And a sweep that only forgets moves it the other way, which is a session that
+/// committed nothing however far the Timeline has been rewound.
+#[tokio::test]
+async fn where_commits_stand_never_reads_a_reset_as_a_commit() {
+    let (_dir, pool) = fresh_pool().await;
+    let (id, repo) = conversation(&pool).await;
+
+    for (sha, subject) in [("a1b2c3d", "feat: one"), ("9f8e7d6", "feat: two")] {
+        record_commit(&pool, id, repo, &landed(sha, subject))
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    let before = commits_landed(&pool, id).await.unwrap();
+
+    forget_commit(&pool, id, repo, "9f8e7d6").await.unwrap();
+
+    assert!(
+        commits_landed(&pool, id).await.unwrap() < before,
+        "a branch reset to where it was is nothing committed",
     );
 }

@@ -203,6 +203,23 @@ pub struct Conversation {
     /// commit to record now.
     pub base_commit: Option<String>,
 
+    /// And the name of the branch that commit was resolved off, once the work
+    /// has started.
+    ///
+    /// Kept beside the sha rather than instead of it, which is a companion's
+    /// rule for a companion's reason — see [`super::Companion::base_ref`]:
+    /// [`Self::base_commit`] says where the base *stood* when the branch was
+    /// cut, and a sha cannot say what branch it came off. What wants the name is
+    /// the commit sweep, which leaves out everything that branch already holds —
+    /// see the server's `commits` module.
+    ///
+    /// `None` twice over and neither of them a value missing: a Draft, whose
+    /// `base_commit` column is still holding the branch name the human picked;
+    /// and every Conversation started by a Verkstead that did not keep the name.
+    /// Both read as the Repo's default branch, which is the rule they started
+    /// under.
+    pub base_ref: Option<String>,
+
     pub state: Lifecycle,
 
     /// The Profile and model the grilling session runs under, once they are
@@ -966,6 +983,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              named_branch              TEXT,
              naming                    INTEGER NOT NULL DEFAULT 0,
              base_commit               TEXT,
+             base_ref                  TEXT,
              state                     TEXT NOT NULL,
              grilling_profile_id       INTEGER REFERENCES profiles(id),
              implementation_profile_id INTEGER REFERENCES profiles(id),
@@ -1626,6 +1644,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         bool,
         bool,
         Option<String>,
+        Option<String>,
         String,
         Option<i64>,
         Option<i64>,
@@ -1641,7 +1660,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
                 COALESCE(c.named_branch, c.branch),
                 c.named_branch IS NOT NULL AS branch_named,
                 c.naming,
-                c.base_commit, c.state,
+                c.base_commit, c.base_ref, c.state,
                 c.grilling_profile_id, c.implementation_profile_id,
                 c.review_profile_id,
                 r.id, r.path, r.name, r.default_branch
@@ -1661,6 +1680,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         branch_named,
         naming,
         base_commit,
+        base_ref,
         state,
         grilling_profile_id,
         implementation_profile_id,
@@ -1687,6 +1707,7 @@ pub async fn load_conversation(pool: &SqlitePool, id: i64) -> Result<Option<Conv
         branch_named,
         naming,
         base_commit: base_commit.filter(|commit| !commit.is_empty()),
+        base_ref: base_ref.filter(|named| !named.is_empty()),
         state: Lifecycle::read(&state)?,
         grilling_pairing: picked(pool, id, Role::Grilling, grilling_profile_id).await?,
         implementation_pairing: pairing(pool, id, Role::Implementation, implementation_profile_id)
@@ -2261,11 +2282,12 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
     // none.
     let mut pull_requests = super::pull_requests::on_timeline(pool, conversation_id).await?;
 
-    // And the Commit Summaries, for the same arithmetic. The commit itself is
-    // joined into the query above; what the agent wrote under its subject is one
-    // more read, and a Timeline of bookkeeping commits answers it with nothing.
-    let mut summaries_of_commits =
-        super::commits::summaries_on_timeline(pool, conversation_id).await?;
+    // And what each commit carries that the query above has no column left for,
+    // for the same arithmetic: what the agent wrote under its subject, and
+    // whether the commit is a merge. One read for both, since it is one join
+    // either way — see [`super::commits::beside_commits_on_timeline`].
+    let mut beside_commits =
+        super::commits::beside_commits_on_timeline(pool, conversation_id).await?;
 
     // And the Pauses, for the arithmetic again and at the pull request's cost:
     // an account running out of window is the rare Event, so this is one more
@@ -2305,6 +2327,14 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
 
             let commit = match (sha, subject, files, insertions, deletions) {
                 (Some(sha), Some(subject), Some(files), Some(insertions), Some(deletions)) => {
+                    // The summary and the merge flag both, off the one read the
+                    // query above had no columns left to hold. That read is over
+                    // this Conversation's commits, so every row this arm reaches
+                    // has an entry in it — and what stands in for one that
+                    // somehow does not is the ordinary commit: no summary, and
+                    // no merge.
+                    let beside = beside_commits.remove(&id).unwrap_or_default();
+
                     Some(super::Commit {
                         sha,
                         subject,
@@ -2313,11 +2343,15 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
                         deletions,
                         // Absent for most commits, which is what a commit that
                         // said nothing about itself looks like.
-                        summary: summaries_of_commits.remove(&id),
+                        summary: beside.summary,
                         // And absent for every commit in the Conversation's own
                         // repository, which is what the join above says: a label
                         // is drawn where repos mix and nowhere else.
                         repo,
+                        // False for every commit but the one a resolution
+                        // session left behind, and for every commit recorded
+                        // before the column existed.
+                        merge: beside.merge,
                     })
                 }
                 // Every column of that row is `NOT NULL`, so the only way to be
@@ -3136,6 +3170,39 @@ pub(crate) async fn branch_made(pool: &SqlitePool, id: i64) -> Result<bool> {
     Ok(row.is_some())
 }
 
+/// What a piece of work branched from: the commit, and the branch that commit
+/// was resolved through where whoever resolved it knows.
+///
+/// Two halves of one answer, which is why they are written together rather than
+/// passed separately — see [`Conversation::base_ref`] for what the name is for.
+/// A bare commit converts into one, and that is a base whose branch nothing
+/// recorded: the reading that falls back to the Repo's default branch, which is
+/// what every Conversation started before the name was kept has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Base<'a> {
+    /// The commit the branch was cut at.
+    pub commit: &'a str,
+
+    /// And the name it resolved through — `origin/main`, or whatever branch the
+    /// human picked. `None` where nothing resolved a name.
+    pub named: Option<&'a str>,
+}
+
+impl<'a> From<&'a str> for Base<'a> {
+    fn from(commit: &'a str) -> Self {
+        Self {
+            commit,
+            named: None,
+        }
+    }
+}
+
+impl<'a> From<&'a String> for Base<'a> {
+    fn from(commit: &'a String) -> Self {
+        Self::from(commit.as_str())
+    }
+}
+
 /// Record that a Conversation has started grilling: what it branched from, where
 /// its worktree is, and that it has moved.
 ///
@@ -3145,10 +3212,12 @@ pub(crate) async fn branch_made(pool: &SqlitePool, id: i64) -> Result<bool> {
 /// one transaction: a Conversation left saying `draft` with a worktree on disk
 /// would be one nothing could start again and nothing would clean up.
 ///
-/// `base_commit` is written whether or not the human overrode one. Where they
-/// did not, the rule was the default branch's tip *at grill start* — so this is
-/// the moment that rule resolves to a commit, and after it there is a fact about
+/// `base` is written whether or not the human overrode one. Where they did not,
+/// the rule was the default branch's tip *at grill start* — so this is the
+/// moment that rule resolves to a commit, and after it there is a fact about
 /// what the work branched from rather than a rule about what it would have.
+/// The branch it resolved *through* is written with it, for the reason
+/// [`Conversation::base_ref`] is kept at all.
 ///
 /// It is also where the Repo remembers what it was started with — see
 /// [`super::pairings::remember`] — because this is the moment the three roles
@@ -3160,14 +3229,14 @@ pub(crate) async fn branch_made(pool: &SqlitePool, id: i64) -> Result<bool> {
 /// saying where they went would be one nothing could bind into a sandbox and
 /// nothing would come back and remove. Empty is the ordinary Conversation, which
 /// has none.
-pub async fn start_grilling(
+pub async fn start_grilling<'a>(
     pool: &SqlitePool,
     id: i64,
-    base_commit: &str,
+    base: impl Into<Base<'a>>,
     worktree: &Path,
     companions: &[super::CompanionWorktree],
 ) -> Result<Grilling> {
-    start(pool, id, base_commit, worktree, companions, None).await
+    start(pool, id, base.into(), worktree, companions, None).await
 }
 
 /// And the same start on a Conversation whose human picked *no grilling*: the
@@ -3184,17 +3253,17 @@ pub async fn start_grilling(
 /// implementation, and a Conversation implementing with no direction is a record
 /// nothing could resume — see [`pick_direction`], which is how the other way in
 /// writes the same row.
-pub async fn start_building(
+pub async fn start_building<'a>(
     pool: &SqlitePool,
     id: i64,
-    base_commit: &str,
+    base: impl Into<Base<'a>>,
     worktree: &Path,
     companions: &[super::CompanionWorktree],
 ) -> Result<Grilling> {
     start(
         pool,
         id,
-        base_commit,
+        base.into(),
         worktree,
         companions,
         Some(Direction::Inline),
@@ -3211,7 +3280,7 @@ pub async fn start_building(
 async fn start(
     pool: &SqlitePool,
     id: i64,
-    base_commit: &str,
+    base: Base<'_>,
     worktree: &Path,
     companions: &[super::CompanionWorktree],
     building: Option<Direction>,
@@ -3246,10 +3315,11 @@ async fn start(
     // a better one. A Conversation the human named has nothing to wait for.
     sqlx::query(
         "UPDATE conversations
-         SET base_commit = ?, state = ?, naming = (named_branch IS NULL)
+         SET base_commit = ?, base_ref = ?, state = ?, naming = (named_branch IS NULL)
          WHERE id = ?",
     )
-    .bind(base_commit)
+    .bind(base.commit)
+    .bind(base.named)
     .bind(landing.stored())
     .bind(id)
     .execute(&mut *tx)
@@ -3787,7 +3857,7 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
         instruction,
         direction,
         worktree,
-        base_commit,
+        base,
         companions,
         opened,
         checkouts,
@@ -3875,9 +3945,10 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
     // [`start_grilling`] is for a Conversation that reached grilling the
     // ordinary way — and after it there is a fact about what the work branched
     // from rather than a rule about what it would have.
-    if let Some(base_commit) = base_commit {
-        sqlx::query("UPDATE conversations SET base_commit = ? WHERE id = ?")
-            .bind(base_commit)
+    if let Some(base) = base {
+        sqlx::query("UPDATE conversations SET base_commit = ?, base_ref = ? WHERE id = ?")
+            .bind(base.commit)
+            .bind(base.named)
             .bind(id)
             .execute(&mut *tx)
             .await
@@ -4040,8 +4111,9 @@ pub struct Steer<'a> {
     /// Where the work goes on, for a target something runs in.
     pub worktree: Option<&'a Path>,
 
-    /// And what its branch was cut from, where the steer is what cut it.
-    pub base_commit: Option<&'a str>,
+    /// And what its branch was cut from, where the steer is what cut it — the
+    /// commit and the branch it resolved through both.
+    pub base: Option<Base<'a>>,
 
     /// The companions the steer is putting on, which are rows this writes and
     /// nothing else could.
@@ -4275,14 +4347,15 @@ pub async fn record_roadmap(pool: &SqlitePool, id: i64) -> Result<Landed> {
 /// that said it was implementing with companions nothing had checked out would
 /// be one nothing could bind into a sandbox and nothing would come back and
 /// remove.
-pub async fn start_stage(
+pub async fn start_stage<'a>(
     pool: &SqlitePool,
     id: i64,
-    base_commit: &str,
+    base: impl Into<Base<'a>>,
     worktree: &Path,
     stacks_on: Option<&str>,
     companions: &[super::CompanionWorktree],
 ) -> Result<Staged> {
+    let base = base.into();
     let worktree = super::repos::text(worktree)?;
 
     let mut tx = super::writing(pool, "starting a stage").await?;
@@ -4301,8 +4374,9 @@ pub async fn start_stage(
         return Ok(Staged::NotDrafting);
     }
 
-    sqlx::query("UPDATE conversations SET base_commit = ?, state = ? WHERE id = ?")
-        .bind(base_commit)
+    sqlx::query("UPDATE conversations SET base_commit = ?, base_ref = ?, state = ? WHERE id = ?")
+        .bind(base.commit)
+        .bind(base.named)
         .bind(Lifecycle::Implementing.stored())
         .bind(id)
         .execute(&mut *tx)

@@ -1446,12 +1446,24 @@ async fn ready(app: &Router, watched: &Path, repo_id: i64) -> i64 {
     id
 }
 
-/// What git in `repo` says its worktrees are, by path.
+/// What git in `repo` says its worktrees are, by path, each in the
+/// filesystem's own spelling of it.
+///
+/// git prints a path in git's normalisation rather than the host's: on Windows
+/// that is forward slashes, and whichever short name the directory was reached
+/// through left as it stands. The tests hold paths the Rust side built, so the
+/// two are the same directory written two ways and compare unequal. This
+/// canonicalises what git said, which is the form `Path::canonicalize` gives
+/// the other side. A worktree whose directory has gone cannot be canonicalised
+/// and stays as git spelled it, because it is one git is holding either way.
 fn worktrees(repo: &Path) -> Vec<PathBuf> {
     git(repo, &["worktree", "list", "--porcelain"])
         .lines()
         .filter_map(|line| line.strip_prefix("worktree "))
-        .map(PathBuf::from)
+        .map(|path| {
+            let path = PathBuf::from(path);
+            path.canonicalize().unwrap_or(path)
+        })
         .collect()
 }
 
@@ -1534,6 +1546,67 @@ async fn starting_records_the_commit_the_work_branched_from() {
     assert_eq!(
         opened(&app, id).await.base_commit.as_deref(),
         Some(tip.as_str())
+    );
+}
+
+/// The branch the base resolved through is recorded beside the commit it
+/// resolved to.
+///
+/// A sha cannot say what branch it came off, and what wants the name is the
+/// commit sweep: a resolution session that merges the base branch in brings
+/// every commit the base has gained with it, and none of that is the
+/// Conversation's work. See the server's `commits` module.
+#[tokio::test]
+async fn starting_records_the_branch_the_base_resolved_through() {
+    let (watched, dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    git(&repo, &["branch", "release"]);
+    assert_eq!(
+        base(&app, id, Some("release")).await,
+        BaseRecorded::Recorded
+    );
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::load_conversation(&pool, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .base_ref
+            .as_deref(),
+        Some("release"),
+        "the branch they picked, rather than the commit it stood at",
+    );
+}
+
+/// And where they picked none, it is the Repo's default branch as origin holds
+/// it — which is the rule an unpicked base resolved by anyway.
+#[tokio::test]
+async fn starting_from_no_pick_records_the_default_branch() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::load_conversation(&pool, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .base_ref
+            .as_deref(),
+        // No origin in this repository, so what origin holds is what it holds.
+        Some("main"),
+        "an unpicked base is the default branch, and the name says which",
     );
 }
 
@@ -6830,7 +6903,7 @@ async fn adopting_starts_the_stage_on_its_own_branch_off_the_base_commit() {
     let worktree = PathBuf::from(view.worktree.expect("a stage has a Worktree").path);
 
     assert!(worktree.starts_with(dir.path()));
-    assert!(worktrees(&repo).contains(&worktree));
+    assert!(worktrees(&repo).contains(&worktree.canonicalize().unwrap()));
     assert!(
         worktree
             .join("docs/roadmaps/mvp/03-implementation.md")
@@ -8407,7 +8480,7 @@ async fn a_build_that_runs_no_sessions_starts_no_grilling_and_makes_nothing() {
     assert_eq!(view.worktree, None, "and it was given nowhere to work");
     assert_eq!(
         worktrees(&repo),
-        vec![repo.clone()],
+        vec![repo.canonicalize().unwrap()],
         "and git was left holding the repository and nothing else",
     );
     assert_eq!(

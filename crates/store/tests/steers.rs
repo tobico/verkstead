@@ -30,9 +30,9 @@ use std::path::{Path, PathBuf};
 use sqlx::SqlitePool;
 use verkstead_schema::Direction;
 use verkstead_store::{
-    Account, Directing, Edited, Event, Lifecycle, ProfileFacts, Role, Settling, Steer, Steering,
-    WaitingOn, create_profile, fix_attempts, load_conversation, open_database, pick_direction,
-    record_fix_attempt, register_repo, save_brief, settle_naming, settle_wrap_up,
+    Account, Base, Directing, Edited, Event, Lifecycle, ProfileFacts, Role, Settling, Steer,
+    Steering, WaitingOn, create_profile, fix_attempts, load_conversation, open_database,
+    pick_direction, record_fix_attempt, register_repo, save_brief, settle_naming, settle_wrap_up,
     start_conversation, start_grilling, start_unnamed_conversation, steer_conversation, timeline,
     wrap_up_settled,
 };
@@ -51,7 +51,7 @@ fn into(target: Lifecycle) -> Steer<'static> {
         instruction: None,
         direction: None,
         worktree: None,
-        base_commit: None,
+        base: None,
         companions: &[],
         opened: &[],
         checkouts: &[],
@@ -460,7 +460,7 @@ async fn a_steer_into_grilling_forgets_the_round_before_it() {
 
 /// What the steer had to make before anything could run in it: the Worktree it
 /// checked out, and — for a Draft, which has never had a branch — the commit
-/// that branch was cut from.
+/// that branch was cut from and the branch it was resolved through.
 ///
 /// Recorded here rather than made here. Git and the filesystem are the server's
 /// to reach, and after this there is a fact about what the work branched from
@@ -476,7 +476,10 @@ async fn a_steer_records_the_worktree_and_the_commit_it_branched_from() {
             draft,
             Steer {
                 worktree: Some(Path::new("/state/worktrees/rate-limiting")),
-                base_commit: Some("c0ffee"),
+                base: Some(Base {
+                    commit: "c0ffee",
+                    named: Some("origin/main"),
+                }),
                 ..into(Lifecycle::Grilling)
             },
         )
@@ -500,6 +503,12 @@ async fn a_steer_records_the_worktree_and_the_commit_it_branched_from() {
         Some("c0ffee"),
         "the column held the branch the human picked while drafting, and now \
          holds what that resolved to",
+    );
+    assert_eq!(
+        conversation.base_ref.as_deref(),
+        Some("origin/main"),
+        "and the branch it resolved through is beside it, which is what the \
+         commit sweep leaves the base's own commits out by",
     );
 }
 

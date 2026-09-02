@@ -1569,6 +1569,10 @@ pub(crate) async fn conversation_view(
                             // this Conversation's own. The store decides that,
                             // because it is the store that knows both.
                             repo: commit.repo,
+                            // And whether it is the merge a resolution session
+                            // left behind, which the sweep read off git when it
+                            // described the commit.
+                            merge: commit.merge,
                         },
                     ),
                     // A wait a Verkstead of before put on a Timeline, said in

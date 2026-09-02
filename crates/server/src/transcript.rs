@@ -818,7 +818,27 @@ mod tests {
     fn aged(path: &Path, by: Duration) {
         let times = std::fs::FileTimes::new().set_modified(SystemTime::now() - by);
 
-        std::fs::File::open(path).unwrap().set_times(times).unwrap();
+        let mut open = std::fs::OpenOptions::new();
+
+        open.read(true);
+
+        // Both of which Windows wants asked for by name, and a Unix `open`
+        // needs neither: a read handle there carries no right to write the
+        // attributes a timestamp lives in, and a directory cannot be opened at
+        // all without backup semantics — and one of the two things aged here is
+        // a directory.
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+
+            const FILE_WRITE_ATTRIBUTES: u32 = 0x0100;
+            const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+
+            open.access_mode(FILE_WRITE_ATTRIBUTES)
+                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS);
+        }
+
+        open.open(path).unwrap().set_times(times).unwrap();
     }
 
     /// Two Codex sessions started near-together in two Worktrees write their

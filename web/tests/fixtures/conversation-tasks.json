@@ -115,14 +115,14 @@
         "at": "2026-08-03T09:07:11.000Z",
         "frozen": true,
         "html": "<h1>One session per task</h1>\n<p>The backlog is worked one task at a time, each in a session of its\nown.</p>\n",
-        "id": 18,
+        "id": 19,
         "markdown": "# One session per task\n\nThe backlog is worked one task at a time, each in a session of its\nown.\n"
       }
     },
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 19,
+        "id": 20,
         "state": "Grilling"
       }
     },
@@ -131,8 +131,9 @@
         "at": "2026-08-03T09:07:11.000Z",
         "deletions": 0,
         "files": 5,
-        "id": 20,
+        "id": 21,
         "insertions": 132,
+        "merge": false,
         "repo": null,
         "sha": "5c2a9e14b7f36d80a1c4e9b2f7d53081a6e4c9b2",
         "snippet": null,
@@ -142,7 +143,7 @@
     {
       "TaskList": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 21,
+        "id": 22,
         "list": {
           "feature": "Task runner",
           "tasks": [
@@ -173,7 +174,7 @@
     {
       "Moved": {
         "at": "2026-08-03T09:07:11.000Z",
-        "id": 22,
+        "id": 23,
         "state": "Implementing"
       }
     }

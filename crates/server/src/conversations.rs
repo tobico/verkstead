@@ -997,7 +997,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
                 let named = picked.unwrap_or(default);
 
                 return worktrees::resolve(&repo, &named)
-                    .map(|commit| (commit, path, branch, Vec::new(), None))
+                    .map(|commit| (commit, named, path, branch, Vec::new(), None))
                     .ok_or(GrillingStarted::NoBaseCommit);
             }
 
@@ -1084,12 +1084,22 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
 
             make(&planned).map_err(Unmade::grilling)?;
 
-            Ok((commit, path, branch, recorded(&planned), Some(making)))
+            Ok((
+                commit,
+                named,
+                path,
+                branch,
+                recorded(&planned),
+                Some(making),
+            ))
         }
     })
     .await?;
 
-    let (commit, path, cut, checkouts, making) = match made {
+    // `named` comes back out rather than being worked out again up here: what an
+    // unpicked base resolved through is decided inside, after the fetch, and the
+    // record is owed the branch the work actually came off.
+    let (commit, named, path, cut, checkouts, making) = match made {
         Ok(made) => made,
         Err(refusal) => return Ok(refusal),
     };
@@ -1101,9 +1111,18 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         store::reinvent_branch(pool, id, &cut).await?;
     }
 
+    // The commit and the branch it resolved through both: a sha cannot say what
+    // branch it came off, and the sweep that leaves the base branch's own
+    // commits off the Timeline needs the name to leave them off by. See
+    // [`store::Conversation::base_ref`].
+    let base = store::Base {
+        commit: &commit,
+        named: Some(&named),
+    };
+
     let moved = match grilled {
-        true => store::start_grilling(pool, id, &commit, &path, &checkouts).await?,
-        false => store::start_building(pool, id, &commit, &path, &checkouts).await?,
+        true => store::start_grilling(pool, id, base, &path, &checkouts).await?,
+        false => store::start_building(pool, id, base, &path, &checkouts).await?,
     };
 
     match moved {
@@ -1650,7 +1669,12 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // that said it was implementing without saying where its companions went
     // would be one nothing could bind into a sandbox and nothing would come back
     // and remove.
-    match store::start_stage(pool, id, &commit, &path, stacks_on.as_deref(), &checkouts).await? {
+    let base = store::Base {
+        commit: &commit,
+        named: Some(&named),
+    };
+
+    match store::start_stage(pool, id, base, &path, stacks_on.as_deref(), &checkouts).await? {
         store::Staged::Started => {}
         store::Staged::NoSuchConversation => return Ok(Adopted::NoSuchConversation),
         store::Staged::NotDrafting => return Ok(Adopted::NotDrafting),

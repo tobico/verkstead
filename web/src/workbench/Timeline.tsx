@@ -1817,6 +1817,13 @@ function UnreadableSet(props: {
 /// and the label earns its place when a timeline carries the commits of a
 /// companion repo as well.
 ///
+/// And whether it is a merge is drawn beside the hash, in that same register. A
+/// merge is where a resolution session brought the base branch in and settled
+/// its conflicts, and what it carries is the hunks the agent resolved — so its
+/// counts and its diff are an ordinary small commit's, and without the word it
+/// would read as one. Every other commit is unlabelled, which is the ordinary
+/// card, and so is every commit recorded before the record could say.
+///
 /// Nothing here asks the human for anything. Commits are viewable and have no
 /// state of their own: the design gives them no per-commit review, because
 /// feedback about the work consolidates in the wrap-up phase.
@@ -1840,6 +1847,9 @@ function Commit(props: {
           {(repo) => <span class={styles.repo}>{repo()}</span>}
         </Show>
         <span class={styles.sha}>{props.commit.sha.slice(0, ABBREVIATED)}</span>
+        <Show when={props.commit.merge}>
+          <span class={styles.merge}>Merge</span>
+        </Show>
       </span>
 
       <span class={styles.subject}>{props.commit.subject}</span>

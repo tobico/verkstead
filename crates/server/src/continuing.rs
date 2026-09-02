@@ -368,7 +368,10 @@ async fn start(
     match store::start_stage(
         &state.pool,
         id,
-        &commit,
+        store::Base {
+            commit: &commit,
+            named: Some(&from),
+        },
         &path,
         stacked_on.as_deref(),
         &checkouts,
