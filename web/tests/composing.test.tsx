@@ -31,7 +31,7 @@ import {
   type Composed,
 } from "../src/workbench/composing";
 import { OPEN, PROFILES, REPOS, drawn, mount, theWorkbench } from "./bench";
-import { offered, pick, showing } from "./pickers";
+import { offered, pick, picker, showing } from "./pickers";
 import { json, serving, whenever } from "./serving";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
 
@@ -248,6 +248,36 @@ describe("the compose page", () => {
     );
     await waitFor(() => expect(trigger.textContent).toBe(REPOS[1]!.name));
     expect(container.querySelector(`.${setup.repoSelect}`)).toBeNull();
+  });
+
+  /// Which of the two is standing follows the id this device is holding, and the
+  /// name on the trigger follows the repos — two different reads, so the panel
+  /// can be standing before there is a name for it to say. The moment the read
+  /// has not landed in looks exactly like the repo having been deregistered
+  /// since, and neither is a blank line under the label.
+  it("says the invitation again where the held repo has no name to draw", async () => {
+    keep({ ...blank(), repo: 9999 });
+    theWorkbench();
+    const { container } = mount("/compose");
+
+    await composing(container);
+
+    const trigger = await drawn(
+      container,
+      `.${setup.repoOption} .${setup.optionValue}`,
+    );
+    expect(trigger.textContent).toBe("Select");
+
+    // And still saying it once the repos have landed and none of them answers
+    // to the id — the panel's own picker being where that is put right.
+    await openRepo(container);
+    const choice = (await waitFor(() =>
+      picker("Repo"),
+    )) as unknown as HTMLSelectElement;
+    await waitFor(() =>
+      expect(choice.options.length).toBeGreaterThanOrEqual(REPOS.length),
+    );
+    expect(trigger.textContent).toBe("Select");
   });
 
   it("keeps what is composed on this device, and creates nothing until a press", async () => {

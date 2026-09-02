@@ -452,8 +452,14 @@ function Compose(props: {
                 />
               }
             >
+              {/* Named by the repo the id stands for, and by the invitation
+                  where there is no name to be had: the id is what this page
+                  keeps on the device, and the name for it comes off a read
+                  that has not landed yet — or off a repo that has been
+                  deregistered since, which is the picker inside the panel's to
+                  put right. A blank line under the label would say neither. */}
               <RepoOptions
-                name={repo()?.name ?? adopting()?.repo ?? ""}
+                name={repo()?.name ?? adopting()?.repo ?? "Select"}
                 alongside={state().companions.length}
               >
                 {() => (

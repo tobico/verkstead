@@ -322,8 +322,13 @@ function RepoOption(props: { conversation: ConversationView }): JSX.Element {
 /// label over a value, the companions counted after the name, and one flat card
 /// holding the whole of *which code*.
 export function RepoOptions(props: {
-  /// What the value line reads: the repository's name. Drawn only where there
-  /// is one — the compose page stands [`RepoSelect`] in this slot until then.
+  /// What the value line reads: the repository's name.
+  ///
+  /// Drawn where a repo has been chosen — the compose page stands
+  /// [`RepoSelect`] in this slot until one has. Which is not the same as having
+  /// a name for it: that page keeps the id on the device and reads the name off
+  /// the repos, so the caller hands in its invitation again for the moment
+  /// between the two, and for a repo that has been deregistered since.
   name: string;
   /// How many other repos the work runs alongside, for the `+N` after it.
   alongside: number;
