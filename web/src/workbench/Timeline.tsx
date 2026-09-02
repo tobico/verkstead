@@ -121,6 +121,7 @@ import type {
 import { CardButton } from "../CardButton";
 import { IconButton } from "../IconButton";
 import { PaneSticky } from "../Panes";
+import { Truncated } from "../Truncated";
 import { useReading } from "../freshness";
 import { HarnessMark } from "../HarnessMark";
 import { Empty } from "../notices";
@@ -350,10 +351,18 @@ function Openable(props: {
 /// run together, and two spans with nothing between them are read as one word.
 /// It is not drawn — a run of white space makes no flex item — so the gap
 /// between them on screen is still the stylesheet's.
+///
+/// The branch is held to one line and cut at the front where it does not fit,
+/// with the whole of it under the pointer — see
+/// [`Truncated`](../Truncated.tsx), which the sidebar's card draws the same
+/// name through. A title that wrapped was a title that grew down the header and
+/// took the controls at the far end of the row with it. The Repo beside it is
+/// not cut: it is a word about the name rather than the name, and on a Draft it
+/// is the whole of what tells one from another.
 function PaneName(props: { conversation: ConversationView }): JSX.Element {
   return (
     <>
-      <span class={styles.paneTitle}>{titled(props.conversation)}</span>{" "}
+      <Truncated class={styles.paneTitle} text={titled(props.conversation)} />{" "}
       <span class={styles.paneRepo}>{props.conversation.repo.name}</span>
     </>
   );

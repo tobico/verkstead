@@ -190,6 +190,7 @@ import statusButton from "../src/workbench/StatusButton.module.css";
 import statusButtonCss from "../src/workbench/StatusButton.module.css?raw";
 import timeline from "../src/workbench/Timeline.module.css";
 import timelineCss from "../src/workbench/Timeline.module.css?raw";
+import truncatedCss from "../src/Truncated.module.css?raw";
 // And the frame the three panes stand in, both ways: it holds the layout rules
 // jsdom lays nothing out for, and the pane names everything else is found by.
 import shell from "../src/Panes.module.css";
@@ -534,6 +535,23 @@ describe("the workbench", () => {
         (row) => row.textContent,
       ),
     ).toEqual(SIDEBAR.map((entry) => titled(entry)));
+  });
+
+  /// Each row's name is held to one line and cut at the front, exactly as the
+  /// header of the pane it opens cuts the same name: a sidebar is a list to run
+  /// an eye down, and a wrapping name made every row a different height. The
+  /// whole of it is in the tooltip.
+  it("holds each row's name to one line, cut at the front", async () => {
+    theWorkbench();
+    const { container } = mount();
+
+    const row = await drawn(
+      container,
+      `.${sidebar.conversationRow} .${sidebar.title}`,
+    );
+
+    expect(row.getAttribute("title")).toBe(titled(SIDEBAR[0]!));
+    expect(row.querySelector("bdi")!.textContent).toBe(titled(SIDEBAR[0]!));
   });
 
   it("says of each conversation which repo it is in", async () => {
@@ -2201,16 +2219,17 @@ describe("a conversation's timeline", () => {
     );
   });
 
-  /// The subtitle is understated rather than a second title, and it wraps: the
-  /// header row also carries the way back and the way on at phone widths, so a
-  /// long branch beside a long Repo name goes onto a second line rather than
-  /// pushing either control off the edge. The stylesheet's, jsdom laying
+  /// The subtitle is understated rather than a second title, and neither half
+  /// of the name wraps: the header row carries the pane's own controls at its
+  /// far end, and a heading that grew downwards was what pushed them onto a
+  /// line of their own. The branch is what gives way instead — cut, not wrapped
+  /// — and the Repo keeps its place beside it. The stylesheet's, jsdom laying
   /// nothing out.
-  it("draws the repo quietly and wraps rather than overflowing", () => {
+  it("draws the repo quietly and holds the name to one line", () => {
     expect(timelineCss).toContain(
       ".paneName {\n" +
         "  display: flex;\n" +
-        "  flex-wrap: wrap;\n" +
+        "  flex-wrap: nowrap;\n" +
         "  align-items: baseline;\n" +
         "  gap: 0 0.5rem;\n" +
         "  min-width: 0;\n" +
@@ -2218,10 +2237,49 @@ describe("a conversation's timeline", () => {
     );
     expect(timelineCss).toContain(
       ".paneName .paneRepo {\n" +
+        "  flex: none;\n" +
         "  font-size: 0.9rem;\n" +
         "  font-weight: 400;\n" +
-        "  color: var(--ink-soft);\n",
+        "  color: var(--ink-soft);\n" +
+        "  white-space: nowrap;\n" +
+        "}",
     );
+  });
+
+  /// And the controls stay at the top right of the pane however long the branch
+  /// is called: the group does not shrink, the heading is allowed to, and the
+  /// cutting happens inside the name.
+  it("holds the pane's controls at the end of the header row", () => {
+    expect(timelineCss).toContain(
+      ".paneControls {\n" +
+        "  display: flex;\n" +
+        "  flex: none;\n" +
+        "  align-items: center;\n" +
+        "  gap: 0.8rem;\n" +
+        "}",
+    );
+    expect(paneHeadCss).toContain(".head h1 {\n  min-width: 0;\n  margin: 0;\n}");
+  });
+
+  /// The branch itself is cut at the front, with the whole of it in a tooltip:
+  /// what tells two branch names apart is their tails, so an ellipsis at the end
+  /// would be a column of names that all read the same. The `<bdi>` inside is
+  /// what keeps the name the right way round in the right-to-left line the cut
+  /// is made with — see `Truncated.tsx`.
+  it("cuts a long branch name at the front and keeps the whole in a tooltip", async () => {
+    const branch = "timeline-pinned-polish-and-then-some-more-of-it-2026";
+
+    theRecordedWith({ branch, branch_named: true });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const title = await drawn(
+      container,
+      `.${shell.middlePane} .${paneHead.head} h1 .${timeline.paneTitle}`,
+    );
+
+    expect(title.getAttribute("title")).toBe(branch);
+    expect(title.querySelector("bdi")!.textContent).toBe(branch);
+    expect(truncatedCss).toContain("  direction: rtl;");
   });
 
   it("says what to do with a conversation nobody has picked", async () => {

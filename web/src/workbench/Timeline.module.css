@@ -41,32 +41,42 @@
    pane is called rather than a caption on it: on a Draft the title is the word
    *Draft* and the Repo is the whole of what tells one draft from another.
 
-   Wrapping and baseline-aligned, since the header row is also where the way
-   back and the way on stand at phone widths: a long branch beside a long Repo
-   name puts the Repo on a line of its own rather than pushing either control
-   off the edge. `min-width: 0` so the wrapping happens inside the heading
-   instead of the heading growing past the row. */
+   One line, baseline-aligned, and never wrapped. The controls at the far end of
+   the header row are the reason: a heading that wrapped grew down the row and
+   took them onto a line of their own, and the share is wanted at the top right
+   of the pane whatever the branch is called. So the branch is cut instead —
+   [`Truncated`](../Truncated.tsx), which cuts it at the front and holds the
+   whole of it in a tooltip — and the Repo keeps its place beside it.
+
+   `min-width: 0` so the cutting happens inside the heading instead of the
+   heading growing past the row. */
 .paneName {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: baseline;
   gap: 0 0.5rem;
   min-width: 0;
 }
 
+/* The branch, which is the half that gives way: it is the long one, and the
+   Repo beside it is a word. */
 .paneName .paneTitle {
-  overflow-wrap: anywhere;
+  flex: 0 1 auto;
 }
 
 /* The step down the sidebar's card takes to say which Repo it is in, and the
    one the status button's state takes beside its status word. Its weight is
    said out loud because it is inside a heading, which would otherwise lend it
-   the title's bold. */
+   the title's bold.
+
+   Not cut and not shrunk: it is one short word beside a name that may be long,
+   and it is what tells two Drafts apart. */
 .paneName .paneRepo {
+  flex: none;
   font-size: 0.9rem;
   font-weight: 400;
   color: var(--ink-soft);
-  overflow-wrap: anywhere;
+  white-space: nowrap;
 }
 
 /* The way on to the next level, which only the timeline has one of: the details
@@ -80,9 +90,14 @@
    details, and the share icon that opens a pane of its own. One group rather
    than two items, so the header stays a title at one end and its controls at
    the other however many of them are drawn — see `PaneHead.module.css`, which
-   spaces what is in the row apart. */
+   spaces what is in the row apart.
+
+   `flex: none`, which is the other half of holding them there: the title beside
+   them is what gives way when the row is too narrow, and a group that shrank
+   would squeeze the share icon rather than cut the branch name. */
 .paneControls {
   display: flex;
+  flex: none;
   align-items: center;
   gap: 0.8rem;
 }

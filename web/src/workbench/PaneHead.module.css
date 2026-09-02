@@ -28,7 +28,15 @@
   padding: 1rem 0;
 }
 
+/* `min-width: 0` so a title too long for the row gives way inside itself rather
+   than pushing the pane's own controls onto a line of their own. A flex item
+   refuses by default to shrink below its content, and the row wraps: a heading
+   that would not narrow is a share icon under the title instead of beside it.
+   What a title *does* with the room it is given is the pane's — the timeline
+   cuts its branch name at the front, see `.paneName` in `Timeline.module.css`;
+   every other pane's is a word or two and never reaches this. */
 .head h1 {
+  min-width: 0;
   margin: 0;
 }
 
