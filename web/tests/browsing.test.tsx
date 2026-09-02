@@ -26,6 +26,11 @@
 //! - **What a field looking for a repository does with one.** It marks it and
 //!   stops there — the Repos' form is being filled in with a repository, so one
 //!   is the end of that browse rather than another level of it.
+//! - **What a field shows of what came back.** The endpoint lists the whole of a
+//!   directory and each field says which of it a human sees: the files, where
+//!   the field names one, and the dotfiles, where the field points at one. Rows
+//!   a field cannot hold are rows offered for nothing, and a file it can hold is
+//!   where its browse arrives rather than another level of it.
 //!
 //! The listing of `/home/ada/src` is the fixture the server's own tests wrote,
 //! so what the rows are drawn from is the shape the endpoint really answers
@@ -45,6 +50,7 @@ import {
   browse,
   browsing,
   held,
+  leading,
   listed,
   listingAt as at,
   marked,
@@ -113,7 +119,12 @@ afterEach(() => {
 /// repository is what it is looking for.
 function mounted(
   at = "",
-  how: { scope?: BrowseScope; repositories?: boolean } = {},
+  how: {
+    scope?: BrowseScope;
+    repositories?: boolean;
+    files?: boolean;
+    dotfiles?: boolean;
+  } = {},
 ) {
   const [value, setValue] = createSignal(at);
 
@@ -128,6 +139,8 @@ function mounted(
         id="where"
         scope={how.scope ?? "anywhere"}
         repositories={how.repositories}
+        files={how.files}
+        dotfiles={how.dotfiles}
         value={value()}
         write={setValue}
       />
@@ -514,5 +527,94 @@ describe("a field looking for a repository", () => {
     await waitFor(() =>
       expect(rows(WHERE)).toEqual(["Up to /home/ada/src", "crates"]),
     );
+  });
+});
+
+describe("what a field shows of what came back", () => {
+  /// The fixture is a directory of four things — two directories, one of them a
+  /// dotfile, a repository and a file — so what a field draws out of it is what
+  /// says which of them it holds. The default is the one every field before
+  /// this task had: directories, and not the hidden ones.
+  it("shows the files beside the directories where a file is what it names", async () => {
+    theFilesystem();
+    mounted("/home/ada/src/", { files: true });
+    await browsed();
+
+    expect(rows(WHERE)).toEqual([
+      "Up to /home/ada",
+      "assets",
+      "verkstead",
+      "README.md",
+    ]);
+  });
+
+  /// And a file is where such a browse arrives: there is nothing under one to
+  /// look at, so the row carries no way further in — which is the difference
+  /// the eye is given between the two kinds of row.
+  it("draws a file as a row that leads nowhere", async () => {
+    theFilesystem();
+    mounted("/home/ada/src/", { files: true });
+    await browsed();
+
+    expect(leading(WHERE)).toEqual(["assets", "verkstead"]);
+  });
+
+  it("writes a file into the field without opening it", async () => {
+    const fetching = theFilesystem();
+    const { value } = mounted("/home/ada/src/", { files: true });
+    await browsed();
+
+    tap(WHERE, "README.md");
+
+    expect(value()).toBe("/home/ada/src/README.md");
+    expect(askedFor(fetching, at("/home/ada/src/README.md"))).toBe(0);
+
+    // Still in the directory that holds it, filtered to the row that was
+    // taken — and still down, closing being the human's here as everywhere
+    // else in this dropdown.
+    expect(rows(WHERE)).toEqual(["Up to /home/ada", "README.md"]);
+    expect(browsing(WHERE)).toBe(true);
+  });
+
+  /// A field pointing at a dotfile shows them, and a directory that is one is
+  /// still a directory: it is drilled into like any other.
+  it("shows the dotfiles the endpoint always lists where the field asks for them", async () => {
+    theFilesystem();
+    mounted("/home/ada/src/", { dotfiles: true });
+    await browsed();
+
+    expect(rows(WHERE)).toEqual([
+      "Up to /home/ada",
+      ".config",
+      "assets",
+      "verkstead",
+    ]);
+  });
+
+  /// The two are separate decisions, and a field that has made both — which is
+  /// what a config file's field is — shows everything the server listed.
+  it("shows the hidden files where the field asks for both", async () => {
+    theFilesystem();
+    mounted("/home/ada/src/", { files: true, dotfiles: true });
+    await browsed();
+
+    expect(rows(WHERE)).toEqual([
+      "Up to /home/ada",
+      ".config",
+      "assets",
+      "verkstead",
+      "README.md",
+    ]);
+  });
+
+  /// And a field that has made neither — every field of tasks 02 and 03 — is
+  /// left as it was: the directories, without the hidden one.
+  it("leaves a field that asked for neither showing the plain directories", async () => {
+    theFilesystem();
+    mounted("/home/ada/src/");
+    await browsed();
+
+    expect(rows(WHERE)).toEqual(["Up to /home/ada", "assets", "verkstead"]);
+    expect(leading(WHERE)).toEqual(["assets", "verkstead"]);
   });
 });

@@ -52,6 +52,20 @@
 //! anything — and there a repository draws marked and is where the browse
 //! stops. Every other field says nothing about one and treats it as the
 //! directory it also is.
+//!
+//! And so is what it shows of what came back. The endpoint lists the whole of a
+//! directory, files and dotfiles included, and which of that a human sees is
+//! each field's own decision: a field naming a file shows the files beside the
+//! directories, and a field pointing at a dotfile — the Agent Profiles' account
+//! paths, which are a `.claude` and a `.claude.json` — shows the dotfiles the
+//! rest leave out. Neither is the dropdown's to assume: rows a field cannot
+//! hold are rows offered for nothing, and a browse is not how somebody reaches
+//! a dotfile they were not already after.
+//!
+//! Which leaves two kinds of row under the way back out. A directory is a level,
+//! so a tap opens it; a file and the repository a field was looking for are not,
+//! so a tap writes them and stops there. That is the whole difference between
+//! them, and the mark at the end of a row is where it is drawn.
 
 import {
   For,
@@ -77,15 +91,21 @@ import { clipping } from "./picking";
 import chrome from "./picking.module.css";
 
 /// One row of the dropdown: what it reads as, what a tap on it writes into the
-/// field, whether it is the way back up rather than somewhere to go into, and
+/// field, whether it is the way back up rather than somewhere to go into,
 /// whether it is the thing this field is looking for — a repository, in the one
-/// field that is looking for one, which draws marked and is where a browse
-/// stops.
+/// field that is looking for one, which draws marked — and whether it is a level
+/// at all.
+///
+/// A row that is not a level is where a browse arrives rather than another step
+/// of it: a file, and the repository a field looking for one has found. It is
+/// written into the field and not opened, and it is drawn without the mark that
+/// says a row leads further in.
 type Row = {
   label: string;
   path: string;
   back: boolean;
   found: boolean;
+  leaf: boolean;
 };
 
 /// What a listing came back holding, or `null` where it came back as one of the
@@ -152,6 +172,18 @@ export function PathField(props: {
   /// Every other field leaves this off and treats a repository as the directory
   /// it also is.
   repositories?: boolean;
+  /// Whether a file is one of the things this field's value may be.
+  ///
+  /// A field naming a file — Claude Code's config file, which is a
+  /// `.claude.json` — shows the files beside the directories, and a file row is
+  /// where its browse arrives: a tap writes it and does not open it. A field
+  /// naming a directory leaves this off and shows directories only.
+  files?: boolean;
+  /// And whether the dotfiles the endpoint always lists are shown.
+  ///
+  /// On for the fields that exist to point at one — an account is kept in a
+  /// `.claude` beside a `.claude.json` — and off everywhere else.
+  dotfiles?: boolean;
   /// What the field holds, and how it comes to hold something else — typed into
   /// or tapped together, which the caller cannot tell apart and has no reason
   /// to.
@@ -247,10 +279,15 @@ export function PathField(props: {
     return roots === null || roots.entries.some((root) => root.path === path);
   };
 
-  /// The entries as this field shows them: directories, which is what these
-  /// fields name, and none of the dotfiles the endpoint always lists — showing
-  /// those is the field's decision rather than the server's, and a browse is not
-  /// how somebody reaches one.
+  /// The entries as this field shows them: what a value of this field could be,
+  /// out of everything the endpoint listed.
+  ///
+  /// The directories always, those being the levels a browse goes through
+  /// whatever it is looking for at the end of it — and the files and the
+  /// dotfiles where the field says so. The server lists all of them on every
+  /// read, so showing them is a prop rather than another request, and the two
+  /// defaults are what most of these fields want: a directory, and not a hidden
+  /// one.
   ///
   /// A repository is one of the directories. It is a directory that holds a
   /// `.git`, and a field with nothing to say about that treats it as the
@@ -263,8 +300,8 @@ export function PathField(props: {
 
     return answer.entries.filter(
       (entry) =>
-        entry.kind !== "File" &&
-        !entry.name.startsWith(".") &&
+        (props.files === true || entry.kind !== "File") &&
+        (props.dotfiles === true || !entry.name.startsWith(".")) &&
         entry.name.toLowerCase().startsWith(looking),
     );
   };
@@ -283,13 +320,30 @@ export function PathField(props: {
     return [
       ...(up === null
         ? []
-        : [{ label: `Up to ${up}`, path: up, back: true, found: false }]),
-      ...shown().map((entry) => ({
-        label: entry.name,
-        path: entry.path,
-        back: false,
-        found: props.repositories === true && entry.kind === "Repository",
-      })),
+        : [
+            {
+              label: `Up to ${up}`,
+              path: up,
+              back: true,
+              found: false,
+              leaf: false,
+            },
+          ]),
+      ...shown().map((entry) => {
+        const found =
+          props.repositories === true && entry.kind === "Repository";
+
+        return {
+          label: entry.name,
+          path: entry.path,
+          back: false,
+          found,
+          // Where a browse arrives rather than another level of it: the
+          // repository the field was looking for, and a file, which has nothing
+          // under it to look at.
+          leaf: found || entry.kind === "File",
+        };
+      }),
     ];
   };
 
@@ -330,14 +384,15 @@ export function PathField(props: {
   /// The rows stay down afterwards, because a browse ends when the human says it
   /// does rather than when they have gone somewhere.
   ///
-  /// Except the row that is what the field was looking for, which is written and
-  /// not opened: a repository is where the Repos' form's browse was going, and
-  /// there is nothing under it that form is after. Nothing is drilled, so the
-  /// text steers again — the field now names that repository, which is the level
-  /// above it filtered to its own name, and the row the human took is the row
-  /// left standing. Closing is still theirs, as it is everywhere else here.
+  /// Except the row that is not a level — a file, or the repository a field
+  /// looking for one has found — which is written and not opened: that is where
+  /// the browse was going, and there is nothing under it the field is after.
+  /// Nothing is drilled, so the text steers again — the field now names that
+  /// row, which is the level above it filtered to the row's own name, so the row
+  /// the human took is the row left standing. Closing is still theirs, as it is
+  /// everywhere else here.
   const take = (row: Row): void => {
-    setDrilled(row.found ? null : row.path);
+    setDrilled(row.leaf ? null : row.path);
     setWalked(0);
     props.write(row.path);
   };
@@ -535,7 +590,7 @@ export function PathField(props: {
                     <Show when={row.found}>
                       <span class={styles.repository}>repository</span>
                     </Show>
-                    <Show when={!row.back && !row.found}>
+                    <Show when={!row.back && !row.leaf}>
                       <span class={chrome.arrow} aria-hidden="true">
                         ›
                       </span>

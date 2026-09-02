@@ -99,6 +99,20 @@ export function marked(label: string): string[] {
     .map(words);
 }
 
+/// And the rows drawn as leading further in, the same way.
+///
+/// The mark at the far end of a row is what says a tap on it opens a level. A
+/// file, and the repository a field looking for one has found, are where a
+/// browse arrives instead, so they carry none — which is the one thing on the
+/// row that says a tap will write it and stop. The way back out carries none of
+/// it either, its own mark standing in front of its words rather than after
+/// them, so it is not one of these.
+export function leading(label: string): string[] {
+  return offered(label)
+    .filter((row) => row.querySelector(`.${styles.arrow}`) !== null)
+    .map(words);
+}
+
 /// Tap the row that reads as `reading`.
 export function tap(label: string, reading: string): void {
   const row = offered(label).find((option) => words(option) === reading);
