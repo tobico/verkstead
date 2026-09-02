@@ -1013,6 +1013,11 @@ static BRISKLY: LazyLock<Pace> = LazyLock::new(|| Pace {
     // asks about — so the tests that are about something else say nothing about
     // it, and the ones that are about it keep [`LANDING`].
     merges: paced(Duration::from_secs(600)),
+    // And longer again, for the same reason a third time: every fixture here
+    // that ends up archived would have its output taken out from under whatever
+    // the test was written to read. The ones that are about the cleanup keep
+    // [`CLEANING`].
+    cleanup: paced(Duration::from_secs(600)),
     // Nothing, which is a server's own: the review takes the Worktree as soon
     // as the wrap-up starts, and the tests that want the window before it hold
     // it open themselves.
@@ -1049,6 +1054,18 @@ static SWEEPING: LazyLock<Pace> = LazyLock::new(|| Pace {
 /// answer.
 static LANDING: LazyLock<Pace> = LazyLock::new(|| Pace {
     merges: paced(Duration::from_millis(100)),
+    ..*BRISKLY
+});
+
+/// And the same at a pace that cleans up after the archivings, for the tests
+/// about what becomes of a Conversation the human has finished looking at.
+///
+/// A server sweeps those every hour, over a clock counted in days. What is
+/// being asked here is what one pass does to each kind of archived
+/// Conversation, and the hour it waits between passes is not part of the
+/// answer.
+static CLEANING: LazyLock<Pace> = LazyLock::new(|| Pace {
+    cleanup: paced(Duration::from_millis(100)),
     ..*BRISKLY
 });
 
@@ -11692,6 +11709,219 @@ async fn a_closed_conversation_is_never_asked_about() {
         "so the conflict that arrived after the human was finished is not written \
          down anywhere",
     );
+}
+
+/// The Cleanup trims what has been archived for longer than its days, and
+/// leaves everything else exactly where it was.
+///
+/// Five Conversations in one pass, because what the sweep *is* is a rule about
+/// which ones: archived four days ago, archived a moment ago, closed but never
+/// archived, trimmed already since it was last archived, and archived a second
+/// time after a trim a life ago. Two of them have their bulk taken and three of
+/// them are untouched.
+///
+/// The bulk is written through the store rather than by running sessions. What
+/// a session puts on a Timeline is this suite's subject everywhere else and is
+/// not in question here — what is, is which archivings the sweep reaches, and
+/// five real runs would be five minutes of waiting to ask it.
+#[tokio::test]
+async fn the_cleanup_trims_what_was_archived_long_enough_ago() {
+    let bench = bench_at_pace(
+        tempfile::tempdir().unwrap(),
+        PRINTS_AND_STOPS,
+        PULL_REQUEST,
+        *CLEANING,
+        None,
+    )
+    .await;
+
+    let pool = open_database(&bench.database).await.unwrap();
+    let repo = bench.repo_id;
+
+    // Archived four days ago, which is past the three the sweep keeps.
+    let old = archived_printing(&pool, repo, "rate-limiting").await;
+    aged(&pool, "archived_conversations", "archived_at", old.id, 4).await;
+
+    // And archived just now, which is not.
+    let fresh = archived_printing(&pool, repo, "usage-limits").await;
+
+    // And closed and left on the sidebar, which has no clock running on it at
+    // all.
+    let living = archived_printing(&pool, repo, "burst-allowance").await;
+    verkstead_store::unarchive_conversation(&pool, living.id)
+        .await
+        .unwrap();
+
+    // And one trimmed since it was last archived, with a second session's output
+    // written after the trim: the mark is what says there is nothing to do, so a
+    // sweep that read it wrong would take this too.
+    let done = archived_printing(&pool, repo, "window-rollover").await;
+    aged(&pool, "archived_conversations", "archived_at", done.id, 4).await;
+    verkstead_store::trim_conversation(&pool, done.id)
+        .await
+        .unwrap();
+    let since = printing(&pool, done.id, "window-rollover-again").await;
+
+    // And one steered back to life and put away again, whose trim mark is older
+    // than the archiving it is under now — so its new bulk is taken as well as
+    // its old.
+    let again = archived_printing(&pool, repo, "counter-reset").await;
+    aged(&pool, "archived_conversations", "archived_at", again.id, 10).await;
+    verkstead_store::trim_conversation(&pool, again.id)
+        .await
+        .unwrap();
+    aged(&pool, "trimmed_conversations", "trimmed_at", again.id, 9).await;
+    verkstead_store::unarchive_conversation(&pool, again.id)
+        .await
+        .unwrap();
+    let relived = printing(&pool, again.id, "counter-reset-again").await;
+    verkstead_store::archive_conversation(&pool, again.id)
+        .await
+        .unwrap();
+    aged(&pool, "archived_conversations", "archived_at", again.id, 4).await;
+
+    let timeline = verkstead_store::timeline(&pool, old.id).await.unwrap();
+
+    until_trimmed(&pool, old.id, old.event).await;
+    until_trimmed(&pool, again.id, relived).await;
+
+    assert_eq!(
+        verkstead_store::timeline(&pool, old.id).await.unwrap(),
+        timeline,
+        "and nothing was written on the Timeline to say so: the cleanup reports \
+         in the log and nowhere else",
+    );
+
+    // Long enough for many more passes, so that what the others still hold is
+    // held against a sweep that has had every chance at them.
+    tokio::time::sleep(CLEANING.cleanup * 8).await;
+
+    assert!(
+        !held(&pool, fresh.id, fresh.event).await.is_empty(),
+        "one archived a moment ago is not old enough to have anything taken",
+    );
+    assert!(
+        !held(&pool, living.id, living.event).await.is_empty(),
+        "and one back on the sidebar has no clock running on it at all",
+    );
+    assert!(
+        !held(&pool, done.id, since).await.is_empty(),
+        "and one trimmed since it was last archived is left alone, whatever has \
+         been printed on it since",
+    );
+    assert!(
+        held(&pool, old.id, old.event).await.is_empty(),
+        "while the one archived four days ago has had its output taken",
+    );
+    assert!(
+        held(&pool, again.id, relived).await.is_empty(),
+        "and so has the one archived again, its last trim being older than the \
+         archiving it is under now",
+    );
+
+    pool.close().await;
+}
+
+/// A stub that prints once and stops, for a fixture whose sessions never start:
+/// [`bench_at_pace`] wants an agent, and nothing here launches one.
+const PRINTS_AND_STOPS: &str = r#"printf 'nothing to do\n'"#;
+
+/// One archived Conversation with a session's worth of bulk on it.
+async fn archived_printing(pool: &SqlitePool, repo: i64, branch: &str) -> Archived {
+    let id = verkstead_store::start_conversation(pool, repo, branch)
+        .await
+        .unwrap()
+        .expect("the Repo is registered");
+
+    verkstead_store::save_brief(pool, id, "# Rate limiting\n")
+        .await
+        .unwrap();
+
+    let event = printing(pool, id, branch).await;
+
+    verkstead_store::close_conversation(pool, id).await.unwrap();
+    verkstead_store::archive_conversation(pool, id)
+        .await
+        .unwrap();
+
+    Archived { id, event }
+}
+
+/// A Conversation the sweep has an opinion about, and the Event its bulk hangs
+/// off.
+struct Archived {
+    id: i64,
+    event: i64,
+}
+
+/// One session's worth of what a trim takes: a Capture with something in it, and
+/// the log the session kept of itself.
+async fn printing(pool: &SqlitePool, id: i64, session: &str) -> i64 {
+    let event = verkstead_store::start_capture(pool, id, Some(session), None)
+        .await
+        .unwrap();
+
+    verkstead_store::append_capture(
+        pool,
+        event,
+        "the session said a great deal\n",
+        &verkstead_store::Summary {
+            lines: 1,
+            turns: Some(2),
+            latest: "the session said a great deal".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+
+    verkstead_store::append_transcript(pool, event, &[r#"{"type":"assistant"}"#.to_owned()])
+        .await
+        .unwrap();
+
+    event
+}
+
+/// Put a stamp back in time, which is the only way a test gets to be days old.
+///
+/// Written straight into the row, because there is nothing that would do it
+/// otherwise: an archiving is stamped `now` and the clock the sweep reads is
+/// counted in days.
+async fn aged(pool: &SqlitePool, table: &str, column: &str, id: i64, days: u32) {
+    sqlx::query(&format!(
+        "UPDATE {table} SET {column} = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)
+         WHERE conversation_id = ?"
+    ))
+    .bind(format!("-{days} days"))
+    .bind(id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// What one session's Capture still holds.
+async fn held(pool: &SqlitePool, id: i64, event: i64) -> String {
+    verkstead_store::capture(pool, id, event)
+        .await
+        .unwrap()
+        .expect("the Event is on that Conversation's Timeline")
+}
+
+/// Wait for the sweep to reach one Conversation, which is its Capture emptied.
+async fn until_trimmed(pool: &SqlitePool, id: i64, event: i64) {
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        if held(pool, id, event).await.is_empty() {
+            return;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the cleanup never trimmed Conversation {id}",
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
 }
 
 /// What a server that comes back up owes a batch's proposal nobody is behind: the

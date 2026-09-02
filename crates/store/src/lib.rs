@@ -30,6 +30,7 @@ use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError}
 
 mod archives;
 mod captures;
+mod cleanup;
 mod commits;
 mod companions;
 mod conversations;
@@ -57,6 +58,7 @@ pub use archives::{
     unarchive_conversation,
 };
 pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
+pub use cleanup::{Trimming, trim_conversation, trimmable};
 pub use commits::{Commit, commit, commit_repo, commits_landed, record_commit, recorded_commits};
 pub use companions::{
     Adding, Change, Companion, CompanionMode, CompanionWorktree, Configured, Joining, Opening,
@@ -725,6 +727,12 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // same way and for the same reason: what a list draws is not a fact about
     // the work either.
     archives::apply_schema(pool).await?;
+
+    // And what a Cleanup has since taken back out of the ones that were put away
+    // long enough ago, which is a mark beside those archivings for the reason
+    // they are marks beside the Conversations. After them, because what it is a
+    // fact about is an archiving rather than a Conversation — see [`cleanup`].
+    cleanup::apply_schema(pool).await?;
 
     // And which of them Verkstead has told the human about and they have not
     // looked at yet, which sits beside the Conversations for that reason again —
