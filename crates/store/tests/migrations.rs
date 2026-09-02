@@ -29,6 +29,11 @@
 //! Conversation's own repository's, that being the only pull request it could
 //! have been about.
 //!
+//! And one column added holding nothing: what a Conversation branched from used
+//! to be a sha alone, and the branch that sha was resolved through is kept
+//! beside it now. Nothing knows what branch the Conversations from before came
+//! off, so the column arrives empty and they sweep by the Repo's default branch.
+//!
 //! And one column added: a branch name used to be one thing, prefilled randomly
 //! and typed over or not, and is now two — the name Verkstead invented and the
 //! name somebody settled on, of which only the second is drawn. Every
@@ -1553,6 +1558,70 @@ async fn a_conversation_from_before_the_branch_name_had_an_owner_keeps_its_name(
             conversation.branch_named,
             "the name it has been read by is one to go on reading it by",
         );
+
+        pool.close().await;
+    }
+}
+
+/// And a Conversation written before the base's branch was kept has none
+/// recorded — which is the record saying what is true rather than a value
+/// missing.
+///
+/// Nothing knows what branch those Conversations came off, and a name guessed at
+/// now would be a worse answer than none: the sweep falls back to the Repo's
+/// default branch, which is the rule an unpicked base started under anyway.
+#[tokio::test]
+async fn a_conversation_from_before_the_base_branch_was_kept_records_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let id = start_conversation(&pool, repo, "rate-limiting")
+        .await
+        .unwrap()
+        .unwrap();
+
+    start_grilling(
+        &pool,
+        id,
+        "c0ffee",
+        Path::new("/data/worktrees/rate-limiting"),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    // The column off, which is the whole of what says this database is one from
+    // before: what the work branched from was a sha and nothing else.
+    sqlx::query("ALTER TABLE conversations DROP COLUMN base_ref")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    pool.close().await;
+
+    for opening in [
+        "it opens, which is most of what this is about",
+        "it opens again",
+    ] {
+        let pool = open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        let conversation = load_conversation(&pool, id).await.unwrap().expect(opening);
+
+        assert_eq!(
+            conversation.base_ref, None,
+            "nothing recorded a branch before there was a column to record it in",
+        );
+        assert_eq!(conversation.base_commit.as_deref(), Some("c0ffee"));
 
         pool.close().await;
     }

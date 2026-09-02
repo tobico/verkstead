@@ -374,6 +374,19 @@ are **pinned**: a fixed set, with no manual pin or unpin. Where more than one is
 pinned they are drawn in one order — the pull request, then the task list, then
 the roadmap — the pull request leading as the only one of the three with
 anything on it to answer.
+**A commit is an Event when the base branch does not already hold it.** Every
+commit that lands on a watched branch reaches the Timeline, minus everything the
+branch the work was cut off is carrying: a resolution session that merges the
+base branch in to settle a pull request's conflicts drags every commit the base
+has gained since the work started along with it, and none of that is this
+Conversation's work. The merge commit itself stays, being the hunks the agent
+resolved rather than anybody else's work. Which branch that is, is the name
+recorded beside the base commit when the work started — the branch the human
+picked, or the Repo's default branch where they picked none — and its `origin/`
+copy counts as the same branch, an agent told to merge the base in landing on
+either. A Conversation from before the name was kept, or one whose branch has
+since gone, reads by the Repo's default branch as origin holds it; a repository
+where that does not resolve either sweeps by the base commit alone.
 _Avoid_: item, record, message, step
 
 **Share**:

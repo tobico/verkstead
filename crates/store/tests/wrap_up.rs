@@ -518,7 +518,7 @@ async fn a_second_round_forgets_what_the_round_before_it_settled() {
                 instruction: None,
                 direction: None,
                 worktree: Some(Path::new("/state/worktrees/rate-limiting")),
-                base_commit: None,
+                base: None,
                 companions: &[],
                 opened: &[],
                 checkouts: &[],

@@ -297,7 +297,7 @@ async fn everything(pool: &SqlitePool) -> i64 {
             instruction: Some("Take the diffs out of the bundle and see what it weighs."),
             direction: None,
             worktree: None,
-            base_commit: None,
+            base: None,
             companions: &[],
             opened: &[],
             checkouts: &[],

@@ -63,8 +63,8 @@ pub use companions::{
     Removing, add_companion, companions, configure_companion, remove_companion,
 };
 pub use conversations::{
-    Chosen, Closable, ClosableCompanion, Closing, Conversation, ConversationRow, Directing, Edited,
-    Ending, Event, Grilling, Implementing, Landed, Lifecycle, Rebuilding, Resolving, Role,
+    Base, Chosen, Closable, ClosableCompanion, Closing, Conversation, ConversationRow, Directing,
+    Edited, Ending, Event, Grilling, Implementing, Landed, Lifecycle, Rebuilding, Resolving, Role,
     RowState, SetOnTimeline, Settling, Staged, Steer, Steering, TimelineEvent, Work, adopting, ask,
     asked_from, closable, close_conversation, conversation_branch, conversations, follow_branch,
     follow_up_over, implement_again, last_batch_proposal, last_proposal, load_conversation, note,

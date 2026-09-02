@@ -13,6 +13,13 @@
 //! is reading it, and a reader that took `index.lock` would be a reader that
 //! made the agent's own `git commit` fail.
 //!
+//! What a sweep counts as the Conversation's is what the base branch does not
+//! already hold. A resolution session settling a pull request's conflicts merges
+//! that branch in, and everything it has gained since the work was cut arrives
+//! with it — none of which is this Conversation's work, and all of which would
+//! bury what is. So the branch it was cut off is recorded beside the commit, and
+//! the listing leaves out everything reachable from it. See [`excluded`].
+//!
 //! A branch is swept whole rather than followed from where the last sweep got
 //! to. What makes that cheap is the store: it already knows which commits are on
 //! the Timeline, so the reading of git that costs anything — a message and a set
@@ -75,7 +82,8 @@ pub(crate) async fn watch(
 }
 
 /// Where a Conversation's commits are read from: the repository, the branch the
-/// work is on, and the commit it started from.
+/// work is on, the commit it started from, and the branch that commit was
+/// resolved through.
 ///
 /// The repository rather than the worktree, and not only because a worktree can
 /// be removed while its branch lives on. The refs are the repository's — a
@@ -100,6 +108,16 @@ pub(crate) struct Branch {
     /// what stops the whole history of the default branch arriving as this
     /// Conversation's commits.
     base: String,
+
+    /// And the branch that commit was resolved through, where the record holds
+    /// one. Everything reachable from it is left out of the sweep, which is what
+    /// keeps a resolution session's merge of the base branch from dragging every
+    /// commit the base has gained onto the Timeline — see [`excluded`].
+    base_ref: Option<String>,
+
+    /// The Repo's default branch, which is what a sweep excludes by where the
+    /// record names no branch or names one that has stopped resolving.
+    default_branch: String,
 }
 
 /// What moves a watched branch's name under the watcher.
@@ -130,7 +148,9 @@ enum Following {
 /// watched and what a sweep does with it are the one module's answer. Each entry
 /// names the repository rather than the checkout — the refs are the
 /// repository's, which a worktree shares — and the commit that repository's own
-/// base resolved to when its checkout was made.
+/// base resolved to when its checkout was made, with the branch it resolved
+/// through beside it. A read-write companion is swept the same way, off the
+/// `base_ref` its row has always held.
 ///
 /// The Conversation's own checkout comes along beside its repository all the
 /// same, because that is where a rename shows up: the branch a session is
@@ -159,6 +179,8 @@ pub(crate) fn watched(conversation: &store::Conversation) -> Vec<Branch> {
                 None => Following::Nothing,
             },
             base,
+            base_ref: conversation.base_ref.clone(),
+            default_branch: conversation.repo.default_branch.clone(),
         }),
         None => tracing::error!(
             conversation_id = conversation.id,
@@ -201,6 +223,8 @@ pub(crate) fn watched(conversation: &store::Conversation) -> Vec<Branch> {
                 false => Following::Nothing,
             },
             base,
+            base_ref: companion.base_ref.clone(),
+            default_branch: companion.repo.default_branch.clone(),
         });
     }
 
@@ -338,17 +362,36 @@ async fn now(pool: &SqlitePool, conversation_id: i64, branch: &Branch) -> Option
 /// costs something is describing a commit, and that happens only for the ones
 /// left over.
 ///
+/// What is on the branch is the branch minus the base commit *and* minus
+/// everything the base branch holds — see [`excluded`]. A resolution session
+/// that merges the base branch in to settle a pull request's conflicts brings
+/// every commit the base has gained since the work was cut along with it, and
+/// none of that is the Conversation's work. The merge commit itself is not on
+/// the base branch, so it stays.
+///
+/// Written as `<branch> ^<excluded>...` rather than `--not`, which is the same
+/// listing: the caret form is a revision like any other, so `--end-of-options`
+/// can stand in front of the whole lot and nothing here can be read as a flag.
+///
 /// Blocking, like everything that shells out to git.
 fn since(branch: &Branch, recorded: &[String]) -> Vec<store::Commit> {
-    let Some(listed) = git(
-        &branch.repo,
-        &[
-            "rev-list",
-            "--reverse",
-            "--end-of-options",
-            &format!("{}..{}", branch.base, branch.branch),
-        ],
-    ) else {
+    let mut listing = vec![
+        "rev-list".to_owned(),
+        "--reverse".to_owned(),
+        "--end-of-options".to_owned(),
+        branch.branch.clone(),
+        format!("^{}", branch.base),
+    ];
+
+    listing.extend(
+        excluded(branch)
+            .into_iter()
+            .map(|named| format!("^{named}")),
+    );
+
+    let arguments: Vec<&str> = listing.iter().map(String::as_str).collect();
+
+    let Some(listed) = git(&branch.repo, &arguments) else {
         tracing::warn!(
             repo = %branch.repo.display(),
             branch = branch.branch,
@@ -364,6 +407,63 @@ fn since(branch: &Branch, recorded: &[String]) -> Vec<store::Commit> {
         .filter(|sha| !recorded.iter().any(|known| known == sha))
         .filter_map(|sha| describe(&branch.repo, sha))
         .collect()
+}
+
+/// The branches whose commits a sweep leaves out: the one the work was cut off
+/// and its counterpart across `origin`.
+///
+/// Both, because an agent told to fetch and merge the base branch in may end up
+/// on either — `git merge origin/main` and `git merge main` are the same
+/// instruction followed two ways, and only the branch it actually merged holds
+/// the commits to leave out.
+///
+/// No fetch is made for it. This runs every couple of seconds, and a resolution
+/// session fetches before it merges: origin's copy is already as current as the
+/// merge that put anything here to leave out.
+///
+/// The fallbacks, in order. A record naming no branch — every Conversation
+/// started before the name was kept — and one whose name has stopped resolving
+/// both fall to the Repo's default branch as origin holds it, which is the rule
+/// an unpicked base started under anyway. A Repo where that does not resolve
+/// either excludes nothing, and the sweep is `<base commit>..<branch>` exactly
+/// as it always was.
+///
+/// A ref that will not resolve is dropped rather than passed on: git refuses the
+/// whole listing over one argument it cannot make sense of, and a sweep that
+/// stopped reading because a branch had been deleted would be a Timeline that
+/// silently stopped growing.
+///
+/// Blocking, like everything that shells out to git.
+fn excluded(branch: &Branch) -> Vec<String> {
+    let named: Vec<String> = branch
+        .base_ref
+        .iter()
+        .flat_map(|named| [named.clone(), counterpart(named)])
+        .filter(|named| crate::worktrees::resolve(&branch.repo, named).is_some())
+        .collect();
+
+    if !named.is_empty() {
+        return named;
+    }
+
+    let default = crate::worktrees::default_ref(&branch.repo, &branch.default_branch);
+
+    crate::worktrees::resolve(&branch.repo, &default)
+        .map(|_| vec![default])
+        .unwrap_or_default()
+}
+
+/// The same branch on the other side of `origin`: `main` for `origin/main`, and
+/// `origin/main` for `main`.
+///
+/// Both directions, because either can be the recorded one. A base nobody picked
+/// is recorded as origin holds it, and a base the human picked is whatever they
+/// typed into the field.
+fn counterpart(named: &str) -> String {
+    match named.strip_prefix("origin/") {
+        Some(local) => local.to_owned(),
+        None => format!("origin/{named}"),
+    }
 }
 
 /// What one commit is, as its Timeline row says it: the message git recorded,
@@ -671,6 +771,8 @@ mod tests {
             branch: "verkstead-7f3a".to_owned(),
             following: Following::Own(worktree.clone()),
             base,
+            base_ref: None,
+            default_branch: "main".to_owned(),
         };
 
         sweep(&pool, &Nudges::new(), conversation, &watched).await;
@@ -885,6 +987,8 @@ mod tests {
             branch: "rate-limiting".to_owned(),
             following: Following::Nothing,
             base: base.clone(),
+            base_ref: None,
+            default_branch: "main".to_owned(),
         };
 
         let landed = since(&branch, &[]);
@@ -909,6 +1013,181 @@ mod tests {
                 .map(|it| it.subject.as_str())
                 .collect::<Vec<_>>(),
             vec!["three"],
+        );
+    }
+
+    /// A resolution session that merges the base branch in to settle a pull
+    /// request's conflicts brings every commit the base has gained since the
+    /// work was cut along with it, and none of that is the Conversation's work.
+    ///
+    /// So a commit is the Conversation's when the base branch does not already
+    /// hold it. The merge commit itself is nobody else's — it is the hunks the
+    /// agent resolved — so it stays.
+    #[test]
+    fn a_sweep_leaves_out_what_the_base_branch_already_holds() {
+        let dir = repository();
+        let path = dir.path();
+        let base = head(path);
+
+        run(path, &["checkout", "--quiet", "-b", "rate-limiting"]);
+        std::fs::write(path.join("limiter.rs"), "fn allow() {}\n").unwrap();
+        run(path, &["add", "limiter.rs"]);
+        run(path, &["commit", "-m", "feat: rate limiting"]);
+
+        // What the base branch gained while the work was going on, which is
+        // somebody else's and belongs on nobody's Timeline.
+        run(path, &["checkout", "--quiet", "main"]);
+        std::fs::write(path.join("elsewhere.rs"), "fn elsewhere() {}\n").unwrap();
+        run(path, &["add", "elsewhere.rs"]);
+        run(path, &["commit", "-m", "feat: somebody else's work"]);
+
+        // And the resolution session settling the conflict it caused.
+        run(path, &["checkout", "--quiet", "rate-limiting"]);
+        run(path, &["merge", "--no-ff", "-m", "merge: main", "main"]);
+
+        let branch = Branch {
+            repo_id: 1,
+            repo: path.to_owned(),
+            branch: "rate-limiting".to_owned(),
+            following: Following::Nothing,
+            base,
+            base_ref: Some("main".to_owned()),
+            default_branch: "main".to_owned(),
+        };
+
+        assert_eq!(
+            since(&branch, &[])
+                .iter()
+                .map(|it| it.subject.as_str())
+                .collect::<Vec<_>>(),
+            vec!["feat: rate limiting", "merge: main"],
+            "the work's own commit and the merge that resolved it, and nothing \
+             the base branch was already holding",
+        );
+    }
+
+    /// And on either side of `origin`, because an agent told to fetch and merge
+    /// the base branch in may end up on either.
+    ///
+    /// The record here names the local branch, which is a week behind — and what
+    /// was merged is origin's copy of it. Excluding only what was recorded would
+    /// put every commit origin had gained on the Timeline.
+    #[test]
+    fn a_sweep_leaves_out_the_base_branch_on_either_side_of_origin() {
+        let dir = repository();
+        let path = dir.path();
+        let base = head(path);
+
+        run(path, &["checkout", "--quiet", "-b", "rate-limiting"]);
+        std::fs::write(path.join("limiter.rs"), "fn allow() {}\n").unwrap();
+        run(path, &["add", "limiter.rs"]);
+        run(path, &["commit", "-m", "feat: rate limiting"]);
+
+        // What origin has gained, with this checkout's own `main` left where it
+        // was: the ordinary state of a repository nobody has pulled in.
+        run(path, &["checkout", "--quiet", "-b", "upstream", "main"]);
+        std::fs::write(path.join("elsewhere.rs"), "fn elsewhere() {}\n").unwrap();
+        run(path, &["add", "elsewhere.rs"]);
+        run(path, &["commit", "-m", "feat: somebody else's work"]);
+        run(
+            path,
+            &["update-ref", "refs/remotes/origin/main", "upstream"],
+        );
+
+        run(path, &["checkout", "--quiet", "rate-limiting"]);
+        run(path, &["branch", "--quiet", "-D", "upstream"]);
+        run(
+            path,
+            &[
+                "merge",
+                "--no-ff",
+                "-m",
+                "merge: origin/main",
+                "origin/main",
+            ],
+        );
+
+        let branch = Branch {
+            repo_id: 1,
+            repo: path.to_owned(),
+            branch: "rate-limiting".to_owned(),
+            following: Following::Nothing,
+            base,
+            base_ref: Some("main".to_owned()),
+            default_branch: "main".to_owned(),
+        };
+
+        assert_eq!(
+            since(&branch, &[])
+                .iter()
+                .map(|it| it.subject.as_str())
+                .collect::<Vec<_>>(),
+            vec!["feat: rate limiting", "merge: origin/main"],
+            "the branch that was merged is the one the record named, on the \
+             other side of origin",
+        );
+    }
+
+    /// The fallbacks, in order: a record naming no branch and one naming a
+    /// branch that has gone both sweep by the Repo's default branch, and a Repo
+    /// whose default branch does not resolve either sweeps by the base commit
+    /// exactly as it always did.
+    #[test]
+    fn a_sweep_with_no_base_branch_left_falls_back_to_the_default_and_then_to_the_base() {
+        let dir = repository();
+        let path = dir.path();
+        let base = head(path);
+
+        run(path, &["checkout", "--quiet", "-b", "rate-limiting"]);
+        std::fs::write(path.join("limiter.rs"), "fn allow() {}\n").unwrap();
+        run(path, &["add", "limiter.rs"]);
+        run(path, &["commit", "-m", "feat: rate limiting"]);
+
+        run(path, &["checkout", "--quiet", "main"]);
+        std::fs::write(path.join("elsewhere.rs"), "fn elsewhere() {}\n").unwrap();
+        run(path, &["add", "elsewhere.rs"]);
+        run(path, &["commit", "-m", "feat: somebody else's work"]);
+
+        run(path, &["checkout", "--quiet", "rate-limiting"]);
+        run(path, &["merge", "--no-ff", "-m", "merge: main", "main"]);
+
+        let sweeping = |base_ref: Option<&str>, default: &str| Branch {
+            repo_id: 1,
+            repo: path.to_owned(),
+            branch: "rate-limiting".to_owned(),
+            following: Following::Nothing,
+            base: base.clone(),
+            base_ref: base_ref.map(str::to_owned),
+            default_branch: default.to_owned(),
+        };
+
+        let subjects = |branch: &Branch| {
+            since(branch, &[])
+                .iter()
+                .map(|it| it.subject.clone())
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            subjects(&sweeping(None, "main")),
+            vec!["feat: rate limiting", "merge: main"],
+            "a Conversation with no branch recorded — every one alive today — \
+             excludes by the Repo's default branch",
+        );
+        assert_eq!(
+            subjects(&sweeping(Some("release-1.4"), "main")),
+            vec!["feat: rate limiting", "merge: main"],
+            "and so does one whose recorded branch has stopped resolving",
+        );
+        assert_eq!(
+            subjects(&sweeping(None, "trunk")),
+            vec![
+                "feat: somebody else's work",
+                "feat: rate limiting",
+                "merge: main",
+            ],
+            "a Repo with no base branch that resolves at all sweeps by the base \
+             commit, exactly as it did before any of this",
         );
     }
 
@@ -976,6 +1255,8 @@ mod tests {
             branch: "rate-limiting".to_owned(),
             following: Following::Nothing,
             base,
+            base_ref: None,
+            default_branch: "main".to_owned(),
         };
 
         let landed = since(&branch, &[]);
@@ -1009,6 +1290,8 @@ mod tests {
             branch: "main".to_owned(),
             following: Following::Nothing,
             base: head(path),
+            base_ref: None,
+            default_branch: "main".to_owned(),
         };
 
         assert!(since(&branch, &[]).is_empty());

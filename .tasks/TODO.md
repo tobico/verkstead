@@ -13,7 +13,7 @@ commits stop landing twice.
 
 ## Tasks
 
-- [ ] 01: The sweep leaves out what the base branch already holds — [details](01-exclude-the-base-branch.md)
+- [x] 01: The sweep leaves out what the base branch already holds — [details](01-exclude-the-base-branch.md)
 - [ ] 02: A merge commit says what was resolved — [details](02-merge-shows-its-resolution.md)
 - [ ] 03: The renderer reads combined diffs — [details](03-render-combined-diffs.md)
 - [ ] 04: The merge row says it is a merge — [details](04-label-the-merge-row.md)

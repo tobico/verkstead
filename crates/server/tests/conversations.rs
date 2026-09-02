@@ -1503,6 +1503,67 @@ async fn starting_records_the_commit_the_work_branched_from() {
     );
 }
 
+/// The branch the base resolved through is recorded beside the commit it
+/// resolved to.
+///
+/// A sha cannot say what branch it came off, and what wants the name is the
+/// commit sweep: a resolution session that merges the base branch in brings
+/// every commit the base has gained with it, and none of that is the
+/// Conversation's work. See the server's `commits` module.
+#[tokio::test]
+async fn starting_records_the_branch_the_base_resolved_through() {
+    let (watched, dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    git(&repo, &["branch", "release"]);
+    assert_eq!(
+        base(&app, id, Some("release")).await,
+        BaseRecorded::Recorded
+    );
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::load_conversation(&pool, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .base_ref
+            .as_deref(),
+        Some("release"),
+        "the branch they picked, rather than the commit it stood at",
+    );
+}
+
+/// And where they picked none, it is the Repo's default branch as origin holds
+/// it — which is the rule an unpicked base resolved by anyway.
+#[tokio::test]
+async fn starting_from_no_pick_records_the_default_branch() {
+    let (watched, dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store::load_conversation(&pool, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .base_ref
+            .as_deref(),
+        // No origin in this repository, so what origin holds is what it holds.
+        Some("main"),
+        "an unpicked base is the default branch, and the name says which",
+    );
+}
+
 /// The picked branch is what the work branches from, and it is not the default
 /// branch's tip.
 #[tokio::test]

@@ -2683,7 +2683,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             worktree: Some(std::path::Path::new(
                 "/var/lib/verkstead/worktrees/verkstead-rate-limiting",
             )),
-            base_commit: None,
+            base: None,
             companions: &[],
             opened: &[],
             checkouts: &[],
