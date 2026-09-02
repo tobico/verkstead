@@ -51,6 +51,17 @@
 //! has to be given back everything the native one arrived with, which is the
 //! keyboard, the roles a screen reader reads it by and a row a finger can hit,
 //! so it earns its keep only where a row has something of its own to draw.
+//!
+//! ## And what a third control borrows
+//!
+//! Giving all that back is most of [`Listbox`], and none of it is about
+//! *choosing*: whether the rows are down, which of them the keyboard is on, the
+//! keys that move it, which way they hang off the control. So it is [`dropping`]
+//! rather than the listbox's own, and the browse field a path is written with —
+//! `PathField.tsx`, whose rows are one directory of the filesystem and no kind
+//! of choice at all — holds it the same way. What that field does not borrow is
+//! anything above: it offers nothing, so it has no `chosen` and none of the four
+//! guarantees are about it.
 
 import {
   For,
@@ -248,35 +259,6 @@ export function Listbox<T>(
 ): JSX.Element {
   const { offered, standing, shown } = showing(props);
 
-  /// Whether the rows are down.
-  const [open, setOpen] = createSignal(false);
-
-  /// And which of them the keyboard is on while they are: an index into the
-  /// options, and the one thing a native dropdown kept for itself that this has
-  /// to keep for it.
-  const [walked, setWalked] = createSignal(0);
-
-  /// Which way they come down: under the control where there is room for them
-  /// there, and over it where there is not.
-  ///
-  /// The other thing a native dropdown kept for itself. Its popup is the
-  /// browser's own and is put wherever it fits on the screen; these rows are an
-  /// element of the page, inside whatever clips the page — a pane is
-  /// `overflow-y: auto` from the second breakpoint up, and the steer modal's
-  /// card is capped at `80vh` — so a control standing low in one of those would
-  /// drop its rows past its edge and out of sight, behind a backdrop that draws
-  /// nothing to say where they went.
-  const [above, setAbove] = createSignal(false);
-
-  /// The same index, held inside the list as it stands now.
-  ///
-  /// A Nudge can take a row away while the rows are down — a Profile deleted
-  /// from another window is exactly that — and a walk left past the end would
-  /// name a row the page no longer holds, which is a screen reader sent nowhere.
-  /// Clamped on the way out rather than corrected on the way in, so there is one
-  /// answer to *which row is the keyboard on* however the list moved.
-  const walking = (): number => Math.min(walked(), Math.max(0, last()));
-
   /// Which row the choice is, or `-1` where nothing is chosen — read off
   /// [`showing`]'s own reading, so the row the control draws is the row it would
   /// send.
@@ -284,12 +266,6 @@ export function Listbox<T>(
 
   /// And the row itself, for the closed control to draw.
   const picked = (): T | undefined => props.options[at()];
-
-  // The rows' own ids, for the `aria-activedescendant` that says which one the
-  // keyboard is on. Generated rather than made out of the control's id, because
-  // one page can hold four of these and an id is the page's to keep unique.
-  const list = createUniqueId();
-  const rowId = (index: number): string => `${list}-${index}`;
 
   // The control, so that a press on a row — which is a press on something no
   // browser will focus — hands the keyboard back where it was.
@@ -299,20 +275,6 @@ export function Listbox<T>(
   // `undefined` as well, unlike the control: they are on the page only while
   // they are down.
   let dropped: HTMLDivElement | undefined;
-
-  /// Drop the rows, with the keyboard on the row that is the choice: a walk
-  /// starts where the human already is rather than at the top of a list they
-  /// have answered once.
-  const drop = (): void => {
-    setWalked(Math.max(0, at()));
-    setOpen(true);
-  };
-
-  /// Take the rows back, and the keyboard with them.
-  const shut = (): void => {
-    setOpen(false);
-    control.focus();
-  };
 
   /// Take one row.
   ///
@@ -327,105 +289,25 @@ export function Listbox<T>(
     if (option) props.pick(props.value(option));
   };
 
-  /// The last row, which is where End goes and where the walk stops.
-  const last = (): number => props.options.length - 1;
-
-  /// The whole keyboard, on the one element that holds the focus.
-  const key = (ev: KeyboardEvent): void => {
-    if (!open()) {
-      // Every way into a native dropdown, and nothing else: a bare Enter or
-      // Space on a closed one opens it rather than submitting whatever form it
-      // is standing in.
-      if (["Enter", " ", "ArrowDown", "ArrowUp"].includes(ev.key)) {
-        ev.preventDefault();
-        drop();
-      }
-      return;
-    }
-
-    switch (ev.key) {
-      case "Escape":
-        // Closed and nothing picked, which is what Escape means over a list.
-        //
-        // Prevented as well as handled, because one of these stands inside the
-        // steer modal: a `dialog` closes itself on Escape, and a hand taking the
-        // rows back is not asking for the modal under them to go too.
-        ev.preventDefault();
-        shut();
-        break;
-      case "Enter":
-      case " ":
-        ev.preventDefault();
-        take(walking());
-        break;
-      case "ArrowDown":
-        ev.preventDefault();
-        setWalked(Math.min(walking() + 1, last()));
-        break;
-      case "ArrowUp":
-        ev.preventDefault();
-        setWalked(Math.max(walking() - 1, 0));
-        break;
-      case "Home":
-        ev.preventDefault();
-        setWalked(0);
-        break;
-      case "End":
-        ev.preventDefault();
-        setWalked(last());
-        break;
-      case "Tab":
-        // Not ours to swallow: the hand is leaving the control, and the rows go
-        // with it. Left to the browser rather than prevented, so the focus lands
-        // wherever it was going.
-        setOpen(false);
-        break;
-    }
-  };
-
-  // Which way the rows hang, measured each time they come down: what they need
-  // against what is left under the control, inside whatever would clip them.
-  //
-  // Here rather than in [`drop`] because what is measured is the rows' own
-  // height, which nothing knows until they are on the page — and an effect runs
-  // after they are and before the browser paints, so the choice is made before
-  // anybody has seen them anywhere. Back under the control as they go, so the
-  // next measure starts from the ordinary way round rather than from the last
-  // answer.
-  createEffect(() => {
-    if (!open()) {
-      setAbove(false);
-      return;
-    }
-
-    if (!dropped) return;
-
-    const anchor = control.getBoundingClientRect();
-    const wanted = dropped.getBoundingClientRect().height;
-    const clip = clipping(control);
-
-    // Over it only where they do not fit under it, and then only where there is
-    // more room over it: the ordinary way round is the one to be in wherever
-    // being in it costs nothing, and where neither side fits the rows go to
-    // whichever side shows more of them. Which side that is changes nothing
-    // about *which* rows — the list is capped and scrolls from its top either
-    // way.
-    setAbove(
-      anchor.bottom + wanted > clip.bottom &&
-        anchor.top - clip.top > clip.bottom - anchor.bottom,
-    );
-  });
-
-  // The row the keyboard has walked to, kept in view: the drop is capped in
-  // height, so a list longer than it can be walked past its own edge.
-  createEffect(() => {
-    if (!open()) return;
-
-    // Reached by id rather than by a ref, the rows being a `For` that rebuilds
-    // — and asked for rather than called, jsdom having no scrolling at all.
-    document.getElementById(rowId(walking()))?.scrollIntoView?.({
-      block: "nearest",
-    });
+  /// Everything about the rows that is not what they say — see [`dropping`],
+  /// which the browse field under a path holds the same way.
+  ///
+  /// A walk here starts on the row that is the choice rather than at the top: a
+  /// list somebody has answered once is one they are walking from where they
+  /// already are. And a bare Enter or Space on a shut control opens it rather
+  /// than submitting the form it stands in, which is what a native dropdown
+  /// does — where the browse field, being a text box, lets both through.
+  const { open, above, walking, list, rowId, drop, shut, key } = dropping({
+    rows: () => props.options.length,
+    from: () => Math.max(0, at()),
+    anchor: () => control,
+    dropped: () => dropped,
+    opens: ["Enter", " ", "ArrowDown", "ArrowUp"],
+    takes: ["Enter", " "],
+    take: (index) => {
+      take(index);
+      return true;
+    },
   });
 
   telling(props, standing);
@@ -522,11 +404,10 @@ export function Listbox<T>(
 /// clips, and one that clips without scrolling is the worse of the two to drop
 /// rows into.
 ///
-/// Exported for the other dropdown the app draws for itself — the browse rows
-/// under a path field, in `PathField.tsx` — which hangs in the same panes and
-/// has to be measured against the same boxes. One answer to *where do rows go*,
-/// rather than one per control.
-export function clipping(from: Element): { top: number; bottom: number } {
+/// Nobody outside this file asks it. [`dropping`] is what the other dropdown the
+/// app draws for itself reaches for, and the measure that wants this is inside
+/// it.
+function clipping(from: Element): { top: number; bottom: number } {
   for (let at = from.parentElement; at; at = at.parentElement) {
     const { overflowY } = getComputedStyle(at);
 
@@ -561,4 +442,233 @@ function Reading<T>(props: {
       <span class={styles.words}>{props.label(props.of)}</span>
     </>
   );
+}
+
+/// Everything a dropdown the app draws for itself is made of that is not what it
+/// offers: whether the rows are down, which of them the keyboard is on, the keys
+/// that move it, and which way they hang off the thing that dropped them.
+///
+/// Two controls here now hang rows off an anchor — [`Listbox`], which offers one
+/// of the server's rows, and the browse field a path is written with, in
+/// `PathField.tsx`, which offers one directory of the filesystem. What they
+/// offer has nothing in common and what they *are* has all of it, and a walk
+/// held twice is two keyboards to drift apart. They had already begun to before
+/// this was one thing.
+///
+/// **What is not here is what either of them draws.** The rows differ — one is a
+/// reading with a harness mark beside it, the other a directory with a way
+/// further in — and so does the element the whole thing hangs off, a `button` on
+/// one and an `input` on the other. Both draw out of `picking.module.css`, which
+/// is the other half of the one look and is shared the way a stylesheet is
+/// rather than the way this is.
+///
+/// A control's own keys are what it says here rather than what it handles
+/// afterwards: `opens` are the keys that drop the rows on a shut one, `takes`
+/// the keys that take the walked row on an open one, and everything else in the
+/// walk is the same on both. `take` answers with whether it took the row,
+/// because one of these stands in a form: an Enter over a list with no row under
+/// it is the browser's again, and the form submits.
+export function dropping(props: {
+  /// How many rows there are, as they stand now. Read rather than counted once,
+  /// the list moving under a walk being the ordinary case on both controls.
+  rows: () => number;
+
+  /// The element the rows hang under, which is also where the focus goes back to
+  /// when they are taken away: a press on a row is a press on something no
+  /// browser will focus.
+  anchor: () => HTMLElement;
+
+  /// And the rows themselves, for the measure — `undefined` until they are on
+  /// the page, being drawn only while they are down.
+  dropped: () => HTMLElement | undefined;
+
+  /// Where a walk starts when the rows come down. The top of the list by
+  /// default; a control that already holds a choice starts the walk on it.
+  from?: () => number;
+
+  /// The keys that drop the rows on a shut control.
+  opens: string[];
+
+  /// And the keys that take the walked row on an open one.
+  takes: string[];
+
+  /// Taking it, answered with whether it was taken.
+  take: (at: number) => boolean;
+}): {
+  open: () => boolean;
+  above: () => boolean;
+  walking: () => number;
+  list: string;
+  rowId: (index: number) => string;
+  drop: () => void;
+  shut: () => void;
+  restart: () => void;
+  key: (ev: KeyboardEvent) => void;
+} {
+  /// Whether the rows are down.
+  const [open, setOpen] = createSignal(false);
+
+  /// And which of them the keyboard is on while they are: an index into the
+  /// rows, and the one thing a native dropdown kept for itself that a control
+  /// drawn out of elements has to keep for it.
+  const [walked, setWalked] = createSignal(0);
+
+  /// Which way they come down: under the anchor where there is room for them
+  /// there, and over it where there is not.
+  ///
+  /// The other thing a native dropdown kept for itself. Its popup is the
+  /// browser's own and is put wherever it fits on the screen; these rows are an
+  /// element of the page, inside whatever clips the page — a pane is
+  /// `overflow-y: auto` from the second breakpoint up, and the steer modal's
+  /// card is capped at `80vh` — so a control standing low in one of those would
+  /// drop its rows past its edge and out of sight, behind a backdrop that draws
+  /// nothing to say where they went.
+  const [above, setAbove] = createSignal(false);
+
+  const from = (): number => props.from?.() ?? 0;
+
+  /// The same index, held inside the list as it stands now.
+  ///
+  /// A Nudge can take a row away while the rows are down — a Profile deleted
+  /// from another window is exactly that, and so is a directory filtered to
+  /// nothing by another keystroke — and a walk left past the end would name a
+  /// row the page no longer holds, which is a screen reader sent nowhere.
+  /// Clamped on the way out rather than corrected on the way in, so there is one
+  /// answer to *which row is the keyboard on* however the list moved.
+  const walking = (): number =>
+    Math.min(walked(), Math.max(0, props.rows() - 1));
+
+  // The rows' own ids, for the `aria-activedescendant` that says which one the
+  // keyboard is on. Generated rather than made out of the anchor's id, because
+  // one page can hold several of these and an id is the page's to keep unique.
+  const list = createUniqueId();
+  const rowId = (index: number): string => `${list}-${index}`;
+
+  /// Drop the rows, with the keyboard where this control starts a walk.
+  const drop = (): void => {
+    setWalked(from());
+    setOpen(true);
+  };
+
+  /// Take them back, and the keyboard with them.
+  const shut = (): void => {
+    setOpen(false);
+    props.anchor().focus();
+  };
+
+  /// And put the walk back where it starts without touching the rows, for a
+  /// control whose list is rebuilt under a browse that is carrying on.
+  const restart = (): void => {
+    setWalked(from());
+  };
+
+  /// The whole keyboard, on the one element that holds the focus.
+  const key = (ev: KeyboardEvent): void => {
+    if (!open()) {
+      if (props.opens.includes(ev.key)) {
+        ev.preventDefault();
+        drop();
+      }
+      return;
+    }
+
+    if (props.takes.includes(ev.key)) {
+      // Prevented only where the row was taken. The other way is a press this
+      // control had nothing to do with, and whatever it was going to do — submit
+      // the form the anchor stands in — it still does.
+      if (props.take(walking())) ev.preventDefault();
+      return;
+    }
+
+    switch (ev.key) {
+      case "Escape":
+        // Shut, and nothing taken, which is what Escape means over a list.
+        //
+        // Prevented as well as handled, because these stand inside things that
+        // answer to Escape themselves: a `dialog` closes itself on one, and a
+        // hand taking the rows back is not asking for whatever they were dropped
+        // inside to go too.
+        ev.preventDefault();
+        shut();
+        break;
+      case "ArrowDown":
+        ev.preventDefault();
+        setWalked(Math.min(walking() + 1, props.rows() - 1));
+        break;
+      case "ArrowUp":
+        ev.preventDefault();
+        setWalked(Math.max(walking() - 1, 0));
+        break;
+      case "Home":
+        // Prevented on the text box as well as on the button: the walk is what
+        // these two move while the rows are down, and a caret can be put back
+        // once they are gone.
+        ev.preventDefault();
+        setWalked(0);
+        break;
+      case "End":
+        ev.preventDefault();
+        setWalked(props.rows() - 1);
+        break;
+      case "Tab":
+        // Not ours to swallow: the hand is leaving the control, and the rows go
+        // with it. Left to the browser rather than prevented, so the focus lands
+        // wherever it was going.
+        setOpen(false);
+        break;
+    }
+  };
+
+  // Which way the rows hang, measured each time they come down and each time
+  // they are rebuilt underneath: what they need against what is left under the
+  // anchor, inside whatever would clip them. A filter that cuts a long list to
+  // two rows is a drop that fits under a control it did not fit under before.
+  //
+  // Here rather than in [`drop`] because what is measured is the rows' own
+  // height, which nothing knows until they are on the page — and an effect runs
+  // after they are and before the browser paints, so the choice is made before
+  // anybody has seen them anywhere. Back under the anchor as they go, so the
+  // next measure starts from the ordinary way round rather than from the last
+  // answer.
+  createEffect(() => {
+    if (!open()) {
+      setAbove(false);
+      return;
+    }
+
+    // Read, so that the measure is made again whenever the rows move.
+    props.rows();
+
+    const rows = props.dropped();
+    if (!rows) return;
+
+    const anchor = props.anchor().getBoundingClientRect();
+    const wanted = rows.getBoundingClientRect().height;
+    const clip = clipping(props.anchor());
+
+    // Over it only where they do not fit under it, and then only where there is
+    // more room over it: the ordinary way round is the one to be in wherever
+    // being in it costs nothing, and where neither side fits the rows go to
+    // whichever side shows more of them. Which side that is changes nothing
+    // about *which* rows — the list is capped and scrolls from its top either
+    // way.
+    setAbove(
+      anchor.bottom + wanted > clip.bottom &&
+        anchor.top - clip.top > clip.bottom - anchor.bottom,
+    );
+  });
+
+  // The row the keyboard has walked to, kept in view: the drop is capped in
+  // height, so a list longer than it can be walked past its own edge.
+  createEffect(() => {
+    if (!open()) return;
+
+    // Reached by id rather than by a ref, the rows being a `For` that rebuilds
+    // — and asked for rather than called, jsdom having no scrolling at all.
+    document.getElementById(rowId(walking()))?.scrollIntoView?.({
+      block: "nearest",
+    });
+  });
+
+  return { open, above, walking, list, rowId, drop, shut, restart, key };
 }

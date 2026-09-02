@@ -33,12 +33,18 @@
 //!
 //! ## What it is made of
 //!
-//! The chrome is [`Listbox`]'s, imported rather than copied: the same combobox
-//! roles, the same keyboard walk, the same rows hung off the same measurement of
-//! what would clip them — see `picking.tsx` and `picking.module.css`. The two
-//! dropdowns the app draws for itself are one thing to the eye, and two copies
-//! of that would be two things to drift. What is this component's own is the
-//! browsing: which directory the rows come out of, and what a tap does with one.
+//! The chrome is [`Listbox`]'s, held rather than copied: the same keyboard walk,
+//! the same rows hung off the same measurement of what would clip them, out of
+//! [`dropping`] in `picking.tsx` — and the same paint, out of
+//! `picking.module.css`. The two dropdowns the app draws for itself are one
+//! thing to the eye and one thing to the hand, and two copies of that would be
+//! two things to drift.
+//!
+//! What is this component's own is everything about *browsing*: which directory
+//! the rows come out of, what a tap does with one, and the rows themselves —
+//! which are markup here rather than shared, a directory with a way further in
+//! having nothing in common with a pairing and its harness mark. The combobox
+//! roles go with them, being said on the markup that carries them.
 //!
 //! Which scope an ask is made in is the caller's, because it is a fact about the
 //! field rather than about the dropdown: a value the server would refuse outside
@@ -72,9 +78,7 @@ import {
   Match,
   Show,
   Switch as Choose,
-  createEffect,
   createSignal,
-  createUniqueId,
   type JSX,
 } from "solid-js";
 
@@ -87,7 +91,7 @@ import type {
 import { useReading } from "./freshness";
 import { Empty, ErrorLine } from "./notices";
 import styles from "./PathField.module.css";
-import { clipping } from "./picking";
+import { dropping } from "./picking";
 import chrome from "./picking.module.css";
 
 /// One row of the dropdown: what it reads as, what a tap on it writes into the
@@ -192,17 +196,39 @@ export function PathField(props: {
   placeholder?: string;
   disabled?: boolean;
 }): JSX.Element {
-  /// Whether the rows are down. Nothing opens them but an ask to browse: a
-  /// dropdown that fell open on the first keystroke would be in the way of
-  /// somebody who knows the path and is typing it.
-  const [open, setOpen] = createSignal(false);
+  // The input, so that a press on a row — which is a press on something no
+  // browser will focus — hands the keyboard back to it, and so that the rows are
+  // measured against it.
+  let field!: HTMLInputElement;
 
-  /// Which row the keyboard is on while they are, as [`Listbox`] keeps it.
-  const [walked, setWalked] = createSignal(0);
+  // And the rows, for that measure.
+  let dropped: HTMLDivElement | undefined;
 
-  /// And which way they hang: under the field where there is room, over it where
-  /// there is not.
-  const [over, setOver] = createSignal(false);
+  /// Everything about the rows that is not what they say — see [`dropping`],
+  /// which the listbox holds the same way.
+  ///
+  /// Two keys are this field's own, and both because the anchor is a text box
+  /// rather than a button. Only ArrowDown drops the rows: nothing else opens
+  /// them, a dropdown falling open on the first keystroke being in the way of
+  /// somebody who knows the path and is typing it. And Enter takes the walked
+  /// row only where there is one to take — a filter matching nothing, a
+  /// directory that would not list — so an Enter over an empty list is the
+  /// form's, and the field submits what it holds.
+  const { open, above: over, walking, list, rowId, drop, shut, restart, key } =
+    dropping({
+      rows: () => rows().length,
+      anchor: () => field,
+      dropped: () => dropped,
+      opens: ["ArrowDown"],
+      takes: ["Enter"],
+      take: (index) => {
+        const row = rows()[index];
+        if (!row) return false;
+
+        take(row);
+        return true;
+      },
+    });
 
   /// The directory a tap put in the field, or `null` while nothing did.
   ///
@@ -351,33 +377,6 @@ export function PathField(props: {
   const said = (): string | null =>
     listing.data === undefined ? null : refusal(listing.data);
 
-  /// Which row the keyboard is on, held inside the list as it stands now: the
-  /// rows move under a walk whenever the filter does.
-  const walking = (): number =>
-    Math.min(walked(), Math.max(0, rows().length - 1));
-
-  // The rows' own ids, for the `aria-activedescendant` that says which one the
-  // keyboard is on — one page can hold several of these fields.
-  const list = createUniqueId();
-  const rowId = (index: number): string => `${list}-${index}`;
-
-  // The input, so that a press on a row — which is a press on something no
-  // browser will focus — hands the keyboard back to it.
-  let field!: HTMLInputElement;
-
-  // And the rows, for the measure that says which way they hang.
-  let dropped: HTMLDivElement | undefined;
-
-  const drop = (): void => {
-    setWalked(0);
-    setOpen(true);
-  };
-
-  const shut = (): void => {
-    setOpen(false);
-    field.focus();
-  };
-
   /// Take one row: write where it goes into the field, and go there.
   ///
   /// Both, which is the whole interaction — there is nothing else a row does.
@@ -393,104 +392,9 @@ export function PathField(props: {
   /// everywhere else here.
   const take = (row: Row): void => {
     setDrilled(row.leaf ? null : row.path);
-    setWalked(0);
+    restart();
     props.write(row.path);
   };
-
-  /// The keyboard, on the field itself — everything [`Listbox`] answers to,
-  /// minus the keys that are the input's own. A closed dropdown hears only the
-  /// way in, so Enter still submits the form the field stands in.
-  const key = (ev: KeyboardEvent): void => {
-    if (!open()) {
-      if (ev.key === "ArrowDown") {
-        ev.preventDefault();
-        drop();
-      }
-      return;
-    }
-
-    switch (ev.key) {
-      case "Escape":
-        // The rows go and the field keeps what it holds, which is how a browse
-        // ends. Prevented as well as handled, so that Escape over the rows is
-        // not also Escape over whatever they were dropped inside.
-        ev.preventDefault();
-        shut();
-        break;
-      case "Enter": {
-        // The walked row, where there is one. Where there is none — a filter
-        // matching nothing, a directory that would not list — the press is the
-        // form's, and the field submits what it holds.
-        const row = rows()[walking()];
-        if (row) {
-          ev.preventDefault();
-          take(row);
-        }
-        break;
-      }
-      case "ArrowDown":
-        ev.preventDefault();
-        setWalked(Math.min(walking() + 1, rows().length - 1));
-        break;
-      case "ArrowUp":
-        ev.preventDefault();
-        setWalked(Math.max(walking() - 1, 0));
-        break;
-      case "Home":
-        // Prevented, unlike in a plain text field: the walk is what these two
-        // move while the rows are down, and the caret can be put back once they
-        // are gone.
-        ev.preventDefault();
-        setWalked(0);
-        break;
-      case "End":
-        ev.preventDefault();
-        setWalked(rows().length - 1);
-        break;
-      case "Tab":
-        // The hand is leaving the field and the rows go with it. Left to the
-        // browser, so the focus lands wherever it was going.
-        setOpen(false);
-        break;
-    }
-  };
-
-  // Which way the rows hang, measured each time they come down and each time
-  // they are rebuilt underneath — a filter that cuts a long list to two rows is
-  // a drop that fits under a field it did not fit under before. Against whatever
-  // would clip them rather than against the window: these stand in a pane that
-  // scrolls its own content.
-  createEffect(() => {
-    if (!open()) {
-      setOver(false);
-      return;
-    }
-
-    // Read, so that the measure is made again whenever the rows move.
-    rows();
-
-    if (!dropped) return;
-
-    const anchor = field.getBoundingClientRect();
-    const wanted = dropped.getBoundingClientRect().height;
-    const clip = clipping(field);
-
-    setOver(
-      anchor.bottom + wanted > clip.bottom &&
-        anchor.top - clip.top > clip.bottom - anchor.bottom,
-    );
-  });
-
-  // The row the keyboard has walked to, kept in view: the drop is capped in
-  // height, so a directory holding more than fits can be walked past its own
-  // edge. Asked for rather than called, jsdom having no scrolling at all.
-  createEffect(() => {
-    if (!open()) return;
-
-    document.getElementById(rowId(walking()))?.scrollIntoView?.({
-      block: "nearest",
-    });
-  });
 
   return (
     <div class={styles.field}>
@@ -520,7 +424,7 @@ export function PathField(props: {
           // Typed text steers the rows from here on, whatever a tap put in the
           // field before it.
           setDrilled(null);
-          setWalked(0);
+          restart();
           props.write(ev.currentTarget.value);
         }}
         onKeyDown={key}
