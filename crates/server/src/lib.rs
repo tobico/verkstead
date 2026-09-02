@@ -291,6 +291,22 @@ pub(crate) struct AppState {
 /// Verkstead at, and a file inside it is Verkstead's own business.
 const DATABASE_NAME: &str = "verkstead.db";
 
+/// How several directories are separated when one environment variable holds
+/// more than one: however the platform writes `PATH`. A `:` on Unix; a `;` on
+/// Windows, where a `:` is a drive letter's own punctuation and splitting on
+/// it would cut `C:\src` into a drive that is not a path and a path that is
+/// not absolute.
+///
+/// clap applies a delimiter to the flag as well as to the variable, so this is
+/// what `--watched-path` is parsed with too: wrong on Windows, it refuses
+/// every startup that names a real directory.
+#[cfg(windows)]
+const PATH_LIST_SEPARATOR: char = ';';
+
+/// See the Windows one above.
+#[cfg(not(windows))]
+const PATH_LIST_SEPARATOR: char = ':';
+
 /// How the server is pointed at its data directory and its socket. There is no
 /// app-level auth: the tailnet is the perimeter, so the defaults keep the
 /// server on the loopback interface until told otherwise.
@@ -326,7 +342,8 @@ pub struct Config {
     pub listen: SocketAddr,
 
     /// A directory Verkstead may operate inside. Repeat the flag, or separate
-    /// several with `:` in the environment variable, as `PATH` is written.
+    /// several in the environment variable the way the platform writes `PATH` —
+    /// `:` on Unix, `;` on Windows.
     ///
     /// This is a security boundary and not a convenience: nothing outside these
     /// directories is ever touched, and a Repo is registered only from within
@@ -342,14 +359,14 @@ pub struct Config {
     #[arg(
         long = "watched-path",
         env = "VERKSTEAD_WATCHED_PATHS",
-        value_delimiter = ':',
+        value_delimiter = PATH_LIST_SEPARATOR,
         value_name = "DIR"
     )]
     pub watched_paths: Vec<PathBuf>,
 
     /// An extra read-write bind every sandbox gets, or `name=DIR` for one only
     /// the Repo registered under that name gets. Repeat the flag, or separate
-    /// several with `:` in the environment variable.
+    /// several in the environment variable the way the platform writes `PATH`.
     ///
     /// This is the Sandbox Configuration: the package registries and the caches
     /// a session needs beyond its own worktree that Verkstead does not provide
@@ -369,7 +386,7 @@ pub struct Config {
     #[arg(
         long = "sandbox-bind",
         env = "VERKSTEAD_SANDBOX_BINDS",
-        value_delimiter = ':',
+        value_delimiter = PATH_LIST_SEPARATOR,
         value_name = "DIR|NAME=DIR"
     )]
     pub sandbox_binds: Vec<String>,

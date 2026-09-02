@@ -33,9 +33,10 @@ $ cargo run -p verkstead-cli -- serve --data-dir . --watched-path ~/src
 `--watched-path` names a directory Verkstead may operate inside, and it is a
 security boundary rather than a convenience: nothing outside the paths given is
 touched, and a repo is registered only from within one. Repeat the flag for more
-than one, or set `VERKSTEAD_WATCHED_PATHS` with them separated by `:`. A path
-that is not there refuses startup, because a flag is the installation's own word
-and nobody is watching when it is wrong.
+than one, or set `VERKSTEAD_WATCHED_PATHS` with them separated the way the
+platform writes `PATH` — `:` on Unix, `;` on Windows. A path that is not there
+refuses startup, because a flag is the installation's own word and nobody is
+watching when it is wrong.
 
 It is not required, though: `cargo run -p verkstead-cli -- serve --data-dir .` on
 its own comes up watching nothing, which admits nothing, and the settings page is
