@@ -29,9 +29,10 @@
 //!
 //! Three of the four are the mono cut, drawn the way [`./Icon.tsx`](./Icon.tsx)
 //! draws a Font Awesome icon: `currentColor` and `1em`, so a mark sits in
-//! whatever ink surrounds it — soft on the status button's second line, the
-//! heading's own on a card. Claude Code's is lobehub's colour variant, which
-//! names its fill and so stands in its own orange wherever it is drawn. That was
+//! whatever ink surrounds it — the ordinary ink on a card's second line, the
+//! heading's own in the pane that card opens. Claude Code's is lobehub's colour
+//! variant, which names its fill and so stands in its own orange wherever it is
+//! drawn. That was
 //! the pick: colour where lobehub has it, and lobehub has it for Claude alone of
 //! these four.
 

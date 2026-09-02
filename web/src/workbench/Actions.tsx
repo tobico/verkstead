@@ -1,6 +1,7 @@
 //! What can be done to a Conversation as a whole, rather than to any one event:
-//! the rows behind the status button at the head of the Conversation pane, and
-//! the same rows under the pointer on a card in the sidebar.
+//! the rows behind the status button that ends the sticky block over the
+//! Conversation pane, and the same rows under the pointer on a card in the
+//! sidebar.
 //!
 //! A menu rather than three buttons, because the last of them throws a worktree
 //! away and a pane header is somewhere the human's cursor passes on the way to
@@ -681,12 +682,13 @@ function actions(): {
   };
 }
 
-/// The menu at the head of the Conversation pane: what there is to do about the
+/// The menu on the Conversation pane: what there is to do about the
 /// Conversation that is open.
 ///
 /// The trigger is the caller's, which is the one thing that makes this menu
-/// different from every other one at the head of a pane. What drops it is the
-/// StatusButton — a two-line button saying where the work stands — so the mark
+/// different from every other one on a pane. What drops it is the StatusButton
+/// — a button saying where the work stands, at the foot of the sticky block —
+/// so the mark
 /// and the paint that the menu draws for a ⋯ would both be in the way, and the
 /// caller hands in what its trigger reads as and a class to paint it by.
 ///

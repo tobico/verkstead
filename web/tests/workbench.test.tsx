@@ -183,9 +183,9 @@ import { STATE } from "../src/workbench/states";
 // What is still the human's to settle on the brief card.
 import setup from "../src/workbench/Setup.module.css";
 import steerModal from "../src/workbench/Steer.module.css";
-// The status button at the head of the Conversation pane, both ways: the hashed
-// names its two lines are queried by, and the source of the paint that says
-// which of them is in the accent.
+// The status button at the foot of the sticky block over the Conversation pane,
+// both ways: the hashed names its line is queried by, and the source of the
+// paint that says when it is in the accent.
 import statusButton from "../src/workbench/StatusButton.module.css";
 import statusButtonCss from "../src/workbench/StatusButton.module.css?raw";
 import timeline from "../src/workbench/Timeline.module.css";

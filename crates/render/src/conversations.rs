@@ -569,11 +569,12 @@ pub struct ConversationView {
     /// `null` on every stop that is not a usage window's — which is nearly all
     /// of them, and every Conversation that has not stopped.
     ///
-    /// Words for the status button's second line, where what is running is
-    /// otherwise said, rather than a moment anything acts on: no stop resumes
-    /// itself, so what a stopped run waits for is a press whatever stopped it.
-    /// The one thing that tells a run stopped by an exhausted window from a run
-    /// stopped by anything else — same card, same status, same row to press.
+    /// Words for the Resume row of the actions menu — the press they are about
+    /// — rather than a moment anything acts on: no stop resumes itself, so what
+    /// a stopped run waits for is a press whatever stopped it. The one thing
+    /// that tells a run stopped by an exhausted window from a run stopped by
+    /// anything else, which is why the row that leads with them is where they
+    /// go: same card, same status word, same row to press.
     ///
     /// As the session printed it, because the wording is the backend's: `3pm`
     /// stays `3pm`, which is what somebody looks at their own clock for.

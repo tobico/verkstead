@@ -3,9 +3,10 @@
 //!
 //! Every place that says who runs a session used to say it its own way — the
 //! pickers one way, the status button another, the record of a finished run not
-//! at all. One reading serves all of them now, and this is where it is composed:
-//! the backend's own name, the model's own name, and the Profile's name after an
-//! em dash where the Profile is the half that tells two runs apart.
+//! at all. One reading serves every site that says it now, and this is where it
+//! is composed: the backend's own name, the model's own name, and the Profile's
+//! name after an em dash where the Profile is the half that tells two runs
+//! apart.
 //!
 //! **The reading is composed rather than kept per Pairing.** A Profile carries
 //! its agent type and a model id and nothing else; every word a human reads is

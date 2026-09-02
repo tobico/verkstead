@@ -270,11 +270,13 @@ flowchart LR
   Work blocks **only** on questions whose answers affect upcoming work.
 - **No commit gates.** The agent commits on its own; review happens later.
   What the gate's summary did survives without it (*settled 2026-08-24,
-  building commit-summaries; refined 2026-08-26, building design-fixes*): a
-  code commit carries an agent-written summary as its message body — prose
-  first, then the delta diagram the retired gates topic taught — and the sweep
-  keeps the body (trailers stripped) so the commit's pane shows it as a headed
-  Message above the diff and its card a clamped prose snippet.
+  building commit-summaries; refined 2026-08-26, building design-fixes; refined
+  2026-09-02, building timeline-pinned-polish*): a code commit carries an
+  agent-written summary as its message body — prose first, then the delta
+  diagram the retired gates topic taught — and the sweep keeps the body
+  (trailers stripped) so the commit's pane shows it as a headed Message above
+  the diff. Nothing of it is on the card, which is the subject and the size of
+  the change: the account of a change is read at the depth it was written for.
   Bookkeeping commits (plans, roadmaps, the finish, ADRs) stay subject-only,
   and a commit without a summary draws as it always did.
   Auto-advance runs the whole pipeline unattended: fresh session per task,
@@ -361,9 +363,10 @@ flowchart LR
   notice, one status, one Resume — and push-notifies. The reset time rides on
   the stop as words to read rather than as a moment anything acts on: no stop
   resumes itself, so this one waits for the same press (*refined 2026-08-25,
-  building one-stop*). The words are on the status button's second line, where
-  what is running is said — this being a stop with nothing running and a reason
-  of its own for it (*refined 2026-08-30, building status-button*).
+  building one-stop*). The words are on the Resume row of the actions menu,
+  which is the press they are about — this being the one stop that waits for
+  that press *and* for an account (*refined 2026-08-30, building status-button;
+  refined 2026-09-02, building timeline-pinned-polish*).
 - **No cap on concurrent sessions** across conversations.
 
 ## Execution and sandboxing
@@ -489,12 +492,12 @@ flowchart LR
   where nothing is configured so the host's own login still stands (*refined
   2026-08-23, building intentional-credentials*). Agents keep using `gh` inside
   the sandbox for push/PR as today.
-- **Full Captures** are stored per session; the timeline event summarizes
-  (turn count + latest statement), the details pane shows everything. The turns
-  are the session's own Transcript, counted as the pane draws them, and a
-  session that keeps no log shows no count at all — a line count off the
-  terminal read 0 for every session whose interface redraws itself (*refined
-  2026-08-23, building agent-output-polish*).
+- **Full Captures** are stored per session; the timeline event summarizes (turn
+  count, and what the run was launched under), the details pane shows
+  everything. The turns are the session's own Transcript, counted as the pane
+  draws them, and a session that keeps no log shows no count at all — a line
+  count off the terminal read 0 for every session whose interface redraws
+  itself (*refined 2026-08-23, building agent-output-polish*).
 
 ## UI
 
@@ -625,10 +628,10 @@ Timeline events:
 
 | Event | In timeline | In details pane |
 |---|---|---|
-| Brief | inline, always: the server's rendering clamped to five lines, drafting or frozen | the composer while its round drafts — one box holding the field that saves itself with the setup along its bottom edge, and the start under it; the frozen document and what the round was configured with, once it is past drafting |
-| Agent output | turn count, latest statement, liveness mark | Transcript or Screen |
+| Brief | inline, always: the server's rendering clamped to three lines under an ellipsis, drafting or frozen | the composer while its round drafts — one box holding the field that saves itself with the setup along its bottom edge, and the start under it; the frozen document and what the round was configured with, once it is past drafting |
+| Agent output | *Agent run*, turn count and liveness mark, over the reading of what it was launched under; pinned as well while it runs | Transcript or Screen |
 | Question set | table of #, question, answer | full answer-set document |
-| Commit | +/− and changed-line counts, clamped summary snippet | boxed Message (diagram drawn) above the server-rendered diff viewer |
+| Commit | subject, +/− and changed-line counts | boxed Message (diagram drawn) above the server-rendered diff viewer |
 | Task list | inline, pinned *and* on the record where the backlog landed | every task document, each a boxed markdown section in backlog order |
 | Stage list | inline, pinned *and* on the record where the roadmap landed | every stage brief, each a boxed markdown section in roadmap order, done state on the heading |
 | PR | name + id, pinned *and* on the record where it happened | fetched commit list and comments |
@@ -641,17 +644,24 @@ Timeline events:
   because there is nothing to decide about it: what the conversation is waiting
   on is the stop beside it, and Resume in the status button's menu is what
   answers that.
-- **Pinning is the fixed set** (task list, stage list, PR) with a floating
-  summary box at the top of the timeline; no manual pin/unpin. They come in one
-  order and are drawn in it — **PR, then task list, then roadmap** (*settled
-  2026-09-02, building pinned-carousel-order*): the PR leads as the one of the
-  three with anything on it to answer, where the two lists are read off the
-  worktree with nothing on them to do, and the lists follow in the order the work
-  goes through them. The order is the server's, decided where the pinned list is
-  built. More than one
-  pinned card is a carousel rather than a stack (*settled 2026-08-24, building
-  workbench-refit*): everything pinned is held above the record, so a stack of
-  them is what the record gets pushed down by. Dots beneath say how many there
+- **Pinning is the fixed set** (the running session, task list, stage list, PR)
+  with a floating summary box at the top of the timeline; no manual pin/unpin.
+  They come in one order and are drawn in it — **the running session, then PR,
+  then task list, then roadmap** (*settled 2026-09-02, building
+  pinned-carousel-order; refined 2026-09-02, building timeline-pinned-polish*):
+  the session leads because it is what the conversation is *doing*, the PR
+  behind it as the one of the rest with anything on it to answer, where the two
+  lists are read off the worktree with nothing on them to do, and the lists
+  follow in the order the work goes through them. The order is the server's,
+  decided where the pinned list is built. **The session is the one that comes
+  and goes**: it is pinned while something is writing into it and nowhere at all
+  otherwise, so a finished conversation carries no card claiming a run that
+  stopped — and the deck holds its place by which card it is rather than by
+  where it sits, a list that grows and shrinks at its head being one an index
+  cannot be remembered across. More than one pinned card is a carousel rather
+  than a stack (*settled 2026-08-24, building workbench-refit*): everything
+  pinned is held above the record, so a stack of them is what the record gets
+  pushed down by. Dots beneath say how many there
   are and which is showing, arrows over the card's edges turn it where there is
   a pointer, and a swipe across it does where there is not. What fronts on
   opening is the card the conversation is blocked on — a PR with feedback
@@ -660,13 +670,13 @@ Timeline events:
   card that is also a moment on the record is drawn in both places — one card,
   the same behaviour either way, and the same selection behind both — because a
   record with the moment folded out of it would be a record missing it. All
-  three are: the PR at the moment the finish step opened it, and the two lists
-  at the moment they landed on the branch (*settled 2026-08-26, building
-  design-fixes*). The lists differ in where their content comes from — the row
-  carries a stamp and nothing else, and the card at it is `.tasks/` or
-  `docs/roadmaps/` read live at the moment somebody looks, exactly as the pinned
-  copy is. Conversations from before the rows existed are not backfilled: they
-  keep their pinned cards alone.
+  four are: the session at the moment it started, the PR at the moment the
+  finish step opened it, and the two lists at the moment they landed on the
+  branch (*settled 2026-08-26, building design-fixes*). The lists differ in
+  where their content comes from — the row carries a stamp and nothing else,
+  and the card at it is `.tasks/` or `docs/roadmaps/` read live at the moment
+  somebody looks, exactly as the pinned copy is. Conversations from before the
+  rows existed are not backfilled: they keep their pinned cards alone.
 - **A checklist card shows five entries, not all of them** (*settled
   2026-08-28, building design-fixes*): the task list and the stage list window
   to five real entries centred on the first one that is not done, held inside
@@ -722,14 +732,19 @@ Timeline events:
   press in front of it, and the gear is the same kind of thing the cards below
   it are — something in this pane that is selected and opened into the pane
   beside it. The ⋯ at the head of a Conversation's timeline went the same way in
-  the end, into the status button under the title: what there is to do about a
-  Conversation is reached from the thing that says what it is doing (*settled
-  2026-08-30, building status-button*). **And the timeline's own header says
-  the Repo understated beside the branch it is titled by**, in the pattern the
-  card that opened it draws its name and its Repo in — so the card and the
-  header read as the one name said twice, and two drafts, both titled *Draft*,
-  are told apart on the header by the only thing that differs (*settled
-  2026-08-30, building status-button*).
+  the end, into the status button: what there is to do about a Conversation is
+  reached from the thing that says where it stands (*settled 2026-08-30,
+  building status-button*). That button sits at the *foot* of the sticky block,
+  under the pinned cards, because a line of chrome along that edge is what says
+  where the block ends (*refined 2026-09-02, building timeline-pinned-polish*).
+  **And the timeline's own header says the Repo understated beside the branch
+  it is titled by**, in the pattern the card that opened it draws its name and
+  its Repo in — so the card and the header read as the one name said twice, and
+  two drafts, both titled *Draft*, are told apart on the header by the only
+  thing that differs (*settled 2026-08-30, building status-button*). The branch
+  is held to one line and cut at the front, in both places, so the header's own
+  controls keep the top right and the sidebar's rows keep one height (*refined
+  2026-09-02, building timeline-pinned-polish*).
 - **Push notifications** for needs-you — a blocking question set, a stop
   Verkstead decided on, an exhausted usage window among them — **and
   milestones** (PR opened, stage complete, conversation done). A stop nobody

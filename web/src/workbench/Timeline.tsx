@@ -1010,11 +1010,11 @@ function parting(pane: Pane): string | undefined {
 /// Which card is showing when a conversation is opened: the one needing
 /// attention, and otherwise the first.
 ///
-/// The first is the fixed order — pull request, then task list, then roadmap —
-/// because that is the order the server hands them over in. The pull request
-/// leads it as the one of the three with anything on it to answer, so a
-/// conversation that has reached one opens on it whether or not it is stopped
-/// there.
+/// The first is the fixed order — the running session, then the pull request,
+/// then the task list, then the roadmap — because that is the order the server
+/// hands them over in. So a conversation with a session running opens on that
+/// session, and one without opens on its pull request where it has reached one,
+/// whether or not it is stopped there.
 ///
 /// Needing attention is the conversation being blocked on the card, which only a
 /// pull request can be: what a wrap-up stops for is the review, and a backlog or
