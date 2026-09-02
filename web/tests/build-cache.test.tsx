@@ -102,7 +102,7 @@ function theSettings(
 
 /// What a save answers with, which is the settings as they now stand.
 function answering(standing: SettingsView): SettingsSaved {
-  return { settings: standing, verified: null };
+  return { settings: standing, verified: null, refused: [] };
 }
 
 function sent(fetching: ReturnType<typeof serving>): unknown {
@@ -284,14 +284,17 @@ describe("changing the build cache", () => {
       expect(sent(fetching)).toEqual({
         git_author: TOLD.git_author,
         github_token: "Keep",
+        // The rules ride along as an action rather than a value: nothing this
+        // form does says anything about them — see [`IgnoredCommentsEdit`].
+        ignored_comments: "Keep",
         rust_build_cache: {
           enabled: false,
           size: TOLD.rust_build_cache.size,
         },
-        share_viewer_url: TOLD.share_viewer_url,
         // Untouched by this form, and sent back as it stands: one request
         // writes the whole of `config.yaml`.
         conflict_resolution: TOLD.conflict_resolution,
+        share_on_done: TOLD.share_on_done,
         ...PATHS,
       }),
     );
@@ -328,11 +331,14 @@ describe("changing the build cache", () => {
       expect(sent(fetching)).toEqual({
         git_author: TOLD.git_author,
         github_token: "Keep",
+        // The rules ride along as an action rather than a value: nothing this
+        // form does says anything about them — see [`IgnoredCommentsEdit`].
+        ignored_comments: "Keep",
         rust_build_cache: { enabled: true, size: "80G" },
-        share_viewer_url: TOLD.share_viewer_url,
         // Untouched by this form, and sent back as it stands: one request
         // writes the whole of `config.yaml`.
         conflict_resolution: TOLD.conflict_resolution,
+        share_on_done: TOLD.share_on_done,
         ...PATHS,
       }),
     );

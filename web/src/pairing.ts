@@ -3,14 +3,21 @@
 //!
 //! A profile says which account, and its list says what that account can launch.
 //! Neither half alone starts a session, so what is picked is both at once: one
-//! flat row per profile-and-model combination, `profile — model`, one tap to
-//! choose. A two-stage profile-then-model picker was considered and rejected —
-//! it scales better and costs a tap every time, and the counts stay small.
+//! flat row per profile-and-model combination, "Claude Code Fable 5 — Work", one
+//! tap to choose. A two-stage profile-then-model picker was considered and
+//! rejected — it scales better and costs a tap every time, and the counts stay
+//! small.
+//!
+//! How a row reads is not this module's own: it is the reading every site that
+//! says who runs a session shares, composed in [`./agents.ts`](./agents.ts) out
+//! of the backend, the model and the profile's name. What is here is the pairing
+//! vocabulary — the rows, and the string one travels as.
 //!
 //! There is no default model anywhere, which is why nothing here invents one: a
 //! profile with no model beside it is not a pairing, and the pickers draw it as
 //! nothing chosen.
 
+import { reading } from "./agents";
 import type {
   PairingView,
   PickedView,
@@ -42,9 +49,28 @@ export function value(pairing: Pairing): string {
   return `${pairing.profile.id}:${pairing.model}`;
 }
 
-/// And what the human reads.
-export function label(pairing: Pairing): string {
-  return `${pairing.profile.name} — ${pairing.model}`;
+/// And what the human reads: the shared reading, made of what the pairing
+/// carries.
+///
+/// A `PairingView` as well as a [`Pairing`], the model being the half a
+/// conversation can have settled without — a profile picked before models were
+/// paired beside them reads as the backend and the profile, which is the half
+/// there is.
+///
+/// `saved` is the profiles as they stand, which decides whether the profile's
+/// own name is said at all — see [`reading`](./agents.ts).
+export function label(
+  pairing: { profile: ProfileEntry; model: string | null },
+  saved: ProfileEntry[] | undefined,
+): string {
+  return reading(
+    {
+      agent: pairing.profile.account.agent_type,
+      model: pairing.model,
+      profile: pairing.profile.name,
+    },
+    saved,
+  );
 }
 
 /// What is chosen now, as [`value`] would have written it.

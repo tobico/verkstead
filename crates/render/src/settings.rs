@@ -1,6 +1,7 @@
 //! What Verkstead has been told — the GitHub token, the git author, the shared
-//! Rust build cache and where the share viewer is hosted — as the viewer
-//! receives it, and what it sends to change any of them.
+//! Rust build cache and whether a Conversation is shared to its pull request
+//! when it settles to Done — as the viewer receives it, and what it sends to
+//! change any of them.
 //!
 //! The token goes one way only. What comes back about it is that there is one,
 //! its last four characters and when it was saved, and nothing here can be made
@@ -23,12 +24,11 @@
 //! fact about it travels one way only: whether the server found an sccache to
 //! compile through, which is its own environment and nobody's setting.
 //!
-//! The share viewer's URL is plainer still: one value, written and read back as
-//! itself. It is a public page the human hosts a copy of, and every link to a
-//! Published Share goes through it — so it is configuration in the ordinary
-//! sense, and the page shows it as it stands. An empty one is *no copy of their
-//! own* rather than no viewer: links are then composed through the copy
-//! Verkstead itself hosts, which is `HOSTED` in `crates/server/src/sharing.rs`.
+//! Sharing to the pull request is plainer still: one switch, written and read
+//! back as itself. It is the one setting here that is **off** with nothing
+//! configured — what it turns on writes to GitHub under the human's own
+//! account — so what comes back is where it sits rather than whether anybody
+//! has been to the page.
 //!
 //! And how a conflict is resolved is the plainest of the lot: one of two words,
 //! written and read back as itself. What travels with it is the warning the page
@@ -43,6 +43,15 @@
 //! first is what makes an entry editable here rather than read-only, and the
 //! second is a report rather than a refusal — a save lands whatever it was
 //! told, and an entry the server cannot see is a row that says so.
+//!
+//! And the ignore rules are the one thing here a save can be *refused* over: a
+//! list of patterns for the comments no agent is ever to be spun up about, and
+//! a pattern the regex engine will not take is a rule that would silence
+//! nothing while reading as though it silenced something. So they travel as an
+//! action rather than as a value — a section that is not about them says
+//! nothing about them, and cannot have its own save turned down by a rule
+//! somebody hand-edited into the file weeks ago. What comes back names the row
+//! and the box, because that is what the page has to draw the error at.
 
 use serde::{Deserialize, Serialize};
 
@@ -63,23 +72,6 @@ pub struct SettingsView {
     /// And how the shared Rust build cache stands.
     pub rust_build_cache: BuildCacheView,
 
-    /// Where the human hosts a share viewer of their own, or empty where they
-    /// host none.
-    ///
-    /// A string rather than an optional, empty for nothing configured, the way
-    /// the author's two halves are: the field on the page holds it either way,
-    /// and clearing the box is how it is taken away.
-    ///
-    /// Empty is not *no viewer*. Links are then composed through the copy
-    /// Verkstead hosts, and this field is the override — which is why nothing
-    /// fills it in on the human's behalf: a field holding an address nobody
-    /// typed is a setting they cannot tell they have not chosen.
-    ///
-    /// Configuration rather than a secret — it is a public page, and its URL
-    /// goes in a comment on a pull request — so unlike the token it reads back
-    /// exactly as it was written.
-    pub share_viewer_url: String,
-
     /// And how a conflicted pull request is resolved in every Repo that has not
     /// said otherwise.
     ///
@@ -89,9 +81,26 @@ pub struct SettingsView {
     /// the Repo — see [`crate::RepoView::conflict_resolution`].
     pub conflict_resolution: ConflictResolution,
 
+    /// And whether a Conversation's record is published and linked on its pull
+    /// request when the work settles to Done.
+    ///
+    /// Never null either, and false where nobody has said: this is the one
+    /// setting on the page whose unconfigured state is the off one, because
+    /// what it turns on writes to GitHub under the human's own account.
+    pub share_on_done: bool,
+
     /// And the Watched Paths and the Sandbox Configuration binds, from both of
     /// the places either of them is said.
     pub paths: PathsView,
+
+    /// And the comments nobody wants addressed, in the order they were written
+    /// down — empty on a Verkstead that has been told to ignore nothing, which
+    /// is the ordinary condition rather than a setting half made.
+    ///
+    /// Exactly as the file holds them, a pattern that will not compile
+    /// included: this is what the editor draws back into its rows, and a rule
+    /// quietly left out of the read would be one the human could not correct.
+    pub ignored_comments: Vec<IgnoreRule>,
 }
 
 /// How a merge conflict between a pull request and its base branch is resolved.
@@ -281,15 +290,15 @@ pub struct SettingsEdit {
     /// stand and the server writes that down.
     pub rust_build_cache: BuildCacheEdit,
 
-    /// And where the human hosts a share viewer of their own, as a value for
-    /// the same reason: an empty one is nothing configured, which is what
-    /// clearing the field means and what puts Verkstead's own hosted copy back.
-    pub share_viewer_url: String,
-
     /// And how a conflicted pull request is resolved where its Repo says
     /// nothing, as a value for the same reason: there are two answers and a save
     /// says which of them this is to be.
     pub conflict_resolution: ConflictResolution,
+
+    /// And whether Done shares the record to the pull request, as a value for
+    /// that reason too — a switch has two answers and a save says which of them
+    /// this is to be.
+    pub share_on_done: bool,
 
     /// The Watched Paths the settings own, as values again: what is sent is
     /// what `config.yaml` holds afterwards, so a row taken off the page is a
@@ -308,6 +317,18 @@ pub struct SettingsEdit {
     /// file holds — and one grammar for both of the places a bind is said is
     /// one thing to learn rather than two.
     pub sandbox_binds: Vec<String>,
+
+    /// And what is to become of the ignore rules, which is an action rather
+    /// than a value — the one other field here that is.
+    ///
+    /// The token's half is an action because it is write-only. This one is
+    /// because it is the only setting a save can be *refused* over: a pattern
+    /// that will not compile is turned down, and a section that rode the rules
+    /// along as values would have the build cache's switch refused over a
+    /// pattern somebody hand-edited into the file weeks ago. So a save that is
+    /// not about the rules says nothing about them, and the ones on disk are
+    /// left exactly where they are.
+    pub ignored_comments: IgnoredCommentsEdit,
 }
 
 /// The build cache as the human has just set it.
@@ -345,10 +366,11 @@ pub enum TokenEdit {
 
 /// What became of a save.
 ///
-/// No refusals to name: there is nothing about a name, an address or a token
-/// this server declines to write down, and a file it could not write at all is
-/// the one failure — which is a status code, because it is something to try
-/// again rather than something to read.
+/// One refusal to name, and it is the ignore rules' — see [`RuleRefused`].
+/// There is nothing about a name, an address or a token this server declines to
+/// write down, and a file it could not write at all is the other failure —
+/// which is a status code rather than a named outcome, because it is something
+/// to try again rather than something to read.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct SettingsSaved {
@@ -360,8 +382,91 @@ pub struct SettingsSaved {
     /// What GitHub made of the token that was just saved, or `null` where the
     /// save was not about a token.
     pub verified: Option<Verified>,
+
+    /// The rules that would not be written down, or empty where the save
+    /// landed — which is every save that did not send any.
+    ///
+    /// A refusal here is the whole request refused: not one rule dropped and
+    /// the rest kept, and not the author written while the rules were turned
+    /// down. Neither file is touched, so `settings` above is how things stood
+    /// before the save as much as after it, and the page has one thing to do
+    /// with it — draw the errors at the rows and leave what the human typed
+    /// where it is.
+    pub refused: Vec<RuleRefused>,
 }
 
+/// One class of comment nobody wants an agent addressing.
+///
+/// Two patterns, either of which may be empty for *no constraint on that part*
+/// — strings rather than optionals, and empty for nothing, the way the author's
+/// two halves are: the row on the page holds a box either way, and clearing one
+/// is how the constraint is taken off.
+///
+/// Regular expressions in the regex crate's syntax, matched anywhere in their
+/// text rather than against the whole of it, and case-sensitive unless the
+/// pattern opens with `(?i)`. The author's is matched against the login of
+/// whoever wrote the comment and the body's against the markdown as it was
+/// written.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct IgnoreRule {
+    pub author: String,
+    pub body: String,
+}
+
+/// What is to become of the ignore rules on a save.
+///
+/// An action rather than a value, for the reason [`TokenEdit`] is one and not
+/// the same reason: nothing about a rule is secret, but the rules are the one
+/// thing a save can be refused over, and a section that is not about them
+/// should not be able to have its own save turned down by a pattern it never
+/// showed anybody.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum IgnoredCommentsEdit {
+    /// Leave whatever is written down alone. What every section but the rules'
+    /// own sends, and what makes those saves ones that cannot be refused.
+    Keep,
+
+    /// Write these in place of whatever is there — the whole list, in the order
+    /// it is to be read back in, so a row taken off the page is a rule taken
+    /// out of the file. An empty list is the human having removed the last one.
+    Set { rules: Vec<IgnoreRule> },
+}
+
+/// One rule a save was turned down over, by where it stood in what was sent.
+///
+/// By position rather than by content, because the row it names is the row the
+/// human is looking at: what they typed is still in front of them, and a
+/// refusal that described the rule instead would leave the page matching it up
+/// against its own boxes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct RuleRefused {
+    /// Where it stood among the rules that were sent, counting from zero.
+    pub rule: u32,
+
+    /// Which of the two patterns is at fault, or `null` where the rule itself
+    /// is — a rule giving neither field is refused as a whole, and there is no
+    /// box to draw that at.
+    pub field: Option<RuleField>,
+
+    /// Why, in words to put on the row. The regex engine's own for a pattern it
+    /// would not take, on one line: what draws this is a small box under a text
+    /// field, and the engine's message is a diagram across three or four.
+    pub why: String,
+}
+
+/// Which of a rule's two patterns something is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum RuleField {
+    /// The one matched against who wrote the comment.
+    Author,
+
+    /// And the one matched against what it says.
+    Body,
+}
 /// Who a token authenticates as, or why nobody could be asked.
 ///
 /// The failure is an answer here rather than a failed save. A token is pasted

@@ -53,7 +53,22 @@ stage: string,
 /**
  * And what that stage is called.
  */
-stage_title: string, };
+stage_title: string, 
+/**
+ * The branch this reading came off, or empty where it came off the default
+ * branch.
+ *
+ * A roadmap is a document on a branch, and one staged on a branch that has
+ * not merged yet is only there. So the branch travels with the reading and
+ * becomes the new Conversation's base: adopting reads the roadmap again at
+ * whatever base it is fixed to, and a stage found here and looked for
+ * somewhere else is a stage that is not there.
+ *
+ * Empty for the default branch, which is the base a Conversation takes
+ * when nobody fixes one — nothing to override, and nothing for the row to
+ * say about where it was found.
+ */
+base: string, };
 
 /**
  * What became of pressing Adopt.
@@ -202,7 +217,30 @@ profile: string | null,
  * at all; `null` beside a `profile` that is not is a session from before
  * either was recorded.
  */
-model: string | null, };
+model: string | null, 
+/**
+ * And which agent ran it, which is what says whose mark goes beside the
+ * reading — the same four words a Profile's account is discriminated by.
+ *
+ * Off the record beside the other two and for their reason. `null` for a
+ * session started before this was written down, which the reading draws
+ * without a mark rather than guessing one.
+ */
+agent_type: AgentType | null, };
+
+/**
+ * Which agent a session runs, on its own rather than as an account's shape.
+ *
+ * The same four words [`ProfileAccount`]'s discriminator is written in, so a
+ * viewer narrowing on one narrows on the other: what a Profile runs and what a
+ * finished session ran are the same fact about the same set of backends, and
+ * two spellings of it would be two things for the viewer to keep in step.
+ *
+ * Its own type because the account is not always there to carry it — a Timeline
+ * Event says which agent ran a session and holds no account at all, the
+ * Profile it was launched from being a thing that can since have gone.
+ */
+export type AgentType = "Claude" | "Codex" | "Grok" | "OpenCode";
 
 /**
  * One question's slot in a Response: either an Answer — a selected Option
@@ -1409,6 +1447,33 @@ at: string,
 html: string, };
 
 /**
+ * One class of comment nobody wants an agent addressing.
+ *
+ * Two patterns, either of which may be empty for *no constraint on that part*
+ * — strings rather than optionals, and empty for nothing, the way the author's
+ * two halves are: the row on the page holds a box either way, and clearing one
+ * is how the constraint is taken off.
+ *
+ * Regular expressions in the regex crate's syntax, matched anywhere in their
+ * text rather than against the whole of it, and case-sensitive unless the
+ * pattern opens with `(?i)`. The author's is matched against the login of
+ * whoever wrote the comment and the body's against the markdown as it was
+ * written.
+ */
+export type IgnoreRule = { author: string, body: string, };
+
+/**
+ * What is to become of the ignore rules on a save.
+ *
+ * An action rather than a value, for the reason [`TokenEdit`] is one and not
+ * the same reason: nothing about a rule is secret, but the rules are the one
+ * thing a save can be refused over, and a section that is not about them
+ * should not be able to have its own save turned down by a pattern it never
+ * showed anybody.
+ */
+export type IgnoredCommentsEdit = "Keep" | { "Set": { rules: Array<IgnoreRule>, } };
+
+/**
  * Where a Conversation has got to.
  *
  * The whole ladder, though only the first two are reachable yet: the states are
@@ -1497,7 +1562,16 @@ at: string, state: Lifecycle, };
  * roadmap's own answer at whatever commit the Conversation ends up branching
  * from.
  */
-export type NewAdoption = { repo_id: number, roadmap: string, };
+export type NewAdoption = { repo_id: number, roadmap: string, 
+/**
+ * The branch the roadmap was found on, where it was found on one — the
+ * [`AbandonedRoadmap::base`] of the row that was clicked, carried back so
+ * the Conversation starts fixed to it.
+ *
+ * Absent where the row came off the default branch, which is what a
+ * Conversation with no base fixed already reads.
+ */
+base: string | null, };
 
 /**
  * Which registered Repo to work alongside.
@@ -1665,6 +1739,11 @@ export type PickedView = "Nothing" | "Skipped" | { "Under": PairingView };
  *
  * All three are on the record as well, each at the moment it arrived there, and
  * each is one card drawn twice rather than two cards.
+ *
+ * The list they arrive in is ordered, and the viewer draws it in that order: a
+ * pull request first, then a task list, then a roadmap. The ordering is done
+ * where the list is built rather than here — see the pinned block in
+ * `crates/server/src/ui.rs`.
  */
 export type PinnedEvent = { "TaskList": TaskListEvent } | { "StageList": StageListEvent } | { "PullRequest": PullRequestEvent };
 
@@ -2305,6 +2384,37 @@ diagrams: boolean, };
 export type RoleChoice = { pairing: ProfileChoice | null, };
 
 /**
+ * Which of a rule's two patterns something is about.
+ */
+export type RuleField = "Author" | "Body";
+
+/**
+ * One rule a save was turned down over, by where it stood in what was sent.
+ *
+ * By position rather than by content, because the row it names is the row the
+ * human is looking at: what they typed is still in front of them, and a
+ * refusal that described the rule instead would leave the page matching it up
+ * against its own boxes.
+ */
+export type RuleRefused = { 
+/**
+ * Where it stood among the rules that were sent, counting from zero.
+ */
+rule: number, 
+/**
+ * Which of the two patterns is at fault, or `null` where the rule itself
+ * is — a rule giving neither field is refused as a whole, and there is no
+ * box to draw that at.
+ */
+field: RuleField | null, 
+/**
+ * Why, in words to put on the row. The regex engine's own for a pattern it
+ * would not take, on one line: what draws this is a small box under a text
+ * field, and the engine's message is a diagram across three or four.
+ */
+why: string, };
+
+/**
  * One session's Screen: the grid its Capture leaves on a terminal.
  *
  * Not the bytes and not a picture of them — the escape sequences that would
@@ -2469,17 +2579,17 @@ export type SettingsEdit = { git_author: Author, github_token: TokenEdit,
  */
 rust_build_cache: BuildCacheEdit, 
 /**
- * And where the human hosts a share viewer of their own, as a value for
- * the same reason: an empty one is nothing configured, which is what
- * clearing the field means and what puts Verkstead's own hosted copy back.
- */
-share_viewer_url: string, 
-/**
  * And how a conflicted pull request is resolved where its Repo says
  * nothing, as a value for the same reason: there are two answers and a save
  * says which of them this is to be.
  */
 conflict_resolution: ConflictResolution, 
+/**
+ * And whether Done shares the record to the pull request, as a value for
+ * that reason too — a switch has two answers and a save says which of them
+ * this is to be.
+ */
+share_on_done: boolean, 
 /**
  * The Watched Paths the settings own, as values again: what is sent is
  * what `config.yaml` holds afterwards, so a row taken off the page is a
@@ -2499,15 +2609,29 @@ watched_paths: Array<string>,
  * file holds — and one grammar for both of the places a bind is said is
  * one thing to learn rather than two.
  */
-sandbox_binds: Array<string>, };
+sandbox_binds: Array<string>, 
+/**
+ * And what is to become of the ignore rules, which is an action rather
+ * than a value — the one other field here that is.
+ *
+ * The token's half is an action because it is write-only. This one is
+ * because it is the only setting a save can be *refused* over: a pattern
+ * that will not compile is turned down, and a section that rode the rules
+ * along as values would have the build cache's switch refused over a
+ * pattern somebody hand-edited into the file weeks ago. So a save that is
+ * not about the rules says nothing about them, and the ones on disk are
+ * left exactly where they are.
+ */
+ignored_comments: IgnoredCommentsEdit, };
 
 /**
  * What became of a save.
  *
- * No refusals to name: there is nothing about a name, an address or a token
- * this server declines to write down, and a file it could not write at all is
- * the one failure — which is a status code, because it is something to try
- * again rather than something to read.
+ * One refusal to name, and it is the ignore rules' — see [`RuleRefused`].
+ * There is nothing about a name, an address or a token this server declines to
+ * write down, and a file it could not write at all is the other failure —
+ * which is a status code rather than a named outcome, because it is something
+ * to try again rather than something to read.
  */
 export type SettingsSaved = { 
 /**
@@ -2520,7 +2644,19 @@ settings: SettingsView,
  * What GitHub made of the token that was just saved, or `null` where the
  * save was not about a token.
  */
-verified: Verified | null, };
+verified: Verified | null, 
+/**
+ * The rules that would not be written down, or empty where the save
+ * landed — which is every save that did not send any.
+ *
+ * A refusal here is the whole request refused: not one rule dropped and
+ * the rest kept, and not the author written while the rules were turned
+ * down. Neither file is touched, so `settings` above is how things stood
+ * before the save as much as after it, and the page has one thing to do
+ * with it — draw the errors at the rows and leave what the human typed
+ * where it is.
+ */
+refused: Array<RuleRefused>, };
 
 /**
  * The settings as they stand, read off the two files at the moment they are
@@ -2537,24 +2673,6 @@ github_token: TokenSaved | null,
  */
 rust_build_cache: BuildCacheView, 
 /**
- * Where the human hosts a share viewer of their own, or empty where they
- * host none.
- *
- * A string rather than an optional, empty for nothing configured, the way
- * the author's two halves are: the field on the page holds it either way,
- * and clearing the box is how it is taken away.
- *
- * Empty is not *no viewer*. Links are then composed through the copy
- * Verkstead hosts, and this field is the override — which is why nothing
- * fills it in on the human's behalf: a field holding an address nobody
- * typed is a setting they cannot tell they have not chosen.
- *
- * Configuration rather than a secret — it is a public page, and its URL
- * goes in a comment on a pull request — so unlike the token it reads back
- * exactly as it was written.
- */
-share_viewer_url: string, 
-/**
  * And how a conflicted pull request is resolved in every Repo that has not
  * said otherwise.
  *
@@ -2565,10 +2683,29 @@ share_viewer_url: string,
  */
 conflict_resolution: ConflictResolution, 
 /**
+ * And whether a Conversation's record is published and linked on its pull
+ * request when the work settles to Done.
+ *
+ * Never null either, and false where nobody has said: this is the one
+ * setting on the page whose unconfigured state is the off one, because
+ * what it turns on writes to GitHub under the human's own account.
+ */
+share_on_done: boolean, 
+/**
  * And the Watched Paths and the Sandbox Configuration binds, from both of
  * the places either of them is said.
  */
-paths: PathsView, };
+paths: PathsView, 
+/**
+ * And the comments nobody wants addressed, in the order they were written
+ * down — empty on a Verkstead that has been told to ignore nothing, which
+ * is the ordinary condition rather than a setting half made.
+ *
+ * Exactly as the file holds them, a pattern that will not compile
+ * included: this is what the editor draws back into its rows, and a rule
+ * quietly left out of the read would be one the human could not correct.
+ */
+ignored_comments: Array<IgnoreRule>, };
 
 /**
  * What became of sharing a Conversation to the pull requests its work is on.
@@ -2593,8 +2730,8 @@ export type ShareCommented = { "Commented": { share: ShareView, on: Array<Commen
 export type SharePublished = { "Published": { share: ShareView, } } | "NoToken" | "NoGistScope" | { "Refused": { why: string, } };
 
 /**
- * One published share, as the workbench draws it: the link, and the moment the
- * snapshot was taken.
+ * One published share, as the workbench draws it: the link, the gist behind it,
+ * and the moment the snapshot was taken.
  */
 export type ShareView = { 
 /**
@@ -2608,6 +2745,16 @@ export type ShareView = {
  * is drawn. See `link` in `crates/server/src/sharing.rs`.
  */
 url: string, 
+/**
+ * And the gist itself, as GitHub gave it, which is what the record holds and
+ * what [`Self::url`] is composed from.
+ *
+ * Beside the viewer's link rather than instead of it, the two being for
+ * different things: the viewer's is what a reader is sent, and this is where
+ * the file actually is. A share is deleted at GitHub and nowhere else, so a
+ * human who wants one gone has to be able to reach it.
+ */
+gist: string, 
 /**
  * When it was published, RFC 3339 — drawn beside the link, because a link
  * with no date says nothing about how far the work has moved since.

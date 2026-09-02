@@ -101,14 +101,18 @@
   font-size: 0.9em;
 }
 
-/* The typed fields — the name, the account's paths, and the model id added by
-   hand — and the agent type, which is picked rather than typed and drawn as the
-   rest of them because it is another of the form's rows, not a control of its
-   own kind. The typed ones are said by type rather than by element, because the
-   ticks the models are picked with are inputs too and a width of the pane is not
-   what a checkbox wants. */
-.form input[type="text"],
-.form select {
+/* The typed fields: the name, the account's paths, and the model id added by
+   hand. Said by type rather than by element, because the ticks the models are
+   picked with are inputs too and a width of the pane is not what a checkbox
+   wants.
+
+   The agent type used to be in this rule, drawn as the rest of the form's rows
+   because it was another of them. It is the app's own listbox now — a row per
+   backend under its own brand mark — which carries the field treatment itself,
+   in `picking.module.css`, and takes only the room under it from here. Its words
+   are not in the fields' monospace either: what is being read is "Claude Code"
+   beside a mark rather than a path. */
+.form input[type="text"] {
   display: block;
   width: 100%;
   margin-bottom: 0.85rem;
@@ -119,6 +123,12 @@
   border: 1px solid var(--edge);
   border-radius: 0.4rem;
   padding: 0.5rem 0.6rem;
+}
+
+/* The room under the type picker, which is the whole of what the form has to say
+   about it: the same gap every field above it leaves. */
+.form .agentType {
+  margin-bottom: 0.85rem;
 }
 
 /* The models: a tick per model this build knows, and the field under them for an
@@ -151,8 +161,12 @@
   gap: 0.35rem;
 }
 
+/* Wrapping, because a row can say more than a narrow pane holds on one line: a
+   tick, a name, the note under `elsewhere` below and the id are four things, and
+   the words are the part worth reading whole. */
 .picks li {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: 0.5rem;
 }
@@ -161,11 +175,22 @@
    — so it takes none of the treatment the labels above the fields do. */
 .form .picks label {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: 0.4rem;
   margin: 0;
   font-size: inherit;
   color: inherit;
+}
+
+/* A ticked model that is another backend's, which is what a profile carries
+   across when its type is picked again. Said in the tick's own words rather
+   than under the list, so the row that is wrong is the row that says so — and
+   in `--stopped`, which is the colour on this page that means *this wants you*:
+   a profile saved with one of these offers a pairing the harness will refuse. */
+.picks .elsewhere {
+  font-size: 0.85rem;
+  color: var(--stopped);
 }
 
 /* The id the name stands for, quiet beside it: what the session is launched
@@ -259,9 +284,9 @@
 }
 
 /* The field being worked in, which is no pointer's doing: the border says which
-   of them the words are going into. */
-.form input[type="text"]:focus-visible,
-.form select:focus-visible {
+   of them the words are going into. The type picker says it for itself, in
+   `picking.module.css`. */
+.form input[type="text"]:focus-visible {
   border-color: var(--accent);
 }
 
@@ -269,8 +294,7 @@
    accent it is filled with, and the outline takes the colour its own words are
    in — the remove's red. */
 @media (hover: hover) {
-  .form input[type="text"]:hover,
-  .form select:hover {
+  .form input[type="text"]:hover {
     border-color: var(--ink-soft);
   }
 

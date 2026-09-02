@@ -6,9 +6,11 @@
 //! rather than as a Brief with a list under it.
 //!
 //! Above the list are the pinned Events, which are a fixed set — the backlog
-//! now, the stage list and the PR as those stages arrive. They do not scroll
-//! with the record: each is the current state of something the work is against,
-//! and is worth having on screen whichever part of the record is being read.
+//! now, the stage list and the PR as those stages arrive — and which are drawn
+//! in one order however they arrived: the pull request, then the task list, then
+//! the roadmap. They do not scroll with the record: each is the current state of
+//! something the work is against, and is worth having on screen whichever part
+//! of the record is being read.
 //! More than one of them is a carousel rather than a stack, because everything
 //! pinned is held above the record and a stack of them is what the record is
 //! pushed down by.
@@ -74,6 +76,7 @@
 //! chooser drawn on the Set itself — so both happen on the page the Set is
 //! answered on and land here as the answered Set.
 
+import { faShare } from "@fortawesome/free-solid-svg-icons";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
   For,
@@ -87,7 +90,8 @@ import {
   type JSX,
 } from "solid-js";
 
-import { saveBrief, startGrilling } from "../api/client";
+import { ran, reading } from "../agents";
+import { listProfiles, saveBrief, startGrilling } from "../api/client";
 import type {
   AgentOutputEvent,
   BriefEvent,
@@ -102,6 +106,7 @@ import type {
   MovedEvent,
   NoticeEvent,
   PinnedEvent,
+  ProfileEntry,
   PullRequestEvent,
   QuestionSetEvent,
   StageListEvent,
@@ -114,7 +119,10 @@ import type {
 } from "../api/types";
 import app from "../App.module.css";
 import { CardButton } from "../CardButton";
+import { IconButton } from "../IconButton";
 import { PaneSticky } from "../Panes";
+import { useReading } from "../freshness";
+import { HarnessMark } from "../HarnessMark";
 import { Empty, ErrorLine, Note } from "../notices";
 import { followBottom } from "../scrolling";
 // The badge and the sentence a Set this build cannot read is drawn with, taken
@@ -373,9 +381,10 @@ export function Timeline(props: {
   ///
   /// What it takes off is everything that is not a moment on the record: the
   /// status button, which is where the work stands and what is running in it
-  /// and the whole of the actions menu behind one press, and the block that
-  /// says what happens next. The cards themselves are untouched — a share is
-  /// read by opening them, exactly as the workbench is.
+  /// and the whole of the actions menu behind one press; the share icon, which
+  /// offers a reader a publish of somebody else's Conversation; and the block
+  /// that says what happens next. The cards themselves are untouched — a share
+  /// is read by opening them, exactly as the workbench is.
   ///
   /// Nothing about a *card* is decided here, and that is deliberate: a shared
   /// Conversation arrives with every field a control is drawn from already
@@ -388,6 +397,22 @@ export function Timeline(props: {
   /// The record itself, which is what says which box this pane scrolls in: a
   /// column of the page below the first breakpoint, and the pane above it.
   let record!: HTMLOListElement;
+
+  // The saved Profiles, for the one thing the record needs them for: whether
+  // the account a session ran as is the only one on its backend, and so whether
+  // its name is said after the model. Once for the pane rather than once per
+  // card, a record holding a session per resume being a column of them.
+  //
+  // Not in a share, which is what the gate is: a share fetches nothing, and an
+  // Agent run never boards one anyway — so this is a read for a card that
+  // cannot be there. A list that has not been read says the account's name,
+  // which is the answer that can never misattribute a run.
+  const profiles = useReading(() => ({
+    queryKey: ["profiles"],
+    queryFn: listProfiles,
+    enabled: !props.readOnly,
+    freshness: { reconcile: "id" },
+  }));
 
   // And the pane follows the bottom of it, the way a running session's output
   // already does — the same code, because it is the same reading: a record still
@@ -440,20 +465,50 @@ export function Timeline(props: {
           heading={styles.paneName}
           title={<PaneName conversation={props.conversation} />}
         >
-          {/* And the way on to the next level, drawn only where there is a next
-              level to reach: the details pane holds the selected Event and
-              nothing else, so with nothing selected it is bare paper and a
-              control that paged into it would page into nothing. Hidden by the
-              stylesheet anyway where all three panes are on screen at once. */}
-          <Show when={props.selected !== null}>
-            <button
-              type="button"
-              class={styles.paneForward}
-              onClick={props.details}
-            >
-              Details →
-            </button>
-          </Show>
+          {/* The pane's own controls, in the slot the settings gear stands in
+              at the head of the conversations. Both of them page into the
+              details, so they are one group at the end of the row rather than
+              two things the header holds apart. */}
+          <div class={styles.paneControls}>
+            {/* And the way on to the next level, drawn only where there is a
+                next level to reach: the details pane holds the selected Event
+                and nothing else, so with nothing selected it is bare paper and
+                a control that paged into it would page into nothing. Hidden by
+                the stylesheet anyway where all three panes are on screen at
+                once. */}
+            <Show when={props.selected !== null}>
+              <button
+                type="button"
+                class={styles.paneForward}
+                onClick={props.details}
+              >
+                Details →
+              </button>
+            </Show>
+
+            {/* Sharing the Conversation, which was four rows of the actions
+                menu and is now a pane of its own — see `Share.tsx`. Drawn
+                exactly as the settings gear beside the Verkstead wordmark is:
+                the same [`IconButton`](../IconButton.tsx), open while its pane
+                is what the details are showing, because it is another thing
+                standing in a pane that is selected and opened into the pane
+                beside it.
+
+                The press walks into the details as pressing a card does, which
+                is what makes it work on a narrow window: the selection and the
+                level are two acts, exactly as they are for every card below. */}
+            <Show when={!props.readOnly}>
+              <IconButton
+                of={faShare}
+                label="Share"
+                open={props.selected === "share"}
+                press={() => {
+                  props.select("share");
+                  props.details();
+                }}
+              />
+            </Show>
+          </div>
         </PaneHead>
 
         {/* And under the title, where the eye lands: where the work stands,
@@ -557,6 +612,7 @@ export function Timeline(props: {
                   {(output) => (
                     <AgentOutput
                       output={output()}
+                      saved={profiles.data}
                       selected={props.selected === output().id}
                       open={() => {
                         props.select(output().id);
@@ -691,6 +747,10 @@ export function Timeline(props: {
 ///
 /// Pinning is the fixed set — a task list, a stage list and the pull request —
 /// so there is nothing to pin, nothing to unpin, and no control for either.
+///
+/// They come in one order and are drawn in it: the pull request, then the task
+/// list, then the roadmap. The server is what puts them in it — see the pinned
+/// block in `crates/server/src/ui.rs`.
 ///
 /// One card at a time once there is more than one of them: they are held above
 /// the record, so a stack of them is a stack the record is pushed down by, and
@@ -953,15 +1013,18 @@ function parting(pane: Pane): string | undefined {
 /// Which card is showing when a conversation is opened: the one needing
 /// attention, and otherwise the first.
 ///
-/// The first is the fixed order — task list, then roadmap, then pull request —
-/// because that is the order the server hands them over in, which is the order
-/// the work goes through them in.
+/// The first is the fixed order — pull request, then task list, then roadmap —
+/// because that is the order the server hands them over in. The pull request
+/// leads it as the one of the three with anything on it to answer, so a
+/// conversation that has reached one opens on it whether or not it is stopped
+/// there.
 ///
 /// Needing attention is the conversation being blocked on the card, which only a
 /// pull request can be: what a wrap-up stops for is the review, and a backlog or
-/// a roadmap is a list read off the worktree with nothing on it to answer. So a
-/// pull request with feedback waiting on it fronts over the backlog beside it,
-/// which is what a reader opening the conversation is being stopped for.
+/// a roadmap is a list read off the worktree with nothing on it to answer. It
+/// still says something where there is more than one pull request: a
+/// companion's with feedback waiting on it fronts over the work's own, which is
+/// what a reader opening the conversation is being stopped for.
 function fronting(conversation: ConversationView): number {
   const at = conversation.pinned.findIndex(
     (event) =>
@@ -1555,18 +1618,29 @@ function ConflictsResolved(): JSX.Element {
   return <p class={styles.pressed}>You asked for the conflict to be resolved</p>;
 }
 
-/// What a session has printed: how much of it there is, and the last thing it
-/// said.
+/// What a session has printed: who ran it, how much of it there is, and the
+/// last thing it said.
 ///
 /// A button, because the whole of it is in the details pane and this is how it
 /// is opened — the summary is a line, and a grilling session's Capture is an
 /// hour of terminal output nobody wants in the middle pane.
+///
+/// The head names the run rather than the kind of thing it is. *Agent run* was
+/// the same three words over every card on a record that may hold a dozen of
+/// them, and what tells one from another is what it was run under — so the head
+/// is the shared reading in [`../agents`], off the three facts the session wrote
+/// down as it started, with the harness's mark in front of it. A session from
+/// before Verkstead wrote any of them down has nothing to be named by, and keeps
+/// the words — and no mark, there being no harness to draw one for.
 ///
 /// It moves while the session runs, which is the point: the page hears the world
 /// moved and reads this back, so a session that has just asked something says so
 /// here rather than at the end of an hour.
 function AgentOutput(props: {
   output: AgentOutputEvent;
+  /// The Profiles as they stand, which says whether the account's own name is
+  /// worth saying — `undefined` until the list has been read.
+  saved: ProfileEntry[] | undefined;
   selected: boolean;
   open: () => void;
 }): JSX.Element {
@@ -1577,7 +1651,15 @@ function AgentOutput(props: {
       press={props.open}
     >
       <span class={styles.eventHead}>
-        <span class={styles.what}>Agent run</span>
+        <span class={styles.what}>
+          {/* The harness's own mark in front of the words, which is what makes a
+              column of these scannable: a reader picks the Claude run out of
+              five by its shape before reading a word of any of them. Inside the
+              heading rather than beside it, so the two stay together where the
+              head wraps. */}
+          <HarnessMark of={props.output.agent_type} class={styles.harness!} />
+          {reading(ran(props.output), props.saved) || "Agent run"}
+        </span>
         {/* How far the conversation has got. A session with no Transcript to
             count has no metric at all rather than a zero: there is nothing here
             that took turns, and a `0 turns` would be a claim about it. */}

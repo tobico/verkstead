@@ -34,16 +34,17 @@ use verkstead_render::{
     CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView,
     ConflictResolutionEdit, ConversationArchived, ConversationClosed, ConversationEntry,
     ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Cursor,
-    GrillingStarted, Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion,
-    NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
-    RepoEntry, Resolved, Resumed, RoleChoice, SetReading, SetView, SettingsEdit, SettingsSaved,
-    SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
-    ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription,
-    TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    GrillingStarted, IgnoreRule, IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut,
+    NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry,
+    PushKey, Registration, RepoEntry, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
+    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
+    SharedCommit, SharedConversation, ShowingArchived, Standing, SteerOpened, SteerSubmission,
+    Submitted, Subscribed, Subscription, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet,
+    Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
-use crate::settings::{Config, GitAuthor, RustBuildCache, Secrets};
+use crate::settings::{Config, GitAuthor, RuleTrouble, RustBuildCache, Secrets};
 use crate::{AppState, store};
 
 /// The viewer's routes, over the state the agent API is already holding: a
@@ -311,11 +312,6 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // read and the save being the same page's two halves — and one save for
         // the author and the token together, because the page has one button.
         .route("/api/ui/settings", get(settings).post(save_settings))
-        // The page the human hosts once so that a Published Share can be read
-        // in a browser — see [`crate::sharing::VIEWER`]. A download beside the
-        // field that records where they put it, because the two are one job:
-        // take this away, put it up, say where it went.
-        .route("/api/ui/share-viewer.html", get(share_viewer))
         .route("/api/ui/update", get(update))
 }
 
@@ -828,7 +824,14 @@ async fn start_adoption(
     State(state): State<AppState>,
     Json(new): Json<NewAdoption>,
 ) -> HttpResponse {
-    match crate::conversations::start_adopting(&state, new.repo_id, &new.roadmap).await {
+    match crate::conversations::start_adopting(
+        &state,
+        new.repo_id,
+        &new.roadmap,
+        new.base.as_deref(),
+    )
+    .await
+    {
         Ok(outcome) => Json(outcome).into_response(),
         Err(error) => {
             tracing::error!(error = ?error, "starting a Conversation to adopt a roadmap failed");
@@ -966,24 +969,6 @@ pub(crate) async fn conversation_view(
     )
     .await;
 
-    // Each of those goes in two places — pinned above the record, and on the
-    // record at the row that says it landed — and this is the one reading behind
-    // both. The rows are stamped where the runner sees the landing; a
-    // Conversation from before there were rows to stamp keeps the pinned card
-    // alone, which is what it has always had.
-    let mut pinned: Vec<verkstead_render::PinnedEvent> = backlog
-        .clone()
-        .map(verkstead_render::task_list_event)
-        .into_iter()
-        .collect();
-
-    pinned.extend(
-        roadmaps
-            .iter()
-            .cloned()
-            .map(verkstead_render::stage_list_event),
-    );
-
     // And how the pull request's checks were the last time anything asked, which
     // is the one thing about a pull request that is written down and moves. Read
     // once for the two cards drawn from it below, both being the one card in the
@@ -1026,30 +1011,60 @@ pub(crate) async fn conversation_view(
         }
     };
 
-    // And every pull request the work ended up on, which are pinned beside them.
-    // These *are* on the record — the Conversation's own repository's is what
-    // moved the Conversation into Wrapping, and a companion's is that wrap-up
-    // covering the repository it also committed in — so they are read off the
-    // Timeline for the reason the Brief is: they are already here. All of them
-    // rather than the last one found: a Conversation ends on one pull request per
-    // repository it was worked in, and the human wraps up all of them at once.
-    // What is not read here is what a PR holds, which is a request of its own;
-    // see [`pull_request`].
-    pinned.extend(timeline.iter().filter_map(|event| match &event.event {
-        store::Event::PullRequest(opened) => Some(verkstead_render::pull_request_event(
-            event.id,
-            event.at.clone(),
-            verkstead_render::PullRequestSummary {
-                number: opened.number,
-                title: opened.title.clone(),
-                url: opened.url.clone(),
-                repo: opened.repo.clone(),
-                checks: own_checks(&opened.repo, checks),
-                merging: merges.get(&event.id).copied().map(merging),
-            },
-        )),
-        _ => None,
-    }));
+    // What is pinned, in the order the carousel turns through it: every pull
+    // request the work ended up on, then the backlog, then the roadmap.
+    //
+    // The pull request leads because it is the one of the three with anything on
+    // it to answer — a review waiting, checks gone red, a merge that stopped —
+    // where a backlog and a roadmap are lists read off the worktree with nothing
+    // on them to do. The two lists follow in the order the work goes through
+    // them: a backlog is this piece of work's own tasks, and a roadmap is the
+    // stages around it.
+    //
+    // Which card fronts when a Conversation is opened is not settled here. That
+    // is the viewer's, and this order is what it falls back to where nothing is
+    // blocking — see `fronting` in `web/src/workbench/Timeline.tsx`.
+    //
+    // The pull requests *are* on the record — the Conversation's own
+    // repository's is what moved the Conversation into Wrapping, and a
+    // companion's is that wrap-up covering the repository it also committed in —
+    // so they are read off the Timeline for the reason the Brief is: they are
+    // already here. All of them rather than the last one found: a Conversation
+    // ends on one pull request per repository it was worked in, and the human
+    // wraps up all of them at once. What is not read here is what a PR holds,
+    // which is a request of its own; see [`pull_request`].
+    let mut pinned: Vec<verkstead_render::PinnedEvent> = timeline
+        .iter()
+        .filter_map(|event| match &event.event {
+            store::Event::PullRequest(opened) => Some(verkstead_render::pull_request_event(
+                event.id,
+                event.at.clone(),
+                verkstead_render::PullRequestSummary {
+                    number: opened.number,
+                    title: opened.title.clone(),
+                    url: opened.url.clone(),
+                    repo: opened.repo.clone(),
+                    checks: own_checks(&opened.repo, checks),
+                    merging: merges.get(&event.id).copied().map(merging),
+                },
+            )),
+            _ => None,
+        })
+        .collect();
+
+    // And the two lists behind it. Each goes in two places — pinned here, and on
+    // the record at the row that says it landed — and this is the one reading
+    // behind both. The rows are stamped where the runner sees the landing; a
+    // Conversation from before there were rows to stamp keeps the pinned card
+    // alone, which is what it has always had.
+    pinned.extend(backlog.clone().map(verkstead_render::task_list_event));
+
+    pinned.extend(
+        roadmaps
+            .iter()
+            .cloned()
+            .map(verkstead_render::stage_list_event),
+    );
 
     // Whether the worktree is still on disk, which is a look at the filesystem
     // rather than anything the store knows.
@@ -1284,21 +1299,15 @@ pub(crate) async fn conversation_view(
     // Composed through the share viewer here rather than written down that way,
     // which is what makes the row a *drawing* of the record: the store keeps the
     // gist's URL as GitHub gave it, so a share published before there was a
-    // viewer links through one now, and a viewer moved later retargets every row
-    // there is without republishing anything — see [`crate::sharing::link`].
+    // viewer links through one now — see [`crate::sharing::link`].
     //
     // A read that fails reads as *never published*, which is a link missing from
     // a page rather than a page that will not draw: the record itself is
     // untouched, and the next publish writes over whatever is there.
-    let viewer = state
-        .settings
-        .config()
-        .share_viewer_url()
-        .map(str::to_owned);
-
     let shared = match store::share(&state.pool, id).await {
         Ok(shared) => shared.map(|shared| verkstead_render::ShareView {
-            url: crate::sharing::link(&shared.url, viewer.as_deref()),
+            url: crate::sharing::link(&shared.url),
+            gist: shared.url,
             at: shared.at,
         }),
         Err(error) => {
@@ -1397,9 +1406,13 @@ pub(crate) async fn conversation_view(
                     // renamed and a Pairing repicked, and what this Event is is
                     // the account of one session that has already happened.
                     store::Event::AgentOutput(summary, ran_under) => {
-                        let (profile, model) = match ran_under {
-                            Some(ran_under) => (Some(ran_under.profile), ran_under.model),
-                            None => (None, None),
+                        let (profile, model, agent_type) = match ran_under {
+                            Some(ran_under) => (
+                                Some(ran_under.profile),
+                                ran_under.model,
+                                ran_under.agent_type.map(crate::profiles::agent_type),
+                            ),
+                            None => (None, None, None),
                         };
 
                         verkstead_render::agent_output_event(
@@ -1412,6 +1425,7 @@ pub(crate) async fn conversation_view(
                             idling,
                             profile,
                             model,
+                            agent_type,
                         )
                     }
                     // The table of what was asked against what was decided, and no
@@ -1596,7 +1610,7 @@ async fn share_file(State(state): State<AppState>, Path(id): Path<String>) -> Ht
 
     let (name, file) = match document(&bundle) {
         Ok(share) => share,
-        Err(refusal) => return refusal,
+        Err(why) => return unavailable(&why),
     };
 
     (
@@ -1642,7 +1656,7 @@ async fn publish_share(State(state): State<AppState>, Path(id): Path<String>) ->
         })
         .into_response(),
         Err(Unpublished::Refused(why)) => Json(why).into_response(),
-        Err(Unpublished::Broken(refusal)) => refusal,
+        Err(Unpublished::Broken(why)) => unavailable(&why),
     }
 }
 
@@ -1654,10 +1668,37 @@ async fn publish_share(State(state): State<AppState>, Path(id): Path<String>) ->
 /// colleague is not choosing between a gist and a comment — they are handing
 /// over the record, and where it goes is wherever the work is being reviewed.
 ///
+/// The act is [`commented`], which the wrap-up's automatic share runs too; this
+/// is the id out of the URL turned into a record, and the answer turned into a
+/// response.
+async fn comment_share(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let bundle = match shared(&state, &id).await {
+        Ok(bundle) => bundle,
+        Err(refusal) => return refusal,
+    };
+
+    match commented(&state, &bundle).await {
+        Ok(said) => Json(said).into_response(),
+        Err(why) => unavailable(&why),
+    }
+}
+
+/// The act itself: the share published and the link said on every pull request
+/// the Conversation holds.
+///
+/// Its own function because the press is not the only thing that does it. A
+/// wrap-up settling to Done with the switch on hands the record over exactly
+/// this way — see [`crate::settling`] — and two spellings of *share to pull
+/// request* would be two answers to what the human turned on.
+///
+/// `bundle` is composed by the caller, because the two of them compose it
+/// differently: the press has an id out of a URL that may name no Conversation,
+/// and the settle has one it has just moved.
+///
 /// **The pull requests are read before anything is made.** A Conversation on
 /// none has nowhere for this to say anything, and publishing a share nobody
 /// would be sent to would leave a gist in somebody's account for nothing. The
-/// row is offered only where the record holds one, so the refusal is a page
+/// press is offered only where the record holds one, so the refusal is a page
 /// drawn against a Conversation that has since moved.
 ///
 /// **A comment on each rather than an edit of any.** A description is whoever
@@ -1669,12 +1710,13 @@ async fn publish_share(State(state): State<AppState>, Path(id): Path<String>) ->
 /// What could not be reached is named against what worked. The share is up
 /// either way, and a human told which pull request missed out can paste the
 /// link there themselves.
-async fn comment_share(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
-    let bundle = match shared(&state, &id).await {
-        Ok(bundle) => bundle,
-        Err(refusal) => return refusal,
-    };
-
+///
+/// The break comes back as a sentence for [`Unpublished::Broken`]'s reason: the
+/// press answers with it and the settle writes it into a Notice.
+pub(crate) async fn commented(
+    state: &AppState,
+    bundle: &SharedConversation,
+) -> Result<ShareCommented, String> {
     // Off the record rather than out of the URL, exactly as the publish's is:
     // the reading above refused an id that named no Conversation.
     let conversation_id = bundle.conversation.id;
@@ -1683,20 +1725,18 @@ async fn comment_share(State(state): State<AppState>, Path(id): Path<String>) ->
         Ok(pulls) => pulls,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "reading the pull requests to comment a share on failed");
-            return unavailable("the pull requests of this conversation could not be read");
+            return Err("the pull requests of this conversation could not be read".to_owned());
         }
     };
 
     if pulls.is_empty() {
-        return Json(ShareCommented::NoPullRequest).into_response();
+        return Ok(ShareCommented::NoPullRequest);
     }
 
-    let published = match publishing(&state, &bundle).await {
+    let published = match publishing(state, bundle).await {
         Ok(published) => published,
-        Err(Unpublished::Refused(why)) => {
-            return Json(ShareCommented::NotPublished { why }).into_response();
-        }
-        Err(Unpublished::Broken(refusal)) => return refusal,
+        Err(Unpublished::Refused(why)) => return Ok(ShareCommented::NotPublished { why }),
+        Err(Unpublished::Broken(why)) => return Err(why),
     };
 
     // What the comment says: where to read the share, and what is in the file
@@ -1704,7 +1744,7 @@ async fn comment_share(State(state): State<AppState>, Path(id): Path<String>) ->
     // — see [`verkstead_render::itemized`] — so that what is listed is what a
     // reader will actually find in it.
     let body = verkstead_render::itemized(
-        &bundle,
+        bundle,
         crate::sharing::titled(&bundle.conversation),
         // The link as the publish composed it, which is the same one the toast
         // and the Share row carry: one press, one address.
@@ -1724,7 +1764,7 @@ async fn comment_share(State(state): State<AppState>, Path(id): Path<String>) ->
         Ok(landings) => landings,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "commenting a published share on its pull requests failed");
-            return unavailable("the share was published but could not be commented anywhere");
+            return Err("the share was published but could not be commented anywhere".to_owned());
         }
     };
 
@@ -1758,12 +1798,31 @@ async fn comment_share(State(state): State<AppState>, Path(id): Path<String>) ->
         }
     }
 
-    Json(ShareCommented::Commented {
+    // And the one fact the automatic share is gated on: a share of this
+    // Conversation has been commented on its pull requests. Written wherever a
+    // comment lands and never unwritten — see [`store::record_share_comment`] —
+    // so that a Conversation the human has handed over themselves stays quiet
+    // when it settles.
+    //
+    // On any landing rather than on all of them. What the fact says is that
+    // somebody reviewing this work has been sent the record, and a pull request
+    // the comment missed is named right here for the human to paste the link on
+    // — where saying nothing was left anywhere would have the next settle
+    // publish a second gist and comment the ones that already have one.
+    //
+    // Nothing is refused for: the comments are on GitHub whatever happens here,
+    // and a fact that could not be written is a line in the log.
+    if !on.is_empty()
+        && let Err(error) = store::record_share_comment(&state.pool, conversation_id).await
+    {
+        tracing::error!(error = ?error, conversation_id, "recording that a share was commented on its pull requests failed");
+    }
+
+    Ok(ShareCommented::Commented {
         share: published.share,
         on,
         missed,
     })
-    .into_response()
 }
 
 /// One composed share published: the gist made, the file pushed into it and the
@@ -1816,21 +1875,17 @@ async fn publishing(
             &file,
         );
 
-        (
-            published,
-            secrets.github_token().map(str::to_owned),
-            config.share_viewer_url().map(str::to_owned),
-        )
+        (published, secrets.github_token().map(str::to_owned))
     })
     .await;
 
-    let (published, token, viewer) = match published {
+    let (published, token) = match published {
         Ok(published) => published,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "publishing a share failed");
-            return Err(Unpublished::Broken(unavailable(
-                "the share could not be published",
-            )));
+            return Err(Unpublished::Broken(
+                "the share could not be published".to_owned(),
+            ));
         }
     };
 
@@ -1854,18 +1909,18 @@ async fn publishing(
     // The gist's own URL is what is recorded, and the link is composed off it on
     // the way out — here for the toast and the comment, and again in the page
     // that draws the Share row. What is written down is where the file went;
-    // where a reader is sent is a fact about the viewer, and the viewer may move
-    // after this.
+    // where a reader is sent is a fact about the viewer.
     let share = match store::record_share(&state.pool, conversation_id, &url).await {
         Ok(share) => verkstead_render::ShareView {
-            url: crate::sharing::link(&share.url, viewer.as_deref()),
+            url: crate::sharing::link(&share.url),
+            gist: share.url,
             at: share.at,
         },
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, "recording where a share was published failed");
-            return Err(Unpublished::Broken(unavailable(
-                "the share was published but could not be written down",
-            )));
+            return Err(Unpublished::Broken(
+                "the share was published but could not be written down".to_owned(),
+            ));
         }
     };
 
@@ -1892,14 +1947,19 @@ struct Published {
 ///
 /// Two, because they reach the human differently. A refusal is about a token or
 /// about GitHub, which is a sentence and a settings page to go to; a break is
-/// the server failing at its own end, which is a status code.
+/// the server failing at its own end, which the workbench meets as a status
+/// code and the wrap-up says on the Timeline.
+///
+/// Which is why the break is a sentence rather than the response saying it: the
+/// press answers with it and the automatic share writes it into a Notice, and
+/// there is no reading a response back into words.
 #[allow(clippy::large_enum_variant)]
 enum Unpublished {
     /// Why the publish did not happen, in the words the workbench reads.
     Refused(SharePublished),
 
-    /// Or what the server could not do about it, as the response saying so.
-    Broken(HttpResponse),
+    /// Or what the server could not do about it, in one sentence.
+    Broken(String),
 }
 
 /// The share of one bundle as the two of them hand it over: what the file is
@@ -1909,25 +1969,24 @@ enum Unpublished {
 /// places. A publish composing its own would be a second build of the same
 /// share, and the byte a link points at should be the byte that downloads.
 ///
-/// The refusal is an `HttpResponse` because that is what the two callers answer
-/// with, and it is the larger half of this `Result` — which is the one thing
-/// clippy has to say about it. Boxing it would put an allocation on the path
-/// that never fails to save one on the path that already gives up.
-#[allow(clippy::result_large_err)]
-fn document(bundle: &SharedConversation) -> Result<(String, String), HttpResponse> {
+/// What it could not do comes back as a sentence rather than as a response: the
+/// download and the publish answer with it, and the wrap-up's automatic share
+/// puts it on the Timeline. Every one of them is the server failing at its own
+/// end, which is why each is worded as a `500` wherever a request is waiting on
+/// it.
+fn document(bundle: &SharedConversation) -> Result<(String, String), String> {
     // Only reachable in a checkout where the share build was never made — the
     // same `allow_missing` the viewer itself is embedded under, and the same
     // answer: the server runs, and what it cannot do it says.
     let Some(template) = crate::viewer::Shareable::get(crate::viewer::SHARE) else {
-        return Err(unavailable(
-            "the share build of the viewer was not built into this binary: run `pnpm build` in web/",
-        ));
+        return Err(
+            "the share build of the viewer was not built into this binary: run `pnpm build` in web/"
+                .to_owned(),
+        );
     };
 
     let Ok(template) = std::str::from_utf8(&template.data) else {
-        return Err(unavailable(
-            "the share build of the viewer could not be read",
-        ));
+        return Err("the share build of the viewer could not be read".to_owned());
     };
 
     // And the diagram renderer, on the one kind of share that needs one. It is
@@ -1938,16 +1997,17 @@ fn document(bundle: &SharedConversation) -> Result<(String, String), HttpRespons
         match crate::viewer::Shareable::get(crate::viewer::MERMAID) {
             Some(built) => match String::from_utf8(built.data.into_owned()) {
                 Ok(code) => Some(code),
-                Err(_) => return Err(unavailable("the diagram renderer could not be read")),
+                Err(_) => return Err("the diagram renderer could not be read".to_owned()),
             },
             // Built by something that is not this build. A share drawn without
             // it is the record with its Diagrams left as the source the agent
             // wrote, which is readable — but a colleague would be reading a
             // page the human never saw, so it is refused instead.
             None => {
-                return Err(unavailable(
-                    "the diagram renderer was not built into this binary: run `pnpm build` in web/",
-                ));
+                return Err(
+                    "the diagram renderer was not built into this binary: run `pnpm build` in web/"
+                        .to_owned(),
+                );
             }
         }
     } else {
@@ -1955,9 +2015,7 @@ fn document(bundle: &SharedConversation) -> Result<(String, String), HttpRespons
     };
 
     let Some(file) = crate::sharing::file(template, bundle, mermaid.as_deref()) else {
-        return Err(unavailable(
-            "the share build of the viewer has nowhere to put a conversation",
-        ));
+        return Err("the share build of the viewer has nowhere to put a conversation".to_owned());
     };
 
     let name = crate::sharing::filename(
@@ -2002,6 +2060,27 @@ async fn shared(state: &AppState, id: &str) -> Result<SharedConversation, HttpRe
         .unwrap_or_default();
 
     Ok(verkstead_render::shared(view, sets, commits, taken))
+}
+
+/// The same composition, for a caller with nobody waiting on a response.
+///
+/// The wrap-up's automatic share has an id it has just settled rather than one
+/// out of a URL, so the refusals above are not answers it could give anybody:
+/// what it needs to know is whether there is a record to hand over, and `None`
+/// is the whole of *no*. The reason is logged here, where every other reading
+/// that fails with nobody watching logs its own.
+pub(crate) async fn share_of(state: &AppState, conversation_id: i64) -> Option<SharedConversation> {
+    match shared(state, &conversation_id.to_string()).await {
+        Ok(bundle) => Some(bundle),
+        Err(_) => {
+            tracing::error!(
+                conversation_id,
+                "composing the share of a Conversation that has just settled failed",
+            );
+
+            None
+        }
+    }
 }
 
 /// And every commit the Timeline holds, rendered as the pane the workbench
@@ -3391,6 +3470,40 @@ async fn save_settings(
     let installed = state.binds.clone();
 
     let saved = tokio::task::spawn_blocking(move || {
+        // What the rules are to be afterwards, and what is wrong with them —
+        // both before a byte of either file is written, because a refusal here
+        // is the whole request refused. A save that wrote the author down and
+        // turned the rules away would leave the human working out which half of
+        // the page they are looking at.
+        let (rules, refused) = match &edit.ignored_comments {
+            // Whatever is written down, carried through untouched — a pattern
+            // that will not compile included. The reading half keeps one of
+            // those and this half is not entitled to drop it: a save about the
+            // build cache has no business quietly rewriting a rule, and no
+            // business being refused over one either.
+            IgnoredCommentsEdit::Keep => {
+                (settings.config().ignored_comments().to_vec(), Vec::new())
+            }
+
+            IgnoredCommentsEdit::Set { rules } => {
+                let rules: Vec<_> = rules.iter().map(as_stored).collect();
+                let refused = refusals(&rules);
+
+                (rules, refused)
+            }
+        };
+
+        if !refused.is_empty() {
+            return Ok(SettingsSaved {
+                // How things stand, which is how they stood: nothing was
+                // written, and the page draws the errors over what the human
+                // still has in front of them.
+                settings: as_told(&settings, caches_compiles, &watched, &installed),
+                verified: None,
+                refused,
+            });
+        }
+
         settings.save_config(&Config::of(
             GitAuthor::of(Some(edit.git_author.name), Some(edit.git_author.email)),
             // The size as it was typed, and an empty field as nothing
@@ -3400,13 +3513,13 @@ async fn save_settings(
                 edit.rust_build_cache.enabled,
                 Some(edit.rust_build_cache.size),
             ),
-            // And where the share viewer is hosted, the same way: an empty
-            // field is nowhere, which is how it is taken away again.
-            Some(edit.share_viewer_url),
             // And how a conflict is resolved where the Repo it is in says
             // nothing, which is one of two words and never absent: there is no
             // third state for a page to send.
             crate::repos::stored(edit.conflict_resolution),
+            // And whether Done shares the record to the pull request, which is
+            // a switch: two answers, and the save says which of them this is.
+            edit.share_on_done,
             // And the paths as values too: what is sent is what the file holds
             // afterwards, so a row taken off the page is a row taken out of the
             // file. Only the settings' own — the installation's are the unit's
@@ -3414,6 +3527,9 @@ async fn save_settings(
             // them if they were.
             edit.sandbox_binds,
             edit.watched_paths,
+            // And the rules, decided above: either what was already written down
+            // or the whole list the page sent, in the order it sent it.
+            rules,
         ))?;
 
         let verifying = match &edit.github_token {
@@ -3450,6 +3566,9 @@ async fn save_settings(
         Ok::<_, std::io::Error>(SettingsSaved {
             settings: as_told(&settings, caches_compiles, &watched, &installed),
             verified,
+            // Nothing turned down: a save that got this far was one there was
+            // nothing wrong with.
+            refused: Vec::new(),
         })
     })
     .await;
@@ -3522,19 +3641,26 @@ fn as_told(
             // environment, and the one thing on this page the human cannot set.
             compiles_cached: caches_compiles,
         },
-        // As it was written, because there is nothing secret about it: a public
-        // page, whose URL goes on a pull request the moment a share is
-        // published through it.
-        share_viewer_url: config.share_viewer_url().unwrap_or_default().to_owned(),
         // Where the setting sits rather than whether anybody has been here:
         // nothing configured is a merge, and there is no third state to draw.
         conflict_resolution: crate::repos::resolution(config.conflict_resolution()),
+
+        // And where the switch beside it sits, which is off until somebody has
+        // been here — the one setting on the page whose unconfigured state is
+        // the off one.
+        share_on_done: config.share_on_done(),
 
         // Both sources at once, each entry saying which of the two said it and
         // whether the server can see it now — see [`crate::paths`]. Read from
         // the file again rather than off the `config` above, because that is
         // where the whole of this one question is answered.
         paths: crate::paths::told(watched, binds, settings),
+
+        // And the ignore rules exactly as the file holds them, a pattern that
+        // will not compile included: this is what the editor draws back into
+        // its rows, and a rule left out of the read would be one the human
+        // could not correct.
+        ignored_comments: config.ignored_comments().iter().map(as_written).collect(),
         github_token: secrets.github_token().map(|token| TokenSaved {
             last_four: last_four(token),
             at: settings
@@ -3543,6 +3669,56 @@ fn as_told(
                 .unwrap_or_default(),
         }),
     }
+}
+
+/// One ignore rule as the settings file holds it, out of what the page sent:
+/// two patterns, each blank one no constraint on that part at all.
+fn as_stored(rule: &IgnoreRule) -> crate::settings::IgnoreRule {
+    crate::settings::IgnoreRule::of(Some(rule.author.clone()), Some(rule.body.clone()))
+}
+
+/// And the other way round, for the read: a pattern that is not there is an
+/// empty box on the page, which is the same thing said in the shape a form
+/// holds.
+fn as_written(rule: &crate::settings::IgnoreRule) -> IgnoreRule {
+    IgnoreRule {
+        author: rule.author().unwrap_or_default().to_owned(),
+        body: rule.body().unwrap_or_default().to_owned(),
+    }
+}
+
+/// What is wrong with the rules a save is asking for, one entry per row at
+/// fault, and empty where there is nothing wrong with any of them.
+///
+/// Every row rather than the first: the page draws the error at the row, so a
+/// human who mistyped two patterns should be told about two of them rather than
+/// finding the second after fixing the first.
+fn refusals(rules: &[crate::settings::IgnoreRule]) -> Vec<RuleRefused> {
+    rules
+        .iter()
+        .enumerate()
+        .filter_map(|(at, rule)| {
+            let (field, why) = match rule.trouble()? {
+                RuleTrouble::Empty => (
+                    None,
+                    "a rule with neither field would ignore every comment there is, so it \
+                     needs an author, a body, or both"
+                        .to_owned(),
+                ),
+                RuleTrouble::Author(why) => (Some(RuleField::Author), why),
+                RuleTrouble::Body(why) => (Some(RuleField::Body), why),
+            };
+
+            Some(RuleRefused {
+                // Saturating rather than wrapping, because a row that pointed
+                // at the wrong one would be worse than a row that points at the
+                // last: a list this long is a request nobody typed.
+                rule: u32::try_from(at).unwrap_or(u32::MAX),
+                field,
+                why,
+            })
+        })
+        .collect()
 }
 
 /// The last four characters of a token, or the fewer there are.
@@ -3555,42 +3731,6 @@ fn last_four(token: &str) -> String {
     let from = characters.len().saturating_sub(4);
 
     characters[from..].iter().collect()
-}
-
-/// `GET /api/ui/share-viewer.html` — the share viewer, to take away and host.
-///
-/// The one file Verkstead hands over that is nobody's record: a small static
-/// page that draws a Published Share in a browser — see
-/// [`crate::sharing::VIEWER`], where what it does and why is written down.
-///
-/// Offered rather than required. Links are composed through the copy Verkstead
-/// hosts unless the human says otherwise ([`crate::sharing::HOSTED`]), so this
-/// is for whoever would rather put the page on a public site of their own once
-/// and point the setting at it.
-///
-/// An attachment rather than a page, for the reason a share is one: what the
-/// press is for is getting the file, and a viewer that opened here would be a
-/// viewer served off the tailnet, where nobody a share is sent to can reach it.
-///
-/// Compiled in rather than embedded like the built viewer beside it. There is
-/// no build step behind this one — it is written by hand and has no
-/// dependencies — so it is in every binary rather than in the ones somebody ran
-/// `pnpm build` for.
-async fn share_viewer() -> HttpResponse {
-    (
-        [
-            (CONTENT_TYPE, "text/html; charset=utf-8".to_owned()),
-            (
-                CONTENT_DISPOSITION,
-                format!(
-                    "attachment; filename=\"{}\"",
-                    crate::sharing::VIEWER_FILENAME
-                ),
-            ),
-        ],
-        crate::sharing::VIEWER,
-    )
-        .into_response()
 }
 
 /// `GET /api/ui/update` — whether a newer Verkstead has been released than

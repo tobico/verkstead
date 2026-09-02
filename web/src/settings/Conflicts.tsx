@@ -163,11 +163,19 @@ export function ConflictsPane(props: {
             ? (settings?.rust_build_cache.size ?? "")
             : "",
         },
-        share_viewer_url: settings?.share_viewer_url ?? "",
         conflict_resolution,
+        // And whether Done shares the record to its pull request, which is the
+        // GitHub section's switch and none of this one's business.
+        share_on_done: settings?.share_on_done ?? false,
         // And the paths as the read left them: a list this section left out
         // would be a list it emptied — see [`heldPaths`].
         ...heldPaths(settings),
+        // And the ignore rules left exactly where they are. Alone among the
+        // settings they travel as an action rather than a value: this form has
+        // nothing to say about them, and one that spoke for them could have its
+        // own save refused over a pattern it never showed anybody — see
+        // [`IgnoredCommentsEdit`].
+        ignored_comments: "Keep",
       });
     },
     // The save's answer *is* a fresh read of both files, so a second read would

@@ -73,20 +73,51 @@ pub(crate) async fn start(state: &AppState, repo_id: i64) -> Result<Started> {
 /// where the page is drawn and asked again when Adopt is pressed: a roadmap
 /// somebody finished between the notice and the click is a thing to say on the
 /// page rather than a start to refuse.
+///
+/// `base` is the branch the notice found the roadmap on, and it is fixed on the
+/// Conversation here rather than left to the human: a roadmap staged on an
+/// unmerged branch exists nowhere else, so a Conversation started against the
+/// default branch would draw *nothing to adopt at this base commit* about the
+/// very roadmap that was just clicked. `None` is the default branch, which is
+/// what a Conversation with no base fixed already reads.
 pub(crate) async fn start_adopting(
     state: &AppState,
     repo_id: i64,
     roadmap: &str,
+    base: Option<&str>,
 ) -> Result<Started> {
     Ok(
         match store::start_adoption(&state.pool, repo_id, &branch_name(), roadmap).await? {
             Some(id) => {
+                if let Some(base) = base {
+                    fix(state, id, base).await;
+                }
+
                 prefill(state, id, repo_id).await;
                 Started::Started { id }
             }
             None => Started::NoSuchRepo,
         },
     )
+}
+
+/// Fix a new adopting Conversation's base to the branch its roadmap was found
+/// on.
+///
+/// Nothing refuses the start over this, for [`prefill`]'s reason: the
+/// Conversation exists by the time this runs. What a base that failed to write
+/// costs is a page saying there is nothing to adopt at the base it does have,
+/// with the picker that fixes it sitting on the same page — so it is logged and
+/// the human is left somewhere they can get themselves out of.
+async fn fix(state: &AppState, id: i64, base: &str) {
+    if let Err(error) = store::set_base_commit(&state.pool, id, Some(base)).await {
+        tracing::warn!(
+            error = ?error,
+            conversation_id = id,
+            base,
+            "fixing an adopting Conversation to the branch its roadmap was found on failed",
+        );
+    }
 }
 
 /// Fill a new Conversation's two pickers with what its Repo was last grilled
@@ -767,6 +798,17 @@ pub(crate) async fn rename_companion_branch(
 /// reaches this any more — a second round opens where it is steered, past
 /// drafting already — so it is asked of the record rather than assumed away.
 ///
+/// **And the branch name is settled here, not when the Conversation was
+/// started.** A name Verkstead invented is a prefill: it is drawn nowhere, the
+/// human never saw it, and by the time the branch is cut the repository may
+/// well have one by that name already — an earlier Conversation's, since a
+/// branch outlives the worktree it was worked in. So a taken prefill is
+/// replaced with another free name rather than refused — free in every
+/// repository it is about to be cut in at once, and free of what their remotes
+/// hold as well as their own branches — and the record follows what was cut.
+/// What *is* refused is a name the human typed on a branch that is already
+/// there: that one they chose and meant, and it is theirs to think again about.
+///
 /// **Every companion repo is checked out here too**, and every one of them is
 /// asked the same four questions in the same order and refused by the same
 /// names — with the repository said, because *which one* is the whole of what
@@ -843,22 +885,26 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     let default = conversation.repo.default_branch.clone();
 
     let repo = conversation.repo.path.clone();
+    let repo_name = conversation.repo.name.clone();
     let branch = conversation.branch.clone();
+
+    // Whether that name is one somebody chose, which is what decides whether a
+    // repository already holding it is a refusal or a reason to pick again —
+    // see the choosing below.
+    let settled = conversation.branch_named;
     let companions = conversation.companions.clone();
     let data_dir = state.data_dir.clone();
 
     // Where the work goes on. A Conversation that already has one works where it
     // has always worked and there is nothing here to make; one that has none is
-    // given the name a first grilling chooses.
+    // given a directory named for its branch, chosen below rather than here
+    // because the branch itself is not settled until the repository has been
+    // asked about the name.
     let worked_in = conversation.worktree.clone();
-    let path = worked_in.clone().unwrap_or_else(|| {
-        worktrees::worktree_path(&state.data_dir, id, &conversation.repo.name, &branch)
-    });
 
     // The filesystem and git halves together, off the runtime: a worktree of a
     // large repository is not a quick call, and every part of this blocks.
     let made = tokio::task::spawn_blocking({
-        let path = path.clone();
         let branch = branch.clone();
         let checkouts = state.checkouts.clone();
         move || {
@@ -868,11 +914,11 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
             // happen, and a base that was frozen when the work started is not
             // something a fetch could freshen. Its companions were checked out
             // with it and are where they were left.
-            if worked_in.is_some() {
+            if let Some(path) = worked_in {
                 let named = picked.unwrap_or(default);
 
                 return worktrees::resolve(&repo, &named)
-                    .map(|commit| (commit, Vec::new(), None))
+                    .map(|commit| (commit, path, branch, Vec::new(), None))
                     .ok_or(GrillingStarted::NoBaseCommit);
             }
 
@@ -903,9 +949,26 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
                 return Err(GrillingStarted::NoBaseCommit);
             };
 
+            // And the name the work is cut on. A name Verkstead invented is
+            // nobody's — a prefill drawn nowhere, which the human never saw and
+            // could not have meant — so a repository that already has a branch
+            // by it is a reason to invent another rather than a reason to stop
+            // the work. Asked after the fetch, so that what the remotes hold is
+            // as fresh as the remotes are.
+            let branch = match settled {
+                true => branch,
+                false => name_to_cut(id, branch, &cut_in(&repo, &companions)),
+            };
+
+            // Which leaves the refusal to the case it was written for: a name
+            // somebody typed, on a branch somebody's work is already on. That
+            // one is theirs to think again about, and taking it over would be
+            // Verkstead writing into work it did not start.
             if worktrees::branch_exists(&repo, &branch) {
                 return Err(GrillingStarted::BranchExists);
             }
+
+            let path = worktrees::worktree_path(&data_dir, id, &repo_name, &branch);
 
             // The Conversation's own checkout is the first of the list, and
             // every companion asks its way on to the end of it. Nothing is made
@@ -913,7 +976,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
             let mut planned = vec![Checkout {
                 companion: None,
                 repo,
-                path,
+                path: path.clone(),
                 branch: Some(branch.clone()),
                 commit: commit.clone(),
             }];
@@ -942,15 +1005,22 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
 
             make(&planned).map_err(Unmade::grilling)?;
 
-            Ok((commit, recorded(&planned), Some(making)))
+            Ok((commit, path, branch, recorded(&planned), Some(making)))
         }
     })
     .await?;
 
-    let (commit, checkouts, making) = match made {
+    let (commit, path, cut, checkouts, making) = match made {
         Ok(made) => made,
         Err(refusal) => return Ok(refusal),
     };
+
+    // The record catches up with the name the branch was actually cut on, which
+    // is the name it was carrying wherever that one was free — which is almost
+    // always, and always for a name the human typed.
+    if cut != branch {
+        store::reinvent_branch(pool, id, &cut).await?;
+    }
 
     let moved = match grilled {
         true => store::start_grilling(pool, id, &commit, &path, &checkouts).await?,
@@ -1387,10 +1457,12 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
                 return Err(Adopted::FetchFailed);
             }
 
-            let named = match picked {
-                Some(picked) => picked,
-                None => worktrees::default_ref(&repo, &default),
-            };
+            // Both, because the stacking question below is *is this the default
+            // branch or something else*, and the default's own name is half of
+            // that. Resolved after the fetch, like everything else here.
+            let default = worktrees::default_ref(&repo, &default);
+
+            let named = picked.unwrap_or_else(|| default.clone());
 
             let Some(commit) = worktrees::resolve(&repo, &named) else {
                 return Err(Adopted::NoBaseCommit);
@@ -1402,7 +1474,11 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
             // have moved since. Which clause refused it is the answer to the
             // button: each of them is a different thing to go and do about it.
             match crate::stages::startable(&repo, &commit, &roadmap) {
-                Startable::Stage(abandoned) => Ok((commit, named, abandoned.stage)),
+                Startable::Stage(abandoned) => {
+                    let stacks_on = predecessor(&repo, &commit, &named, &default);
+
+                    Ok((commit, named, abandoned.stage, stacks_on))
+                }
                 Startable::NoRoadmap => Err(Adopted::NoRoadmap),
                 Startable::Complete => Err(Adopted::RoadmapComplete),
                 Startable::InFlight => Err(Adopted::StageInFlight),
@@ -1416,7 +1492,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // `named` comes back out rather than being worked out again up here: what an
     // unpicked base resolved through is decided inside, after the fetch, and the
     // Timeline is owed the name the branch actually came off.
-    let (commit, named, stage) = match read {
+    let (commit, named, stage, stacks_on) = match read {
         Ok(read) => read,
         Err(refusal) => return Ok(refusal),
     };
@@ -1486,9 +1562,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     };
 
     // And now the store, in the order the record is read in: the branch it is on,
-    // the Brief it works from, and then the move that freezes both. Adoption
-    // never stacks — there is no predecessor Conversation to stand on, and
-    // standing on an unmerged one is the base commit the human fixed above.
+    // the Brief it works from, and then the move that freezes both.
     store::rename_branch(pool, id, Some(branch.as_str())).await?;
     store::save_brief(pool, id, &stage.brief).await?;
 
@@ -1497,7 +1571,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // that said it was implementing without saying where its companions went
     // would be one nothing could bind into a sandbox and nothing would come back
     // and remove.
-    match store::start_stage(pool, id, &commit, &path, None, &checkouts).await? {
+    match store::start_stage(pool, id, &commit, &path, stacks_on.as_deref(), &checkouts).await? {
         store::Staged::Started => {}
         store::Staged::NoSuchConversation => return Ok(Adopted::NoSuchConversation),
         store::Staged::NotDrafting => return Ok(Adopted::NotDrafting),
@@ -1511,7 +1585,13 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // Conversation's own Timeline, because that is the only Timeline there is:
     // adoption has no predecessor Conversation for the human to have been
     // watching.
-    if let Err(error) = store::note(pool, id, &adopted(&stage, &branch, &named)).await {
+    if let Err(error) = store::note(
+        pool,
+        id,
+        &adopted(&stage, &branch, stacks_on.as_deref(), &named),
+    )
+    .await
+    {
         tracing::error!(error = ?error, conversation_id = id, "recording what was adopted failed");
     }
 
@@ -1537,7 +1617,12 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // [`crate::runner::plan_stage`].
     let driving = state.drivers.driving(id);
 
-    tokio::spawn(crate::runner::plan_stage(state.clone(), id, None, driving));
+    tokio::spawn(crate::runner::plan_stage(
+        state.clone(),
+        id,
+        stacks_on,
+        driving,
+    ));
 
     Ok(Adopted::Adopted)
 }
@@ -1547,19 +1632,72 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
 ///
 /// [`crate::continuing::begun`]'s wording, with the two things adoption changes
 /// taken out of it. *With nobody asked* goes, because somebody did: a human
-/// pressed this. And only the came-off half is ever said, because an adopted
-/// stage has no predecessor Conversation to stack on — where its branch stands
-/// is the base commit, which is the human's to fix and theirs alone.
-fn adopted(stage: &crate::stages::Stage, branch: &str, from: &str) -> String {
+/// pressed this. What stays is both halves: an adopted stage stacks on the base
+/// the human fixed it to, wherever that base is a predecessor there is anything
+/// left to stack on, and the half it did not take is as much worth saying as
+/// the half it did.
+fn adopted(
+    stage: &crate::stages::Stage,
+    branch: &str,
+    stacks_on: Option<&str>,
+    from: &str,
+) -> String {
     // The brief named rather than linked, as the unattended start names it: it
     // is a path in a Worktree the workbench has no route to, and a link that
     // went nowhere would be worse than the path itself.
-    format!(
-        "Stage {} of the `{}` roadmap — *{}* — was adopted from `{}`. Its branch `{branch}` came \
-         off `{from}`: an adopted stage has no Conversation before it to stack on, so where it \
-         stands is the base commit this one was fixed to.",
+    let started = format!(
+        "Stage {} of the `{}` roadmap — *{}* — was adopted from `{}`.",
         stage.label, stage.roadmap, stage.title, stage.brief_path,
-    )
+    );
+
+    match stacks_on {
+        Some(predecessor) => format!(
+            "{started} Its branch `{branch}` stacks on `{predecessor}`, the base this \
+             Conversation was fixed to, the way this repository's `{}` records.",
+            crate::stages::GIT_WORKFLOW,
+        ),
+        None => format!(
+            "{started} Its branch `{branch}` came off `{from}` and stacks on nothing: the base \
+             is the default branch, or work already in it, or this repository's `{}` records no \
+             way to stack a roadmap stage on the one before it.",
+            crate::stages::GIT_WORKFLOW,
+        ),
+    }
+}
+
+/// The branch an adopted stage stacks on, where there is one to stack on.
+///
+/// Stacking is what a stage does when the work it builds on is finished and not
+/// yet merged, and for an adopted stage that work is whatever the human fixed
+/// the base to — there being no predecessor Conversation here to take it from,
+/// which is the one thing adoption does differently. Four things have to hold,
+/// and each of them is a way of there being nothing to stack on rather than a
+/// failure:
+///
+/// - **The base is not the default branch.** A stage off the default branch is
+///   the ordinary unstacked case: there is no predecessor, which is what
+///   picking no base means.
+/// - **It names a local branch.** A stack holds branches, so a base given as a
+///   raw commit or as a remote-tracking ref is not one a stack could be told
+///   about. Asked as [`worktrees::branch_exists`] rather than the fail-safe
+///   reading, because a git that would not answer is a reason to leave the
+///   bookkeeping alone rather than to invent some.
+/// - **It is not already in the default branch.** A merged predecessor is work
+///   that has landed, and its pull request is closed: there is nothing left for
+///   a stack to hold it in.
+/// - **The repository records a stacking mechanism**, at the base commit, which
+///   is [`crate::stages::stacks_at`]'s question and the same one the unattended
+///   path asks of a Worktree. Verkstead carries no mechanism of its own.
+fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<String> {
+    if named == default || !worktrees::branch_exists(repo, named) {
+        return None;
+    }
+
+    if worktrees::merged(repo, commit, default) != Some(false) {
+        return None;
+    }
+
+    crate::stages::stacks_at(repo, commit).then(|| named.to_owned())
 }
 
 /// Stop a Conversation wherever it has got to: its session ended, its worktree
@@ -1953,40 +2091,127 @@ fn is_branch_name(branch: &str) -> bool {
         .is_some()
 }
 
+/// Colours, weather and temper — words that pair with anything below and carry
+/// no meaning about the work, so a name that is left as it is never says
+/// something untrue about the branch.
+const QUALITIES: [&str; 32] = [
+    "amber", "ashen", "autumn", "brisk", "cobalt", "copper", "crisp", "dusky", "eager", "ember",
+    "flint", "frosted", "gilded", "hushed", "indigo", "ivory", "lucid", "mellow", "misty",
+    "nimble", "ochre", "opal", "quiet", "rustic", "sable", "scarlet", "slate", "sunlit", "teal",
+    "umber", "verdant", "wistful",
+];
+
+/// Birds, weather and landscape, for the same reason.
+const THINGS: [&str; 32] = [
+    "anchor", "beacon", "bramble", "cedar", "cinder", "coppice", "curlew", "delta", "eddy",
+    "fathom", "gable", "harbour", "heron", "kestrel", "lantern", "meadow", "orchard", "otter",
+    "pennant", "quarry", "ridge", "rookery", "sable", "shale", "sparrow", "thicket", "thistle",
+    "tundra", "vale", "willow", "wren", "zephyr",
+];
+
+/// How many names the two lists spell between them, which is how far
+/// [`free_branch_name`] walks before it gives up on a plain pair.
+const PAIRS: u64 = QUALITIES.len() as u64 * THINGS.len() as u64;
+
+/// The pair of words at `nth`, counted through every combination the two lists
+/// hold and wrapping round at the end of them.
+///
+/// One number rather than two, so that a walk from anywhere reaches all of them:
+/// the qualities turn over first and the things once per lap, and `PAIRS` steps
+/// from any starting point is every name there is.
+fn pair(nth: u64) -> String {
+    let quality = QUALITIES[(nth % QUALITIES.len() as u64) as usize];
+    let thing = THINGS[((nth / QUALITIES.len() as u64) % THINGS.len() as u64) as usize];
+
+    format!("{quality}-{thing}")
+}
+
 /// A branch name to start a Conversation under, until the human names it
 /// themselves.
 ///
 /// Two words rather than a hash: it is a branch name, so it is going to be typed
 /// and read aloud, and the whole point of prefilling one is that the human need
 /// not stop and think of anything before they start writing the brief.
+///
+/// Nothing is asked of any repository here. A Draft's branch is a prefill that
+/// is drawn nowhere and cut nowhere, so the moment the name has to be free is
+/// the moment the branch is made, and that moment is [`free_branch_name`]'s.
 fn branch_name() -> String {
-    /// Colours, weather and temper — words that pair with anything below and
-    /// carry no meaning about the work, so a name that is left as it is never
-    /// says something untrue about the branch.
-    const QUALITIES: [&str; 32] = [
-        "amber", "ashen", "autumn", "brisk", "cobalt", "copper", "crisp", "dusky", "eager",
-        "ember", "flint", "frosted", "gilded", "hushed", "indigo", "ivory", "lucid", "mellow",
-        "misty", "nimble", "ochre", "opal", "quiet", "rustic", "sable", "scarlet", "slate",
-        "sunlit", "teal", "umber", "verdant", "wistful",
-    ];
-
-    /// Birds, weather and landscape, for the same reason.
-    const THINGS: [&str; 32] = [
-        "anchor", "beacon", "bramble", "cedar", "cinder", "coppice", "curlew", "delta", "eddy",
-        "fathom", "gable", "harbour", "heron", "kestrel", "lantern", "meadow", "orchard", "otter",
-        "pennant", "quarry", "ridge", "rookery", "sable", "shale", "sparrow", "thicket", "thistle",
-        "tundra", "vale", "willow", "wren", "zephyr",
-    ];
-
     // A generator that could not answer is not a reason to refuse to start a
     // Conversation: the name is a prefill the human is free to replace, so an
     // unlucky machine gets the first pair rather than an error.
+    pair(getrandom::u64().unwrap_or(0))
+}
+
+/// Every repository a Conversation's own branch name is about to be cut in: its
+/// Repo, and each companion mirroring that name.
+///
+/// A companion with a name of its own is not one of them — that name is the
+/// human's and does not move with this one, so a repository holding it is a
+/// refusal about that companion rather than a reason to pick another name here.
+pub(crate) fn cut_in(repo: &Path, companions: &[store::Companion]) -> Vec<PathBuf> {
+    std::iter::once(repo.to_path_buf())
+        .chain(
+            companions
+                .iter()
+                .filter(|companion| companion.mirrors())
+                .map(|companion| companion.repo.path.clone()),
+        )
+        .collect()
+}
+
+/// The name to cut a Conversation's branch under, where the name it is carrying
+/// is one Verkstead invented.
+///
+/// `branch` itself wherever nothing in `repos` answers to it, which is almost
+/// always, and another invented name where something does — see
+/// [`free_branch_name`]. What each repository answers to is read once and whole:
+/// its own branches and its remotes' both — see [`worktrees::cut_names`].
+///
+/// Both starts that cut a branch on an invented name come through here, and only
+/// those: a name the human typed is refused on a repository that already has it
+/// rather than picked around, that name being theirs and chosen.
+pub(crate) fn name_to_cut(id: i64, branch: String, repos: &[PathBuf]) -> String {
+    let taken: std::collections::HashSet<String> = repos
+        .iter()
+        .flat_map(|repo| worktrees::cut_names(repo))
+        .collect();
+
+    match taken.contains(&branch) {
+        false => branch,
+        true => free_branch_name(id, |name| !taken.contains(name)),
+    }
+}
+/// A name for the branch a start is about to cut, where the one the Conversation
+/// has been carrying is taken.
+///
+/// `free` is asked of every candidate, and it answers for every repository the
+/// name is about to be cut in — the Conversation's own and each companion
+/// mirroring it. A name free in one of them and taken in another is not a name
+/// this start can use.
+///
+/// Every pair is tried, from a random one round to itself, so this reaches the
+/// end empty-handed only where those repositories hold all thousand of them
+/// between them. What stands behind that is the Conversation's id, which nothing
+/// outside this Conversation collides with — and then a count, for the reason
+/// [`worktrees::unclaimed_path`] carries one.
+fn free_branch_name(id: i64, free: impl Fn(&str) -> bool) -> String {
     let picked = getrandom::u64().unwrap_or(0);
 
-    let quality = QUALITIES[(picked % QUALITIES.len() as u64) as usize];
-    let thing = THINGS[((picked / QUALITIES.len() as u64) % THINGS.len() as u64) as usize];
+    let paired = (0..PAIRS)
+        .map(|nth| pair(picked.wrapping_add(nth)))
+        .find(|name| free(name));
 
-    format!("{quality}-{thing}")
+    if let Some(name) = paired {
+        return name;
+    }
+
+    let stem = pair(picked);
+
+    std::iter::once(format!("{stem}-{id}"))
+        .chain((2..).map(|nth| format!("{stem}-{id}-{nth}")))
+        .find(|name| free(name))
+        .expect("the count is unbounded, so some name is free")
 }
 
 #[cfg(test)]
@@ -2012,6 +2237,49 @@ mod tests {
         assert!(name.chars().all(|c| c.is_ascii_lowercase() || c == '-'));
     }
 
+    /// The property the whole of this turns on: the pairs are names, not
+    /// samples of one. A word repeated in a list would quietly shrink the space
+    /// a start picks from, and the smaller that space is the more often two
+    /// Conversations of one Repo are handed the same branch.
+    #[test]
+    fn the_pairs_are_a_thousand_names_and_no_two_the_same() {
+        let names: std::collections::HashSet<String> = (0..PAIRS).map(pair).collect();
+
+        assert_eq!(names.len() as u64, PAIRS);
+    }
+
+    /// A name for a repository that already holds the one the Conversation was
+    /// carrying: another pair, and one that repository does not have.
+    #[test]
+    fn a_taken_name_is_replaced_with_one_that_is_free() {
+        let taken: std::collections::HashSet<String> = (0..PAIRS / 2).map(pair).collect();
+
+        for _ in 0..16 {
+            let name = free_branch_name(7, |name| !taken.contains(name));
+
+            assert!(!taken.contains(&name), "{name:?} is taken");
+            assert!(is_branch_name(&name), "git refused {name:?}");
+        }
+    }
+
+    /// And it walks the whole list to find it, from wherever it starts: one free
+    /// name among a thousand taken ones is still the one that comes back.
+    #[test]
+    fn the_one_free_name_is_the_one_that_comes_back() {
+        let only = pair(11);
+
+        assert_eq!(free_branch_name(7, |name| name == only), only);
+    }
+
+    /// A repository holding every pair there is falls back to the Conversation's
+    /// id, which nothing outside that Conversation collides with.
+    #[test]
+    fn a_repository_holding_every_pair_falls_back_to_the_conversation() {
+        let name = free_branch_name(7, |name| name.ends_with("-7"));
+
+        assert!(name.ends_with("-7"), "{name:?} should carry the id");
+        assert!(is_branch_name(&name), "git refused {name:?}");
+    }
     #[test]
     fn the_names_git_refuses_are_refused_here() {
         for refused in [
@@ -2033,5 +2301,129 @@ mod tests {
         for taken in ["main", "rate-limiting", "feature/rate-limiting", "v2"] {
             assert!(is_branch_name(taken), "{taken:?} should be taken");
         }
+    }
+
+    /// The whole of what an adopted stage stacks on: a base that is a local
+    /// branch, is not the default branch, has not been merged into it, in a
+    /// repository that records a mechanism.
+    #[test]
+    fn an_adopted_stage_stacks_on_the_unmerged_branch_it_was_based_on() {
+        let repo = stacking();
+        let tip = worktrees::resolve(&repo, "predecessor").expect("the branch resolves");
+
+        assert_eq!(
+            predecessor(&repo, &tip, "predecessor", "main"),
+            Some("predecessor".to_owned()),
+        );
+    }
+
+    /// Each of the four ways there is nothing to stack on, which are ways of
+    /// this being an ordinary unstacked stage rather than ways of failing.
+    #[test]
+    fn a_base_with_nothing_left_to_stack_on_stacks_on_nothing() {
+        let repo = stacking();
+        let tip = worktrees::resolve(&repo, "predecessor").expect("the branch resolves");
+        let main = worktrees::resolve(&repo, "main").expect("main resolves");
+
+        assert_eq!(
+            predecessor(&repo, &main, "main", "main"),
+            None,
+            "the default branch is what an unstacked stage comes off",
+        );
+
+        assert_eq!(
+            predecessor(&repo, &tip, &tip, "main"),
+            None,
+            "a raw commit is not a branch a stack could be told about",
+        );
+
+        assert_eq!(
+            predecessor(&repo, &tip, "nothing-by-that-name", "main"),
+            None,
+            "and neither is a name with no local branch behind it",
+        );
+
+        run(
+            &repo,
+            &["merge", "-q", "--no-ff", "-m", "merge it", "predecessor"],
+        );
+
+        assert_eq!(
+            predecessor(&repo, &tip, "predecessor", "main"),
+            None,
+            "and a predecessor already in the default branch is finished work",
+        );
+    }
+
+    /// The mechanism is the repository's, so a repository that records none has
+    /// nothing to follow and the stage comes off its base unstacked.
+    #[test]
+    fn a_repository_recording_no_mechanism_stacks_nothing() {
+        let repo = stacking();
+
+        std::fs::write(
+            repo.join(crate::stages::GIT_WORKFLOW),
+            "# Git workflow\n\n## Review process\n\n### Finish sequence\n\nPush it.\n",
+        )
+        .unwrap();
+
+        run(&repo, &["add", "-A"]);
+        run(&repo, &["commit", "-m", "docs: no stacking here"]);
+        run(&repo, &["checkout", "-q", "-B", "predecessor"]);
+        run(&repo, &["checkout", "-q", "main"]);
+
+        let tip = worktrees::resolve(&repo, "predecessor").expect("the branch resolves");
+
+        assert_eq!(predecessor(&repo, &tip, "predecessor", "main"), None);
+    }
+
+    /// A repository that records a stacking mechanism, with one unmerged branch
+    /// off its default branch to stand a stage on.
+    fn stacking() -> PathBuf {
+        // Leaked rather than returned beside the path: these tests are a handful
+        // of git calls each, and a temporary directory that outlives the test
+        // binary is the tidier of the two shapes to read.
+        let dir = Box::leak(Box::new(tempfile::tempdir().unwrap()));
+        let repo = dir.path().to_path_buf();
+
+        run(&repo, &["init", "--initial-branch", "main"]);
+        run(&repo, &["config", "user.email", "test@verkstead.invalid"]);
+        run(&repo, &["config", "user.name", "Verkstead Test"]);
+
+        let workflow = repo.join(crate::stages::GIT_WORKFLOW);
+        std::fs::create_dir_all(workflow.parent().unwrap()).unwrap();
+        std::fs::write(
+            &workflow,
+            "# Git workflow\n\n## Review process\n\n\
+             ### Finish sequence\n\nPush it.\n\n\
+             ### Stacking roadmap stages\n\n`gh stack init <predecessor> <new>`\n",
+        )
+        .unwrap();
+
+        run(&repo, &["add", "-A"]);
+        run(
+            &repo,
+            &["commit", "-m", "chore: how this repository reviews"],
+        );
+
+        run(&repo, &["checkout", "-q", "-b", "predecessor"]);
+        std::fs::write(repo.join("predecessor.md"), "# the stage before\n").unwrap();
+        run(&repo, &["add", "-A"]);
+        run(&repo, &["commit", "-m", "feat: the stage before this one"]);
+        run(&repo, &["checkout", "-q", "main"]);
+
+        repo
+    }
+
+    fn run(dir: &Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .output()
+            .expect("git should be on the PATH for these tests");
+
+        assert!(output.status.success(), "git {args:?} failed");
     }
 }

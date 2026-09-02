@@ -73,7 +73,7 @@ import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { Modal } from "../Modal";
 import * as pairing from "../pairing";
-import { Picker } from "../picking";
+import { Listbox } from "../picking";
 import { Switch as Toggle } from "../Switch";
 import { chosen } from "./naming";
 import { NO_SESSIONS, NoSessions, noSessions } from "./sessions";
@@ -983,16 +983,17 @@ export function Steer(props: {
             is the conversation's own pairing rather than one session's, which is
             what the line under it says: steering re-settles what runs the work.
 
-            A [`Picker`] rather than a `<select>`, so this cannot come to show
-            one pairing while the submit would send another — see
-            `src/picking.tsx`. */}
+            A [`Listbox`] rather than a `<select>`, so this cannot come to show
+            one pairing while the submit would send another — and so that every
+            row carries the mark of the harness it runs, which an `<option>`
+            cannot hold. See `src/picking.tsx`. */}
         <Show when={runs()}>
           <div class={styles.steerPairing}>
             <label for="steer-pairing">Run it under</label>
             {/* Drawn only once the list is here, the way the setup's pickers
-                are: a select whose value is set before its options exist is a
-                select showing nothing, and the modal reads the profiles when it
-                opens rather than finding them already read. */}
+                are: a control whose choice is set before its rows exist is a
+                control showing nothing, and the modal reads the profiles when
+                it opens rather than finding them already read. */}
             <Show
               when={profiles.data}
               fallback={
@@ -1004,11 +1005,15 @@ export function Steer(props: {
               }
             >
               {(saved) => (
-                <Picker
+                <Listbox
                   id="steer-pairing"
                   options={pairing.pairings(saved())}
                   value={pairing.value}
-                  label={pairing.label}
+                  // The whole list beside each row: the profile's name is said
+                  // after the model only where its backend has more than one
+                  // account saved.
+                  label={(row) => pairing.label(row, saved())}
+                  mark={(row) => row.profile.account.agent_type}
                   chosen={picked()}
                   pick={pick}
                   gone={() => pick("")}

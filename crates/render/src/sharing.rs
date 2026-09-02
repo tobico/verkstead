@@ -443,6 +443,21 @@ pub struct MissedOut {
     pub why: String,
 }
 
+/// What says a comment is the one a share left, rather than something somebody
+/// wants addressed.
+///
+/// An HTML comment, so GitHub draws nothing where it sits: a reader of the pull
+/// request sees the link and the itemization and no machinery at all. It goes on
+/// a line of its own at the end of the body, and whatever reads it looks for it
+/// at the *start* of a line — a human quote-replying to the share gets every
+/// line of it prefixed with `>`, and their reply is somebody talking rather than
+/// Verkstead's own comment coming back around.
+///
+/// Verkstead's own name is in it because a pull request is a public place: a
+/// marker somebody might plausibly write themselves is one that would silence
+/// their comment by accident.
+pub const SHARE_MARKER: &str = "<!-- verkstead:shared-conversation -->";
+
 /// The comment a share leaves on a pull request: the link, and what is in the
 /// file behind it.
 ///
@@ -504,6 +519,12 @@ fn listed(timeline: &[TimelineEvent], taken: &str, title: &str, link: &str) -> S
             said.push_str(&format!("- {commit}\n"));
         }
     }
+
+    // The marker last, on a line of its own under a blank one, so that it is a
+    // comment of markdown's own rather than the tail of whatever the itemization
+    // ended on. Nothing is drawn where it sits, and nothing said above it
+    // changes — see [`SHARE_MARKER`].
+    said.push_str(&format!("\n{SHARE_MARKER}\n"));
 
     said
 }
@@ -785,6 +806,46 @@ mod tests {
 
         assert!(
             said.contains("- ``fix: draw `*` as a *mark*`` — 1 file, +1 −0\n"),
+            "{said}",
+        );
+    }
+
+    /// The comment ends with the marker that keeps Wrapping off it, on a line
+    /// of its own — an HTML comment, so a reader of the pull request sees
+    /// nothing where it sits and everything above it is the comment as it was.
+    #[test]
+    fn a_comment_ends_with_the_marker_that_says_whose_it_is() {
+        let said = listed(
+            &timeline(),
+            "2026-08-30T01:02:03Z",
+            "sharing",
+            "https://x/#9f1",
+        );
+
+        assert!(
+            said.ends_with(&format!("\n{SHARE_MARKER}\n")),
+            "the marker on a line of its own at the end of: {said}",
+        );
+        assert!(
+            SHARE_MARKER.starts_with("<!--") && SHARE_MARKER.ends_with("-->"),
+            "and it is an HTML comment, which draws as nothing: {SHARE_MARKER}",
+        );
+        assert!(
+            said.contains("**Question Sets**\n\n- What a share carries\n")
+                && said.contains("- `feat: share a conversation as one file to send` —"),
+            "with what the comment says unchanged above it: {said}",
+        );
+    }
+
+    /// A Conversation with nothing in the Timeline at all is still Verkstead's
+    /// own comment, so the marker is not something the itemization carries: it
+    /// is on every share comment there is.
+    #[test]
+    fn the_marker_is_there_whatever_the_share_holds() {
+        let said = listed(&[], "2026-08-30T01:02:03Z", "sharing", "https://x/#9f1");
+
+        assert!(
+            said.lines().any(|line| line.starts_with(SHARE_MARKER)),
             "{said}",
         );
     }

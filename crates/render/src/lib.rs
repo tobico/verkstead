@@ -54,21 +54,21 @@ pub use conversations::{
     task_list_event, task_list_reached, unreadable_set_event,
 };
 pub use profiles::{
-    Broken, PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen, ProfileDeleted,
-    ProfileEdit, ProfileEntry, ProfileSaved, RoleChoice,
+    AgentType, Broken, PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen,
+    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, RoleChoice,
 };
 pub use push::{PushKey, Subscribed, Subscription, Unsubscribe};
 pub use repos::{
     ConflictResolutionEdit, Registered, Registration, RepoEntry, RepoRemoved, RepoView,
 };
 pub use settings::{
-    Author, BindEntry, BuildCacheEdit, BuildCacheView, ConflictResolution, PathResolution,
-    PathSource, PathsView, SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved,
-    Verified, WatchedPathEntry,
+    Author, BindEntry, BuildCacheEdit, BuildCacheView, ConflictResolution, IgnoreRule,
+    IgnoredCommentsEdit, PathResolution, PathSource, PathsView, RuleField, RuleRefused,
+    SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved, Verified, WatchedPathEntry,
 };
 pub use sharing::{
-    CommentedOn, MissedOut, ShareCommented, SharePublished, SharedCommit, SharedConversation,
-    itemized, shared, shared_commit,
+    CommentedOn, MissedOut, SHARE_MARKER, ShareCommented, SharePublished, SharedCommit,
+    SharedConversation, itemized, shared, shared_commit,
 };
 pub use transcript::{
     Bookkeeping, Cursor, Prose, Put, Reasoning, ToolResult, ToolUse, TranscriptView, Turn, Unread,

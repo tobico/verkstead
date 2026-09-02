@@ -82,6 +82,22 @@ than another being invented. Two drafts against one Repo both reading *Draft*
 beside the same Repo name is what two drafts are: they are few, and they are
 short-lived.
 
+**An invented name is a prefill until the work starts, and only then a branch.**
+Which is where it is made to be free: at the moment the branch is cut it is
+checked against every repository it is about to be cut in — the Conversation's
+own and each companion mirroring it — and where one of them already answers to
+that name, another is invented out of the same words and that is what the work
+goes on. What a repository answers to is its own branches and its remotes' both:
+a name only origin holds can be cut locally, and the push behind it would be
+into somebody's branch. A branch outlives the worktree it was worked in, so a
+Repo worked in for a while holds plenty of them, and two Conversations landing on
+one of a thousand names is a matter of when rather than whether. Nothing is
+reported, because nothing had been drawn: whose the name is does not change with
+it, and the first session still has one to replace. **A name the human typed is
+refused instead** — that one they chose and meant, so a branch of somebody else's
+work under it is something to tell them about rather than something to pick
+around.
+
 **And where nobody has named it, the work's first session is asked to.** The
 press that starts the work leaves the naming to the session it starts — the
 grilling one, the ungrilled build one, or the one a steered Draft starts — and
@@ -400,7 +416,10 @@ _Avoid_: feed, log, history, activity stream
 One entry in a Timeline — a Brief, agent output, a Question Set, a Handoff, a
 commit, a task list, a stage list, a PR, a Notice. Each shows a summary in the
 Timeline and its full self in the details pane. Task lists, stage lists and PRs
-are **pinned**: a fixed set, with no manual pin or unpin.
+are **pinned**: a fixed set, with no manual pin or unpin. Where more than one is
+pinned they are drawn in one order — the pull request, then the task list, then
+the roadmap — the pull request leading as the only one of the three with
+anything on it to answer.
 _Avoid_: item, record, message, step
 
 **Share**:
@@ -408,8 +427,8 @@ A read-only copy of one Conversation as a single HTML file, for showing
 somebody what was asked, answered and built without giving them the workbench.
 It is the viewer built to one document with every byte it needs inside it, and
 the record written into it on the way out, so it opens off a disk with no
-network and nothing to install. Taken from the **Share** row in the
-Conversation's actions, and named for the branch and the day.
+network and nothing to install. Taken from **Download** on the **Share Pane**,
+and named for the branch and the day.
 **A curated record rather than the whole one**: the Brief, the Question Sets,
 the commits, the Steers and the lifecycle lines board; a session's output, the
 Notices, the Handoff and the pinned cards do not, and nothing marks where they
@@ -429,10 +448,14 @@ report
 **Published Share**:
 A Share put where a link reaches it, rather than handed over as a file: a
 **secret gist**, made by Verkstead itself through the GitHub token on the
-settings page. Taken from the **Publish** row beside the download, and drawn
-back in the same menu as the link and the day it was taken. What the token needs
-for it is the **`gist` scope**, and a token without it is named on the settings
-page when it is saved rather than found by a press weeks later.
+settings page. Taken from **Publish** on the **Share Pane**, and drawn back on
+that same pane: the link to send somebody, the day it was taken, and the gist
+behind both. What the token needs for it is the **`gist` scope**, and a token
+without it is named on the settings page when it is saved rather than found by a
+press weeks later.
+**Verkstead deletes none of them.** A gist is deleted at GitHub, which is why
+the gist's own URL is drawn beside the link: the way to be rid of a Published
+Share is the only way there is.
 **The API makes it and git fills it**: the Gists API's cap on what a gist may be
 created with is undocumented and reported at a megabyte, and a Share is several
 — so the gist is created holding a placeholder and the file arrives over a push,
@@ -454,22 +477,33 @@ plain text a browser refuses to draw — so the page closes the gap: the gist's 
 rides in the **URL fragment**, the Share is fetched from GitHub by the reader's
 own browser, and it is drawn in a **sandboxed frame** with scripts allowed and
 same-origin withheld.
-**Verkstead hosts one and the human may host their own.** Verkstead's copy is
-published to this project's GitHub Pages from the page in the repository, and it
-is what every link is composed through unless the human says otherwise — so a
-Verkstead nobody has configured hands out links that draw. The page is also
-offered as a download on the settings page, and the **share viewer URL** beside
-it is where the human put a copy of their own; that is configuration rather than
-a secret, it reads back as it was written, and an empty one means Verkstead's
-hosted copy rather than no viewer at all.
+**Verkstead hosts it, and there is nothing to configure.** The copy is published
+to this project's GitHub Pages from the page in the repository, and it is what
+every link is composed through — so every Verkstead hands out links that draw,
+with nobody having been to a settings page. Hosting a copy of your own would buy
+nothing, because the page learns nothing to keep away from Verkstead's site.
 **The link is composed as it is drawn**, off the gist URL the record keeps: a
-Published Share taken before a viewer was configured is linked through one now,
-and a viewer that moves retargets every link there is without republishing.
+Published Share taken before there was a viewer to compose through is linked
+through one now, and the viewer moving retargets every link there is without
+republishing.
 It learns nothing about what passes through it: a fragment is never sent to a
 server, so the host sees only that somebody opened the page, and the frame keeps
 the Share's own scripts off that host's origin.
 _Avoid_: proxy, server, renderer, gateway (nothing passes through it — the
 reader's browser fetches from GitHub itself)
+
+**Share Pane**:
+Where everything about handing a Conversation to somebody is done: the Published
+Share where there is one — the link with a button that copies it, when it was
+taken, and the gist behind it — and under that the three ways of handing the
+record over: **Download**, **Publish** (or *Publish again*), and **Share to Pull
+Request** where the record holds one.
+A details pane like any other, at a path of its own, opened by the **share icon
+on the Timeline's header** rather than by anything on the record: sharing belongs
+to the Conversation rather than to a moment in it. It was four rows of the
+Conversation's actions, and none of them did anything to the Conversation, which
+is what that menu is for.
+_Avoid_: share dialog, export panel, share menu
 
 **Share to Pull Request**:
 The one press that hands the record to whoever is reviewing the work: it takes a
@@ -477,9 +511,8 @@ Share, publishes it, and leaves **one comment on every pull request the
 Conversation holds** — its own Repo's and every Companion Repo's alike. Offered
 only where the record holds a pull request, because a Conversation on none has
 nowhere for it to go.
-The comment carries **the link** — through the Share Viewer, the human's own
-where they host one and Verkstead's hosted copy where they do not — and the
-**itemized summary** of what is in the file: the Brief's first line, the
+The comment carries **the link** — through the Share Viewer Verkstead hosts —
+and the **itemized summary** of what is in the file: the Brief's first line, the
 Question Sets by title, and the commits by subject with how much each moved.
 Itemized off the Share rather than off the Conversation, so what is listed is
 what a reader will find in it.
@@ -490,8 +523,52 @@ A pull request the comment could not land on — one that has gone, one the toke
 may not write on — is **named against the ones that worked** rather than
 swallowed: the Share is published either way, so the human can paste the link
 there themselves.
+**And the wrap-up does it by itself where the human has asked for that**, which
+is the `share_on_done` switch on the settings page — off until somebody turns it
+on. A Conversation the pipeline settles to **Done** is shared this same way, in
+the same breath as the push and the unseen mark; it is that settle rather than
+the state, so a **Steer** into Done shares nothing.
+It happens once, gated on one recorded fact: **a share-to-PR comment has been
+left on this Conversation**. The fact is written wherever a comment lands, the
+press's own and the wrap-up's alike, and never unwritten — so work the human has
+already handed over stays quiet, a second settle after a share that worked stays
+quiet, and a share that *failed* left no fact and gets another go at the next
+settle. Failure is a **Notice** naming what could not be done; success says
+nothing at all, the fresh Published Share reading on the Share Pane.
+**And nothing is ever dispatched about it.** The comment ends with an invisible
+marker — an HTML comment, so a reader sees nothing where it sits — and Wrapping
+drops any comment carrying it at the start of a line, wherever it reads comments.
+It is left as the configured token, which is usually the human's own account, so
+nothing about who said it could tell it from what they write themselves. A human
+quote-replying to it is still somebody to answer: GitHub puts a `>` in front of
+every quoted line, so the marker no longer begins one.
 _Avoid_: announce, notify, post, broadcast (a comment is left, once, by a press
-the human made)
+or by the settle the human turned on)
+
+**Ignore rule**:
+One class of comment nobody wants addressed, written in the GitHub and git
+author settings pane, a row apiece: a regex over who said it, a regex over what
+it says, or both. A rule matches where every field it gives does, and the list
+combines with OR — so a comment any one rule matches is skipped wherever
+Wrapping reads comments, in the fresh ones a session would be dispatched about
+and the standing ones folded into the review alike, on a Companion Repo's pull
+request as much as on the Conversation's own.
+What they are for is a bot nobody can turn off: a review service set up with no
+billing information on it, filing the same word about billing on every pull
+request, where the alternative is a session spun up to address it each time.
+**A skipped comment is written down as addressed**, which is what makes deleting
+a rule change what happens next rather than what happened — months of a bot's
+nagging would otherwise all come back as sessions on the poll after the rule
+went. And the rules are read off the file every poll, so one written on a phone
+takes effect on the next one.
+**About agent work and nothing else.** A skipped comment still appears wherever
+the workbench lists what is on a pull request: a comment nobody is being sent to
+answer is still one the human wrote a rule about, and hiding it would leave them
+no way to see what the rule is doing.
+The marker Share to Pull Request leaves is not one of these. That one is
+Verkstead's own comment, dropped by inspection for ever and never configurable.
+_Avoid_: filter, mute, block, spam rule, exclusion (a rule says what nobody is
+sent to address, not what is hidden)
 
 **Commit Summary**:
 The agent-written account a code commit carries as its message body — prose
@@ -643,6 +720,23 @@ session runs one model. Offered as one flat list wherever it is picked — a row
 per Profile-and-model combination — because the counts are small and a
 two-stage pick would cost a tap every time. There is no default model
 anywhere, so an unpaired Profile is half a choice and reads as none.
+
+**How one reads is one reading, everywhere the workbench says who runs a
+session**: the harness's brand mark, the harness's own name, the model's own
+name, and the Profile's name after an em dash — "Claude Code Fable 5 — Work".
+The name is said only where it is what tells two of them apart, which is a
+harness with more than one Profile saved; a harness with one says "Grok 4.6" and
+stops. The harness's name is dropped where the model's own has already said it,
+so an OpenCode account on minimax reads "OpenCode Minimax M2.1" and a Grok Build
+one does not read "Grok Build Grok 4.6". It is **composed** out of the three
+recorded facts rather than written down per Pairing — the harness, the model id,
+the Profile's name — so a Profile saved a year ago reads the way one saved today
+does, and an id this build has not learned the name of reads as the id, which is
+legible where a blank would not be. Every site shares it: the four pairing
+pickers, the Agent run card on the Timeline and the details pane it opens, the
+status button's running line, and the Brief's three pairing facts. The pickers
+are drawn by hand rather than as a `<select>` for one reason — an `<option>`
+holds text and no mark.
 _Avoid_: profile choice, model selection, profile+model, combination
 
 **Grilling Pairing** / **Implementation Pairing** / **Review Pairing**:

@@ -193,6 +193,20 @@ pub struct AbandonedRoadmap {
 
     /// And what that stage is called.
     pub stage_title: String,
+
+    /// The branch this reading came off, or empty where it came off the default
+    /// branch.
+    ///
+    /// A roadmap is a document on a branch, and one staged on a branch that has
+    /// not merged yet is only there. So the branch travels with the reading and
+    /// becomes the new Conversation's base: adopting reads the roadmap again at
+    /// whatever base it is fixed to, and a stage found here and looked for
+    /// somewhere else is a stage that is not there.
+    ///
+    /// Empty for the default branch, which is the base a Conversation takes
+    /// when nobody fixes one — nothing to override, and nothing for the row to
+    /// say about where it was found.
+    pub base: String,
 }
 
 /// What a Conversation is adopting, as its own page draws it: the roadmap it
@@ -635,8 +649,8 @@ pub struct ConversationView {
     pub shared: Option<ShareView>,
 }
 
-/// One published share, as the workbench draws it: the link, and the moment the
-/// snapshot was taken.
+/// One published share, as the workbench draws it: the link, the gist behind it,
+/// and the moment the snapshot was taken.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct ShareView {
@@ -649,6 +663,15 @@ pub struct ShareView {
     /// reader goes through is a fact about the settings at the moment the page
     /// is drawn. See `link` in `crates/server/src/sharing.rs`.
     pub url: String,
+
+    /// And the gist itself, as GitHub gave it, which is what the record holds and
+    /// what [`Self::url`] is composed from.
+    ///
+    /// Beside the viewer's link rather than instead of it, the two being for
+    /// different things: the viewer's is what a reader is sent, and this is where
+    /// the file actually is. A share is deleted at GitHub and nowhere else, so a
+    /// human who wants one gone has to be able to reach it.
+    pub gist: String,
 
     /// When it was published, RFC 3339 — drawn beside the link, because a link
     /// with no date says nothing about how far the work has moved since.
@@ -908,6 +931,11 @@ pub struct StageListReached {
 ///
 /// All three are on the record as well, each at the moment it arrived there, and
 /// each is one card drawn twice rather than two cards.
+///
+/// The list they arrive in is ordered, and the viewer draws it in that order: a
+/// pull request first, then a task list, then a roadmap. The ordering is done
+/// where the list is built rather than here — see the pinned block in
+/// `crates/server/src/ui.rs`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum PinnedEvent {
@@ -1668,6 +1696,14 @@ pub struct AgentOutputEvent {
     /// at all; `null` beside a `profile` that is not is a session from before
     /// either was recorded.
     pub model: Option<String>,
+
+    /// And which agent ran it, which is what says whose mark goes beside the
+    /// reading — the same four words a Profile's account is discriminated by.
+    ///
+    /// Off the record beside the other two and for their reason. `null` for a
+    /// session started before this was written down, which the reading draws
+    /// without a mark rather than guessing one.
+    pub agent_type: Option<crate::AgentType>,
 }
 
 /// A Question Set as the Timeline shows it: what it was called, the table of
@@ -1890,6 +1926,7 @@ pub fn agent_output_event(
     idle: bool,
     profile: Option<String>,
     model: Option<String>,
+    agent_type: Option<crate::AgentType>,
 ) -> TimelineEvent {
     TimelineEvent::AgentOutput(AgentOutputEvent {
         id,
@@ -1900,6 +1937,7 @@ pub fn agent_output_event(
         running,
         profile,
         model,
+        agent_type,
         // Idle is a thing a running session is, and the caller reads the two
         // off different places — so the pair is made consistent here rather
         // than at each of them.
@@ -2421,6 +2459,15 @@ pub struct NewConversation {
 pub struct NewAdoption {
     pub repo_id: i64,
     pub roadmap: String,
+
+    /// The branch the roadmap was found on, where it was found on one — the
+    /// [`AbandonedRoadmap::base`] of the row that was clicked, carried back so
+    /// the Conversation starts fixed to it.
+    ///
+    /// Absent where the row came off the default branch, which is what a
+    /// Conversation with no base fixed already reads.
+    #[serde(default)]
+    pub base: Option<String>,
 }
 
 /// The order the human has just dragged the sidebar into: every Conversation

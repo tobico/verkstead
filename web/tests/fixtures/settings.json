@@ -8,6 +8,12 @@
     "at": "2026-08-03T09:07:11.000Z",
     "last_four": "cdef"
   },
+  "ignored_comments": [
+    {
+      "author": "coderabbitai",
+      "body": "billing"
+    }
+  ],
   "paths": {
     "binds": [
       {
@@ -49,5 +55,5 @@
     "size": "50G",
     "size_configured": true
   },
-  "share_viewer_url": "https://ada.github.io/verkstead-shares/"
+  "share_on_done": true
 }

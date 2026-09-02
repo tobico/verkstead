@@ -20,8 +20,16 @@
 //! understated, because the state alone has never been the answer to "is
 //! something happening?" and the status alone has never said what the work is
 //! in the middle of. The second is where the *machine* stands, which is a
-//! different question and a quieter one: what is running, said as the human
-//! would say it — "Work Fable 5" rather than a profile id and `claude-fable-5`.
+//! different question and a quieter one: what is running, said the way every
+//! other place that says who runs a session says it — "Claude Code Fable 5 —
+//! Work" rather than a profile id and `claude-fable-5`.
+//!
+//! That reading is not this pane's own and is not composed here: it is the
+//! shared one in [`../agents`], read off what the session recorded as it
+//! started. This line said the Profile's name first for as long as it was the
+//! only place saying any of this; a page that says one thing three ways is a
+//! page whose reader has to learn three, so the convention went with the
+//! second and third sites arriving.
 //!
 //! The accent is spent on the two statuses that need somebody: *Waiting on you*
 //! and *Blocked*. Everything else is the ordinary text colour, including
@@ -32,8 +40,15 @@ import { Show, createMemo, type JSX } from "solid-js";
 import { faChevronDown } from "@fortawesome/free-solid-svg-icons";
 
 import { Icon } from "../Icon";
-import type { AgentOutputEvent, ConversationView } from "../api/types";
-import { prettify } from "../models";
+import { ran, reading } from "../agents";
+import { listProfiles } from "../api/client";
+import type {
+  AgentOutputEvent,
+  ConversationView,
+  ProfileEntry,
+} from "../api/types";
+import { useReading } from "../freshness";
+import { HarnessMark } from "../HarnessMark";
 import { Actions } from "./Actions";
 import { WAITING_ON_CHECKS } from "./conditions";
 import { ENDED, STATE } from "./states";
@@ -137,30 +152,30 @@ export function running(
 /// What the second line says: the agent running, or what there is instead of
 /// one.
 ///
-/// The Profile's name and the model, as the human would say them and with
-/// nothing between: "Work Fable 5" is one thing being named, and a dash would
-/// make it two facts joined. Both come off the record rather than off the
-/// Pairing the Conversation is configured with — what is running is what was
-/// launched, and a Pairing repicked since does not change it.
+/// The shared reading of the three facts the session wrote down as it started —
+/// the backend, the model and the Profile's name where that is what tells two
+/// runs apart. All three come off the record rather than off the Pairing the
+/// Conversation is configured with: what is running is what was launched, and a
+/// Pairing repicked since does not change it.
+///
+/// `saved` is only for the last of the three — whether the Profile's name is
+/// worth saying — and is `undefined` until the list has been read.
 ///
 /// The out-of-window line is the one stop that says something a resume cannot:
 /// every other stop waits for the same press, and this one waits for the same
 /// press *and* an account. The short form of it, the sentence itself being the
 /// resume row's.
-export function agent(conversation: ConversationView): string {
+export function agent(
+  conversation: ConversationView,
+  saved: ProfileEntry[] | undefined,
+): string {
   const session = running(conversation);
 
   if (session) {
-    const said = [
-      session.profile,
-      session.model === null ? null : prettify(session.model),
-    ]
-      .filter((part): part is string => Boolean(part))
-      .join(" ");
-
-    // A session from before Verkstead wrote either down. There is one running
-    // and nothing true to say about it, which is exactly what this says.
-    return said || "Agent running";
+    // A session from before Verkstead wrote any of the three down reads as
+    // nothing at all. There is one running and nothing true to say about it,
+    // which is exactly what this says instead.
+    return reading(ran(session), saved) || "Agent running";
   }
 
   if (conversation.resets !== null) {
@@ -175,6 +190,30 @@ export function StatusButton(props: {
   conversation: ConversationView;
 }): JSX.Element {
   const said = createMemo(() => status(props.conversation));
+
+  // The saved Profiles, for the one thing the reading needs them for: whether
+  // the account behind the running session is the only one on its backend, and
+  // so whether its name is said after the model. The same query the pickers
+  // make, so the cache is what a second caller pays — and the reading says the
+  // name while it is still in flight, saying it being the answer that can never
+  // misattribute a run.
+  //
+  // Read here rather than passed in, so the button is whole wherever it is
+  // drawn — and never in a share, which draws no status button at all and so
+  // makes no request for this.
+  const profiles = useReading(() => ({
+    queryKey: ["profiles"],
+    queryFn: listProfiles,
+    freshness: { reconcile: "id" },
+  }));
+
+  // And the harness that session was launched under, for the mark in front of
+  // the words. Off the same record the words are read from, so the two cannot
+  // disagree: no session running, or one that recorded no harness, is no mark —
+  // which is the same nothing the line's own reading says about it.
+  const under = createMemo(
+    () => running(props.conversation)?.agent_type ?? null,
+  );
 
   return (
     <Actions
@@ -201,7 +240,10 @@ export function StatusButton(props: {
               </Show>
             </span>
 
-            <span class={styles.agent}>{agent(props.conversation)}</span>
+            <span class={styles.agent}>
+              <HarnessMark of={under()} class={styles.harness!} />
+              {agent(props.conversation, profiles.data)}
+            </span>
           </span>
 
           {/* Which way the menu will go, and no part of what the button says. */}

@@ -107,9 +107,9 @@ export function without(entries: string[], at: number): string[] {
 /// One request writes the whole of `config.yaml`, so a save carries every value
 /// in it and the caller rewrites the one list it is about — `writeWatched` and
 /// `writeBinds` are that, each riding the other list along as it stands. The
-/// author, the token, the build cache and the share viewer ride along the same
-/// way: what is sent is what the file holds afterwards, so a list or a value
-/// left out would be one emptied.
+/// author, the token, the build cache and the share-on-Done switch ride along
+/// the same way: what is sent is what the file holds afterwards, so a list or a
+/// value left out would be one emptied.
 export function useWritingPaths() {
   const queries = useQueryClient();
   const settings = useSettings();
@@ -134,9 +134,15 @@ export function useWritingPaths() {
             ? (standing?.rust_build_cache.size ?? "")
             : "",
         },
-        share_viewer_url: standing?.share_viewer_url ?? "",
         conflict_resolution: standing?.conflict_resolution ?? "Merge",
+        share_on_done: standing?.share_on_done ?? false,
         ...lists,
+        // And the ignore rules left exactly where they are. Alone among the
+        // settings they travel as an action rather than a value: this form has
+        // nothing to say about them, and one that spoke for them could have its
+        // own save refused over a pattern it never showed anybody — see
+        // [`IgnoredCommentsEdit`].
+        ignored_comments: "Keep",
       });
     },
     onSuccess: (saved: SettingsSaved) => {

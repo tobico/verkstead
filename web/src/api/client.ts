@@ -215,10 +215,14 @@ export function listAbandonedRoadmaps(): Promise<AbandonedRepo[]> {
 export function startAdoption(
   repoId: number,
   roadmap: string,
+  base: string,
 ): Promise<Started> {
   return post<Started>("/api/ui/adoptions", {
     repo_id: repoId,
     roadmap,
+    // The branch the roadmap was found on, so the new Conversation starts
+    // fixed to it. Empty is the default branch, which is what no base means.
+    base: base || null,
   });
 }
 
@@ -811,20 +815,6 @@ export function loadSettings(): Promise<SettingsView> {
 /// way.
 export function saveSettings(edit: SettingsEdit): Promise<SettingsSaved> {
   return post<SettingsSaved>("/api/ui/settings", edit);
-}
-
-/// Where the share viewer stands to be taken away: the small page that draws a
-/// published share in a browser rather than downloading it.
-///
-/// For whoever would rather host it themselves. Verkstead keeps a copy of the
-/// same page on its own GitHub Pages and composes every link through that
-/// unless the setting beside this names another — see `HOSTED` in
-/// `settings/ShareViewer.tsx`.
-///
-/// A path rather than a fetch, for the reason a share's own download is one:
-/// what the press is for is a file, and a link is how a browser is handed one.
-export function shareViewerPath(): string {
-  return "/api/ui/share-viewer.html";
 }
 
 /// The public half of the server's VAPID keypair — what `PushManager.subscribe`

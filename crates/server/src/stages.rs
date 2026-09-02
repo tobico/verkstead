@@ -160,10 +160,26 @@ const STACKING: &str = "### Stacking roadmap stages";
 /// is where the section belongs and a file that mentioned stacking in passing —
 /// a note, a changelog entry — would not be a repository that had recorded one.
 pub(crate) fn stacks(worktree: &Path) -> bool {
-    let Ok(workflow) = std::fs::read_to_string(worktree.join(GIT_WORKFLOW)) else {
-        return false;
-    };
+    std::fs::read_to_string(worktree.join(GIT_WORKFLOW)).is_ok_and(|workflow| stacking(&workflow))
+}
 
+/// The same question asked of a Repo at a commit, with no Worktree anywhere in
+/// it — [`abandoned`]'s way of reading, for [`abandoned`]'s reason.
+///
+/// What adoption needs. A stage adopted off an unmerged predecessor stacks on
+/// it exactly as an unattended one does, and the file that says whether this
+/// repository stacks at all is a file in the repository — read here at the
+/// commit the stage branches from, which is the commit whose contents the stage
+/// will be working against.
+pub(crate) fn stacks_at(repo: &Path, commit: &str) -> bool {
+    at(repo, commit, GIT_WORKFLOW).is_some_and(|workflow| stacking(&workflow))
+}
+
+/// Whether a `git-workflow.md`'s text records a stacking mechanism.
+///
+/// The bytes are the caller's to fetch — off a checkout or out of a git
+/// directory — and what counts as recording one is the same either way.
+fn stacking(workflow: &str) -> bool {
     workflow
         .lines()
         .map(str::trim_end)
@@ -284,11 +300,29 @@ impl Stage {
 /// annotated with the branch it was worked on. That annotation is the roadmap
 /// saying *this one is in flight*, and the branch in it is what says whose.
 ///
-/// Blocking work: a git read and two file reads.
+/// *Which* roadmap comes first, where the branch touched more than one. Writing
+/// to a roadmap is what says a Conversation is a stage of it, and a stage
+/// session that amends another roadmap's briefs in passing — retiring a
+/// deferral, correcting a decision a later effort recorded — has written to two.
+/// Taken in name order that reads as the alphabet deciding which roadmap a
+/// Conversation belongs to, and a stage of the second one carries on into the
+/// first. So the Conversation's own roadmap is settled first, by
+/// [`belongs_to`], and where there is one it is the only one read: a roadmap
+/// this branch merely edited is a roadmap somebody else's Conversation is
+/// carrying on.
+///
+/// Blocking work: a git read and a file read per roadmap the branch touched.
 pub(crate) fn next_stage(worktree: &Path, base: &str, branch: &str) -> Next {
+    let touched = touched(worktree, base);
+
+    let considered = match belongs_to(worktree, &touched, branch) {
+        Some(own) => BTreeSet::from([own]),
+        None => touched,
+    };
+
     let mut complete = None;
 
-    for name in touched(worktree, base) {
+    for name in considered {
         let directory = worktree.join(ROADMAPS).join(&name);
 
         let Ok(list) = std::fs::read_to_string(directory.join(INDEX)) else {
@@ -339,6 +373,50 @@ pub(crate) fn next_stage(worktree: &Path, base: &str, branch: &str) -> Next {
         Some(roadmap) => Next::Complete { roadmap },
         None => Next::NoRoadmap,
     }
+}
+
+/// Which of the roadmaps this branch touched the Conversation on `branch` is a
+/// stage *of*, where it is a stage of one at all.
+///
+/// Two ways a roadmap says a branch is its own, and they are the roadmap's own
+/// records rather than anything Verkstead stores:
+///
+/// - **Its index annotates a stage with the branch.** `/next-stage` writes that
+///   annotation when it starts the stage, so the roadmap holding it is the one
+///   that claimed this branch. The same reading [`ours`] does, asked the other
+///   way round.
+/// - **The branch is named for it.** A stage branch is `<roadmap>/<NN>-<slug>`,
+///   built by [`Stage::branch`] and by nothing else, so its first component
+///   names the roadmap the stage came from. The fallback for a roadmap whose
+///   annotation never landed — a plan commit that failed to edit the index
+///   leaves the stage in flight all the same.
+///
+/// `None` for a branch no roadmap claims and no roadmap named, which is the
+/// Conversation that *wrote* a roadmap rather than one that is a stage of one:
+/// its branch is a name the human chose, and the roadmap it wrote has every box
+/// unchecked and nothing in flight. Whatever it touched is what it planned, so
+/// there is nothing to prefer between them and the caller reads them all.
+fn belongs_to(worktree: &Path, touched: &BTreeSet<String>, branch: &str) -> Option<String> {
+    if branch.is_empty() {
+        return None;
+    }
+
+    let claimed = touched.iter().find(|name| {
+        let index = worktree.join(ROADMAPS).join(name).join(INDEX);
+
+        std::fs::read_to_string(index).is_ok_and(|list| {
+            list.lines()
+                .filter_map(checklist::entry)
+                .any(|entry| ours(entry.after, branch))
+        })
+    });
+
+    claimed
+        .or_else(|| {
+            let (named, _) = branch.split_once('/')?;
+            touched.get(named)
+        })
+        .cloned()
 }
 
 /// Whether what a roadmap wrote after a stage's link says the stage is in
@@ -648,6 +726,27 @@ fn notice(repo: &store::Repo) -> Option<AbandonedRepo> {
 /// resolves has nothing to read and nothing to say — the same shrug the pinned
 /// lists make.
 ///
+/// **And at every local branch the default branch has not swallowed**, because
+/// a roadmap is a document on a branch like any other and the default branch is
+/// only one place it can be. A roadmap staged on a branch whose pull request is
+/// still open is invisible at the default tip, and so is every stage of it — so
+/// the effort that most needs carrying on is the one nothing offers. Each
+/// reading names the branch it came off, which is what the press fixes the new
+/// Conversation's base to: a roadmap found on a branch is a roadmap adopted
+/// from that branch, and reading it anywhere else would offer a stage the base
+/// cannot start.
+///
+/// Merged branches are skipped rather than read, and that is the whole of what
+/// keeps this affordable: they hold nothing the default tip does not, so the
+/// set is *what is in flight* rather than every branch the repository has ever
+/// kept. In a working repository that is a handful out of a hundred.
+///
+/// The same reading twice over is drawn once — deduplicated on the branch the
+/// stage would be worked on, which is the roadmap and the stage together, and
+/// the default branch's reading is the one kept. Two branches offering
+/// genuinely different stages of one roadmap are two different pieces of work
+/// off two different bases, and both are drawn.
+///
 /// No fetch, unlike those two. This is read for every registered Repo every
 /// time the workbench reads the sidebar, and a network call per Repo per read is
 /// not what a notice is worth: origin's copy as it last stood is enough to agree
@@ -659,23 +758,78 @@ fn notice(repo: &store::Repo) -> Option<AbandonedRepo> {
 /// Repo's own pane says what is waiting in it however short the list is — empty
 /// included, which is the ordinary answer.
 ///
-/// Blocking, like everything else here: it is a handful of short git reads
-/// against a local directory, and whoever calls it is on a borrowed thread
-/// already.
+/// Blocking, like everything else here: short git reads against a local
+/// directory, and whoever calls it is on a borrowed thread already.
 pub(crate) fn waiting(repo: &store::Repo) -> Vec<AbandonedRoadmap> {
     let named = worktrees::default_ref(&repo.path, &repo.default_branch);
     let Some(commit) = worktrees::resolve(&repo.path, &named) else {
         return Vec::new();
     };
 
-    abandoned_at(&repo.path, &commit)
-        .into_iter()
-        .map(|abandoned| AbandonedRoadmap {
+    // The default branch first, so that where the same stage is offered twice
+    // the reading kept is the one needing no base fixed at all. Its base is
+    // empty for that reason: there is nothing for the press to override.
+    let bases = std::iter::once((String::new(), commit)).chain(unmerged(&repo.path, &named));
+
+    let mut drawn = BTreeSet::new();
+
+    bases
+        .flat_map(|(base, commit)| {
+            abandoned_at(&repo.path, &commit)
+                .into_iter()
+                .map(move |abandoned| (base.clone(), abandoned))
+        })
+        // On the stage's branch rather than on the roadmap: it carries the
+        // roadmap and the stage both, and two bases offering the same stage are
+        // offering the one piece of work.
+        .filter(|(_, abandoned)| drawn.insert(abandoned.stage.branch()))
+        .map(|(base, abandoned)| AbandonedRoadmap {
             name: abandoned.stage.roadmap,
             title: abandoned.title,
             stage: abandoned.stage.label,
             stage_title: abandoned.stage.title,
+            base,
         })
+        .collect()
+}
+
+/// Every local branch of `repo` whose commits `default` does not already hold,
+/// with the commit each is at.
+///
+/// The branches worth reading a roadmap off, and the reason [`waiting`] can
+/// afford to read any of them: a merged branch holds nothing the default tip
+/// does not, so whatever it would offer is offered there already and read more
+/// cheaply. What is left is the work in flight, which in a repository people
+/// use is a handful of the branches it keeps.
+///
+/// The commit comes back with the name rather than being resolved again per
+/// branch — git has it in hand while it is listing them, and this runs on the
+/// sidebar's path.
+///
+/// `--no-merged=` written as one argument, because git takes what follows the
+/// `=` as a value whatever it looks like: the default branch's name comes from
+/// the Repo's own record, and a record is not a place to be relaxed about an
+/// argument that could read as an option.
+///
+/// A repository git will not list says it has no branches, which is the answer
+/// that changes nothing: the default branch's reading stands on its own.
+fn unmerged(repo: &Path, default: &str) -> Vec<(String, String)> {
+    let listed = git(
+        repo,
+        &[
+            "for-each-ref",
+            "--format=%(refname:short)\t%(objectname)",
+            &format!("--no-merged={default}"),
+            "refs/heads",
+        ],
+    );
+
+    listed
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| line.split_once('\t'))
+        .filter(|(branch, commit)| !branch.is_empty() && !commit.is_empty())
+        .map(|(branch, commit)| (branch.to_owned(), commit.to_owned()))
         .collect()
 }
 
@@ -1563,6 +1717,121 @@ Turns this askance clone into Verkstead.
         );
     }
 
+    /// A stage session that amended another roadmap's briefs in passing has
+    /// written to two roadmaps, and only one of them is the one it is a stage
+    /// of. Read in name order the alphabet would decide it — and a stage of
+    /// `missing-roles` would carry on into `brain-chat-parity`, which is a
+    /// different effort entirely.
+    #[test]
+    fn a_roadmap_this_branch_only_amended_is_not_the_one_carried_on() {
+        let repo = Repo::with(&[]);
+
+        // Sorts first, and is somebody else's effort with work left in it.
+        repo.write(
+            "brain-chat-parity",
+            "# Brain chat parity roadmap\n\n\
+             - [x] 13: The agent chat — [brief](13-agent-chat.md)\n\
+             - [ ] 14: The widget — [brief](14-brain-chat-widget.md)\n",
+        );
+        repo.brief("brain-chat-parity", "14-brain-chat-widget.md", "# 14.\n");
+
+        // And this Conversation's own, which says so by annotating its stage.
+        repo.write(
+            "missing-roles",
+            "# Missing roles roadmap\n\n\
+             - [x] 01: Project config — [brief](01-project-config.md)\n\
+             - [ ] 02: Grant filters — [brief](02-grant-filters.md) \
+             *(in progress: `missing-roles/02-grant-filters`)*\n\
+             - [ ] 03: Workflow permissions — [brief](03-workflow-permissions.md)\n",
+        );
+        repo.brief("missing-roles", "03-workflow-permissions.md", "# 03.\n");
+
+        let Next::Stage(stage) = repo.next("missing-roles/02-grant-filters") else {
+            panic!("stage 03 of this Conversation's own roadmap is the one to start");
+        };
+
+        assert_eq!(stage.roadmap, "missing-roles");
+        assert_eq!(stage.label, "03");
+    }
+
+    /// The annotation is the roadmap claiming the branch, and a plan commit that
+    /// failed to write one leaves the stage in flight all the same. The branch's
+    /// own name is what says which roadmap then — it is built out of it.
+    #[test]
+    fn a_branch_named_for_a_roadmap_is_that_roadmaps_stage() {
+        let repo = Repo::with(&[]);
+
+        repo.write(
+            "brain-chat-parity",
+            "# Brain chat parity roadmap\n\n- [ ] 14: The widget — [brief](14-widget.md)\n",
+        );
+        repo.brief("brain-chat-parity", "14-widget.md", "# 14.\n");
+
+        // No annotation anywhere in it: nothing claims this branch.
+        repo.write(
+            "missing-roles",
+            "# Missing roles roadmap\n\n\
+             - [x] 01: Project config — [brief](01-project-config.md)\n\
+             - [ ] 02: Grant filters — [brief](02-grant-filters.md)\n\
+             - [ ] 03: Workflow permissions — [brief](03-workflow-permissions.md)\n",
+        );
+        repo.brief("missing-roles", "02-grant-filters.md", "# 02.\n");
+
+        let Next::Stage(stage) = repo.next("missing-roles/02-grant-filters") else {
+            panic!("the branch names the roadmap it is a stage of");
+        };
+
+        assert_eq!(stage.roadmap, "missing-roles");
+        assert_eq!(
+            stage.label, "02",
+            "unannotated, its own stage is still open and is the lowest one left",
+        );
+    }
+
+    /// And a roadmap of the Conversation's own with nothing left in it is the
+    /// roadmap complete, rather than a licence to start somebody else's.
+    #[test]
+    fn its_own_roadmap_running_out_does_not_carry_on_into_another() {
+        let repo = Repo::with(&[]);
+
+        repo.write(
+            "brain-chat-parity",
+            "# Brain chat parity roadmap\n\n- [ ] 14: The widget — [brief](14-widget.md)\n",
+        );
+        repo.brief("brain-chat-parity", "14-widget.md", "# 14.\n");
+
+        repo.write(
+            "missing-roles",
+            "# Missing roles roadmap\n\n\
+             - [x] 01: Project config — [brief](01-project-config.md)\n\
+             - [ ] 02: Grant filters — [brief](02-grant-filters.md) \
+             *(in progress: `missing-roles/02-grant-filters`)*\n",
+        );
+
+        assert_eq!(
+            repo.next("missing-roles/02-grant-filters"),
+            Next::Complete {
+                roadmap: "missing-roles".to_owned()
+            },
+        );
+    }
+
+    /// The Conversation that *wrote* a roadmap is a stage of nothing: its branch
+    /// is a name the human chose and every box it wrote is unchecked. What it
+    /// touched is what it planned, so stage 01 of it is what starts.
+    #[test]
+    fn the_conversation_that_wrote_a_roadmap_starts_its_first_stage() {
+        let repo = Repo::with(&[]);
+        repo.write("mvp", MVP);
+        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+
+        let Next::Stage(stage) = repo.next("teal-beacon") else {
+            panic!("nothing claims this branch, so what it wrote is what carries on");
+        };
+
+        assert_eq!(stage.roadmap, "mvp");
+    }
+
     /// An ordinary feature: its branch has written to no roadmap, so there is no
     /// roadmap for its wrap-up to carry on.
     #[test]
@@ -1615,6 +1884,35 @@ Turns this askance clone into Verkstead.
         );
 
         assert!(stacks(repo.path()), "and this one has");
+    }
+
+    /// And the same mechanism read the way adoption has to read it: out of a git
+    /// directory at a commit, there being no Worktree anywhere in that path.
+    ///
+    /// A file that is only in the working tree is not one a commit holds, which
+    /// is the whole difference between the two readings and worth asserting: the
+    /// stage adoption starts works against the commit, not against whatever the
+    /// human's checkout happens to be showing.
+    #[test]
+    fn the_stacking_mechanism_reads_out_of_a_commit_too() {
+        let repo = Repo::with(&[]);
+        repo.workflow(
+            "# Git workflow\n\n## Review process\n\n\
+             ### Finish sequence\n\nPush it.\n\n\
+             ### Stacking roadmap stages\n\n`gh stack init <predecessor> <new>`\n",
+        );
+
+        assert!(
+            !stacks_at(repo.path(), &repo.tip()),
+            "written and not committed is nothing the commit holds",
+        );
+
+        repo.commit();
+
+        assert!(
+            stacks_at(repo.path(), &repo.tip()),
+            "and committed, it is what the commit records",
+        );
     }
 
     /// Under the review process rather than anywhere in the file: a repository
@@ -1967,6 +2265,95 @@ Turns this askance clone into Verkstead.
                 ),
             ],
             "the finished one is not among them",
+        );
+    }
+
+    /// A roadmap staged on a branch whose pull request is still open is on that
+    /// branch and nowhere else, so the default tip cannot see it — and it is
+    /// exactly the effort somebody wants carried on. It comes back named with
+    /// the branch it was found on, which is what the press fixes the base to.
+    #[test]
+    fn a_roadmap_on_an_unmerged_branch_is_waiting_too() {
+        let repo = Repo::with(&[]);
+        repo.write(
+            "missing-roles",
+            "# Missing roles roadmap\n\n\
+             - [x] 01: Project config — [brief](01-project-config.md)\n\
+             - [ ] 02: Grant filters — [brief](02-grant-filters.md)\n",
+        );
+        repo.brief("missing-roles", "02-grant-filters.md", "# 02.\n");
+        repo.commit_on(
+            "tobi/missing-roles",
+            "docs: stage the missing-roles roadmap",
+        );
+
+        let waiting = waiting(&repo.registered());
+
+        assert_eq!(
+            waiting
+                .iter()
+                .map(|roadmap| (
+                    roadmap.name.as_str(),
+                    roadmap.stage.as_str(),
+                    roadmap.base.as_str(),
+                ))
+                .collect::<Vec<_>>(),
+            [("missing-roles", "02", "tobi/missing-roles")],
+            "found on the branch that holds it, and named with it",
+        );
+    }
+
+    /// And once that branch merges the default tip holds it, which is the
+    /// cheaper reading and the one that needs no base fixed. The branch is not
+    /// read at all then — merged is the whole of what keeps this affordable —
+    /// so the row that survives is the default's.
+    #[test]
+    fn a_roadmap_the_default_branch_has_swallowed_needs_no_base() {
+        let repo = Repo::with(&[]);
+        repo.write(
+            "missing-roles",
+            "# Missing roles roadmap\n\n- [ ] 01: Project config — [brief](01-config.md)\n",
+        );
+        repo.brief("missing-roles", "01-config.md", "# 01.\n");
+        repo.commit();
+
+        // The same commits, on a branch of its own as well as on the default.
+        repo.branch("tobi/missing-roles");
+
+        let waiting = waiting(&repo.registered());
+
+        assert_eq!(waiting.len(), 1, "one roadmap, drawn once: {waiting:?}");
+        assert_eq!(waiting[0].name, "missing-roles");
+        assert_eq!(
+            waiting[0].base, "",
+            "off the default branch, which is the base a Conversation takes anyway",
+        );
+    }
+
+    /// Two branches offering the same stage of the same roadmap is one piece of
+    /// work, and it is drawn once. The default branch's reading is the one kept:
+    /// it is the base that needs no fixing.
+    #[test]
+    fn the_same_stage_offered_twice_is_drawn_once() {
+        let repo = Repo::with(&[]);
+        repo.write(
+            "mvp",
+            "# MVP roadmap\n\n- [ ] 01: Workbench — [brief](01-workbench.md)\n",
+        );
+        repo.brief("mvp", "01-workbench.md", "# 01. Workbench\n");
+        repo.commit();
+
+        // A branch that has moved on from the default tip, carrying the same
+        // roadmap with the same stage left to start.
+        std::fs::write(repo.path().join("elsewhere.md"), "# something else\n").unwrap();
+        repo.commit_on("somebody/else", "chore: something else entirely");
+
+        let waiting = waiting(&repo.registered());
+
+        assert_eq!(waiting.len(), 1, "one stage, one row: {waiting:?}");
+        assert_eq!(
+            waiting[0].base, "",
+            "and the default branch's reading of it"
         );
     }
 

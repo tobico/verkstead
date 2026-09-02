@@ -9,11 +9,10 @@
 //! Three shapes under the settings, because there are three kinds of thing the
 //! pane draws:
 //!
-//! - `github`, `build-cache`, `share-viewer`, `paths` and `conflicts` — the
-//!   credentials, the shared Rust build cache, where the share viewer is
-//!   hosted, the directories Verkstead may work in, and how a conflicted pull
-//!   request is resolved, each named by a word. There is one of each of them,
-//!   and a word says so.
+//! - `github`, `build-cache`, `paths` and `conflicts` — the credentials, the
+//!   shared Rust build cache, the directories Verkstead may work in, and how a
+//!   conflicted pull request is resolved, each named by a word. There is one of
+//!   each of them, and a word says so.
 //! - `profiles/:id` — an Agent Profile, which arrives with an id of its own,
 //!   and `profiles/new` for the blank form that adds one.
 //! - `repos/:id` — a registered Repo, opened; and `repos/new` for the path
@@ -36,28 +35,22 @@
 //! picked rather than a promise that it is still there.
 
 /// The openings named by a word rather than by an id: the credentials, the
-/// shared Rust build cache, where the share viewer is hosted, the paths
-/// Verkstead has been told about, and how a conflicted pull request is resolved
-/// — the things there is exactly one of on this page.
+/// shared Rust build cache, the paths Verkstead has been told about, and how a
+/// conflicted pull request is resolved — the things there is exactly one of on
+/// this page.
 ///
 /// A list rather than a word written wherever one is needed, because three
 /// separate things read it and all three have to agree: the [`Opening`] below is
 /// made of it, [`openingAt`] turns a path into one, and the routes the app
 /// declares under `/settings` decide whether that path reaches this page at all.
-/// Written apart, a fourth section can be added to the page, given a card and a
-/// pane and a path, and answer that path with *No such page* — a nested route
-/// with no matching child falls to the catch-all, and nothing about the section
-/// itself is wrong. Which is what happened to the share viewer.
+/// Written apart, a section can be added to the page, given a card and a pane
+/// and a path, and answer that path with *No such page* — a nested route with
+/// no matching child falls to the catch-all, and nothing about the section
+/// itself is wrong. Which has happened here before.
 ///
 /// So the app writes those routes from this — see `panes` in `SettingsPage.tsx`
 /// — and a word added here arrives with the route that reaches it.
-export const WORDS = [
-  "github",
-  "build-cache",
-  "share-viewer",
-  "paths",
-  "conflicts",
-] as const;
+export const WORDS = ["github", "build-cache", "paths", "conflicts"] as const;
 
 /// What the details pane on the settings page is showing.
 ///

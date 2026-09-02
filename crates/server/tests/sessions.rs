@@ -1165,6 +1165,36 @@ esac
     )
 }
 
+/// The same, with the details pane's own question answered beside the watchers'.
+///
+/// The pane asks for `commits` and the rollup together, so its question has to be
+/// matched before the checks watcher's — the watcher's own field is in both, and
+/// a stub that cannot be asked about the checks would otherwise refuse the pane
+/// as well. What it answers with is the same comments the watcher is given, which
+/// is the point: the pane draws what is on the pull request, whatever a rule has
+/// taken out of what an agent is sent about.
+fn gh_about_with_a_pane(rollup: &str, said: &str, on_the_diff: &str) -> String {
+    format!(
+        r#"
+if [ "$1" = api ]; then printf '[{on_the_diff}]'; exit 0; fi
+case "$5" in
+*commits*)
+    printf '{{"commits":[],"comments":[{said}],"statusCheckRollup":[],"mergeable":"MERGEABLE","state":"OPEN"}}'
+    ;;
+*statusCheckRollup*)
+{rollup}
+    ;;
+*comments*)
+    printf '{{"comments":[{said}],"reviews":[]}}'
+    ;;
+*)
+    printf '{{"number":41,"title":"Rate limiting","url":"https://github.com/tobico/verkstead/pull/41"}}'
+    ;;
+esac
+"#
+    )
+}
+
 /// The same, except that nothing has been said on the pull request until `after`
 /// is there with something in it.
 ///
@@ -1419,6 +1449,49 @@ const CHECKS_UNANSWERABLE: &str = r#"    printf 'gh: To use GitHub CLI, run: gh 
 const THREE_COMMENTS: &str = r#"{"id":"IC_1","author":{"login":"tobico"},"body":"Rename the window field.","createdAt":"2026-08-21T09:00:00Z"},
 {"id":"IC_2","author":{"login":"tobico"},"body":"And the test that pins it.","createdAt":"2026-08-21T09:00:20Z"},
 {"id":"IC_3","author":{"login":"tobico"},"body":"Otherwise this reads well.","createdAt":"2026-08-21T09:00:40Z"}"#;
+
+/// The comment Share to Pull Request leaves, and a human quote-replying to it.
+///
+/// Verkstead's own is written by the configured token — the human's own account,
+/// as it usually is — so who said it tells the two apart in neither direction.
+/// The marker at the start of the share's last line is the whole of it, and the
+/// reply carries that same marker inside a quote, where GitHub has put a `>` in
+/// front of every line of it.
+///
+/// The `\n` are doubled so that `printf` writes them rather than a newline: a
+/// literal newline inside a JSON string is not JSON.
+const A_SHARE_AND_A_REPLY: &str = r#"{"id":"IC_1","author":{"login":"tobico"},"body":"[Read this conversation](https://x/#9f1)\\n\\nA limiter that counts across instances.\\n\\n<!-- verkstead:shared-conversation -->\\n","createdAt":"2026-08-21T09:00:00Z"},
+{"id":"IC_2","author":{"login":"tobico"},"body":"> [Read this conversation](https://x/#9f1)\\n>\\n> <!-- verkstead:shared-conversation -->\\n\\nWhich of these is the one to keep?","createdAt":"2026-08-21T09:05:00Z"}"#;
+
+/// A pull request with two bots and a human on it, which is what an ignore rule
+/// is written about.
+///
+/// `coderabbitai` files the same word about billing on every pull request,
+/// because the service was set up with no billing information on it, and says
+/// something worth reading beside it. `dependabot` says nothing anybody wants a
+/// session for. And the human mentions billing themselves, which is the comment
+/// a rule about the word alone would swallow.
+const TWO_BOTS_AND_A_HUMAN: &str = r#"{"id":"IC_1","author":{"login":"coderabbitai"},"body":"Your billing information is missing.","createdAt":"2026-08-21T09:00:00Z"},
+{"id":"IC_2","author":{"login":"coderabbitai"},"body":"This loop reads the vector twice.","createdAt":"2026-08-21T09:00:20Z"},
+{"id":"IC_3","author":{"login":"dependabot"},"body":"Bump serde to 1.0.219.","createdAt":"2026-08-21T09:00:40Z"},
+{"id":"IC_4","author":{"login":"tobico"},"body":"We should sort the billing out one day.","createdAt":"2026-08-21T09:01:00Z"}"#;
+
+/// And the same bot leaving its billing note on a line of the diff, which is a
+/// comment read through the REST endpoint rather than `pr view` and matched by
+/// exactly the same rule.
+const A_BOT_ON_THE_DIFF: &str = r#"{"node_id":"PRRC_9","user":{"login":"coderabbitai"},"body":"Billing information is still missing.","created_at":"2026-08-21T09:02:00Z","path":"src/window.rs","line":12}"#;
+
+/// The one note on its own, for the test about a rule written after the wrap-up
+/// had started watching.
+const A_BOTS_BILLING_NOTE: &str = r#"{"id":"IC_5","author":{"login":"coderabbitai"},"body":"Your billing information is missing.","createdAt":"2026-08-21T09:10:00Z"}"#;
+
+/// The rules the human wrote to silence the two of them: the review service by
+/// what it says as well as who says it, and the dependency bot by name alone.
+///
+/// Two rules rather than one, which is what says the list combines with OR — and
+/// the first gives both fields, which is what says a rule's own fields combine
+/// with AND: the human's own word about billing is not the bot's.
+const THE_BOTS_IGNORED: &str = "ignored_comments:\n  - author: coderabbitai\n    body: '(?i)billing'\n  - author: '^dependabot'\n";
 
 /// And two left on the lines of the diff, which is where a review of code
 /// mostly happens — the entries of the REST endpoint's answer, spelled its way.
@@ -2465,11 +2538,7 @@ async fn bench_at_pace(
 
     // Who a session commits as: a settings file in the Data Directory, which is
     // where every sandbox is configured out of.
-    std::fs::write(
-        state.path().join("config.yaml"),
-        "git_author:\n  name: Verkstead Test\n  email: test@verkstead.invalid\n",
-    )
-    .unwrap();
+    std::fs::write(state.path().join("config.yaml"), THE_AUTHOR).unwrap();
 
     let database = state.path().join("verkstead.db");
 
@@ -6208,18 +6277,24 @@ async fn attempts_spent(fixture: &Grilling, check: &str) -> i64 {
     spent
 }
 
-/// Write `config.yaml` over, keeping the author every sandbox is configured out
-/// of — see [`bench_at_pace`], which is what wrote it in the first place.
+/// Write `config.yaml` over with `more` beside the author every sandbox is
+/// configured out of — see [`bench_at_pace`], which is what wrote it in the
+/// first place.
 ///
 /// The file is read at the moment it is needed rather than held from startup, so
 /// a fixture that writes it after its server is up is a human who went to the
-/// settings page while the work was going on.
+/// settings page while the work was going on. Written over rather than added to,
+/// which is what lets a test take a setting away again: `configure(&fixture, "")`
+/// is the human deleting what they had just written.
 fn configure(fixture: &Grilling, more: &str) {
     let path = fixture.state.path().join("config.yaml");
-    let author = std::fs::read_to_string(&path).unwrap();
 
-    std::fs::write(&path, format!("{author}{more}")).unwrap();
+    std::fs::write(&path, format!("{THE_AUTHOR}{more}")).unwrap();
 }
+
+/// Who every session in these tests commits as, which is the whole of what a
+/// bench's `config.yaml` says until a test writes something else into it.
+const THE_AUTHOR: &str = "git_author:\n  name: Verkstead Test\n  email: test@verkstead.invalid\n";
 
 /// And say how one Repo resolves a conflict, which is the override that wins
 /// over that file.
@@ -10126,6 +10201,275 @@ async fn what_was_already_said_reaches_the_review_rather_than_a_session_of_its_o
         !dispatched.exists(),
         "and nothing was dispatched to act on any of it: {:?}",
         std::fs::read_to_string(&dispatched).ok(),
+    );
+}
+
+/// The comment a share leaves on a pull request is Verkstead's own, so nothing is
+/// ever dispatched about it and the review is never given it — while a human
+/// quote-replying to it is somebody to answer like anybody else.
+///
+/// Share to Pull Request writes as the configured token, which is usually the
+/// human's own account, so no rule about who said it could tell the two apart:
+/// the marker at the start of a line is what does. Quote-replying puts a `>` in
+/// front of every line of what is quoted, which is why the rule is written about
+/// the start of a line and not about the text appearing at all.
+///
+/// The checks cannot be asked about, which keeps the Conversation wrapping up
+/// long enough to watch nothing happen.
+#[tokio::test]
+async fn the_comment_a_share_left_is_never_addressed_and_a_reply_to_it_is() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    assert!(
+        A_SHARE_AND_A_REPLY.contains(verkstead_render::SHARE_MARKER),
+        "the fixture is the comment a share actually leaves",
+    );
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
+        &gh_about(CHECKS_UNANSWERABLE, A_SHARE_AND_A_REPLY, ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let told = until_written(&reviews).await;
+
+    assert!(
+        !told
+            .lines()
+            .any(|line| line.starts_with(verkstead_render::SHARE_MARKER)),
+        "what Verkstead said itself was not folded into the review: {told}",
+    );
+    assert!(
+        told.contains("Which of these is the one to keep?"),
+        "and the human's reply to it was: {told}",
+    );
+
+    // Nothing is left unaddressed: the reply went to the review, and the share's
+    // own comment was never anything to address.
+    let deadline = Instant::now() + *PATIENCE;
+    while !comments_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the pull request never settled, so the share's own comment was read \
+             as something to answer",
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    // Long enough for many more polls of a pull request the share comment is
+    // still standing on, and will be standing on for ever.
+    pause(Duration::from_millis(500)).await;
+
+    assert!(
+        !dispatched.exists(),
+        "and no session was dispatched about any of it: {:?}",
+        std::fs::read_to_string(&dispatched).ok(),
+    );
+}
+
+/// The comments the human's own ignore rules match are skipped wherever Wrapping
+/// reads them: they never reach the review prompt, nothing is dispatched about
+/// them, and each is written down as addressed on the way past.
+///
+/// What the rules are for is a bot nobody can turn off — a review service set up
+/// with no billing information on it, filing the same word about billing on every
+/// pull request — where the alternative is a session spun up to address it each
+/// time. So the test is written about what a rule has to leave alone as much as
+/// what it takes away: the same bot saying something worth reading is still
+/// somebody to answer, and so is the human using the word the rule is about.
+///
+/// Both fields of the first rule have to match and the two rules combine with OR,
+/// and the bot's note on a line of the diff is matched by the same rule as its
+/// note in the conversation — the three places a human writes arrive as one
+/// stream of comments, so there is one check across all of them.
+///
+/// The checks cannot be asked about, which keeps the Conversation wrapping up
+/// long enough to watch nothing happen.
+#[tokio::test]
+async fn the_comments_the_ignore_rules_match_reach_nobody_and_are_written_down() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
+        &gh_about_with_a_pane(CHECKS_UNANSWERABLE, TWO_BOTS_AND_A_HUMAN, A_BOT_ON_THE_DIFF),
+    )
+    .await;
+
+    // Said long before the wrap-up is anywhere near: the file is read on every
+    // poll, so what matters is that the rules are there by the time the comments
+    // are.
+    configure(&fixture, THE_BOTS_IGNORED);
+
+    worked_to_empty(&fixture).await;
+
+    let told = until_written(&reviews).await;
+
+    assert!(
+        !told.contains("Your billing information is missing.")
+            && !told.contains("Billing information is still missing."),
+        "what the first rule matches was not folded into the review, in the \
+         conversation or on the diff: {told}",
+    );
+    assert!(
+        !told.contains("Bump serde"),
+        "nor what the second one does: {told}",
+    );
+    assert!(
+        told.contains("This loop reads the vector twice."),
+        "the same bot saying something worth reading is still somebody to \
+         answer, both fields of that rule having to match: {told}",
+    );
+    assert!(
+        told.contains("We should sort the billing out one day."),
+        "and so is the human using the word the rule is about: {told}",
+    );
+
+    // Written down as they were skipped, which is what makes deleting the rule
+    // later change what happens next rather than what happened. The two the
+    // review was given are written down beside them, as the review's always are.
+    let mut written = addressed(&fixture).await;
+    written.sort();
+
+    assert_eq!(
+        written,
+        ["IC_1", "IC_2", "IC_3", "IC_4", "PRRC_9"],
+        "every comment on the pull request is dealt with: three by a rule and \
+         two by the review",
+    );
+
+    // Long enough for many more polls of a pull request with five comments on it.
+    pause(Duration::from_millis(500)).await;
+
+    assert!(
+        !dispatched.exists(),
+        "and nothing was dispatched about any of it: {:?}",
+        std::fs::read_to_string(&dispatched).ok(),
+    );
+
+    // The ignore is about agent work and nothing else. What the pane lists is
+    // what is on the pull request, read straight off `gh` as it opens — a
+    // comment nobody is being sent to answer is still a comment the human wrote
+    // a rule about, and hiding it would leave them no way to see what the rule
+    // is doing.
+    let opened = pull_request(&fixture.view().await)
+        .expect("the wrap-up has its pull request pinned")
+        .id;
+
+    let carried: verkstead_render::PullRequestDetails = get(
+        &fixture.app,
+        &format!(
+            "/api/ui/conversations/{}/pull-request/{}",
+            fixture.id, opened
+        ),
+    )
+    .await;
+
+    assert!(
+        carried
+            .comments
+            .iter()
+            .any(|comment| comment.html.contains("Your billing information is missing")),
+        "the details pane still lists what the rules skipped: {:?}",
+        carried.comments,
+    );
+}
+
+/// A rule written while a wrap-up is already watching takes effect on the next
+/// poll, and taking it away again brings nothing back.
+///
+/// Both halves are what the rules are read off the file for rather than held from
+/// startup. The human is on a phone reading a pull request a bot has just filed
+/// its note on: they write the rule where they are, and the poll after it is the
+/// one that skips the comment — no restart, and nothing for them to go back to
+/// the machine for.
+///
+/// And the comment is written down as addressed as it is skipped, which is the
+/// other half. A rule silencing months of a bot's nagging would otherwise be a
+/// rule nobody could ever delete: the day they did, the whole of it would come
+/// back as sessions on the next poll.
+///
+/// The bot says nothing until the test says so, which is how it says the comment
+/// landed after the review — everything standing when the review starts is the
+/// review's to propose about. The checks cannot be asked about, which keeps the
+/// Conversation wrapping up long enough to watch nothing happen.
+#[tokio::test]
+async fn a_rule_written_while_the_wrap_up_watches_takes_effect_and_deleting_it_brings_nothing_back()
+{
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let landed = spill.path().join("the-bot-has-filed-its-note");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_AND_FIND_NOTHING),
+        &gh_about_once(CHECKS_UNANSWERABLE, &landed, A_BOTS_BILLING_NOTE, ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    until_written(&reviews).await;
+
+    // The review is over and nothing has been said, which is the wrap-up sitting
+    // where the human finds it: watching a pull request nobody has written on.
+    let deadline = Instant::now() + *PATIENCE;
+    while !comments_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the pull request nobody had written on never settled",
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    // Then the human writes the rule, on their phone and with the server they
+    // wrote it against still running — and only then does the bot file its note.
+    configure(&fixture, THE_BOTS_IGNORED);
+    std::fs::write(&landed, "filed").unwrap();
+
+    // The next poll skips it and writes it down, which is the whole of what the
+    // rule taking effect without a restart looks like from outside.
+    let deadline = Instant::now() + *PATIENCE;
+    while addressed(&fixture).await != ["IC_5"] {
+        assert!(
+            Instant::now() < deadline,
+            "the rule written mid-wrap-up never took effect: {:?}",
+            addressed(&fixture).await,
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    assert!(
+        !dispatched.exists(),
+        "and no session was dispatched about it: {:?}",
+        std::fs::read_to_string(&dispatched).ok(),
+    );
+
+    // And the human deletes the rule again, the bot's note still standing on the
+    // pull request. Nothing comes back: it was written down as addressed the
+    // moment it was skipped.
+    configure(&fixture, "");
+
+    // Long enough for many more polls of a pull request the note is still on.
+    pause(Duration::from_millis(500)).await;
+
+    assert!(
+        !dispatched.exists(),
+        "deleting the rule resurrected what it had already silenced: {:?}",
+        std::fs::read_to_string(&dispatched).ok(),
+    );
+    assert!(
+        comments_settled(&fixture).await,
+        "and the pull request is still settled, nothing being left unaddressed \
+         on it",
     );
 }
 
@@ -23643,6 +23987,68 @@ async fn a_comment_on_a_companions_pull_request_is_answered_in_that_companions_w
         addressed(&fixture).await.is_empty(),
         "rather than against the Conversation's own, which nobody said anything on",
     );
+}
+
+/// A rule covers a companion's pull request exactly as it covers the work's own:
+/// the comment is skipped, no session is sent about it, and it is written down as
+/// addressed against the pull request it was left on.
+///
+/// One rule list for the whole workbench rather than one per repository. A
+/// Conversation ends on a pull request per repository it was worked in, and every
+/// one of them is read through the same reader — so a bot the human has silenced
+/// is silenced wherever it writes, which is what they meant by writing the rule
+/// once.
+///
+/// The comment lands after the review has started, so it is a batch's rather than
+/// the review's: everything standing when the review starts is the review's to
+/// propose about.
+#[tokio::test]
+async fn a_rule_covers_a_companions_pull_request_as_much_as_the_works_own() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    let said = saying_once(&reviews, "IC_7", "nit: this reads oddly.");
+
+    let fixture = grilling_spilling_alongside(
+        spill,
+        &a_backlog_alongside_then_answers(&reviews, &batches, RESPOND_AND_FIND_NOTHING),
+        "askance",
+        &gh_alongside_saying(NOTHING_SAID, &said),
+    )
+    .await;
+
+    // A rule about what was said rather than who said it, which is the half of a
+    // rule that has nothing to do with which repository it was said in.
+    configure(&fixture, "ignored_comments:\n  - body: '^nit:'\n");
+
+    worked_to_empty(&fixture).await;
+
+    until_written(&reviews).await;
+
+    let companion = companion_repo(&fixture).await;
+    let deadline = Instant::now() + *PATIENCE;
+
+    while addressed_on(&fixture, companion).await != ["IC_7"] {
+        assert!(
+            Instant::now() < deadline,
+            "the rule never reached the companion's pull request: {:?}",
+            addressed_on(&fixture, companion).await,
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    assert!(
+        !batches.exists(),
+        "and no session was sent about it: {:?}",
+        std::fs::read_to_string(&batches).ok(),
+    );
+
+    // Which is a wrap-up with nothing left outstanding on either pull request,
+    // so it finishes on its own.
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
 }
 
 /// One review reads the whole of the work, so it is told where the whole of it

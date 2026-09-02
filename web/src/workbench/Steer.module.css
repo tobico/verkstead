@@ -112,15 +112,10 @@
   font-weight: 600;
 }
 
-.steerPairing select {
-  width: 100%;
-  padding: 0.45rem 0.5rem;
-  font: inherit;
-  color: var(--ink);
-  background: var(--paper);
-  border: 1px solid var(--edge);
-  border-radius: 0.4rem;
-}
+/* The pairing is picked with the listbox the app draws rather than a `<select>`,
+   so that every row carries its harness's mark: what it looks like is
+   `picking.module.css`, this modal being one of the five places that one control
+   stands. Nothing of it is left here — it is as wide as the field already. */
 
 .steerPairing .fieldNote {
   margin: 0.35rem 0 0;
@@ -314,19 +309,18 @@
   font-size: 0.9rem;
 }
 
-/* The field being typed in or picked from, which is no pointer's doing: the
-   border says which of them the words or the choice are going into. */
-.steerBrief textarea:focus-visible,
-.steerPairing select:focus-visible {
+/* The field being typed in, which is no pointer's doing: the border says which
+   of them the words are going into. The pairing control says it for itself, in
+   `picking.module.css`. */
+.steerBrief textarea:focus-visible {
   border-color: var(--accent);
 }
 
-/* And under the pointer: the two fields darken their borders, the steer deepens
-   the accent it is filled with, and the cancel's outline takes the accent its
-   words are already in. */
+/* And under the pointer: the field darkens its border, the steer deepens the
+   accent it is filled with, and the cancel's outline takes the accent its words
+   are already in. */
 @media (hover: hover) {
-  .steerBrief textarea:hover,
-  .steerPairing select:hover {
+  .steerBrief textarea:hover {
     border-color: var(--ink-soft);
   }
 

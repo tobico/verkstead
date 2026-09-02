@@ -34,6 +34,7 @@ import {
 
 import { Menu, Nested } from "../Menu";
 import { Switch as Toggle } from "../Switch";
+import type { AgentType } from "../agents";
 import {
   addCompanion,
   chooseGrillingPairing,
@@ -68,7 +69,7 @@ import type {
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
-import { Picker } from "../picking";
+import { Listbox, Picker } from "../picking";
 import { BROKEN } from "../profiles/ProfileList";
 import { AUTOMATIC, chosen } from "./naming";
 import styles from "./Setup.module.css";
@@ -341,11 +342,15 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
 /// One of the three choices: which profile-and-model pairing fills this role —
 /// or, where the role can be picked away, that it runs nothing.
 ///
-/// A select rather than a list of buttons, because the pairings are a short list
-/// that barely changes and the choice is one of them — the same control the
-/// sidebar picks a repo with. One flat row per pairing rather than a profile
-/// picker with a model picker after it: the counts stay small, and two stages
-/// would cost a tap every time.
+/// A dropdown rather than a list of buttons, because the pairings are a short
+/// list that barely changes and the choice is one of them. One flat row per
+/// pairing rather than a profile picker with a model picker after it: the counts
+/// stay small, and two stages would cost a tap every time.
+///
+/// The app's own listbox rather than a `<select>`, because every row carries the
+/// mark of the harness it runs and an `<option>` holds nothing but text — the
+/// mark is what makes a column of accounts scannable, which is the whole reason
+/// these three rows are worth drawing by hand.
 ///
 /// `away` is the row a role that can run nothing offers above the pairings,
 /// where it offers one. In the same flat list rather than beside it as a switch,
@@ -370,10 +375,19 @@ function PairingPicker(props: {
   /// the choice that says *skip this* and a reader scanning accounts should meet
   /// it before the accounts.
   const rows = (): Row[] => [
-    ...(props.away ? [{ value: pairing.NONE, label: props.away }] : []),
-    ...pairing
-      .pairings(props.saved)
-      .map((row) => ({ value: pairing.value(row), label: pairing.label(row) })),
+    ...(props.away
+      ? // No mark: the row is not an account, so there is no harness for one to
+        // be of — see [`Row`].
+        [{ value: pairing.NONE, label: props.away, mark: null }]
+      : []),
+    ...pairing.pairings(props.saved).map((row) => ({
+      value: pairing.value(row),
+      // The whole list beside each row, because how one reads depends on the
+      // rest of it: the profile's name is said after the model only where its
+      // backend has more than one account saved.
+      label: pairing.label(row, props.saved),
+      mark: row.profile.account.agent_type,
+    })),
   ];
 
   const choose = useMutation(() => ({
@@ -395,9 +409,10 @@ function PairingPicker(props: {
   return (
     <div class={styles.profileChoice}>
       <label for={`${props.role}-pairing`}>{props.label}</label>
-      {/* A [`Picker`] rather than a `<select>`, so this cannot come to show one
-          pairing while the mutation below would choose another — see
-          `src/picking.tsx`.
+      {/* A [`Listbox`] rather than a `<select>`, so this cannot come to show one
+          pairing while the mutation below would choose another — and so that
+          every row can carry its harness's mark, which an `<option>` cannot
+          hold. See `src/picking.tsx`.
 
           The empty value is the state of having chosen nothing, and it is not
           an option to go back to: a conversation with no pairing is one that
@@ -410,11 +425,12 @@ function PairingPicker(props: {
           The row that runs nothing is not that state and never sends the empty
           string: it is a choice like the pairings, and the placeholder stands
           above it until one of them is made. */}
-      <Picker
+      <Listbox
         id={`${props.role}-pairing`}
         options={rows()}
         value={(row) => row.value}
         label={(row) => row.label}
+        mark={(row) => row.mark}
         chosen={props.chosen}
         pick={(picked) => choose.mutate(picked)}
         disabled={choose.isPending}
@@ -448,12 +464,15 @@ function PairingPicker(props: {
   );
 }
 
-/// One row of a picker, as the control reads it: what it sends and what it
-/// says.
+/// One row of a picker, as the control reads it: what it sends, what it says,
+/// and whose mark goes in front of the words.
 ///
 /// Made here rather than taken from the pairings, because the review picker's
-/// list is not only pairings — see [`PairingPicker`].
-type Row = { value: string; label: string };
+/// list is not only pairings — see [`PairingPicker`]. Which is the whole of why
+/// the mark is `null`able: the row that runs nothing is not an account, so there
+/// is no harness for a mark to be of, and the control draws no element rather
+/// than a gap where one would have been.
+type Row = { value: string; label: string; mark: AgentType | null };
 
 /// The branch the work will be done on: empty until the human names one, and
 /// theirs to change until grilling begins.

@@ -51,6 +51,14 @@ rust-embed = { version = "8", features = [
     "interpolate-folder-path",
     "mime-guess",
 ] }
+# The engine behind the ignore rules in `settings`: a human's pattern for the
+# comments Wrapping is never to address, compiled against whatever a bot writes
+# on a pull request. This one rather than the `fancy-regex` syntect already
+# pulls in, because its answer is linear in the length of what it is matched
+# against whatever the pattern is — the patterns here are typed on a phone and
+# the text is a stranger's comment, so a backtracking engine would be a way to
+# hang the poll from either end.
+regex = "1"
 # Comparing the latest release's tag against the version this was built as.
 semver.workspace = true
 serde.workspace = true

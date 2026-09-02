@@ -42,10 +42,13 @@
 //! The models are one of those fields, and a profile carries the whole list of
 //! them: a profile reaches one account with one configuration, so what it can
 //! launch is its own rather than a list every profile shares. They are picked
-//! off the models this build knows, with a field beside the picks for an id it
-//! does not — the list goes stale the week another model ships, which is why it
-//! is the ordinary way in rather than the only one. The line-a-piece textarea
-//! this replaces was the whole of it, and made every profile a spelling test.
+//! off the models this build knows *of the picked agent type* — a model belongs
+//! to one backend, and a tick for another backend's would be an invitation to
+//! save a profile that cannot launch — with a field beside the picks for an id
+//! the build does not know: the list goes stale the week another model ships,
+//! which is why it is the ordinary way in rather than the only one. The
+//! line-a-piece textarea this replaces was the whole of it, and made every
+//! profile a spelling test.
 //!
 //! The agent type is picked rather than said. It was said while there was one of
 //! it — a select with a single option is theatre — and there is a second backend
@@ -53,6 +56,12 @@
 //! fields because it is what says which fields those are: changing it swaps them
 //! for the picked type's own, blank, a path typed for one type's account meaning
 //! nothing in another's.
+//!
+//! It is the one row of this form that is not a native control: each type is
+//! offered under its own brand mark, which an `<option>` cannot hold, so the
+//! type is picked with the app's own listbox — see
+//! [`../picking.tsx`](../picking.tsx). Everything else here is a text field or a
+//! tick, and stays one.
 //!
 //! A type is offered only once it can launch the real binary, which is what
 //! keeps the picker from being a lie — and offering is said apart from drawing,
@@ -82,6 +91,7 @@ import {
   editProfile,
   listProfiles,
 } from "../api/client";
+import { AGENT_NAME, type AgentType } from "../agents";
 import type {
   Broken,
   ProfileAccount,
@@ -93,6 +103,7 @@ import type {
 import { useReading } from "../freshness";
 import { KNOWN_MODELS, known, prettify } from "../models";
 import { Empty, ErrorLine } from "../notices";
+import { Listbox } from "../picking";
 import { PaneHead } from "../workbench/PaneHead";
 import app from "../App.module.css";
 import styles from "./ProfileList.module.css";
@@ -144,10 +155,6 @@ export const BROKEN: Record<Broken, string> = {
   HomeMissing: "The home it kept its account under is gone.",
   OutsideWatchedPaths: "Its account now points outside the watched paths.",
 };
-
-/// Which agent a profile runs, which is the discriminator its account is shaped
-/// by.
-type AgentType = ProfileAccount["agent_type"];
 
 /// One path an account of some agent type is: the key it is held under, what the
 /// label over it says, and an example to type into it.
@@ -239,17 +246,6 @@ const BLANK_ACCOUNT: Record<AgentType, ProfileAccount> = {
   Codex: { agent_type: "Codex", home: "" },
   Grok: { agent_type: "Grok", home: "" },
   OpenCode: { agent_type: "OpenCode", home: "" },
-};
-
-/// And what each type is called over its picker.
-///
-/// The backend's own name rather than the discriminator, which is the word the
-/// record is written in and not one anybody would recognise their account by.
-const AGENT_NAME: Record<AgentType, string> = {
-  Claude: "Claude Code",
-  Codex: "Codex",
-  Grok: "Grok Build",
-  OpenCode: "OpenCode",
 };
 
 /// An empty form: what "add a profile" starts from.
@@ -543,17 +539,53 @@ export function ProfilePane(props: {
     setRefused(null);
   };
 
-  /// Every model the form draws a tick for: the ones this build knows, and any
-  /// this profile carries that it does not — one saved while the field was free
-  /// text, or one added by hand since.
+  /// The models this build knows that the picked agent type can launch: the
+  /// ticks the form offers of its own.
   ///
-  /// The unknown ones after the known ones rather than in the profile's own
-  /// order, because the known list stands in the same order on every profile and
-  /// one that shuffled itself per profile would be a list nobody could scan.
+  /// Filtered by the type the form is on rather than the whole list, because a
+  /// model is one backend's — a Claude Code account cannot be launched on
+  /// `grok-4.6`, and a tick for it would be an invitation to save a profile that
+  /// cannot run. Picking another type therefore changes what is offered, the way
+  /// it changes which account paths are asked for.
+  const launchable = (): string[] =>
+    KNOWN_MODELS.filter(
+      (model) => model.agent === form().account.agent_type,
+    ).map((model) => model.id);
+
+  /// Every model the form draws a tick for: those, and any this profile carries
+  /// that they do not cover — an id this build has never heard of, one saved
+  /// while the field was free text, or one belonging to a backend this profile
+  /// is no longer on.
+  ///
+  /// The profile's own after the offered ones rather than in the profile's own
+  /// order, because the offered list stands in the same order on every profile
+  /// and one that shuffled itself per profile would be a list nobody could scan.
+  /// Drawn at all because a tick is how a model is taken *off* a profile: one
+  /// the form hid would be one nobody could untick.
   const offered = (): string[] => [
-    ...KNOWN_MODELS.map((model) => model.id),
-    ...form().models.filter((model) => !known(model)),
+    ...launchable(),
+    ...form().models.filter((model) => !launchable().includes(model)),
   ];
+
+  /// Whose model one of them is, where it is a model this build knows and the
+  /// backend that launches it is not the one the form is on.
+  ///
+  /// Which is the one thing a row of [`offered`] can be that nothing here put
+  /// there. A profile carries the models it was saved with, so picking another
+  /// backend leaves the models of the backend before it on the form — ticked,
+  /// because unticking one is how it is taken off, and drawn for that reason
+  /// rather than hidden. Nothing else on the form says a tick is not this
+  /// account's, and what a tick like that saves is a pairing offered as
+  /// runnable that the harness will refuse: `grok` started on `claude-fable-5`.
+  ///
+  /// `undefined` for every ordinary row and for an id the list has never heard
+  /// of — the free-text way in is what that is, and a model this build cannot
+  /// name is not a model it can say the backend of.
+  const elsewhere = (model: string): AgentType | undefined =>
+    KNOWN_MODELS.find(
+      (known) =>
+        known.id === model && known.agent !== form().account.agent_type,
+    )?.agent;
 
   /// A model ticked or unticked.
   ///
@@ -641,6 +673,19 @@ export function ProfilePane(props: {
                           }
                         />
                         {prettify(model)}
+                        {/* And whose it is, where it is not this account's:
+                            inside the label rather than beside it, unlike the
+                            id below, because it is about the tick rather than
+                            about the model — a reader who cannot see the row
+                            hears it as part of what they are ticking. */}
+                        <Show when={elsewhere(model)}>
+                          {(agent) => (
+                            <span class={styles.elsewhere}>
+                              {AGENT_NAME[agent()]}'s model, which this account
+                              cannot launch
+                            </span>
+                          )}
+                        </Show>
                       </label>
                       {/* The id beside the name, for whoever is checking: the
                           name is this viewer's word and the id is what the
@@ -696,19 +741,27 @@ export function ProfilePane(props: {
                 is under this changes with it and nothing typed for the old one
                 is carried across. */}
             <label for="profile-agent_type">Agent</label>
-            <select
+            {/* The app's own listbox rather than a `<select>`, because each row
+                carries that backend's brand mark and an `<option>` holds
+                nothing but text — the one row of this form where there is
+                something to draw beside the words.
+
+                A profile of a type this build draws but does not offer reads as
+                nothing chosen rather than as whichever type happens to be first,
+                which is the listbox's own guarantee and the honest reading of a
+                row that is not on offer. Its account is untouched by that: what
+                the form sends is what was read back, until another type is
+                picked. */}
+            <Listbox
               id="profile-agent_type"
-              value={form().account.agent_type}
-              onChange={(ev) =>
-                pickedType(ev.currentTarget.value as AgentType)
-              }
-            >
-              <For each={AGENT_TYPES}>
-                {(agent_type) => (
-                  <option value={agent_type}>{AGENT_NAME[agent_type]}</option>
-                )}
-              </For>
-            </select>
+              class={styles.agentType}
+              options={AGENT_TYPES}
+              value={(agent_type) => agent_type}
+              label={(agent_type) => AGENT_NAME[agent_type]}
+              mark={(agent_type) => agent_type}
+              chosen={form().account.agent_type}
+              pick={(picked) => pickedType(picked as AgentType)}
+            />
 
             {/* The account, in whatever shape its agent type keeps one: the
                 fields come off the type rather than being written here, so a

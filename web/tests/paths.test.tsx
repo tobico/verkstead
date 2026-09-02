@@ -70,12 +70,15 @@ const OWN = "/var/cache/verkstead-cargo";
 const REST = {
   git_author: TOLD.git_author,
   github_token: "Keep",
+  // The rules ride along as an action rather than a value: nothing this
+  // form does says anything about them — see [`IgnoredCommentsEdit`].
+  ignored_comments: "Keep",
   rust_build_cache: {
     enabled: TOLD.rust_build_cache.enabled,
     size: TOLD.rust_build_cache.size,
   },
-  share_viewer_url: TOLD.share_viewer_url,
   conflict_resolution: TOLD.conflict_resolution,
+  share_on_done: TOLD.share_on_done,
 };
 
 /// The same settings with the installation having said one of each as well,
@@ -221,7 +224,7 @@ const WITHOUT_THE_REPO = REPOS.filter((repo) => repo.name !== REPO);
 
 /// What a save answers with, which is the settings as they now stand.
 function answering(standing: SettingsView): SettingsSaved {
-  return { settings: standing, verified: null };
+  return { settings: standing, verified: null, refused: [] };
 }
 
 function sent(fetching: ReturnType<typeof serving>): unknown {

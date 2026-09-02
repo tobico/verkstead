@@ -1751,6 +1751,29 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     git(&repo, &["add", "-A"]);
     git(&repo, &["commit", "-m", "docs: the roadmaps as they stand"]);
 
+    // And a fourth on a branch of its own that the default branch has not
+    // swallowed, which is the ordinary shape of a roadmap staged in Verkstead
+    // and not merged yet: invisible at the default tip, and the effort most
+    // likely to be the one somebody wants carried on. Its row names the branch,
+    // because that is the base adopting it fixes the Conversation to.
+    git(&repo, &["checkout", "-q", "-b", "tobi/steer"]);
+
+    let steer = repo.join("docs/roadmaps/steer");
+    std::fs::create_dir_all(&steer).unwrap();
+    std::fs::write(
+        steer.join("ROADMAP.md"),
+        "# Steer roadmap\n\n\
+         Taking a run somewhere else, mid-flight.\n\n\
+         ## Stages\n\n\
+         - [ ] 01: One stop and steer — [brief](01-stop-and-steer.md)\n",
+    )
+    .unwrap();
+    std::fs::write(steer.join("01-stop-and-steer.md"), "# a stage brief\n").unwrap();
+
+    git(&repo, &["add", "-A"]);
+    git(&repo, &["commit", "-m", "docs: stage the steer roadmap"]);
+    git(&repo, &["checkout", "-q", "main"]);
+
     let registered = store::register_repo(&pool, &repo, "verkstead", "main")
         .await
         .unwrap()
@@ -2875,16 +2898,16 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             // build cache that has been configured rather than only its
             // defaults — `settings-unset.json` above is the other half.
             "rust_build_cache": { "enabled": true, "size": "50G" },
-            // And a share viewer hosted somewhere, for the same reason: the
-            // fixture of a Verkstead that has been told everything carries the
-            // configured half of this too, and `settings-unset.json` is where
-            // nobody has hosted one.
-            "share_viewer_url": "https://ada.github.io/verkstead-shares/",
             // And a rebase configured, for the reason the size above is typed:
             // the fixture of a Verkstead that has been told everything carries
             // the answer somebody chose, and `settings-unset.json` is the one
             // nobody has chosen anything in.
             "conflict_resolution": "Rebase",
+
+            // And the switch on, for that reason again — this is the
+            // fixture of a Verkstead that has been told everything, and off is
+            // what `settings-unset.json` already carries.
+            "share_on_done": true,
 
             // And the paths this Verkstead was told about, which come back
             // labelled as the settings' own — the router behind this fixture was
@@ -2898,6 +2921,16 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             // wrote it would be a diff on every run.
             "watched_paths": ["/home/ada/src"],
             "sandbox_binds": ["/var/cache/verkstead-node", "verkstead=/var/cache/verkstead-cargo"],
+
+            // And one comment nobody wants addressed, for the reason the size
+            // above is typed: this is the fixture of a Verkstead that has been
+            // told everything, and `settings-unset.json` is the one that has
+            // been told nothing. The rules are the one setting sent as an
+            // action rather than a value — every other section sends `Keep`,
+            // and this is the section that owns them.
+            "ignored_comments": {
+                "Set": { "rules": [{ "author": "coderabbitai", "body": "billing" }] }
+            },
         }),
     )
     .await;
