@@ -60,8 +60,13 @@ export const KNOWN_MODELS: KnownModel[] = [
   // model in a second spelling: this list is what a profile is ordinarily
   // filled in from, and one that offered each model twice would be twice as
   // long to read for the sake of the two rows anybody asks for.
-  { id: "opus[1m]", name: "Opus 5 (1M context)", agent: "Claude" },
-  { id: "sonnet[1m]", name: "Sonnet 5 (1M context)", agent: "Claude" },
+  //
+  // Spelled out in full, like every other entry and for the entry's own reason:
+  // a pick says exactly which model was meant. `opus[1m]` reads the same and is
+  // the harness's to answer for — see the aliases below, which is what that
+  // spelling is one of, and which is why it is not what a pick sends.
+  { id: "claude-opus-5[1m]", name: "Opus 5 (1M context)", agent: "Claude" },
+  { id: "claude-sonnet-5[1m]", name: "Sonnet 5 (1M context)", agent: "Claude" },
   { id: "gpt-5-codex", name: "GPT-5 Codex", agent: "Codex" },
   { id: "grok-4.6", name: "Grok 4.6", agent: "Grok" },
   { id: "grok-4.5", name: "Grok 4.5", agent: "Grok" },

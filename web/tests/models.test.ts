@@ -97,10 +97,15 @@ describe("the known models", () => {
     expect(known("claude-opus-7[1m]")).toBe(false);
   });
 
-  it("offers the two that are worth a row", () => {
+  /// And spelled out in full where they are offered, like every other entry: a
+  /// pick says exactly which model it meant, and `opus[1m]` is the harness's
+  /// short name for whichever one it calls Opus this month.
+  it("offers the two that are worth a row, in full", () => {
     const ids = KNOWN_MODELS.map((model) => model.id);
 
-    expect(ids).toContain("opus[1m]");
-    expect(ids).toContain("sonnet[1m]");
+    expect(ids).toContain("claude-opus-5[1m]");
+    expect(ids).toContain("claude-sonnet-5[1m]");
+    expect(ids).not.toContain("opus[1m]");
+    expect(ids).not.toContain("sonnet[1m]");
   });
 });
