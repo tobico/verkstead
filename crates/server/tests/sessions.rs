@@ -3860,8 +3860,20 @@ async fn an_opencode_session_follows_the_records_of_the_session_it_opened_in_its
         "following the store should not cost the Capture anything: {said:?}"
     );
 
-    let view = fixture.view().await;
-    let printed = output(&view).expect("the session is on the Timeline");
+    // Waited for rather than read the once, because the two are written a step
+    // apart: the poll that moves the follower puts the records in the store and
+    // *then* summarises the row off them, so a Transcript that has arrived is
+    // not yet a count of what is on it — see `summarise` in
+    // `crates/server/src/sessions.rs`. Read immediately, this asserted against
+    // whichever of the two had happened by then, which on a loaded machine is
+    // the first.
+    let printed = fixture
+        .until(|view| {
+            output(view)
+                .filter(|printed| printed.turns.is_some())
+                .cloned()
+        })
+        .await;
 
     assert_eq!(
         printed.turns,

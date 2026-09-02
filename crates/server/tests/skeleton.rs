@@ -137,11 +137,7 @@ fn watched_paths_are_a_list_however_they_are_given() {
         .unwrap()
         .into_string()
         .unwrap();
-    let separated = Config::parse_from([
-        "verkstead serve",
-        "--watched-path",
-        one_string.as_str(),
-    ]);
+    let separated = Config::parse_from(["verkstead serve", "--watched-path", one_string.as_str()]);
 
     assert_eq!(repeated.watched_paths, separated.watched_paths);
     assert_eq!(
