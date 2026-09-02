@@ -19,6 +19,7 @@ import type {
   ShowingArchived,
 } from "../src/api/types";
 import { Shell } from "../src/App";
+import { ComposePage } from "../src/workbench/Compose";
 import { Conversations } from "../src/workbench/Conversations";
 import { Workbench } from "../src/workbench/Workbench";
 import { json, serving, whenever } from "./serving";
@@ -121,6 +122,11 @@ export function mount(at = "/") {
             <Route path="/share" />
             <Route path="/roadmaps/:name" />
           </Route>
+          {/* And the compose page beside them, exactly as `App.tsx` has it: a
+              press on the sidebar's link is a navigation, and a test mounting
+              the workbench without this would be testing an app where that link
+              goes nowhere. */}
+          <Route path="/compose" component={ComposePage} />
         </MemoryRouter>
       </QueryClientProvider>
     )),

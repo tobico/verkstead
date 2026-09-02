@@ -1,12 +1,18 @@
-//! The conversations sidebar: what there is to work on, and the one way to add
+//! The conversations sidebar: what there is to work on, and the ways to add
 //! to it.
 //!
-//! A Conversation is started against a registered Repo and nothing else — the
-//! branch name is the server's to prefill and the brief is written afterwards,
-//! in the Timeline, which is where it lives. So the whole of starting one is
-//! saying which repository the work is in, and one press of a menu says it:
-//! the button drops the registered Repos, and the Repo pressed *is* the
-//! Conversation started. See [`NewConversation`].
+//! The first of them is the compose page — a link at the head of the pane, and
+//! the composer with nothing behind it yet: the brief is written, the setup is
+//! settled, and the Conversation is created by the press at the end of it. See
+//! `Compose.tsx`.
+//!
+//! The second is older and is on its way out. A Conversation can also be started
+//! against a registered Repo and nothing else — the branch name is the server's
+//! to prefill and the brief written afterwards — so the whole of starting one is
+//! saying which repository the work is in, and one press of a menu says it: the
+//! button drops the registered Repos, and the Repo pressed *is* the Conversation
+//! started. It stays beside the link while the roadmaps it also holds are still
+//! only reachable through it. See [`NewConversation`].
 //!
 //! The roadmaps nothing is driving are in that menu too, under a heading of
 //! their own — see [`NewConversation`] again, because they are the same thing:
@@ -466,6 +472,19 @@ export function Conversations(props: {
           <Settings />
         </PaneHead>
       </PaneSticky>
+
+      {/* The way on to the compose page, which is where a Conversation is
+          written before it exists. A link rather than a button because it is a
+          page: it opens in a new tab if somebody asks it to, and Back leaves it.
+
+          The menu beside it is the older way in — one press, one repo, and the
+          Conversation created before the human has written a word — and it
+          stays until the compose page has taken over the roadmaps it also
+          holds. Both say *New conversation*, because both are, and the pair is
+          the one moment on this branch when they are. */}
+      <A class={styles.compose} href="/compose">
+        New conversation
+      </A>
 
       <NewConversation open={props.open} />
 

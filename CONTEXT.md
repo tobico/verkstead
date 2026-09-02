@@ -345,6 +345,17 @@ default-branch rule, a companion that has just become the Conversation's own
 Repo is dropped — a Conversation is never a companion of itself — and the branch
 name and the Pairings are left exactly where the human left them.
 
+**And the same composer with nothing behind it is the compose page**, reached
+from *New conversation* at the head of the sidebar: the same box, the same row
+along its edge and the same press, over what this device is holding rather than
+over a record. It is kept per device the way a half-filled answer sheet is, so a
+reload loses nothing, and nothing exists on the server until a press — **Start**
+creates the Conversation, puts every field the human touched on it through the
+endpoints the composer uses and kicks the work off, and **Save as draft** stops
+after the fields. Either way the page lands in the Conversation it made and this
+device stops holding anything. A field the server refuses leaves the rest of the
+work on that draft, and the refusal is said on the draft's own composer.
+
 Every one of those freezes at the same moment the Brief does, so once grilling
 starts none of it is drawn; on a later round the branch and the base commit are
 frozen already, and so is the Repo — a checkout is of one repository, and the

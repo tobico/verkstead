@@ -24,6 +24,6 @@ unsaved state, and it creates by replaying the existing endpoints.
 - [x] 02: The composer look — [details](02-composer-look.md)
 - [x] 03: Switching a draft's repo — [details](03-switching-a-drafts-repo.md)
 - [x] 04: The one-event layout — [details](04-one-event-layout.md)
-- [ ] 05: The compose page — [details](05-compose-page.md)
+- [x] 05: The compose page — [details](05-compose-page.md)
 - [ ] 06: Pairing prefill on compose — [details](06-pairing-prefill.md)
 - [ ] 07: Adopting from compose — [details](07-adopting-from-compose.md)

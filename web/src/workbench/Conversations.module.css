@@ -85,6 +85,24 @@
   margin-bottom: 1.5rem;
 }
 
+/* The way on to the compose page, drawn as the button beside it: the two are the
+   same act reached two ways for as long as both are here, and one of them
+   painted differently would be saying they were not. A link, so it is the paint
+   of a button rather than a button — no underline, and the pane's width. */
+.compose {
+  display: block;
+  width: 100%;
+  margin-bottom: 0.5rem;
+  padding: 0.5rem 1rem;
+  font-weight: 600;
+  text-align: center;
+  text-decoration: none;
+  color: var(--accent);
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+}
+
 /* The width of the pane, because it is the pane's one action and the menu comes
    down the width of it. The mark is pushed to the far end, where a dropdown's
    is. */
@@ -298,7 +316,8 @@
     background: transparent;
   }
 
-  .newConversation > button:not(:disabled):hover {
+  .newConversation > button:not(:disabled):hover,
+  .compose:hover {
     color: var(--accent-deep);
     border-color: var(--accent-deep);
   }

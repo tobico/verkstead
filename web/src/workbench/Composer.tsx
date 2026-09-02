@@ -50,7 +50,7 @@
 //! [`Brief`]: ./Brief.tsx
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
-import { Show, createSignal, type JSX } from "solid-js";
+import { For, Show, createSignal, type JSX } from "solid-js";
 
 import { saveBrief, startGrilling } from "../api/client";
 import type {
@@ -64,6 +64,7 @@ import { PaneSticky } from "../Panes";
 import { Empty, ErrorLine, Note } from "../notices";
 import { Adoption } from "./Adoption";
 import styles from "./Composer.module.css";
+import { refusedOnCreate } from "./composing";
 import { PaneHead } from "./PaneHead";
 import { Setup, SetupNotes } from "./Setup";
 import { keeping } from "./settling";
@@ -125,6 +126,16 @@ export function Composer(props: {
         {/* What the setup has to say that is not a control, under the box
             rather than inside it. */}
         <SetupNotes conversation={props.conversation} />
+
+        {/* And what the create that made this Conversation could not do, for
+            the one draft that was made from the compose page rather than
+            configured here. Said on this pane because this is where what was
+            refused is: the field is drawn holding what the server kept, and
+            this is why it is not holding what was composed. See
+            `composing.ts`. */}
+        <For each={refusedOnCreate(props.conversation.id)}>
+          {(said) => <ErrorLine class={styles.failure}>{said}</ErrorLine>}
+        </For>
 
         {/* And the press the whole pane is arranged for. Only one of the two is
             ever drawn — each is for a different kind of draft — so they read as

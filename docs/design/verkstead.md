@@ -578,6 +578,20 @@ and the Adopt press where the start would be. Past drafting a frozen Brief opens
 the read-only pane instead, and the repo name, the worktree path and the
 conversation state are drawn nowhere on the record: it tells that story itself.
 
+**The same composer stands with nothing behind it, as the compose page**
+(*settled 2026-09-02, building brief-details-view*), reached from a New
+conversation link at the head of the sidebar and drawn on the two-pane frame the
+one-Event layout uses. What it holds — repo, brief, branch, base, companions,
+pairings — is kept on the device the way an answer sheet's draft is, so a reload
+or a closed tab loses nothing, and nothing reaches the server until a press.
+**Start** creates the Conversation, replays every touched field through the
+per-field setup endpoints and kicks the work off; **Save as draft**, quieter and
+beside it, stops after the fields. Both need a repo and nothing else, both land
+in the Conversation they made, and a successful create clears what the device was
+holding. There is no batched create and no second set of validation rules: a
+field the server refuses leaves the rest of the work on a part-set draft, and the
+refusal is carried to that draft's own composer to be read where the field is.
+
 Timeline events:
 
 | Event | In timeline | In details pane |

@@ -1,6 +1,7 @@
 /* Where a Conversation is drafted: the box the Brief is written in, the setup
    along the inside of its bottom edge, and the press that starts the work under
-   it. See `Composer.tsx`.
+   it. See `Composer.tsx` — and `Compose.tsx`, which is the same box before
+   there is a Conversation under it and is painted from here for that reason.
 
    The look is the composer of a chat app, because the act is the same one: a
    piece of work is described in a box, a few options about how it is to be run
@@ -126,6 +127,49 @@
 @media (hover: hover) {
   .startGrilling .start:not(:disabled):not(.inert):hover {
     background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}
+
+/* And the compose page's presses, which are the same one with another beside
+   it: a Conversation can be created without being started, and that is the
+   quieter of the two. A row, so the pair sits against the far edge the start
+   alone sits against — inside `.startGrilling`, which is where what they have
+   to say still goes. */
+.presses {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.6rem;
+}
+
+/* The secondary one: the shape of the start beside it and the paint of an
+   outline, because creating without starting is the smaller of the two acts and
+   a page of buttons all painted as the primary one says nothing about which of
+   them matters.
+
+   Painted here rather than handed the app's [`QuietButton`], which is a control
+   with no disabled state: this one has to be able to say that there is nothing
+   to create yet. */
+.presses .draft {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.presses .draft:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+@media (hover: hover) {
+  .presses .draft:not(:disabled):hover {
+    color: var(--accent-deep);
     border-color: var(--accent-deep);
   }
 }
