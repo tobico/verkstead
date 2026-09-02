@@ -20,6 +20,7 @@
 //! viewer, this is the one place the rendering happens.
 
 mod answering;
+mod browsing;
 mod conversations;
 mod profiles;
 mod push;
@@ -31,6 +32,7 @@ mod update;
 mod view;
 
 pub use answering::{Locked, Submitted};
+pub use browsing::{BrowseScope, DirectoryEntry, DirectoryListing, EntryKind};
 pub use conversations::{
     AbandonedRepo, AbandonedRoadmap, Adopted, AdoptedStage, AdoptionView, AgentOutputEvent,
     BacklogPane, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed, BriefEdit,

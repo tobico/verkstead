@@ -13,6 +13,8 @@ use axum::routing::{get, post};
 use sqlx::SqlitePool;
 use verkstead_store::{Settlements, Waits};
 
+mod browsing;
+
 /// The shared Rust build cache every sandbox is given: where it is, and whether
 /// there is an sccache to compile through.
 ///

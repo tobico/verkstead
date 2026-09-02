@@ -470,6 +470,17 @@ export type BriefSaved = "Saved" | "NoSuchConversation" | "NotDrafting";
 export type Broken = "DirMissing" | "ConfigMissing" | "HomeMissing" | "OutsideWatchedPaths";
 
 /**
+ * Which kind of field is asking, which is what decides where it may look.
+ *
+ * Sent in the query rather than being a route of its own: it is one reading,
+ * asked two ways round, and the answer has the same shape either way.
+ *
+ * Spelled in lower case, unlike everything else the viewer sends: this one
+ * travels in a URL beside the path, where a capital would read as a mistake.
+ */
+export type BrowseScope = "watched" | "anywhere";
+
+/**
  * The build cache as the human has just set it.
  *
  * The size is a string because it is sccache's own word for one, and an empty
@@ -1474,6 +1485,55 @@ export type DiffView = { html: string, paths: Array<string>, };
 export type Direction = "inline" | "task-list" | "roadmap";
 
 /**
+ * One thing in a directory.
+ *
+ * Both the name and the whole path, because the field uses each for something
+ * different: the name is the row, and the path is what a tap writes into the
+ * input and asks the next listing for.
+ */
+export type DirectoryEntry = { 
+/**
+ * What it is called in the directory holding it — the row's own word.
+ *
+ * The Watched Paths' roots have no directory holding them, so what comes
+ * back for one of those is the last segment of it. A field drawing that
+ * listing has the whole path beside it and may say more.
+ */
+name: string, 
+/**
+ * And where it is: absolute, and under the resolved directory it was read
+ * out of.
+ */
+path: string, kind: EntryKind, };
+
+/**
+ * What one directory holds, or the reason it does not answer.
+ *
+ * [`DirectoryListing::Listed`] is the ordinary answer and the rest are the
+ * dropdown's other rows: a line where the entries would be, saying what the
+ * server made of the path the field holds.
+ */
+export type DirectoryListing = { "Listed": { 
+/**
+ * The directory this lists, resolved — `..` taken out and every
+ * symlink followed, which is what the entries below hang off.
+ *
+ * `null` for the [`BrowseScope::Watched`] roots, which are a listing
+ * with no one directory above them: the boundary is a set of
+ * directories rather than a place.
+ */
+path: string | null, entries: Array<DirectoryEntry>, } } | "NotAbsolute" | "Missing" | "NotADirectory" | "OutsideWatchedPaths" | { "Unreadable": { why: string, } };
+
+/**
+ * What one entry is, which decides what the field drawing it does with the row.
+ *
+ * Three rather than two, because a repository is the thing one of these fields
+ * is looking *for*: the Repos' form marks it and stops there, where every other
+ * field treats it as the directory it also is.
+ */
+export type EntryKind = "Directory" | "File" | "Repository";
+
+/**
  * What became of starting a Conversation grilling.
  *
  * Every refusal is named rather than collapsed into one, because each of them
@@ -1806,6 +1866,11 @@ export type PickedView = "Nothing" | "Skipped" | { "Under": PairingView };
  *
  * All three are on the record as well, each at the moment it arrived there, and
  * each is one card drawn twice rather than two cards.
+ *
+ * The list they arrive in is ordered, and the viewer draws it in that order: a
+ * pull request first, then a task list, then a roadmap. The ordering is done
+ * where the list is built rather than here — see the pinned block in
+ * `crates/server/src/ui.rs`.
  */
 export type PinnedEvent = { "TaskList": TaskListEvent } | { "StageList": StageListEvent } | { "PullRequest": PullRequestEvent };
 

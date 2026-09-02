@@ -29,8 +29,8 @@ use axum::routing::{get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView, CheckRollup,
-    CleanupStepView, CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded,
+    Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, BrowseScope, BuildCacheView,
+    CheckRollup, CleanupStepView, CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded,
     CompanionBranchRenamed, CompanionMode, CompanionModeChoice, CompanionModeChosen,
     CompanionRemoved, CompanionView, ConflictResolutionEdit, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
@@ -315,6 +315,12 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // read and the save being the same page's two halves — and one save for
         // the author and the token together, because the page has one button.
         .route("/api/ui/settings", get(settings).post(save_settings))
+        // One directory of the filesystem, for a path field's browse dropdown.
+        // Not a route under anything it belongs to: it serves every field that
+        // takes a path — the settings' own, the Repos' form, an Agent Profile's
+        // account — and what bounds it is the scope asked for rather than
+        // whatever page is asking.
+        .route("/api/ui/directories", get(directories))
         .route("/api/ui/update", get(update))
 }
 
@@ -972,24 +978,6 @@ pub(crate) async fn conversation_view(
     )
     .await;
 
-    // Each of those goes in two places — pinned above the record, and on the
-    // record at the row that says it landed — and this is the one reading behind
-    // both. The rows are stamped where the runner sees the landing; a
-    // Conversation from before there were rows to stamp keeps the pinned card
-    // alone, which is what it has always had.
-    let mut pinned: Vec<verkstead_render::PinnedEvent> = backlog
-        .clone()
-        .map(verkstead_render::task_list_event)
-        .into_iter()
-        .collect();
-
-    pinned.extend(
-        roadmaps
-            .iter()
-            .cloned()
-            .map(verkstead_render::stage_list_event),
-    );
-
     // And how the pull request's checks were the last time anything asked, which
     // is the one thing about a pull request that is written down and moves. Read
     // once for the two cards drawn from it below, both being the one card in the
@@ -1032,30 +1020,60 @@ pub(crate) async fn conversation_view(
         }
     };
 
-    // And every pull request the work ended up on, which are pinned beside them.
-    // These *are* on the record — the Conversation's own repository's is what
-    // moved the Conversation into Wrapping, and a companion's is that wrap-up
-    // covering the repository it also committed in — so they are read off the
-    // Timeline for the reason the Brief is: they are already here. All of them
-    // rather than the last one found: a Conversation ends on one pull request per
-    // repository it was worked in, and the human wraps up all of them at once.
-    // What is not read here is what a PR holds, which is a request of its own;
-    // see [`pull_request`].
-    pinned.extend(timeline.iter().filter_map(|event| match &event.event {
-        store::Event::PullRequest(opened) => Some(verkstead_render::pull_request_event(
-            event.id,
-            event.at.clone(),
-            verkstead_render::PullRequestSummary {
-                number: opened.number,
-                title: opened.title.clone(),
-                url: opened.url.clone(),
-                repo: opened.repo.clone(),
-                checks: own_checks(&opened.repo, checks),
-                merging: merges.get(&event.id).copied().map(merging),
-            },
-        )),
-        _ => None,
-    }));
+    // What is pinned, in the order the carousel turns through it: every pull
+    // request the work ended up on, then the backlog, then the roadmap.
+    //
+    // The pull request leads because it is the one of the three with anything on
+    // it to answer — a review waiting, checks gone red, a merge that stopped —
+    // where a backlog and a roadmap are lists read off the worktree with nothing
+    // on them to do. The two lists follow in the order the work goes through
+    // them: a backlog is this piece of work's own tasks, and a roadmap is the
+    // stages around it.
+    //
+    // Which card fronts when a Conversation is opened is not settled here. That
+    // is the viewer's, and this order is what it falls back to where nothing is
+    // blocking — see `fronting` in `web/src/workbench/Timeline.tsx`.
+    //
+    // The pull requests *are* on the record — the Conversation's own
+    // repository's is what moved the Conversation into Wrapping, and a
+    // companion's is that wrap-up covering the repository it also committed in —
+    // so they are read off the Timeline for the reason the Brief is: they are
+    // already here. All of them rather than the last one found: a Conversation
+    // ends on one pull request per repository it was worked in, and the human
+    // wraps up all of them at once. What is not read here is what a PR holds,
+    // which is a request of its own; see [`pull_request`].
+    let mut pinned: Vec<verkstead_render::PinnedEvent> = timeline
+        .iter()
+        .filter_map(|event| match &event.event {
+            store::Event::PullRequest(opened) => Some(verkstead_render::pull_request_event(
+                event.id,
+                event.at.clone(),
+                verkstead_render::PullRequestSummary {
+                    number: opened.number,
+                    title: opened.title.clone(),
+                    url: opened.url.clone(),
+                    repo: opened.repo.clone(),
+                    checks: own_checks(&opened.repo, checks),
+                    merging: merges.get(&event.id).copied().map(merging),
+                },
+            )),
+            _ => None,
+        })
+        .collect();
+
+    // And the two lists behind it. Each goes in two places — pinned here, and on
+    // the record at the row that says it landed — and this is the one reading
+    // behind both. The rows are stamped where the runner sees the landing; a
+    // Conversation from before there were rows to stamp keeps the pinned card
+    // alone, which is what it has always had.
+    pinned.extend(backlog.clone().map(verkstead_render::task_list_event));
+
+    pinned.extend(
+        roadmaps
+            .iter()
+            .cloned()
+            .map(verkstead_render::stage_list_event),
+    );
 
     // Whether the worktree is still on disk, which is a look at the filesystem
     // rather than anything the store knows.
@@ -3759,6 +3777,60 @@ fn last_four(token: &str) -> String {
     let from = characters.len().saturating_sub(4);
 
     characters[from..].iter().collect()
+}
+
+/// Which directory a path field is asking about, and in what scope.
+///
+/// The path is optional because a field standing empty is where a browse
+/// begins, and an empty one is read as no path at all: `?path=` is what a
+/// cleared input sends, and it names the same nothing.
+///
+/// The scope is not optional. A field is one kind or the other and knows which
+/// it is, so an ask that says nothing about it is a caller with a bug rather
+/// than a browse to answer — and answering it in either scope would be answering
+/// a different question from the one asked.
+#[derive(Debug, serde::Deserialize)]
+struct Browsing {
+    scope: BrowseScope,
+    path: Option<String>,
+}
+
+/// `GET /api/ui/directories?scope=<scope>&path=<path>` — what one directory
+/// holds, for the dropdown a path field browses with.
+///
+/// One directory per request and no walking: the field asks again for every
+/// level somebody drills into, so a browse costs one `read_dir` at a time
+/// whatever is under it.
+///
+/// Every refusal is a named outcome in the body rather than a status, the way
+/// registering a Repo refuses: a path that is relative, missing, not a
+/// directory, outside the Watched Paths or unreadable is a line the dropdown
+/// draws where its rows would be. Most of them are the ordinary state of a field
+/// halfway through being typed into.
+///
+/// What decides where the ask may look is [`BrowseScope`] — see
+/// [`crate::browsing`], where the boundary is consulted for one of the two.
+async fn directories(
+    State(state): State<AppState>,
+    Query(browsing): Query<Browsing>,
+) -> HttpResponse {
+    let watched = state.watched.clone();
+    let path = browsing
+        .path
+        .filter(|path| !path.is_empty())
+        .map(std::path::PathBuf::from);
+
+    // Off the runtime: reading the boundary is a file and a `canonicalize` per
+    // entry in it, and opening a directory is a read of its own.
+    match tokio::task::spawn_blocking(move || crate::browsing::list(&watched, browsing.scope, path))
+        .await
+    {
+        Ok(listing) => Json(listing).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "listing a directory failed");
+            unavailable("the directory could not be listed")
+        }
+    }
 }
 
 /// `GET /api/ui/update` — whether a newer Verkstead has been released than

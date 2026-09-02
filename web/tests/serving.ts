@@ -56,7 +56,7 @@ export function askedFor(
 
 /// What a test hands [`serving`]: an answer in the sequence, or one belonging to
 /// a request.
-type Answer =
+export type Answer =
   | ((init?: RequestInit) => Promise<Response>)
   | { key: string; answer: (init?: RequestInit) => Promise<Response> };
 

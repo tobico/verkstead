@@ -14,9 +14,18 @@ still holds word for word, because the asking half is unchanged.
 **Watched Path**:
 A directory Verkstead is permitted to operate inside, said either in the
 environment at installation or in the workbench settings, the boundary being
-the union of the two. A security boundary rather than a convenience: any
-filesystem operation on a path outside every Watched Path is refused, and Repos
-are registered only from within one. The installation's own are resolved once
+the union of the two. A security boundary rather than a convenience: nothing
+outside every Watched Path is written, worked in or registered — a Repo is
+registered only from within one, and so is the account an Agent Profile names.
+**Reading the names in a directory is the one thing it does not bound**, and
+deliberately: the workbench's path fields browse the filesystem into
+themselves, and the fields whose values the boundary says nothing about — a
+Watched Path being added, a Sandbox Configuration bind — browse anywhere the
+server can read. What that discloses is a listing of names to the one human the
+tailnet is the perimeter for, and a field that could not reach the directory it
+is about to be pointed at would be a field nobody could fill in. The fields
+whose values *are* bounded browse bounded, by the same admission their save
+makes. The installation's own are resolved once
 at startup and a missing one refuses to start; the settings' own are re-read
 whenever an admission is decided and never refuse anything — one that will not
 resolve covers nothing, with a line in the log — so a bare binary comes up
@@ -81,6 +90,22 @@ the naming back, and the name the Conversation started on stands again rather
 than another being invented. Two drafts against one Repo both reading *Draft*
 beside the same Repo name is what two drafts are: they are few, and they are
 short-lived.
+
+**An invented name is a prefill until the work starts, and only then a branch.**
+Which is where it is made to be free: at the moment the branch is cut it is
+checked against every repository it is about to be cut in — the Conversation's
+own and each companion mirroring it — and where one of them already answers to
+that name, another is invented out of the same words and that is what the work
+goes on. What a repository answers to is its own branches and its remotes' both:
+a name only origin holds can be cut locally, and the push behind it would be
+into somebody's branch. A branch outlives the worktree it was worked in, so a
+Repo worked in for a while holds plenty of them, and two Conversations landing on
+one of a thousand names is a matter of when rather than whether. Nothing is
+reported, because nothing had been drawn: whose the name is does not change with
+it, and the first session still has one to replace. **A name the human typed is
+refused instead** — that one they chose and meant, so a branch of somebody else's
+work under it is something to tell them about rather than something to pick
+around.
 
 **And where nobody has named it, the work's first session is asked to.** The
 press that starts the work leaves the naming to the session it starts — the
@@ -345,7 +370,10 @@ _Avoid_: feed, log, history, activity stream
 One entry in a Timeline — a Brief, agent output, a Question Set, a Handoff, a
 commit, a task list, a stage list, a PR, a Notice. Each shows a summary in the
 Timeline and its full self in the details pane. Task lists, stage lists and PRs
-are **pinned**: a fixed set, with no manual pin or unpin.
+are **pinned**: a fixed set, with no manual pin or unpin. Where more than one is
+pinned they are drawn in one order — the pull request, then the task list, then
+the roadmap — the pull request leading as the only one of the three with
+anything on it to answer.
 _Avoid_: item, record, message, step
 
 **Share**:
