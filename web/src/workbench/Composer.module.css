@@ -288,12 +288,17 @@
   cursor: pointer;
 }
 
-.presses .draft:disabled {
+/* The same two ways of not being pressable that the start beside it draws, and
+   drawn the same: a press already in flight, and nothing yet to create. The
+   second of them is only `aria-disabled`, so that a pointer can still reach the
+   `title` saying what is missing — see `Compose.tsx`. */
+.presses .draft:disabled,
+.presses .draft.inert {
   opacity: 0.65;
 }
 
 @media (hover: hover) {
-  .presses .draft:not(:disabled):hover {
+  .presses .draft:not(:disabled):not(.inert):hover {
     color: var(--accent-deep);
     border-color: var(--accent-deep);
   }

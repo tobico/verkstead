@@ -27,6 +27,14 @@
 //! and two presses, and every sentence added to it was read once and then read
 //! past forever.
 //!
+//! Which is why neither of them is ever truly `disabled` for a thing that is
+//! missing — only for a press already in flight. A disabled button is one no
+//! browser will hover and no keyboard will reach, so the `title` explaining it
+//! would go the same way as the press it never takes, and the page would be back
+//! to refusing without saying why. Both draw inert, both answer a press with
+//! nothing, and `aria-disabled` is what says so to whoever is not looking at
+//! them.
+//!
 //! No Timeline beside it, for the reason a Conversation whose record is the one
 //! Event has none: there is nothing yet to read. So the page is the sidebar and
 //! this, and the frame widens exactly as it does there — see `Workbench.tsx`,
@@ -608,12 +616,17 @@ function Compose(props: {
             <button
               type="button"
               class={styles.draft}
-              disabled={!ready() || make.isPending}
-              // Why it cannot be pressed, on the press itself: there is one
-              // thing missing and it is the one thing the row above it is
-              // asking for.
+              classList={{ [styles.inert!]: !ready() }}
+              // Truly `disabled` for a press already in flight and nothing
+              // else. Having no repo to create in is the other thing entirely:
+              // it draws inert, answers a press with nothing, and says why in a
+              // `title` — which is the whole reason it is not disabled, a
+              // button a browser will not hover being a button that cannot
+              // explain itself. Exactly as the start beside it works.
+              disabled={make.isPending}
+              aria-disabled={!ready()}
               title={ready() ? undefined : NO_REPO}
-              onClick={() => make.mutate(false)}
+              onClick={() => ready() && make.mutate(false)}
             >
               Save as draft
             </button>
@@ -621,13 +634,11 @@ function Compose(props: {
               type="button"
               class={styles.start}
               classList={{ [styles.inert!]: !startable() }}
-              // Truly `disabled` for the two things that leave the press
-              // nothing to do: no repo, which is what its tooltip says, and a
-              // press already in flight. Not being ready to *start* is the
-              // other thing entirely — it draws inert, says what is missing on
-              // hover, and answers a press with nothing, exactly as the
-              // composer's own start does.
-              disabled={!ready() || make.isPending}
+              // The same, with one more thing to wait on: creating is all the
+              // press beside it does, and this one grills as well. So a repo is
+              // not the whole of what it needs, and its `title` says whichever
+              // of the two is missing.
+              disabled={make.isPending}
               aria-disabled={!startable()}
               title={ready() ? (startable() ? undefined : waiting()) : NO_REPO}
               onClick={() => startable() && make.mutate(true)}

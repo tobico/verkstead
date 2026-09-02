@@ -279,8 +279,13 @@ describe("the compose page", () => {
     expect(writes(fetching, "/api/ui/conversations")).toBe(0);
   });
 
-  it("starts nothing until a repo is picked", async () => {
-    theWorkbench();
+  /// Neither press is ever truly `disabled` for a thing that is missing, only
+  /// for a press in flight: a disabled button is one no browser will hover and
+  /// no keyboard will reach, so the `title` saying what is missing would go the
+  /// same way as the press it never takes. Inert, `aria-disabled`, and answering
+  /// a press with nothing is what says it instead.
+  it("creates nothing until a repo is picked, and says why on both presses", async () => {
+    const fetching = creating();
     const { container } = mount("/compose");
 
     await composing(container);
@@ -288,19 +293,28 @@ describe("the compose page", () => {
     const start = screen.getByRole("button", { name: "Start work" });
     const draft = screen.getByRole("button", { name: "Save as draft" });
 
-    expect((start as HTMLButtonElement).disabled).toBe(true);
-    expect((draft as HTMLButtonElement).disabled).toBe(true);
+    for (const press of [start, draft]) {
+      expect((press as HTMLButtonElement).disabled).toBe(false);
+      expect(press.getAttribute("aria-disabled")).toBe("true");
+      expect(press.classList.contains(composer.inert!)).toBe(true);
 
-    // And why, on both of them: one thing is missing, and it is the first
-    // control in the row above.
-    expect(start.getAttribute("title")).toBe("No repo selected");
-    expect(draft.getAttribute("title")).toBe("No repo selected");
+      // And why, on the press itself: one thing is missing, and it is the first
+      // control in the row above.
+      expect(press.getAttribute("title")).toBe("No repo selected");
+    }
+
+    // Pressed, either of them does nothing at all — which is what the press
+    // being taken at all has to be worth.
+    fireEvent.click(draft);
+    fireEvent.click(start);
+    expect(writes(fetching, "/api/ui/conversations")).toBe(0);
 
     await pickRepo(container, REPOS[1]!.id);
 
-    await waitFor(() => expect((draft as HTMLButtonElement).disabled).toBe(false));
-    expect((start as HTMLButtonElement).disabled).toBe(false);
+    await waitFor(() => expect(draft.getAttribute("aria-disabled")).toBe("false"));
+    expect(draft.classList.contains(composer.inert!)).toBe(false);
     expect(draft.getAttribute("title")).toBeNull();
+    expect(start.getAttribute("title")).not.toBe("No repo selected");
   });
 
   /// And the two presses part company there. Creating is the whole of what the
@@ -344,9 +358,10 @@ describe("the compose page", () => {
 
     // And nothing about the other press: creating is all it does, and it can.
     expect(
-      (screen.getByRole("button", { name: "Save as draft" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(false);
+      screen
+        .getByRole("button", { name: "Save as draft" })
+        .getAttribute("aria-disabled"),
+    ).toBe("false");
 
     // A brief typed is the last of it, and the press goes live.
     fireEvent.input(await composing(container), {
