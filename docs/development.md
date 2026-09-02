@@ -436,10 +436,14 @@ $ tools/build-appimage.sh     # Verkstead-x86_64.AppImage, once the viewer is bu
 $ tools/build-macos-dmg.sh    # Verkstead-universal.dmg, on a Mac
 ```
 
-The last two are the desktop artifacts a release ships, one per platform. Both
-take everything from the working tree and leave one file under `target/`, and
-both want `web/dist` already built, because the viewer is compiled into the
-binary they wrap.
+The last two are two of the three desktop artifacts a release ships, one per
+platform that has something to wrap. Both take everything from the working tree
+and leave one file under `target/`, and both want `web/dist` already built,
+because the viewer is compiled into the binary they wrap. There is no third
+script, because Windows has no packaging: the exe a release ships there is what
+`cargo build --release -p verkstead-desktop` writes on a Windows machine, icon
+and version information included — `crates/desktop/build.rs` compiles those in —
+and the release leg renames that file and uploads it.
 
 The AppImage is the desktop binary, the packaging assets and every library the
 tray is drawn over, in one file, and it is the same command CI runs. It builds

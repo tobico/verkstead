@@ -37,6 +37,10 @@ APP="$WORK/Verkstead.app"
 STAGE="$WORK/dmg"
 DMG="$WORK/Verkstead-universal.dmg"
 
+# A name said before an ellipsis is braced — `${target}…` rather than
+# `$target…`. The bash a Mac runs reads the first byte of that character as part
+# of the name, so an unbraced one is a variable nobody set and `set -u` ends the
+# script on the line that was only reporting progress.
 say() { printf '%s\n' "$*"; }
 die() {
   printf '%s\n' "$*" >&2
@@ -85,7 +89,7 @@ touch crates/server/src/viewer.rs
 halves=()
 for entry in $TARGETS; do
   target="${entry%%:*}"
-  say "Building $BINARY for $target…"
+  say "Building $BINARY for ${target}…"
   cargo build --release --locked --package "$BINARY" --target "$target"
   halves+=("target/$target/release/$BINARY")
 done
@@ -193,7 +197,7 @@ ln -s /Applications "$STAGE/Applications"
 # do not produce the same bytes — `hdiutil` stamps the volume with the time it
 # was made and offers nothing to say otherwise — so the dmg is checked by what
 # comes out of it rather than by its hash.
-say "Packing $DMG…"
+say "Packing ${DMG}…"
 rm -f "$DMG"
 hdiutil create -volname Verkstead -srcfolder "$STAGE" \
   -fs HFS+ -format UDZO -ov -quiet "$DMG"

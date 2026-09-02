@@ -81,6 +81,13 @@ The desktop app is deliberately plain about its limits:
 - **Unsigned on macOS and Windows.** The Gatekeeper approval dance is
   documented; SmartScreen's "run anyway" is left to the reader. Signing is a
   cost decision to revisit, not an architectural one.
+
+  Amended: **SmartScreen's is written out as well.** The stage that shipped the
+  exe put its two clicks beside the download in `docs/adoption.md`, where
+  Gatekeeper's three already were: a reader stopped by a blue window whose only
+  button says *Don't run* is not one to leave to work it out. What stands is the
+  decision to ship unsigned; what changed is that both platforms' way past it is
+  now written down.
 - **Update checking gains nothing.** The server's daily poll and the viewer's
   banner (public-release stage 05) already cover the desktop; the tray adds no
   notifier and no self-update.
