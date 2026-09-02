@@ -97,7 +97,14 @@
   padding: 0.5rem 0.6rem;
 }
 
-.field button {
+/* And the press that saves it, said as a child of the line rather than as
+   anything standing on it. The box beside it is the browsing field now, and that
+   brings a press of its own — see `PathField.module.css`, where the ▾ is drawn
+   as quietly as the box it drops rows under. A descendant rule would reach past
+   the field into that one and paint it as a second Add, being the more specific
+   of the two. The box above stays a descendant on purpose: painting the field's
+   own input is exactly what that rule is for. */
+.field > button {
   padding: 0.5rem 1rem;
   font: inherit;
   font-weight: 600;
@@ -108,7 +115,7 @@
   cursor: pointer;
 }
 
-.field button:disabled {
+.field > button:disabled {
   cursor: not-allowed;
   opacity: 0.65;
 }
@@ -122,7 +129,7 @@
     border-color: var(--ink-soft);
   }
 
-  .field button:not(:disabled):hover {
+  .field > button:not(:disabled):hover {
     background: var(--accent-deep);
     border-color: var(--accent-deep);
   }
