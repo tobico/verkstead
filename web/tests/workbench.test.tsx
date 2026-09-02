@@ -2251,7 +2251,13 @@ describe("a conversation's timeline", () => {
         "  gap: 0.8rem;\n" +
         "}",
     );
-    expect(paneHeadCss).toContain(".head h1 {\n  min-width: 0;\n  margin: 0;\n}");
+    // The zero basis is the load-bearing half: a wrapping row decides where to
+    // break on each item's basis, before any shrinking, so an `auto` basis puts
+    // the controls on their own line the moment the title alone is wider than
+    // the row — however narrow it would then have been allowed to become.
+    expect(paneHeadCss).toContain(
+      ".head h1 {\n  flex: 1 1 0;\n  min-width: 0;\n  margin: 0;\n}",
+    );
   });
 
   /// The branch itself is cut at the front, with the whole of it in a tooltip:
