@@ -63,7 +63,11 @@ flowchart LR
   its first directory from its own settings page. They double as a security
   boundary either way: Verkstead refuses to operate on any file outside them,
   and watching nothing admits nothing. Repos are registered from within the
-  watched paths.
+  watched paths. **Reading the names in a directory is outside the boundary's
+  scope** (*revised 2026-09-02, grilling path-selector*: this said "refuses to
+  operate on any file outside them", full stop) — see the path-selector bullet
+  under **UI** for what browses where, and why the wider half of it was taken
+  deliberately.
 - A **conversation** is the core entity: attached to a repo and a base commit,
   starting from a **brief** (an editable markdown document). The base commit
   defaults to the default branch's tip at grill start; overriding it is picking
@@ -710,6 +714,35 @@ Timeline events:
   2026-08-29, building settings-redesign*) — an unregistering rather than a
   delete, refused while live work is on it. See **Repo** in `CONTEXT.md` for
   what that means and what it leaves alone.
+- **Every path is written into one field that browses** (*settled 2026-09-02,
+  grilling path-selector*; this revises the stance three module headers stated,
+  that a path is typed rather than picked because nothing scans a filesystem to
+  offer choices from). The field is the text input it always was, extended with
+  a drill-in dropdown: the rows are the entries of the deepest directory the
+  text already names, a tap writes that path into the box and opens it, and the
+  human closes the dropdown once the box holds what they want. There is no
+  picking — closing is how a browse ends, so the box is always the choice and
+  what a form sends is what the box holds, browsed or typed. It is served by one
+  endpoint answering **one directory per request**, never a walk, because a
+  browse is a level at a time and a tree nobody will read the whole of is not
+  worth crossing a wire. Every refusal — relative, missing, not a directory,
+  outside the boundary, unreadable — is a named outcome the dropdown draws where
+  its rows would be rather than a status code, a field halfway through a word
+  being the ordinary state of one.
+- **The browse is bounded by whatever bounds the field's own value**, in two
+  scopes. A field whose value the server refuses outside the Watched Paths —
+  the path a Repo is registered from, an Agent Profile's account paths — browses
+  inside them, opening on the roots themselves and stopping there on the way
+  back out, decided by the same admission the save is about to make, so the
+  dropdown cannot offer a wasted press. A field the boundary says nothing about
+  — a Watched Path being added, a Sandbox Configuration bind — browses anywhere
+  the server can read. **That second scope is a wider disclosure than anything
+  else here makes and was taken deliberately**: a watched path is how the
+  boundary is *said*, so a field bounded by it could only ever offer what is
+  already watched, and reaching the page is already reaching the machine — the
+  tailnet is the perimeter and there is one human behind it. What it discloses
+  is a listing of names, and nothing outside a Watched Path is written, worked
+  in or registered on the strength of it.
 
 ## Build and migration
 
