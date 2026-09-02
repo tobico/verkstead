@@ -2517,6 +2517,18 @@ pub struct BriefEdit {
     pub markdown: String,
 }
 
+/// Which registered Repo a drafting Conversation is to be moved onto.
+///
+/// The id and nothing else, the way [`NewCompanion`] is: everything that
+/// follows a switch — the base going back to the rule, a companion that has
+/// just become the Conversation's own Repo going away — follows from the choice
+/// rather than being said again beside it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct RepoChoice {
+    pub repo_id: i64,
+}
+
 /// What the branch is to be called.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
@@ -2671,6 +2683,35 @@ pub enum BriefSaved {
     /// The Conversation is past drafting, so its Brief is frozen: a steered
     /// round adds a new Brief rather than editing this one.
     NotDrafting,
+}
+
+/// What became of moving a Conversation onto another Repo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum RepoSwitched {
+    /// Moved: the Conversation is on that Repo, its base is back on the
+    /// default-branch rule, and the companion it has just become — if it was one
+    /// — is gone.
+    Switched,
+
+    NoSuchConversation,
+
+    /// The Conversation is past drafting, or its branch has been cut. The same
+    /// refusal the branch name and the base give, for the stronger version of
+    /// the same reason: a checkout is of one repository, and no dropdown moves
+    /// work that has already been done.
+    NotDrafting,
+
+    /// The Conversation is adopting a roadmap, which is a file in the Repo it is
+    /// on: only the roadmap's name is kept, so work moved elsewhere would go
+    /// looking for that name in a repository that has no such roadmap — or has a
+    /// different one under the same name. What is the human's here is putting
+    /// the roadmap down, not carrying it across.
+    Adopting,
+
+    /// There is no registered Repo with that id — taken off the registry between
+    /// the panel listing it and the press that picked it.
+    NoSuchRepo,
 }
 
 /// What became of naming the branch.

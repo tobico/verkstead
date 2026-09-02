@@ -29,6 +29,7 @@ import tokens from "../src/styles/base.css?raw";
 import contents from "../src/set/Contents.module.css?raw";
 import standing from "../src/set/Standing.module.css?raw";
 import actions from "../src/workbench/Actions.module.css?raw";
+import composer from "../src/workbench/Composer.module.css?raw";
 import sidebar from "../src/workbench/Conversations.module.css?raw";
 // And the one caller that hands in a trigger of its own, which is where that
 // button is painted.
@@ -629,7 +630,7 @@ describe("what every menu is drawn with", () => {
   /// away from the shared one.
   it("leaves no menu a shadow of its own", () => {
     const callers: [string, string][] = [
-      ['.newConversation > [role="menu"]', sidebar],
+      ['.adopt > [role="menu"]', composer],
       ['.conversationActions > [role="menu"]', actions],
       ['.standing > [role="menu"]', standing],
     ];

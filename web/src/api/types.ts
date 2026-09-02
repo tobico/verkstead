@@ -2269,6 +2269,16 @@ export type Registered = "Added" | "NotAbsolute" | "Missing" | "OutsideWatchedPa
 export type Registration = { path: string, };
 
 /**
+ * Which registered Repo a drafting Conversation is to be moved onto.
+ *
+ * The id and nothing else, the way [`NewCompanion`] is: everything that
+ * follows a switch — the base going back to the rule, a companion that has
+ * just become the Conversation's own Repo going away — follows from the choice
+ * rather than being said again beside it.
+ */
+export type RepoChoice = { repo_id: number, };
+
+/**
  * One repository's block of a Set's Diff: what it is called, and its
  * uncommitted changes rendered as any other Diff is.
  *
@@ -2299,6 +2309,37 @@ repo: string | null, diff: DiffView, };
 export type RepoEntry = { id: number, name: string, path: string, default_branch: string, };
 
 /**
+ * What a Repo was last grilled with, as a Conversation started on it would
+ * arrive showing it — the prefill, read before there is a Conversation for it
+ * to have been applied to.
+ *
+ * The same three fields a [`crate::ConversationView`] carries and in the same
+ * shapes, because that is what this is: what the pickers of a freshly created
+ * draft on this Repo would say. A page filling its own pickers from this and a
+ * page reading them off a draft are drawing the same answer, and one shape is
+ * what keeps the two from wording it differently.
+ *
+ * Each of them is judged before it is handed over, exactly as creation judges
+ * it: a remembered Pairing whose Profile has broken, or whose Profile no
+ * longer lists the model it was remembered with, comes back as nothing picked
+ * — the same nothing a Repo with no memory at all comes back as.
+ */
+export type RepoPairingsView = { 
+/**
+ * One of the two roles whose memory can hold the row that runs no session,
+ * so this says which of three rather than whether anything is remembered.
+ */
+grilling: PickedView, 
+/**
+ * The one role that has no such row: a Pairing, or nothing.
+ */
+implementation: PairingView | null, 
+/**
+ * And the other role that has one.
+ */
+review: PickedView, };
+
+/**
  * What became of taking one off the registry.
  *
  * A removal rather than a deletion, which is why nothing here says anything
@@ -2310,6 +2351,11 @@ export type RepoEntry = { id: number, name: string, path: string, default_branch
  * the same kind of reason.
  */
 export type RepoRemoved = "Removed" | "NoSuchRepo" | "InUse";
+
+/**
+ * What became of moving a Conversation onto another Repo.
+ */
+export type RepoSwitched = "Switched" | "NoSuchConversation" | "NotDrafting" | "Adopting" | "NoSuchRepo";
 
 /**
  * One registered Repo opened: everything the card cannot hold, read at the

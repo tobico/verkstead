@@ -42,7 +42,9 @@ import type {
   PushKey,
   Registered,
   RepoEntry,
+  RepoPairingsView,
   RepoRemoved,
+  RepoSwitched,
   RepoView,
   ConflictResolution,
   Resolved,
@@ -162,6 +164,17 @@ export function loadRepo(id: number): Promise<RepoView> {
 /// Verkstead hearing about it, so there is nothing here that could be kept.
 export function listBranches(repoId: number): Promise<string[]> {
   return get<string[]>(`/api/ui/repos/${repoId}/branches`);
+}
+
+/// What one registered Repo was last grilled with, judged as something to fill
+/// a picker with: the three roles a Conversation started on it would arrive
+/// showing.
+///
+/// For the page that asks those three questions before there is a Conversation
+/// to read the answers off. Read again whenever the repo changes, because the
+/// memory is the repo's: another repo is another answer.
+export function loadRepoPairings(repoId: number): Promise<RepoPairingsView> {
+  return get<RepoPairingsView>(`/api/ui/repos/${repoId}/pairings`);
 }
 
 /// What one directory holds, for the dropdown a path field browses with.
@@ -485,6 +498,21 @@ export function saveBrief(id: number, markdown: string): Promise<BriefSaved> {
   return post<BriefSaved>(`/api/ui/conversations/${id}/brief`, { markdown });
 }
 
+
+/// Move a drafting Conversation onto another registered Repo.
+///
+/// Which Repo is the whole of what goes out, the way an added companion is:
+/// what follows — the base back on the new repo's rule, and a companion that
+/// has just become this Conversation's own Repo going away — is the server's to
+/// do rather than this page's to ask for.
+export function switchRepo(
+  id: number,
+  repoId: number,
+): Promise<RepoSwitched> {
+  return post<RepoSwitched>(`/api/ui/conversations/${id}/repo`, {
+    repo_id: repoId,
+  });
+}
 /// Name the branch the work will be done on. Whether git would take the name is
 /// the server's to say, so this is another outcome to read rather than a status.
 export function renameBranch(

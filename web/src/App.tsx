@@ -10,6 +10,7 @@ import { retrying } from "./api/client";
 import { Empty } from "./notices";
 import { listenForNudges } from "./nudge";
 import { SettingsPage, panes } from "./settings/SettingsPage";
+import { ComposePage } from "./workbench/Compose";
 import { Workbench } from "./workbench/Workbench";
 
 /// One client for the whole app, made once rather than per render: it is where
@@ -70,6 +71,12 @@ export function App(): JSX.Element {
           <Route path="/share" />
           <Route path="/roadmaps/:name" />
         </Route>
+        {/* And the composer before there is anything for it to be about: the
+            same page, working what the device is holding rather than a record.
+            A page of its own rather than a pane of the workbench, because there
+            is no Conversation for the workbench to be about — what it shares
+            with it is the sidebar and the frame, both of which it draws. */}
+        <Route path="/compose" component={ComposePage} />
         {/* Everything the human configures, on one page: the GitHub token and
             the git author Verkstead was told, the Agent Profiles a session runs
             under, and the Repos a Conversation is started against. The Repos

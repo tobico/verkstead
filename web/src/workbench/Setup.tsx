@@ -1,5 +1,5 @@
 //! A Conversation's setup: what has to be settled before anything will run it,
-//! drawn under the Brief it belongs to.
+//! drawn along the bottom edge of the box the Brief is written in.
 //!
 //! The branch the work will be done on, the branch it will come off, the other
 //! repos it works alongside, and the pairings its sessions run under. Every
@@ -7,12 +7,31 @@
 //! and every one of them is the human's to change for as long as it is still
 //! drafting.
 //!
-//! Under the Brief rather than in a pane of its own, because setting a
-//! Conversation up and kicking it off are one act and both belong where the work
-//! is read: the Brief is the headline and the setup follows it. Once grilling
-//! starts none of this is drawn at all — the server freezes every one of them at
-//! that moment, so nothing taken away was still actionable, and the card goes
-//! back to being the Brief alone.
+//! **A row of options rather than a form under the Brief.** Setting a
+//! Conversation up and kicking it off are one act, and the act is written in
+//! one box — so the whole of the setup is four dropdowns inside that box's
+//! bottom edge, each a dimmed label over its value, and what a reader takes off
+//! them at a glance is the sentence *this repo, these three accounts*. The
+//! panel behind the first of them is where the rest of it lives: the branch,
+//! the base and the companion repos are all answers to *which code*, and one
+//! trigger for the four of them is what keeps the row down to what it says. See
+//! [`Composer`](./Composer.tsx) for the box, and [`SetupNotes`] for what the
+//! setup has to say that is not a control.
+//!
+//! Once grilling starts none of this is drawn at all: the server freezes every
+//! one of them at that moment, so nothing taken away was still actionable, and
+//! a Brief past drafting opens the record of what it was configured with
+//! instead.
+//!
+//! **Every control here is drawn twice**, because the setup is asked in two
+//! places: of a Conversation, where each field saves itself the moment it is
+//! touched, and on the compose page, where none of it exists anywhere until a
+//! press creates something (see `Compose.tsx`). So each of them is split — the
+//! control and what it looks like are exported from here, and what a pick
+//! *does* and what is said under it belong to whoever draws it. That is the
+//! same seam [`BasePicker`] has always stood on, widened to the rest of the
+//! row: two pages that asked these questions apart would come to word them
+//! differently.
 //!
 //! The three pairings are separate choices because they are genuinely separate
 //! accounts — grill on fable, implement on opus, review on whatever did not
@@ -29,10 +48,11 @@ import {
   Show,
   Switch,
   createSignal,
+  type Accessor,
   type JSX,
 } from "solid-js";
 
-import { Menu, Nested } from "../Menu";
+import { Menu } from "../Menu";
 import { Switch as Toggle } from "../Switch";
 import type { AgentType } from "../agents";
 import {
@@ -49,6 +69,7 @@ import {
   setBaseBranch,
   setCompanionBase,
   setCompanionMode,
+  switchRepo,
 } from "../api/client";
 import type {
   BaseRecorded,
@@ -65,6 +86,7 @@ import type {
   ProfileChosen,
   ProfileEntry,
   RepoEntry,
+  RepoSwitched,
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
@@ -82,6 +104,17 @@ export const BRANCH_REFUSAL: Record<BranchRenamed, string> = {
   NotDrafting:
     "The branch exists by now, so its name is not a text field any more.",
   NotABranchName: "Git will not take that as a branch name.",
+};
+
+/// And moving the work onto another repo.
+export const REPO_SWITCH_REFUSAL: Record<RepoSwitched, string> = {
+  Switched: "",
+  NoSuchConversation: "This conversation is gone.",
+  NotDrafting:
+    "The branch exists by now, so which repo the work is in is settled.",
+  Adopting:
+    "The stage being adopted is in this repo, so the work cannot be moved off it.",
+  NoSuchRepo: "That repo is not registered any more.",
 };
 
 /// And a base branch.
@@ -152,59 +185,330 @@ export const CHOICE_REFUSAL: Record<ProfileChosen, string> = {
 export function Setup(props: {
   conversation: ConversationView;
 }): JSX.Element {
-  /// Whether the branch this work is done on has been made already, which is
-  /// what a worktree says: one is made with the branch and forgotten only by
-  /// closing.
-  ///
-  /// A drafting conversation with one has had its branch cut already. The branch
-  /// and the base commit are settled for good by then and the server refuses
-  /// both, so the fields go: a field whose save comes back refused is worse than
-  /// no field. The pairings stay, because they are re-settled every time work
-  /// starts under them.
-  const branched = () => props.conversation.worktree !== null;
-
   return (
-    <section class={styles.conversationSetup} aria-label="Setup">
-      {/* The branch and the branch it comes off, side by side wherever there
-          is room for two and stacked where there is not — the same row the
-          pairings below are laid out in, because they are the same kind of
-          pair: two short choices about the one thing.
+    <section class={styles.options} aria-label="Setup">
+      {/* The repository first, because it is what everything after it is a fact
+          about — and one dropdown for the whole of it: the branch, the branch
+          it comes off, and the repos the work runs alongside are all answers to
+          *which code*, and a row of four separate triggers for them would be a
+          row about one repository read as four things. */}
+      <RepoOption conversation={props.conversation} />
 
-          No branch field where the conversation is adopting a roadmap: a stage
-          is worked on its own slug, so the name invented when the row was made
-          is discarded when the stage is adopted, and naming it here would be a
-          field with nothing behind it. */}
-      <Show when={!branched()}>
-        <div class={styles.branches}>
-          <Show when={!props.conversation.adopting}>
-            <BranchName conversation={props.conversation} />
-          </Show>
-          <BaseBranch conversation={props.conversation} />
-          {/* What is beyond the two fields: the other repositories this
-              conversation may work alongside. Behind a ⋯ rather than in the
-              row, because most work is one repository and a permanent control
-              for the exception would be a control most conversations never
-              press. */}
-          <AddCompanion conversation={props.conversation} />
-        </div>
-
-        {/* And the ones already added, under the row they were added from —
-            they belong to the branch and the base rather than to the pairings,
-            and they go with them when the card freezes. */}
-        <Companions conversation={props.conversation} />
-      </Show>
-
+      {/* And the three accounts, one trigger each. */}
       <Profiles conversation={props.conversation} />
+    </section>
+  );
+}
+
+/// What the setup has to say that is not a control: drawn under the box rather
+/// than inside its edge, because the row along that edge is what there is to
+/// change and these are what there is to know.
+export function SetupNotes(props: {
+  conversation: ConversationView;
+}): JSX.Element {
+  return (
+    <>
+      {/* Nothing is said here about being ready: readiness is the business of
+          the button it gates, which is enabled or else explains what is
+          missing. Said up here as well it would be the same verdict twice.
+
+          An adopting conversation never grills at all, and why every pairing is
+          asked for all the same is worth a line. */}
+      <Show when={props.conversation.adopting}>
+        <Note class={styles.aside}>
+          All three pairings are fixed before adopting: the implementation one
+          is what the work runs under, the review one is what looks at it, and
+          the grilling one is carried, because the stages after this one inherit
+          all of them from it.
+        </Note>
+      </Show>
 
       {/* And the last thing read before the work is started, because it is
           about what the work will be like rather than about anything above:
           this repository builds Rust, and its dependencies will be compiled
           from scratch every session. */}
       <UncachedCompiles conversation={props.conversation} />
-    </section>
+    </>
   );
 }
 
+/// The Repo, and everything that is a fact about it: which repository the work
+/// is in, the branch it will be done on, the branch it comes off, and the repos
+/// it runs alongside.
+///
+/// A label over a value like every other option in the row — the repository's
+/// name, and `+1`, `+2` for the companions it is working beside — and what it
+/// opens is one flat panel rather than a menu of levels: what is in there is a
+/// picker, a field, a second picker and the rows they configure, which is a
+/// form, and a form walked one level at a time would be a form nobody could read
+/// at once.
+///
+/// Drawn whatever state the round is in, unlike everything below the repo
+/// picker inside it. Once the branch is cut the server refuses the branch, the
+/// base and every companion press, so those go — but which repository the work
+/// is in is still a fact worth reading, and the picker says for itself that it
+/// is settled by being disabled.
+function RepoOption(props: { conversation: ConversationView }): JSX.Element {
+  /// How many other repos the work runs alongside, for the `+N` after the name.
+  const alongside = () => props.conversation.companions.length;
+
+  /// Whether the branch this work is done on has been made already, which is
+  /// what a worktree says: one is made with the branch and forgotten only by
+  /// closing.
+  ///
+  /// A drafting conversation with one has had its branch cut — a later round,
+  /// steered onto work that is already built. The repo, the branch and the base
+  /// are settled for good by then and the server refuses all three, so what a
+  /// control cannot do it does not draw, the picker excepted. The pairings are
+  /// outside this panel and stay, being re-settled every time work starts under
+  /// them.
+  const branched = () => props.conversation.worktree !== null;
+
+  /// And whether which repository this work is in was settled by the roadmap it
+  /// is adopting rather than by the human.
+  ///
+  /// A roadmap is a file in a repository and only its *name* is kept, so a
+  /// conversation moved off the repo it was started against would go looking for
+  /// that name over there — and find nothing to adopt, or a roadmap of the same
+  /// name that is not the one anybody picked. The server refuses it for that
+  /// reason, and the picker says so by being disabled: what is the human's here
+  /// is composing work of their own instead, which is the compose page's to
+  /// offer.
+  const adopting = () => props.conversation.adopting !== null;
+
+  return (
+    <RepoOptions name={props.conversation.repo.name} alongside={alongside()}>
+      {() => (
+        <>
+          {/* Which repository, first: everything under it is a fact about the
+              one this picks. */}
+          <RepoPicker
+            conversation={props.conversation}
+            disabled={branched() || adopting()}
+          />
+
+          <Show when={!branched()}>
+            {/* No branch field where the conversation is adopting a roadmap: a
+                stage is worked on its own slug, so the name invented when the
+                row was made is discarded when the stage is adopted, and naming
+                it here would be a field with nothing behind it. */}
+            <Show when={!props.conversation.adopting}>
+              <BranchName conversation={props.conversation} />
+            </Show>
+            <BaseBranch conversation={props.conversation} />
+            <AddCompanion conversation={props.conversation} />
+
+            {/* And the ones already added, under the control they were added
+                from — they belong to the branch and the base rather than to the
+                pairings, and they go with them when the round's branch is
+                cut. */}
+            <Companions conversation={props.conversation} />
+          </Show>
+        </>
+      )}
+    </RepoOptions>
+  );
+}
+
+/// The option itself: the trigger standing in the row, and the panel that comes
+/// down behind it.
+///
+/// Presentational, because two composers draw the same option over different
+/// things — a Conversation, where everything inside the panel saves itself as
+/// it is touched, and the compose page, where none of it exists anywhere until
+/// something is created. What they share is the shape of the option: a dimmed
+/// label over a value, the companions counted after the name, and one flat card
+/// holding the whole of *which code*.
+export function RepoOptions(props: {
+  /// What the value line reads — the repository's name, or the invitation to
+  /// pick one where nothing is picked yet.
+  name: string;
+  /// How many other repos the work runs alongside, for the `+N` after it.
+  alongside: number;
+  children: () => JSX.Element;
+}): JSX.Element {
+  return (
+    <Menu
+      panel
+      class={styles.repoOption!}
+      name="Repo setup"
+      trigger={
+        <>
+          <span class={styles.optionLabel}>Repo</span>
+          <span class={styles.optionLine}>
+            <span class={styles.optionValue}>
+              {props.name}
+              {/* The companions counted rather than named: the row is one line
+                  and the names are inside the panel, where they can be read
+                  beside what the work will do with them. */}
+              <Show when={props.alongside}>{(many) => <> +{many()}</>}</Show>
+            </span>
+            <span class={styles.optionArrow} aria-hidden="true">
+              ▾
+            </span>
+          </span>
+        </>
+      }
+    >
+      {props.children}
+    </Menu>
+  );
+}
+
+/// Which Repo the work is in at all: the first thing in the Repo panel, and the
+/// one the branch, the base and the companions under it are facts about.
+///
+/// A drafting Conversation can be moved onto another registered Repo, and three
+/// things follow from the move — the base goes back to the new repo's default,
+/// a companion that has just become the Conversation's own Repo goes away, and
+/// the branch name and the pairings stay exactly where they were. None of that
+/// is asked for here: the server does it, and this panel reads the result off
+/// the Conversation it re-reads.
+///
+/// Disabled once the branch has been cut, and on a conversation adopting a
+/// roadmap — the one control in this panel that is drawn in either state rather
+/// than taken away. A checkout is of one repository and a roadmap is a file in
+/// one, so what it says then is a fact about the work — *this is the repo, and
+/// it is settled* — and a fact is worth reading where a refused field is not.
+/// The server refuses both, so the disabling is what the record says rather than
+/// this panel's own rule.
+///
+/// **Nothing is filtered out of the list**, for [`AddCompanion`]'s reason: the
+/// repo the Conversation is already on is in it, and picking it is a switch
+/// onto where it already is, which changes nothing but the base.
+function RepoPicker(props: {
+  conversation: ConversationView;
+  disabled: boolean;
+}): JSX.Element {
+  const queries = useQueryClient();
+
+  const [refused, setRefused] = createSignal<RepoSwitched | null>(null);
+
+  const move = useMutation(() => ({
+    mutationFn: (repoId: number) => switchRepo(props.conversation.id, repoId),
+    onSuccess: (outcome: RepoSwitched) => {
+      if (outcome !== "Switched") {
+        setRefused(outcome);
+        // Refused about one of the two lists this control was drawn over: the
+        // registry it picked out of, or the Conversation the pick was about.
+        void queries.invalidateQueries({ queryKey: ["repos"] });
+        void queries.invalidateQueries({ queryKey: ["conversation"] });
+        return;
+      }
+
+      setRefused(null);
+      // The whole panel is about the repo that has just changed — and so is the
+      // sidebar row and every pane head, which read the same record.
+      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  }));
+
+  return (
+    <RepoChoice
+      chosen={String(props.conversation.repo.id)}
+      also={props.conversation.repo}
+      disabled={props.disabled || move.isPending}
+      pick={(repoId) => move.mutate(repoId)}
+    >
+      {/* What moving the work would take with it, said before it is done rather
+          than after: the base is the one thing here that a switch resets. */}
+      <Show when={!props.disabled}>
+        <Note class={styles.aside}>
+          Moving this onto another repo puts its base back on that repo's
+          default branch. Its branch name, its pairings and the repos it works
+          alongside are kept.
+        </Note>
+      </Show>
+
+      <Show when={refused()}>
+        {(outcome) => (
+          <ErrorLine class={styles.failure}>
+            {REPO_SWITCH_REFUSAL[outcome()]}
+          </ErrorLine>
+        )}
+      </Show>
+      <Show when={move.isError}>
+        <ErrorLine class={styles.failure}>
+          The repo could not be switched: {move.error?.message}
+        </ErrorLine>
+      </Show>
+    </RepoChoice>
+  );
+}
+
+/// The control itself: every registered Repo, and whatever is chosen wherever
+/// the list does not hold it.
+///
+/// Presentational and shared, for [`RepoOptions`]'s reason. What a pick *does*
+/// is the caller's — a move on a saved Conversation, a field of the compose
+/// state — and so is everything said under it.
+export function RepoChoice(props: {
+  /// What is chosen, as the picker writes it: the Repo's id, or the empty
+  /// string where nothing is picked yet, which is only ever the compose page.
+  chosen: string;
+  /// The Repo to offer wherever the list does not hold it — the list still on
+  /// its way, or one unregistered since the work was started on it. Drawn
+  /// either way, because a picker showing one repo while the record held
+  /// another would be the panel disagreeing with its own trigger.
+  also?: RepoEntry;
+  disabled?: boolean;
+  pick: (repoId: number) => void;
+  /// What the caller has to say under it. The refusals above all: what a pick
+  /// is refused for is a fact about the caller's record rather than about this
+  /// control.
+  children?: JSX.Element;
+}): JSX.Element {
+  const repos = useReading(() => ({
+    queryKey: ["repos"],
+    queryFn: listRepos,
+
+    // Merged by the id each row carries flat, for [`CompanionChoice`]'s reason:
+    // a Nudge landing while the human has the dropdown open must not take their
+    // choice with it.
+    freshness: { reconcile: "id" },
+  }));
+
+  const options = (): RepoEntry[] => {
+    const listed = repos.data ?? [];
+    const held = props.also;
+
+    return held === undefined || listed.some((repo) => repo.id === held.id)
+      ? listed
+      : [held, ...listed];
+  };
+
+  return (
+    <div class={styles.repoPick}>
+      <label for="conversation-repo">Repo</label>
+      <Switch>
+        <Match when={repos.isError}>
+          <ErrorLine class={styles.failure}>
+            Could not read the repos: {repos.error?.message}
+          </ErrorLine>
+        </Match>
+        <Match when={true}>
+          {/* A [`Picker`] rather than a `<select>`, so this cannot come to show
+              one repo while the mutation behind it would record another — the
+              same reason the base picker under it is one. A Conversation is on
+              a repo from the moment it exists, so the placeholder is the
+              compose page's alone. */}
+          <Picker
+            id="conversation-repo"
+            options={options()}
+            value={(repo) => String(repo.id)}
+            label={(repo) => repo.name}
+            chosen={props.chosen}
+            disabled={props.disabled}
+            pick={(repo) => props.pick(Number(repo))}
+          />
+        </Match>
+      </Switch>
+
+      {props.children}
+    </div>
+  );
+}
 /// What a Rust repository loses on a server with no sccache: the compiling.
 ///
 /// Drawn only where all three hold — the repository is a Cargo workspace, the
@@ -228,15 +532,80 @@ function UncachedCompiles(props: {
     </Show>
   );
 }
-
 /// The three pairings the work will run under — two of which may be picked
-/// away instead — and whether everything the work needs is settled.
+/// away instead — one option of the row each, the role as the label and the
+/// pairing as the value.
 ///
 /// The profile list is read here rather than passed down, so the pickers are
 /// whole wherever they are drawn — the sidebar does the same with the repos. The
 /// pairings are made of it here: a row per profile-and-model combination, which
 /// is what a picker offers.
+///
+/// The three stand in the row rather than in a section of their own, and there
+/// is no heading over them: the role is written on each one, so a word above
+/// all three would be the row saying what its labels already say.
 function Profiles(props: { conversation: ConversationView }): JSX.Element {
+  return (
+    <ProfileChoices>
+      {(saved) => (
+        <>
+          {/* One of the two pickers with a row that is not an account: a
+              brief can go straight to the work, with no interview between
+              the two. */}
+          <PairingPicker
+            conversation={props.conversation}
+            saved={saved()}
+            role="grilling"
+            label="Grilling"
+            away="No grilling"
+            chosen={pairing.settled(props.conversation.grilling_pairing)}
+            pairing={pairing.under(props.conversation.grilling_pairing)}
+            choose={(id, picked) =>
+              chooseGrillingPairing(id, pairing.role(picked))
+            }
+          />
+          <PairingPicker
+            conversation={props.conversation}
+            saved={saved()}
+            role="implementation"
+            label="Implementation"
+            chosen={pairing.chosen(props.conversation.implementation_pairing)}
+            pairing={props.conversation.implementation_pairing}
+            choose={(id, picked) =>
+              chooseImplementationPairing(id, pairing.choice(picked))
+            }
+          />
+          {/* And the other: a conversation can be wrapped up without being
+              reviewed at all, and that is picked here rather than anywhere
+              else. */}
+          <PairingPicker
+            conversation={props.conversation}
+            saved={saved()}
+            role="review"
+            label="Review"
+            away="No review"
+            chosen={pairing.settled(props.conversation.review_pairing)}
+            pairing={pairing.under(props.conversation.review_pairing)}
+            choose={(id, picked) =>
+              chooseReviewPairing(id, pairing.role(picked))
+            }
+          />
+        </>
+      )}
+    </ProfileChoices>
+  );
+}
+
+/// The saved profiles, read once for whatever asks who runs a session — and
+/// the two things that can stand in place of the pickers: a read that failed,
+/// and a workbench with no profile saved in it yet.
+///
+/// Shared for [`RepoOptions`]'s reason: the compose page asks the same three
+/// questions of the same list, and a second read of it here would be the same
+/// list twice.
+export function ProfileChoices(props: {
+  children: (saved: Accessor<ProfileEntry[]>) => JSX.Element;
+}): JSX.Element {
   const profiles = useReading(() => ({
     queryKey: ["profiles"],
     queryFn: listProfiles,
@@ -248,94 +617,22 @@ function Profiles(props: { conversation: ConversationView }): JSX.Element {
   }));
 
   return (
-    <section class={styles.conversationProfiles} aria-label="Agent profiles">
-      <h3>Agent profiles</h3>
-
-      <Switch>
-        <Match when={profiles.isError}>
-          <ErrorLine class={styles.failure}>
-            Could not read the agent profiles: {profiles.error?.message}
-          </ErrorLine>
-        </Match>
-        <Match when={profiles.data?.length === 0}>
-          {/* Nothing to choose, so the only thing to offer is the page that
-              fixes that. */}
-          <Empty>
-            No agent profiles are saved yet —{" "}
-            <A href="/settings">add one</A> to run a session under.
-          </Empty>
-        </Match>
-        <Match when={profiles.data}>
-          {(saved) => (
-            /* Side by side wherever there is room for them, stacked where
-               there is not. The wrap is the pane's own width rather than the
-               window's, because this card is drawn in a pane the human can
-               narrow. */
-            <div class={styles.pairings}>
-              {/* One of the two pickers with a row that is not an account: a
-                  brief can go straight to the work, with no interview between
-                  the two. */}
-              <PairingPicker
-                conversation={props.conversation}
-                saved={saved()}
-                role="grilling"
-                label="Grilling"
-                away="No grilling"
-                chosen={pairing.settled(props.conversation.grilling_pairing)}
-                pairing={pairing.under(props.conversation.grilling_pairing)}
-                choose={(id, picked) =>
-                  chooseGrillingPairing(id, pairing.role(picked))
-                }
-              />
-              <PairingPicker
-                conversation={props.conversation}
-                saved={saved()}
-                role="implementation"
-                label="Implementation"
-                chosen={pairing.chosen(
-                  props.conversation.implementation_pairing,
-                )}
-                pairing={props.conversation.implementation_pairing}
-                choose={(id, picked) =>
-                  chooseImplementationPairing(id, pairing.choice(picked))
-                }
-              />
-              {/* And the other: a conversation can be wrapped up without being
-                  reviewed at all, and that is picked here rather than anywhere
-                  else. */}
-              <PairingPicker
-                conversation={props.conversation}
-                saved={saved()}
-                role="review"
-                label="Review"
-                away="No review"
-                chosen={pairing.settled(props.conversation.review_pairing)}
-                pairing={pairing.under(props.conversation.review_pairing)}
-                choose={(id, picked) =>
-                  chooseReviewPairing(id, pairing.role(picked))
-                }
-              />
-            </div>
-          )}
-        </Match>
-      </Switch>
-
-      {/* Nothing is said here about being ready: readiness is the business of
-          the button it gates, at the end of the record below, which is enabled
-          or else explains what is missing. Said up here as well it would be the
-          same verdict twice.
-
-          An adopting conversation never grills at all, and why every pairing
-          is fixed for it all the same is worth a line. */}
-      <Show when={props.conversation.adopting}>
-        <Note>
-          All three pairings are fixed before adopting: the implementation one
-          is what the work runs under, the review one is what looks at it, and
-          the grilling one is carried, because the stages after this one inherit
-          all of them from it.
-        </Note>
-      </Show>
-    </section>
+    <Switch>
+      <Match when={profiles.isError}>
+        <ErrorLine class={styles.failure}>
+          Could not read the agent profiles: {profiles.error?.message}
+        </ErrorLine>
+      </Match>
+      <Match when={profiles.data?.length === 0}>
+        {/* Nothing to choose, so the only thing to offer is the page that
+            fixes that. */}
+        <Empty class={styles.nothing}>
+          No agent profiles are saved yet — <A href="/settings">add one</A> to
+          run a session under.
+        </Empty>
+      </Match>
+      <Match when={profiles.data}>{props.children}</Match>
+    </Switch>
   );
 }
 
@@ -370,33 +667,13 @@ function PairingPicker(props: {
 
   const [refused, setRefused] = createSignal<ProfileChosen | null>(null);
 
-  /// Every row the control offers: the pairings, and the row that runs nothing
-  /// above them where this role has one. Above rather than below, because it is
-  /// the choice that says *skip this* and a reader scanning accounts should meet
-  /// it before the accounts.
-  const rows = (): Row[] => [
-    ...(props.away
-      ? // No mark: the row is not an account, so there is no harness for one to
-        // be of — see [`Row`].
-        [{ value: pairing.NONE, label: props.away, mark: null }]
-      : []),
-    ...pairing.pairings(props.saved).map((row) => ({
-      value: pairing.value(row),
-      // The whole list beside each row, because how one reads depends on the
-      // rest of it: the profile's name is said after the model only where its
-      // backend has more than one account saved.
-      label: pairing.label(row, props.saved),
-      mark: row.profile.account.agent_type,
-    })),
-  ];
-
   const choose = useMutation(() => ({
     mutationFn: (picked: string) => props.choose(props.conversation.id, picked),
     onSuccess: (outcome: ProfileChosen) => {
       if (outcome !== "Chosen") {
         setRefused(outcome);
-        // Chosen from a list this card read a moment ago: reading it again is
-        // both the correction and the explanation.
+        // Chosen from a list this option read a moment ago: reading it again
+        // is both the correction and the explanation.
         void queries.invalidateQueries({ queryKey: ["profiles"] });
         return;
       }
@@ -407,35 +684,15 @@ function PairingPicker(props: {
   }));
 
   return (
-    <div class={styles.profileChoice}>
-      <label for={`${props.role}-pairing`}>{props.label}</label>
-      {/* A [`Listbox`] rather than a `<select>`, so this cannot come to show one
-          pairing while the mutation below would choose another — and so that
-          every row can carry its harness's mark, which an `<option>` cannot
-          hold. See `src/picking.tsx`.
-
-          The empty value is the state of having chosen nothing, and it is not
-          an option to go back to: a conversation with no pairing is one that
-          will not grill, so the placeholder disappears once one is picked. It
-          comes back if the profile that was picked is deleted, or if it stopped
-          listing the model it was paired with, which is the honest reading of
-          it — and nothing is said upwards about that, the choice being the
-          server's record rather than this card's to clear.
-
-          The row that runs nothing is not that state and never sends the empty
-          string: it is a choice like the pairings, and the placeholder stands
-          above it until one of them is made. */}
-      <Listbox
-        id={`${props.role}-pairing`}
-        options={rows()}
-        value={(row) => row.value}
-        label={(row) => row.label}
-        mark={(row) => row.mark}
-        chosen={props.chosen}
-        pick={(picked) => choose.mutate(picked)}
-        disabled={choose.isPending}
-      />
-
+    <RolePicker
+      saved={props.saved}
+      role={props.role}
+      label={props.label}
+      away={props.away}
+      chosen={props.chosen}
+      pick={(picked) => choose.mutate(picked)}
+      disabled={choose.isPending}
+    >
       {/* A profile chosen before models were paired with them: half a choice,
           which the picker draws as none. Said in words rather than left as a
           bare placeholder, because the conversation does have a profile. */}
@@ -460,6 +717,84 @@ function PairingPicker(props: {
           The profile could not be chosen: {choose.error?.message}
         </ErrorLine>
       </Show>
+    </RolePicker>
+  );
+}
+
+/// The control itself: one option of the row, the role as its label and the
+/// pairing as its value.
+///
+/// Presentational and shared, for [`RepoOptions`]'s reason — the compose page
+/// asks the same three questions before there is a Conversation for an answer
+/// to be about. What a pick *does* is the caller's, and so is everything said
+/// under it.
+export function RolePicker(props: {
+  saved: ProfileEntry[];
+  /// What this control is called in the document, for the `<label>` over it.
+  role: string;
+  label: string;
+  /// The row a role that can run nothing offers above the pairings, where it
+  /// offers one.
+  away?: string;
+  chosen: string;
+  pick: (picked: string) => void;
+  disabled?: boolean;
+  children?: JSX.Element;
+}): JSX.Element {
+  /// Every row the control offers: the pairings, and the row that runs nothing
+  /// above them where this role has one. Above rather than below, because it is
+  /// the choice that says *skip this* and a reader scanning accounts should meet
+  /// it before the accounts.
+  const rows = (): Row[] => [
+    ...(props.away
+      ? // No mark: the row is not an account, so there is no harness for one to
+        // be of — see [`Row`].
+        [{ value: pairing.NONE, label: props.away, mark: null }]
+      : []),
+    ...pairing.pairings(props.saved).map((row) => ({
+      value: pairing.value(row),
+      // The whole list beside each row, because how one reads depends on the
+      // rest of it: the profile's name is said after the model only where its
+      // backend has more than one account saved.
+      label: pairing.label(row, props.saved),
+      mark: row.profile.account.agent_type,
+    })),
+  ];
+
+  return (
+    <div class={styles.profileChoice}>
+      <label class={styles.optionLabel} for={`${props.role}-pairing`}>
+        {props.label}
+      </label>
+      {/* A [`Listbox`] rather than a `<select>`, so this cannot come to show one
+          pairing while the mutation below would choose another — and so that
+          every row can carry its harness's mark, which an `<option>` cannot
+          hold. See `src/picking.tsx`.
+
+          The empty value is the state of having chosen nothing, and it is not
+          an option to go back to: a conversation with no pairing is one that
+          will not grill, so the placeholder disappears once one is picked. It
+          comes back if the profile that was picked is deleted, or if it stopped
+          listing the model it was paired with, which is the honest reading of
+          it — and nothing is said upwards about that, the choice being the
+          server's record rather than this option's to clear.
+
+          The row that runs nothing is not that state and never sends the empty
+          string: it is a choice like the pairings, and the placeholder stands
+          above it until one of them is made. */}
+      <Listbox
+        id={`${props.role}-pairing`}
+        class={styles.optionPick}
+        options={rows()}
+        value={(row) => row.value}
+        label={(row) => row.label}
+        mark={(row) => row.mark}
+        chosen={props.chosen}
+        pick={(picked) => props.pick(picked)}
+        disabled={props.disabled}
+      />
+
+      {props.children}
     </div>
   );
 }
@@ -488,8 +823,8 @@ type Row = { value: string; label: string; mark: AgentType | null };
 /// that starts grilling; this is the name it will be given.
 ///
 /// It keeps itself the way the Brief above it does — on a pause in the typing
-/// and on the way out of the field — because it is the same card and a field
-/// with a button beside it would be the one thing on that card asking to be
+/// and on the way out of the field — because it is the same panel and a field
+/// with a button beside it would be the one thing in that panel asking to be
 /// pressed. There is no word about saving either: what a save cannot do is
 /// said, and what it did is the name in the field and in the sidebar.
 function BranchName(props: { conversation: ConversationView }): JSX.Element {
@@ -557,32 +892,18 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
   });
 
   return (
-    <form
-      class={styles.branchName}
-      onSubmit={(ev) => {
-        // Nothing to press, so this is Enter in the field: the same save the
-        // pause was about to make, made now.
-        ev.preventDefault();
-        keeper.keep();
+    <BranchField
+      id="branch"
+      label="Branch"
+      class={styles.branchName!}
+      placeholder={AUTOMATIC}
+      value={branch()}
+      set={(name) => {
+        setNamed(name);
+        keeper.settle();
       }}
+      leave={() => keeper.keep()}
     >
-      <label for="branch">Branch</label>
-      <div class={styles.fieldLine}>
-        <input
-          id="branch"
-          type="text"
-          autocapitalize="off"
-          autocorrect="off"
-          spellcheck={false}
-          placeholder={AUTOMATIC}
-          value={branch()}
-          onInput={(ev) => {
-            setNamed(ev.currentTarget.value);
-            keeper.settle();
-          }}
-          onBlur={() => keeper.keep()}
-        />
-      </div>
       {/* A refusal stands until the next save answers, rather than clearing on
           the next keystroke: it is the only thing that says why the sidebar is
           not following the field, and one that vanished as it was read would
@@ -597,6 +918,63 @@ function BranchName(props: { conversation: ConversationView }): JSX.Element {
           The branch could not be named: {rename.error?.message}
         </ErrorLine>
       </Show>
+    </BranchField>
+  );
+}
+
+/// A branch name being typed: the field, the label over it, and whatever the
+/// caller has to say underneath.
+///
+/// The conversation's own name and a read-write companion's are the same field
+/// asked twice, and the compose page asks both again against nothing saved — so
+/// what is here is the field and the form around it, and what a name *does*
+/// stays with whoever owns it.
+///
+/// A `<form>` because there is nothing in it to press: Enter in a field with no
+/// button beside it is a save on the panels that save as they go, and nothing at
+/// all on the one that does not.
+export function BranchField(props: {
+  id: string;
+  /// What names it. Markup rather than a string, because a companion's field
+  /// says which repository it belongs to in words nobody sees — see
+  /// [`ForRepo`].
+  label: JSX.Element;
+  /// Which of the two fields this is, for the margin the panel gives it.
+  class: string;
+  value: string;
+  placeholder?: string;
+  set: (name: string) => void;
+  /// What the way out of the field does, for the caller that does anything with
+  /// it: the panels that save as they go keep the name here and on Enter, and
+  /// the compose page has nowhere to keep it but where it already is.
+  leave?: () => void;
+  children?: JSX.Element;
+}): JSX.Element {
+  return (
+    <form
+      class={props.class}
+      onSubmit={(ev) => {
+        // Nothing to press, so this is Enter in the field: the same save the
+        // pause was about to make, made now.
+        ev.preventDefault();
+        props.leave?.();
+      }}
+    >
+      <label for={props.id}>{props.label}</label>
+      <div class={styles.fieldLine}>
+        <input
+          id={props.id}
+          type="text"
+          autocapitalize="off"
+          autocorrect="off"
+          spellcheck={false}
+          placeholder={props.placeholder}
+          value={props.value}
+          onInput={(ev) => props.set(ev.currentTarget.value)}
+          onBlur={() => props.leave?.()}
+        />
+      </div>
+      {props.children}
     </form>
   );
 }
@@ -623,7 +1001,7 @@ export const RULE = "";
 /// are reading the same list, and so is every companion row that names it.
 export function BasePicker(props: {
   /// The control's own id, for the `<label>` that names it — one per repo on a
-  /// card that may draw several of these.
+  /// panel that may draw several of these.
   id: string;
   /// What names it. Markup rather than a string, because a companion's
   /// controls say which repository they belong to in words nobody sees —
@@ -709,8 +1087,8 @@ function BaseBranch(props: { conversation: ConversationView }): JSX.Element {
     onSuccess: (outcome: BaseRecorded) => {
       if (outcome !== "Recorded") {
         setRefused(outcome);
-        // Picked out of a list this card read a moment ago: reading it again is
-        // both the correction and the explanation.
+        // Picked out of a list this panel read a moment ago: reading it again
+        // is both the correction and the explanation.
         void queries.invalidateQueries({
           queryKey: ["repos", props.conversation.repo.id, "branches"],
         });
@@ -745,133 +1123,157 @@ function BaseBranch(props: { conversation: ConversationView }): JSX.Element {
   );
 }
 
-/// The ⋯ at the end of the branch row: what there is to settle about this
-/// conversation beyond the two fields beside it.
+/// The control that puts another registered Repo on the conversation, inside
+/// the Repo panel with the branch and the base it belongs beside.
 ///
-/// One row today — *Add companion repo* — and that row opens a level of the
-/// same menu listing every registered Repo, because the list is as long as the
-/// registry is and flattening it into the first level would put a dozen
-/// repositories in front of somebody who came for something else.
+/// A picker whose first row is the invitation rather than a choice: what is
+/// picked is done rather than held, so the control goes straight back to that
+/// first row and the repository appears as one of the companion rows under it.
+/// It was a ⋯ menu with a level of repositories inside it, which is what a row
+/// in a *card* has to be — the panel is that card by now, and a menu opened
+/// inside a popover to reach a list the popover had the room for would be two
+/// popovers for one press.
 ///
-/// The Repos are read here rather than passed down, so the menu is whole
+/// The Repos are read here rather than passed down, so the control is whole
 /// wherever it is drawn — the sidebar's own repo menu does the same.
 ///
 /// **Nothing is filtered out of the list.** This conversation's own Repo and
 /// one already added are both in it, and both are refused by name when they are
-/// pressed: the server is what decides either way, and a list that quietly left
+/// picked: the server is what decides either way, and a list that quietly left
 /// a repository out would leave the human hunting for one that is registered.
 function AddCompanion(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
 
-  const repos = useReading(() => ({
-    queryKey: ["repos"],
-    queryFn: listRepos,
-
-    // Merged by the id each row carries flat, for this menu rather than for any
-    // list: a rebuilt row is a new element, and a Nudge landing while the menu
-    // is open would take the focus off the row the human had tabbed to.
-    freshness: { reconcile: "id" },
-  }));
-
   const [refused, setRefused] = createSignal<CompanionAdded | null>(null);
 
-  // The menu's own way to shut, held out here because what closes this one is a
-  // request coming back rather than the press that sent it.
-  let shut = (): void => {};
+  // What was picked, for as long as the add is in the air: the control shows it
+  // while it is being made, and goes back to the invitation whatever became of
+  // it — an add is done rather than held, and the repository's own row under
+  // the control is where it is read afterwards.
+  const [picked, setPicked] = createSignal("");
 
   const add = useMutation(() => ({
     mutationFn: (repoId: number) => addCompanion(props.conversation.id, repoId),
     onSuccess: (outcome: CompanionAdded) => {
       if (outcome !== "Added") {
         setRefused(outcome);
-        // Every refusal is about one of two lists this menu was drawn over: the
-        // registered Repos, or the conversation the row would hang off.
-        // Reading both again is the correction and the explanation together,
-        // and the menu stays open to be read.
+        // Every refusal is about one of two lists this control was drawn over:
+        // the registered Repos, or the conversation the row would hang off.
+        // Reading both again is the correction and the explanation together.
         void queries.invalidateQueries({ queryKey: ["repos"] });
         void queries.invalidateQueries({ queryKey: ["conversation"] });
         return;
       }
 
-      // Straight back to the card, where the row it added is: the menu was a
-      // way to say which repository, and the row appearing under the branch is
-      // the confirmation.
       setRefused(null);
-      shut();
       void queries.invalidateQueries({ queryKey: ["conversation"] });
     },
+    onSettled: () => setPicked(""),
   }));
 
   return (
-    <Menu
-      class={styles.setupMenu!}
-      label="More setup"
-      name="More setup"
-      trigger="⋯"
-      closer={(close) => (shut = close)}
-      opening={() => setRefused(null)}
+    <CompanionChoice
+      chosen={picked()}
+      disabled={add.isPending}
+      add={(repoId) => {
+        setPicked(String(repoId));
+        add.mutate(repoId);
+      }}
     >
-      {() => (
-        <Nested label="Add companion repo">
-          {() => (
-            <>
-              <Switch>
-                <Match when={repos.isError}>
-                  <ErrorLine class={styles.failure}>
-                    Could not read the repos: {repos.error?.message}
-                  </ErrorLine>
-                </Match>
-                <Match when={repos.data?.length === 0}>
-                  {/* Nothing to work alongside, so the only thing to offer is
-                      the page that fixes that. */}
-                  <Empty class={styles.nothing}>
-                    No repos are registered yet —{" "}
-                    <A href="/settings">register one</A> to work alongside.
-                  </Empty>
-                </Match>
-                <Match when={repos.data}>
-                  {(registered) => (
-                    <For each={registered()}>
-                      {(repo) => (
-                        <button
-                          type="button"
-                          role="menuitem"
-                          disabled={add.isPending}
-                          onClick={() => add.mutate(repo.id)}
-                        >
-                          {repo.name}
-                        </button>
-                      )}
-                    </For>
-                  )}
-                </Match>
-              </Switch>
-
-              {/* Said in the level the press was made in, which is where the
-                  human is still standing: this menu does not shut on a refusal,
-                  and the level it does not shut is this one. */}
-              <Show when={refused()}>
-                {(outcome) => (
-                  <ErrorLine class={styles.failure}>
-                    {COMPANION_REFUSAL[outcome()]}
-                  </ErrorLine>
-                )}
-              </Show>
-              <Show when={add.isError}>
-                <ErrorLine class={styles.failure}>
-                  The companion repo could not be added: {add.error?.message}
-                </ErrorLine>
-              </Show>
-            </>
-          )}
-        </Nested>
-      )}
-    </Menu>
+      {/* Said under the control the press was made in, which is where the human
+          is still standing: the panel does not shut on a refusal. */}
+      <Show when={refused()}>
+        {(outcome) => (
+          <ErrorLine class={styles.failure}>
+            {COMPANION_REFUSAL[outcome()]}
+          </ErrorLine>
+        )}
+      </Show>
+      <Show when={add.isError}>
+        <ErrorLine class={styles.failure}>
+          The companion repo could not be added: {add.error?.message}
+        </ErrorLine>
+      </Show>
+    </CompanionChoice>
   );
 }
 
-/// The repos this conversation works alongside, one row each under the branch
-/// row they were added from.
+/// The control itself, shared for [`RepoOptions`]'s reason: what putting a
+/// repository alongside the work looks like, wherever the work is being set up.
+///
+/// A picker whose first row is the invitation rather than a choice. Nothing is
+/// filtered out of the list, for [`AddCompanion`]'s reason, and what an add
+/// *does* — a request on a saved Conversation, a row of the compose state — is
+/// the caller's.
+export function CompanionChoice(props: {
+  /// What the control is showing: the invitation, or the repository an add
+  /// still in flight is about.
+  chosen: string;
+  disabled?: boolean;
+  add: (repoId: number) => void;
+  /// What the caller has to say under it, the refusals above all.
+  children?: JSX.Element;
+}): JSX.Element {
+  const repos = useReading(() => ({
+    queryKey: ["repos"],
+    queryFn: listRepos,
+
+    // Merged by the id each row carries flat: a rebuilt `<option>` is a new
+    // element in a `<select>` the human may have open, and a Nudge landing
+    // while they were choosing would take the choice with it.
+    freshness: { reconcile: "id" },
+  }));
+
+  /// What is offered: the invitation, and then every registered Repo.
+  ///
+  /// `null` is the invitation, and it sends the empty string — which is a row
+  /// of the caller's own rather than the picker's placeholder, so nothing is
+  /// drawn over it and picking it does nothing. See `src/picking.tsx`.
+  const options = (): (RepoEntry | null)[] => [null, ...(repos.data ?? [])];
+
+  return (
+    <div class={styles.addCompanion}>
+      <label for="add-companion">Works alongside</label>
+      <Switch>
+        <Match when={repos.isError}>
+          <ErrorLine class={styles.failure}>
+            Could not read the repos: {repos.error?.message}
+          </ErrorLine>
+        </Match>
+        <Match when={repos.data?.length === 0}>
+          {/* Nothing to work alongside, so the only thing to offer is the page
+              that fixes that. */}
+          <Empty class={styles.nothing}>
+            No repos are registered yet — <A href="/settings">register one</A>{" "}
+            to work alongside.
+          </Empty>
+        </Match>
+        <Match when={repos.data}>
+          <Picker
+            id="add-companion"
+            options={options()}
+            value={(repo) => (repo ? String(repo.id) : "")}
+            label={(repo) => repo?.name ?? "Add a repo…"}
+            chosen={props.chosen}
+            disabled={props.disabled}
+            pick={(repo) => {
+              // The invitation is not a repository, so picking it is not an
+              // add: the control was already showing it.
+              if (!repo) return;
+
+              props.add(Number(repo));
+            }}
+          />
+        </Match>
+      </Switch>
+
+      {props.children}
+    </div>
+  );
+}
+
+/// The repos this conversation works alongside, one row each under the control
+/// they were added from, inside the Repo panel.
 ///
 /// Nothing at all where there are none, rather than an empty list with a
 /// heading over it: one repository is what most work needs, and a conversation
@@ -914,7 +1316,7 @@ function Companion(props: {
     onSuccess: (outcome: CompanionRemoved) => {
       setRefused(outcome === "Removed" ? null : outcome);
 
-      // Either way: what came back is about a conversation this card read a
+      // Either way: what came back is about a conversation this panel read a
       // moment ago, so reading it again is both the correction and — where the
       // row is simply gone — the whole of what there was to do.
       void queries.invalidateQueries({ queryKey: ["conversation"] });
@@ -987,8 +1389,8 @@ function Companion(props: {
 /// screen reader tabbing from one control to the next gets no line above. So
 /// every one of them carries the name inside its own label, and none of them
 /// shows it twice.
-function ForRepo(props: { companion: CompanionView }): JSX.Element {
-  return <span class={styles.forRepo}> for {props.companion.repo.name}</span>;
+export function ForRepo(props: { repo: string }): JSX.Element {
+  return <span class={styles.forRepo}> for {props.repo}</span>;
 }
 
 /// The branch this companion's checkout comes off.
@@ -1028,7 +1430,7 @@ function CompanionBase(props: {
   return (
     <BasePicker
       id={`companion-${props.companion.repo.id}-base`}
-      label={<>Base<ForRepo companion={props.companion} /></>}
+      label={<>Base<ForRepo repo={props.companion.repo.name} /></>}
       repo={props.companion.repo}
       chosen={props.companion.base_ref ?? RULE}
       disabled={record.isPending}
@@ -1071,7 +1473,7 @@ function CompanionAccess(props: {
     onSuccess: (outcome: CompanionModeChosen) => {
       setRefused(outcome === "Chosen" ? null : outcome);
 
-      // Either way: what came back is about a conversation this card read a
+      // Either way: what came back is about a conversation this panel read a
       // moment ago, and the switch draws what the record says rather than what
       // was pressed — so reading it again is both the correction and the way
       // the flip lands.
@@ -1082,7 +1484,7 @@ function CompanionAccess(props: {
   return (
     <div class={styles.companionMode}>
       <Toggle
-        label={<>Read-write<ForRepo companion={props.companion} /></>}
+        label={<>Read-write<ForRepo repo={props.companion.repo.name} /></>}
         on={props.companion.mode === "ReadWrite"}
         disabled={choose.isPending}
         flip={(on) => choose.mutate(on ? "ReadWrite" : "ReadOnly")}
@@ -1118,7 +1520,7 @@ function CompanionAccess(props: {
 ///
 /// It keeps itself the way the branch field above it does — on a pause in the
 /// typing, on the way out of the field and on Enter — because it is the same
-/// card, and a Save button here would be the one thing on it asking to be
+/// panel, and a Save button here would be the one thing in it asking to be
 /// pressed.
 function CompanionBranch(props: {
   conversation: ConversationView;
@@ -1199,34 +1601,22 @@ function CompanionBranch(props: {
   });
 
   return (
-    <form
-      class={styles.companionBranch}
-      onSubmit={(ev) => {
-        // Nothing to press, so this is Enter in the field: the same save the
-        // pause was about to make, made now.
-        ev.preventDefault();
-        keeper.keep();
+    <BranchField
+      id={`companion-${props.companion.repo.id}-branch`}
+      label={
+        <>
+          Branch
+          <ForRepo repo={props.companion.repo.name} />
+        </>
+      }
+      class={styles.companionBranch!}
+      value={branch()}
+      set={(name) => {
+        setNamed(name);
+        keeper.settle();
       }}
+      leave={() => keeper.keep()}
     >
-      <label for={`companion-${props.companion.repo.id}-branch`}>
-        Branch
-        <ForRepo companion={props.companion} />
-      </label>
-      <div class={styles.fieldLine}>
-        <input
-          id={`companion-${props.companion.repo.id}-branch`}
-          type="text"
-          autocapitalize="off"
-          autocorrect="off"
-          spellcheck={false}
-          value={branch()}
-          onInput={(ev) => {
-            setNamed(ev.currentTarget.value);
-            keeper.settle();
-          }}
-          onBlur={() => keeper.keep()}
-        />
-      </div>
       <Show when={refused()}>
         {(outcome) => (
           <ErrorLine class={styles.failure}>
@@ -1239,6 +1629,6 @@ function CompanionBranch(props: {
           The branch could not be named: {rename.error?.message}
         </ErrorLine>
       </Show>
-    </form>
+    </BranchField>
   );
 }

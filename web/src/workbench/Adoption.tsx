@@ -8,11 +8,11 @@
 //!
 //! What the roadmap and the stage are is the server's reading of the repository
 //! at this conversation's base commit, redone every time the page is drawn.
-//! Overriding the base on the brief card is answered by the stage that is
+//! Overriding the base on the composer is answered by the stage that is
 //! next *there*: what this names is never what the notice happened to show, it
 //! is what the press would actually start.
 //!
-//! The branch is not offered here or on the brief card. A stage is worked on
+//! The branch is not offered here or on the composer beside it. A stage is worked on
 //! its own slug — `04-wrap-up.md` becomes `wrap-up` — so the name the server
 //! invented when the row was made is discarded at the press, and what the
 //! sidebar shows until then is that invented name.

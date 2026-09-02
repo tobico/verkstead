@@ -35,18 +35,19 @@ _Avoid_: project root, workspace, scan path, allowed directory
 
 **Repo**:
 A git repository registered with Verkstead from inside a Watched Path.
-Conversations attach to one. Its files stay the source of truth for task lists
-(`.tasks/`) and roadmaps (`docs/roadmaps/`) — Verkstead parses and renders
-them, and never owns them.
+Conversations attach to one — and while one is still a Draft with nothing checked
+out, the Repo dropdown on its composer moves it onto another. Its files stay the
+source of truth for task lists (`.tasks/`) and roadmaps (`docs/roadmaps/`) —
+Verkstead parses and renders them, and never owns them.
 **Registering one can be taken back, and that is an unregistering rather than a
-delete**: Verkstead stops offering it for new work — the settings list, the New
-conversation menu, the roadmaps waiting to be adopted — while every Conversation
-ever worked in it goes on naming it, because a record that could not say which
-repository its work was done in would be no record. The directory is untouched
-either way. Refused while a Conversation that is neither Done nor Closed is on
-it, the way removing an Agent Profile a Conversation is set to run under is; and
-registering the same path again brings the same Repo back rather than making a
-second one.
+delete**: Verkstead stops offering it for new work — the settings list, the Repo
+dropdown on the compose page, the roadmaps waiting to be adopted — while every
+Conversation ever worked in it goes on naming it, because a record that could
+not say which repository its work was done in would be no record. The directory
+is untouched either way. Refused while a Conversation that is neither Done nor
+Closed is on it, the way removing an Agent Profile a Conversation is set to run
+under is; and registering the same path again brings the same Repo back rather
+than making a second one.
 One thing about a registered Repo is configured rather than read off the
 repository: its **resolution strategy**, where its conflicts are to be resolved
 differently from every other Repo's.
@@ -83,7 +84,7 @@ is started on a name Verkstead invented, because there has to be a branch to cut
 and nobody has thought about the work yet — and a name nobody chose says nothing
 about the work, so while it is a Draft none of it is drawn anywhere: the sidebar
 row, the pane header and the row read aloud all call it **Draft**, and the
-branch field on the setup card stands empty under *Automatically select*. Whose
+branch field on the composer stands empty under *Automatically select*. Whose
 the name is is kept in the record rather than read off the name's shape. Typing
 one settles it, and it is the title from that moment; clearing the field hands
 the naming back, and the name the Conversation started on stands again rather
@@ -122,9 +123,9 @@ and the row read aloud go on saying *Draft* through the first minutes of
 Grilling or Implementing — and say the branch the moment the name is settled.
 Two things settle it and both are final: the session renames the branch and
 Verkstead follows it, or the session ends having left the name alone, and the
-name it left is the Conversation's. The setup card is not part of this: the
+name it left is the Conversation's. The composer is not part of this: the
 branch is a plan while the Conversation drafts and a fact from the moment it is
-cut, so the field goes when the card does, whatever the name on it turns out to
+cut, so the field goes when the pane does, whatever the name on it turns out to
 be.
 _Avoid_: task, session, job, thread, ticket
 
@@ -236,7 +237,7 @@ big its compiled half may grow, is the human's, in the workbench settings. The
 one control there that only ever *closes* a hole — the **Sandbox
 Configuration** beside it opens them, and does so only for what somebody typed.
 Without an sccache it is still a cache — the crate downloads are shared —
-and the setup card says so on a repository that builds Rust.
+and the composer says so on a repository that builds Rust.
 _Avoid_: sccache, cargo cache, artifact cache, shared target dir
 
 **Compile Server**:
@@ -307,7 +308,7 @@ Conversation's own Repo is refused — it is the work's repository already, and 
 second checkout of it in one sandbox is not a companion — and so is a Repo
 added twice.
 
-**Configured beside the branch while the Brief drafts**, on the setup card and
+**Configured beside the branch while the Brief drafts**, on the composer and
 by the setup's own rules: freely added, edited and taken away, and frozen at
 grill start along with the branch and the base. What is configured is the mode,
 the branch the checkout comes off — that repository's default branch where none
@@ -322,7 +323,7 @@ the work goes on in, because what that settles is the sandbox the sessions to
 come run in rather than a property of one state. Never the other way: nothing
 removes a companion and nothing puts one back to read-only, so what a session
 was once given is never taken back mid-Conversation. What is added at a steer
-answers the setup card's questions again, and what is opened up is cut its
+answers the composer's questions again, and what is opened up is cut its
 branch off the base its row already names, re-resolved at that moment — the
 repository is joining the work now, so it starts from now rather than from the
 commit its detached checkout was left at.
@@ -396,21 +397,75 @@ What is *not* the human's again on a later round is the branch and the base
 commit: the branch has been worked, and the second round carries on from what is
 on it.
 
-Written where it is read: while its round is drafting, the Brief on its card
-*is* the field — raw markdown, always open, keeping itself whenever the typing
-stops for a moment and whenever the field is left, and saying nothing about it
-either way.
-There is no Edit, no Save and no word about saving, because there is no other
-thing the Brief could be doing while it is a draft. Once it freezes it is the
-server's rendering of it and nothing else.
+Written on the **composer**, which is the details pane its Timeline card opens
+while its round is drafting: the Brief there *is* the field — raw markdown,
+always open, keeping itself whenever the typing stops for a moment and whenever
+the field is left, and saying nothing about it either way. There is no Edit, no
+Save and no word about saving, because there is no other thing the Brief could
+be doing while it is a draft. The card itself is the server's rendering clamped
+to five lines the whole time, drafting or frozen, and once the round is past
+drafting the pane is that rendering and what the round was configured with.
 
-While it is still a draft its card carries the whole of the Conversation's
-setup under it — the branch, the base commit, the Pairings and the readiness
-verdict — because setting the work up and kicking it off are one act, and both
-belong where the work is read. Every one of those freezes at the same moment
-the Brief does, so once grilling starts the card is the Brief alone; on a
-later round the branch and the base commit are frozen already, and what the
-card carries under the new Brief is the Pairings.
+**The composer is drawn as the composer of a chat app**, because the act is the
+same one: one box at the app's own measure, centred in the pane, holding the
+Brief — and the whole of the Conversation's setup along the inside of that box's
+bottom edge, as a row of borderless dropdowns that read as part of it. Each is a
+dimmed label over its value. **Repo** comes first and is one flat panel holding
+everything that is a fact about the repository — which repository the work is
+in, the branch, the base commit, what the work runs alongside and how far into
+each of those it may reach — and the three role Pairings follow it, the role as
+the label and the Pairing as the value. The press that starts the work is the
+one thing outside the box, under it and against its right edge, and it carries
+the readiness verdict.
+
+**Which Repo a draft is on is one of those, and moving it is one press.** The
+picker at the top of that panel lists the registered Repos, and three things
+follow from a switch: the base commit goes back to the new repository's
+default-branch rule, a companion that has just become the Conversation's own
+Repo is dropped — a Conversation is never a companion of itself — and the branch
+name and the Pairings are left exactly where the human left them.
+Refused where the work is adopting a roadmap, and the picker reads disabled: the
+roadmap is a file in the repository it was found in and only its **name** is
+kept, so a Conversation moved off would go looking for that name elsewhere and
+find nothing to adopt — or a different roadmap called the same thing. Which
+repository an adoption is in was settled by the row that started it; what is
+still the human's is putting the roadmap down and composing work of their own.
+
+**And the same composer with nothing behind it is the compose page**, reached
+from *New conversation* at the head of the sidebar — which is the whole of what
+that pane offers beyond the list: the same box, the same row along its edge and
+the same press, over what this device is holding rather than over a record. It is
+kept per device the way a half-filled answer sheet is, so a reload loses nothing,
+and nothing exists on the server until a press — **Start** creates the
+Conversation, puts every field the human touched on it through the endpoints the
+composer uses and kicks the work off, and **Save as draft** stops after the
+fields. So they wait on different things: creating needs a Repo and nothing else,
+while starting carries a grilling with it and needs what one needs — a Brief and
+the three roles answered — drawing inert short of that and saying what is missing
+when it is pressed, the way the press on a draft's own composer does. Either way
+the page lands in the Conversation it made and this device stops holding
+anything. A field the server refuses leaves the rest of the work on that draft,
+and the refusal is said on the draft's own composer.
+
+**Adopting a roadmap is that page too**, from an **Adopt a roadmap** dropdown
+under the box, at the near edge of the row the two presses are at the far edge
+of — drawn only where there is a roadmap to adopt and nothing written in the box,
+since what it loads stands in place of what would have been written there.
+Picking one creates nothing: the roadmap is loaded into what the device is
+holding, the box locks to a card naming it and the Stage that would be started,
+the Repo and the base commit are the roadmap's own, and what is still the
+human's is the Pairings and the repos the work runs alongside. A clear control
+puts it down and gives the box back what was in it. **Start** then creates the
+adopting Conversation and adopts the Stage; **Save as draft** creates it and
+leaves the adopting to the press on its own page.
+
+Every one of those freezes at the same moment the Brief does, so once grilling
+starts none of it is drawn; on a later round the branch and the base commit are
+frozen already, and so is the Repo — a checkout is of one repository, and the
+one thing that can no longer be done is the one thing still drawn, the picker
+saying it for itself by reading disabled. What the row offers under the new
+Brief is otherwise the Pairings alone. What a control cannot do it does not
+draw.
 _Avoid_: description, prompt, spec, issue body
 
 **Timeline**:
@@ -419,6 +474,13 @@ of the workbench. Everything Verkstead and its agents do lands here as an
 Event; nothing happens off it. It records the work rather than the watching:
 looking at a session's Screen leaves no Event, and neither does typing into one
 — the record keeps what was built rather than who was there.
+
+**A record of one Event is not drawn at all**, which is every draft nothing has
+happened to yet: there is nothing to read on it, so the pane goes — the whole of
+it, header and pins included — and the composer beside it takes the column as
+well as its own. A narrow window walks straight from the conversations to the
+composer and straight back out. A second Event of any kind puts the pane back,
+at the width this device left it.
 _Avoid_: feed, log, history, activity stream
 
 **Event**:
@@ -818,6 +880,14 @@ change before pressing, and what they changed it to is what gets remembered
 next. A remembered Pairing whose Profile has broken, or which no longer lists
 the model, is silently not applied — an unchosen picker, exactly as a Repo with
 no memory gives.
+
+**The compose page reads the same memory off the Repo**, so its three pickers
+stand on what a created draft would have arrived showing, before anything is
+created — read again whenever the repo is switched, another repo being another
+answer. Shown rather than held: a picker still on the prefill sends nothing when
+the Conversation is made, and what fills it is the server's own prefill doing
+what it always does. One the human touched is theirs, and a switch leaves it
+alone.
 _Avoid_: primary/secondary profile, planner/worker, grilling agent, grilling
 profile (the Profile is half of it)
 
@@ -958,11 +1028,16 @@ Take a roadmap the Repo already holds — written by the old tools, by hand, by
 anything that was not this Verkstead — into the pipeline, by starting its next
 Stage as a Conversation. The human's press stands in for the Stage before it
 that would otherwise have started it, so there is no grilling and no Brief to
-write: what they settle is the Pairings and the base commit, and the stage
-brief becomes the Brief. One Stage is the whole of what adopting starts, and all
-it has to start — that Stage's own plan commit writes to the roadmap, so when it
-settles the Stage after it begins the ordinary unattended way, and an adopted
-roadmap is a staged one from there on. Never stacks: there is no predecessor
+write: what they settle is the Pairings, the base commit and the repos the work
+runs alongside, and the stage brief becomes the Brief. **Taken up on the compose
+page**, from the dropdown under its box: the roadmap loads into the composer, and
+the press under it creates the Conversation and adopts the Stage together — the
+same two presses every other piece of work is composed with, the quieter of which
+stops at a draft, for the adopting to be pressed on its own pane. One Stage is
+the whole of what adopting starts, and all it has to start — that Stage's own
+plan commit writes to the roadmap, so when it settles the Stage after it begins
+the ordinary unattended way, and an adopted roadmap is a staged one from there
+on. Never stacks: there is no predecessor
 Conversation to stack on, and building on an unmerged branch is the human's
 move, made by picking that branch as the base.
 _Avoid_: import, attach, resume, take over, migrate
@@ -976,9 +1051,11 @@ still exists, and the Stage's own branch not taken. A roadmap that is
 finished, one already in flight and one whose next brief is missing are each not
 abandoned and each draw nothing, because what the human can do something about
 is the only thing worth saying. Read from the repositories every time it is
-drawn and never stored, like the pinned stage lists — and with nothing to
-dismiss one by, a roadmap's score being the repository's to keep: an unwanted
-notice is silenced there, by ticking the box or annotating the stage.
+drawn and never stored, like the pinned stage lists — and drawn where work is
+composed rather than anywhere waiting on the human, since taking one up is
+something to do rather than something to answer. With nothing to dismiss one by,
+a roadmap's score being the repository's to keep: an unwanted row is silenced in
+the repository, by ticking the box or annotating the stage.
 _Avoid_: stale, orphaned, dormant, unmanaged, needs attention
 
 **Stopped**:
@@ -1179,7 +1256,7 @@ for a wrap-up: that both builds and reviews, so the one pick reaches the Review
 Pairing as well — but only to **fill** one nothing was picked for, never to
 replace one that was. The picker is labelled for the state's own work and
 prefilled with what builds, so a human who changes nothing on it has said
-nothing about the review, and an account they chose on the setup card to be a
+nothing about the review, and an account they chose on the composer to be a
 fresh set of eyes stays that.
 
 **And the submit resumes in the same press.** The stop the click left is

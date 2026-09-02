@@ -13,9 +13,12 @@
    workbench reads a Timeline there and the settings page draws its own root,
    and the frame has no opinion about either.
 
-   The panes are always in the document. A pane that was rendered away would
-   have to be rebuilt — and its scroll position found again — every time the
-   human walked back into it.
+   Every pane the frame was handed is always in the document, whichever level is
+   showing. A pane that was rendered away would have to be rebuilt — and its
+   scroll position found again — every time the human walked back into it. A
+   level the frame was handed *nothing* for is a different matter: there is no
+   such pane at all then, and the two frames that happen in are said at the end
+   of this file.
 
    Four of the names here are worn by things this file does not draw:
    `paneChrome` by whatever sticks to the top of a pane, `paneFoot` by whatever
@@ -510,6 +513,46 @@
      no sidebar to be beside, and the pane it would go back to has never
      existed. */
   .panes.two .middlePane .paneBack {
+    display: none;
+  }
+}
+
+/* And the other two panes rather than three: the frame the workbench is drawn
+   in while the Conversation it is reading has nothing on its record but the one
+   Event. `Panes.tsx` puts this name on the frame when it is handed no middle
+   pane, and there is then no such pane in the document — the level is not drawn
+   rather than drawn empty, so nothing the Timeline's head would have carried is
+   left standing over the pane beside it.
+
+   The details take the room, which is the whole of what this says: the sidebar
+   at the width this device settled it, its own divider, and everything after it.
+   No width of its own, and that is the point — the border is the sidebar's,
+   moving the sidebar's own percentage, and the middle pane's is left untouched
+   in this device's storage for the moment a second Event brings the column back.
+
+   After every rule it overrides, as `.two` is and for the same reason: the
+   columns above are set on `.panes` at two widths and the rules that show a pane
+   are the same two classes deep as these. Two classes here outrank one there
+   whatever the order, and the order says which frame is the ordinary one all the
+   same. */
+@media (min-width: 60rem) {
+  .panes.widened {
+    grid-template-columns: var(--pane-sidebar, 20%) auto 1fr;
+  }
+
+  /* The second column is the details at every width from here, rather than
+     whichever level `data-pane` names: there is no middle pane for it to name,
+     and the walk that attribute is for is the narrow window's. */
+  .panes.widened > .detailsPane {
+    display: block;
+  }
+
+  /* And the details pane's way back out, which the sidebar being on screen
+     makes pointless exactly as it does the Timeline's. Said here rather than
+     left to the 80rem rule in `PaneHead.module.css`, because what takes the way
+     back away is the pane it would go back to already standing beside this one —
+     and in this frame that happens a breakpoint earlier. */
+  .panes.widened .detailsPane .paneBack {
     display: none;
   }
 }

@@ -147,15 +147,15 @@ describe("the end of a record", () => {
     expect(openingOf(steer)).toBeNull();
   });
 
-  /// And the Brief while it is still being written, which is a field with the
-  /// conversation's setup under it rather than a card to press. A Draft that has
-  /// nothing else on its record has nothing openable at all, and the pane stays
-  /// bare paper.
-  it("says nothing of a brief that has not frozen", () => {
+  /// And the Brief while it is still being written, which opens the composer
+  /// the way a frozen one opens the record of what a round was built from: a
+  /// Draft with nothing else on its record lands on it, which is where the
+  /// human writes the brief and settles the setup.
+  it("opens a brief that has not frozen, which is what a draft lands on", () => {
     const brief = DRAFT.timeline[0]!;
     expect("Brief" in brief && brief.Brief.frozen).toBe(false);
-    expect(openingOf(brief)).toBeNull();
-    expect(lastOpening(DRAFT.timeline)).toBeNull();
+    expect(openingOf(brief)).toBe("Brief" in brief && brief.Brief.id);
+    expect(lastOpening(DRAFT.timeline)).toBe(openingOf(brief));
   });
 
   /// The two lists open by their word rather than by the id of the row they
