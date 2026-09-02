@@ -2159,6 +2159,37 @@ repo: string | null, diff: DiffView, };
 export type RepoEntry = { id: number, name: string, path: string, default_branch: string, };
 
 /**
+ * What a Repo was last grilled with, as a Conversation started on it would
+ * arrive showing it — the prefill, read before there is a Conversation for it
+ * to have been applied to.
+ *
+ * The same three fields a [`crate::ConversationView`] carries and in the same
+ * shapes, because that is what this is: what the pickers of a freshly created
+ * draft on this Repo would say. A page filling its own pickers from this and a
+ * page reading them off a draft are drawing the same answer, and one shape is
+ * what keeps the two from wording it differently.
+ *
+ * Each of them is judged before it is handed over, exactly as creation judges
+ * it: a remembered Pairing whose Profile has broken, or whose Profile no
+ * longer lists the model it was remembered with, comes back as nothing picked
+ * — the same nothing a Repo with no memory at all comes back as.
+ */
+export type RepoPairingsView = { 
+/**
+ * One of the two roles whose memory can hold the row that runs no session,
+ * so this says which of three rather than whether anything is remembered.
+ */
+grilling: PickedView, 
+/**
+ * The one role that has no such row: a Pairing, or nothing.
+ */
+implementation: PairingView | null, 
+/**
+ * And the other role that has one.
+ */
+review: PickedView, };
+
+/**
  * What became of taking one off the registry.
  *
  * A removal rather than a deletion, which is why nothing here says anything

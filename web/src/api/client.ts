@@ -40,6 +40,7 @@ import type {
   PushKey,
   Registered,
   RepoEntry,
+  RepoPairingsView,
   RepoRemoved,
   RepoSwitched,
   RepoView,
@@ -161,6 +162,17 @@ export function loadRepo(id: number): Promise<RepoView> {
 /// Verkstead hearing about it, so there is nothing here that could be kept.
 export function listBranches(repoId: number): Promise<string[]> {
   return get<string[]>(`/api/ui/repos/${repoId}/branches`);
+}
+
+/// What one registered Repo was last grilled with, judged as something to fill
+/// a picker with: the three roles a Conversation started on it would arrive
+/// showing.
+///
+/// For the page that asks those three questions before there is a Conversation
+/// to read the answers off. Read again whenever the repo changes, because the
+/// memory is the repo's: another repo is another answer.
+export function loadRepoPairings(repoId: number): Promise<RepoPairingsView> {
+  return get<RepoPairingsView>(`/api/ui/repos/${repoId}/pairings`);
 }
 
 /// Ask Verkstead to take on the repository at an absolute path.

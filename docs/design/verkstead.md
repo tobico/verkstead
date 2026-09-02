@@ -591,6 +591,10 @@ in the Conversation they made, and a successful create clears what the device wa
 holding. There is no batched create and no second set of validation rules: a
 field the server refuses leaves the rest of the work on a part-set draft, and the
 refusal is carried to that draft's own composer to be read where the field is.
+Its three role pickers stand on what the picked repo was last grilled with, read
+off the repo and re-read whenever it is switched, so the page shows what a draft
+created there would have arrived showing — shown and not held, so a picker left
+on it sends nothing at create and the server's own prefill answers for it.
 
 Timeline events:
 

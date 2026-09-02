@@ -62,6 +62,12 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // the Conversation: the branches are the repository's, and two
         // Conversations against one Repo are looking at the same list.
         .route("/api/ui/repos/{id}/branches", get(branches))
+        // And what that Repo was last grilled with, which is what a page asking
+        // the three role questions fills its own pickers from before there is a
+        // Conversation for the server to have prefilled. Under the Repo for the
+        // branches' reason: the memory is the Repo's, and every page composing
+        // against it is looking at the same answer.
+        .route("/api/ui/repos/{id}/pairings", get(pairings))
         // And one Repo opened, which is the pane its card leads to: the same
         // three facts the row carries, plus the branches, how much work is on
         // it, and what it is holding that nothing is driving. Its own read
@@ -593,6 +599,44 @@ async fn branches(State(state): State<AppState>, Path(id): Path<String>) -> Http
         Err(error) => {
             tracing::error!(error = ?error, repo_id = id, "listing a Repo's branches failed");
             unavailable("the Repo's branches could not be read")
+        }
+    }
+}
+
+/// `GET /api/ui/repos/{id}/pairings` — what one registered Repo was last
+/// grilled with, judged as something to fill a picker with.
+///
+/// What a Conversation started on this Repo would arrive showing, answered
+/// before one is started: the compose page has three role questions to ask and
+/// no record to read the answers off, so it asks the Repo the same thing
+/// creation asks it — see [`crate::conversations::pairing_prefill`], which is
+/// the one reading.
+///
+/// A 404 for an id nothing is registered under, and for one that is not a
+/// number either — the same answer the branches give for the same reason:
+/// neither names a Repo, and a page composing against one that has gone has a
+/// repo to pick again rather than a failure to report.
+async fn pairings(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return no_such_repo(&id);
+    };
+
+    match store::registered_repo(&state.pool, id).await {
+        Ok(None) => no_such_repo(&id.to_string()),
+        Ok(Some(_)) => match crate::conversations::pairing_prefill(&state, id).await {
+            Ok(prefill) => Json(prefill).into_response(),
+            Err(error) => {
+                tracing::error!(
+                    error = ?error,
+                    repo_id = id,
+                    "reading what a Repo was last grilled with failed",
+                );
+                unavailable("the repo's remembered pairings could not be read")
+            }
+        },
+        Err(error) => {
+            tracing::error!(error = ?error, repo_id = id, "reading a Repo failed");
+            unavailable("the repo's remembered pairings could not be read")
         }
     }
 }

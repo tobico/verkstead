@@ -25,10 +25,11 @@ use crate::{
     ConversationView, GrillingStarted, Locked, NewAdoption, NewCompanion, NewConversation,
     NewOrder, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
     ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RepoChoice, RepoEntry,
-    RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen,
-    SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
-    SharedConversation, ShowingArchived, Shown, Started, SteerOpened, SteerSubmission, Submitted,
-    Subscribed, Subscription, TranscriptView, Unsubscribe, UpdateNotice, Watching,
+    RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane,
+    RoleChoice, Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
+    SharePublished, SharedConversation, ShowingArchived, Shown, Started, SteerOpened,
+    SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe,
+    UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -239,6 +240,11 @@ fn the_viewers_types_are_written_from_these() {
     ProfileChoice::export_all(&config).unwrap();
     ProfileChosen::export_all(&config).unwrap();
     RoleChoice::export_all(&config).unwrap();
+
+    // And what a Repo remembers of the three, which is what the compose page
+    // fills its own pickers from before there is a Conversation for the
+    // server to have prefilled.
+    RepoPairingsView::export_all(&config).unwrap();
 
     // Telling one device about a Set, and stopping.
     PushKey::export_all(&config).unwrap();

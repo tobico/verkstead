@@ -10,6 +10,7 @@
 import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
 import { beforeEach, describe, expect, it } from "vitest";
 
+import type { ProfileEntry, RepoPairingsView } from "../src/api/types";
 import composer from "../src/workbench/Composer.module.css";
 import sidebar from "../src/workbench/Conversations.module.css";
 import setup from "../src/workbench/Setup.module.css";
@@ -23,6 +24,7 @@ import {
   type Composed,
 } from "../src/workbench/composing";
 import { OPEN, PROFILES, REPOS, drawn, mount, theWorkbench } from "./bench";
+import { pick, showing } from "./pickers";
 import { json, serving, whenever } from "./serving";
 
 /// What the page put on the wire when it wrote to `path`, and how often it did.
@@ -74,11 +76,17 @@ async function composing(container: ParentNode): Promise<HTMLTextAreaElement> {
 }
 
 /// Open the Repo panel, which is where the repo is picked and everything under
-/// it is settled.
+/// it is settled — unless it is open already, a press on the trigger being what
+/// shuts it again.
 async function openRepo(container: ParentNode): Promise<HTMLElement> {
-  fireEvent.click(
-    await drawn<HTMLButtonElement>(container, `.${setup.repoOption} > button`),
+  const trigger = await drawn<HTMLButtonElement>(
+    container,
+    `.${setup.repoOption} > button`,
   );
+
+  if (trigger.getAttribute("aria-expanded") !== "true") {
+    fireEvent.click(trigger);
+  }
 
   return drawn(container, `.${setup.repoOption} > [role="group"]`);
 }
@@ -91,7 +99,12 @@ async function pickRepo(container: ParentNode, id: number): Promise<void> {
     screen.getByLabelText("Repo"),
   )) as HTMLSelectElement;
 
-  await waitFor(() => expect(picker.options.length).toBeGreaterThan(REPOS.length));
+  // Waited for the list to have landed: a repo apiece, plus the placeholder
+  // while nothing is picked — which is gone the second time this is called, a
+  // placeholder being a state there is no way back to.
+  await waitFor(() =>
+    expect(picker.options.length).toBeGreaterThanOrEqual(REPOS.length),
+  );
 
   fireEvent.change(picker, { target: { value: String(id) } });
 }
@@ -343,6 +356,141 @@ describe("the compose page", () => {
 
     // Still on the page, still holding what was composed.
     expect(history.get()).toBe("/compose");
+  });
+
+  /// What one Repo remembers, as the endpoint writes it: a pairing per role,
+  /// off the fixture's own profiles so the rows a test names are rows the
+  /// picker really offers.
+  const remembering = (
+    grilling: ProfileEntry,
+    implementation: ProfileEntry,
+    review: ProfileEntry,
+  ): RepoPairingsView => ({
+    grilling: { Under: { profile: grilling, model: grilling.models[0]! } },
+    implementation: {
+      profile: implementation,
+      model: implementation.models[0]!,
+    },
+    review: { Under: { profile: review, model: review.models[0]! } },
+  });
+
+  /// The workbench with one Repo remembering something and the rest of them
+  /// remembering nothing, which is what the bench already serves.
+  const rememberedOn = (repoId: number, prefill: RepoPairingsView) =>
+    theWorkbench(
+      whenever(`/api/ui/repos/${repoId}/pairings`, json(prefill)),
+      json(null),
+    );
+
+  it("fills the three roles with what the repo was last grilled with", async () => {
+    rememberedOn(
+      REPOS[1]!.id,
+      remembering(PROFILES[0]!, PROFILES[1]!, PROFILES[2]!),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+
+    // Nothing to prefill from until a repo is picked: the memory is the repo's.
+    await waitFor(() => expect(showing("Grilling")).toBe("Not chosen"));
+
+    await pickRepo(container, REPOS[1]!.id);
+
+    await waitFor(() =>
+      expect(showing("Grilling")).toBe("Claude Code Fable 5 — fable"),
+    );
+    expect(showing("Implementation")).toBe("Claude Code Opus 5 — opus");
+    expect(showing("Review")).toBe("Claude Code Sonnet 5 — sonnet");
+  });
+
+  it("re-reads on a switch, and leaves a role the human touched alone", async () => {
+    theWorkbench(
+      whenever(
+        `/api/ui/repos/${REPOS[1]!.id}/pairings`,
+        json(remembering(PROFILES[0]!, PROFILES[1]!, PROFILES[2]!)),
+      ),
+      whenever(
+        `/api/ui/repos/${REPOS[0]!.id}/pairings`,
+        json(remembering(PROFILES[2]!, PROFILES[2]!, PROFILES[0]!)),
+      ),
+      json(null),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await pickRepo(container, REPOS[1]!.id);
+
+    await waitFor(() =>
+      expect(showing("Grilling")).toBe("Claude Code Fable 5 — fable"),
+    );
+
+    // One of the three made the human's own, which is what the switch must not
+    // touch.
+    pick("Grilling", "No grilling");
+    expect(showing("Grilling")).toBe("No grilling");
+
+    await pickRepo(container, REPOS[0]!.id);
+
+    // The two nobody touched are the other repo's memory now; the one they did
+    // is still theirs.
+    await waitFor(() =>
+      expect(showing("Review")).toBe("Claude Code Fable 5 — fable"),
+    );
+    expect(showing("Implementation")).toBe("Claude Code Sonnet 5 — sonnet");
+    expect(showing("Grilling")).toBe("No grilling");
+  });
+
+  it("sends nothing for a role left showing the prefill", async () => {
+    const fetching = creating(
+      whenever(
+        `/api/ui/repos/${REPOS[1]!.id}/pairings`,
+        json(remembering(PROFILES[0]!, PROFILES[1]!, PROFILES[2]!)),
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/grilling-pairing`,
+        json("Chosen"),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/implementation-pairing`,
+        json("Chosen"),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/review-pairing`,
+        json("Chosen"),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    await pickRepo(container, REPOS[1]!.id);
+
+    await waitFor(() =>
+      expect(showing("Grilling")).toBe("Claude Code Fable 5 — fable"),
+    );
+
+    // One picked away from what was shown, the other two left on it.
+    pick("Review", "No review");
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(
+        sent(fetching, `/api/ui/conversations/${OPEN.id}/review-pairing`),
+      ).toEqual({ pairing: null }),
+    );
+
+    // The server applies its own prefill to the Conversation it creates, so a
+    // picker still showing that prefill has nothing to say: sending it back
+    // would be this page claiming somebody chose it.
+    expect(
+      writes(fetching, `/api/ui/conversations/${OPEN.id}/grilling-pairing`),
+    ).toBe(0);
+    expect(
+      writes(fetching, `/api/ui/conversations/${OPEN.id}/implementation-pairing`),
+    ).toBe(0);
   });
 
   it("asks the same three roles the composer asks", async () => {

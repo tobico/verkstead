@@ -774,6 +774,14 @@ change before pressing, and what they changed it to is what gets remembered
 next. A remembered Pairing whose Profile has broken, or which no longer lists
 the model, is silently not applied — an unchosen picker, exactly as a Repo with
 no memory gives.
+
+**The compose page reads the same memory off the Repo**, so its three pickers
+stand on what a created draft would have arrived showing, before anything is
+created — read again whenever the repo is switched, another repo being another
+answer. Shown rather than held: a picker still on the prefill sends nothing when
+the Conversation is made, and what fills it is the server's own prefill doing
+what it always does. One the human touched is theirs, and a switch leaves it
+alone.
 _Avoid_: primary/secondary profile, planner/worker, grilling agent, grilling
 profile (the Profile is half of it)
 

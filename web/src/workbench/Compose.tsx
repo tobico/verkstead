@@ -18,6 +18,11 @@
 //! this, and the frame widens exactly as it does there — see `Workbench.tsx`,
 //! where the same two panes are handed to the same frame.
 //!
+//! The one thing it reads that a saved composer has no need of is the repo's own
+//! memory of what it was last grilled with. A draft has that applied to it when
+//! it is created; this page has no draft yet, so it asks for the same answer and
+//! shows it — see `showing`, which is careful to show it rather than hold it.
+//!
 //! What it does *not* do is decide anything the composer decides. Every control
 //! here is the composer's own component drawn over the compose state instead of
 //! over a Conversation — see `Setup.tsx`, where they live — so the two pages
@@ -30,10 +35,11 @@ import { For, Show, createEffect, createSignal, type JSX } from "solid-js";
 import app from "../App.module.css";
 import { PaneSticky, Panes } from "../Panes";
 import { Switch as Toggle } from "../Switch";
-import { listRepos } from "../api/client";
+import { listRepos, loadRepoPairings } from "../api/client";
 import type { RepoEntry } from "../api/types";
 import { useReading } from "../freshness";
 import { ErrorLine, Note } from "../notices";
+import * as pairing from "../pairing";
 import { Conversations } from "./Conversations";
 import styles from "./Composer.module.css";
 import { PaneHead } from "./PaneHead";
@@ -124,6 +130,52 @@ function Compose(props: {
   /// is picked, and nothing while the list is still on its way.
   const repo = (): RepoEntry | null =>
     (repos.data ?? []).find((entry) => entry.id === state().repo) ?? null;
+
+  // And what that repo was last grilled with, which is what a draft created on
+  // it would arrive showing. Read the moment one is picked and again whenever it
+  // changes, the key carrying the repo: the memory is the repo's, so another
+  // repo is another answer — and there is nothing to ask until one is picked.
+  //
+  // Asked of the server rather than worked out here, for the reason the server
+  // holds the memory at all: the workbench is answered from a phone as readily
+  // as from a desk, and every judgement about whether a remembered pairing still
+  // runs is made where the profiles and the watched paths are.
+  const remembered = useReading(() => ({
+    queryKey: ["repos", state().repo, "pairings"],
+    queryFn: () => loadRepoPairings(state().repo!),
+    enabled: state().repo !== null,
+
+    // Merged by the id each profile carries, for the pickers below: what a
+    // re-read that changed nothing must not do is rebuild a dropdown the human
+    // has open.
+    freshness: { reconcile: "id" },
+  }));
+
+  /// What one role's picker shows: what the human picked, and the repo's own
+  /// memory until they pick anything.
+  ///
+  /// The prefill is *shown* rather than held — it never lands in the compose
+  /// state, which is what keeps a picker nobody touched untouched at create
+  /// time: the server applies its own prefill to the Conversation it makes, and
+  /// a page that had copied the same answer into its state would be sending it
+  /// back as though somebody had chosen it. Which also means switching repos
+  /// simply reads another memory, and a role the human did touch stands through
+  /// it.
+  const showing = (role: "grilling" | "implementation" | "review"): string => {
+    const picked = state()[role];
+    if (picked !== null) {
+      return picked;
+    }
+
+    const prefill = remembered.data;
+    if (prefill === undefined) {
+      return "";
+    }
+
+    return role === "implementation"
+      ? pairing.chosen(prefill.implementation)
+      : pairing.settled(prefill[role]);
+  };
 
   /// Whether there is anything to create at all, which is the repo and nothing
   /// else: everything else on this page may stay empty, as it always may while
@@ -313,8 +365,10 @@ function Compose(props: {
 
             {/* And the three accounts, one trigger each — the same three
                 questions, asked before there is a record for an answer to be
-                about. A picker nobody touches sends nothing when this is
-                created, and the server's own prefill stands. */}
+                about. Each of them stands on what the repo was last grilled
+                with until it is touched, which is what a created draft would
+                have arrived showing — and a picker left on it sends nothing
+                when this is created, so the server's own prefill stands. */}
             <ProfileChoices>
               {(saved) => (
                 <>
@@ -323,14 +377,14 @@ function Compose(props: {
                     role="grilling"
                     label="Grilling"
                     away="No grilling"
-                    chosen={state().grilling ?? ""}
+                    chosen={showing("grilling")}
                     pick={(picked) => change({ grilling: picked })}
                   />
                   <RolePicker
                     saved={saved()}
                     role="implementation"
                     label="Implementation"
-                    chosen={state().implementation ?? ""}
+                    chosen={showing("implementation")}
                     pick={(picked) => change({ implementation: picked })}
                   />
                   <RolePicker
@@ -338,7 +392,7 @@ function Compose(props: {
                     role="review"
                     label="Review"
                     away="No review"
-                    chosen={state().review ?? ""}
+                    chosen={showing("review")}
                     pick={(picked) => change({ review: picked })}
                   />
                 </>

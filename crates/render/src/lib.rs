@@ -55,7 +55,7 @@ pub use conversations::{
 };
 pub use profiles::{
     AgentType, Broken, PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen,
-    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, RoleChoice,
+    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, RepoPairingsView, RoleChoice,
 };
 pub use push::{PushKey, Subscribed, Subscription, Unsubscribe};
 pub use repos::{
