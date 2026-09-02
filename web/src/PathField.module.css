@@ -1,0 +1,74 @@
+/* The path field's own parts — see `PathField.tsx`. What the rows themselves
+   look like is `picking.module.css`: the browse dropdown and the listbox are one
+   control to the eye, so they are hung, capped and painted by one sheet, and
+   this file holds only what a browsing field has that a listbox does not.
+
+   The input is not styled here either. Every form that takes a path already
+   paints its own text fields — the paths editor, the Repos' form, the profile
+   form — and a field that arrived with a look of its own would be the one row of
+   those forms that did not match the rest. So what this lays out is where the
+   input sits and what stands beside it. */
+
+/* The input and its press, side by side, and the anchor the rows hang from.
+   Takes the whole of the room the form gives it, the input taking the whole of
+   what is left after the press. */
+.field {
+  position: relative;
+  display: flex;
+  flex: 1;
+  gap: 0.35rem;
+  align-items: stretch;
+  min-width: 0;
+}
+
+/* The way into the rows, drawn as quietly as the field it stands beside: the
+   same paper, border and radius every text field in the app has, and no colour
+   of its own. It is how a browse is started, not something to be steered
+   towards. */
+.browse {
+  flex: none;
+  padding: 0 0.6rem;
+  font: inherit;
+  color: var(--ink-soft);
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.browse:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* The press while the rows are down, said the way the listbox says it: the
+   border is what tells the eye which field a browse is going into. */
+.browse:focus-visible,
+.browse[aria-expanded="true"] {
+  color: inherit;
+  border-color: var(--accent);
+}
+
+@media (hover: hover) {
+  .browse:not(:disabled):hover {
+    border-color: var(--ink-soft);
+  }
+}
+
+/* Which way the row back out goes, in front of its words rather than after them
+   — every other row in the list leads further in, and this is the one that does
+   not. */
+.back {
+  flex: none;
+  font-size: 0.8em;
+  color: var(--ink-soft);
+}
+
+/* And what the list says when it has no rows: the reason, or that it is still
+   being read. Padded to where a row's words would be, so a listing that comes
+   back with a line instead of rows does not also move. */
+.line {
+  margin: 0;
+  padding: 0.7rem 0.6rem;
+  font-size: 0.9rem;
+}

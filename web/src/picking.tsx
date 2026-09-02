@@ -521,7 +521,12 @@ export function Listbox<T>(
 /// `hidden` counts with `auto` and `scroll`: what matters here is that the box
 /// clips, and one that clips without scrolling is the worse of the two to drop
 /// rows into.
-function clipping(from: Element): { top: number; bottom: number } {
+///
+/// Exported for the other dropdown the app draws for itself — the browse rows
+/// under a path field, in `PathField.tsx` — which hangs in the same panes and
+/// has to be measured against the same boxes. One answer to *where do rows go*,
+/// rather than one per control.
+export function clipping(from: Element): { top: number; bottom: number } {
   for (let at = from.parentElement; at; at = at.parentElement) {
     const { overflowY } = getComputedStyle(at);
 

@@ -25,6 +25,11 @@
 //! - **What a row reports.** Whether the server can see what an entry names is
 //!   the one thing a human cannot check from a phone, and it is said in the
 //!   server's own words on the row itself.
+//! - **What a browse writes.** All three fields browse, and what a browse leaves
+//!   in one goes to the server exactly as a typed path does — the dropdown is a
+//!   way of writing the box rather than a second way of saving. How the dropdown
+//!   itself behaves is asked in `browsing.test.tsx`, where the field is driven
+//!   on its own.
 //!
 //! The read is a fixture the server's own tests wrote, so what the page is drawn
 //! from is the shape the endpoint really answers with. What resolution *means*
@@ -37,13 +42,19 @@ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { RepoEntry, SettingsSaved, SettingsView } from "../src/api/types";
+import type {
+  DirectoryListing,
+  RepoEntry,
+  SettingsSaved,
+  SettingsView,
+} from "../src/api/types";
 import card from "../src/CardButton.module.css";
 import { RepoBinds } from "../src/repos/RepoBinds";
 import { PathsCard, PathsPane } from "../src/settings/Paths";
 import rowStyles from "../src/settings/PathEditor.module.css";
 import styles from "../src/settings/Paths.module.css";
-import { hangs, json, serving, whenever } from "./serving";
+import { browse, held, listingAt, rows as offered, tap } from "./fields";
+import { hangs, json, serving, whenever, type Answer } from "./serving";
 import repos from "./fixtures/repos.json" with { type: "json" };
 import told from "./fixtures/settings.json" with { type: "json" };
 import unset from "./fixtures/settings-unset.json" with { type: "json" };
@@ -194,10 +205,7 @@ function mountOwn(repo = REPO) {
 /// Repo from a stray — see `drawn` in `Paths.tsx`. The fixture's registry holds
 /// the Repo the fixture's scoped bind is written for, so the ordinary case is a
 /// pane with no stray on it.
-function theSettings(
-  standing: SettingsView,
-  ...answers: Array<() => Promise<Response>>
-) {
+function theSettings(standing: SettingsView, ...answers: Array<Answer>) {
   return registered(standing, REPOS, ...answers);
 }
 
@@ -206,7 +214,7 @@ function theSettings(
 function registered(
   standing: SettingsView,
   repos: RepoEntry[] | (() => Promise<Response>),
-  ...answers: Array<() => Promise<Response>>
+  ...answers: Array<Answer>
 ) {
   return serving(
     whenever("/api/ui/settings", json(standing)),
@@ -697,6 +705,93 @@ describe("adding a row", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Add" })[0]!);
 
     await waitFor(() => screen.getByText(/could not be saved/));
+  });
+});
+
+describe("browsing for one", () => {
+  /// One level of the filesystem, as the endpoint behind the dropdown answers
+  /// for it: where the fixture's own watched path lives, and one directory
+  /// beside it to browse to.
+  const HOME: DirectoryListing = {
+    Listed: {
+      path: "/home/ada",
+      entries: [
+        { name: "src", path: "/home/ada/src", kind: "Directory" },
+        { name: "work", path: "/home/ada/work", kind: "Directory" },
+      ],
+    },
+  };
+
+  /// The one directory every browse here reaches, held for the request the
+  /// field makes: all three fields ask in the anywhere scope, none of these
+  /// values being bounded by the Watched Paths.
+  const inHome = whenever(listingAt("/home/ada"), json(HOME));
+
+  /// Browse a field down to `/home/ada` and tap `work`, which is what leaves a
+  /// path in the box that nobody typed.
+  async function browsed(label: string): Promise<void> {
+    const field = await waitFor(() => screen.getByLabelText(label));
+
+    fireEvent.input(field, { target: { value: "/home/ada/" } });
+    browse(label);
+
+    await waitFor(() => expect(offered(label)).toContain("work"));
+    tap(label, "work");
+
+    expect(held(label)).toBe("/home/ada/work");
+  }
+
+  /// The point of the whole component: what a browse leaves in the field is
+  /// what Add sends, and it is sent the way a typed path is — the same one
+  /// request that writes the whole file, with everything else riding along.
+  it("saves a watched path a browse wrote, as a typed one is saved", async () => {
+    const fetching = theSettings(TOLD, inHome, json(answering(TOLD)));
+    mountPane();
+
+    await browsed("Add a watched path");
+    fireEvent.click(screen.getAllByRole("button", { name: "Add" })[0]!);
+
+    await waitFor(() =>
+      expect(sent(fetching)).toEqual({
+        ...REST,
+        watched_paths: [WATCHED, "/home/ada/work"],
+        sandbox_binds: [BIND, SCOPED],
+      }),
+    );
+  });
+
+  it("browses the binds every sandbox gets the same way", async () => {
+    const fetching = theSettings(TOLD, inHome, json(answering(TOLD)));
+    mountPane();
+
+    await browsed("Add a bind");
+    fireEvent.click(screen.getAllByRole("button", { name: "Add" })[1]!);
+
+    await waitFor(() =>
+      expect(sent(fetching)).toEqual({
+        ...REST,
+        watched_paths: [WATCHED],
+        sandbox_binds: [BIND, SCOPED, "/home/ada/work"],
+      }),
+    );
+  });
+
+  /// And the third of them, on the Repo's own pane — where the pane's grammar
+  /// is put around whatever the field holds, browsed or typed.
+  it("browses a Repo's own binds, and writes them against its name", async () => {
+    const fetching = theSettings(TOLD, inHome, json(answering(TOLD)));
+    mountOwn();
+
+    await browsed("Add a bind for this repo");
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    await waitFor(() =>
+      expect(sent(fetching)).toEqual({
+        ...REST,
+        watched_paths: [WATCHED],
+        sandbox_binds: [BIND, SCOPED, `${REPO}=/home/ada/work`],
+      }),
+    );
   });
 });
 
