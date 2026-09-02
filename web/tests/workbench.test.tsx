@@ -11917,10 +11917,32 @@ describe("a run stopped because an account ran out of window", () => {
   /// The one thing that tells this stop from any other is when the account
   /// comes back, and it is said on the resume row of the actions menu — the row
   /// the press is on, this being a stop that waits for the press *and* for an
-  /// account. Nowhere on the status button, which says *Stopped* either way.
+  /// account. In the words the session printed them in, and in front of the
+  /// sentence every resume row says, because *when* is the half the human does
+  /// not already know.
   ///
+  /// Nowhere on the status button, which says its status word either way: the
+  /// button has one line and the work to say it about.
+  it("says on the resume row when the account comes back", async () => {
+    thePaused();
+    const { container } = mount(`/conversations/${WAITING.id}`);
+
+    const resume = await drawn(await openActions(container), `.${actions.resume}`);
+
+    expect(resume.querySelector(`.${actions.says}`)!.textContent).toBe(
+      "Out of window until 3pm. Work out what should be running from where the work stands, and start it.",
+    );
+
+    // And nothing of it on the button that drops the menu.
+    expect(
+      (await drawn(container, `.${statusButton.status} .${statusButton.what}`))
+        .textContent,
+    ).not.toContain("Out of window");
+  });
+
   /// A conversation stopped by a press carries no such words, which is the whole
-  /// of the difference between the two.
+  /// of the difference between the two: the row says what the press does and
+  /// nothing about when, there being nothing to wait for but the press.
   it("is the only thing a conversation stopped by a press draws differently", async () => {
     expect(STOPPED.resets).toBeNull();
 
@@ -11928,7 +11950,10 @@ describe("a run stopped because an account ran out of window", () => {
     const { container } = mount(`/conversations/${STOPPED.id}`);
 
     const resume = await drawn(await openActions(container), `.${actions.resume}`);
-    expect(resume.textContent).not.toContain("Out of window");
+
+    expect(resume.querySelector(`.${actions.says}`)!.textContent).toBe(
+      "Work out what should be running from where the work stands, and start it.",
+    );
   });
 
   /// The record is kept and read rather than rewritten (ADR-0006): a Pause a

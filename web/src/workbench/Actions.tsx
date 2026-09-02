@@ -17,6 +17,12 @@
 //! one row rather than one per way of stopping — saying something else should
 //! happen is what Steer is for.
 //!
+//! One stop is worth more than that row's standing sentence, and it says so
+//! there: a run stopped by an exhausted usage window waits for this press *and*
+//! for the account to come back, so the row leads with when that is — see
+//! [`resuming`]. The only place it is said, the status button under the pinned
+//! cards having one line and the work to say it about.
+//!
 //! Then, in order of what each costs: stop, which waits for the task the run is
 //! on; force stop, which does not; steer, which moves the work somewhere else;
 //! and the two closes, which are not a stop at all but the end of the
@@ -192,6 +198,31 @@ export const RESUME_REFUSAL: Record<Resumed, string> = {
   NoFollowUpBrief:
     "Nothing on the record says what this follow-up was opened about. Steer it into Follow-up again with a fresh brief.",
 };
+
+/// What the Resume row says under its name: what the press does, and — on the
+/// one stop that waits for something the press cannot supply — when the account
+/// it was spending comes back.
+///
+/// The window fact leads, because it is the half the human does not already
+/// know: every row here says what its press does, and only this one has anything
+/// to say about *when*. Nothing waits on it and nothing counts down to it — no
+/// stop resumes itself, so a run stopped by a spent window waits for the same
+/// press as every other, and the words are there to say whether pressing now is
+/// worth it.
+///
+/// Here rather than on the status button, where it used to stand: the button
+/// says where the *work* is and has one line to say it in, and this row is the
+/// press the fact is about. As the session printed it — `3pm` stays `3pm` — the
+/// wording being the backend's and the reader's own clock being what it is read
+/// against.
+export function resuming(conversation: ConversationView): string {
+  const standing =
+    "Work out what should be running from where the work stands, and start it.";
+
+  return conversation.resets === null
+    ? standing
+    : `Out of window until ${conversation.resets}. ${standing}`;
+}
 
 /// One row of this menu: what the press is called, and under it the sentence
 /// saying what pressing it means.
@@ -492,7 +523,12 @@ function actions(): {
             among them, and drawn only where the server says there is something
             to start — see `ready_to_resume`. It carries nothing: what to start
             is worked out from where the work now stands at the moment of the
-            press. */}
+            press.
+
+            What it says is the one thing that differs between two stops: an
+            exhausted usage window is the stop that waits for an account as well
+            as for this press, and the row is where that is said — see
+            [`resuming`]. */}
         {/* And never on a Verkstead with no session to start: what Resume
             works out is which session should be running, so a row offering it
             there is a press that could only be refused. What says so is on the
@@ -505,7 +541,7 @@ function actions(): {
             class={styles.resume}
             label="Resume"
             pressing="Resuming…"
-            says="Work out what should be running from where the work stands, and start it."
+            says={resuming(conversation())}
             working={start.isPending}
             press={() => start.mutate(conversation().id)}
           />
