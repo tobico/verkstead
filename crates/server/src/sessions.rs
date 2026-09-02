@@ -33,14 +33,17 @@ use sqlx::SqlitePool;
 use tokio::process::{Child, Command};
 use tokio::sync::{oneshot, watch};
 use tokio::task::JoinHandle;
+use verkstead_render::SessionsHere;
 use verkstead_schema::Nudge;
 
 use crate::build_cache::{self, BuildCache};
 use crate::capture::{Reading, Told};
 use crate::handoffs::Handoffs;
 use crate::nudge::Nudges;
+use crate::platform::Platform;
 use crate::runner::Pace;
-use crate::sandbox::{Executable, Home, Reachable, Sandbox, SandboxConfig, under_dev_shell};
+use crate::sandbox::outliving;
+use crate::sandbox::{Executable, Homes, Reachable, Sandbox, SandboxConfig, under_dev_shell};
 use crate::screen::Live;
 use crate::settings::Settings;
 use crate::skills::{self, Skills};
@@ -92,7 +95,7 @@ const IDLE_AFTER: Duration = Duration::from_secs(3);
 /// settings page reaches the next session without the server being restarted.
 #[derive(Debug, Clone)]
 pub struct Agents {
-    home: Home,
+    homes: Homes,
     reachable: Reachable,
     config: SandboxConfig,
 
@@ -166,7 +169,7 @@ impl Agents {
     /// whichever account it names.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        home: Home,
+        homes: Homes,
         reachable: Reachable,
         config: SandboxConfig,
         cache: BuildCache,
@@ -176,7 +179,7 @@ impl Agents {
         settings: Settings,
     ) -> Agents {
         Agents {
-            home,
+            homes,
             reachable,
             config,
             cache,
@@ -195,7 +198,7 @@ impl Agents {
     #[allow(clippy::too_many_arguments)]
     pub fn running(
         agent: Vec<String>,
-        home: Home,
+        homes: Homes,
         reachable: Reachable,
         config: SandboxConfig,
         cache: BuildCache,
@@ -207,7 +210,7 @@ impl Agents {
         Agents {
             agent: Some(agent),
             ..Agents::new(
-                home, reachable, config, cache, skills, verkstead, handoffs, settings,
+                homes, reachable, config, cache, skills, verkstead, handoffs, settings,
             )
         }
     }
@@ -643,7 +646,24 @@ pub(crate) struct Sessions {
     /// grilling makes the worktree either way.
     agents: Option<Arc<Agents>>,
 
+    /// And whether a session has anywhere to run on this platform at all, which
+    /// is the other half of the same question and the one that is not about this
+    /// router — see [`Sessions::here`].
+    here: SessionsHere,
+
     running: Arc<Mutex<HashMap<i64, Running>>>,
+
+    /// And the backend of the session each Conversation is *launching*, held
+    /// from before its process exists until it is on the register above — see
+    /// [`Sessions::launching`].
+    ///
+    /// The register cannot answer for that stretch, and there is one thing that
+    /// has to be answered in it: how a session asks. A process is spawned and
+    /// then written down, and between the two it is running and already able to
+    /// reach the server — so a Set it sends in that window would be read as one
+    /// from outside a session and waited on, on a backend whose sessions cannot
+    /// wait. See [`Sessions::channel`], which is the whole of what this is for.
+    launching: Arc<Mutex<HashMap<i64, store::AgentType>>>,
 
     /// Whose turn it is in each Conversation's Worktree — see [`Sessions::turn`].
     turns: Arc<Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>>,
@@ -655,6 +675,27 @@ pub(crate) struct Sessions {
 /// rather than taken to start one: what it is protecting is not the launching but
 /// the working.
 pub(crate) type Turn = tokio::sync::OwnedMutexGuard<()>;
+
+/// The note that a Conversation is launching a session, held for as long as the
+/// launch takes — see [`Sessions::launching`].
+///
+/// A guard rather than a pair of calls, because what it is covering has three
+/// ways out: a process that would not start, a Capture that could not be opened,
+/// and the one that worked. Only the last of them leaves anything on the
+/// register, and none of them should leave this behind.
+struct Launching {
+    launching: Arc<Mutex<HashMap<i64, store::AgentType>>>,
+    conversation_id: i64,
+}
+
+impl Drop for Launching {
+    fn drop(&mut self) {
+        self.launching
+            .lock()
+            .expect("the launching registry is not poisoned")
+            .remove(&self.conversation_id);
+    }
+}
 
 /// A session that has been started, as whatever is driving it holds one.
 ///
@@ -1169,24 +1210,101 @@ struct Running {
     agent_type: store::AgentType,
 }
 
+/// Whether a Verkstead built for `platform` runs sessions at all.
+///
+/// The one place the fact is decided, and the whole of the decision: a session's
+/// agent runs on a pseudo-terminal, both Unixes have one to open and Windows has
+/// not — see [`crate::terminal`], whose Windows arm is a terminal that refuses.
+///
+/// A function of the platform rather than a `cfg!`, for the reason
+/// [`Platform`] is a value: the arm this machine will never run is still an arm
+/// its tests call. What a running server answers is [`Platform::HERE`]'s answer,
+/// and it is [`Sessions::under`] that asks — everything above reads it off the
+/// registry rather than off the target it was compiled for.
+pub(crate) fn run_on(platform: Platform) -> SessionsHere {
+    match platform {
+        Platform::Linux | Platform::MacOs => SessionsHere::Run,
+        Platform::Windows => SessionsHere::NotOnWindowsYet,
+    }
+}
+
 impl Sessions {
     /// A server that can run sessions, under `agents`.
+    ///
+    /// Which is what the served router is built with, so this is where the
+    /// platform's own answer is read: a Windows one runs none, whatever agents
+    /// it was handed — see [`run_on`].
     pub(crate) fn under(agents: Agents) -> Sessions {
         Sessions {
             agents: Some(Arc::new(agents)),
+            here: run_on(Platform::HERE),
             running: Arc::new(Mutex::new(HashMap::new())),
+            launching: Arc::new(Mutex::new(HashMap::new())),
             turns: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
+    /// The skills every session this server runs is given, or `None` where it
+    /// runs none.
+    ///
+    /// Here because a prompt names them: what sends a session into a skill is
+    /// the path it is told to read, and where that path is depends on where
+    /// they were installed — see [`Skills::inside`]. A server with no agents
+    /// has no skills to name and nothing to start, so the two are `None`
+    /// together.
+    pub(crate) fn skills(&self) -> Option<&Skills> {
+        self.agents.as_deref().map(|agents| &agents.skills)
+    }
+
     /// One that cannot: nothing is launched, and everything else about starting
     /// a grilling holds.
+    ///
+    /// It answers [`SessionsHere::Run`] whatever machine it was built for, which
+    /// is the one place the platform's own answer is not read. Only a test
+    /// stands one of these up, and what a test stands it up for is what a press
+    /// leaves behind — the branch, the worktree, the record — rather than what
+    /// platform it is running on. Read here, the same suite run on Windows
+    /// would be one where every press is refused before it makes anything, and
+    /// nothing it is about would ever be asked of git.
+    ///
+    /// What a Windows build answers is asked of
+    /// [`Sessions::without_sessions`] instead, on whichever machine is running
+    /// the tests.
     pub(crate) fn none() -> Sessions {
         Sessions {
             agents: None,
+            here: SessionsHere::Run,
             running: Arc::new(Mutex::new(HashMap::new())),
+            launching: Arc::new(Mutex::new(HashMap::new())),
             turns: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// And one on a platform that has no session to run — which today is
+    /// Windows, and which is the whole of what it says.
+    ///
+    /// The arm a Linux machine will never be, stood up so that its tests can
+    /// call it: what every way into a session answers where there is none to
+    /// start is a rule rather than a platform, and it is asked wherever the
+    /// suite runs. See [`crate::router_running_no_sessions`].
+    pub(crate) fn without_sessions() -> Sessions {
+        Sessions {
+            here: SessionsHere::NotOnWindowsYet,
+            ..Sessions::none()
+        }
+    }
+
+    /// Whether a session started here would have anywhere to run at all — the
+    /// question every way into one asks before it makes anything, and what the
+    /// pane draws where a session would start.
+    ///
+    /// Not [`Sessions::runs_sessions`], which is a fact about this router:
+    /// whether it was given agents. This one is a fact about the build, and the
+    /// two are refused differently — a router with no agents makes the branch
+    /// and the worktree and launches nothing into them, and a build with no
+    /// sessions refuses in front of all of it and says so.
+    pub(crate) fn here(&self) -> SessionsHere {
+        self.here
     }
 
     /// Wait for this Conversation's Worktree, and take it.
@@ -1251,19 +1369,58 @@ impl Sessions {
     /// roles under Pairings that need not agree — a wrap-up's review may be on
     /// one backend and the work on another.
     ///
-    /// [`store::Channel::Blocking`] where nothing is running, which is what a
-    /// Set arriving from outside a session is: a router with no agents at all,
-    /// and the human's own devices, which never post one here. It is also the
-    /// safe way round — a wait opened on a Set nobody will nudge about ends
-    /// when the CLI that opened it does, where a Set stored for a session that
-    /// is not idling would be one nobody ever comes back for.
+    /// The register **or the launch that has not reached it yet**, because a
+    /// session is running before it is written down: [`Sessions::start`] spawns
+    /// the process and then opens the Capture it prints into, and an agent that
+    /// asks in between would be asking from a Conversation the register says has
+    /// nothing running. It is the fixture's stub that does that every time and a
+    /// loaded machine that lets a real one, and the answer is wrong either way —
+    /// so the backend is written down before there is a process to ask, and taken
+    /// off again when the register has it. See [`Sessions::launching`].
+    ///
+    /// [`store::Channel::Blocking`] where neither has one, which is what a Set
+    /// arriving from outside a session is: a router with no agents at all, and
+    /// the human's own devices, which never post one here. It is also the safe
+    /// way round — a wait opened on a Set nobody will nudge about ends when the
+    /// CLI that opened it does, where a Set stored for a session that is not
+    /// idling would be one nobody ever comes back for.
     pub(crate) fn channel(&self, conversation_id: i64) -> store::Channel {
-        self.running
+        let running = self
+            .running
             .lock()
             .expect("the sessions registry is not poisoned")
             .get(&conversation_id)
-            .map(|running| running.agent_type.channel())
+            .map(|running| running.agent_type);
+
+        running
+            .or_else(|| {
+                self.launching
+                    .lock()
+                    .expect("the launching registry is not poisoned")
+                    .get(&conversation_id)
+                    .copied()
+            })
+            .map(store::AgentType::channel)
             .unwrap_or(store::Channel::Blocking)
+    }
+
+    /// Write down that this Conversation is launching a session on `agent_type`,
+    /// and hand back the note to hold while it does.
+    ///
+    /// Taken before the process is spawned and dropped when [`Sessions::start`]
+    /// returns, which is after the session is on the register — so the two
+    /// answers meet rather than leaving a gap, and a launch that failed leaves
+    /// nothing behind for the next Set to read.
+    fn launching(&self, conversation_id: i64, agent_type: store::AgentType) -> Launching {
+        self.launching
+            .lock()
+            .expect("the launching registry is not poisoned")
+            .insert(conversation_id, agent_type);
+
+        Launching {
+            launching: self.launching.clone(),
+            conversation_id,
+        }
     }
 
     /// Whether a Conversation's running session has stopped — its backend's own
@@ -1492,7 +1649,7 @@ impl Sessions {
         let built = tokio::task::spawn_blocking({
             let conversation = conversation.clone();
             let profile = pairing.profile.clone();
-            let home = agents.home.clone();
+            let homes = agents.homes.clone();
             let reachable = agents.reachable.clone();
             let skills = agents.skills.clone();
             let handoffs = agents.handoffs.clone();
@@ -1522,7 +1679,7 @@ impl Sessions {
                 let sandbox = Sandbox::for_conversation(
                     &conversation,
                     &profile,
-                    home,
+                    &homes,
                     &reachable,
                     &skills,
                     &verkstead,
@@ -1570,6 +1727,16 @@ impl Sessions {
         // that never found its own record. See [`crate::transcript`].
         let at_launch = SystemTime::now();
 
+        // And which backend this Conversation is launching on, put down before
+        // there is a process that could ask anything. It is off the register
+        // that a Set is read for how the session that sent it asks, and the
+        // register does not learn of this one until its Capture is open — which
+        // is a database write away, and a process that starts talking in the
+        // meantime is a session asking as some other backend would. Held until
+        // this returns, by which time the register has it or there is no session
+        // to have. See [`Sessions::channel`].
+        let _launching = self.launching(conversation_id, pairing.profile.agent_type());
+
         let child = match terminal.spawn(&mut captured(&sandbox, &argv)) {
             Ok(child) => child,
             Err(error) => {
@@ -1581,6 +1748,16 @@ impl Sessions {
                 return Ok(None);
             }
         };
+
+        // And a keeper beside it where the platform's sandbox has nothing to
+        // say about how long what it started lives — see
+        // [`crate::sandbox::outliving`]. The terminal it was spawned on made it
+        // a session of its own, so its pid is the process group everything it
+        // goes on to start will be in. Nothing on Linux, where the flag it was
+        // started with is what says this.
+        if let Some(running) = child.id() {
+            outliving::keep(Platform::HERE, running, std::process::id());
+        }
 
         // Shared from here on: the relay reads it, and — once somebody is
         // watching — a resize from the browser reaches it.
@@ -2369,9 +2546,11 @@ mod tests {
     /// standing where it goes.
     fn real(state: &std::path::Path) -> Agents {
         Agents::new(
-            Home {
-                path: PathBuf::from("/home/verkstead"),
-            },
+            Homes::on(
+                crate::platform::Platform::HERE,
+                PathBuf::from("/home/verkstead"),
+                state,
+            ),
             Reachable::at("127.0.0.1:8422".parse().unwrap()),
             SandboxConfig::default(),
             // What the argv is built from is not the sandbox, so this asks for
@@ -2381,7 +2560,7 @@ mod tests {
             // A test harness is its own executable, and what a sandbox does with
             // one is bind it: any file that is really there will do where nothing
             // here runs it.
-            Executable::of_the_server(),
+            Executable::of_the_server(state),
             Handoffs::under(state),
             Settings::in_data_dir(state),
         )
@@ -2692,5 +2871,40 @@ mod tests {
 
             assert!(seen.insert(name.clone()), "{name:?} was handed out twice");
         }
+    }
+
+    /// Which platforms run a session, said as the value it is: two do, and the
+    /// one that has no pseudo-terminal to open does not — yet.
+    ///
+    /// Every arm asked on whichever machine is running this, which is the whole
+    /// reason it is a function of the platform rather than a `cfg!`: what a
+    /// Windows build answers is a thing the Linux runner can check.
+    #[test]
+    fn the_platform_without_a_terminal_runs_no_sessions() {
+        assert_eq!(run_on(Platform::Linux), SessionsHere::Run);
+        assert_eq!(run_on(Platform::MacOs), SessionsHere::Run);
+        assert_eq!(run_on(Platform::Windows), SessionsHere::NotOnWindowsYet);
+
+        assert!(
+            run_on(Platform::Windows).absent(),
+            "which is the question every way into a session asks",
+        );
+        assert!(!run_on(Platform::Linux).absent());
+    }
+
+    /// And what a registry says about it: the served router's own is the
+    /// platform's answer, and a test's is the one that leaves a press making
+    /// what it makes.
+    #[test]
+    fn a_registry_says_whether_there_is_a_session_to_start() {
+        assert_eq!(Sessions::none().here(), SessionsHere::Run);
+        assert_eq!(
+            Sessions::without_sessions().here(),
+            SessionsHere::NotOnWindowsYet,
+        );
+        assert!(
+            !Sessions::without_sessions().runs_sessions(),
+            "and a build with no sessions has no agents either way",
+        );
     }
 }

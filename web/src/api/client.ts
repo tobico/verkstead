@@ -14,6 +14,7 @@ import type {
   BaseRecorded,
   BranchRenamed,
   BriefSaved,
+  BrowseScope,
   Capture,
   CommitPane,
   CompanionAdded,
@@ -29,6 +30,7 @@ import type {
   ConversationStopped,
   ConversationUnarchived,
   ConversationView,
+  DirectoryListing,
   GrillingStarted,
   ProfileChoice,
   ProfileChosen,
@@ -173,6 +175,31 @@ export function listBranches(repoId: number): Promise<string[]> {
 /// memory is the repo's: another repo is another answer.
 export function loadRepoPairings(repoId: number): Promise<RepoPairingsView> {
   return get<RepoPairingsView>(`/api/ui/repos/${repoId}/pairings`);
+}
+
+/// What one directory holds, for the dropdown a path field browses with.
+///
+/// One directory per ask and never a walk: the field asks again for every level
+/// somebody drills into, so a browse costs one reading of one directory however
+/// much is under it.
+///
+/// No path at all is the field standing empty, which the two scopes answer
+/// differently — the Watched Paths themselves, or `/`. Every refusal is in the
+/// body rather than in the status, the way registering a Repo refuses: a path
+/// that is relative, missing, not a directory, outside the Watched Paths or
+/// unreadable is a line the dropdown draws where its rows would be, and most of
+/// those are the ordinary state of a field halfway through being typed into.
+export function listDirectory(
+  scope: BrowseScope,
+  path: string | null,
+): Promise<DirectoryListing> {
+  const asking = new URLSearchParams({ scope });
+
+  if (path !== null) {
+    asking.set("path", path);
+  }
+
+  return get<DirectoryListing>(`/api/ui/directories?${asking}`);
 }
 
 /// Ask Verkstead to take on the repository at an absolute path.

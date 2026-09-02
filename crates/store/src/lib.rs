@@ -30,6 +30,7 @@ use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError}
 
 mod archives;
 mod captures;
+mod cleanup;
 mod commits;
 mod companions;
 mod conversations;
@@ -57,6 +58,10 @@ pub use archives::{
     unarchive_conversation,
 };
 pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
+pub use cleanup::{
+    Deletion, Trimming, deletable, delete_conversation, deleted_tables, reclaim, trim_conversation,
+    trimmable, trimmed,
+};
 pub use commits::{Commit, commit, commit_repo, commits_landed, record_commit, recorded_commits};
 pub use companions::{
     Adding, Change, Companion, CompanionMode, CompanionWorktree, Configured, Joining, Opening,
@@ -69,8 +74,8 @@ pub use conversations::{
     adopting, ask, asked_from, closable, close_conversation, conversation_branch, conversations,
     follow_branch, follow_up_over, implement_again, last_batch_proposal, last_proposal,
     load_conversation, note, open_set, opened_at, pick_direction, record_backlog, record_handoff,
-    record_roadmap, recorded_worktrees, rename_branch, resolve_conflicts, save_brief,
-    set_asked_from, set_base_commit, set_grilling_pairing, set_implementation_pairing,
+    record_roadmap, recorded_worktrees, reinvent_branch, rename_branch, resolve_conflicts,
+    save_brief, set_asked_from, set_base_commit, set_grilling_pairing, set_implementation_pairing,
     set_review_pairing, set_state, settle_naming, skip_grilling, skip_review, stacks_on,
     start_adoption, start_building, start_conversation, start_grilling, start_implementing,
     start_stage, start_unnamed_conversation, state, steer_conversation, switch_repo, timeline,
@@ -725,6 +730,12 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // same way and for the same reason: what a list draws is not a fact about
     // the work either.
     archives::apply_schema(pool).await?;
+
+    // And what a Cleanup has since taken back out of the ones that were put away
+    // long enough ago, which is a mark beside those archivings for the reason
+    // they are marks beside the Conversations. After them, because what it is a
+    // fact about is an archiving rather than a Conversation — see [`cleanup`].
+    cleanup::apply_schema(pool).await?;
 
     // And which of them Verkstead has told the human about and they have not
     // looked at yet, which sits beside the Conversations for that reason again —

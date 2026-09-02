@@ -234,6 +234,17 @@ pub(crate) struct Boundary<'a> {
 }
 
 impl Boundary<'_> {
+    /// Every Watched Path this moment covers, both halves in one list.
+    ///
+    /// Where a browse bounded by the boundary begins — see [`crate::browsing`],
+    /// which is the one caller that wants the boundary as a set of directories
+    /// rather than as a decision about a path. Which of the two places said an
+    /// entry is not here: that is the settings page's question, and
+    /// [`crate::paths`] is where it is asked.
+    pub(crate) fn roots(&self) -> Vec<PathBuf> {
+        self.configured.iter().chain(&self.said).cloned().collect()
+    }
+
     /// Whether `path` is inside a Watched Path, and where it really is if so.
     ///
     /// Blocking: resolving a path is a filesystem read. Only the one, though —
@@ -340,6 +351,12 @@ mod tests {
 
     /// A path that reads as inside a Watched Path and is not: the symlink is
     /// followed before the boundary is consulted.
+    ///
+    /// Made where a link can be made without asking anybody's permission, which
+    /// is both Unixes and not Windows. The code under test is the same
+    /// everywhere — it is `canonicalize` and a prefix — so what is lost there is
+    /// the making of the link rather than any of the boundary's own reasoning.
+    #[cfg(unix)]
     #[test]
     fn a_symlink_out_of_a_watched_path_is_outside_it() {
         let root = tempdir();
@@ -458,6 +475,7 @@ mod tests {
             .save_config(&crate::settings::Config::of(
                 crate::settings::GitAuthor::default(),
                 crate::settings::RustBuildCache::default(),
+                crate::settings::Cleanup::default(),
                 crate::store::ConflictResolution::Merge,
                 false,
                 vec![],

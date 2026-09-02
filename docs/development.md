@@ -26,20 +26,21 @@ Everything below assumes this shell — it carries the Rust toolchain, `sqlite`,
 
 ```console
 $ (cd web && pnpm install && pnpm build)
-$ cargo run -p verkstead-cli -- serve --watched-path ~/src
+$ cargo run -p verkstead-cli -- serve --data-dir . --watched-path ~/src
   INFO verkstead_server: verkstead is listening listen=127.0.0.1:8422 data_dir=. watched=["/home/you/src"]
 ```
 
 `--watched-path` names a directory Verkstead may operate inside, and it is a
 security boundary rather than a convenience: nothing outside the paths given is
 touched, and a repo is registered only from within one. Repeat the flag for more
-than one, or set `VERKSTEAD_WATCHED_PATHS` with them separated by `:`. A path
-that is not there refuses startup, because a flag is the installation's own word
-and nobody is watching when it is wrong.
+than one, or set `VERKSTEAD_WATCHED_PATHS` with them separated the way the
+platform writes `PATH` — `:` on Unix, `;` on Windows. A path that is not there
+refuses startup, because a flag is the installation's own word and nobody is
+watching when it is wrong.
 
-It is not required, though, and neither is anything else here: `cargo run -p
-verkstead-cli -- serve` on its own comes up watching nothing, which admits
-nothing, and the settings page is where it is pointed at its first directory.
+It is not required, though: `cargo run -p verkstead-cli -- serve --data-dir .` on
+its own comes up watching nothing, which admits nothing, and the settings page is
+where it is pointed at its first directory.
 Watched paths and sandbox binds are said in both places and what the server uses
 is the union — see the `"paths"` payload further down this section. The flag is
 the shape a service unit wants, where startup is the moment to hear about a
@@ -50,8 +51,50 @@ fatal.
 Everything Verkstead makes goes in one place, the **Data Directory**: the
 database at `verkstead.db`, the worktrees, the installed skills, the handoff
 directories and the settings files. `--data-dir` says where, or
-`VERKSTEAD_DATA_DIR`; it defaults to the working directory, which is what a dev
-run out of a checkout wants.
+`VERKSTEAD_DATA_DIR`. Said nothing, it is the platform's own place for it —
+`~/.local/share/verkstead` on Linux, `~/Library/Application Support/Verkstead`
+on macOS — which is what an installed Verkstead wants and not what a dev run
+out of a checkout does: `--data-dir .` is why every command here says it, and
+it keeps the database, the worktrees and the settings beside the checkout where
+they can be deleted with it.
+
+The desktop app is the other binary, and the same server: `cargo run -p
+verkstead-desktop -- --data-dir .` serves what the command above serves and
+opens the viewer in your browser as it comes up. `--no-open` leaves the browser
+alone, and every other flag is the server's own, because the app *is* the
+server ([ADR 0012](adr/0012-desktop-tray-binary.md)) — started with nothing
+said it is the platform's Data Directory again, which is what a machine that
+installed it wants and not what a checkout does. It is the one crate here that
+links a system toolkit — GTK on Linux, which is why it builds in the dev shell
+and nowhere else here; AppKit on a Mac and Win32 on Windows, which are those
+platforms' own and want nothing installed. An address something is already
+listening on — the command above, say — is a dialog and a nonzero exit rather
+than a second Verkstead beside the first.
+
+What it puts on the screen is an icon in the system tray, and the menu on it is
+**Open** — the viewer again, in your browser — **View Logs**, which opens the
+file the server's log goes to instead of a stdout nobody launched from an icon
+will read, **Launch on Startup**, and **Exit**, which stops Verkstead where it
+stands the way stopping the systemd unit does. Run it where there is no screen
+to put an icon on, over SSH or under a test, and it is the server and the open
+and no more: a warning in the log, and everything else exactly as it was.
+
+**Launch on Startup** is a checkbox over the platform's own registration — your
+desktop's autostart entry at `~/.config/autostart/net.tobico.Verkstead.desktop`
+here, a launch agent at `~/Library/LaunchAgents/net.tobico.Verkstead.plist` on
+macOS, a `net.tobico.Verkstead` value under
+`HKCU\Software\Microsoft\Windows\CurrentVersion\Run` on Windows — and that
+registration is the whole of the state: checking the box writes it, unchecking
+removes it, turning it off in your desktop's own settings unchecks it, and no
+setting of Verkstead's own keeps a second copy of the answer. Every
+launch rewrites it while it is there, with the path of the executable that is
+running, so a binary you moved heals its own entry the next time you start it
+by hand. What it writes starts the app with `--no-open`: a login is not a
+moment to be handed a browser window. The one thing the box cannot see is the
+platform's own second opinion about it — macOS's Login Items list, which
+`launchd` keeps in a database rather than in the file, and Windows' Startup tab
+in Task Manager, which Explorer records under `StartupApproved`: switch
+Verkstead off in either and the box goes on showing what the registration says.
 
 One directory is made outside it: the **Build Cache**, at
 `$XDG_CACHE_HOME/verkstead` — `~/.cache/verkstead` on most machines — unless
@@ -64,13 +107,15 @@ whole thing. It is on with nothing configured, and the settings page is where
 it is switched off or given a size.
 
 The sccache **server** is Verkstead's own, not the sessions'. It comes up as a
-`bwrap` child of the running server the first time a session starts on a repo
-with a root `Cargo.toml`, in a sandbox holding `<data-dir>/worktrees` and the
-build cache and nothing else — so `ps` shows a `bwrap … verkstead-compiling`
-beside each session's, and it goes when the server does. Every session's
+child of the running server the first time a session starts on a repo with a
+root `Cargo.toml`, in a sandbox holding `<data-dir>/worktrees` and the build
+cache and nothing else — so `ps` shows one more sandboxed child beside each
+session's, and it goes when the server does. That sandbox is described and
+rendered by the code a session's is, so it is `bwrap` on Linux and
+`sandbox-exec` on a Mac without either half saying which. Every session's
 `sccache` is only the client half reaching it. Sessions starting their own is
 what this replaces: they all bind one port, and the loser's compiles then run
-in the winner's sandbox where its worktree is not mounted.
+in the winner's sandbox where its worktree is not reachable.
 
 A session's GitHub auth and the author of its commits are two of those settings
 rather than anything found in a home directory. Put a token in `secrets.yaml`
@@ -89,6 +134,13 @@ git_author:
 rust_build_cache:
   enabled: true
   size: 30G
+cleanup:
+  trim:
+    enabled: true
+    days: 3
+  delete:
+    enabled: false
+    days: 30
 conflict_resolution: merge
 share_on_done: false
 sandbox_binds:
@@ -123,12 +175,17 @@ what the settings page saves through:
 $ curl http://127.0.0.1:8422/api/ui/settings
 {"git_author":{"name":"","email":""},"github_token":null,
  "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
-   "compiles_cached":true},"conflict_resolution":"Merge",
+   "compiles_cached":true},
+ "cleanup":{"trim":{"enabled":true,"days":3,"days_configured":false},
+   "delete":{"enabled":false,"days":30,"days_configured":false}},
+ "conflict_resolution":"Merge",
  "share_on_done":false,"paths":{"watched":[],"binds":[]}}
 $ curl -X POST -H 'Content-Type: application/json' \
     -d '{"git_author":{"name":"Tobias Cohen","email":"tobi@tobico.net"},
          "github_token":{"Set":{"token":"ghp_..."}},
          "rust_build_cache":{"enabled":true,"size":""},
+         "cleanup":{"trim":{"enabled":true,"days":""},
+           "delete":{"enabled":false,"days":""}},
          "conflict_resolution":"Merge",
          "share_on_done":false,
          "watched_paths":["/home/tobi/src"],
@@ -138,6 +195,8 @@ $ curl -X POST -H 'Content-Type: application/json' \
   "github_token":{"last_four":"cdef","at":"2026-08-23T08:23:15.041950412Z"},
   "rust_build_cache":{"enabled":true,"size":"30G","size_configured":false,
     "compiles_cached":true},
+  "cleanup":{"trim":{"enabled":true,"days":3,"days_configured":false},
+    "delete":{"enabled":false,"days":30,"days_configured":false}},
   "conflict_resolution":"Merge",
   "share_on_done":false,
   "paths":{"watched":[{"path":"/home/tobi/src","source":"Settings",
@@ -204,6 +263,30 @@ deleted. So a conversation shared by hand stays quiet, and a share that failed
 wrote no row and is tried again at the next settle. A failure is a Notice on the
 timeline naming it; a share that worked writes nothing there.
 
+`"cleanup"` is what becomes of a conversation the human has archived: a **trim**
+that takes its bulk — the full agent output, the transcripts and the session
+records, which is everything a share never carried — and a **delete** that takes
+the whole conversation. Each is a switch and a number of days, each clock counts
+from the archiving, and unarchiving stops both. The two default the opposite
+ways about, and an absent key, an absent file and one nothing can parse all say
+it: the trim is **on** at three days, because what it takes is what nobody opens
+twice, and the delete is **off** at thirty, because it is the one thing here
+that forgets. A duration that is not a whole number of days — an empty field
+included — is no duration configured, which is how the default is asked for
+back; `"days_configured"` beside the number is what says which of the two is
+being shown, and the settings page draws the default as a placeholder. Nothing
+here is refused, a delete sooner than the trim included: the clocks are
+independent, so the conversation is simply deleted before it was ever trimmed.
+The sweep reads the file on every pass, an hour apart, so a switch flipped from
+a phone is in force on the next one without a restart. It reports what it did in
+the log and asks nothing of anybody — no timeline card, no notice — while
+announcing on the nudge stream that the record moved, so an open page stops
+drawing what has been taken. A pass that took something ends with a `VACUUM`,
+because SQLite frees the pages a delete emptied inside the file and leaves the
+file the size it was; a pass that found nothing does not. And it touches nothing
+outside Verkstead's own record: the git branch stays, and a published share
+stays published.
+
 `"conflict_resolution"` is what a session sent at a pull request that will not
 merge is told to do about it: `"Merge"`, which merges the base branch into the
 work branch and pushes, or `"Rebase"`, which rebases the branch onto its base and
@@ -250,8 +333,9 @@ comment rather than rewriting the one before it. A pull request the comment
 could not land on is named beside the ones that worked.
 
 One binary serves both halves: the agent API under `/api/v1/`, and the web UI
-on <http://127.0.0.1:8422/>. It creates `verkstead.db` in the working directory
-on first run. Leave it running; check it in a third terminal if you like:
+on <http://127.0.0.1:8422/>. It creates `verkstead.db` in the Data Directory on
+first run, which `--data-dir .` above makes the checkout. Leave it running;
+check it in a third terminal if you like:
 
 ```console
 $ curl http://127.0.0.1:8422/api/v1/health
@@ -397,8 +481,34 @@ $ cargo fmt
 $ nix fmt                 # the Nix files
 $ nix flake check         # the viewer's suite, and the NixOS module in a VM
 
-$ tools/generate-icons.sh # the favicon and PWA icons, after replacing the artwork
+$ tools/generate-icons.sh     # the favicon and PWA icons, after replacing the artwork
+$ tools/generate-packaging.sh # the desktop entry, the launcher icons, the icns and the ico
+$ tools/build-appimage.sh     # Verkstead-x86_64.AppImage, once the viewer is built
+$ tools/build-macos-dmg.sh    # Verkstead-universal.dmg, on a Mac
 ```
+
+The last two are two of the three desktop artifacts a release ships, one per
+platform that has something to wrap. Both take everything from the working tree
+and leave one file under `target/`, and both want `web/dist` already built,
+because the viewer is compiled into the binary they wrap. There is no third
+script, because Windows has no packaging: the exe a release ships there is what
+`cargo build --release -p verkstead-desktop` writes on a Windows machine, icon
+and version information included — `crates/desktop/build.rs` compiles those in —
+and the release leg renames that file and uploads it.
+
+The AppImage is the desktop binary, the packaging assets and every library the
+tray is drawn over, in one file, and it is the same command CI runs. It builds
+what `cargo build --release -p verkstead-desktop` builds, so it wants the dev
+shell for the same reason that does.
+
+The dmg is `Verkstead.app` — the same binary built for both Apple targets and
+`lipo`-ed into one, the icns from `packaging/`, and an `Info.plist` that says
+`net.tobico.Verkstead` and `LSUIElement`, which is what makes it a menu-bar app
+with no Dock tile. It runs on a Mac only: `lipo`, `codesign` and `hdiutil` are
+the operating system's own tools, and there is no cross build of it from here.
+The bundle is ad-hoc signed rather than signed with a Developer ID, because
+Apple silicon will not execute a binary with no signature at all — that is not
+the signing that gets an app past Gatekeeper, and there is none of that.
 
 ### The sessions suite, and the machine under it
 
@@ -518,7 +628,7 @@ and every platform:
 | Artwork | Cut into | Why it is its own file |
 | --- | --- | --- |
 | `icons/verkstead.png` | `icon-192`, `icon-512` | The full mark on a transparent field: the manifest's icons, and the sidebar's at `3rem` |
-| `icons/verkstead-hammer.png` | `icon-32` | The hammer alone — at 32px the full mark is a grey smudge with confetti on it, and no filter rescues artwork with too much in it for the size |
+| `icons/verkstead-hammer.png` | `icon-32`, and every icon under `packaging/` | The hammer alone — at 32px the full mark is a grey smudge with confetti on it, and no filter rescues artwork with too much in it for the size |
 | `icons/verkstead-bg.jpg` | `apple-touch-icon.png` | The only one drawn with a field of its own, because iOS composites a transparent icon onto black |
 
 The iOS icon used to be the full mark flattened onto the manifest's
@@ -529,6 +639,30 @@ The manifest asks for `any` rather than `any maskable`: the artwork runs to the
 edges of its square, and a launcher masking it to a circle would cut the hammer
 and the anvil's horn off. Art with a margin inside it could claim `maskable`
 back.
+
+`packaging/` is the second tree of generated assets, and it sits outside
+`assets/` deliberately. Everything under that directory is `publicDir` — served
+at the web root and, because the viewer is embedded, carried inside every binary
+including the headless CLI — and a desktop entry and a launcher's icons are
+neither the viewer's to serve nor the CLI's to hold. So the desktop packaging
+gets a directory of its own: `net.tobico.Verkstead.desktop` and the hicolor icon
+tree that `tools/build-appimage.sh` installs into the AppImage,
+`net.tobico.Verkstead.icns` that `tools/build-macos-dmg.sh` puts in the app
+bundle, and `net.tobico.Verkstead.ico`, which `crates/desktop/build.rs` compiles
+into `verkstead-desktop.exe` as a resource — Windows has no packaging around the
+exe to install an icon beside it, so the file carries its own. It is written by
+[`tools/generate-packaging.sh`](../tools/generate-packaging.sh) from the same
+hammer, and committed for the same reason the viewer's icons are. That script
+rewrites the whole directory from nothing on every run — so a size
+that stops being generated stops being committed, and nothing under it is ever
+edited by hand.
+
+The icns is written by the script itself rather than by `iconutil`, which is a
+Mac's: the format is a header and a PNG per icon slot, so it is generated in the
+dev shell alongside everything else here rather than on the one platform that
+reads it. The ico is `magick`'s own output, that tool being in the dev shell
+and having no such restriction — and the sizes it is handed are those same
+committed downscales, so every platform draws the same pixels.
 
 The tests run the real server in-process, so the round trip they check is the
 one an agent gets — including the quickstart above, whose example files

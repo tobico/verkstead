@@ -184,6 +184,13 @@ pub struct Pace {
     /// waiting to be merged is one of the things it looks at.
     pub merges: Duration,
 
+    /// And how often the archived Conversations are looked over for one with
+    /// a cleanup due on it — see [`crate::cleanup`].
+    ///
+    /// Here for [`Pace::merges`]'s reason again, and slower than any of the
+    /// rest: what it is watching is a clock counted in days.
+    pub cleanup: Duration,
+
     /// And how often every Conversation is looked over for one that has
     /// Stalled — see [`crate::stalls`].
     ///
@@ -205,6 +212,7 @@ impl Default for Pace {
             long_stop: Duration::from_secs(300),
             stalls: crate::stalls::SWEPT_EVERY,
             merges: crate::merges::SWEPT_EVERY,
+            cleanup: crate::cleanup::SWEPT_EVERY,
             reviewing: Duration::ZERO,
         }
     }
@@ -3379,16 +3387,27 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
         return None;
     };
 
+    // What every one of these prompts names first, which is the skill it sends
+    // the session into: where the skills are is where this server installed
+    // them, and a server that installed none runs no sessions to send anywhere.
+    let Some(skills) = state.sessions.skills() else {
+        tracing::error!(
+            conversation_id,
+            "this server has no skills to send a session into, so none was started"
+        );
+        return None;
+    };
+
     let prompt = match crate::conversations::documents(&state.pool, conversation_id).await {
         Ok((brief, handoff)) => {
             let handoff = handoff.as_deref();
 
             match &inside {
                 Prompt::PlanningStage(stacked_on) => {
-                    skills::next_stage(&brief, stacked_on.as_deref())
+                    skills::next_stage(skills, &brief, stacked_on.as_deref())
                 }
-                Prompt::Staging => skills::staging(&brief),
-                Prompt::NextTask => skills::next_task(&brief, handoff),
+                Prompt::Staging => skills::staging(skills, &brief),
+                Prompt::NextTask => skills::next_task(skills, &brief, handoff),
                 // The one prompt that reads a Pairing to decide what it says:
                 // a Conversation whose human picked *no grilling* has no
                 // handoff because there was no interview, which is a different
@@ -3397,21 +3416,27 @@ async fn launch(state: &AppState, conversation_id: i64, inside: Prompt) -> Optio
                 // press, so a resumed run says it too — see
                 // [`skills::ungrilled`].
                 Prompt::Implementing if conversation.grilling_pairing.skipped() => {
-                    skills::ungrilled(&brief)
+                    skills::ungrilled(skills, &brief)
                 }
-                Prompt::Implementing => skills::implementing(&brief, handoff),
-                Prompt::Submitting => skills::submitting(&brief, handoff),
+                Prompt::Implementing => skills::implementing(skills, &brief, handoff),
+                Prompt::Submitting => skills::submitting(skills, &brief, handoff),
                 Prompt::Instruction(instruction) => {
-                    skills::instruction(&brief, handoff, instruction)
+                    skills::instruction(skills, &brief, handoff, instruction)
                 }
-                Prompt::Addressing(feedback) => skills::addressing(&brief, handoff, feedback),
+                Prompt::Addressing(feedback) => {
+                    skills::addressing(skills, &brief, handoff, feedback)
+                }
                 Prompt::Reviewing { on, said } => {
-                    skills::reviewing(&brief, handoff, on.as_deref(), said.as_deref())
+                    skills::reviewing(skills, &brief, handoff, on.as_deref(), said.as_deref())
                 }
-                Prompt::Responding(said) => skills::responding(&brief, handoff, said),
-                Prompt::FollowingUp(follow_up) => {
-                    skills::following_up(&brief, handoff, &follow_up.brief, &follow_up.settled)
-                }
+                Prompt::Responding(said) => skills::responding(skills, &brief, handoff, said),
+                Prompt::FollowingUp(follow_up) => skills::following_up(
+                    skills,
+                    &brief,
+                    handoff,
+                    &follow_up.brief,
+                    &follow_up.settled,
+                ),
             }
         }
         Err(error) => {

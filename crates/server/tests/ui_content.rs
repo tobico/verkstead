@@ -13,6 +13,15 @@
 //! those files rather than a hand-written mock, so a change to the wire shape
 //! that nobody carried across shows up as a failing fixture rather than as a
 //! viewer that draws the wrong thing.
+//!
+//! That fixture half is the one thing here that is not built everywhere: the
+//! settings fixture wants a `gh` to answer, and the stand-in for one is a shell
+//! script — see [`told_app`]. Everything the rest of this file asks is about
+//! what the server made of an agent's markup, which is the same answer on any
+//! machine. So the fixture test is left out on Windows and the long tail of
+//! helpers only it uses goes unused there, which is what this says rather than
+//! `cfg`-gating twenty of them one at a time.
+#![cfg_attr(not(unix), allow(dead_code, unused_imports))]
 
 use std::path::Path;
 
@@ -27,7 +36,9 @@ use verkstead_schema::{
     Answer, Liveness, Question, QuestionOption, QuestionSet, RepoDiff, Response, SetCreated,
     Subquestion,
 };
-use verkstead_server::{Gh, open_database, router, router_asking_github, store};
+use verkstead_server::{
+    Gh, WatchedPaths, open_database, router, router_asking_github, router_watching, store,
+};
 
 /// The Conversation every Set in this file is asked from.
 ///
@@ -1594,6 +1605,12 @@ const FIXTURES: &str = "../../web/tests/fixtures";
 /// Everything a clock would otherwise decide is pinned, so that a run today and
 /// a run next week write the same bytes: every settling stamp is overwritten
 /// with a stated minute after the fact, and it is the viewer that words one.
+///
+/// Written where the `gh` it needs can be a shell script — see [`told_app`] —
+/// which is both Unixes. The files are committed and the viewer's own job reads
+/// them, so what a Windows run would add is a second machine writing the same
+/// bytes.
+#[cfg(unix)]
 #[tokio::test]
 async fn the_viewers_own_tests_are_fed_from_here() {
     // A Set to answer: every feature of the question grammar, the agent's markup
@@ -2883,6 +2900,15 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             // build cache that has been configured rather than only its
             // defaults — `settings-unset.json` above is the other half.
             "rust_build_cache": { "enabled": true, "size": "50G" },
+            // And a Cleanup somebody has been through: both durations typed and
+            // the delete turned on, for the reason the size above is typed —
+            // this is the fixture of a Verkstead that has been told everything,
+            // and `settings-unset.json` is the one holding the defaults the page
+            // draws as placeholders.
+            "cleanup": {
+                "trim": { "enabled": true, "days": "5" },
+                "delete": { "enabled": true, "days": "90" },
+            },
             // And a rebase configured, for the reason the size above is typed:
             // the fixture of a Verkstead that has been told everything carries
             // the answer somebody chose, and `settings-unset.json` is the one
@@ -2927,6 +2953,83 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         "settings.json",
         &pin_written_at(&get(&app, "/api/ui/settings").await, ""),
     );
+
+    // And what a path field's browse dropdown is filled from: one directory of
+    // the filesystem, with one entry of each kind in it.
+    //
+    // A real directory, made fresh on every run, because a listing is read off
+    // the filesystem and nothing else — there is no store behind this endpoint
+    // at all. It is made under a temporary directory and put back to
+    // `/home/ada/src` afterwards, which is the Watched Path the settings
+    // fixtures above name: the two fixtures are then the same Verkstead, seen
+    // from its settings page and from a dropdown on it.
+    let made = tempfile::tempdir().unwrap();
+    let root = made.path().join("src");
+    std::fs::create_dir_all(root.join("assets")).unwrap();
+    std::fs::create_dir_all(root.join("verkstead/.git")).unwrap();
+    std::fs::create_dir_all(root.join(".config")).unwrap();
+    std::fs::write(root.join("README.md"), "# a directory\n").unwrap();
+
+    let (_dir, app) = browsing_app(&root).await;
+
+    write(
+        "directories.json",
+        &pin_under(
+            &get(
+                &app,
+                &format!("/api/ui/directories?scope=watched&path={}", root.display()),
+            )
+            .await,
+            made.path(),
+            "/home/ada",
+        ),
+    );
+
+    // And where a browse bounded by the Watched Paths begins: the roots
+    // themselves, which is the one listing with no directory above it.
+    write(
+        "directories-roots.json",
+        &pin_under(
+            &get(&app, "/api/ui/directories?scope=watched").await,
+            made.path(),
+            "/home/ada",
+        ),
+    );
+}
+
+/// A router watching one directory, and the directory holding its database
+/// alive.
+///
+/// What a browse in the watched scope is written over: everything else here
+/// stands up a router watching nothing, which is the closed state — and a
+/// dropdown bounded by the Watched Paths has nothing to answer where there are
+/// none.
+async fn browsing_app(watched: &Path) -> (tempfile::TempDir, Router) {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+    let data_dir = dir.path().to_owned();
+    let watched = WatchedPaths::resolve(&[watched.to_owned()]).unwrap();
+
+    (dir, router_watching(pool, watched, data_dir))
+}
+
+/// Put a payload's temporary directory back to a stated one, wherever it
+/// appears.
+///
+/// A listing is nothing but paths — the directory, and every row in it — so
+/// there is no one field to pin: what is written over a directory made fresh on
+/// every run is put back by the prefix it was made under. Resolved first,
+/// because the paths in the payload are: a temporary directory on macOS is
+/// reached through a symlink.
+fn pin_under(json: &str, made: &Path, at: &str) -> String {
+    let made = made.canonicalize().unwrap();
+    let made = made.to_str().unwrap();
+
+    assert!(json.contains(made), "nothing under {made} to pin:\n{json}");
+
+    json.replace(made, at)
 }
 
 /// A server keeping settings files of its own, whose `gh` answers `gh api user`
@@ -2935,6 +3038,9 @@ async fn the_viewers_own_tests_are_fed_from_here() {
 /// The stub is what lets a fixture carry a verified token without a network or
 /// somebody's credentials — what a token really verifies as is
 /// `tests/settings.rs`'s subject, and this is only the shape of the answer.
+///
+/// A `/bin/sh` script, which is what keeps it and its one caller off Windows.
+#[cfg(unix)]
 async fn told_app() -> (tempfile::TempDir, Router) {
     let dir = tempfile::tempdir().unwrap();
     let pool = open_database(&dir.path().join("verkstead.db"))

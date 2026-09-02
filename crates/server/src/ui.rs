@@ -29,22 +29,25 @@ use axum::routing::{get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView, CheckRollup,
-    CommentedOn, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
-    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView,
-    ConflictResolutionEdit, ConversationArchived, ConversationClosed, ConversationEntry,
-    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Cursor,
-    GrillingStarted, IgnoreRule, IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut,
-    NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry,
-    PushKey, Registration, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
-    RuleField, RuleRefused, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
-    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowingArchived, Standing,
-    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TimelineEvent, TokenEdit,
-    TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, BrowseScope, BuildCacheView,
+    CheckRollup, CleanupStepView, CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded,
+    CompanionBranchRenamed, CompanionMode, CompanionModeChoice, CompanionModeChosen,
+    CompanionRemoved, CompanionView, ConflictResolutionEdit, ConversationArchived,
+    ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
+    ConversationUnarchived, ConversationView, Cursor, GrillingStarted, IgnoreRule,
+    IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion,
+    NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
+    RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
+    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
+    SharedCommit, SharedConversation, ShowingArchived, Standing, SteerOpened, SteerSubmission,
+    Submitted, Subscribed, Subscription, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet,
+    Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
-use crate::settings::{Config, GitAuthor, RuleTrouble, RustBuildCache, Secrets};
+use crate::settings::{
+    Cleanup, CleanupStep, Config, GitAuthor, RuleTrouble, RustBuildCache, Secrets,
+};
 use crate::{AppState, store};
 
 /// The viewer's routes, over the state the agent API is already holding: a
@@ -323,6 +326,12 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // read and the save being the same page's two halves — and one save for
         // the author and the token together, because the page has one button.
         .route("/api/ui/settings", get(settings).post(save_settings))
+        // One directory of the filesystem, for a path field's browse dropdown.
+        // Not a route under anything it belongs to: it serves every field that
+        // takes a path — the settings' own, the Repos' form, an Agent Profile's
+        // account — and what bounds it is the scope asked for rather than
+        // whatever page is asking.
+        .route("/api/ui/directories", get(directories))
         .route("/api/ui/update", get(update))
 }
 
@@ -1018,24 +1027,6 @@ pub(crate) async fn conversation_view(
     )
     .await;
 
-    // Each of those goes in two places — pinned above the record, and on the
-    // record at the row that says it landed — and this is the one reading behind
-    // both. The rows are stamped where the runner sees the landing; a
-    // Conversation from before there were rows to stamp keeps the pinned card
-    // alone, which is what it has always had.
-    let mut pinned: Vec<verkstead_render::PinnedEvent> = backlog
-        .clone()
-        .map(verkstead_render::task_list_event)
-        .into_iter()
-        .collect();
-
-    pinned.extend(
-        roadmaps
-            .iter()
-            .cloned()
-            .map(verkstead_render::stage_list_event),
-    );
-
     // And how the pull request's checks were the last time anything asked, which
     // is the one thing about a pull request that is written down and moves. Read
     // once for the two cards drawn from it below, both being the one card in the
@@ -1078,30 +1069,60 @@ pub(crate) async fn conversation_view(
         }
     };
 
-    // And every pull request the work ended up on, which are pinned beside them.
-    // These *are* on the record — the Conversation's own repository's is what
-    // moved the Conversation into Wrapping, and a companion's is that wrap-up
-    // covering the repository it also committed in — so they are read off the
-    // Timeline for the reason the Brief is: they are already here. All of them
-    // rather than the last one found: a Conversation ends on one pull request per
-    // repository it was worked in, and the human wraps up all of them at once.
-    // What is not read here is what a PR holds, which is a request of its own;
-    // see [`pull_request`].
-    pinned.extend(timeline.iter().filter_map(|event| match &event.event {
-        store::Event::PullRequest(opened) => Some(verkstead_render::pull_request_event(
-            event.id,
-            event.at.clone(),
-            verkstead_render::PullRequestSummary {
-                number: opened.number,
-                title: opened.title.clone(),
-                url: opened.url.clone(),
-                repo: opened.repo.clone(),
-                checks: own_checks(&opened.repo, checks),
-                merging: merges.get(&event.id).copied().map(merging),
-            },
-        )),
-        _ => None,
-    }));
+    // What is pinned, in the order the carousel turns through it: every pull
+    // request the work ended up on, then the backlog, then the roadmap.
+    //
+    // The pull request leads because it is the one of the three with anything on
+    // it to answer — a review waiting, checks gone red, a merge that stopped —
+    // where a backlog and a roadmap are lists read off the worktree with nothing
+    // on them to do. The two lists follow in the order the work goes through
+    // them: a backlog is this piece of work's own tasks, and a roadmap is the
+    // stages around it.
+    //
+    // Which card fronts when a Conversation is opened is not settled here. That
+    // is the viewer's, and this order is what it falls back to where nothing is
+    // blocking — see `fronting` in `web/src/workbench/Timeline.tsx`.
+    //
+    // The pull requests *are* on the record — the Conversation's own
+    // repository's is what moved the Conversation into Wrapping, and a
+    // companion's is that wrap-up covering the repository it also committed in —
+    // so they are read off the Timeline for the reason the Brief is: they are
+    // already here. All of them rather than the last one found: a Conversation
+    // ends on one pull request per repository it was worked in, and the human
+    // wraps up all of them at once. What is not read here is what a PR holds,
+    // which is a request of its own; see [`pull_request`].
+    let mut pinned: Vec<verkstead_render::PinnedEvent> = timeline
+        .iter()
+        .filter_map(|event| match &event.event {
+            store::Event::PullRequest(opened) => Some(verkstead_render::pull_request_event(
+                event.id,
+                event.at.clone(),
+                verkstead_render::PullRequestSummary {
+                    number: opened.number,
+                    title: opened.title.clone(),
+                    url: opened.url.clone(),
+                    repo: opened.repo.clone(),
+                    checks: own_checks(&opened.repo, checks),
+                    merging: merges.get(&event.id).copied().map(merging),
+                },
+            )),
+            _ => None,
+        })
+        .collect();
+
+    // And the two lists behind it. Each goes in two places — pinned here, and on
+    // the record at the row that says it landed — and this is the one reading
+    // behind both. The rows are stamped where the runner sees the landing; a
+    // Conversation from before there were rows to stamp keeps the pinned card
+    // alone, which is what it has always had.
+    pinned.extend(backlog.clone().map(verkstead_render::task_list_event));
+
+    pinned.extend(
+        roadmaps
+            .iter()
+            .cloned()
+            .map(verkstead_render::stage_list_event),
+    );
 
     // Whether the worktree is still on disk, which is a look at the filesystem
     // rather than anything the store knows.
@@ -1328,6 +1349,23 @@ pub(crate) async fn conversation_view(
         }
     };
 
+    // And whether the Cleanup has been through it since, which is the other
+    // sidecar beside the archivings — read the same way and for the same kind
+    // of reason: the page has to be able to say why a session's drill-down is
+    // missing.
+    //
+    // A read that fails reads as *not trimmed*, which is the way round that
+    // says nothing rather than the way round that says something untrue: the
+    // record is drawn as it always was, and the worst of it is a card that
+    // opens on nothing with no word for why.
+    let trimmed = match store::trimmed(&state.pool, id).await {
+        Ok(trimmed) => trimmed,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading whether a Conversation was trimmed failed");
+            false
+        }
+    };
+
     // And where the latest share of it was published, where anybody has
     // published one — the link the workbench draws beside the Share row. Read
     // the way the archive mark is: a row beside the Conversation rather than a
@@ -1376,6 +1414,13 @@ pub(crate) async fn conversation_view(
         state: lifecycle(conversation.state),
         ready_to_grill,
         compiles_uncached,
+        // Whether there is a session to be started at all, which is a fact about
+        // this build rather than about this Conversation — the same answer on
+        // every one it sends. Read off the registry rather than off the target
+        // this was compiled for, so that a test on any machine can stand a
+        // server up that answers either way — see
+        // [`crate::sessions::Sessions::here`].
+        sessions: state.sessions.here(),
         ready_to_resume,
         ready_to_stop,
         stop_asked,
@@ -1396,6 +1441,7 @@ pub(crate) async fn conversation_view(
         waiting_on_checks: narrowed_to_checks && writing.is_none(),
         resets,
         archived,
+        trimmed,
         shared,
         // The same reading the Events above are drawn against, said as a fact
         // about the Conversation: the Timeline offers Force stop exactly where
@@ -3563,6 +3609,15 @@ async fn save_settings(
                 edit.rust_build_cache.enabled,
                 Some(edit.rust_build_cache.size),
             ),
+            // And the Cleanup's two rows, each a switch and a duration as it
+            // was typed — an empty field is the default asked for back, and so
+            // is anything that is not a whole number of days. Nothing here is
+            // refused, a delete sooner than the trim included: the two clocks
+            // run from the archiving independently.
+            Cleanup::of(
+                CleanupStep::of(edit.cleanup.trim.enabled, Some(edit.cleanup.trim.days)),
+                CleanupStep::of(edit.cleanup.delete.enabled, Some(edit.cleanup.delete.days)),
+            ),
             // And how a conflict is resolved where the Repo it is in says
             // nothing, which is one of two words and never absent: there is no
             // third state for a page to send.
@@ -3674,6 +3729,7 @@ fn as_told(
     let config = settings.config();
     let author = config.git_author();
     let cache = config.rust_build_cache();
+    let cleanup = config.cleanup();
 
     SettingsView {
         git_author: Author {
@@ -3690,6 +3746,22 @@ fn as_told(
             // Not out of the files at all: this is the server's own
             // environment, and the one thing on this page the human cannot set.
             compiles_cached: caches_compiles,
+        },
+        // And the Cleanup's two rows, each read the way the size above is: the
+        // days configured where somebody typed them, and the fallback with the
+        // flag beside it saying so, because a value nobody chose should be
+        // drawn as a placeholder rather than as a choice.
+        cleanup: CleanupView {
+            trim: CleanupStepView {
+                enabled: cleanup.trims(),
+                days: cleanup.trim_after(),
+                days_configured: cleanup.trim_after_configured().is_some(),
+            },
+            delete: CleanupStepView {
+                enabled: cleanup.deletes(),
+                days: cleanup.delete_after(),
+                days_configured: cleanup.delete_after_configured().is_some(),
+            },
         },
         // Where the setting sits rather than whether anybody has been here:
         // nothing configured is a merge, and there is no third state to draw.
@@ -3781,6 +3853,60 @@ fn last_four(token: &str) -> String {
     let from = characters.len().saturating_sub(4);
 
     characters[from..].iter().collect()
+}
+
+/// Which directory a path field is asking about, and in what scope.
+///
+/// The path is optional because a field standing empty is where a browse
+/// begins, and an empty one is read as no path at all: `?path=` is what a
+/// cleared input sends, and it names the same nothing.
+///
+/// The scope is not optional. A field is one kind or the other and knows which
+/// it is, so an ask that says nothing about it is a caller with a bug rather
+/// than a browse to answer — and answering it in either scope would be answering
+/// a different question from the one asked.
+#[derive(Debug, serde::Deserialize)]
+struct Browsing {
+    scope: BrowseScope,
+    path: Option<String>,
+}
+
+/// `GET /api/ui/directories?scope=<scope>&path=<path>` — what one directory
+/// holds, for the dropdown a path field browses with.
+///
+/// One directory per request and no walking: the field asks again for every
+/// level somebody drills into, so a browse costs one `read_dir` at a time
+/// whatever is under it.
+///
+/// Every refusal is a named outcome in the body rather than a status, the way
+/// registering a Repo refuses: a path that is relative, missing, not a
+/// directory, outside the Watched Paths or unreadable is a line the dropdown
+/// draws where its rows would be. Most of them are the ordinary state of a field
+/// halfway through being typed into.
+///
+/// What decides where the ask may look is [`BrowseScope`] — see
+/// [`crate::browsing`], where the boundary is consulted for one of the two.
+async fn directories(
+    State(state): State<AppState>,
+    Query(browsing): Query<Browsing>,
+) -> HttpResponse {
+    let watched = state.watched.clone();
+    let path = browsing
+        .path
+        .filter(|path| !path.is_empty())
+        .map(std::path::PathBuf::from);
+
+    // Off the runtime: reading the boundary is a file and a `canonicalize` per
+    // entry in it, and opening a directory is a read of its own.
+    match tokio::task::spawn_blocking(move || crate::browsing::list(&watched, browsing.scope, path))
+        .await
+    {
+        Ok(listing) => Json(listing).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, "listing a directory failed");
+            unavailable("the directory could not be listed")
+        }
+    }
 }
 
 /// `GET /api/ui/update` — whether a newer Verkstead has been released than

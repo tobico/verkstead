@@ -92,6 +92,14 @@ const PATHS = {
     "verkstead=/var/cache/verkstead-cargo",
   ],
 };
+
+/// And the Cleanup as a save puts it back: the switches where the read left
+/// them, and each duration as the string a form holds. Carried by every
+/// section for the reason the paths are — see [`heldCleanup`].
+const CLEANUP = {
+  trim: { enabled: true, days: "5" },
+  delete: { enabled: true, days: "90" },
+};
 const PROFILES = profiles as ProfileEntry[];
 const REPOS = repos as RepoEntry[];
 const FIRST_REPO = REPOS[0]!;
@@ -423,6 +431,7 @@ describe("saving", () => {
           enabled: TOLD.rust_build_cache.enabled,
           size: TOLD.rust_build_cache.size,
         },
+        cleanup: CLEANUP,
         conflict_resolution: TOLD.conflict_resolution,
         share_on_done: TOLD.share_on_done,
         ...PATHS,
@@ -652,6 +661,7 @@ describe("replacing and clearing the token", () => {
         // Untouched by this form, and so untouched in what the save answers
         // with — see the sections below it for what does change these.
         rust_build_cache: TOLD.rust_build_cache,
+        cleanup: TOLD.cleanup,
         conflict_resolution: TOLD.conflict_resolution,
         share_on_done: TOLD.share_on_done,
         paths: TOLD.paths,
@@ -677,6 +687,7 @@ describe("replacing and clearing the token", () => {
           enabled: TOLD.rust_build_cache.enabled,
           size: TOLD.rust_build_cache.size,
         },
+        cleanup: CLEANUP,
         conflict_resolution: TOLD.conflict_resolution,
         share_on_done: TOLD.share_on_done,
         ...PATHS,
@@ -1064,6 +1075,7 @@ describe("sharing on Done", () => {
           enabled: TOLD.rust_build_cache.enabled,
           size: TOLD.rust_build_cache.size,
         },
+        cleanup: CLEANUP,
         conflict_resolution: TOLD.conflict_resolution,
         ...PATHS,
       }),

@@ -238,6 +238,16 @@ export function StatusButton(props: {
               <Show when={said().word !== null}>
                 <span class={styles.state}>{said().state}</span>
               </Show>
+
+              {/* And what a Cleanup has taken, where it has been through this
+                  record: the word for the state it left the Conversation in,
+                  in the same understated voice the lifecycle state is said in
+                  and last on the line, because it is a fact about the record
+                  rather than about the work. Drawn only once a trim has
+                  happened — nothing here ever says one is coming. */}
+              <Show when={props.conversation.trimmed}>
+                <span class={styles.trimmed}>Trimmed</span>
+              </Show>
             </span>
 
             <span class={styles.agent}>

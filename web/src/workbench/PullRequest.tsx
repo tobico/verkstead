@@ -46,6 +46,7 @@ import { utcStamp } from "../set/when";
 import { CheckMark, SAID } from "./Checks";
 import { IN_WORDS } from "./Merging";
 import { PaneHead } from "./PaneHead";
+import { NO_SESSIONS, noSessions } from "./sessions";
 import styles from "./PullRequest.module.css";
 import { ABBREVIATED } from "./Timeline";
 
@@ -64,6 +65,12 @@ import { ABBREVIATED } from "./Timeline";
 export const RESOLVE_REFUSAL: Record<Resolved, string> = {
   Resolving: "",
   NoSuchConversation: "This conversation is gone.",
+  // The one refusal here that is about this Verkstead rather than about this
+  // conversation: what the press starts again is the resolution session, and
+  // there is none to start. The button is not drawn on such a build — see
+  // `sessions.tsx` — so this is what a page drawn before the read answers a
+  // press with.
+  NotOnWindowsYet: NO_SESSIONS,
   NotDone:
     "This conversation is not finished with any more, so whatever is driving it has the conflict in hand.",
   NothingConflicts:
@@ -157,7 +164,11 @@ export function PullRequest(props: {
         <Show
           when={
             props.opened.merging === "Conflicting" &&
-            props.conversation.state === "Done"
+            props.conversation.state === "Done" &&
+            // And never on a Verkstead with no session to resolve it: the press
+            // would only be refused, and the line above it already says the
+            // branch conflicts. See `sessions.tsx`.
+            !noSessions(props.conversation)
           }
         >
           <button

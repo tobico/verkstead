@@ -6,9 +6,11 @@
 //! rather than as a Brief with a list under it.
 //!
 //! Above the list are the pinned Events, which are a fixed set — the backlog
-//! now, the stage list and the PR as those stages arrive. They do not scroll
-//! with the record: each is the current state of something the work is against,
-//! and is worth having on screen whichever part of the record is being read.
+//! now, the stage list and the PR as those stages arrive — and which are drawn
+//! in one order however they arrived: the pull request, then the task list, then
+//! the roadmap. They do not scroll with the record: each is the current state of
+//! something the work is against, and is worth having on screen whichever part
+//! of the record is being read.
 //! More than one of them is a carousel rather than a stack, because everything
 //! pinned is held above the record and a stack of them is what the record is
 //! pushed down by.
@@ -135,6 +137,7 @@ import { Mark } from "./Mark";
 import marks from "./Mark.module.css";
 import { Conflict } from "./Merging";
 import { PaneHead } from "./PaneHead";
+import { NO_SESSIONS } from "./sessions";
 import { StatusButton } from "./StatusButton";
 import styles from "./Timeline.module.css";
 import { titled } from "./naming";
@@ -173,6 +176,11 @@ const GRILL_REFUSAL: Record<
   Started: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "This conversation has already been started.",
+  // The one refusal here that is about this Verkstead rather than about this
+  // conversation, and the one the page draws before the press where it can —
+  // see `sessions.tsx`, whose sentence every other press that wanted a session
+  // says as well.
+  NotOnWindowsYet: NO_SESSIONS,
   NoGrillingProfile:
     "Pick a grilling profile and model — or No grilling — first, on the brief.",
   NoImplementationProfile:
@@ -711,6 +719,10 @@ export function Timeline(props: {
 /// Pinning is the fixed set — a task list, a stage list and the pull request —
 /// so there is nothing to pin, nothing to unpin, and no control for either.
 ///
+/// They come in one order and are drawn in it: the pull request, then the task
+/// list, then the roadmap. The server is what puts them in it — see the pinned
+/// block in `crates/server/src/ui.rs`.
+///
 /// One card at a time once there is more than one of them: they are held above
 /// the record, so a stack of them is a stack the record is pushed down by, and
 /// what is pinned is worth having in view rather than worth having all of at
@@ -972,15 +984,18 @@ function parting(pane: Pane): string | undefined {
 /// Which card is showing when a conversation is opened: the one needing
 /// attention, and otherwise the first.
 ///
-/// The first is the fixed order — task list, then roadmap, then pull request —
-/// because that is the order the server hands them over in, which is the order
-/// the work goes through them in.
+/// The first is the fixed order — pull request, then task list, then roadmap —
+/// because that is the order the server hands them over in. The pull request
+/// leads it as the one of the three with anything on it to answer, so a
+/// conversation that has reached one opens on it whether or not it is stopped
+/// there.
 ///
 /// Needing attention is the conversation being blocked on the card, which only a
 /// pull request can be: what a wrap-up stops for is the review, and a backlog or
-/// a roadmap is a list read off the worktree with nothing on it to answer. So a
-/// pull request with feedback waiting on it fronts over the backlog beside it,
-/// which is what a reader opening the conversation is being stopped for.
+/// a roadmap is a list read off the worktree with nothing on it to answer. It
+/// still says something where there is more than one pull request: a
+/// companion's with feedback waiting on it fronts over the work's own, which is
+/// what a reader opening the conversation is being stopped for.
 function fronting(conversation: ConversationView): number {
   const at = conversation.pinned.findIndex(
     (event) =>

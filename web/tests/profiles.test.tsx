@@ -19,6 +19,12 @@
 //! are the server's to decide — the tests over in `crates/server` are what say
 //! so. This side's job is to send what was typed and say in words what came
 //! back.
+//!
+//! And that the browse writes the same boxes the typing does. The fields are the
+//! shared one — how the dropdown itself behaves is `browsing.test.tsx`'s, where
+//! it is driven on its own — so what is asked here is what this form made of it:
+//! the two per-field decisions these paths are the only ones to make, and a
+//! browsed account saved exactly as a typed one.
 
 import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
@@ -26,6 +32,7 @@ import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  DirectoryListing,
   ProfileAccount,
   ProfileEdit,
   ProfileEntry,
@@ -45,9 +52,17 @@ import { ProfileList, ProfilePane } from "../src/profiles/ProfileList";
 import styles from "../src/profiles/ProfileList.module.css";
 import head from "../src/workbench/PaneHead.module.css";
 import { drawn } from "./bench";
+import {
+  browse,
+  held,
+  leading,
+  listingAt,
+  rows as browsed,
+  tap,
+} from "./fields";
 import { art, marked } from "./marking";
 import { offered as offeredRows, pick, rows, showing } from "./pickers";
-import { json, serving, whenever } from "./serving";
+import { askedFor, json, serving, whenever } from "./serving";
 import profiles from "./fixtures/profiles.json" with { type: "json" };
 
 const SAVED = profiles as ProfileEntry[];
@@ -1085,5 +1100,212 @@ describe("the models a profile lists", () => {
 
     expect(screen.queryByLabelText(UNKNOWN)).toBeNull();
     expect(ticked()).toEqual(["claude-fable-5"]);
+  });
+});
+
+
+describe("browsing for the account's paths", () => {
+  /// The labels the fields are found by, which are the ones the form has always
+  /// had — each of them saying where the path it names is mounted.
+  const DIRECTORY = "Claude directory, mounted at ~/.claude";
+  const CONFIG = "Config file, mounted at ~/.claude.json";
+
+  /// A watched root, and an account kept under it: a `.claude` beside a
+  /// `.claude.json`, which is what these fields exist to point at.
+  ///
+  /// Written here rather than taken from the fixtures the server's own tests
+  /// wrote, unlike the Repos' form's browse: what is asked here is what this
+  /// form does about a dotfile and about a file, and neither of those fixtures
+  /// holds an account. The shape is the endpoint's own — directories first and
+  /// then by name, dotfiles among them.
+  const ROOTS: DirectoryListing = {
+    Listed: {
+      path: null,
+      entries: [
+        { name: "accounts", path: "/home/ada/accounts", kind: "Directory" },
+      ],
+    },
+  };
+
+  const ACCOUNTS: DirectoryListing = {
+    Listed: {
+      path: "/home/ada/accounts",
+      entries: [
+        { name: "work", path: "/home/ada/accounts/work", kind: "Directory" },
+      ],
+    },
+  };
+
+  const WORK: DirectoryListing = {
+    Listed: {
+      path: "/home/ada/accounts/work",
+      entries: [
+        {
+          name: ".claude",
+          path: "/home/ada/accounts/work/.claude",
+          kind: "Directory",
+        },
+        {
+          name: ".claude.json",
+          path: "/home/ada/accounts/work/.claude.json",
+          kind: "File",
+        },
+        {
+          name: "notes.md",
+          path: "/home/ada/accounts/work/notes.md",
+          kind: "File",
+        },
+      ],
+    },
+  };
+
+  /// And the account directory itself, which the browse opens once it is taken:
+  /// a directory is a level whatever it is called, so taking one asks what is
+  /// inside it.
+  const CLAUDE: DirectoryListing = {
+    Listed: { path: "/home/ada/accounts/work/.claude", entries: [] },
+  };
+
+  /// The list behind the pane, the levels this browse goes through, and whatever
+  /// the save itself is answered by.
+  ///
+  /// Every level in the watched scope, which is the one these fields are bounded
+  /// by: the server refuses an account outside the Watched Paths, so a dropdown
+  /// offering one would be offering a wasted press.
+  function theBrowse(...answers: Array<() => Promise<Response>>) {
+    return serving(
+      whenever("/api/ui/profiles", json(SAVED)),
+      whenever(listingAt(null, "watched"), json(ROOTS)),
+      whenever(listingAt("/home/ada/accounts", "watched"), json(ACCOUNTS)),
+      whenever(listingAt("/home/ada/accounts/work", "watched"), json(WORK)),
+      whenever(
+        listingAt("/home/ada/accounts/work/.claude", "watched"),
+        json(CLAUDE),
+      ),
+      ...answers,
+    );
+  }
+
+  /// Take the row that reads as `reading`, once there is one to take.
+  ///
+  /// Waited for around the tap rather than before it: this form draws two of
+  /// these fields over one query cache, so a level can arrive, be asked for
+  /// again and land a second time — and a row read between the two is a row
+  /// that was there a moment ago. Waiting on the press itself is waiting for
+  /// the row a human would have their finger on.
+  async function take(label: string, reading: string): Promise<void> {
+    await waitFor(() => tap(label, reading));
+  }
+
+  /// Browse one of the fields down to the account, which is the two levels under
+  /// the watched root.
+  async function browsedToTheAccount(label: string): Promise<void> {
+    browse(label);
+
+    await take(label, "accounts");
+    await take(label, "work");
+  }
+
+  /// The dotfiles are the point of these fields: a browse that hid them would
+  /// stop one level above every path this form is for.
+  it("shows the account's dotfile directory and drills into it", async () => {
+    theBrowse();
+    mountPane("new");
+
+    await browsedToTheAccount(DIRECTORY);
+
+    // The directories of the account, hidden ones included — and only the
+    // directories, this field naming one. The way back out is a row here and
+    // was not one at the root: above that is outside the boundary.
+    await waitFor(() =>
+      expect(browsed(DIRECTORY)).toEqual([
+        "Up to /home/ada/accounts",
+        ".claude",
+      ]),
+    );
+
+    await take(DIRECTORY, ".claude");
+    expect(held(DIRECTORY)).toBe("/home/ada/accounts/work/.claude");
+  });
+
+  /// And the config file names a file, so its browse shows them and stops at
+  /// one: there is nothing under a `.claude.json` this form is after.
+  it("shows the config file's own file and stops there", async () => {
+    const fetching = theBrowse();
+    mountPane("new");
+
+    await browsedToTheAccount(CONFIG);
+
+    await waitFor(() =>
+      expect(browsed(CONFIG)).toEqual([
+        "Up to /home/ada/accounts",
+        ".claude",
+        ".claude.json",
+        "notes.md",
+      ]),
+    );
+    // The directory among them is the one row that leads anywhere.
+    expect(leading(CONFIG)).toEqual([".claude"]);
+
+    await take(CONFIG, ".claude.json");
+
+    expect(held(CONFIG)).toBe("/home/ada/accounts/work/.claude.json");
+    expect(
+      askedFor(
+        fetching,
+        listingAt("/home/ada/accounts/work/.claude.json", "watched"),
+      ),
+    ).toBe(0);
+  });
+
+  /// The point of the whole component: saving a browsed account is saving a
+  /// typed one. Save sends the boxes, and what the server makes of them goes on
+  /// deciding everything.
+  it("saves a browsed account exactly as a typed one", async () => {
+    const fetching = theBrowse(json("Saved"));
+    const { done } = mountPane("new");
+
+    fireEvent.input(screen.getByLabelText("Name"), {
+      target: { value: "work" },
+    });
+    fireEvent.click(screen.getByLabelText(prettify("claude-sonnet-5")));
+
+    await browsedToTheAccount(DIRECTORY);
+    await take(DIRECTORY, ".claude");
+
+    await browsedToTheAccount(CONFIG);
+    await take(CONFIG, ".claude.json");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/profiles")).toEqual({
+        name: "work",
+        models: ["claude-sonnet-5"],
+        account: {
+          agent_type: "Claude",
+          claude_dir: "/home/ada/accounts/work/.claude",
+          config_file: "/home/ada/accounts/work/.claude.json",
+        },
+      }),
+    );
+    await waitFor(() => expect(done).toHaveBeenCalled());
+  });
+
+  /// And the home the types after the first keep everything under browses the
+  /// same way: one field, the dotfiles shown, and the same scope.
+  it("browses the home of a type that keeps one", async () => {
+    theBrowse();
+    mountPane("new");
+
+    pick("Agent", AGENT_NAME.Codex);
+    await waitFor(() => screen.getByLabelText(/Home directory/));
+
+    const HOME = "Home directory, mounted at ~/.codex";
+    await browsedToTheAccount(HOME);
+
+    await waitFor(() =>
+      expect(browsed(HOME)).toEqual(["Up to /home/ada/accounts", ".claude"]),
+    );
   });
 });

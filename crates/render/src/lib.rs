@@ -20,6 +20,7 @@
 //! viewer, this is the one place the rendering happens.
 
 mod answering;
+mod browsing;
 mod conversations;
 mod profiles;
 mod push;
@@ -31,6 +32,7 @@ mod update;
 mod view;
 
 pub use answering::{Locked, Submitted};
+pub use browsing::{BrowseScope, DirectoryEntry, DirectoryListing, EntryKind};
 pub use conversations::{
     AbandonedRepo, AbandonedRoadmap, Adopted, AdoptedStage, AdoptionView, AgentOutputEvent,
     BacklogPane, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed, BriefEdit,
@@ -43,8 +45,8 @@ pub use conversations::{
     NewCompanion, NewConversation, NewOrder, NoticeEvent, PinnedEvent, ProposalView,
     PullRequestCheck, PullRequestComment, PullRequestCommit, PullRequestDetails, PullRequestEvent,
     PullRequestSummary, QuestionSetEvent, RepoChoice, RepoSwitched, ResolveConflictsEvent,
-    Resolved, Resumed, RoadmapPane, Screen, SetRow, ShareView, ShowingArchived, Shown, Size,
-    StageDocument, StageEntry, StageListEvent, StageListReached, StageSource, Started,
+    Resolved, Resumed, RoadmapPane, Screen, SessionsHere, SetRow, ShareView, ShowingArchived,
+    Shown, Size, StageDocument, StageEntry, StageListEvent, StageListReached, StageSource, Started,
     SteerCompanionRefusal, SteerEvent, SteerOpened, SteerSubmission, SteerTarget, TaskDocument,
     TaskEntry, TaskListEvent, TaskListReached, TaskSource, TimelineEvent, UnreadableSetEvent,
     Watching, Worktree, agent_output_event, backlog_pane, brief_event, commit_event, commit_pane,
@@ -62,9 +64,10 @@ pub use repos::{
     ConflictResolutionEdit, Registered, Registration, RepoEntry, RepoRemoved, RepoView,
 };
 pub use settings::{
-    Author, BindEntry, BuildCacheEdit, BuildCacheView, ConflictResolution, IgnoreRule,
-    IgnoredCommentsEdit, PathResolution, PathSource, PathsView, RuleField, RuleRefused,
-    SettingsEdit, SettingsSaved, SettingsView, TokenEdit, TokenSaved, Verified, WatchedPathEntry,
+    Author, BindEntry, BuildCacheEdit, BuildCacheView, CleanupEdit, CleanupStepEdit,
+    CleanupStepView, CleanupView, ConflictResolution, IgnoreRule, IgnoredCommentsEdit,
+    PathResolution, PathSource, PathsView, RuleField, RuleRefused, SettingsEdit, SettingsSaved,
+    SettingsView, TokenEdit, TokenSaved, Verified, WatchedPathEntry,
 };
 pub use sharing::{
     CommentedOn, MissedOut, SHARE_MARKER, ShareCommented, SharePublished, SharedCommit,

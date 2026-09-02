@@ -15,7 +15,6 @@
 //! and leaves the branch: a branch is a name and a commit, and it may hold work
 //! worth reading; a worktree is a directory the human never asked to keep.
 
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -192,6 +191,45 @@ pub(crate) fn branches(repo: &Path) -> Vec<String> {
         .collect()
 }
 
+/// Every name `repo` already answers to as a branch: its own, and each remote's
+/// with the remote's own name taken off the front.
+///
+/// What this is for is choosing a name nothing has, which is a different
+/// question from whether one particular name is free — [`branch_exists`] is
+/// that one, and it is what a refusal is written on. This is deliberately the
+/// wider reading: a name only origin holds can be cut locally and is still a
+/// name to leave alone, because what would be pushed to it is somebody's
+/// branch, and there is no shortage of other names to pick.
+///
+/// Read whole rather than asked name by name, because that is what the caller
+/// is doing: a walk over a thousand candidates is one `for-each-ref` here and a
+/// thousand lookups in memory, against a thousand git processes the other way.
+///
+/// Empty for a repository git will not read, which is [`branches`]'s reading
+/// and the safe one here. What follows a name chosen against nothing is a
+/// worktree git refuses, said in those words; a caller that read an unreadable
+/// repository as holding every name would have nothing left to choose.
+pub(crate) fn cut_names(repo: &Path) -> std::collections::HashSet<String> {
+    let listed = |refs: &str, format: &str| {
+        git(repo, &["for-each-ref", &format!("--format={format}"), refs])
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| line.split_once('\t'))
+            .filter(|(symref, _)| symref.is_empty())
+            .map(|(_, name)| name.to_owned())
+            .collect::<Vec<String>>()
+    };
+
+    // The remotes with `refs/remotes/<remote>/` off the front, so that
+    // `origin/rate-limiting` is read as the name a branch would be cut under —
+    // and `origin/HEAD` falls out with the other symbolic refs, being another
+    // name for a branch already in the list.
+    listed("refs/heads", "%(symref)\t%(refname:short)")
+        .into_iter()
+        .chain(listed("refs/remotes", "%(symref)\t%(refname:lstrip=3)"))
+        .collect()
+}
+
 /// What fetching `repo`'s remotes came to.
 ///
 /// Three answers rather than a boolean, because the middle one is not a
@@ -280,18 +318,19 @@ fn fetching(repo: &Path, limit: Option<Duration>) -> Fetched {
         return answered(command.output());
     };
 
-    // A group of its own, so that the kill below reaches the transport helper
-    // git started as well as git itself.
-    command.process_group(0);
+    // A group of its own where the platform has them, so that the kill below
+    // reaches the transport helper git started as well as git itself — see
+    // [`stop`], which is where the whole of that difference is.
+    in_its_own_group(&mut command);
 
     let child = match command.spawn() {
         Ok(child) => child,
         Err(error) => return Fetched::Failed(error.to_string()),
     };
 
-    // Kept before the child is handed over, because the group is named by it and
-    // the thread below is where the child goes.
-    let group = child.id();
+    // Kept before the child is handed over, because what is killed is named by
+    // it and the thread below is where the child goes.
+    let fetch = child.id();
 
     // Waited on by a thread rather than by polling, so that the pipes are
     // drained while git is still writing to them: a fetch blocked on a full
@@ -304,7 +343,7 @@ fn fetching(repo: &Path, limit: Option<Duration>) -> Fetched {
     match waited.recv_timeout(limit) {
         Ok(output) => answered(output),
         Err(_) => {
-            stop(group);
+            stop(fetch);
 
             // The thread above is left to reap it, which it does as soon as the
             // group is gone.
@@ -334,14 +373,29 @@ fn answered(output: std::io::Result<std::process::Output>) -> Fetched {
     })
 }
 
+/// Put the fetch in a process group of its own, on the platforms that have
+/// them, so that ending it is ending everything it started — see [`stop`].
+#[cfg(unix)]
+fn in_its_own_group(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+
+    command.process_group(0);
+}
+
+/// And where there are none — see [`stop`]'s Windows arm, which reaches what it
+/// can reach without one.
+#[cfg(not(unix))]
+fn in_its_own_group(_command: &mut Command) {}
+
 /// Kill a fetch that has run past its deadline, and everything it started.
 ///
 /// The group rather than the process: `git fetch` does its talking through a
 /// transport helper it spawns, and that helper is where a stalled network
 /// leaves things waiting. Signalling git alone would end the wait here and
 /// leave the helper behind with nobody to reap it.
-fn stop(group: u32) {
-    let Ok(group) = i32::try_from(group) else {
+#[cfg(unix)]
+fn stop(fetch: u32) {
+    let Ok(group) = i32::try_from(fetch) else {
         return;
     };
 
@@ -354,6 +408,44 @@ fn stop(group: u32) {
             error = ?error,
             "a fetch that ran past its deadline could not be killed"
         );
+    }
+}
+
+/// The same on Windows, which has no process group of that kind to put a fetch
+/// in — so the tree is what stands in for one.
+///
+/// **A fetch that ran past its deadline is killed here too.** What that reaches
+/// is narrower than a group: `taskkill /T` walks the parent-child relationships
+/// as they stand at the moment it looks, so it ends git and the transport
+/// helper git started, and would miss a grandchild that had already been
+/// reparented. Narrower is the whole of the difference — the process holding
+/// the stalled connection is git or its helper, which is what the group was for
+/// on the other platform.
+///
+/// `taskkill` rather than a kill of the one process, which is all the standard
+/// library offers by the time the child has been handed to the thread waiting
+/// on it: a helper left behind holds the socket open, and the point of the
+/// deadline is that nothing is left holding one.
+#[cfg(windows)]
+fn stop(fetch: u32) {
+    let killed = Command::new("taskkill")
+        .args(["/F", "/T", "/PID"])
+        .arg(fetch.to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+
+    match killed {
+        Ok(status) if status.success() => {}
+        Ok(status) => tracing::warn!(
+            %status,
+            "a fetch that ran past its deadline could not be killed"
+        ),
+        Err(error) => tracing::warn!(
+            error = ?error,
+            "a fetch that ran past its deadline could not be killed"
+        ),
     }
 }
 
@@ -1256,6 +1348,58 @@ mod tests {
         );
     }
 
+    /// The names a start has to pick around: the local branches and the remote
+    /// ones as they would be cut, with the remote's own name off the front.
+    ///
+    /// A name only origin holds is one to leave alone — cutting it locally
+    /// works, and then the push behind it is into somebody's branch.
+    #[test]
+    fn the_names_a_repository_answers_to_are_its_locals_and_its_remotes() {
+        let (_dir, repo) = repository();
+        let tip = resolve(&repo, "main").expect("the branch resolves");
+
+        run(&repo, &["branch", "rate-limiting"]);
+        run(&repo, &["branch", "feature/throttling"]);
+        run(
+            &repo,
+            &["update-ref", "refs/remotes/origin/pushed-elsewhere", &tip],
+        );
+        run(&repo, &["update-ref", "refs/remotes/origin/main", &tip]);
+        run(
+            &repo,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/main",
+            ],
+        );
+
+        let names = cut_names(&repo);
+
+        assert!(names.contains("main"));
+        assert!(names.contains("rate-limiting"));
+        assert!(names.contains("feature/throttling"), "slashes and all");
+        assert!(
+            names.contains("pushed-elsewhere"),
+            "a remote's branch under the name it would be cut as",
+        );
+        assert!(
+            !names.contains("origin/pushed-elsewhere"),
+            "and not under the remote's own name for it",
+        );
+        assert!(
+            !names.contains("HEAD"),
+            "origin/HEAD is another name for a branch already in the list",
+        );
+        assert!(!names.contains("hushed-otter"), "and nothing else is in it");
+
+        // A directory git will not read holds no names, which is what leaves a
+        // caller something to choose.
+        let nowhere = tempfile::tempdir().unwrap();
+
+        assert!(cut_names(nowhere.path()).is_empty());
+    }
+
     /// A worktree git still answers about, on the branch it was made for, is
     /// one to work in — and it stays one when there is uncommitted work in it.
     ///
@@ -1553,6 +1697,10 @@ mod tests {
     /// A link is deleted as a link and never followed. What is on the other end
     /// is by definition outside the one directory this may delete inside, so
     /// walking it would be the whole of the mistake this is written against.
+    ///
+    /// On the platforms where a test may make a link at all — Windows wants a
+    /// privilege for one, and the sweep's own reasoning is the same there.
+    #[cfg(unix)]
     #[test]
     fn a_link_under_the_worktrees_directory_goes_as_a_link() {
         let (dir, repo) = repository();

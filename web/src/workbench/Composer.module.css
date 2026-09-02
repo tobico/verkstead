@@ -120,6 +120,17 @@
   font-size: 0.9rem;
 }
 
+/* And what stands where the button would be on a Verkstead that runs no
+   sessions: the same size as the note under a button, because that is what it
+   is — the state, said in words, where there is nothing to press. Left-aligned
+   against the box rather than following the button to the far edge: it is a
+   sentence to read, and the end of the line is not where one starts. */
+.startGrilling .noSessions {
+  margin: 0;
+  font-size: 0.9rem;
+  text-align: start;
+}
+
 /* Under the pointer, the one filled button on the pane: it deepens its accent.
    Never while it is refusing the press — the start has two ways of doing that
    and this excludes both — and inside a query, because a hover state has to be

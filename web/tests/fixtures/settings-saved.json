@@ -1,6 +1,18 @@
 {
   "refused": [],
   "settings": {
+    "cleanup": {
+      "delete": {
+        "days": 90,
+        "days_configured": true,
+        "enabled": true
+      },
+      "trim": {
+        "days": 5,
+        "days_configured": true,
+        "enabled": true
+      }
+    },
     "conflict_resolution": "Rebase",
     "git_author": {
       "email": "ada@example.com",

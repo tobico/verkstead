@@ -18,17 +18,17 @@ use ts_rs::TS;
 
 use crate::{
     AbandonedRepo, Adopted, BacklogPane, BaseBranchChoice, BaseRecorded, BranchRename,
-    BranchRenamed, BriefEdit, BriefSaved, Capture, CommitPane, CompanionAdded,
+    BranchRenamed, BriefEdit, BriefSaved, BrowseScope, Capture, CommitPane, CompanionAdded,
     CompanionBaseRecorded, CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen,
     CompanionRemoved, ConflictResolutionEdit, ConversationArchived, ConversationClosed,
     ConversationEntry, ConversationSteered, ConversationStopped, ConversationUnarchived,
-    ConversationView, GrillingStarted, Locked, NewAdoption, NewCompanion, NewConversation,
-    NewOrder, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
-    ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RepoChoice, RepoEntry,
-    RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane,
-    RoleChoice, Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
-    SharePublished, SharedConversation, ShowingArchived, Shown, Started, SteerOpened,
-    SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe,
+    ConversationView, DirectoryListing, GrillingStarted, Locked, NewAdoption, NewCompanion,
+    NewConversation, NewOrder, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
+    ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RepoChoice,
+    RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed,
+    RoadmapPane, RoleChoice, Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedConversation, ShowingArchived, Shown, Started,
+    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TranscriptView, Unsubscribe,
     UpdateNotice, Watching,
 };
 
@@ -259,6 +259,12 @@ fn the_viewers_types_are_written_from_these() {
     SettingsView::export_all(&config).unwrap();
     SettingsEdit::export_all(&config).unwrap();
     SettingsSaved::export_all(&config).unwrap();
+
+    // And what a path field browses with: one directory of the filesystem, and
+    // the scope the field asks in — which is what says whether the boundary is
+    // consulted. The listing writes the entries and their kinds with it.
+    BrowseScope::export_all(&config).unwrap();
+    DirectoryListing::export_all(&config).unwrap();
 
     // Whether there is a newer Verkstead than the one serving the page.
     UpdateNotice::export_all(&config).unwrap();

@@ -194,6 +194,9 @@ import timelineCss from "../src/workbench/Timeline.module.css?raw";
 // jsdom lays nothing out for, and the pane names everything else is found by.
 import shell from "../src/Panes.module.css";
 import shellCss from "../src/Panes.module.css?raw";
+// And the one sentence a Verkstead with no session to start says, wherever it
+// says it — the fifth thing every press that wanted a session comes back with.
+import { NO_SESSIONS } from "../src/workbench/sessions";
 import { ABBREVIATED, CLAMPED_LINES, SWIPE } from "../src/workbench/Timeline";
 import {
   COMPANION_BRANCH_REFUSAL,
@@ -390,8 +393,9 @@ async function openActions(container: ParentNode): Promise<HTMLElement> {
   return drawn(container, `.${actions.conversationActions} > .${dropdown.drop}`);
 }
 
-/// The status button's first line, in its two parts: the status word and the
-/// state understated beside it.
+/// The status button's first line, in its parts: the status word, the state
+/// understated beside it, and the word for what a Cleanup took where one has
+/// been through the record.
 ///
 /// Where there is no status word to say — a Draft, a Done or a Closed
 /// conversation — the state takes the bold and stands alone, so `word` is the
@@ -400,6 +404,7 @@ async function openActions(container: ParentNode): Promise<HTMLElement> {
 async function standing(container: ParentNode): Promise<{
   word: string | null;
   state: string | null;
+  trimmed: string | null;
   attention: boolean;
 }> {
   const line = await drawn(
@@ -410,6 +415,8 @@ async function standing(container: ParentNode): Promise<{
   return {
     word: line.querySelector(`.${statusButton.title}`)?.textContent ?? null,
     state: line.querySelector(`.${statusButton.state}`)?.textContent ?? null,
+    trimmed:
+      line.querySelector(`.${statusButton.trimmed}`)?.textContent ?? null,
     attention: line.classList.contains(statusButton.attention!),
   };
 }
@@ -4887,6 +4894,31 @@ function theGrillingOutput(
   );
 }
 
+/// The same conversation after a Cleanup has been through it: every card where
+/// it was, and the session's own output taken out from under the one that opens
+/// on it.
+///
+/// Which is exactly what the server hands over once a trim has run — the
+/// Transcript has no lines left to read and the Capture has no chunks — so what
+/// this stands up is the shape the pane really meets rather than a shape
+/// invented for it.
+function theTrimmed(...answers: Parameters<typeof serving>) {
+  return serving(
+    whenever("/api/ui/conversations", json(SIDEBAR)),
+    whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+    whenever("/api/ui/repos", json(REPOS)),
+    whenever("/api/ui/profiles", json(PROFILES)),
+    whenever(
+      `/api/ui/conversations/${GRILLING.id}`,
+      json({ ...GRILLING, state: "Closed", archived: true, trimmed: true }),
+    ),
+    whenever(TRANSCRIPT_OF_IT, json(SAID_NOTHING)),
+    whenever(CAPTURE_OF_IT, json({ ...CAPTURE, text: "" })),
+    whenever(SCREEN_OF_IT, json(SCREEN)),
+    ...answers,
+  );
+}
+
 /// Where a browser would have found an element, for the one assertion that
 /// reads a measurement back: jsdom has no layout, so every element on the page
 /// is at nothing and nothing wide, and a mark measured off two of them would
@@ -5635,6 +5667,78 @@ describe("a session's output on the timeline", () => {
 
     expect(shown.textContent).toBe(CAPTURE.text);
     expect(askedFor(fetching, CAPTURE_OF_IT)).toBeGreaterThan(0);
+  });
+
+  /// And where a Cleanup has taken that record, the pane says so.
+  ///
+  /// The loss explaining itself. Trimmed, the Transcript comes back with no
+  /// turns and the Capture with no bytes, which is the same nothing a session
+  /// that never printed leaves — and drawn as that nothing it reads as a pane
+  /// that has failed. The card above it is untouched: the summary the Timeline
+  /// draws survived the trim, and this is the drill-down under it saying where
+  /// the rest went.
+  it("says the detail was trimmed rather than opening on nothing", async () => {
+    theTrimmed();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
+
+    const said = await drawn(container, `.${shell.detailsPane} .${outputPane.trimmed}`);
+
+    expect(said.textContent).toContain("trimmed");
+    expect(
+      container.querySelector(`.${shell.detailsPane} .${outputPane.capture}`),
+      "and nothing standing empty where the record was",
+    ).toBeNull();
+
+    // The summary that survived, still drawn over it: what is gone is the
+    // drill-down rather than the card.
+    const summary = await drawn(container, `.${shell.detailsPane} .${outputPane.captureSummary}`);
+    expect(summary.querySelector(`.${outputPane.turns}`)!.textContent).toBe(
+      `${OUTPUT.turns} turns`,
+    );
+  });
+
+  /// The other half of the switch says the same thing, and asks the server for
+  /// nothing: the grid is replayed from the bytes the trim took, so what a
+  /// request would come back with is an empty terminal.
+  it("says the same of the screen, and asks for no grid", async () => {
+    const fetching = theTrimmed();
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
+    await drawn(container, `.${shell.detailsPane} .${outputPane.trimmed}`);
+
+    fireEvent.click(await drawn(container, `.${shell.detailsPane} .${outputPane.screenTab}`));
+
+    const said = await drawn(container, `.${shell.detailsPane} .${outputPane.trimmed}`);
+
+    expect(said.textContent).toContain("trimmed");
+    expect(askedFor(fetching, SCREEN_OF_IT)).toBe(0);
+  });
+
+  /// And a session that simply printed nothing says what it always said: the
+  /// word is about a cleanup that happened, so a conversation no sweep has
+  /// reached never sees it.
+  it("still says a quiet session printed nothing where no cleanup ran", async () => {
+    theGrilling(whenever(CAPTURE_OF_IT, json({ ...CAPTURE, text: "" })));
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
+
+    // Waited for rather than read once: the same notice says the pane is
+    // loading while the two records are on their way, and what this is about is
+    // the words it settles on.
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${shell.detailsPane} .${notices.empty}`)
+          ?.textContent,
+      ).toBe("This session has printed nothing yet."),
+    );
+
+    expect(
+      container.querySelector(`.${shell.detailsPane} .${outputPane.trimmed}`),
+    ).toBeNull();
   });
 
   /// The pane opens on what the session said rather than on how it looked: the
@@ -12719,16 +12823,19 @@ describe("the pinned pull request", () => {
   });
   });
 
-/// A conversation with all three kinds pinned at once: the backlog it was built
-/// from, the roadmap the branch wrote to, and the pull request it ended on.
+/// A conversation with all three kinds pinned at once: the pull request it ended
+/// on, the backlog it was built from, and the roadmap the branch wrote to.
+///
+/// In that order, which is the order the server hands them over in — see the
+/// pinned block in `crates/server/src/ui.rs`.
 ///
 /// Composed rather than a fixture of its own, because what is being read here is
 /// how the timeline draws several pinned cards, and each of the three is already
 /// a golden fixture the server wrote.
 const ALL_THREE = [
+  { PullRequest: OPENED },
   { TaskList: BACKLOG },
   { StageList: ROADMAP },
-  { PullRequest: OPENED },
 ];
 
 /// A finger going down or coming up at a place across the card.
@@ -12759,7 +12866,7 @@ describe("the pinned carousel", () => {
     expect(
       pinned.querySelectorAll(`.${timeline.taskList}, .${timeline.stageList}, .${timeline.pullRequest}`),
     ).toHaveLength(1);
-    expect(pinned.querySelector(`.${timeline.taskList}`)).not.toBeNull();
+    expect(pinned.querySelector(`.${timeline.pullRequest}`)).not.toBeNull();
   });
 
   /// The dots are the whole of what the carousel says about itself: how many
@@ -12781,9 +12888,9 @@ describe("the pinned carousel", () => {
     expect(dots.nextElementSibling?.className).toContain(timeline.deck);
 
     expect(buttons.map((dot) => dot.getAttribute("aria-label"))).toEqual([
+      "Pull request",
       "Task list",
       "Roadmap",
-      "Pull request",
     ]);
     expect(buttons.map((dot) => dot.getAttribute("aria-current"))).toEqual([
       "true",
@@ -12800,12 +12907,12 @@ describe("the pinned carousel", () => {
     fireEvent.click(dots.querySelectorAll("button")[2]!);
 
     await waitFor(() =>
-      expect(container.querySelector(`.${timeline.pinned} .${timeline.pullRequest}`)).not.toBeNull(),
+      expect(container.querySelector(`.${timeline.pinned} .${timeline.stageList}`)).not.toBeNull(),
     );
     // The card it turned off is held in the deck while the slide runs, and gone
     // once it has.
     await waitFor(() =>
-      expect(container.querySelector(`.${timeline.pinned} .${timeline.taskList}`)).toBeNull(),
+      expect(container.querySelector(`.${timeline.pinned} .${timeline.pullRequest}`)).toBeNull(),
     );
     expect(
       dots.querySelectorAll("button")[2]!.getAttribute("aria-current"),
@@ -12822,14 +12929,14 @@ describe("the pinned carousel", () => {
 
     fireEvent.click(carousel.querySelector(`.${timeline.step}.${timeline.on}`)!);
     await waitFor(() =>
-      expect(carousel.querySelector(`.${timeline.stageList}`)).not.toBeNull(),
+      expect(carousel.querySelector(`.${timeline.taskList}`)).not.toBeNull(),
     );
 
     // Back past the front, which is the far end of the list.
     fireEvent.click(carousel.querySelector(`.${timeline.step}.${timeline.back}`)!);
     fireEvent.click(carousel.querySelector(`.${timeline.step}.${timeline.back}`)!);
     await waitFor(() =>
-      expect(carousel.querySelector(`.${timeline.pullRequest}`)).not.toBeNull(),
+      expect(carousel.querySelector(`.${timeline.stageList}`)).not.toBeNull(),
     );
   });
 
@@ -12883,11 +12990,11 @@ describe("the pinned carousel", () => {
     // arrow is pressed, and one of them is gone again a fifth of a second later.
     const leaving = deck.querySelector(`.${timeline.leaving}`);
     expect(leaving?.className).toContain(timeline.onward);
-    expect(leaving?.querySelector(`.${timeline.taskList}`)).not.toBeNull();
+    expect(leaving?.querySelector(`.${timeline.pullRequest}`)).not.toBeNull();
 
     const arriving = deck.querySelector(`.${timeline.arriving}`);
     expect(arriving?.className).toContain(timeline.onward);
-    expect(arriving?.querySelector(`.${timeline.stageList}`)).not.toBeNull();
+    expect(arriving?.querySelector(`.${timeline.taskList}`)).not.toBeNull();
 
     // And back the other way, which the pair say too.
     await waitFor(() => expect(deck.querySelector(`.${timeline.leaving}`)).toBeNull());
@@ -12899,7 +13006,7 @@ describe("the pinned carousel", () => {
 
     await waitFor(() => expect(deck.querySelector(`.${timeline.leaving}`)).toBeNull());
     expect(deck.querySelector(`.${timeline.arriving}`)).toBeNull();
-    expect(deck.querySelector(`.${timeline.taskList}`)).not.toBeNull();
+    expect(deck.querySelector(`.${timeline.pullRequest}`)).not.toBeNull();
   });
 
   it("turns the card on a swipe across it", async () => {
@@ -12911,35 +13018,43 @@ describe("the pinned carousel", () => {
     // Leftwards is onwards, the way a page turns.
     swipe(deck, 200, 200 - SWIPE);
     await waitFor(() =>
-      expect(deck.querySelector(`.${timeline.stageList}`)).not.toBeNull(),
+      expect(deck.querySelector(`.${timeline.taskList}`)).not.toBeNull(),
     );
 
     swipe(deck, 200, 200 + SWIPE);
     await waitFor(() =>
-      expect(deck.querySelector(`.${timeline.taskList}`)).not.toBeNull(),
+      expect(deck.querySelector(`.${timeline.pullRequest}`)).not.toBeNull(),
     );
 
     // A press that slid a little is still a press, and turns nothing.
     await waitFor(() => expect(deck.querySelector(`.${timeline.leaving}`)).toBeNull());
     swipe(deck, 200, 200 - (SWIPE - 1));
-    expect(deck.querySelector(`.${timeline.stageList}`)).toBeNull();
+    expect(deck.querySelector(`.${timeline.taskList}`)).toBeNull();
   });
 
   /// Which card the reader is put in front of: the one the work has stopped on,
-  /// which is what they opened the conversation to deal with.
+  /// which is what they opened the conversation to deal with. Only a pull
+  /// request can be one, so it only picks a card out where there is more than
+  /// one of those — a companion's over the work's own here.
   it("fronts the card the work is blocked on", async () => {
-    theWrapping({ pinned: ALL_THREE, blocked_on: OPENED.id });
+    theWrapping({
+      pinned: [...ALL_THREE, BESIDE_IT],
+      blocked_on: BESIDE_IT.PullRequest.id,
+    });
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
-    const pinned = await drawn(container, `.${timeline.pinned}`);
+    const repo = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.pullRequest} .${timeline.repo}`,
+    );
 
-    expect(pinned.querySelector(`.${timeline.pullRequest}`)).not.toBeNull();
-    expect(pinned.querySelector(`.${timeline.taskList}`)).toBeNull();
+    expect(repo.textContent).toBe("askance");
   });
 
   /// And with nothing stopping it, the fixed order — which is the order the
-  /// server hands them over in, and the order the work goes through them in.
-  it("otherwise fronts the first, which is the task list", async () => {
+  /// server hands them over in, the pull request leading it as the one of the
+  /// three with anything on it to answer.
+  it("otherwise fronts the first, which is the pull request", async () => {
     expect(WRAPPING.blocked_on).toBeNull();
 
     theWrapping({ pinned: ALL_THREE });
@@ -12947,19 +13062,20 @@ describe("the pinned carousel", () => {
 
     const pinned = await drawn(container, `.${timeline.pinned}`);
 
-    expect(pinned.querySelector(`.${timeline.taskList}`)).not.toBeNull();
+    expect(pinned.querySelector(`.${timeline.pullRequest}`)).not.toBeNull();
   });
 
-  /// And with no backlog to be first, the roadmap — the order is the server's,
-  /// which is the order the work goes through them in.
-  it("fronts the roadmap where there is no backlog before it", async () => {
+  /// And with no pull request to be first, the task list — the order is the
+  /// server's, and what is behind the pull request is the order the work goes
+  /// through the two lists in.
+  it("fronts the task list where there is no pull request before it", async () => {
     theWrapping({ pinned: ALL_THREE.slice(1) });
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
     const pinned = await drawn(container, `.${timeline.pinned}`);
 
-    expect(pinned.querySelector(`.${timeline.stageList}`)).not.toBeNull();
-    expect(pinned.querySelector(`.${timeline.pullRequest}`)).toBeNull();
+    expect(pinned.querySelector(`.${timeline.taskList}`)).not.toBeNull();
+    expect(pinned.querySelector(`.${timeline.stageList}`)).toBeNull();
   });
 
   /// One pinned card is not a carousel: there is nothing to turn to, and dots
@@ -12990,6 +13106,8 @@ describe("the pinned carousel", () => {
 
     const dots = carousel.querySelector(`.${timeline.dots}`)!;
     fireEvent.click(dots.querySelectorAll("button")[2]!);
+    await drawn(container, `.${timeline.pinned} .${timeline.stageList}`);
+    fireEvent.click(dots.querySelectorAll("button")[0]!);
 
     const opened = await drawn(container, `.${timeline.pinned} .${timeline.pullRequest}`);
     fireEvent.click(opened);
@@ -13082,6 +13200,42 @@ describe("a conversation that has ended", () => {
     const { container } = mount(`/conversations/${OPEN.id}`);
 
     expect((await standing(container)).word).toBe("Closed");
+  });
+
+  /// And the one thing a Cleanup leaves on the page: the word for what it took,
+  /// beside the word for where the work got to.
+  ///
+  /// A word rather than a banner, and only ever about a trim that has already
+  /// happened — nothing anywhere says one is coming.
+  it("names a trimmed conversation Trimmed beside its state", async () => {
+    theRecordedWith({
+      state: "Closed",
+      ready_to_grill: false,
+      archived: true,
+      trimmed: true,
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const line = await standing(container);
+
+    expect(line.word).toBe("Closed");
+    expect(line.trimmed).toBe("Trimmed");
+  });
+
+  /// And says nothing of the kind on one no sweep has reached, which is nearly
+  /// every conversation there is: the line is exactly what it was.
+  it("says nothing about trimming on one no cleanup has been through", async () => {
+    theRecordedWith({
+      state: "Closed",
+      ready_to_grill: false,
+      archived: true,
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const line = await standing(container);
+
+    expect(line.word).toBe("Closed");
+    expect(line.trimmed).toBeNull();
   });
 
   /// And a Draft is the third of them, for the other half of the same reason:
@@ -14276,5 +14430,133 @@ describe("the timeline following its bottom", () => {
       ).toHaveLength(record.length),
     );
     expect(scrolled.mock.calls.length).toBeGreaterThan(landed);
+  });
+});
+
+/// A Verkstead with no session to run: the state where a session would start,
+/// and no press that would start one.
+///
+/// The server says so on every conversation it sends — a Windows build has no
+/// terminal for an agent to work in — and this is the whole of what the page
+/// does about it. Asked here rather than on a Windows machine, which is the
+/// point of the fact being a value: the fixture says the server runs none, and
+/// what the page draws is drawn on whatever is running these tests.
+describe("a Verkstead that runs no sessions", () => {
+  /// The drafting conversation as such a server would send it.
+  const ABSENT: Partial<ConversationView> = { sessions: "NotOnWindowsYet" };
+
+  it("says so where the work would be started, and offers no press", async () => {
+    theWorkbenchWith(ABSENT);
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const under = await drawn(container, `.${composer.startGrilling}`);
+
+    expect(under.textContent).toContain(NO_SESSIONS);
+    expect(
+      under.querySelector(`.${composer.start}`),
+      "and no Start work to press, ready or not",
+    ).toBeNull();
+  });
+
+  /// And the press beside it, on the page a conversation started from the
+  /// abandoned-roadmaps notice opens on: the same sentence, in the place the
+  /// same press would have been.
+  it("says the same where a stage would be adopted, and offers no press", async () => {
+    theWorkbench(
+      whenever(
+        `/api/ui/conversations/${ADOPTING.id}`,
+        json({ ...ADOPTING, ...ABSENT }),
+      ),
+    );
+    const { container } = mount(`/conversations/${ADOPTING.id}`);
+
+    const panel = await drawn(container, `.${adoption.adoption}`);
+
+    expect(panel.textContent).toContain(NO_SESSIONS);
+    expect(screen.queryByRole("button", { name: "Adopt" })).toBeNull();
+  });
+
+  /// And Resume goes off the menu, on a conversation the server still says
+  /// there is driving to start again for: what the press works out is which
+  /// session should be running, and there are none.
+  it("offers no resume, on a conversation the server says is ready for one", async () => {
+    theGrillingStanding(ABSENT);
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const menu = await openActions(container);
+    await drawn(menu, `.${actions.close}`);
+
+    expect(GRILLING.ready_to_resume).toBe(true);
+    expect(menu.querySelector(`.${actions.resume}`)).toBeNull();
+    expect(
+      menu.querySelector(`.${actions.steer}`),
+      "and the steer row stays: done is still somewhere to steer into",
+    ).toBeTruthy();
+  });
+
+  /// The steer modal is the one place where some of what it offers still works.
+  /// Four of the five targets run a session and are held shut with the reason
+  /// above them; done runs nothing, and is the move this build can still make.
+  it("holds the steer shut on every target that runs, and says why", async () => {
+    theGrillingStanding(ABSENT, whenever(STEERING, OVER_NOTHING, "POST"));
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const modal = await openSteer(container);
+    const press = (await drawn(
+      modal,
+      `.${steerModal.steerButtons} .${steerModal.steer}`,
+    )) as HTMLButtonElement;
+
+    for (const target of ["Grilling", "Implementing"]) {
+      fireEvent.click(
+        await drawn(modal, `.${steerModal.steerTarget} input[value="${target}"]`),
+      );
+
+      await waitFor(() => expect(press.disabled).toBe(true));
+      expect(modal.textContent).toContain(NO_SESSIONS);
+    }
+
+    fireEvent.click(
+      await drawn(modal, `.${steerModal.steerTarget} input[value="Done"]`),
+    );
+
+    await waitFor(() => expect(press.disabled).toBe(false));
+    expect(
+      modal.textContent,
+      "and nothing is said about sessions where none would run",
+    ).not.toContain(NO_SESSIONS);
+  });
+
+  /// And every press that could still be made and refused says one thing.
+  ///
+  /// Five ways into a session and one answer: which press asked for one is not
+  /// something the human has to be told about, and five wordings of it would be
+  /// five people's guesses at the same sentence.
+  it("says one thing, whichever press asked for a session", () => {
+    expect(ADOPT_REFUSAL.NotOnWindowsYet).toBe(NO_SESSIONS);
+    expect(RESUME_REFUSAL.NotOnWindowsYet).toBe(NO_SESSIONS);
+    expect(STEER_REFUSAL.NotOnWindowsYet).toBe(NO_SESSIONS);
+    expect(RESOLVE_REFUSAL.NotOnWindowsYet).toBe(NO_SESSIONS);
+  });
+
+  /// And a start that was refused all the same — the page is only as fresh as
+  /// its last read, so a conversation that was drawn before the server said
+  /// anything about sessions still has a button to press.
+  it("answers a start that was refused with the same sentence", async () => {
+    theWorkbenchWith(
+      {},
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/grill`,
+        json("NotOnWindowsYet" satisfies GrillingStarted),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    fireEvent.click(
+      await drawn(container, `.${composer.startGrilling} .${composer.start}`),
+    );
+
+    await waitFor(() => screen.getByText(NO_SESSIONS));
   });
 });

@@ -8,10 +8,10 @@ use verkstead_store::{
     Account, Archiving, Closing, Edited, Event, Grilling, Lifecycle, Picked, ProfileFacts,
     RowState, Switched, Unarchiving, add_companion, adopting, archive_conversation, archived,
     close_conversation, conversation_branch, conversations, create_profile, follow_branch,
-    load_conversation, open_database, register_repo, rename_branch, save_brief, set_base_commit,
-    set_grilling_pairing, set_state, settle_naming, show_archived, showing_archived,
-    start_adoption, start_building, start_conversation, start_grilling, start_unnamed_conversation,
-    switch_repo, timeline, unarchive_conversation,
+    load_conversation, open_database, register_repo, reinvent_branch, rename_branch, save_brief,
+    set_base_commit, set_grilling_pairing, set_state, settle_naming, show_archived,
+    showing_archived, start_adoption, start_building, start_conversation, start_grilling,
+    start_unnamed_conversation, switch_repo, timeline, unarchive_conversation,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -507,6 +507,63 @@ async fn handing_the_branch_name_back_leaves_the_one_it_started_on() {
     let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
     assert_eq!(conversation.branch, "amber-kestrel");
     assert!(!conversation.branch_named);
+}
+
+/// Inventing another name replaces the prefill and leaves whose the name is
+/// alone: what went in is another name Verkstead invented, so the Conversation
+/// is still on one of its own and its first session still has one to pick.
+#[tokio::test]
+async fn inventing_another_name_replaces_the_one_the_conversation_started_on() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+    let id = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+
+    reinvent_branch(&pool, id, "hushed-otter").await.unwrap();
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(conversation.branch, "hushed-otter");
+    assert!(!conversation.branch_named);
+}
+
+/// And it does nothing at all where the human has settled a name. Theirs is not
+/// a name to go picking again behind them — a repository already holding it is
+/// something to tell them about instead.
+#[tokio::test]
+async fn inventing_another_name_leaves_a_name_the_human_settled() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo_id = repo(&pool, "verkstead").await;
+    let theirs = start_conversation(&pool, repo_id, "throttling")
+        .await
+        .unwrap()
+        .unwrap();
+    let typed = start_unnamed_conversation(&pool, repo_id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+
+    rename_branch(&pool, typed, Some("rate-limiting"))
+        .await
+        .unwrap();
+
+    for id in [theirs, typed] {
+        reinvent_branch(&pool, id, "hushed-otter").await.unwrap();
+    }
+
+    let conversation = load_conversation(&pool, theirs).await.unwrap().unwrap();
+    assert_eq!(conversation.branch, "throttling");
+
+    let conversation = load_conversation(&pool, typed).await.unwrap().unwrap();
+    assert_eq!(conversation.branch, "rate-limiting");
+    assert!(conversation.branch_named);
+
+    // Including the prefill underneath it, which is what stands if that name is
+    // ever handed back.
+    rename_branch(&pool, typed, None).await.unwrap();
+    let conversation = load_conversation(&pool, typed).await.unwrap().unwrap();
+    assert_eq!(conversation.branch, "amber-kestrel");
 }
 
 /// Taking the override away puts the Conversation back on the rule, rather than

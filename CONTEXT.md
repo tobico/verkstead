@@ -14,9 +14,18 @@ still holds word for word, because the asking half is unchanged.
 **Watched Path**:
 A directory Verkstead is permitted to operate inside, said either in the
 environment at installation or in the workbench settings, the boundary being
-the union of the two. A security boundary rather than a convenience: any
-filesystem operation on a path outside every Watched Path is refused, and Repos
-are registered only from within one. The installation's own are resolved once
+the union of the two. A security boundary rather than a convenience: nothing
+outside every Watched Path is written, worked in or registered — a Repo is
+registered only from within one, and so is the account an Agent Profile names.
+**Reading the names in a directory is the one thing it does not bound**, and
+deliberately: the workbench's path fields browse the filesystem into
+themselves, and the fields whose values the boundary says nothing about — a
+Watched Path being added, a Sandbox Configuration bind — browse anywhere the
+server can read. What that discloses is a listing of names to the one human the
+tailnet is the perimeter for, and a field that could not reach the directory it
+is about to be pointed at would be a field nobody could fill in. The fields
+whose values *are* bounded browse bounded, by the same admission their save
+makes. The installation's own are resolved once
 at startup and a missing one refuses to start; the settings' own are re-read
 whenever an admission is decided and never refuse anything — one that will not
 resolve covers nothing, with a line in the log — so a bare binary comes up
@@ -83,6 +92,22 @@ than another being invented. Two drafts against one Repo both reading *Draft*
 beside the same Repo name is what two drafts are: they are few, and they are
 short-lived.
 
+**An invented name is a prefill until the work starts, and only then a branch.**
+Which is where it is made to be free: at the moment the branch is cut it is
+checked against every repository it is about to be cut in — the Conversation's
+own and each companion mirroring it — and where one of them already answers to
+that name, another is invented out of the same words and that is what the work
+goes on. What a repository answers to is its own branches and its remotes' both:
+a name only origin holds can be cut locally, and the push behind it would be
+into somebody's branch. A branch outlives the worktree it was worked in, so a
+Repo worked in for a while holds plenty of them, and two Conversations landing on
+one of a thousand names is a matter of when rather than whether. Nothing is
+reported, because nothing had been drawn: whose the name is does not change with
+it, and the first session still has one to replace. **A name the human typed is
+refused instead** — that one they chose and meant, so a branch of somebody else's
+work under it is something to tell them about rather than something to pick
+around.
+
 **And where nobody has named it, the work's first session is asked to.** The
 press that starts the work leaves the naming to the session it starts — the
 grilling one, the ungrilled build one, or the one a steered Draft starts — and
@@ -143,21 +168,27 @@ The one directory Verkstead keeps what it makes in — the database, at
 `verkstead.db` inside it, the Worktrees, the installed Skills, the handoff
 directories, the settings files it is told the human's credentials and identity
 in, and whatever later stages need to put somewhere. Said once, as
-`--data-dir`, and the working directory when nothing says otherwise; everything
-in it is named by Verkstead rather than by whoever started it. Not a Watched
-Path and not the same kind of thing: a Watched Path bounds what the human may
-point Verkstead at, and this is Verkstead's own.
+`--data-dir`, and the platform's own place for it when nothing says otherwise —
+`~/.local/share/verkstead` on Linux, `~/Library/Application Support/Verkstead`
+on macOS, `%APPDATA%\Verkstead` on Windows, whichever binary was started, so
+that a Verkstead launched from an icon finds what one launched from a shell
+left. A run out of a checkout asks for the old behaviour by name, with
+`--data-dir .`. Everything in it is named by Verkstead rather than by whoever
+started it. Not a Watched Path and not the same kind of thing: a Watched Path
+bounds what the human may point Verkstead at, and this is Verkstead's own. The
+**Build Cache** and the **Log Directory** are Verkstead's own too, and neither
+of them is in here.
 _Avoid_: state directory, work dir, scratch space, cache
 
 **Sandbox**:
 What a session runs inside: its Conversation's Worktree, the Repo's git
 directory and the Conversation's handoff directory writable, the Agent
-Profile's pair at `~/.claude` and `~/.claude.json`, the system, the Skills at
-`/verkstead/skills` and the Verkstead executable read-only, and nothing else of
-the machine at all — not even the checkout the Worktree was made from. An empty
-directory read-only over `~/.claude/skills` goes with the Skills' own mount:
-the account's are hidden rather than merged with, and a mount at a path no
-backend owns hides nothing by itself. Each Companion Repo the
+Profile's pair at `~/.claude` and `~/.claude.json`, the system, the Skills and
+the Verkstead executable read-only in a directory of Verkstead's own, and
+nothing else of the machine at all — not even the checkout the Worktree was
+made from. Nothing at all stands where the account's own skills would be found:
+they are hidden rather than merged with, and where the mechanism has no mount
+to hide one with it refuses the path instead. Each Companion Repo the
 Conversation was configured with is inside as well: its Worktree and the git
 directory behind it, both at that companion's own mode, so a read-only one is
 read-only through both. The **Build Cache** is inside as well, writable, with
@@ -196,8 +227,12 @@ Conversation. The server's own feature rather than Sandbox Configuration: it
 makes the directory, it resolves the `sccache` it compiles through off its own
 environment, and it is **on with nothing configured** — a human should never
 have a worse experience for not having checked the settings. Where it is is the
-installer's (`--build-cache-dir`, else the XDG cache directory; the packaged
-unit says `/var/cache/verkstead`); whether a Sandbox gets one at all, and how
+installer's (`--build-cache-dir`, else the platform's own place for one: the
+XDG cache directory on both Unixes — `~/.cache/verkstead` where nothing says
+otherwise — and `%LOCALAPPDATA%\Verkstead\Cache` on Windows, the local rather
+than the roaming application data because a compiled crate follows nobody
+between machines. The packaged unit says `/var/cache/verkstead`); whether a
+Sandbox gets one at all, and how
 big its compiled half may grow, is the human's, in the workbench settings. The
 one control there that only ever *closes* a hole — the **Sandbox
 Configuration** beside it opens them, and does so only for what somebody typed.
@@ -218,6 +253,50 @@ and the Build Cache, and nothing else Verkstead keeps: `rustc` runs proc macros
 while it compiles, so the database and the settings files stay outside its
 reach.
 _Avoid_: daemon, sccache daemon, build server, compiler service
+
+**Log Directory**:
+The other directory of Verkstead's own outside the Data Directory: where the
+desktop app writes the server's log file, because the stdout of a tray app
+launched from an icon goes nowhere and a file has to have somewhere to be.
+Where it is is the platform's and nothing says otherwise —
+`~/.local/state/verkstead` on Linux (`$XDG_STATE_HOME` where that is set to an
+absolute path), `~/Library/Logs/Verkstead` on macOS, `%LOCALAPPDATA%\Verkstead`
+on Windows, the local rather than the roaming application data because a log
+file follows nobody between machines. The three platforms disagree about what
+such a directory even *is*, which is why it is named here for what it is **for**
+rather than for what any one of them calls it. **The desktop app makes it**,
+as the Build Cache makes its own where it uses it, and what it holds is the log
+and the log before it: `verkstead.log`, rolled over to `verkstead.log.1` at a
+few megabytes and kept no further back than that, so a machine that has been
+running Verkstead for months is not handed a log nobody can open. **View Logs**
+on the tray menu is what opens it. The server itself keeps logging to stdout
+wherever it was started from — where the events go is the starting binary's
+call — and `RUST_LOG` filters the file exactly as it filters that stdout.
+**A machine that names nowhere to put one is not refused**: it gets no file, the
+app says so and logs to standard error instead, and the menu item says the same
+rather than opening nothing — a Verkstead with nowhere for a log file has only
+lost the log, where one with nowhere for a Data Directory has nothing to serve.
+Not the Data Directory and not settable beside it: what `--data-dir` says has
+nothing to do with where this is.
+_Avoid_: state directory, logs dir, log file (that's what goes *in* it), cache
+
+**Startup Registration**:
+What says Verkstead comes up when the machine's desktop session does, and what
+**Launch on Startup** on the tray menu ticks and unticks. The platform's own,
+and the platform's alone: an XDG autostart entry named for the app id on Linux
+(`~/.config/autostart/net.tobico.Verkstead.desktop`), the Run key on Windows, a
+launch agent on macOS. **It is the state rather than a copy of it** — the box
+is drawn from reading it, checking writes it and unchecking removes it, and
+neither settings file has an entry for this or ever will: a human who turns it
+off with their desktop's own settings has unchecked the box, and Verkstead
+agrees with them rather than argues. **Every launch rewrites it while it is
+there**, with the path of the executable that is running, so a binary that was
+moved — downloaded again elsewhere, an AppImage put somewhere else — heals its
+own registration the next time it is started by hand; a machine that never
+asked for one is left alone. What it starts is an ordinary launch of the app
+with the browser left alone, because a login is not a moment to be handed a
+browser window.
+_Avoid_: autostart setting, startup preference, run at login option
 
 **Companion Repo**:
 Another registered Repo a Conversation is given to work alongside its own,
@@ -299,13 +378,14 @@ _Avoid_: submodule, dependency, linked repo, sibling checkout, secondary repo
 One of the workflows Verkstead runs its sessions by — grilling, implementing,
 breaking down, working a Step and following up now, the rest as the stages that
 need them arrive. Verkstead's own: shipped inside the binary, installed under
-the Data Directory at startup and mounted read-only at `/verkstead/skills` — a
-path no backend owns, beside the Verkstead executable's — so a session's
-behaviour is the product's rather than whatever the machine or the account
-happens to keep. What the account keeps is hidden by an empty directory bound
-over `~/.claude/skills`, which is the mounting the Skills used to do there. A
-session is put inside one by the prompt it is started on, which names the Skill
-above the Brief.
+the Data Directory at startup and read-only inside at a path no backend owns,
+beside the Verkstead executable's — so a session's behaviour is the product's
+rather than whatever the machine or the account happens to keep. That path is
+`/verkstead/skills` where the sandbox can mount one there and the directory
+they were installed in where it cannot, which is the whole of the difference: a
+session is put inside a Skill by the prompt it is started on, which names it
+above the Brief, and what a prompt names is where the file really is. What the
+account keeps under its own skills is not reachable at all.
 _Avoid_: prompt, instructions, plugin, workflow file
 
 **Brief**:
@@ -407,7 +487,10 @@ _Avoid_: feed, log, history, activity stream
 One entry in a Timeline — a Brief, agent output, a Question Set, a Handoff, a
 commit, a task list, a stage list, a PR, a Notice. Each shows a summary in the
 Timeline and its full self in the details pane. Task lists, stage lists and PRs
-are **pinned**: a fixed set, with no manual pin or unpin.
+are **pinned**: a fixed set, with no manual pin or unpin. Where more than one is
+pinned they are drawn in one order — the pull request, then the task list, then
+the roadmap — the pull request leading as the only one of the three with
+anything on it to answer.
 _Avoid_: item, record, message, step
 
 **Share**:
@@ -1451,8 +1534,12 @@ in one press, for a Conversation the human is finished with and finished
 looking at; it refuses what closing refuses and nothing more.
 
 Reversible, which is what tells it from **Locked**: nothing is confirmed,
-because nothing is lost. The two words are not each other's — one is a Question
-Set settling for good, this is a Conversation leaving a list.
+because the archiving itself loses nothing. The two words are not each other's
+— one is a Question Set settling for good, this is a Conversation leaving a
+list. What archiving does start is the Cleanup's clocks — a **Trimmed**
+Conversation some days on, a **Deleted** one later where the settings turn
+that on — and unarchiving stops them; what a cleanup has taken by then stays
+taken, which is those two entries' story rather than this one's.
 
 Two ways back, and they are different things. **Unarchive** takes it out for
 good, and the Conversation is on the sidebar again as it was. **Show archived
@@ -1463,6 +1550,32 @@ beside the archivings and read back on every load.
 _Avoid_: locked (the Question Set word), deleted, hidden, closed (the state
 being archived, not the archiving), done, restore or unhide (the word is
 unarchive)
+
+**Trimmed**:
+An **Archived** Conversation the Cleanup has taken the bulk out of: the full
+agent output, the transcripts and the session records are gone, while every
+card on the Timeline stays — the Brief, the Question Sets, the commit
+summaries, the pull request — so the record still reads whole, and a Share of
+it is the Share it always was, a Share never having included what trimming
+takes. Named on the Conversation's page, and a card whose drill-down is gone
+says so rather than breaking; nothing anywhere announces a trim to come, only
+one that has happened. On by default, three days after the archiving, with the
+switch and the days in the settings' Cleanup section; a fresh archiving makes
+a Conversation trimmable again, so one steered back to life and put away again
+has its new bulk taken too.
+_Avoid_: pruned, compacted, cleaned (the sweep's word, not the state's)
+
+**Deleted**:
+A Conversation the Cleanup has removed for good: every row it owned, Timeline
+and all, gone from the sidebar even under Show archived, its URL answering
+plainly that there is no such conversation. The one thing in Verkstead that
+forgets, so it ships off — thirty days after the archiving where the settings
+turn it on, and never anything the human did not archive first. It touches
+nothing outside Verkstead's own record: the git branch stays, because a branch
+is the repository's and may hold work worth reading, and a published Share
+stays published, because publishing it was deliberate.
+_Avoid_: purged, erased, removed, archived (deletion is the end of an archived
+Conversation, not a kind of archiving)
 
 **Unseen**:
 A Conversation Verkstead has told the human about and they have not looked at

@@ -37,7 +37,10 @@
 //! behind a deleted directory is the very thing this button is for. A closed
 //! Conversation kept its branch and lost its Worktree, so it gets one back on
 //! the branch. And a Draft has neither, so the branch is cut where a grill start
-//! would have cut it: off the base the human fixed, resolved at this moment.
+//! would have cut it: off the base the human fixed, resolved at this moment, and
+//! under a name settled the way a grill start settles one — a name Verkstead
+//! invented that some repository already answers to is swapped for a free one
+//! rather than worked over, that branch being somebody else's.
 //!
 //! **Every companion checkout the record says is missing is made again too**,
 //! beside the Conversation's own, because the two sources with nothing on disk
@@ -285,7 +288,20 @@ pub(crate) async fn submit(
         })
         .collect();
 
-    let said = announced(&added, &opened, &conversation.branch);
+    // The name the work is on, which this steer settled: the one the
+    // Conversation was carrying, or another invented one where a repository
+    // already answered to that. The record catches up before anything is
+    // written against it — see [`crate::conversations::name_to_cut`].
+    let branch = made
+        .branch
+        .clone()
+        .unwrap_or_else(|| conversation.branch.clone());
+
+    if branch != conversation.branch {
+        store::reinvent_branch(&state.pool, conversation_id, &branch).await?;
+    }
+
+    let said = announced(&added, &opened, &branch);
 
     let settling = settling(&conversation, submission);
 
@@ -454,6 +470,17 @@ async fn refusal(
     conversation: &Conversation,
     submission: &SteerSubmission,
 ) -> anyhow::Result<Option<ConversationSteered>> {
+    // A target something runs in, on a build that runs no sessions: four of the
+    // five, Done being the one nothing is launched into. First, because it is
+    // the one refusal here that is about the machine rather than about this
+    // Conversation — and in front of everything the steer makes, as a grill
+    // start's own is. See [`crate::sessions::run_on`], and [`roles`], which is
+    // what says a target runs something: what a session would run under is
+    // exactly what a target with no roles has none of.
+    if state.sessions.here().absent() && !roles(submission.target).is_empty() {
+        return Ok(Some(ConversationSteered::NotOnWindowsYet));
+    }
+
     // A wrapping Conversation is defined by the pull request under it, so a steer
     // into Wrapping is a move onto one that is already there — and a follow-up is
     // the human taking something up about work that is already pushed, so it
@@ -1269,7 +1296,12 @@ enum Joining {
 ///   drafting or the Repo's default branch where they fixed none — resolved at
 ///   this moment, exactly as [`crate::conversations::start_grilling`] resolves
 ///   it, because what they picked is a branch and what they meant by picking it
-///   is wherever it stands now.
+///   is wherever it stands now. And under a name settled the same way: a Draft
+///   has never had a branch cut, so a name Verkstead invented that a repository
+///   already answers to is another Conversation's or a stranger's rather than
+///   this one's own coming back, and it is swapped for a free one — see
+///   [`crate::conversations::name_to_cut`]. Which is what leaves the *Kept*
+///   reading above to the Conversations it was written for.
 ///
 /// Which is why the path is chosen here where the record holds none: it is
 /// chosen the way a first grilling chooses one, and this is a first grilling for
@@ -1307,19 +1339,25 @@ async fn plan(
         return Ok(Planning::Ready(Planned::default()));
     }
 
-    let path = conversation.worktree.clone().unwrap_or_else(|| {
-        crate::worktrees::worktree_path(
-            &state.data_dir,
-            conversation.id,
-            &conversation.repo.name,
-            &conversation.branch,
-        )
-    });
-
+    let worked_in = conversation.worktree.clone();
     let repo = conversation.repo.path.clone();
+    let repo_name = conversation.repo.name.clone();
     let branch = conversation.branch.clone();
     let id = conversation.id;
     let data_dir = state.data_dir.clone();
+
+    // Whether the name this steer would work under is one it may pick again.
+    //
+    // A Draft has never had a branch cut, so a repository already holding that
+    // name is holding somebody else's work rather than this Conversation's own
+    // coming back — and a name Verkstead invented is one nobody chose, so it is
+    // swapped for a free one exactly as a grill start swaps it. See
+    // [`crate::conversations::name_to_cut`], which is the same choosing.
+    //
+    // Everything else steered through here has worked before: picking its own
+    // branch back up is the whole point of this path, and the name on it is
+    // either the human's or the one a session settled.
+    let prefill = conversation.state == Lifecycle::Draft && !conversation.branch_named;
 
     // What a branch that has never been cut comes off, named rather than
     // resolved: a drafting Conversation's column holds the *branch* the human
@@ -1362,11 +1400,31 @@ async fn plan(
         )
         .collect();
 
+    // Every repository the Conversation's own name would be cut in, for the
+    // choosing below: read off the checkouts this steer is about to make, so a
+    // companion mirroring that name is asked about it too.
+    let cut_in = crate::conversations::cut_in(
+        &repo,
+        &checking_out
+            .iter()
+            .map(|(_, companion)| companion.clone())
+            .collect::<Vec<store::Companion>>(),
+    );
+
     let planned = tokio::task::spawn_blocking({
-        let path = path.clone();
         let branch = branch.clone();
 
         move || {
+            // The name before anything else, the directory being named for it.
+            let branch = match prefill {
+                true => crate::conversations::name_to_cut(id, branch, &cut_in),
+                false => branch,
+            };
+
+            let path = worked_in.unwrap_or_else(|| {
+                crate::worktrees::worktree_path(&data_dir, id, &repo_name, &branch)
+            });
+
             let mut checkouts = Vec::new();
             let mut base_commit = None;
 
@@ -1414,6 +1472,7 @@ async fn plan(
                 worktree: Some(path),
                 base_commit,
                 checkouts,
+                branch: Some(branch),
             })
         }
     })
@@ -1575,6 +1634,7 @@ async fn make(planned: Planned) -> anyhow::Result<Making> {
     let Planned {
         worktree,
         base_commit,
+        branch,
         checkouts,
     } = planned;
 
@@ -1640,6 +1700,7 @@ async fn make(planned: Planned) -> anyhow::Result<Making> {
         Ok(checkouts) => Making::Ready(Made {
             worktree,
             base_commit,
+            branch,
             checkouts,
         }),
         Err(refusal) => Making::Refused(refusal),
@@ -1774,6 +1835,12 @@ struct Planned {
     /// What its branch will be cut from, where this steer is what cuts it.
     base_commit: Option<String>,
 
+    /// The name the work will be on, where this steer is what settles
+    /// it — the name the Conversation was carrying, or another invented
+    /// one where a repository already answered to that. `None` where
+    /// nothing was planned at all, a steer into Done settling nothing.
+    branch: Option<String>,
+
     /// Every checkout to make, the Conversation's own first.
     checkouts: Vec<Checkout>,
 }
@@ -1800,6 +1867,10 @@ struct Made {
     /// Conversation that had a branch already: what it branched from was
     /// resolved once, and it is not resolved again.
     base_commit: Option<String>,
+
+    /// The name the work is on, where this steer settled it — see
+    /// [`Planned::branch`].
+    branch: Option<String>,
 
     /// And where each companion's checkout went.
     checkouts: Vec<store::CompanionWorktree>,

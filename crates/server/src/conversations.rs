@@ -877,6 +877,17 @@ pub(crate) async fn rename_companion_branch(
 /// reaches this any more — a second round opens where it is steered, past
 /// drafting already — so it is asked of the record rather than assumed away.
 ///
+/// **And the branch name is settled here, not when the Conversation was
+/// started.** A name Verkstead invented is a prefill: it is drawn nowhere, the
+/// human never saw it, and by the time the branch is cut the repository may
+/// well have one by that name already — an earlier Conversation's, since a
+/// branch outlives the worktree it was worked in. So a taken prefill is
+/// replaced with another free name rather than refused — free in every
+/// repository it is about to be cut in at once, and free of what their remotes
+/// hold as well as their own branches — and the record follows what was cut.
+/// What *is* refused is a name the human typed on a branch that is already
+/// there: that one they chose and meant, and it is theirs to think again about.
+///
 /// **Every companion repo is checked out here too**, and every one of them is
 /// asked the same four questions in the same order and refused by the same
 /// names — with the repository said, because *which one* is the whole of what
@@ -906,6 +917,17 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
 
     if conversation.state != store::Lifecycle::Draft {
         return Ok(GrillingStarted::NotDrafting);
+    }
+
+    // And in front of everything this press makes, on a build that runs no
+    // sessions: the branch, the worktree and the frozen Brief are what a session
+    // is started *into*, and making all three for a launch that cannot happen
+    // would leave the human a Conversation grilling with nothing grilling it.
+    // The pane draws the state rather than the button — see
+    // [`crate::sessions::run_on`] — and this is that rule asked again on
+    // arrival.
+    if state.sessions.here().absent() {
+        return Ok(GrillingStarted::NotOnWindowsYet);
     }
 
     // Read as rows rather than judged off the ids, which is the same reading the
@@ -942,22 +964,26 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     let default = conversation.repo.default_branch.clone();
 
     let repo = conversation.repo.path.clone();
+    let repo_name = conversation.repo.name.clone();
     let branch = conversation.branch.clone();
+
+    // Whether that name is one somebody chose, which is what decides whether a
+    // repository already holding it is a refusal or a reason to pick again —
+    // see the choosing below.
+    let settled = conversation.branch_named;
     let companions = conversation.companions.clone();
     let data_dir = state.data_dir.clone();
 
     // Where the work goes on. A Conversation that already has one works where it
     // has always worked and there is nothing here to make; one that has none is
-    // given the name a first grilling chooses.
+    // given a directory named for its branch, chosen below rather than here
+    // because the branch itself is not settled until the repository has been
+    // asked about the name.
     let worked_in = conversation.worktree.clone();
-    let path = worked_in.clone().unwrap_or_else(|| {
-        worktrees::worktree_path(&state.data_dir, id, &conversation.repo.name, &branch)
-    });
 
     // The filesystem and git halves together, off the runtime: a worktree of a
     // large repository is not a quick call, and every part of this blocks.
     let made = tokio::task::spawn_blocking({
-        let path = path.clone();
         let branch = branch.clone();
         let checkouts = state.checkouts.clone();
         move || {
@@ -967,11 +993,11 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
             // happen, and a base that was frozen when the work started is not
             // something a fetch could freshen. Its companions were checked out
             // with it and are where they were left.
-            if worked_in.is_some() {
+            if let Some(path) = worked_in {
                 let named = picked.unwrap_or(default);
 
                 return worktrees::resolve(&repo, &named)
-                    .map(|commit| (commit, Vec::new(), None))
+                    .map(|commit| (commit, path, branch, Vec::new(), None))
                     .ok_or(GrillingStarted::NoBaseCommit);
             }
 
@@ -1002,9 +1028,26 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
                 return Err(GrillingStarted::NoBaseCommit);
             };
 
+            // And the name the work is cut on. A name Verkstead invented is
+            // nobody's — a prefill drawn nowhere, which the human never saw and
+            // could not have meant — so a repository that already has a branch
+            // by it is a reason to invent another rather than a reason to stop
+            // the work. Asked after the fetch, so that what the remotes hold is
+            // as fresh as the remotes are.
+            let branch = match settled {
+                true => branch,
+                false => name_to_cut(id, branch, &cut_in(&repo, &companions)),
+            };
+
+            // Which leaves the refusal to the case it was written for: a name
+            // somebody typed, on a branch somebody's work is already on. That
+            // one is theirs to think again about, and taking it over would be
+            // Verkstead writing into work it did not start.
             if worktrees::branch_exists(&repo, &branch) {
                 return Err(GrillingStarted::BranchExists);
             }
+
+            let path = worktrees::worktree_path(&data_dir, id, &repo_name, &branch);
 
             // The Conversation's own checkout is the first of the list, and
             // every companion asks its way on to the end of it. Nothing is made
@@ -1012,7 +1055,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
             let mut planned = vec![Checkout {
                 companion: None,
                 repo,
-                path,
+                path: path.clone(),
                 branch: Some(branch.clone()),
                 commit: commit.clone(),
             }];
@@ -1041,15 +1084,22 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
 
             make(&planned).map_err(Unmade::grilling)?;
 
-            Ok((commit, recorded(&planned), Some(making)))
+            Ok((commit, path, branch, recorded(&planned), Some(making)))
         }
     })
     .await?;
 
-    let (commit, checkouts, making) = match made {
+    let (commit, path, cut, checkouts, making) = match made {
         Ok(made) => made,
         Err(refusal) => return Ok(refusal),
     };
+
+    // The record catches up with the name the branch was actually cut on, which
+    // is the name it was carrying wherever that one was free — which is almost
+    // always, and always for a name the human typed.
+    if cut != branch {
+        store::reinvent_branch(pool, id, &cut).await?;
+    }
 
     let moved = match grilled {
         true => store::start_grilling(pool, id, &commit, &path, &checkouts).await?,
@@ -1112,15 +1162,13 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // bundled grilling skill: a sandbox has no global `CLAUDE.md` to say what a
     // session is for, so the prompt is where it is said — see [`crate::skills`].
     if let Some(pairing) = conversation.grilling_pairing.pairing().cloned()
+        && let Some(prompt) = state
+            .sessions
+            .skills()
+            .map(|skills| skills::grilling(skills, &brief))
         && let Err(error) = state
             .sessions
-            .start(
-                pool,
-                &state.nudges,
-                &conversation,
-                &pairing,
-                &skills::grilling(&brief),
-            )
+            .start(pool, &state.nudges, &conversation, &pairing, &prompt)
             .await
     {
         tracing::error!(error = ?error, conversation_id = id, "a grilling session could not be started");
@@ -1422,6 +1470,14 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // one.
     if conversation.worktree.is_some() {
         return Ok(Adopted::NotDrafting);
+    }
+
+    // And the same stand-down the press beside this one makes, in the same place
+    // and for the same reason: what adopting makes is where a session works, and
+    // a stage taken up on a build that runs none is a stage nothing will start
+    // on. See [`start_grilling`].
+    if state.sessions.here().absent() {
+        return Ok(Adopted::NotOnWindowsYet);
     }
 
     // The one thing about the roadmap that is Verkstead's, and the whole of what
@@ -2114,40 +2170,127 @@ fn is_branch_name(branch: &str) -> bool {
         .is_some()
 }
 
+/// Colours, weather and temper — words that pair with anything below and carry
+/// no meaning about the work, so a name that is left as it is never says
+/// something untrue about the branch.
+const QUALITIES: [&str; 32] = [
+    "amber", "ashen", "autumn", "brisk", "cobalt", "copper", "crisp", "dusky", "eager", "ember",
+    "flint", "frosted", "gilded", "hushed", "indigo", "ivory", "lucid", "mellow", "misty",
+    "nimble", "ochre", "opal", "quiet", "rustic", "sable", "scarlet", "slate", "sunlit", "teal",
+    "umber", "verdant", "wistful",
+];
+
+/// Birds, weather and landscape, for the same reason.
+const THINGS: [&str; 32] = [
+    "anchor", "beacon", "bramble", "cedar", "cinder", "coppice", "curlew", "delta", "eddy",
+    "fathom", "gable", "harbour", "heron", "kestrel", "lantern", "meadow", "orchard", "otter",
+    "pennant", "quarry", "ridge", "rookery", "sable", "shale", "sparrow", "thicket", "thistle",
+    "tundra", "vale", "willow", "wren", "zephyr",
+];
+
+/// How many names the two lists spell between them, which is how far
+/// [`free_branch_name`] walks before it gives up on a plain pair.
+const PAIRS: u64 = QUALITIES.len() as u64 * THINGS.len() as u64;
+
+/// The pair of words at `nth`, counted through every combination the two lists
+/// hold and wrapping round at the end of them.
+///
+/// One number rather than two, so that a walk from anywhere reaches all of them:
+/// the qualities turn over first and the things once per lap, and `PAIRS` steps
+/// from any starting point is every name there is.
+fn pair(nth: u64) -> String {
+    let quality = QUALITIES[(nth % QUALITIES.len() as u64) as usize];
+    let thing = THINGS[((nth / QUALITIES.len() as u64) % THINGS.len() as u64) as usize];
+
+    format!("{quality}-{thing}")
+}
+
 /// A branch name to start a Conversation under, until the human names it
 /// themselves.
 ///
 /// Two words rather than a hash: it is a branch name, so it is going to be typed
 /// and read aloud, and the whole point of prefilling one is that the human need
 /// not stop and think of anything before they start writing the brief.
+///
+/// Nothing is asked of any repository here. A Draft's branch is a prefill that
+/// is drawn nowhere and cut nowhere, so the moment the name has to be free is
+/// the moment the branch is made, and that moment is [`free_branch_name`]'s.
 fn branch_name() -> String {
-    /// Colours, weather and temper — words that pair with anything below and
-    /// carry no meaning about the work, so a name that is left as it is never
-    /// says something untrue about the branch.
-    const QUALITIES: [&str; 32] = [
-        "amber", "ashen", "autumn", "brisk", "cobalt", "copper", "crisp", "dusky", "eager",
-        "ember", "flint", "frosted", "gilded", "hushed", "indigo", "ivory", "lucid", "mellow",
-        "misty", "nimble", "ochre", "opal", "quiet", "rustic", "sable", "scarlet", "slate",
-        "sunlit", "teal", "umber", "verdant", "wistful",
-    ];
-
-    /// Birds, weather and landscape, for the same reason.
-    const THINGS: [&str; 32] = [
-        "anchor", "beacon", "bramble", "cedar", "cinder", "coppice", "curlew", "delta", "eddy",
-        "fathom", "gable", "harbour", "heron", "kestrel", "lantern", "meadow", "orchard", "otter",
-        "pennant", "quarry", "ridge", "rookery", "sable", "shale", "sparrow", "thicket", "thistle",
-        "tundra", "vale", "willow", "wren", "zephyr",
-    ];
-
     // A generator that could not answer is not a reason to refuse to start a
     // Conversation: the name is a prefill the human is free to replace, so an
     // unlucky machine gets the first pair rather than an error.
+    pair(getrandom::u64().unwrap_or(0))
+}
+
+/// Every repository a Conversation's own branch name is about to be cut in: its
+/// Repo, and each companion mirroring that name.
+///
+/// A companion with a name of its own is not one of them — that name is the
+/// human's and does not move with this one, so a repository holding it is a
+/// refusal about that companion rather than a reason to pick another name here.
+pub(crate) fn cut_in(repo: &Path, companions: &[store::Companion]) -> Vec<PathBuf> {
+    std::iter::once(repo.to_path_buf())
+        .chain(
+            companions
+                .iter()
+                .filter(|companion| companion.mirrors())
+                .map(|companion| companion.repo.path.clone()),
+        )
+        .collect()
+}
+
+/// The name to cut a Conversation's branch under, where the name it is carrying
+/// is one Verkstead invented.
+///
+/// `branch` itself wherever nothing in `repos` answers to it, which is almost
+/// always, and another invented name where something does — see
+/// [`free_branch_name`]. What each repository answers to is read once and whole:
+/// its own branches and its remotes' both — see [`worktrees::cut_names`].
+///
+/// Both starts that cut a branch on an invented name come through here, and only
+/// those: a name the human typed is refused on a repository that already has it
+/// rather than picked around, that name being theirs and chosen.
+pub(crate) fn name_to_cut(id: i64, branch: String, repos: &[PathBuf]) -> String {
+    let taken: std::collections::HashSet<String> = repos
+        .iter()
+        .flat_map(|repo| worktrees::cut_names(repo))
+        .collect();
+
+    match taken.contains(&branch) {
+        false => branch,
+        true => free_branch_name(id, |name| !taken.contains(name)),
+    }
+}
+/// A name for the branch a start is about to cut, where the one the Conversation
+/// has been carrying is taken.
+///
+/// `free` is asked of every candidate, and it answers for every repository the
+/// name is about to be cut in — the Conversation's own and each companion
+/// mirroring it. A name free in one of them and taken in another is not a name
+/// this start can use.
+///
+/// Every pair is tried, from a random one round to itself, so this reaches the
+/// end empty-handed only where those repositories hold all thousand of them
+/// between them. What stands behind that is the Conversation's id, which nothing
+/// outside this Conversation collides with — and then a count, for the reason
+/// [`worktrees::unclaimed_path`] carries one.
+fn free_branch_name(id: i64, free: impl Fn(&str) -> bool) -> String {
     let picked = getrandom::u64().unwrap_or(0);
 
-    let quality = QUALITIES[(picked % QUALITIES.len() as u64) as usize];
-    let thing = THINGS[((picked / QUALITIES.len() as u64) % THINGS.len() as u64) as usize];
+    let paired = (0..PAIRS)
+        .map(|nth| pair(picked.wrapping_add(nth)))
+        .find(|name| free(name));
 
-    format!("{quality}-{thing}")
+    if let Some(name) = paired {
+        return name;
+    }
+
+    let stem = pair(picked);
+
+    std::iter::once(format!("{stem}-{id}"))
+        .chain((2..).map(|nth| format!("{stem}-{id}-{nth}")))
+        .find(|name| free(name))
+        .expect("the count is unbounded, so some name is free")
 }
 
 #[cfg(test)]
@@ -2173,6 +2316,49 @@ mod tests {
         assert!(name.chars().all(|c| c.is_ascii_lowercase() || c == '-'));
     }
 
+    /// The property the whole of this turns on: the pairs are names, not
+    /// samples of one. A word repeated in a list would quietly shrink the space
+    /// a start picks from, and the smaller that space is the more often two
+    /// Conversations of one Repo are handed the same branch.
+    #[test]
+    fn the_pairs_are_a_thousand_names_and_no_two_the_same() {
+        let names: std::collections::HashSet<String> = (0..PAIRS).map(pair).collect();
+
+        assert_eq!(names.len() as u64, PAIRS);
+    }
+
+    /// A name for a repository that already holds the one the Conversation was
+    /// carrying: another pair, and one that repository does not have.
+    #[test]
+    fn a_taken_name_is_replaced_with_one_that_is_free() {
+        let taken: std::collections::HashSet<String> = (0..PAIRS / 2).map(pair).collect();
+
+        for _ in 0..16 {
+            let name = free_branch_name(7, |name| !taken.contains(name));
+
+            assert!(!taken.contains(&name), "{name:?} is taken");
+            assert!(is_branch_name(&name), "git refused {name:?}");
+        }
+    }
+
+    /// And it walks the whole list to find it, from wherever it starts: one free
+    /// name among a thousand taken ones is still the one that comes back.
+    #[test]
+    fn the_one_free_name_is_the_one_that_comes_back() {
+        let only = pair(11);
+
+        assert_eq!(free_branch_name(7, |name| name == only), only);
+    }
+
+    /// A repository holding every pair there is falls back to the Conversation's
+    /// id, which nothing outside that Conversation collides with.
+    #[test]
+    fn a_repository_holding_every_pair_falls_back_to_the_conversation() {
+        let name = free_branch_name(7, |name| name.ends_with("-7"));
+
+        assert!(name.ends_with("-7"), "{name:?} should carry the id");
+        assert!(is_branch_name(&name), "git refused {name:?}");
+    }
     #[test]
     fn the_names_git_refuses_are_refused_here() {
         for refused in [

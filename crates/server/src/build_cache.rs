@@ -38,16 +38,22 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
-use crate::sandbox;
+use crate::platform::Platform;
+use crate::sandbox::outliving;
+use crate::sandbox::{self, Access, Reach};
 use crate::settings::RustBuildCache;
 
-/// What is looked for on the server's own `PATH`, and the name it is mounted
-/// under inside a sandbox — see [`crate::sandbox::SCCACHE_INSIDE`].
-const SCCACHE: &str = "sccache";
-
-/// The directory name Verkstead's own things go under inside the XDG cache
-/// directory, which is where the build cache is when nobody has said otherwise.
-const OURS: &str = "verkstead";
+/// What is looked for on the server's own `PATH`, and the name it is found
+/// under inside a sandbox: in the directory of Verkstead's own that the binary
+/// a session asks with is in — see [`crate::sandbox::own_bin`].
+///
+/// The same trick as that binary, for the same reason: which sccache a session
+/// compiles through is the server's to choose rather than the machine's to
+/// have installed, and an absolute `RUSTC_WRAPPER` is one that works whatever a
+/// project's dev shell does to `PATH`. Made by a bind on Linux, where the
+/// directory is nowhere on the host at all, and a link really written on a Mac,
+/// where it is under the Data Directory.
+pub(crate) const SCCACHE: &str = "sccache";
 
 /// What `CARGO_HOME` is inside the cache directory: the registry index, the
 /// `.crate` files downloaded into it, and the sources unpacked from them.
@@ -70,18 +76,21 @@ const SCCACHE_DIR: &str = "sccache";
 /// there is what the projects on this machine depend on.
 pub(crate) const SIZE: &str = "30G";
 
-/// The `HOME` the compile server is given, which is a directory made by the
-/// bind and holding nothing.
+/// The `HOME` the compile server is given, which is a directory of Verkstead's
+/// own holding nothing.
 ///
 /// It has one because sccache looks for a config file under it, and a process
-/// with no `HOME` at all looks for one under `/`. Beside `/verkstead/bin`, for
-/// the reason that is where it is: a directory of Verkstead's own rather than a
-/// name inside one of the host's.
-const COMPILING_HOME: &str = "/verkstead/home";
+/// with no `HOME` at all looks for one under `/`. Beside the `bin` the sccache
+/// itself is in, for the reason that is where it is: a directory of Verkstead's
+/// own rather than a name inside one of the host's — `/verkstead/home` where a
+/// bind makes it, and under the Data Directory where nothing can, which is why
+/// it is a function of where that is. See [`crate::sandbox::own_directory`].
+const COMPILING_HOME: &str = "home";
 
-/// What the compile server's sandbox is called from inside it, which is the
-/// only thing that tells it apart from a session's in a process listing.
-const COMPILING_HOST: &str = "verkstead-compiling";
+/// Where that is, for a server keeping its things under `data_dir`.
+fn compiling_home(data_dir: &Path) -> PathBuf {
+    sandbox::own_directory(Platform::HERE, data_dir).join(COMPILING_HOME)
+}
 
 /// The build cache this server hands out: where it is, and what it can offer.
 ///
@@ -109,13 +118,18 @@ pub struct BuildCache {
     /// cache rather than a failure.
     sccache: Option<PathBuf>,
 
-    /// The Worktrees directory, which is the whole of what the compile server
-    /// is shown of the Data Directory — see [`BuildCache::compiling`].
+    /// The Data Directory, which the compile server's sandbox is read off two
+    /// ways — see [`BuildCache::compiling`].
     ///
-    /// Every Conversation's checkout is under it and nothing else Verkstead
-    /// keeps is, so one bind covers every Conversation there will ever be while
-    /// leaving the database and the settings files outside.
-    worktrees: Option<PathBuf>,
+    /// The Worktrees directory under it is the whole of what that sandbox is
+    /// *shown* of it: every Conversation's checkout is under that one directory
+    /// and nothing else Verkstead keeps is, so one entry covers every
+    /// Conversation there will ever be while leaving the database and the
+    /// settings files outside. And where the sccache and the compile server's
+    /// own HOME are found inside is read off it too, because on a Mac a
+    /// directory of Verkstead's own is one under here rather than a name a bind
+    /// invents — see [`crate::sandbox::own_directory`].
+    data_dir: Option<PathBuf>,
 
     /// The one sccache server this machine compiles through, once something has
     /// asked for it.
@@ -143,9 +157,11 @@ struct Compiling {
 impl Drop for Compiling {
     /// Stopping it is letting go of it.
     ///
-    /// `--die-with-parent` is what makes the server Verkstead's rather than
-    /// something left running on the machine, and it covers the case that
-    /// matters — the server exiting. This covers the other one: a size the
+    /// What makes the server Verkstead's rather than something left running on
+    /// the machine is the platform's own answer to the case that matters — the
+    /// server exiting: `--die-with-parent` on Linux, and a keeper of
+    /// Verkstead's own on a Mac, which has no such flag to be started with (see
+    /// [`crate::sandbox::outliving`]). This covers the other case: a size the
     /// human changed, where the old server is replaced while Verkstead carries
     /// on, and where nothing else would ever tell it to go.
     fn drop(&mut self) {
@@ -156,7 +172,19 @@ impl Drop for Compiling {
 
 impl BuildCache {
     /// The cache at `configured`, or at the XDG cache directory where nothing
-    /// was configured — see [`default_dir`].
+    /// was configured — `$XDG_CACHE_HOME/verkstead`, or `~/.cache/verkstead`
+    /// where the machine leaves the XDG variable unset, which is the
+    /// specification's own fallback and what most machines have.
+    ///
+    /// That reading is [`crate::platform::cache_dir`]'s rather than this
+    /// module's: one place reads the environment for every directory of
+    /// Verkstead's own, so a relative `XDG_CACHE_HOME` — or a relative `HOME`
+    /// — is ignored here exactly as it is ignored for the Data Directory,
+    /// because either would otherwise resolve against whatever directory the
+    /// unit happened to start the server in. Nowhere to resolve to is a service
+    /// unit that said nothing about either variable, and it refuses startup
+    /// rather than picking somewhere: a cache in a directory nobody chose is
+    /// one nobody will find to clear.
     ///
     /// The directory is **made** where it is not there, which is the one place
     /// Verkstead makes a directory outside its own Data Directory. Sandbox
@@ -176,11 +204,11 @@ impl BuildCache {
     pub fn resolve(configured: Option<&Path>, data_dir: &Path) -> anyhow::Result<BuildCache> {
         let dir = match configured {
             Some(dir) => dir.to_owned(),
-            None => default_dir().ok_or_else(|| {
+            None => crate::platform::cache_dir().ok_or_else(|| {
                 anyhow::anyhow!(
-                    "there is nowhere to put the shared Rust build cache: neither \
-                     XDG_CACHE_HOME nor HOME is set, so say where it goes with \
-                     --build-cache-dir"
+                    "there is nowhere to put the shared Rust build cache: {}, so say \
+                     where it goes with --build-cache-dir",
+                    crate::platform::nothing_says_where_to_cache(crate::platform::Platform::HERE),
                 )
             })?,
         };
@@ -223,19 +251,19 @@ impl BuildCache {
         Ok(BuildCache {
             dir: Some(dir),
             sccache,
-            worktrees: Some(worktrees),
+            data_dir: Some(data_dir.to_owned()),
             compiling: Arc::default(),
         })
     }
 
     /// One at `dir`, with `sccache` where the machine has one, compiling in a
-    /// sandbox holding `worktrees` — which is what a test builds when the cache
-    /// is the thing under test.
-    pub fn at(dir: PathBuf, sccache: Option<PathBuf>, worktrees: PathBuf) -> BuildCache {
+    /// sandbox holding the Worktrees under `data_dir` — which is what a test
+    /// builds when the cache is the thing under test.
+    pub fn at(dir: PathBuf, sccache: Option<PathBuf>, data_dir: PathBuf) -> BuildCache {
         BuildCache {
             dir: Some(dir),
             sccache,
-            worktrees: Some(worktrees),
+            data_dir: Some(data_dir),
             compiling: Arc::default(),
         }
     }
@@ -295,8 +323,7 @@ impl BuildCache {
     /// whose compile server is missing falls back to starting one of its own,
     /// which is what every session did before this existed.
     pub fn compiling(&self, settings: &RustBuildCache) {
-        let (Some(dir), Some(sccache), Some(worktrees)) =
-            (&self.dir, &self.sccache, &self.worktrees)
+        let (Some(dir), Some(sccache), Some(data_dir)) = (&self.dir, &self.sccache, &self.data_dir)
         else {
             return;
         };
@@ -321,8 +348,16 @@ impl BuildCache {
             *running = None;
         }
 
-        match compile_server(dir, sccache, worktrees, settings.size()).spawn() {
+        match compile_server(dir, sccache, data_dir, settings.size()).spawn() {
             Ok(server) => {
+                // A keeper beside it, where the sandbox it was started in has
+                // nothing to say about outliving anybody — see
+                // [`crate::sandbox::outliving`], and [`compile_server`] for the
+                // process group of its own this is the other half of. Nothing
+                // at all on Linux, where `--die-with-parent` is the whole of
+                // it.
+                outliving::keep(Platform::HERE, server.id(), std::process::id());
+
                 tracing::info!(
                     cache = %dir.display(),
                     size = settings.size(),
@@ -438,118 +473,87 @@ pub fn builds_rust(repo: &Path) -> bool {
 ///
 /// **In the foreground on purpose.** `sccache --start-server` daemonises and
 /// returns, which would leave Verkstead with nothing to hold — no way to know
-/// whether it is still up, and nothing for `--die-with-parent` to hang off.
-/// `SCCACHE_START_SERVER` with `SCCACHE_NO_DAEMON` is the server *as* the
-/// process, so it is a child like any other: it dies when Verkstead does, and
-/// [`BuildCache::compiling`] can ask whether it is alive.
+/// whether it is still up, and no pid for either platform's answer to outliving
+/// the server to be about. `SCCACHE_START_SERVER` with `SCCACHE_NO_DAEMON` is the server
+/// *as* the process, so it is a child like any other: it dies when Verkstead
+/// does, and [`BuildCache::compiling`] can ask whether it is alive.
 ///
 /// `SCCACHE_IDLE_TIMEOUT` is nothing, because the default is ten minutes and
 /// this one is meant to be there whenever a session wants it — an unattended
 /// Conversation may go a long time between builds.
 ///
 /// Not a [`crate::sandbox::Sandbox`], deliberately. That type is a
-/// Conversation's — a Worktree, a Profile, a handoff directory, the credentials
-/// a session commits with — and none of it applies to a process that serves
-/// every Conversation and belongs to none. What the two do share is the system
-/// binds and the `PATH`, which are facts about the machine, so they are read
-/// from the one place that states them.
-fn compile_server(dir: &Path, sccache: &Path, worktrees: &Path, size: &str) -> Command {
-    let mut bwrap = Command::new("bwrap");
+/// Conversation's — a Worktree, a Profile, a handoff directory, the
+/// credentials a session commits with — and none of it applies to a process
+/// that serves every Conversation and belongs to none. **It is a
+/// [`crate::sandbox::Surface`] all the same**, and rendered by the renderer a
+/// session's is: what a sandbox holds is one description on both platforms, so
+/// this is bubblewrap's flags on Linux and a deny-by-default policy on a Mac
+/// without a word here saying which — see [`crate::sandbox::rendered`].
+///
+/// What it gave up to be one is the hostname it used to be given inside. A name
+/// for the machine is something one of the two mechanisms can say and the other
+/// cannot, so it is no part of a description either of them answers — and what
+/// it was worth was telling this sandbox apart from a session's in a process
+/// listing.
+fn compile_server(dir: &Path, sccache: &Path, data_dir: &Path, size: &str) -> Command {
+    let worktrees = crate::worktrees::directory(data_dir);
+    let home = compiling_home(data_dir);
 
-    // Nothing of the server's environment, for the reason a session gets none:
-    // what is inside is what is said here.
-    bwrap.env_clear();
+    // The directory of Verkstead's own inside, which is where the sccache
+    // below is found and where a session's own `verkstead` goes — and so what
+    // leads the `PATH` in both.
+    let ours = sandbox::own_bin(Platform::HERE, data_dir);
+    let inside = ours.join(SCCACHE);
 
-    bwrap.args([
-        "--die-with-parent",
-        "--unshare-all",
-        "--share-net",
-        "--hostname",
-        COMPILING_HOST,
-    ]);
+    // Started in its own HOME, which is a directory of Verkstead's own holding
+    // nothing: a compile server has no checkout of its own to stand in, and
+    // every path it is handed is absolute.
+    let mut surface = sandbox::on_the_machine(home.clone());
 
-    for path in sandbox::SYSTEM.iter().map(Path::new).filter(|p| p.exists()) {
-        bwrap.arg("--ro-bind").arg(path).arg(path);
-    }
-
-    bwrap.args(["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp"]);
-    bwrap.arg("--dir").arg(COMPILING_HOME);
-
-    bwrap
+    surface
+        .made(Access::Empty(home.clone()))
         // Every Conversation's checkout, writable: a compile writes its output
-        // into the Worktree's own `target/`. One bind rather than one per
+        // into the Worktree's own `target/`. One entry rather than one per
         // Conversation, because a Worktree made after this started would
         // otherwise be one this cannot see.
-        .arg("--bind")
-        .arg(worktrees)
-        .arg(worktrees)
+        .own(&worktrees, Reach::ReadWrite)
         // And the cache, which holds both what it reads — the dependency
         // sources under `CARGO_HOME` — and what it writes.
-        .arg("--bind")
-        .arg(dir)
-        .arg(dir)
-        .arg("--ro-bind")
-        .arg(sccache)
-        .arg(sandbox::SCCACHE_INSIDE);
+        .own(dir, Reach::ReadWrite)
+        .elsewhere(sccache, &inside, Reach::ReadOnly);
 
-    bwrap
-        .arg("--setenv")
-        .arg("HOME")
-        .arg(COMPILING_HOME)
-        .arg("--setenv")
-        .arg("PATH")
-        .arg(sandbox::PATH)
-        .arg("--setenv")
-        .arg("SCCACHE_DIR")
-        .arg(dir.join(SCCACHE_DIR))
-        .arg("--setenv")
-        .arg("SCCACHE_CACHE_SIZE")
-        .arg(size)
-        .arg("--setenv")
-        .arg("SCCACHE_START_SERVER")
-        .arg("1")
-        .arg("--setenv")
-        .arg("SCCACHE_NO_DAEMON")
-        .arg("1")
-        .arg("--setenv")
-        .arg("SCCACHE_IDLE_TIMEOUT")
-        .arg("0")
-        .arg(sandbox::SCCACHE_INSIDE);
+    surface
+        .set("HOME", &home)
+        // The same `PATH` a session gets, off the same directory: the sccache
+        // this runs is beside where a session's `verkstead` goes, and what is
+        // in front of the machine's own paths is that directory either way —
+        // see [`crate::sandbox::path`].
+        .set("PATH", sandbox::path(&ours))
+        .set("SCCACHE_DIR", dir.join(SCCACHE_DIR))
+        .set("SCCACHE_CACHE_SIZE", size)
+        .set("SCCACHE_START_SERVER", "1")
+        .set("SCCACHE_NO_DAEMON", "1")
+        .set("SCCACHE_IDLE_TIMEOUT", "0")
+        .running(&[&inside]);
+
+    let mut compiling = sandbox::rendered(&surface);
+
+    // In a process group of its own where the platform needs one, which is what
+    // a keeper ends when the server has gone — see
+    // [`crate::sandbox::outliving`]. A session's sandbox has one already,
+    // because it runs on a terminal; this runs on none, so it says so here.
+    outliving::in_its_own_group(Platform::HERE, &mut compiling);
 
     // Nothing to read and nothing to say: what it prints in the ordinary case
     // is nothing at all. Its errors are left to the server's own, which is
     // where somebody would go looking for why compiling stopped being cached.
-    bwrap
+    compiling
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::inherit());
 
-    bwrap
-}
-
-/// Where the build cache goes when nobody has said: `$XDG_CACHE_HOME/verkstead`,
-/// or `~/.cache/verkstead` where the machine leaves the XDG variable unset —
-/// which is the specification's own fallback and what most machines have.
-///
-/// `None` where neither variable is set and there is therefore no home to put a
-/// cache under, which is a service unit that said nothing about either. The
-/// server refuses to start on it rather than picking somewhere: a cache in a
-/// directory nobody chose is one nobody will find to clear.
-///
-/// A relative `XDG_CACHE_HOME` is ignored rather than resolved, as the
-/// specification says: it would otherwise resolve against whatever directory
-/// the unit happened to start the server in.
-fn default_dir() -> Option<PathBuf> {
-    let xdg = std::env::var_os("XDG_CACHE_HOME")
-        .map(PathBuf::from)
-        .filter(|dir| dir.is_absolute());
-
-    let cache = match xdg {
-        Some(dir) => dir,
-        None => PathBuf::from(std::env::var_os("HOME")?).join(".cache"),
-    };
-
-    Some(cache.join(OURS))
+    compiling
 }
 
 /// Where `program` is on the server's own `PATH`, or `None` where it is on none
@@ -578,7 +582,7 @@ mod tests {
         let cache = BuildCache::at(
             PathBuf::from("/var/cache/verkstead"),
             None,
-            PathBuf::from("/var/lib/verkstead/worktrees"),
+            PathBuf::from("/var/lib/verkstead"),
         );
 
         assert!(cache.shared(&RustBuildCache::of(false, None)).is_none());
@@ -602,7 +606,7 @@ mod tests {
         let cache = BuildCache::at(
             PathBuf::from("/var/cache/verkstead"),
             Some(PathBuf::from("/nix/store/whatever/bin/sccache")),
-            PathBuf::from("/var/lib/verkstead/worktrees"),
+            PathBuf::from("/var/lib/verkstead"),
         );
         let shared = cache
             .shared(&RustBuildCache::default())
@@ -629,7 +633,7 @@ mod tests {
         let cache = BuildCache::at(
             PathBuf::from("/var/cache/verkstead"),
             None,
-            PathBuf::from("/var/lib/verkstead/worktrees"),
+            PathBuf::from("/var/lib/verkstead"),
         );
         let shared = cache.shared(&RustBuildCache::default()).unwrap();
 
@@ -674,7 +678,7 @@ mod tests {
         let cache = BuildCache::at(
             PathBuf::from("/var/cache/verkstead"),
             Some(PathBuf::from("/nix/store/whatever/bin/sccache")),
-            PathBuf::from("/var/lib/verkstead/worktrees"),
+            PathBuf::from("/var/lib/verkstead"),
         );
 
         cache.compiling(&RustBuildCache::of(false, None));
@@ -690,7 +694,7 @@ mod tests {
         let cache = BuildCache::at(
             PathBuf::from("/var/cache/verkstead"),
             None,
-            PathBuf::from("/var/lib/verkstead/worktrees"),
+            PathBuf::from("/var/lib/verkstead"),
         );
 
         cache.compiling(&RustBuildCache::default());

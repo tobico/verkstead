@@ -227,6 +227,12 @@ async fn a_repo_outside_the_watched_paths_is_refused_by_the_server() {
 
 /// A path that reads as inside a Watched Path and is not: the symlink is
 /// followed before the boundary is consulted.
+///
+/// Made where a link can be made without asking anybody's permission,
+/// which is both Unixes and not Windows: what the boundary does with one is
+/// the same reasoning everywhere, so what is lost there is the making of the
+/// link rather than any of it.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_repo_reached_through_a_symlink_out_of_a_watched_path_is_refused() {
     let root = tempfile::tempdir().unwrap();
