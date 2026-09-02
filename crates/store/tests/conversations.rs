@@ -1,16 +1,17 @@
 //! Conversations: what starting one records, what a drafting one is still the
 //! human's to change, and that all of it is still there after a restart.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Archiving, Closing, Edited, Event, Grilling, Lifecycle, RowState, Unarchiving, adopting,
-    archive_conversation, archived, close_conversation, conversation_branch, conversations,
-    follow_branch, load_conversation, open_database, register_repo, rename_branch, save_brief,
-    set_base_commit, set_state, settle_naming, show_archived, showing_archived, start_adoption,
-    start_building, start_conversation, start_grilling, start_unnamed_conversation, timeline,
-    unarchive_conversation,
+    Account, Archiving, Closing, Edited, Event, Grilling, Lifecycle, Picked, ProfileFacts,
+    RowState, Switched, Unarchiving, add_companion, adopting, archive_conversation, archived,
+    close_conversation, conversation_branch, conversations, create_profile, follow_branch,
+    load_conversation, open_database, register_repo, rename_branch, save_brief, set_base_commit,
+    set_grilling_pairing, set_state, settle_naming, show_archived, showing_archived,
+    start_adoption, start_building, start_conversation, start_grilling, start_unnamed_conversation,
+    switch_repo, timeline, unarchive_conversation,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -29,6 +30,22 @@ async fn repo(pool: &SqlitePool, name: &str) -> i64 {
         .unwrap()
         .expect("nothing was registered at that path yet")
         .id
+}
+
+/// The model every made-up Profile here lists.
+const MODEL: &str = "claude-opus-5";
+
+/// A Profile to pair a role with, which is all these tests want one for: what a
+/// switch must leave alone.
+fn profile_facts(name: &str) -> ProfileFacts {
+    ProfileFacts {
+        name: name.to_owned(),
+        account: Account::Claude {
+            claude_dir: PathBuf::from(format!("/watched/accounts/{name}/.claude")),
+            config_file: PathBuf::from(format!("/watched/accounts/{name}/.claude.json")),
+        },
+        models: vec![MODEL.to_owned()],
+    }
 }
 
 /// The markdown of a Conversation's Brief, read back off its Timeline.
@@ -613,6 +630,119 @@ async fn nothing_started_means_nothing_listed() {
     let (_dir, pool) = fresh_pool().await;
 
     assert!(conversations(&pool).await.unwrap().is_empty());
+}
+
+/// Moving a draft onto another Repo, and the three things that follow from it:
+/// the base back on the rule, every companion kept but the one that has just
+/// become the Conversation's own, and the branch name and the Pairings exactly
+/// where the human left them.
+#[tokio::test]
+async fn switching_a_drafts_repo_resets_its_base_and_drops_only_the_companion_it_became() {
+    let (_dir, pool) = fresh_pool().await;
+    let verkstead = repo(&pool, "verkstead").await;
+    let askance = repo(&pool, "askance").await;
+    let notes = repo(&pool, "notes").await;
+
+    let id = start_conversation(&pool, verkstead, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+
+    // Everything the switch must not touch, said first: a branch the human
+    // typed, an account to grill under, and two repos to work alongside — one
+    // of which is where the work is about to move.
+    rename_branch(&pool, id, Some("rate-limiting"))
+        .await
+        .unwrap();
+    let profile = create_profile(&pool, &profile_facts("desk"))
+        .await
+        .unwrap()
+        .expect("nothing is called that yet");
+    set_grilling_pairing(&pool, id, profile.id, Some(MODEL))
+        .await
+        .unwrap();
+    set_base_commit(&pool, id, Some("main")).await.unwrap();
+    add_companion(&pool, id, askance).await.unwrap();
+    add_companion(&pool, id, notes).await.unwrap();
+
+    assert_eq!(
+        switch_repo(&pool, id, askance).await.unwrap(),
+        Switched::Switched
+    );
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+    assert_eq!(conversation.repo.name, "askance");
+    assert_eq!(
+        conversation.base_commit, None,
+        "the override named a branch of the repo being left, so the new repo's \
+         default-branch rule stands again"
+    );
+    assert_eq!(
+        conversation
+            .companions
+            .iter()
+            .map(|companion| companion.repo.name.as_str())
+            .collect::<Vec<_>>(),
+        ["notes"],
+        "the repo it moved onto is its own now, and a Conversation is no \
+         companion of itself — the other one has nothing to do with the move"
+    );
+    assert_eq!(conversation.branch, "rate-limiting");
+    assert!(conversation.branch_named);
+    assert!(matches!(conversation.grilling_pairing, Picked::Under(_)));
+}
+
+/// The freeze: a checkout is of one repository, so from the moment there is one
+/// the Repo is settled — asked off the worktree rather than off the state, which
+/// is what a second round steered back into Draft is still holding.
+#[tokio::test]
+async fn a_repo_switch_is_refused_once_the_branch_has_been_cut() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+    let elsewhere = repo(&pool, "askance").await;
+
+    start_grilling(&pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
+        .await
+        .unwrap();
+
+    assert_eq!(
+        switch_repo(&pool, id, elsewhere).await.unwrap(),
+        Switched::NotDrafting
+    );
+
+    // And still refused where the state has come back to Draft, the worktree
+    // having stayed: that is a round steered onto work that is already built.
+    set_state(&pool, id, Lifecycle::Draft).await.unwrap();
+
+    assert_eq!(
+        switch_repo(&pool, id, elsewhere).await.unwrap(),
+        Switched::NotDrafting
+    );
+    assert_eq!(
+        load_conversation(&pool, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .repo
+            .name,
+        "verkstead"
+    );
+}
+
+/// The two refusals about the asking rather than about the state.
+#[tokio::test]
+async fn switching_onto_a_repo_that_is_not_registered_says_so() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafted(&pool).await;
+
+    assert_eq!(
+        switch_repo(&pool, id, 404).await.unwrap(),
+        Switched::NoSuchRepo
+    );
+    assert_eq!(
+        switch_repo(&pool, 404, 1).await.unwrap(),
+        Switched::NoSuchConversation
+    );
 }
 
 /// Starting to grill records the three things that were not facts before it: the

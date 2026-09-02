@@ -2119,6 +2119,16 @@ export type Registered = "Added" | "NotAbsolute" | "Missing" | "OutsideWatchedPa
 export type Registration = { path: string, };
 
 /**
+ * Which registered Repo a drafting Conversation is to be moved onto.
+ *
+ * The id and nothing else, the way [`NewCompanion`] is: everything that
+ * follows a switch — the base going back to the rule, a companion that has
+ * just become the Conversation's own Repo going away — follows from the choice
+ * rather than being said again beside it.
+ */
+export type RepoChoice = { repo_id: number, };
+
+/**
  * One repository's block of a Set's Diff: what it is called, and its
  * uncommitted changes rendered as any other Diff is.
  *
@@ -2160,6 +2170,11 @@ export type RepoEntry = { id: number, name: string, path: string, default_branch
  * the same kind of reason.
  */
 export type RepoRemoved = "Removed" | "NoSuchRepo" | "InUse";
+
+/**
+ * What became of moving a Conversation onto another Repo.
+ */
+export type RepoSwitched = "Switched" | "NoSuchConversation" | "NotDrafting" | "NoSuchRepo";
 
 /**
  * One registered Repo opened: everything the card cannot hold, read at the

@@ -548,19 +548,22 @@ scrolls up, and again once they come back down. A phone lands on the timeline
 with the newest thing marked open, never carried past the record into the
 details.
 
-What a Conversation needs settling before it runs — branch, base commit, both
-Pairings, the readiness verdict — stands on the **composer**, which is the
+What a Conversation needs settling before it runs — repo, branch, base commit,
+both Pairings, the readiness verdict — stands on the **composer**, which is the
 details pane a drafting Brief opens, drawn as the composer of a chat app: one
 box at the app's measure holding the document as the field it is written in,
 the setup as a row of borderless label-over-value dropdowns along the inside of
-its bottom edge — Repo first, whose one flat panel holds the branch, the base
-and the companions, then the three role Pairings — and the press that starts
-the work under the box, against its right edge. It is the pane for a
-Conversation while it drafts, whatever the Brief's own freeze — an adopting
-draft gets it with the box locked to the stage's rendering and the Adopt press
-where the start would be. Past drafting a frozen Brief opens the read-only pane
-instead, and the repo name, the worktree path and the conversation state are
-drawn nowhere on the record: it tells that story itself.
+its bottom edge — Repo first, whose one flat panel holds which repo the work is
+in, the branch, the base and the companions, then the three role Pairings — and
+the press that starts the work under the box, against its right edge. Switching
+a draft's repo resets its base to the new repo's default and drops a companion
+that has become its own repo, leaving the branch name and the Pairings alone;
+it is refused, and the picker reads disabled, from the moment a worktree exists.
+It is the pane for a Conversation while it drafts, whatever the Brief's own
+freeze — an adopting draft gets it with the box locked to the stage's rendering
+and the Adopt press where the start would be. Past drafting a frozen Brief opens
+the read-only pane instead, and the repo name, the worktree path and the
+conversation state are drawn nowhere on the record: it tells that story itself.
 
 Timeline events:
 

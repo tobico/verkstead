@@ -58,6 +58,7 @@ import {
   setBaseBranch,
   setCompanionBase,
   setCompanionMode,
+  switchRepo,
 } from "../api/client";
 import type {
   BaseRecorded,
@@ -74,6 +75,7 @@ import type {
   ProfileChosen,
   ProfileEntry,
   RepoEntry,
+  RepoSwitched,
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
@@ -91,6 +93,15 @@ export const BRANCH_REFUSAL: Record<BranchRenamed, string> = {
   NotDrafting:
     "The branch exists by now, so its name is not a text field any more.",
   NotABranchName: "Git will not take that as a branch name.",
+};
+
+/// And moving the work onto another repo.
+export const REPO_SWITCH_REFUSAL: Record<RepoSwitched, string> = {
+  Switched: "",
+  NoSuchConversation: "This conversation is gone.",
+  NotDrafting:
+    "The branch exists by now, so which repo the work is in is settled.",
+  NoSuchRepo: "That repo is not registered any more.",
 };
 
 /// And a base branch.
@@ -161,17 +172,6 @@ export const CHOICE_REFUSAL: Record<ProfileChosen, string> = {
 export function Setup(props: {
   conversation: ConversationView;
 }): JSX.Element {
-  /// Whether the branch this work is done on has been made already, which is
-  /// what a worktree says: one is made with the branch and forgotten only by
-  /// closing.
-  ///
-  /// A drafting conversation with one has had its branch cut already. The branch
-  /// and the base commit are settled for good by then and the server refuses
-  /// both, so the Repo option goes with them: what a control cannot do it does
-  /// not draw. The pairings stay, because they are re-settled every time work
-  /// starts under them.
-  const branched = () => props.conversation.worktree !== null;
-
   return (
     <section class={styles.options} aria-label="Setup">
       {/* The repository first, because it is what everything after it is a fact
@@ -179,9 +179,7 @@ export function Setup(props: {
           it comes off, and the repos the work runs alongside are all answers to
           *which code*, and a row of four separate triggers for them would be a
           row about one repository read as four things. */}
-      <Show when={!branched()}>
-        <RepoOption conversation={props.conversation} />
-      </Show>
+      <RepoOption conversation={props.conversation} />
 
       {/* And the three accounts, one trigger each. */}
       <Profiles conversation={props.conversation} />
@@ -221,21 +219,37 @@ export function SetupNotes(props: {
   );
 }
 
-/// The Repo, and everything that is a fact about it: the branch the work will
-/// be done on, the branch it comes off, and the repos it runs alongside.
+/// The Repo, and everything that is a fact about it: which repository the work
+/// is in, the branch it will be done on, the branch it comes off, and the repos
+/// it runs alongside.
 ///
 /// A label over a value like every other option in the row — the repository's
 /// name, and `+1`, `+2` for the companions it is working beside — and what it
 /// opens is one flat panel rather than a menu of levels: what is in there is a
-/// field and two pickers and the rows they configure, which is a form, and a
-/// form walked one level at a time would be a form nobody could read at once.
+/// picker, a field, a second picker and the rows they configure, which is a
+/// form, and a form walked one level at a time would be a form nobody could read
+/// at once.
 ///
-/// Drawn only while the branch is still a plan. Once it is cut the server
-/// refuses every press in here, and a panel whose every control is refused is
-/// worse than no panel — see [`Setup`].
+/// Drawn whatever state the round is in, unlike everything below the repo
+/// picker inside it. Once the branch is cut the server refuses the branch, the
+/// base and every companion press, so those go — but which repository the work
+/// is in is still a fact worth reading, and the picker says for itself that it
+/// is settled by being disabled.
 function RepoOption(props: { conversation: ConversationView }): JSX.Element {
   /// How many other repos the work runs alongside, for the `+N` after the name.
   const alongside = () => props.conversation.companions.length;
+
+  /// Whether the branch this work is done on has been made already, which is
+  /// what a worktree says: one is made with the branch and forgotten only by
+  /// closing.
+  ///
+  /// A drafting conversation with one has had its branch cut — a later round,
+  /// steered onto work that is already built. The repo, the branch and the base
+  /// are settled for good by then and the server refuses all three, so what a
+  /// control cannot do it does not draw, the picker excepted. The pairings are
+  /// outside this panel and stay, being re-settled every time work starts under
+  /// them.
+  const branched = () => props.conversation.worktree !== null;
 
   return (
     <Menu
@@ -262,26 +276,155 @@ function RepoOption(props: { conversation: ConversationView }): JSX.Element {
     >
       {() => (
         <>
-          {/* No branch field where the conversation is adopting a roadmap: a
-              stage is worked on its own slug, so the name invented when the row
-              was made is discarded when the stage is adopted, and naming it here
-              would be a field with nothing behind it. */}
-          <Show when={!props.conversation.adopting}>
-            <BranchName conversation={props.conversation} />
-          </Show>
-          <BaseBranch conversation={props.conversation} />
-          <AddCompanion conversation={props.conversation} />
+          {/* Which repository, first: everything under it is a fact about the
+              one this picks. */}
+          <RepoPicker conversation={props.conversation} disabled={branched()} />
 
-          {/* And the ones already added, under the control they were added
-              from — they belong to the branch and the base rather than to the
-              pairings, and they go with them when the round's branch is cut. */}
-          <Companions conversation={props.conversation} />
+          <Show when={!branched()}>
+            {/* No branch field where the conversation is adopting a roadmap: a
+                stage is worked on its own slug, so the name invented when the
+                row was made is discarded when the stage is adopted, and naming
+                it here would be a field with nothing behind it. */}
+            <Show when={!props.conversation.adopting}>
+              <BranchName conversation={props.conversation} />
+            </Show>
+            <BaseBranch conversation={props.conversation} />
+            <AddCompanion conversation={props.conversation} />
+
+            {/* And the ones already added, under the control they were added
+                from — they belong to the branch and the base rather than to the
+                pairings, and they go with them when the round's branch is
+                cut. */}
+            <Companions conversation={props.conversation} />
+          </Show>
         </>
       )}
     </Menu>
   );
 }
 
+/// Which Repo the work is in at all: the first thing in the Repo panel, and the
+/// one the branch, the base and the companions under it are facts about.
+///
+/// A drafting Conversation can be moved onto another registered Repo, and three
+/// things follow from the move — the base goes back to the new repo's default,
+/// a companion that has just become the Conversation's own Repo goes away, and
+/// the branch name and the pairings stay exactly where they were. None of that
+/// is asked for here: the server does it, and this panel reads the result off
+/// the Conversation it re-reads.
+///
+/// Disabled once the branch has been cut, which is the one control in this
+/// panel that is drawn in that state rather than taken away. A checkout is of
+/// one repository, so what it says then is a fact about the work — *this is the
+/// repo, and it is settled* — and a fact is worth reading where a refused field
+/// is not.
+///
+/// **Nothing is filtered out of the list**, for [`AddCompanion`]'s reason: the
+/// repo the Conversation is already on is in it, and picking it is a switch
+/// onto where it already is, which changes nothing but the base.
+function RepoPicker(props: {
+  conversation: ConversationView;
+  disabled: boolean;
+}): JSX.Element {
+  const queries = useQueryClient();
+
+  const repos = useReading(() => ({
+    queryKey: ["repos"],
+    queryFn: listRepos,
+
+    // Merged by the id each row carries flat, for [`AddCompanion`]'s reason: a
+    // Nudge landing while the human has the dropdown open must not take their
+    // choice with it.
+    freshness: { reconcile: "id" },
+  }));
+
+  const [refused, setRefused] = createSignal<RepoSwitched | null>(null);
+
+  const move = useMutation(() => ({
+    mutationFn: (repoId: number) => switchRepo(props.conversation.id, repoId),
+    onSuccess: (outcome: RepoSwitched) => {
+      if (outcome !== "Switched") {
+        setRefused(outcome);
+        // Refused about one of the two lists this control was drawn over: the
+        // registry it picked out of, or the Conversation the pick was about.
+        void queries.invalidateQueries({ queryKey: ["repos"] });
+        void queries.invalidateQueries({ queryKey: ["conversation"] });
+        return;
+      }
+
+      setRefused(null);
+      // The whole panel is about the repo that has just changed — and so is the
+      // sidebar row and every pane head, which read the same record.
+      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  }));
+
+  /// What is offered: every registered Repo, and the one the Conversation is on
+  /// wherever the list does not hold it — the list still on its way, or a repo
+  /// unregistered since the work was started on it. Drawn either way, because a
+  /// picker showing one repo while the record held another would be the panel
+  /// disagreeing with its own trigger.
+  const options = (): RepoEntry[] => {
+    const listed = repos.data ?? [];
+
+    return listed.some((repo) => repo.id === props.conversation.repo.id)
+      ? listed
+      : [props.conversation.repo, ...listed];
+  };
+
+  return (
+    <div class={styles.repoPick}>
+      <label for="conversation-repo">Repo</label>
+      <Switch>
+        <Match when={repos.isError}>
+          <ErrorLine class={styles.failure}>
+            Could not read the repos: {repos.error?.message}
+          </ErrorLine>
+        </Match>
+        <Match when={true}>
+          {/* A [`Picker`] rather than a `<select>`, so this cannot come to show
+              one repo while the mutation behind it would record another — the
+              same reason the base picker under it is one. There is no
+              placeholder: a Conversation is on a repo from the moment it
+              exists, so every state of this control is a repo. */}
+          <Picker
+            id="conversation-repo"
+            options={options()}
+            value={(repo) => String(repo.id)}
+            label={(repo) => repo.name}
+            chosen={String(props.conversation.repo.id)}
+            disabled={props.disabled || move.isPending}
+            pick={(repo) => move.mutate(Number(repo))}
+          />
+        </Match>
+      </Switch>
+
+      {/* What moving the work would take with it, said before it is done rather
+          than after: the base is the one thing here that a switch resets. */}
+      <Show when={!props.disabled}>
+        <Note class={styles.aside}>
+          Moving this onto another repo puts its base back on that repo's
+          default branch. Its branch name, its pairings and the repos it works
+          alongside are kept.
+        </Note>
+      </Show>
+
+      <Show when={refused()}>
+        {(outcome) => (
+          <ErrorLine class={styles.failure}>
+            {REPO_SWITCH_REFUSAL[outcome()]}
+          </ErrorLine>
+        )}
+      </Show>
+      <Show when={move.isError}>
+        <ErrorLine class={styles.failure}>
+          The repo could not be switched: {move.error?.message}
+        </ErrorLine>
+      </Show>
+    </div>
+  );
+}
 /// What a Rust repository loses on a server with no sccache: the compiling.
 ///
 /// Drawn only where all three hold — the repository is a Cargo workspace, the

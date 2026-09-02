@@ -121,6 +121,7 @@
   overflow-y: auto;
 }
 
+.repoPick,
 .branchName,
 .baseBranch,
 .addCompanion {
@@ -232,6 +233,7 @@
 
 /* Every label inside the panel, which is a form and so is labelled as one —
    unlike the row outside it, whose labels are the triggers' own first line. */
+.repoPick label,
 .branchName label,
 .baseBranch label,
 .addCompanion label,
@@ -264,6 +266,7 @@
    dropdown is for: a branch has nothing to draw beside its name, and neither
    has a repo — so these stay a `<select>` where the pairings outside have
    become a listbox of their own. */
+.repoPick select,
 .baseBranch select,
 .addCompanion select {
   width: 100%;
@@ -282,6 +285,7 @@
 }
 
 .branchName .failure,
+.repoPick .failure,
 .baseBranch .failure,
 .addCompanion .failure,
 .profileChoice .failure {
@@ -315,6 +319,7 @@
    of them the human is in — the branch, a base, or a companion's own. The
    pairing control says it for itself, in `picking.module.css`. */
 .fieldLine input:focus-visible,
+.repoPick select:focus-visible,
 .baseBranch select:focus-visible,
 .addCompanion select:focus-visible {
   border-color: var(--accent);
@@ -325,6 +330,7 @@
    else. */
 @media (hover: hover) {
   .fieldLine input:hover,
+  .repoPick select:hover,
   .baseBranch select:hover,
   .addCompanion select:hover {
     border-color: var(--ink-soft);

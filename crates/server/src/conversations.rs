@@ -22,7 +22,7 @@ use sqlx::SqlitePool;
 use verkstead_render::{
     Adopted, BaseRecorded, BranchRenamed, BriefSaved, CompanionAdded, CompanionBaseRecorded,
     CompanionBranchRenamed, CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved,
-    ConversationClosed, GrillingStarted, PairingView, PickedView, Started, Worktree,
+    ConversationClosed, GrillingStarted, PairingView, PickedView, RepoSwitched, Started, Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
 
@@ -592,6 +592,23 @@ pub(crate) async fn set_base_branch(
         store::Edited::Saved => BaseRecorded::Recorded,
         store::Edited::NoSuchConversation => BaseRecorded::NoSuchConversation,
         store::Edited::NotDrafting => BaseRecorded::NotDrafting,
+    })
+}
+
+/// Move a drafting Conversation onto another registered Repo.
+///
+/// Thin over the store, and for [`add_companion`]'s reason with one more behind
+/// it: everything a switch decides — which repository, what its base goes back
+/// to, and which companion is no longer one — is a question about the rows, and
+/// nothing has been checked out to ask git about. The refusal that matters is
+/// the one that says something *has* been, which the store answers off the
+/// worktree it wrote.
+pub(crate) async fn switch_repo(pool: &SqlitePool, id: i64, repo_id: i64) -> Result<RepoSwitched> {
+    Ok(match store::switch_repo(pool, id, repo_id).await? {
+        store::Switched::Switched => RepoSwitched::Switched,
+        store::Switched::NoSuchConversation => RepoSwitched::NoSuchConversation,
+        store::Switched::NotDrafting => RepoSwitched::NotDrafting,
+        store::Switched::NoSuchRepo => RepoSwitched::NoSuchRepo,
     })
 }
 

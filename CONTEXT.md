@@ -26,9 +26,10 @@ _Avoid_: project root, workspace, scan path, allowed directory
 
 **Repo**:
 A git repository registered with Verkstead from inside a Watched Path.
-Conversations attach to one. Its files stay the source of truth for task lists
-(`.tasks/`) and roadmaps (`docs/roadmaps/`) — Verkstead parses and renders
-them, and never owns them.
+Conversations attach to one — and while one is still a Draft with nothing checked
+out, the Repo dropdown on its composer moves it onto another. Its files stay the
+source of truth for task lists (`.tasks/`) and roadmaps (`docs/roadmaps/`) —
+Verkstead parses and renders them, and never owns them.
 **Registering one can be taken back, and that is an unregistering rather than a
 delete**: Verkstead stops offering it for new work — the settings list, the New
 conversation menu, the roadmaps waiting to be adopted — while every Conversation
@@ -330,16 +331,27 @@ same one: one box at the app's own measure, centred in the pane, holding the
 Brief — and the whole of the Conversation's setup along the inside of that box's
 bottom edge, as a row of borderless dropdowns that read as part of it. Each is a
 dimmed label over its value. **Repo** comes first and is one flat panel holding
-everything that is a fact about the repository — the branch, the base commit,
-what the work runs alongside and how far into each of those it may reach — and
-the three role Pairings follow it, the role as the label and the Pairing as the
-value. The press that starts the work is the one thing outside the box, under it
-and against its right edge, and it carries the readiness verdict.
+everything that is a fact about the repository — which repository the work is
+in, the branch, the base commit, what the work runs alongside and how far into
+each of those it may reach — and the three role Pairings follow it, the role as
+the label and the Pairing as the value. The press that starts the work is the
+one thing outside the box, under it and against its right edge, and it carries
+the readiness verdict.
+
+**Which Repo a draft is on is one of those, and moving it is one press.** The
+picker at the top of that panel lists the registered Repos, and three things
+follow from a switch: the base commit goes back to the new repository's
+default-branch rule, a companion that has just become the Conversation's own
+Repo is dropped — a Conversation is never a companion of itself — and the branch
+name and the Pairings are left exactly where the human left them.
 
 Every one of those freezes at the same moment the Brief does, so once grilling
 starts none of it is drawn; on a later round the branch and the base commit are
-frozen already, so the Repo option goes with them and what the row offers under
-the new Brief is the Pairings alone. What a control cannot do it does not draw.
+frozen already, and so is the Repo — a checkout is of one repository, and the
+one thing that can no longer be done is the one thing still drawn, the picker
+saying it for itself by reading disabled. What the row offers under the new
+Brief is otherwise the Pairings alone. What a control cannot do it does not
+draw.
 _Avoid_: description, prompt, spec, issue body
 
 **Timeline**:

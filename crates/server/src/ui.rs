@@ -36,11 +36,11 @@ use verkstead_render::{
     ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Cursor,
     GrillingStarted, IgnoreRule, IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut,
     NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry,
-    PushKey, Registration, RepoEntry, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
-    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
-    SharedCommit, SharedConversation, ShowingArchived, Standing, SteerOpened, SteerSubmission,
-    Submitted, Subscribed, Subscription, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet,
-    Unsubscribe, UpdateNotice, Verified,
+    PushKey, Registration, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
+    RuleField, RuleRefused, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowingArchived, Standing,
+    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TimelineEvent, TokenEdit,
+    TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -175,6 +175,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             get(pull_request),
         )
         .route("/api/ui/conversations/{id}/brief", post(save_brief))
+        // And which Repo the work is in at all, which is the first thing the
+        // Repo panel asks and the one the branch and the base below it are
+        // facts about. Refused from the moment there is a checkout, like both
+        // of them.
+        .route("/api/ui/conversations/{id}/repo", post(switch_repo))
         .route("/api/ui/conversations/{id}/branch", post(rename_branch))
         .route("/api/ui/conversations/{id}/base", post(set_base_branch))
         // And the other registered Repos the work runs alongside, added and
@@ -2580,6 +2585,26 @@ async fn save_brief(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "saving a Brief failed");
             unavailable("the Brief could not be saved")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/repo` — move the work onto another
+/// registered Repo.
+async fn switch_repo(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(choice): Json<RepoChoice>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(RepoSwitched::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::switch_repo(&state.pool, id, choice.repo_id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "switching a conversation's repo failed");
+            unavailable("the repo could not be switched")
         }
     }
 }

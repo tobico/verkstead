@@ -41,6 +41,7 @@ import type {
   Registered,
   RepoEntry,
   RepoRemoved,
+  RepoSwitched,
   RepoView,
   ConflictResolution,
   Resolved,
@@ -458,6 +459,21 @@ export function saveBrief(id: number, markdown: string): Promise<BriefSaved> {
   return post<BriefSaved>(`/api/ui/conversations/${id}/brief`, { markdown });
 }
 
+
+/// Move a drafting Conversation onto another registered Repo.
+///
+/// Which Repo is the whole of what goes out, the way an added companion is:
+/// what follows — the base back on the new repo's rule, and a companion that
+/// has just become this Conversation's own Repo going away — is the server's to
+/// do rather than this page's to ask for.
+export function switchRepo(
+  id: number,
+  repoId: number,
+): Promise<RepoSwitched> {
+  return post<RepoSwitched>(`/api/ui/conversations/${id}/repo`, {
+    repo_id: repoId,
+  });
+}
 /// Name the branch the work will be done on. Whether git would take the name is
 /// the server's to say, so this is another outcome to read rather than a status.
 export function renameBranch(

@@ -200,6 +200,7 @@ import {
   COMPANION_MODE_REFUSAL,
   COMPANION_REFUSAL,
   COMPANION_REMOVAL_REFUSAL,
+  REPO_SWITCH_REFUSAL,
 } from "../src/workbench/Setup";
 import { STEER_REFUSAL } from "../src/workbench/Steer";
 import {
@@ -3004,9 +3005,20 @@ describe("the composer pane", () => {
     await drawn(container, `.${shell.detailsPane} .${composer.composer}`);
     await waitFor(() => screen.getByLabelText("Grilling"));
 
-    // The whole Repo option is gone with them: every control behind it is one
-    // the server would refuse, and what a control cannot do it does not draw.
-    expect(container.querySelector(`.${setup.repoOption}`)).toBeNull();
+    // The Repo option stays, because which repo the work is in is still a fact
+    // worth reading — and its picker says for itself that it is settled. Every
+    // control behind it is one the server would refuse, and what a control
+    // cannot do it does not draw.
+    expect(container.querySelector(`.${setup.repoOption}`)).toBeTruthy();
+
+    fireEvent.click(
+      await drawn<HTMLButtonElement>(container, `.${setup.repoOption} > button`),
+    );
+    await waitFor(() => screen.getByLabelText("Repo"));
+
+    expect((screen.getByLabelText("Repo") as HTMLSelectElement).disabled).toBe(
+      true,
+    );
     expect(container.querySelector(`.${setup.companions}`)).toBeNull();
     expect(screen.queryByLabelText("Branch")).toBeNull();
     expect(screen.queryByLabelText("Base branch")).toBeNull();
@@ -3719,6 +3731,107 @@ describe("a conversation's setup", () => {
   });
 });
 
+/// Which repo the work is in at all: the first thing in the Repo panel, and the
+/// one the branch, the base and the companions under it are facts about.
+///
+/// What follows a switch — the base back on the new repo's default, a companion
+/// that has just become the conversation's own repo dropped — is the server's,
+/// and `crates/store/tests/conversations.rs` is what says so. What is asked here
+/// is that the press goes out, that the panel reads the record back, and that a
+/// branch already cut settles the picker rather than hiding it.
+describe("switching a draft's repo", () => {
+  /// The picker, waited for: the repos arrive on a read of their own, and a
+  /// `<select>` told to show an option it has not been given yet falls to the
+  /// first one it has.
+  async function repoPicker(container: ParentNode): Promise<HTMLSelectElement> {
+    await openRepo(container);
+
+    const picker = (await waitFor(() =>
+      screen.getByLabelText("Repo"),
+    )) as HTMLSelectElement;
+
+    await waitFor(() => expect(picker.options.length).toBe(REPOS.length));
+
+    return picker;
+  }
+
+  /// Every registered repo, the conversation's own among them and showing —
+  /// nothing is filtered out, the way nothing is filtered out of the companion
+  /// picker beside it.
+  it("offers every registered repo, above the branch and the base", async () => {
+    theWorkbench();
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const picker = await repoPicker(container);
+
+    expect([...picker.options].map((option) => option.textContent)).toEqual(
+      REPOS.map((repo) => repo.name),
+    );
+    expect(picker.value).toBe(String(OPEN.repo.id));
+
+    // At the top of the panel, which is the order the panel is read in: the
+    // repo, and then everything that is a fact about it.
+    const panel = await drawn(container, `.${setup.repoOption} > [role="group"]`);
+    const pick = panel.querySelector(`.${setup.repoPick}`)!;
+    expect(
+      pick.compareDocumentPosition(panel.querySelector(`.${setup.branchName}`)!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("moves the work onto the repo that was picked", async () => {
+    const fetching = theWorkbench(json("Switched"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const elsewhere = REPOS.find((repo) => repo.id !== OPEN.repo.id)!;
+    fireEvent.change(await repoPicker(container), {
+      target: { value: String(elsewhere.id) },
+    });
+
+    await waitFor(() =>
+      expect(sent(fetching, `/api/ui/conversations/${OPEN.id}/repo`)).toEqual({
+        repo_id: elsewhere.id,
+      }),
+    );
+  });
+
+  /// Said where the press was made, the panel not shutting on a refusal.
+  it("says in the panel why a switch was refused", async () => {
+    theWorkbench(json("NoSuchRepo"));
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    const elsewhere = REPOS.find((repo) => repo.id !== OPEN.repo.id)!;
+    fireEvent.change(await repoPicker(container), {
+      target: { value: String(elsewhere.id) },
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText(REPO_SWITCH_REFUSAL.NoSuchRepo)).toBeTruthy(),
+    );
+  });
+
+  /// A later round, steered onto work that is already built: the checkout is of
+  /// one repository, so the server refuses the switch and the picker says so by
+  /// being disabled. The branch and the base go entirely, as they always have —
+  /// this is the one control in the panel drawn in a state it cannot act in,
+  /// because which repo the work is in is still a fact worth reading.
+  it("reads disabled once the branch has been cut", async () => {
+    theWorkbenchWith({
+      worktree: { path: "/var/lib/verkstead/worktrees/verkstead-open", missing: false },
+    });
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
+
+    const picker = (await waitFor(() =>
+      screen.getByLabelText("Repo"),
+    )) as HTMLSelectElement;
+
+    expect(picker.disabled).toBe(true);
+    expect(screen.queryByLabelText("Branch")).toBeNull();
+    expect(screen.queryByLabelText("Base branch")).toBeNull();
+    expect(screen.queryByLabelText("Works alongside")).toBeNull();
+  });
+});
 /// The other repositories a conversation works alongside: added from a picker
 /// inside the Repo panel, and drawn as a row apiece under it.
 ///
