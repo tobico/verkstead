@@ -29,11 +29,36 @@
    `PaneHead.tsx`, `Timeline.tsx`, `Conversations.tsx` and `Screen.tsx` each
    import this module for the ones they need. */
 
+/* The frame — and the box that everything standing in it is positioned against,
+   which is the half of clipping that is easy to leave off.
+
+   An `overflow` does not clip an absolutely positioned descendant unless the box
+   that carries it is also that descendant's containing block. With nothing
+   positioned in between, the browser lays such an element out against the
+   initial containing block instead — the document — and there the frame's
+   `overflow: hidden` further down cannot reach it. What that leaves is one
+   element standing wherever the pane it is in has been scrolled to, outside
+   every pane and past the bottom of the window, and a document as tall as
+   wherever it landed. Which is the page scrolling under the panes again, by a
+   route that neither the frame's height nor `overscroll-behavior` closes: a
+   thing a screen reader is meant to find and nobody is meant to see is enough
+   to push the whole workbench off the screen.
+
+   So the two are said together, here and on the pane below. The frame contains
+   as well as clips, and so does each pane, which is what makes a stray position
+   stay inside the pane it was written in at every width rather than only above
+   the breakpoint where the frame clips. Nothing in the app positions itself
+   against the document on purpose — what wants the window uses `fixed`, which
+   is the top of the page whatever contains it. */
 .panes {
+  position: relative;
   display: grid;
 }
 
+/* And the pane, which is the box that scrolls: what is written into one is
+   contained by it, so what a pane holds cannot come out anywhere but a pane. */
 .pane {
+  position: relative;
   padding: 1.25rem;
   min-width: 0;
 }
@@ -286,7 +311,11 @@
        is a pane that has got its own height wrong — and left unclipped that
        becomes page to scroll, which pushes the whole frame off the screen
        once the pane the human is reading runs out of its own. Clipped, the
-       mistake stays inside the pane it was made in. */
+       mistake stays inside the pane it was made in.
+
+       Which is only true of what this box is the containing block for, and it
+       is one — see the `position` at the top of the file, which is the other
+       half of this line and no use without it. */
     overflow: hidden;
   }
 

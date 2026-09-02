@@ -129,8 +129,15 @@ impl Entry {
 /// what goes in it is a registration with the login session rather than
 /// anything of Verkstead's to keep, and no flag of the server's has anything to
 /// say about where it is.
+///
+/// Absolute is asked as `Path::has_root`, which is what
+/// [`verkstead_server::platform`] asks it as and for the same reason: this arm
+/// is compiled by every runner and macOS's rule is not. A Mac reads the two the
+/// same way — a path there is absolute exactly when it begins with `/` — while
+/// `is_absolute` on the Windows runner calls `/Users/you` relative, and the
+/// test below would be asking this what a Mac never asks it.
 fn agents_dir(home: Option<&Path>) -> Option<PathBuf> {
-    Some(home.filter(|dir| dir.is_absolute())?.join(LAUNCH_AGENTS))
+    Some(home.filter(|dir| dir.has_root())?.join(LAUNCH_AGENTS))
 }
 
 /// The agent as it is written, for a Verkstead at `exe`.
