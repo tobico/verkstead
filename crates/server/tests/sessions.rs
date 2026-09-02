@@ -11735,6 +11735,11 @@ async fn the_cleanup_trims_what_was_archived_long_enough_ago() {
     )
     .await;
 
+    // Listening before there is anything to hear, because a Nudge is sent
+    // rather than stored: a page that subscribed after the sweep ran would be
+    // the one thing this cannot tell from a sweep that announced nothing.
+    let mut page = Listening::open(&bench.app).await;
+
     let pool = open_database(&bench.database).await.unwrap();
     let repo = bench.repo_id;
 
@@ -11788,9 +11793,20 @@ async fn the_cleanup_trims_what_was_archived_long_enough_ago() {
     assert_eq!(
         verkstead_store::timeline(&pool, old.id).await.unwrap(),
         timeline,
-        "and nothing was written on the Timeline to say so: the cleanup reports \
-         in the log and nowhere else",
+        "and nothing was written on the Timeline to say so: a cleanup puts \
+         nothing in front of the human",
     );
+
+    // What it does say is that this Conversation moved, which is how a page
+    // open on it learns to draw the word and to stop drawing the drill-downs
+    // that have gone. Told rather than shown: the viewer does not poll.
+    until_nudged(
+        &mut page,
+        Nudge::Conversation {
+            conversation: old.id,
+        },
+    )
+    .await;
 
     // Long enough for many more passes, so that what the others still hold is
     // held against a sweep that has had every chance at them.
@@ -11911,6 +11927,10 @@ async fn the_cleanup_deletes_what_was_archived_long_enough_ago() {
     // having already chosen to keep it.
     git(&bench.repo, &["branch", "rate-limiting"]);
 
+    // And a page open on the sidebar throughout — see the trim's own test for
+    // why it subscribes before there is anything to hear.
+    let mut page = Listening::open(&bench.app).await;
+
     let pool = open_database(&bench.database).await.unwrap();
     let repo = bench.repo_id;
 
@@ -11953,6 +11973,11 @@ async fn the_cleanup_deletes_what_was_archived_long_enough_ago() {
     cleaning_up(&bench, "cleanup:\n  delete:\n    enabled: true\n");
 
     until_deleted(&pool, old.id).await;
+
+    // And the list itself is announced as having moved, which is what makes the
+    // sidebar's own promise true: gone even under Show archived, rather than a
+    // row still drawn for something that answers not-found.
+    until_nudged(&mut page, Nudge::Conversations).await;
 
     // Long enough for many more passes, so that what is still there is held
     // against a sweep that has had every chance at it.
@@ -12114,6 +12139,26 @@ async fn held(pool: &SqlitePool, id: i64, event: i64) -> String {
         .await
         .unwrap()
         .expect("the Event is on that Conversation's Timeline")
+}
+
+/// Wait for one Nudge of a particular shape to reach a page that is listening.
+///
+/// Past whatever else the sweep announced on the way, rather than reading the
+/// next one and insisting on it: two Conversations trimmed in one pass are two
+/// Nudges, and which of them arrives first is nobody's promise.
+async fn until_nudged(page: &mut Listening, wanted: Nudge) {
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        if page.nudge().await == wanted {
+            return;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the cleanup never announced {wanted:?}",
+        );
+    }
 }
 
 /// Wait for the sweep to reach one Conversation, which is its Capture emptied.

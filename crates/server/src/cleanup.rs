@@ -41,12 +41,23 @@
 //! the delete switch being turned on, which is a human saying what should
 //! happen to what they have already put away.
 //!
-//! **And it says what it did in the log and nowhere else.** Nothing is refused
-//! and nothing comes back. A cleanup writes no Timeline Event, sends no Nudge
-//! and puts nothing in front of the human — a card that said *this was cleaned
-//! up* would be the record growing where it was supposed to shrink, and the mark
-//! the Conversation's own page draws is the record of a trim. A delete leaves no
-//! mark at all, there being nothing left for one to be on.
+//! **And it puts nothing in front of the human.** Nothing is refused and
+//! nothing comes back. A cleanup writes no Timeline Event and asks nothing of
+//! anybody — a card that said *this was cleaned up* would be the record growing
+//! where it was supposed to shrink, and the mark the Conversation's own page
+//! draws is the record of a trim. A delete leaves no mark at all, there being
+//! nothing left for one to be on.
+//!
+//! **What it does announce is that the record moved**, which is a different
+//! thing from telling anybody about it. The viewer reads back what a Nudge names
+//! and does not poll (ADR-0009), so a page open while this ran would otherwise
+//! go on drawing what the sweep has taken — a sidebar still listing a
+//! Conversation that answers not-found, which is not the *gone from the sidebar
+//! even under Show archived* the glossary promises. So a delete announces
+//! [`Nudge::Conversations`], the list having lost one, and a trim announces
+//! [`Nudge::Conversation`], the page having gained a word and lost its
+//! drill-downs — exactly as the merge sweep announces the word it changed.
+//!
 //! **And a pass that took something gives the space back.** SQLite frees the
 //! pages a delete emptied inside the file and leaves the file the size it was,
 //! so the one thing here that is about disk would reclaim no disk at all — see
@@ -54,6 +65,8 @@
 //! and never after one that found nothing.
 
 use std::time::Duration;
+
+use verkstead_schema::Nudge;
 
 use crate::AppState;
 use crate::store;
@@ -192,6 +205,11 @@ async fn deleting(state: &AppState, cleanup: &crate::settings::Cleanup) -> bool 
             Ok(store::Deletion::Deleted) => {
                 deleted = true;
 
+                // The list itself moved, which is the Nudge for a Conversation
+                // that left it: every page open on the sidebar is drawing a row
+                // for something that now answers not-found.
+                state.nudges.announce(Nudge::Conversations);
+
                 tracing::info!(
                     conversation_id,
                     archived_for = delete_after,
@@ -235,6 +253,13 @@ async fn trimming(state: &AppState, cleanup: &crate::settings::Cleanup) -> bool 
         match store::trim_conversation(&state.pool, conversation_id).await {
             Ok(store::Trimming::Trimmed) => {
                 trimmed = true;
+
+                // This Conversation moved rather than the list: it is where it
+                // was, with a word on it that was not there before and
+                // drill-downs that are now empty.
+                state.nudges.announce(Nudge::Conversation {
+                    conversation: conversation_id,
+                });
 
                 tracing::info!(
                     conversation_id,
