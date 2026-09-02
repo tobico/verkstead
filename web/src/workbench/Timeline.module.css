@@ -205,22 +205,21 @@
     border-color: var(--accent);
   }
 
+  /* Half outside the card each, so the circle sits centred over the edge line
+     it turns the deck across — half the 1.75rem width, which is what puts the
+     centre exactly on the edge. The pane's own padding is the room they hang
+     into.
+
+     Outside rather than inset, which is the other half of a change the cards
+     made: they are borderless at rest now, so an arrow lying inside one had
+     nothing to lie against, and the card had to be padded away from words it
+     was not touching. Nothing is padded for them any more. */
   .deck > .back {
-    left: 0.35rem;
+    left: -0.875rem;
   }
 
   .deck > .on {
-    right: 0.35rem;
-  }
-
-  /* And the room the arrows need, which is the card's to give: they lie over
-     its own edges, so a card that did not stand back from them would have them
-     lying over its words. Only here — where there is no pointer there are no
-     arrows to clear, and a card in a phone-width pane has no width to spare. */
-  .deck .taskList,
-  .deck .stageList,
-  .deck .pullRequest {
-    padding-inline: 2.4rem;
+    right: -0.875rem;
   }
 }
 

@@ -787,10 +787,10 @@ type Pane = {
 
 /// The carousel: one pinned card showing, and the ways to the others.
 ///
-/// Dots above saying how many there are and which is showing, arrows over the
-/// card's edges where there is a pointer to reach them with, and a swipe across
-/// the card where there is not. All three are the same move, which is why they
-/// are one function between them.
+/// Dots above saying how many there are and which is showing, arrows straddling
+/// the card's edges where there is a pointer to reach them with, and a swipe
+/// across the card where there is not. All three are the same move, which is why
+/// they are one function between them.
 ///
 /// Above rather than beneath, because the cards are not the same height as each
 /// other: dots under them would move every time the card changed, and they are
@@ -951,7 +951,9 @@ function Carousel(props: {
             buttons lying over the card would be two buttons in the way of it.
 
             Inside the deck rather than beside it, so that what they are
-            centred against is the card rather than the card and its dots. */}
+            centred against is the card rather than the card and its dots — and
+            each is placed half outside it, straddling the edge it turns the
+            deck across, in the room the pane's own padding leaves. */}
         <button
           type="button"
           class={`${styles.step} ${styles.back}`}

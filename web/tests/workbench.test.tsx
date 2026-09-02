@@ -13127,14 +13127,20 @@ describe("the pinned carousel", () => {
     );
   });
 
-  /// The arrows lie over the card's own edges, so the card stands back from
-  /// them — and only where there are arrows to stand back from.
-  it("gives the cards room for the arrows where there are arrows", async () => {
+  /// Each arrow straddles the edge of the card it turns the deck across: half
+  /// its own width outside, which puts its centre on the edge line. The room is
+  /// the pane's own padding, and no card is padded for them — the cards are
+  /// borderless at rest, so an arrow lying inside one had nothing to lie
+  /// against and the inset it was given read as a card indented for nothing.
+  it("straddles each card's edge with its arrow, and pads no card for them", () => {
     const [, hovering] = timelineCss.split("@media (hover: hover) {");
 
-    expect(hovering).toContain(
-      "  .deck .taskList,\n  .deck .stageList,\n  .deck .pullRequest {\n    padding-inline: 2.4rem;\n  }",
-    );
+    // Half of the 1.75rem circle above, which is what centres it on the edge.
+    expect(hovering).toContain("    width: 1.75rem;");
+    expect(hovering).toContain("  .deck > .back {\n    left: -0.875rem;\n  }");
+    expect(hovering).toContain("  .deck > .on {\n    right: -0.875rem;\n  }");
+
+    expect(timelineCss).not.toContain("padding-inline");
   });
 
   /// The slide is the stylesheet's, gated the way the record's tab indicator
