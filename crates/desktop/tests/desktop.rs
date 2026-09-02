@@ -13,10 +13,13 @@
 //! test rather than here. Two things are what divide them. The browser is
 //! started through the desktop's own opener, and on a Unix that is a program on
 //! the `PATH` a test can put a stand-in in front of, while on Windows it is
-//! `powershell.exe` and `explorer.exe` by name — so nothing there can watch
-//! what would have been opened, and what the stand-in directory does instead is
-//! make sure nothing is. And the dialogs: a Verkstead that could not take its
-//! address draws one, which a session with no screen never reaches — the
+//! `powershell.exe` and `explorer.exe` by name — which Windows finds in its own
+//! system directory whatever the `PATH` says, so there is nothing to stand in
+//! front of and nothing there can watch what would have been opened. **What
+//! keeps a browser shut on Windows is `--no-open`**, on every test that runs
+//! there, and a test written for that machine without it opens a real browser
+//! on whoever is running it. And the dialogs: a Verkstead that could not take
+//! its address draws one, which a session with no screen never reaches — the
 //! session every test here has on a Unix, and not what a Windows machine with
 //! somebody signed into it is.
 //!
@@ -52,14 +55,17 @@ fn free_port() -> u16 {
 /// `xdg-open` that writes down what it was asked to open and exits, and on
 /// Windows a directory with nothing in it at all.
 ///
-/// It is the whole of the `PATH` the app is started with either way, which is
-/// what makes both of them work. The Unix opener tries `xdg-open` first, so
-/// what is written here is what a browser would have been shown and an empty
-/// file is a browser that was never asked. The Windows one starts
-/// `powershell.exe` and then `explorer.exe`, which are names rather than
-/// programs a directory of the test's own can hold — so nothing there is
-/// standing in for a browser, and what an empty directory buys instead is that
-/// no browser on the machine running these tests is ever really opened.
+/// It is the whole of the `PATH` the app is started with either way, and on a
+/// Unix that is what makes it work: the opener tries `xdg-open` first, so what
+/// is written here is what a browser would have been shown and an empty file is
+/// a browser that was never asked.
+///
+/// **It buys nothing on Windows**, and the directory is there to keep the two
+/// arms one shape rather than to stop anything. The Windows opener starts
+/// `powershell.exe` and then `explorer.exe`, and Windows finds both in its own
+/// system directory before it ever reads the `PATH` — so a stand-in cannot be
+/// put in front of them and an empty directory does not keep them from running.
+/// What keeps a browser shut there is `--no-open`; see this file's own docs.
 struct Opener {
     bin: PathBuf,
     #[cfg(unix)]
