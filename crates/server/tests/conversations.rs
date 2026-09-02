@@ -1446,12 +1446,24 @@ async fn ready(app: &Router, watched: &Path, repo_id: i64) -> i64 {
     id
 }
 
-/// What git in `repo` says its worktrees are, by path.
+/// What git in `repo` says its worktrees are, by path, each in the
+/// filesystem's own spelling of it.
+///
+/// git prints a path in git's normalisation rather than the host's: on Windows
+/// that is forward slashes, and whichever short name the directory was reached
+/// through left as it stands. The tests hold paths the Rust side built, so the
+/// two are the same directory written two ways and compare unequal. This
+/// canonicalises what git said, which is the form `Path::canonicalize` gives
+/// the other side. A worktree whose directory has gone cannot be canonicalised
+/// and stays as git spelled it, because it is one git is holding either way.
 fn worktrees(repo: &Path) -> Vec<PathBuf> {
     git(repo, &["worktree", "list", "--porcelain"])
         .lines()
         .filter_map(|line| line.strip_prefix("worktree "))
-        .map(PathBuf::from)
+        .map(|path| {
+            let path = PathBuf::from(path);
+            path.canonicalize().unwrap_or(path)
+        })
         .collect()
 }
 
@@ -6891,7 +6903,7 @@ async fn adopting_starts_the_stage_on_its_own_branch_off_the_base_commit() {
     let worktree = PathBuf::from(view.worktree.expect("a stage has a Worktree").path);
 
     assert!(worktree.starts_with(dir.path()));
-    assert!(worktrees(&repo).contains(&worktree));
+    assert!(worktrees(&repo).contains(&worktree.canonicalize().unwrap()));
     assert!(
         worktree
             .join("docs/roadmaps/mvp/03-implementation.md")
@@ -8468,7 +8480,7 @@ async fn a_build_that_runs_no_sessions_starts_no_grilling_and_makes_nothing() {
     assert_eq!(view.worktree, None, "and it was given nowhere to work");
     assert_eq!(
         worktrees(&repo),
-        vec![repo.clone()],
+        vec![repo.canonicalize().unwrap()],
         "and git was left holding the repository and nothing else",
     );
     assert_eq!(
