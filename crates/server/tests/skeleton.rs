@@ -95,9 +95,13 @@ fn config_is_overridable_by_flag() {
         config.data_dir.as_deref(),
         Some(Path::new("/srv/verkstead"))
     );
+    // Joined rather than spelled, because a separator is the platform's: the
+    // same directory and the same file name come out `\` apart on Windows, and
+    // a literal here would be this test asserting which platform it is running
+    // on.
     assert_eq!(
-        database(Path::new("/srv/verkstead")).to_str().unwrap(),
-        "/srv/verkstead/verkstead.db",
+        database(Path::new("/srv/verkstead")),
+        Path::new("/srv/verkstead").join("verkstead.db"),
         "the database is that one name inside whichever directory won",
     );
 }
@@ -125,10 +129,18 @@ fn watched_paths_are_a_list_however_they_are_given() {
         "--watched-path",
         "/srv/scratch",
     ]);
+    // Written the way the platform writes `PATH`, which is what the flag is
+    // parsed with: a `;` on Windows, where a `:` is a drive letter's own
+    // punctuation — see `PATH_LIST_SEPARATOR` in `lib.rs`. Spelled with a `:`
+    // here, this asked Windows for one path named after two.
+    let one_string = std::env::join_paths(["/srv/repos", "/srv/scratch"])
+        .unwrap()
+        .into_string()
+        .unwrap();
     let separated = Config::parse_from([
         "verkstead serve",
         "--watched-path",
-        "/srv/repos:/srv/scratch",
+        one_string.as_str(),
     ]);
 
     assert_eq!(repeated.watched_paths, separated.watched_paths);
