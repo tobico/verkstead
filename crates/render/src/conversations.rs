@@ -244,6 +244,43 @@ pub struct AdoptedStage {
     pub branch: String,
 }
 
+/// Whether this Verkstead runs sessions at all, and where it does not, what to
+/// say about it.
+///
+/// One fact about the build, said once and read everywhere a session would
+/// start: the pane draws it where the press would have been, and every way into
+/// a session refuses by it — see [`GrillingStarted::NotOnWindowsYet`], which is
+/// the same refusal under five names because there are five ways in.
+///
+/// **A value rather than a `cfg`**, as the platform directories and the sandbox
+/// surface are: the arm a machine will never run is still an arm its tests call,
+/// so what a Windows build answers is testable on the Linux runner and the
+/// viewer's half is testable without a Windows machine anywhere.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum SessionsHere {
+    /// They run: a press that starts a session starts one, which is every
+    /// Verkstead but a Windows one.
+    Run,
+
+    /// They do not, this build being for Windows. A session's agent runs on a
+    /// pseudo-terminal and Windows has none to open — see the server's
+    /// `terminal` module, whose Windows arm is a terminal that refuses.
+    ///
+    /// **Not yet**, rather than not ever: a Mac runs sessions and a stage after
+    /// the port brings them to Windows too. Everything else about a Windows
+    /// Verkstead is the same product.
+    NotOnWindowsYet,
+}
+
+impl SessionsHere {
+    /// Whether there is no session to be started here — the question every way
+    /// into one asks before it makes anything.
+    pub fn absent(self) -> bool {
+        matches!(self, SessionsHere::NotOnWindowsYet)
+    }
+}
+
 /// One Conversation, whole: what it is attached to, what the human has settled
 /// about it, and everything that has happened to it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -339,6 +376,14 @@ pub struct ConversationView {
     /// the reason [`ConversationView::ready_to_grill`] is one: two of the three
     /// are facts about the server that nothing else on this payload carries.
     pub compiles_uncached: bool,
+
+    /// Whether this Verkstead runs sessions at all — see [`SessionsHere`].
+    ///
+    /// A fact about the build rather than about this Conversation, and the same
+    /// answer on every Conversation one server sends. Carried here for the
+    /// reason [`ConversationView::compiles_uncached`] is: it is read where the
+    /// work is started from, and nothing else on this payload says it.
+    pub sessions: SessionsHere,
 
     /// Whether there is driving to start again: the Conversation is in a state
     /// something ought to be driving, and nothing is.
@@ -2616,6 +2661,16 @@ pub enum GrillingStarted {
     /// It is past drafting, so it has been started once already — or closed.
     NotDrafting,
 
+    /// This Verkstead runs no sessions, so there is nothing here to start — see
+    /// [`SessionsHere::NotOnWindowsYet`].
+    ///
+    /// Refused in front of everything else this press does, the branch and the
+    /// worktree included: a start that made both and then found nothing to
+    /// launch in them would be a Conversation grilling with nothing grilling it.
+    /// The pane draws the state rather than the button, so this is that same
+    /// rule asked again on arrival — the way every named refusal here is.
+    NotOnWindowsYet,
+
     /// No Agent Profile is chosen for the grilling session.
     NoGrillingProfile,
 
@@ -2712,6 +2767,16 @@ pub enum Resumed {
     /// driving it. None of the three is a Conversation standing still.
     NotDriven,
 
+    /// This Verkstead runs no sessions, so there is nothing to start driving it
+    /// with — see [`SessionsHere::NotOnWindowsYet`].
+    ///
+    /// Reachable on a Data Directory that arrived from a machine that does run
+    /// them, that being the only way a Windows Verkstead has a Conversation
+    /// mid-run at all: nothing it started itself ever got past drafting. The
+    /// restart's own take-up is refused by this too, and writes it down as the
+    /// Notice that stops the Conversation — see the server's `resume` module.
+    NotOnWindowsYet,
+
     /// Something is driving it already — a session, a runner, a wrap-up's
     /// watchers. The second press of the button is the first one arriving
     /// again, and starting a second driver would be two agents in one Worktree.
@@ -2785,6 +2850,12 @@ pub enum Resolved {
     /// and needs no press; one that has been closed is the human finished with
     /// the work.
     NotDone,
+
+    /// This Verkstead runs no sessions, so the wrap-up this press starts again
+    /// would have nothing to resolve the conflict with — see
+    /// [`SessionsHere::NotOnWindowsYet`], and [`Resumed::NotOnWindowsYet`] for
+    /// how a Conversation on such a machine got past drafting at all.
+    NotOnWindowsYet,
 
     /// Nothing on it conflicts any more. The pull request merges again —
     /// somebody resolved it, or the freshening the pane does as it opens found
@@ -3138,6 +3209,15 @@ pub enum ConversationSteered {
     /// same rule asked again on arrival, the way every named refusal here is.
     NoPullRequest,
 
+    /// A target something runs in was named on a Verkstead that runs no
+    /// sessions — see [`SessionsHere::NotOnWindowsYet`].
+    ///
+    /// Four of the five targets, and not Done: nothing runs there, so a steer
+    /// into it is the one this build can still make. The modal holds the submit
+    /// shut on the other four and says why; this is that same rule asked again
+    /// on arrival.
+    NotOnWindowsYet,
+
     /// Implementing was named with nothing written, for a Conversation with
     /// nothing on its branch to carry on: no backlog with work left in it, and
     /// no roadmap it has written.
@@ -3306,6 +3386,12 @@ pub enum Adopted {
     /// It is adopting nothing, which is every Conversation that began with a
     /// Brief and a grilling. There is no roadmap here to take a stage from.
     NotAdopting,
+
+    /// This Verkstead runs no sessions, so the stage would be adopted and then
+    /// left standing — see [`SessionsHere::NotOnWindowsYet`], and
+    /// [`GrillingStarted::NotOnWindowsYet`], which is the same refusal on the
+    /// press beside this one.
+    NotOnWindowsYet,
 
     /// No Agent Profile is chosen for the grilling. Carried by an adopted stage
     /// rather than run under: every stage after it inherits both Profiles from

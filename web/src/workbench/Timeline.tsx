@@ -130,6 +130,7 @@ import { Mark } from "./Mark";
 import marks from "./Mark.module.css";
 import { Conflict } from "./Merging";
 import { PaneHead } from "./PaneHead";
+import { NO_SESSIONS, NoSessions, noSessions } from "./sessions";
 import { Setup } from "./Setup";
 import { StatusButton } from "./StatusButton";
 import styles from "./Timeline.module.css";
@@ -170,6 +171,11 @@ const GRILL_REFUSAL: Record<
   Started: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "This conversation has already been started.",
+  // The one refusal here that is about this Verkstead rather than about this
+  // conversation, and the one the page draws before the press where it can —
+  // see `sessions.tsx`, whose sentence every other press that wanted a session
+  // says as well.
+  NotOnWindowsYet: NO_SESSIONS,
   NoGrillingProfile:
     "Pick a grilling profile and model — or No grilling — first, on the brief.",
   NoImplementationProfile:
@@ -1818,6 +1824,11 @@ function Commit(props: {
 ///
 /// The server checks every one of the conditions again regardless — the page's
 /// copy is only as fresh as its last read.
+///
+/// **Except on a Verkstead with no session to start**, where there is no button
+/// at all and the state stands in its place: not being ready is something to go
+/// and fix, and this is not — see `sessions.tsx`. The press is refused by name
+/// regardless, which is what the map above is filled in for.
 function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
 
@@ -1852,46 +1863,51 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
   return (
     <Show when={props.conversation.state === "Draft"}>
       <div class={styles.startGrilling}>
-        <button
-          type="button"
-          class={styles.start}
-          classList={{ [styles.inert!]: !ready() }}
-          // Only ever `disabled` for a press already in flight. Not being ready
-          // is the other thing entirely: that press has an answer to give.
-          disabled={start.isPending}
-          aria-disabled={!ready()}
-          onClick={() => (ready() ? start.mutate() : setAsked(true))}
-          onMouseEnter={() => setHovered(true)}
-          onMouseLeave={() => setHovered(false)}
-        >
-          {start.isPending ? "Starting…" : "Start work"}
-        </button>
         <Show
-          when={ready()}
-          fallback={
-            <Show when={missing()}>
-              <Note>
-                This needs a brief, and every role picked and working.
-              </Note>
-            </Show>
-          }
+          when={!noSessions(props.conversation)}
+          fallback={<NoSessions class={styles.noSessions} />}
         >
-          <Note>
-            This creates the branch and its worktree, and freezes the brief.
-          </Note>
-        </Show>
+          <button
+            type="button"
+            class={styles.start}
+            classList={{ [styles.inert!]: !ready() }}
+            // Only ever `disabled` for a press already in flight. Not being ready
+            // is the other thing entirely: that press has an answer to give.
+            disabled={start.isPending}
+            aria-disabled={!ready()}
+            onClick={() => (ready() ? start.mutate() : setAsked(true))}
+            onMouseEnter={() => setHovered(true)}
+            onMouseLeave={() => setHovered(false)}
+          >
+            {start.isPending ? "Starting…" : "Start work"}
+          </button>
+          <Show
+            when={ready()}
+            fallback={
+              <Show when={missing()}>
+                <Note>
+                  This needs a brief, and every role picked and working.
+                </Note>
+              </Show>
+            }
+          >
+            <Note>
+              This creates the branch and its worktree, and freezes the brief.
+            </Note>
+          </Show>
 
-        <Show when={refused()}>
-          {(outcome) => (
+          <Show when={refused()}>
+            {(outcome) => (
+              <ErrorLine class={styles.failure}>
+                {grillRefusal(outcome())}
+              </ErrorLine>
+            )}
+          </Show>
+          <Show when={start.isError}>
             <ErrorLine class={styles.failure}>
-              {grillRefusal(outcome())}
+              The work could not be started: {start.error?.message}
             </ErrorLine>
-          )}
-        </Show>
-        <Show when={start.isError}>
-          <ErrorLine class={styles.failure}>
-            The work could not be started: {start.error?.message}
-          </ErrorLine>
+          </Show>
         </Show>
       </div>
     </Show>

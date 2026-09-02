@@ -23,6 +23,7 @@ import { createSignal, type JSX, Show } from "solid-js";
 import { adoptRoadmap } from "../api/client";
 import type { Adopted, ConversationView } from "../api/types";
 import { Empty, ErrorLine, Note } from "../notices";
+import { NO_SESSIONS, NoSessions, noSessions } from "./sessions";
 import { COMPANION_REFUSAL } from "./Timeline";
 import styles from "./Adoption.module.css";
 
@@ -42,6 +43,10 @@ export const ADOPT_REFUSAL: Record<
   NotDrafting: "This conversation has already been adopted.",
   NotAdopting:
     "This conversation is adopting nothing, so it has no roadmap to take a stage from.",
+  // The one refusal here that is about this Verkstead rather than about this
+  // conversation, and the press that starts a grilling meets it too — see
+  // `sessions.tsx`, which is where the sentence is.
+  NotOnWindowsYet: NO_SESSIONS,
   NoGrillingProfile: "Choose a grilling profile and model first, on the brief.",
   NoImplementationProfile:
     "Choose an implementation profile and model first, on the brief.",
@@ -140,36 +145,45 @@ export function Adoption(props: {
       </Show>
 
       <Show when={props.conversation.state === "Draft"}>
-        <button
-          type="button"
-          class={styles.adopt}
-          disabled={adopt.isPending}
-          onClick={() => adopt.mutate()}
+        {/* And nothing to press on a Verkstead with no session to run the stage
+            — the state stands where the button would be, as it does under the
+            brief on a conversation that is grilled rather than adopted. See
+            `sessions.tsx`. */}
+        <Show
+          when={!noSessions(props.conversation)}
+          fallback={<NoSessions class={styles.noSessions} />}
         >
-          {adopt.isPending ? "Adopting…" : "Adopt"}
-        </button>
-        <Note>
-          This creates the branch and its worktree, takes the stage brief as
-          this conversation's brief, and starts the work on it. Both agent
-          profiles have to be chosen first.
-          {/* And the companions, where any were configured while it drafted:
-              the press checks them out beside the stage's own, so it is worth
-              saying that it is this press that makes them. */}
-          <Show when={props.conversation.companions.length}>
-            {" "}
-            The repos alongside are checked out with it.
-          </Show>
-        </Note>
+          <button
+            type="button"
+            class={styles.adopt}
+            disabled={adopt.isPending}
+            onClick={() => adopt.mutate()}
+          >
+            {adopt.isPending ? "Adopting…" : "Adopt"}
+          </button>
+          <Note>
+            This creates the branch and its worktree, takes the stage brief as
+            this conversation's brief, and starts the work on it. Both agent
+            profiles have to be chosen first.
+            {/* And the companions, where any were configured while it drafted:
+                the press checks them out beside the stage's own, so it is worth
+                saying that it is this press that makes them. */}
+            <Show when={props.conversation.companions.length}>
+              {" "}
+              The repos alongside are checked out with it.
+            </Show>
+          </Note>
 
-        <Show when={refused()}>
-          {(outcome) => (
-            <ErrorLine class={styles.failure}>{adoptRefusal(outcome())}</ErrorLine>
-          )}
-        </Show>
-        <Show when={adopt.isError}>
-          <ErrorLine class={styles.failure}>
-            The stage could not be adopted: {adopt.error?.message}
-          </ErrorLine>
+          <Show when={refused()}>
+            {(outcome) => (
+              <ErrorLine class={styles.failure}>{adoptRefusal(outcome())}</ErrorLine>
+            )}
+          </Show>
+          <Show when={adopt.isError}>
+            <ErrorLine class={styles.failure}>
+              The stage could not be adopted: {adopt.error?.message}
+            </ErrorLine>
+          </Show>
         </Show>
       </Show>
     </section>

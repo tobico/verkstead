@@ -76,6 +76,7 @@ import * as pairing from "../pairing";
 import { Picker } from "../picking";
 import { Switch as Toggle } from "../Switch";
 import { chosen } from "./naming";
+import { NO_SESSIONS, NoSessions, noSessions } from "./sessions";
 import { BasePicker, RULE } from "./Setup";
 import styles from "./Steer.module.css";
 
@@ -90,6 +91,11 @@ export const STEER_REFUSAL: Record<
 > = {
   Steered: "",
   NoSuchConversation: "This conversation is gone.",
+  // The one refusal here that is about this Verkstead rather than about this
+  // conversation, and the same answer the presses outside this modal give — see
+  // `sessions.tsx`. The submit is held shut on every target something runs in,
+  // so this is what a modal opened before the read answers a press with.
+  NotOnWindowsYet: NO_SESSIONS,
   NoPullRequest:
     "This work is on no pull request, so there is no wrap-up to steer it into.",
   NoInstruction:
@@ -1052,16 +1058,28 @@ export function Steer(props: {
           </div>
         </Show>
 
+        {/* And what a target something runs in comes to on a Verkstead with no
+            session to run it: said above the buttons, because it is the reason
+            the submit under it is shut. Done is the one target this build can
+            still be steered into — nothing runs there — so the line goes with
+            the target rather than standing at the head of the modal. See
+            `sessions.tsx`. */}
+        <Show when={runs() && noSessions(props.conversation)}>
+          <NoSessions class={styles.noSessions} />
+        </Show>
+
         <div class={styles.steerButtons}>
           {/* Held shut where the target runs something and nothing is picked to
               run it: the server refuses that by name, and a press that could
-              only be refused is one the human should not have to make. */}
+              only be refused is one the human should not have to make. And shut
+              in the same way where nothing here runs a session at all. */}
           <button
             type="submit"
             class={styles.steer}
             disabled={
               submit.isPending ||
               (runs() && !picked()) ||
+              (runs() && noSessions(props.conversation)) ||
               needsInstruction() ||
               needsBrief() ||
               needsFollowUp()

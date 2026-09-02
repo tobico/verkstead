@@ -117,6 +117,7 @@ import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { utcStamp } from "../set/when";
 import styles from "./Actions.module.css";
+import { NO_SESSIONS, noSessions } from "./sessions";
 import { Steer, onAPullRequest } from "./Steer";
 
 /// Each way of being refused a stop, whichever of the two was pressed, in the
@@ -180,6 +181,11 @@ export const RESUME_REFUSAL: Record<Resumed, string> = {
   NoSuchConversation: "This conversation is gone.",
   NotDriven:
     "Nothing is supposed to be driving this conversation, so there is nothing to start again.",
+  // The one refusal here that is about this Verkstead rather than about this
+  // conversation. The row is not drawn on a build with no session to start —
+  // see `sessions.tsx` — so this is what a page drawn before the read answers
+  // a press with.
+  NotOnWindowsYet: NO_SESSIONS,
   AlreadyDriven:
     "Something is already driving this conversation. Have a look at what it is doing.",
   NowhereToWork:
@@ -673,7 +679,14 @@ function actions(): {
             to start — see `ready_to_resume`. It carries nothing: what to start
             is worked out from where the work now stands at the moment of the
             press. */}
-        <Show when={conversation().ready_to_resume}>
+        {/* And never on a Verkstead with no session to start: what Resume
+            works out is which session should be running, so a row offering it
+            there is a press that could only be refused. What says so is on the
+            conversation — see `sessions.tsx` — and the refusal is still mapped
+            above, a page being only as fresh as its last read. */}
+        <Show
+          when={conversation().ready_to_resume && !noSessions(conversation())}
+        >
           <Action
             class={styles.resume}
             label="Resume"

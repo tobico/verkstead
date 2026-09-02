@@ -105,6 +105,7 @@
       }
     }
   },
+  "sessions": "Run",
   "shared": null,
   "state": "Grilling",
   "stop_asked": false,

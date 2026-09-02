@@ -36,7 +36,9 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
-use crate::conversations::{CommitPane, CompanionView, ConversationView, TimelineEvent};
+use crate::conversations::{
+    CommitPane, CompanionView, ConversationView, SessionsHere, TimelineEvent,
+};
 use crate::profiles::PickedView;
 use crate::repos::RepoEntry;
 use crate::view::SetView;
@@ -220,6 +222,14 @@ pub fn shared(
             stop_asked: false,
             ready_to_continue: false,
             compiles_uncached: false,
+
+            // And the state a session would be started from, said as the
+            // ordinary one. It is a fact about the machine that would run it —
+            // which is the workbench's rather than the reader's, a share being
+            // opened wherever somebody was sent it — so a share carrying the
+            // exporter's answer would be telling the reader about a platform
+            // that is not theirs.
+            sessions: SessionsHere::Run,
 
             // And what is being adopted, which is the one other thing that puts
             // a control on the record: an adopting Conversation draws the Adopt

@@ -1330,6 +1330,13 @@ pub(crate) async fn conversation_view(
         state: lifecycle(conversation.state),
         ready_to_grill,
         compiles_uncached,
+        // Whether there is a session to be started at all, which is a fact about
+        // this build rather than about this Conversation — the same answer on
+        // every one it sends. Read off the registry rather than off the target
+        // this was compiled for, so that a test on any machine can stand a
+        // server up that answers either way — see
+        // [`crate::sessions::Sessions::here`].
+        sessions: state.sessions.here(),
         ready_to_resume,
         ready_to_stop,
         stop_asked,

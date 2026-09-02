@@ -89,6 +89,7 @@
       }
     }
   },
+  "sessions": "Run",
   "shared": null,
   "state": "Wrapping",
   "stop_asked": false,
