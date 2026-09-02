@@ -47,6 +47,11 @@
 //! up* would be the record growing where it was supposed to shrink, and the mark
 //! the Conversation's own page draws is the record of a trim. A delete leaves no
 //! mark at all, there being nothing left for one to be on.
+//! **And a pass that took something gives the space back.** SQLite frees the
+//! pages a delete emptied inside the file and leaves the file the size it was,
+//! so the one thing here that is about disk would reclaim no disk at all — see
+//! [`crate::store::reclaim`], run once at the end of a pass that took something
+//! and never after one that found nothing.
 
 use std::time::Duration;
 
@@ -131,8 +136,25 @@ async fn sweep(state: &AppState) {
     // trimmed it and then deleted it would have taken the bulk out of something
     // it was about to take altogether, and said so twice in the log. Deleting
     // first leaves the trim nothing but what is staying.
-    deleting(state, cleanup).await;
-    trimming(state, cleanup).await;
+    //
+    // Both halves run whatever the other did, so neither is written with `||`:
+    // what is collected here is whether there is space to give back, and a
+    // delete that took something is no reason to skip the trim.
+    let deleted = deleting(state, cleanup).await;
+    let trimmed = trimming(state, cleanup).await;
+
+    // And the rewrite that turns rows nobody can reach any more into disk the
+    // human can use, once, after a pass that took something. A failure is a pass
+    // that did not reclaim rather than a cleanup that went wrong — the rows are
+    // gone either way, and the next pass to take something tries again.
+    if deleted || trimmed {
+        match store::reclaim(&state.pool).await {
+            Ok(()) => tracing::info!("the space a cleanup freed has been given back"),
+            Err(error) => {
+                tracing::error!(error = ?error, "giving back the space a cleanup freed failed");
+            }
+        }
+    }
 }
 
 /// The delete half of one pass: what has been archived longer than the delete's
@@ -144,10 +166,13 @@ async fn sweep(state: &AppState) {
 /// next pass, exactly as the trim's backlog does: *a delete, thirty days after
 /// the archiving* is a rule about the record rather than about what has happened
 /// since somebody found the settings page.
-async fn deleting(state: &AppState, cleanup: &crate::settings::Cleanup) {
+///
+/// Answers whether it took anything, which is what says there is space to give
+/// back — see [`sweep`].
+async fn deleting(state: &AppState, cleanup: &crate::settings::Cleanup) -> bool {
     if !cleanup.deletes() {
         tracing::debug!("the Cleanup's delete is switched off, so nothing is deleted");
-        return;
+        return false;
     }
 
     let delete_after = cleanup.delete_after();
@@ -156,17 +181,23 @@ async fn deleting(state: &AppState, cleanup: &crate::settings::Cleanup) {
         Ok(waiting) => waiting,
         Err(error) => {
             tracing::error!(error = ?error, "listing the archived Conversations to delete failed");
-            return;
+            return false;
         }
     };
 
+    let mut deleted = false;
+
     for conversation_id in waiting {
         match store::delete_conversation(&state.pool, conversation_id).await {
-            Ok(store::Deletion::Deleted) => tracing::info!(
-                conversation_id,
-                archived_for = delete_after,
-                "an archived Conversation has been deleted",
-            ),
+            Ok(store::Deletion::Deleted) => {
+                deleted = true;
+
+                tracing::info!(
+                    conversation_id,
+                    archived_for = delete_after,
+                    "an archived Conversation has been deleted",
+                );
+            }
             Ok(outcome) => tracing::debug!(
                 conversation_id,
                 outcome = ?outcome,
@@ -177,13 +208,15 @@ async fn deleting(state: &AppState, cleanup: &crate::settings::Cleanup) {
             }
         }
     }
+
+    deleted
 }
 
 /// And the trim half, which is the same shape a step earlier.
-async fn trimming(state: &AppState, cleanup: &crate::settings::Cleanup) {
+async fn trimming(state: &AppState, cleanup: &crate::settings::Cleanup) -> bool {
     if !cleanup.trims() {
         tracing::debug!("the Cleanup's trim is switched off, so nothing is trimmed");
-        return;
+        return false;
     }
 
     let trim_after = cleanup.trim_after();
@@ -192,17 +225,23 @@ async fn trimming(state: &AppState, cleanup: &crate::settings::Cleanup) {
         Ok(waiting) => waiting,
         Err(error) => {
             tracing::error!(error = ?error, "listing the archived Conversations to clean up failed");
-            return;
+            return false;
         }
     };
 
+    let mut trimmed = false;
+
     for conversation_id in waiting {
         match store::trim_conversation(&state.pool, conversation_id).await {
-            Ok(store::Trimming::Trimmed) => tracing::info!(
-                conversation_id,
-                archived_for = trim_after,
-                "an archived Conversation has been trimmed",
-            ),
+            Ok(store::Trimming::Trimmed) => {
+                trimmed = true;
+
+                tracing::info!(
+                    conversation_id,
+                    archived_for = trim_after,
+                    "an archived Conversation has been trimmed",
+                );
+            }
             Ok(outcome) => tracing::debug!(
                 conversation_id,
                 outcome = ?outcome,
@@ -213,4 +252,6 @@ async fn trimming(state: &AppState, cleanup: &crate::settings::Cleanup) {
             }
         }
     }
+
+    trimmed
 }

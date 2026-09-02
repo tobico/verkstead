@@ -539,3 +539,37 @@ async fn take(tx: &mut sqlx::SqliteConnection, id: i64, table: &str, what: &str)
 
     Ok(())
 }
+
+/// Give the space a cleanup freed back to the filesystem.
+///
+/// The half of a cleanup SQLite will not do on its own. A `DELETE` marks the
+/// pages it emptied free *inside* the database file and leaves the file the size
+/// it was: what comes back is reused by whatever is written next, so a Verkstead
+/// that trims stops growing — but a human who turned the delete on to get their
+/// disk back gets none of it back until something rewrites the file without the
+/// free pages in it. `VACUUM` is that something.
+///
+/// **Rather than `auto_vacuum`**, which would do it as the rows go and cost
+/// nothing here. It cannot be turned on after the fact: a database made without
+/// it has to be vacuumed once to change the setting at all, so the pragma buys a
+/// migration and this buys none — and what it would be paying for is continuous
+/// bookkeeping on every write, to save an hourly rewrite of a file a single
+/// human's record fits in.
+///
+/// Run only after a pass that actually took something — see
+/// [`crate::cleanup::sweep`] in the server, which is the whole of the caller.
+/// The rewrite is not free, and a sweep that found nothing has nothing to give
+/// back.
+///
+/// It takes the database exclusively for as long as it runs, so it can fail on
+/// one that is busy. That is a pass that did not reclaim rather than a cleanup
+/// that went wrong: the rows are gone either way, and the next sweep to take
+/// something tries again.
+pub async fn reclaim(pool: &SqlitePool) -> Result<()> {
+    sqlx::query("VACUUM")
+        .execute(pool)
+        .await
+        .context("giving back the space a cleanup freed")?;
+
+    Ok(())
+}

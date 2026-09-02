@@ -29,7 +29,7 @@ use verkstead_store::{
     add_companion, append_capture, append_transcript, archive_conversation, ask, capture,
     close_conversation, create_profile, deletable, delete_conversation, deleted_tables,
     load_conversation, load_response, lock_set, nothing_else, open_database, pick_direction,
-    place_conversations, record_addressed_comments, record_backlog, record_check_rollup,
+    place_conversations, reclaim, record_addressed_comments, record_backlog, record_check_rollup,
     record_commit, record_conflict_fix_attempt, record_fix_attempt, record_merging,
     record_pull_request, record_share, record_share_comment, record_standing, register_repo,
     save_brief, session_id, set_grilling_pairing, settle_wrap_up, skip_review, stamp_unseen,
@@ -943,4 +943,92 @@ async fn what_is_deletable_is_what_has_been_archived_for_long_enough() {
         deletable(&pool, 30).await.unwrap().is_empty(),
         "and once they are gone there is nothing left to do",
     );
+}
+
+/// And the space a cleanup freed comes back to the filesystem, which is what
+/// the whole feature is for.
+///
+/// Deleting rows is not reclaiming disk: SQLite marks the pages free inside the
+/// file and leaves the file the size it was, so a human who turned the delete on
+/// to get their disk back would get none of it. Asked of the free list and the
+/// page count rather than of the file on disk, which is the same fact without
+/// waiting on a checkpoint: pages nothing can reach before, and a smaller
+/// database with none of them after.
+#[tokio::test]
+async fn a_cleanup_gives_the_space_back() {
+    let (_dir, pool) = fresh_pool().await;
+    let worked = worked(&pool, "rate-limiting").await;
+
+    // Enough of it that the delete frees whole pages rather than parts of one:
+    // what is being asked is whether the file is rewritten, and a database that
+    // fit on one page either way could not answer.
+    let event = start_capture(&pool, worked.id, Some("session"), None)
+        .await
+        .unwrap();
+
+    for line in 0..200 {
+        append_capture(
+            &pool,
+            event,
+            &format!("{line}: the session said a great deal indeed\n"),
+            &Summary {
+                lines: line + 1,
+                turns: Some(2),
+                latest: "the session said a great deal indeed".to_owned(),
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    let before = pages(&pool).await;
+
+    assert_eq!(
+        delete_conversation(&pool, worked.id).await.unwrap(),
+        Deletion::Deleted
+    );
+
+    assert!(
+        free(&pool).await > 0,
+        "a delete leaves pages nothing can reach, which is the thing to give back",
+    );
+    assert_eq!(
+        pages(&pool).await,
+        before,
+        "and leaves the database exactly as big as it was",
+    );
+
+    reclaim(&pool).await.unwrap();
+
+    assert_eq!(
+        free(&pool).await,
+        0,
+        "and afterwards there are none of them"
+    );
+    assert!(
+        pages(&pool).await < before,
+        "and the database itself is smaller than it was",
+    );
+}
+
+/// How many pages the database is, which is its size in the only unit SQLite
+/// measures itself in.
+async fn pages(pool: &SqlitePool) -> i64 {
+    let (pages,): (i64,) = sqlx::query_as("PRAGMA page_count")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+
+    pages
+}
+
+/// And how many of them are free: emptied by a delete, still inside the file,
+/// and no use to anything outside it.
+async fn free(pool: &SqlitePool) -> i64 {
+    let (free,): (i64,) = sqlx::query_as("PRAGMA freelist_count")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+
+    free
 }

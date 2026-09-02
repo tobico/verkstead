@@ -234,9 +234,11 @@ here is refused, a delete sooner than the trim included: the clocks are
 independent, so the conversation is simply deleted before it was ever trimmed.
 The sweep reads the file on every pass, an hour apart, so a switch flipped from
 a phone is in force on the next one without a restart. It says what it did in
-the log and nowhere else — no timeline card, no notice — and it touches nothing
-outside Verkstead's own record: the git branch stays, and a published share
-stays published.
+the log and nowhere else — no timeline card, no notice. A pass that took
+something ends with a `VACUUM`, because SQLite frees the pages a delete emptied
+inside the file and leaves the file the size it was; a pass that found nothing
+does not. And it touches nothing outside Verkstead's own record: the git branch
+stays, and a published share stays published.
 
 `"conflict_resolution"` is what a session sent at a pull request that will not
 merge is told to do about it: `"Merge"`, which merges the base branch into the

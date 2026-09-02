@@ -59,7 +59,7 @@ pub use archives::{
 };
 pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
 pub use cleanup::{
-    Deletion, Trimming, deletable, delete_conversation, deleted_tables, trim_conversation,
+    Deletion, Trimming, deletable, delete_conversation, deleted_tables, reclaim, trim_conversation,
     trimmable, trimmed,
 };
 pub use commits::{Commit, commit, commit_repo, commits_landed, record_commit, recorded_commits};
