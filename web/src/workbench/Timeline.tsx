@@ -820,12 +820,32 @@ function Carousel(props: {
 }): JSX.Element {
   const cards = () => props.conversation.pinned;
 
-  const [at, setAt] = createSignal(fronting(props.conversation));
+  /// Which card the human turned to, held as which card it is rather than as
+  /// where it sat.
+  ///
+  /// The list is read again every time the page hears the world moved, and it
+  /// changes under the reader while they are looking at it: the running session
+  /// leads it and is pinned only while one runs, so every session that starts
+  /// pushes the rest of the deck down one and every session that ends pulls them
+  /// back up. An index remembered across that is an index meaning a different
+  /// card — a reader on the pull request would find the backlog under them,
+  /// having pressed nothing. What they turned to is a card, so a card is what is
+  /// kept.
+  ///
+  /// By [`named`], which is what tells one pinned card from another anyway: it
+  /// is the name on the dot that turns to it, and it says which repository a
+  /// pull request is in for exactly this reason — no two cards in a deck answer
+  /// to it.
+  const [at, setAt] = createSignal(named(cards()[fronting(props.conversation)]!));
 
-  /// Never off the end of a list that shrank underneath it — a pull request is
-  /// pinned as the run finishes, and a backlog stops being pinned as its last
-  /// task file goes.
-  const showing = () => Math.min(at(), cards().length - 1);
+  /// And where that card is now. Nothing found is the card having left the deck
+  /// — the session that finished, the backlog whose last task file went — and
+  /// the front is what a deck with nothing to go back to shows, exactly as one
+  /// being opened does.
+  const showing = () => {
+    const found = cards().findIndex((card) => named(card) === at());
+    return found === -1 ? 0 : found;
+  };
 
   /// The turn that is running, where there is one: the card it left, and the
   /// way it is going. Nothing at all while the deck is at rest.
@@ -850,7 +870,7 @@ function Carousel(props: {
     // list: turning on past the last card is still travelling onwards, and the
     // card it lands on is the first.
     setTurning({ from: was, onward: to > was });
-    setAt(next);
+    setAt(named(cards()[next]!));
     clearTimeout(running);
     running = setTimeout(() => setTurning(null), SLIDE);
   };

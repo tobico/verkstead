@@ -13065,6 +13065,56 @@ describe("the pinned carousel", () => {
     ).toBeNull();
   });
 
+  /// Which is why the deck holds its place by which card it is rather than by
+  /// where it sits. The session leads the list and comes and goes with the run,
+  /// so a reader who turned to the backlog would otherwise find the pull request
+  /// under them the moment a session started, having pressed nothing — and the
+  /// backlog again the moment it ended.
+  it("keeps the reader on the card they turned to as a session comes and goes", async () => {
+    let standing: ConversationView = { ...WRAPPING, pinned: ALL_THREE };
+
+    serving(
+      whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+      whenever("/api/ui/repos", json(REPOS)),
+      whenever("/api/ui/profiles", json(PROFILES)),
+      whenever(`/api/ui/conversations/${WRAPPING.id}`, () => json(standing)()),
+      whenever(WHAT_IS_ON_IT, json(CARRIED)),
+    );
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    const dots = await drawn(
+      container,
+      `.${timeline.pinned} .${timeline.carousel} > .${timeline.dots}`,
+    );
+    const named = () =>
+      dots
+        .querySelector("button[aria-current='true']")!
+        .getAttribute("aria-label");
+
+    fireEvent.click(
+      [...dots.querySelectorAll("button")].find(
+        (dot) => dot.getAttribute("aria-label") === "Task list",
+      )!,
+    );
+    await waitFor(() => expect(named()).toBe("Task list"));
+
+    // A session starts, and goes in at the head of the list.
+    standing = {
+      ...WRAPPING,
+      pinned: [{ AgentOutput: { ...OUTPUT, running: true } }, ...ALL_THREE],
+    };
+    readAgain();
+    await waitFor(() => expect(dots.querySelectorAll("button").length).toBe(4));
+    expect(named()).toBe("Task list");
+
+    // And ends, taking it out from under the rest again.
+    standing = { ...WRAPPING, pinned: ALL_THREE };
+    readAgain();
+    await waitFor(() => expect(dots.querySelectorAll("button").length).toBe(3));
+    expect(named()).toBe("Task list");
+  });
+
   it("shows one of several pinned cards at a time", async () => {
     theWrapping({ pinned: ALL_THREE });
     const { container } = mount(`/conversations/${WRAPPING.id}`);
