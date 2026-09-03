@@ -251,6 +251,52 @@ pub(crate) fn under(directory: &Path, name: &str) -> PathBuf {
 const BIN: &str = "bin";
 const VERKSTEAD: &str = "verkstead";
 
+/// And the two more that are there only where the image carries the libraries
+/// it runs over — see [`Bundled`]: the libraries themselves, and the image
+/// behind the launcher that stands at `bin/verkstead` in front of them.
+///
+/// `lib` beside `bin` because that is where a reader looks for it, and
+/// `libexec` because the image is no longer what a session runs directly — what
+/// is on the `PATH` is what a session types, and the file behind the launcher
+/// is not that.
+const LIB: &str = "lib";
+const LIBEXEC: &str = "libexec";
+
+/// Where the launcher is written on the host: under the Data Directory, beside
+/// everything else the server makes for a session to read.
+///
+/// Not under the `bin` of the server's own directory, which on a Mac *is* a
+/// directory under the Data Directory: what goes there is what a session finds,
+/// and a host file standing where the bind goes would be one path trying to be
+/// two files.
+const LAUNCHER: &str = "verkstead-launcher";
+
+/// What the AppImage runtime says about where it mounted the image, which is
+/// how the server finds the libraries it was bundled with — see
+/// [`Executable::bundling`].
+const APPDIR: &str = "APPDIR";
+
+/// And where the libraries are under that, which is the layout
+/// `tools/build-appimage.sh` packs.
+const BUNDLED_LIBRARIES: &str = "usr/lib";
+
+/// What the loader reads a library path off, which is what the launcher sets
+/// and what the probe is run with — see [`Bundled`].
+const LD_LIBRARY_PATH: &str = "LD_LIBRARY_PATH";
+
+/// And the verb the server runs its own image with before it equips anybody
+/// with it — see [`Executable::probe`], which is where the choice of this one
+/// is argued.
+const GUIDE: &str = "guide";
+
+/// How much of what a refused image said for itself is carried into the log
+/// line that refuses it.
+///
+/// A loader naming the library it could not find says it in a few words; an
+/// image that failed some other way could say anything at all, and a log record
+/// is no place to find out how much.
+const COMPLAINT: usize = 500;
+
 /// Where each agent type's account lands in HOME.
 ///
 /// Claude's pair, and the one directory each backend after it keeps its whole
@@ -619,9 +665,21 @@ impl Home {
 /// refused as unknown, so no grilling could reach its closing move.
 ///
 /// A machine's own install is therefore not a fallback. A session asking with a
-/// binary nobody chose is the failure this removes, and where the server cannot
-/// find its own image the session is not started at all, and what is logged is
-/// which session that cost.
+/// binary nobody chose is the failure this removes, and where the server has no
+/// image of its own to hand over the session is not started at all, and what is
+/// logged is which session that cost.
+///
+/// **Having none is the wider of the two things that sounds like**: an image
+/// the server cannot find, and one it found that will not run. The second is
+/// asked at startup by running it — see [`Executable::probed`] — because the
+/// invariant this type exists to keep is not one an existence check can stand
+/// on. Both say *why* in the startup log as they happen, because by the time a
+/// session is refused for want of an image there is nothing left to look at.
+///
+/// **And an image is sometimes more than a file.** The AppImage carries the
+/// libraries it is drawn over beside it, because the machine it lands on may
+/// have none of them, and a session given the file alone would be given a
+/// binary that cannot load — see [`Bundled`], which is what goes in with it.
 #[derive(Debug, Clone)]
 pub struct Executable {
     path: PathBuf,
@@ -630,7 +688,55 @@ pub struct Executable {
     /// directory of Verkstead's own — see [`own_directory`]. Made by the bind
     /// on Linux and really there on a Mac, and first on a session's `PATH`
     /// either way.
+    ///
+    /// Where the image was bundled with libraries this is where the *launcher*
+    /// goes instead, and the image itself is under `libexec` behind it — see
+    /// [`Bundled`].
     inside: PathBuf,
+
+    /// The libraries the image cannot run without, where it was packed with
+    /// any.
+    bundled: Option<Bundled>,
+}
+
+/// The libraries an image was packed with, and the launcher that points the
+/// loader at them.
+///
+/// **An AppImage is the whole of why this is here.** It carries GTK and
+/// everything under it in `usr/lib`, and `AppRun` points the loader there with
+/// `LD_LIBRARY_PATH` before it execs the binary — so the file runs for the
+/// human on a machine that has none of those installed. A session gets no
+/// `AppRun` and no such variable: its environment is cleared, `/tmp` is a
+/// tmpfs of its own so the mounted image is not even there, and what it is
+/// handed is the one file. On a machine with the toolkit installed that file
+/// loads off `/usr/lib` and all is well; on the machine the AppImage was made
+/// for, it does not load at all. So the libraries go in beside it.
+///
+/// **Through a launcher rather than through the session's own environment.**
+/// An `LD_LIBRARY_PATH` set for the session would be set for everything the
+/// session runs — its agent, `git`, `cargo`, `rustc` — and what is in that
+/// directory is not only GTK: `libz`, `libexpat`, `libpcre2` and forty more,
+/// built against whatever the artifact was built on. Ahead of the machine's own
+/// for every process in the sandbox, that is a session whose toolchain has been
+/// quietly re-pointed. So `bin/verkstead` is two lines of `/bin/sh` that set
+/// the variable and exec the image behind it, which is `AppRun`'s own trick at
+/// the scope it belongs at: the one binary that needs those libraries.
+#[derive(Debug, Clone)]
+struct Bundled {
+    /// Where they are on the host.
+    libraries: PathBuf,
+
+    /// And where a session finds them, which is `lib` beside the `bin` the
+    /// launcher is in.
+    libraries_inside: PathBuf,
+
+    /// The launcher on the host, written under the Data Directory — see
+    /// [`LAUNCHER`].
+    launcher: PathBuf,
+
+    /// And where the image goes, which is behind the launcher rather than on
+    /// the `PATH` — see [`LIBEXEC`].
+    image_inside: PathBuf,
 }
 
 impl Executable {
@@ -640,9 +746,84 @@ impl Executable {
     /// `None` where the process cannot say what it is running, and `None` too
     /// where what it names is no longer a file: a binary replaced under a
     /// running server is exactly that, and `/proc` answers for it with a path
-    /// marked `(deleted)` that no bind can be made from.
+    /// marked `(deleted)` that no bind can be made from. **Both are said in the
+    /// log here**, because neither is said anywhere else: the session that is
+    /// refused for want of an image names which session it cost and cannot name
+    /// why, there being nothing left by then to look at.
+    ///
+    /// And packed with whatever the runtime that started this process says it
+    /// was packed with — see [`Executable::bundling`].
     pub fn of_the_server(data_dir: &Path) -> Option<Executable> {
-        Executable::at(std::env::current_exe().ok()?, data_dir)
+        let running = match std::env::current_exe() {
+            Ok(running) => running,
+            Err(error) => {
+                tracing::error!(
+                    error = ?error,
+                    "Verkstead cannot say what image it is running, so no session can be \
+                     equipped to ask with it and none will be started"
+                );
+                return None;
+            }
+        };
+
+        let Some(image) = Executable::at(running.clone(), data_dir) else {
+            tracing::error!(
+                verkstead = %running.display(),
+                "Verkstead's own image is not a file any more — a binary replaced under a \
+                 running server reads exactly like this — so no session can be equipped to \
+                 ask with it and none will be started"
+            );
+            return None;
+        };
+
+        Some(image.bundling(
+            data_dir,
+            std::env::var_os(APPDIR).map(PathBuf::from).as_deref(),
+        ))
+    }
+
+    /// The same image, carrying the libraries it was packed with, where
+    /// `appdir` says it was packed with any — see [`Bundled`].
+    ///
+    /// `appdir` is the AppImage runtime's own account of where it mounted this
+    /// run's image, and what makes it worth trusting is the two things asked of
+    /// it here: that the image being equipped is *inside* it, so a stray
+    /// variable cannot point a session's loader somewhere of its own, and that
+    /// the libraries are really there.
+    ///
+    /// **A launcher that could not be written is an image without one**, and
+    /// then an image that will not load for a session — which is what the probe
+    /// is about to say next, in the log, in the loader's own words. Nothing is
+    /// refused here: what this settles is what the image comes with rather than
+    /// whether it runs.
+    pub fn bundling(mut self, data_dir: &Path, appdir: Option<&Path>) -> Executable {
+        let Some(libraries) = appdir
+            .filter(|appdir| appdir.is_absolute() && self.path.starts_with(appdir))
+            .map(|appdir| appdir.join(BUNDLED_LIBRARIES))
+            .filter(|libraries| libraries.is_dir())
+        else {
+            return self;
+        };
+
+        let own = own_directory(Platform::HERE, data_dir);
+        let bundled = Bundled {
+            libraries,
+            libraries_inside: under(&own, LIB),
+            launcher: data_dir.join(LAUNCHER),
+            image_inside: under(&under(&own, LIBEXEC), VERKSTEAD),
+        };
+
+        match bundled.write_the_launcher() {
+            Ok(()) => self.bundled = Some(bundled),
+            Err(error) => tracing::error!(
+                launcher = %bundled.launcher.display(),
+                error = ?error,
+                "Verkstead could not write the launcher its own image is reached through, so \
+                 the libraries it was packed with cannot be handed to a session with it"
+            ),
+        }
+
+        self
     }
 
     /// A named one, which is how a test puts the real CLI where the server's own
@@ -656,25 +837,181 @@ impl Executable {
         path.is_file().then_some(Executable {
             path,
             inside: under(&own_bin(Platform::HERE, data_dir), VERKSTEAD),
+            bundled: None,
         })
     }
 
-    /// Where it is on the host, which is what a sandbox binds.
+    /// The same image, having proved it runs — and `None`, with the reason in
+    /// the log, where it does not.
+    ///
+    /// Run once, at startup, because that is when there is something to do
+    /// about it: an image that will not run is a Verkstead nobody can grill
+    /// with, and a human reading the startup line is the one who can replace
+    /// it. Not a reason to refuse to start, for the reason a missing image is
+    /// not — the workbench, the Timeline and every record in it are still
+    /// there to read — so what is refused is sessions, one at a time and each
+    /// of them named as it is refused (see [`crate::sessions`]).
+    ///
+    /// The *why* is therefore said here and the *which* is said there. Nothing
+    /// probes at spawn: an image that ran at startup is the same file every
+    /// session after it is handed, and running it once per session would be a
+    /// second answer to a question already answered.
+    pub fn probed(self) -> Option<Executable> {
+        match self.probe() {
+            Ok(()) => Some(self),
+            Err(error) => {
+                tracing::error!(
+                    verkstead = %self.path.display(),
+                    error = ?error,
+                    "Verkstead's own image will not run in the environment a session runs it \
+                     in, so no session can be equipped to ask with it and none will be started"
+                );
+                None
+            }
+        }
+    }
+
+    /// Whether it runs at all, asked by running it.
+    ///
+    /// `guide` is the verb, because it is the one that reaches for nothing: it
+    /// prints a document compiled into the binary and opens no socket, reads no
+    /// directory and asks no server. So a non-zero exit says the file itself
+    /// would not run, which is the whole of what is being asked.
+    ///
+    /// **In the environment a session would get rather than the server's own**,
+    /// which is the only reason the answer is worth having. A sandbox clears
+    /// the environment and sets the handful of variables inside — see
+    /// [`Sandbox::surface`] — so an image that runs only by grace of something
+    /// its launcher exported runs for the server and for nobody the server
+    /// starts. The AppImage is exactly that: `AppRun` points the loader at the
+    /// libraries bundled beside it with `LD_LIBRARY_PATH` and execs the binary
+    /// under it, so a probe inheriting this process's environment would pass on
+    /// a machine where the same file, run any other way, would not start.
+    ///
+    /// **And the libraries a session *is* given are given here too**, for the
+    /// same reason and read the same way round: a session reaches the image
+    /// through a launcher that points the loader at them — see [`Bundled`] —
+    /// so a probe that left them out would refuse every AppImage on every
+    /// machine rather than the ones where sessions really cannot run. What is
+    /// named is the host's copy of the directory the launcher names inside,
+    /// those being one directory seen from two places.
+    fn probe(&self) -> anyhow::Result<()> {
+        let mut command = Command::new(&self.path);
+        command.arg(GUIDE).env_clear().stdin(Stdio::null());
+
+        if let Some(bundled) = &self.bundled {
+            command.env(LD_LIBRARY_PATH, &bundled.libraries);
+        }
+
+        let output = command
+            .output()
+            .map_err(|error| anyhow::anyhow!("running {} {GUIDE}: {error}", self.path.display()))?;
+
+        if output.status.success() {
+            return Ok(());
+        }
+
+        // What it said before it gave up, which on the failure this is here to
+        // catch is the loader naming the library it could not find. On one line
+        // and no longer than a line, because where it is going is a field of a
+        // log record rather than a terminal.
+        let complaint: String = String::from_utf8_lossy(&output.stderr)
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .chars()
+            .take(COMPLAINT)
+            .collect();
+
+        anyhow::bail!(
+            "{} {GUIDE} failed ({}){}{complaint}",
+            self.path.display(),
+            output.status,
+            if complaint.is_empty() { "" } else { ": " },
+        )
+    }
+
+    /// Where the image is on the host, which is what the probe runs.
     pub fn path(&self) -> &Path {
         &self.path
     }
 
-    /// Where a session finds it, which is what a sandbox puts it at.
-    fn inside(&self) -> &Path {
-        &self.inside
+    /// What a sandbox binds and where, host path first.
+    ///
+    /// One pair for an ordinary image — the file at `bin/verkstead`, which is
+    /// the whole of what a session is given. Three where it was packed with
+    /// libraries: the launcher on the `PATH`, the image behind it, and the
+    /// libraries the launcher points the loader at — see [`Bundled`].
+    fn binds(&self) -> Vec<(&Path, &Path)> {
+        let Some(bundled) = &self.bundled else {
+            return vec![(self.path.as_path(), self.inside.as_path())];
+        };
+
+        vec![
+            (bundled.launcher.as_path(), self.inside.as_path()),
+            (self.path.as_path(), bundled.image_inside.as_path()),
+            (
+                bundled.libraries.as_path(),
+                bundled.libraries_inside.as_path(),
+            ),
+        ]
     }
 
-    /// And the directory it is in inside, which is what goes first on a
+    /// And the directory a session finds it in, which is what goes first on a
     /// session's `PATH` — see [`path`].
     fn bin(&self) -> &Path {
         self.inside
             .parent()
             .expect("a path built by joining two names onto a directory has one")
+    }
+}
+
+impl Bundled {
+    /// Write the launcher, which is `bin/verkstead` as a session finds it.
+    ///
+    /// Two lines of `/bin/sh`: the library path, and the image behind it. Every
+    /// path in it is the path *inside*, because that is the only place it is
+    /// ever run — the probe runs the image itself and says the same thing with
+    /// an environment variable, see [`Executable::probe`].
+    ///
+    /// The variable is **set rather than prepended**. A session's environment is
+    /// cleared and this is not one of the handful put back — see
+    /// [`Sandbox::surface`] — so there is nothing to keep, and reading one that
+    /// the sandbox does not set would be reading whatever a future stage
+    /// happened to add.
+    ///
+    /// Rewritten at every startup rather than written once: the paths in it
+    /// follow the Data Directory, and a launcher left by a Verkstead that was
+    /// pointed somewhere else is a launcher naming a directory this run does not
+    /// bind.
+    fn write_the_launcher(&self) -> std::io::Result<()> {
+        let launcher = format!(
+            "#!/bin/sh\n\
+             {LD_LIBRARY_PATH}={}\n\
+             export {LD_LIBRARY_PATH}\n\
+             exec {} \"$@\"\n",
+            self.libraries_inside.display(),
+            self.image_inside.display(),
+        );
+
+        if let Some(dir) = self.launcher.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+
+        std::fs::write(&self.launcher, launcher)?;
+
+        // And executable, which is the whole of what makes it the thing on the
+        // `PATH` rather than a file beside it. Unix alone: there is no AppImage
+        // on the other platforms and so no launcher, and no mode bit to set if
+        // there were.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            std::fs::set_permissions(&self.launcher, std::fs::Permissions::from_mode(0o755))?;
+        }
+
+        Ok(())
     }
 }
 
@@ -1352,11 +1689,15 @@ impl Sandbox {
         // And the binary the session asks with, in a directory of its own that
         // goes first on `PATH` — see [`Executable`]. What is on that `PATH`
         // entry is this one file and nothing the host put beside it.
-        surface.elsewhere(
-            self.verkstead.path(),
-            self.verkstead.inside(),
-            Reach::ReadOnly,
-        );
+        //
+        // Three things rather than one where the image was packed with the
+        // libraries it runs over: the launcher on the `PATH`, the image behind
+        // it, and the libraries themselves — see [`Bundled`], which is where the
+        // whole of that is. Nothing about the `PATH` or the environment changes
+        // either way, which is the point of its being a launcher.
+        for (host, inside) in self.verkstead.binds() {
+            surface.elsewhere(host, inside, Reach::ReadOnly);
+        }
 
         // And the shared build cache: the directory writable at its own place,
         // and the sccache that compiles into it read-only in the directory the
@@ -1850,5 +2191,217 @@ mod tests {
         let bin = tempfile::tempdir().unwrap();
 
         assert!(Executable::at(bin.path().join("verkstead"), bin.path()).is_none());
+    }
+
+    /// An image that runs `script` as the whole of whatever verb it is given.
+    ///
+    /// A script rather than a binary because what the probe asks of an image is
+    /// whether the machine will run the file at all — and a shell script that
+    /// exits 127 with a loader's complaint on stderr is the same answer to that
+    /// question as an ELF whose libraries are missing. Unix alone: the mode bit
+    /// is what makes it an image, and Windows has no such thing.
+    #[cfg(unix)]
+    fn image(dir: &Path, script: &str) -> Executable {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = dir.join(VERKSTEAD);
+        std::fs::write(&path, format!("#!/bin/sh\n{script}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        Executable::at(path, dir).expect("the file was just written")
+    }
+
+    /// The probe is a run of the image, and the verb is the one that reaches
+    /// for nothing — see [`Executable::probe`].
+    ///
+    /// Once, and at startup: the count is what says a session's spawn asks the
+    /// image nothing, because a probe per spawn would be a process started for
+    /// every session to answer what was already known.
+    #[test]
+    #[cfg(unix)]
+    fn an_image_that_answers_the_guide_equips_every_session_after_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let ran = dir.path().join("ran");
+        let image = image(dir.path(), &format!("echo \"$@\" >> {}", ran.display()));
+
+        assert!(
+            image.probed().is_some(),
+            "an image that runs is one every session can ask with"
+        );
+
+        let runs = std::fs::read_to_string(&ran).unwrap();
+        assert_eq!(
+            runs.lines().collect::<Vec<_>>(),
+            [GUIDE],
+            "the image is run once, with the verb that opens nothing"
+        );
+    }
+
+    /// And one that will not run equips nobody, the same as one that is not
+    /// there — with what the machine said about it carried out for the startup
+    /// log, which is the only place a human finds out what to replace.
+    #[test]
+    #[cfg(unix)]
+    fn an_image_that_will_not_run_equips_nobody() {
+        let dir = tempfile::tempdir().unwrap();
+        let image = image(
+            dir.path(),
+            "echo 'libgtk-3.so.0: cannot open shared object file' >&2\nexit 127",
+        );
+
+        let refused = format!("{:?}", image.probe().expect_err("it exits 127"));
+
+        assert!(
+            refused.contains("libgtk-3.so.0"),
+            "the log line has to say what would not load, got {refused:?}"
+        );
+        assert!(
+            image.probed().is_none(),
+            "an image that will not run is one no session can ask with"
+        );
+    }
+
+    /// And it is run in the environment a session would get rather than in this
+    /// process's own, which is the whole of what the probe is worth.
+    ///
+    /// `HOME` stands for the environment here: it is set for anything a human
+    /// or a service manager started, a shell that inherits nothing does not
+    /// invent one, and it is not a variable a sandbox passes through — see
+    /// [`Sandbox::surface`], which sets a home of the session's own. An image
+    /// that saw this process's would have seen its `LD_LIBRARY_PATH` too, which
+    /// is the variable that makes a bundled AppImage pass a probe it should
+    /// fail.
+    #[test]
+    #[cfg(unix)]
+    fn the_probe_runs_the_image_in_a_session_environment_rather_than_the_servers() {
+        assert!(
+            std::env::var_os("HOME").is_some(),
+            "this process has to have a HOME for its absence inside to mean anything"
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let saw = dir.path().join("saw");
+        let image = image(
+            dir.path(),
+            &format!("echo \"${{HOME-nothing}}\" > {}", saw.display()),
+        );
+
+        image.probe().expect("the image runs");
+
+        assert_eq!(
+            std::fs::read_to_string(&saw).unwrap().trim(),
+            "nothing",
+            "the server's own environment is not what a session runs the image in"
+        );
+    }
+
+    /// An AppDir at `dir` with `libraries` under it, and an image inside it
+    /// where an AppImage's own is — which is the whole of what
+    /// [`Executable::bundling`] asks of a runtime's claim.
+    #[cfg(unix)]
+    fn appdir(dir: &Path, script: &str) -> Executable {
+        let bin = dir.join("usr/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(dir.join(BUNDLED_LIBRARIES)).unwrap();
+
+        image(&bin, script)
+    }
+
+    /// An image packed with libraries is handed over as three things rather than
+    /// one, and what is on the `PATH` is the launcher — see [`Bundled`].
+    ///
+    /// The libraries a session gets are the AppDir's own, at a path of
+    /// Verkstead's own inside; the image is behind the launcher rather than
+    /// beside it, so that nothing but the launcher is on the `PATH`.
+    #[test]
+    #[cfg(unix)]
+    fn an_image_packed_with_libraries_hands_a_session_the_launcher_and_the_two_behind_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let data_dir = tempfile::tempdir().unwrap();
+        let image = appdir(dir.path(), "exit 0").bundling(data_dir.path(), Some(dir.path()));
+
+        let own = own_directory(Platform::HERE, data_dir.path());
+        let launcher = data_dir.path().join(LAUNCHER);
+        let on_the_path = under(&under(&own, BIN), VERKSTEAD);
+        let behind_it = under(&under(&own, LIBEXEC), VERKSTEAD);
+        let libraries_inside = under(&own, LIB);
+        let libraries = dir.path().join(BUNDLED_LIBRARIES);
+
+        assert_eq!(
+            image.binds(),
+            vec![
+                (launcher.as_path(), on_the_path.as_path()),
+                (image.path(), behind_it.as_path()),
+                (libraries.as_path(), libraries_inside.as_path()),
+            ],
+        );
+
+        let written = std::fs::read_to_string(&launcher).unwrap();
+        assert!(
+            written.contains(&format!("LD_LIBRARY_PATH={}", libraries_inside.display()))
+                && written.contains(&format!("exec {} \"$@\"", behind_it.display())),
+            "the launcher should point the loader at the libraries and exec the image, got:\n\
+             {written}"
+        );
+    }
+
+    /// And an ordinary image is one thing, with no launcher and nothing said to
+    /// the loader — which is every image but an AppImage's.
+    ///
+    /// The three ways a runtime's claim is refused are each one of these: no
+    /// variable at all, one naming a directory the image is not under, and one
+    /// with no libraries in it.
+    #[test]
+    #[cfg(unix)]
+    fn an_image_that_was_packed_with_nothing_is_the_one_file_it_always_was() {
+        let dir = tempfile::tempdir().unwrap();
+        let data_dir = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let bare = tempfile::tempdir().unwrap();
+
+        for said in [None, Some(elsewhere.path()), Some(bare.path())] {
+            let image = appdir(dir.path(), "exit 0").bundling(data_dir.path(), said);
+            let inside = image.inside.clone();
+
+            assert_eq!(
+                image.binds(),
+                vec![(image.path(), inside.as_path())],
+                "an image the runtime said nothing usable about is bound as itself, \
+                 and {said:?} said nothing usable"
+            );
+            assert!(
+                !data_dir.path().join(LAUNCHER).exists(),
+                "and there is no launcher to write"
+            );
+        }
+    }
+
+    /// The probe runs the image the way a session reaches it, libraries and all:
+    /// an image that needs what it was packed with passes, and the same image
+    /// without them does not.
+    ///
+    /// Which is the whole of what the probe is worth on an AppImage. Read the
+    /// other way round it is the same claim: a probe that left the libraries out
+    /// would refuse every AppImage on every machine, rather than the ones where
+    /// a session really could not run one.
+    #[test]
+    #[cfg(unix)]
+    fn the_probe_gives_the_image_the_libraries_a_session_would_give_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let data_dir = tempfile::tempdir().unwrap();
+        let needs_them = "[ -n \"${LD_LIBRARY_PATH-}\" ] || { \
+             echo 'libgtk-3.so.0: cannot open shared object file' >&2; exit 127; }";
+
+        let packed = appdir(dir.path(), needs_them).bundling(data_dir.path(), Some(dir.path()));
+        assert!(
+            packed.probe().is_ok(),
+            "an image packed with what it needs is one a session can ask with"
+        );
+
+        let bare = appdir(dir.path(), needs_them);
+        assert!(
+            bare.probe().is_err(),
+            "and the same image with nothing packed beside it is not"
+        );
     }
 }

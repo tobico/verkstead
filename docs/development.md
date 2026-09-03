@@ -58,18 +58,22 @@ out of a checkout does: `--data-dir .` is why every command here says it, and
 it keeps the database, the worktrees and the settings beside the checkout where
 they can be deleted with it.
 
-The desktop app is the other binary, and the same server: `cargo run -p
-verkstead-desktop -- --data-dir .` serves what the command above serves and
-opens the viewer in your browser as it comes up. `--no-open` leaves the browser
-alone, and every other flag is the server's own, because the app *is* the
-server ([ADR 0012](adr/0012-desktop-tray-binary.md)) — started with nothing
-said it is the platform's Data Directory again, which is what a machine that
-installed it wants and not what a checkout does. It is the one crate here that
-links a system toolkit — GTK on Linux, which is why it builds in the dev shell
-and nowhere else here; AppKit on a Mac and Win32 on Windows, which are those
-platforms' own and want nothing installed. An address something is already
-listening on — the command above, say — is a dialog and a nonzero exit rather
-than a second Verkstead beside the first.
+The desktop app is a verb of that same binary, and the same server: `cargo run
+-p verkstead-cli -- desktop --data-dir .` serves what the command above serves
+and opens the viewer in your browser as it comes up. `--no-open` leaves the
+browser alone, and every other flag is the server's own, because the app *is*
+the server ([ADR 0012](adr/0012-desktop-tray-binary.md), as amended) — started
+with nothing said it is the platform's Data Directory again, which is what a
+machine that installed it wants and not what a checkout does. The tray half is
+`crates/desktop`, a library the CLI carries behind its default-on `desktop`
+feature: a build that says nothing gets both halves, which is what makes every
+image that can serve one that can also `ask`, and `--no-default-features` is
+the headless build the musl CLI and the nix package take. It is the one crate
+here that links a system toolkit — GTK on Linux, which is why the workspace
+builds in the dev shell and nowhere else here; AppKit on a Mac and Win32 on
+Windows, which are those platforms' own and want nothing installed. An address
+something is already listening on — the command above, say — is a dialog and a
+nonzero exit rather than a second Verkstead beside the first.
 
 What it puts on the screen is an icon in the system tray, and the menu on it is
 **Open** — the viewer again, in your browser — **View Logs**, which opens the
@@ -88,8 +92,9 @@ registration is the whole of the state: checking the box writes it, unchecking
 removes it, turning it off in your desktop's own settings unchecks it, and no
 setting of Verkstead's own keeps a second copy of the answer. Every
 launch rewrites it while it is there, with the path of the executable that is
-running, so a binary you moved heals its own entry the next time you start it
-by hand. What it writes starts the app with `--no-open`: a login is not a
+running and the `desktop` verb behind it — one image has more than one way in
+now — so a binary you moved heals its own entry the next time you start it by
+hand. What it writes starts the app with `--no-open`: a login is not a
 moment to be handed a browser window. The one thing the box cannot see is the
 platform's own second opinion about it — macOS's Login Items list, which
 `launchd` keeps in a database rather than in the file, and Windows' Startup tab
@@ -485,21 +490,23 @@ $ tools/generate-icons.sh     # the favicon and PWA icons, after replacing the a
 $ tools/generate-packaging.sh # the desktop entry, the launcher icons, the icns and the ico
 $ tools/build-appimage.sh     # Verkstead-x86_64.AppImage, once the viewer is built
 $ tools/build-macos-dmg.sh    # Verkstead-universal.dmg, on a Mac
+$ tools/build-windows-msi.sh  # Verkstead-x86_64.msi, on Windows
 ```
 
-The last two are two of the three desktop artifacts a release ships, one per
-platform that has something to wrap. Both take everything from the working tree
-and leave one file under `target/`, and both want `web/dist` already built,
-because the viewer is compiled into the binary they wrap. There is no third
-script, because Windows has no packaging: the exe a release ships there is what
-`cargo build --release -p verkstead-desktop` writes on a Windows machine, icon
-and version information included — `crates/desktop/build.rs` compiles those in —
-and the release leg renames that file and uploads it.
+The last three are the three desktop artifacts a release ships, one per desktop
+platform. Each takes everything from the working tree and leaves one file under
+`target/`, and each wants `web/dist` already built, because the viewer is
+compiled into the binary they wrap. Each also runs only where its artifact does:
+the dmg wants a Mac for `lipo` and `hdiutil`, and the msi wants Windows for the
+WiX toolset and the MSVC build under it, so the dev shell has the first of the
+three and nothing of the other two.
 
-The AppImage is the desktop binary, the packaging assets and every library the
+The AppImage is the unified binary, the packaging assets and every library the
 tray is drawn over, in one file, and it is the same command CI runs. It builds
-what `cargo build --release -p verkstead-desktop` builds, so it wants the dev
-shell for the same reason that does.
+what `cargo build --release -p verkstead-cli` builds, feature and all, and its
+`AppRun` supplies the `desktop` verb — a desktop launcher names a file and has
+nowhere to say one — so it wants the dev shell for the same reason that build
+does.
 
 The dmg is `Verkstead.app` — the same binary built for both Apple targets and
 `lipo`-ed into one, the icns from `packaging/`, and an `Info.plist` that says
@@ -509,6 +516,17 @@ the operating system's own tools, and there is no cross build of it from here.
 The bundle is ad-hoc signed rather than signed with a Developer ID, because
 Apple silicon will not execute a binary with no signature at all — that is not
 the signing that gets an app past Gatekeeper, and there is none of that.
+
+The msi is the two files a Windows install is — the unified `verkstead` and the
+windows-subsystem shim that opens it from an icon — wrapped in an installer,
+because two files beside each other are not a portable download. What goes where
+is [`tools/verkstead.wxs`](../tools/verkstead.wxs), and all of it goes into the
+profile: `%LOCALAPPDATA%\Programs\Verkstead`, the user's own Start menu, and
+the user's own `PATH`, so that `verkstead ask` works in a terminal opened
+afterwards. Per-user because the package is unsigned, and asking for
+administrator would be an unsigned program asking for the machine. It runs on
+Windows only: the WiX toolset's `candle` and `light` compile the package, and
+MSVC and the Windows SDK build what goes in it.
 
 ### The sessions suite, and the machine under it
 
@@ -648,9 +666,11 @@ neither the viewer's to serve nor the CLI's to hold. So the desktop packaging
 gets a directory of its own: `net.tobico.Verkstead.desktop` and the hicolor icon
 tree that `tools/build-appimage.sh` installs into the AppImage,
 `net.tobico.Verkstead.icns` that `tools/build-macos-dmg.sh` puts in the app
-bundle, and `net.tobico.Verkstead.ico`, which `crates/desktop/build.rs` compiles
-into `verkstead-desktop.exe` as a resource — Windows has no packaging around the
-exe to install an icon beside it, so the file carries its own. It is written by
+bundle, and `net.tobico.Verkstead.ico`, which Windows wants twice:
+`crates/desktop/build.rs` compiles it into the shim as a resource, nothing
+installed beside an exe being what Alt-Tab and the taskbar draw it with, and
+`tools/verkstead.wxs` names it again for the entry the msi leaves in Apps &
+Features. It is written by
 [`tools/generate-packaging.sh`](../tools/generate-packaging.sh) from the same
 hammer, and committed for the same reason the viewer's icons are. That script
 rewrites the whole directory from nothing on every run — so a size

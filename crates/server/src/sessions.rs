@@ -109,11 +109,13 @@ pub struct Agents {
     /// The executable every sandbox is given as `verkstead`: this server's own
     /// image — see [`Executable`].
     ///
-    /// `None` where the server cannot find it, which is not a fallback to the
-    /// machine's install but a session that does not start. Resolved at startup
-    /// like everything else here, and reported per session rather than at
-    /// startup, because what it costs is a session and the log line worth having
-    /// is the one that says which — see [`Sessions::start`].
+    /// `None` where the server has none — one it could not find, or one it
+    /// found and could not run — which is not a fallback to the machine's
+    /// install but a session that does not start. Resolved *and probed* at
+    /// startup like everything else here, so nothing is asked of the image
+    /// again per spawn; which session a missing one costs is reported per
+    /// session all the same, because that is the half of it startup cannot
+    /// name — see [`Sessions::start`].
     verkstead: Option<Executable>,
 
     handoffs: Handoffs,
@@ -1574,11 +1576,11 @@ impl Sessions {
     ///
     /// The session that was started, for whoever is driving it — see
     /// [`Session`]. A server with no way to run agents starts none, a server
-    /// that cannot find its own executable to equip one with starts none either,
-    /// and a sandbox that cannot be built — a Conversation with no worktree, or
-    /// one git will not own — is the same answer: there is nothing here to
-    /// launch. All three are logged, because each of them means a Conversation
-    /// that is grilling with nothing grilling it.
+    /// with no image of its own to equip one with starts none either, and a
+    /// sandbox that cannot be built — a Conversation with no worktree, or one
+    /// git will not own — is the same answer: there is nothing here to launch.
+    /// All three are logged, because each of them means a Conversation that is
+    /// grilling with nothing grilling it.
     ///
     /// The Timeline Event is made after the process is, so that a session that
     /// never started leaves no Capture of nothing.
@@ -1604,11 +1606,17 @@ impl Sessions {
         // another binary's server is the failure this refuses — see
         // [`Executable`]. Which session it cost is the whole of what is worth
         // logging, and this is where that is known.
+        //
+        // Either of the two ways there can be no image reaches this: one the
+        // server could not find, and one it found and could not run. Which of
+        // them it was is in the startup log — see [`Executable::probed`] — and
+        // saying it again per session would be repeating at every refusal what
+        // does not change between them.
         let Some(verkstead) = agents.verkstead.clone() else {
             tracing::error!(
                 conversation_id = conversation.id,
-                "Verkstead cannot find its own executable, so this session could not be \
-                 equipped with `verkstead` and was not started"
+                "Verkstead has no image of its own to equip a session with — the startup log \
+                 says which of the two it is — so this session was not started"
             );
             return Ok(None);
         };

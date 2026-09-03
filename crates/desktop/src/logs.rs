@@ -29,13 +29,16 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::MakeWriter;
 
-/// What is logged when `RUST_LOG` says nothing: what `crates/cli` logs — the
-/// server's own startup line and whatever else it has to report — and this
-/// binary's own account of the tray, the browser and this file beside it, with
-/// nothing from the crates beneath either. The app's half is here because it is
-/// the half that says why there is no icon in the tray, and a reason nobody is
-/// shown is no reason at all.
-const DEFAULT_FILTER: &str = "verkstead_server=info,verkstead_desktop=info";
+/// What is logged when `RUST_LOG` says nothing: what `verkstead serve` logs —
+/// the server's own startup line and whatever else it has to report — this
+/// crate's own account of the tray, the browser and this file beside it, and
+/// the verb's account of what stopped the app, with nothing from the crates
+/// beneath any of them. The app's half is here because it is the half that says
+/// why there is no icon in the tray, and a reason nobody is shown is no reason
+/// at all; `verkstead_cli` is here because the tray app is reached through that
+/// crate's `desktop` verb, and the log file is the only place a tray app's last
+/// words are read.
+const DEFAULT_FILTER: &str = "verkstead_server=info,verkstead_desktop=info,verkstead_cli=info";
 
 /// What the log file is called inside the Log Directory.
 const FILE: &str = "verkstead.log";

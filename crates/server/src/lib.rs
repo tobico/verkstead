@@ -855,11 +855,22 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
     // is the running server's own build and cannot disagree with it about a
     // schema, a Guide or a wire format — see [`sandbox::Executable`].
     //
-    // Not a reason to refuse to start, unlike the two above. A server that
-    // cannot say what it is running has nothing to equip a session with, and
-    // which session that costs is the thing worth reporting — so it is said as
-    // one is started rather than here, where there is nothing to name.
-    let verkstead = sandbox::Executable::of_the_server(&data_dir);
+    // Found and then *run*, here and once: a `guide` in the environment a
+    // session would get, which is what says the file will run for somebody
+    // other than whatever launched this process — see [`Executable::probed`],
+    // and the AppImage it is written for.
+    //
+    // Not a reason to refuse to start, unlike the two above. A server with no
+    // image to hand over has nothing to equip a session with, and which session
+    // that costs is the thing worth reporting — so *which* is said as one is
+    // started rather than here, where there is nothing to name.
+    //
+    // And *why* is said here, by whichever of the two steps found out: neither
+    // an image that could not be found nor one that will not run leaves anything
+    // to look at by the time a session is refused, so each says so as it
+    // happens. See [`Executable::of_the_server`] and [`Executable::probed`].
+    let verkstead =
+        sandbox::Executable::of_the_server(&data_dir).and_then(sandbox::Executable::probed);
 
     // And where a Conversation's handoff document is written, which is a root
     // under the same directory: each Conversation's own is made as its first

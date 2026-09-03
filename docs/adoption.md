@@ -51,11 +51,11 @@ spellings of one. **The flake and the NixOS module run the headless daemon**, on
 a machine that is always on and answering from wherever you are. **The AppImage
 is the same server started from an icon**, on the Linux desktop in front of you,
 with the viewer in your browser and a tray icon over it. **The dmg is that same
-app for a Mac**, with the icon in the menu bar instead. **The exe is that same
-app for Windows**, and is the whole download rather than something to install.
-Which one you want is which of those machines you were describing; two at once
-is two Verksteads, and the second to reach port 8422 says so in a dialog and
-exits.
+app for a Mac**, with the icon in the menu bar instead. **The msi installs that
+same app on Windows**, into your own profile and without asking for
+administrator. Which one you want is which of those machines you were
+describing; two at once is two Verksteads, and the second to reach port 8422
+says so in a dialog and exits.
 
 ### The daemon, on NixOS
 
@@ -140,6 +140,15 @@ Startup** is a checkbox over the desktop's own startup registration, and
 **Exit** stops the server. `--no-open` starts it without the browser, and
 `--data-dir` moves the Data Directory off `~/.local/share/verkstead`.
 
+**What is inside is the whole `verkstead`**, and the icon is one verb of it:
+the entry point in the file runs `verkstead desktop`, because a desktop
+launcher names a file and has nowhere to say a verb — which is also why the
+flags above are the app's rather than the CLI's. The same binary is what a
+session started here is handed to ask with, so the two halves of an ask are
+one build ([ADR-0012](adr/0012-desktop-tray-binary.md), as amended) — and the
+libraries it was packed with go in beside it, so a session can run it on the
+machine this file was made for as surely as you can.
+
 **A desktop with no tray host shows no icon, and nothing is wrong.** Vanilla
 GNOME is the case people meet — it draws no tray, and an AppIndicator extension
 is what gives it one. Verkstead cannot tell that from a tray that is drawing the
@@ -181,6 +190,12 @@ the Apple silicon build and the Intel one are in the one executable, so there is
 one download and no architecture to choose between. macOS 11 is the oldest it
 will start on. Open the image and drag Verkstead into the Applications folder
 beside it in the window, which is the whole of the install.
+
+Inside the bundle is the whole `verkstead`, with a small launcher script beside
+it that supplies the `desktop` verb — a bundle names an executable and has
+nowhere to say a verb — so the app you double-click and the binary a session
+asks with are one build ([ADR-0012](adr/0012-desktop-tray-binary.md), as
+amended).
 
 **The first launch is then refused, and that is expected.** The app is unsigned
 — there is no Developer ID behind it, which is
@@ -279,59 +294,84 @@ until something replaces them.
 
 ### The desktop app, on Windows
 
-`Verkstead-x86_64.exe` is the whole download and the whole install: the server,
-the viewer and everything the tray is drawn with in one file, with no installer
-and no MSI behind it (ADR-0012). It is portable — put it wherever you keep such
-things, a folder of your own or a stick, and double-click it. x86_64 only, which
-is every Intel and AMD machine, and an arm64 one runs it under the emulation
-Windows does for exactly this.
+`Verkstead-x86_64.msi` is the download, and it is an installer rather than a
+file to keep wherever you like: a Windows install is two files — the whole
+`verkstead`, and a small windows-subsystem shim beside it that supplies the
+`desktop` verb a Start-menu shortcut has nowhere to write
+([ADR-0012](adr/0012-desktop-tray-binary.md), as amended) — and two files
+beside each other are not a portable download. x86_64 only, which is every
+Intel and AMD machine, and an arm64 one runs it under the emulation Windows
+does for exactly this.
 
-**The first launch is then stopped, and that is expected.** The exe is unsigned
-— there is no code-signing certificate behind it, which is
+**Opening it is stopped the first time, and that is expected.** The package is
+unsigned — there is no code-signing certificate behind it, which is
 [ADR-0012](adr/0012-desktop-tray-binary.md)'s decision rather than an oversight
-— and Windows marks a file that arrived from the internet, so SmartScreen puts a
-blue **Windows protected your PC** window in front of it with a **Don't run**
+— and Windows marks a file that arrived from the internet, so SmartScreen puts
+a blue **Windows protected your PC** window in front of it with a **Don't run**
 button and nothing else that looks like a way on. There is a way on, and it is
 two clicks:
 
 1. Click **More info**, which is the line under the message and the whole of
    what is hidden here.
 2. It names the file and says *Unknown publisher*, and a **Run anyway** button
-   appears at the bottom. Click that.
+   appears at the bottom. Click that, and the install runs.
 
-Once, rather than at every launch: what was allowed through is that copy of the
-file, and starting it again — by hand, or from Launch on Startup — is ordinary.
-A newer download is a different file and wants the same two clicks. The other
-way round is to take the mark off before the first launch instead: right-click
-the exe, **Properties**, and tick **Unblock** at the bottom of the **General**
-tab.
+Once, at the install rather than at every launch: what is started afterwards is
+the Start-menu entry, which Windows put there itself and says nothing about. A
+newer download is a different file and wants the same two clicks. The other way
+round is to take the mark off before opening it instead: right-click the msi,
+**Properties**, and tick **Unblock** at the bottom of the **General** tab.
 
-What is on the screen after that is an icon in the notification area, and the
-menu on it is the Linux tray's four: **Open** brings the viewer back, and is
-what a double-click on the icon does; **View Logs** opens the file under
-`%LOCALAPPDATA%\Verkstead` that the server's logging goes to when there is no
-console to print it in; **Launch on Startup** is a checkbox over a
-`net.tobico.Verkstead` value under
+**It installs into your own profile, and asks nobody for anything.** The app is
+unsigned, so an installer asking for administrator would be an unsigned program
+asking for the machine, and elevation buys a downloader nothing they wanted.
+Everything therefore lands in the profile: the two exes under
+`%LOCALAPPDATA%\Programs\Verkstead`, a **Verkstead** entry in your own Start
+menu, and the uninstall entry in **Installed apps** beside everything else you
+installed. A newer msi replaces the copy that is there rather than standing
+beside it.
+
+**And the install directory goes on your `PATH`**, which is the half of this
+download that is not the icon at all: `verkstead ask`, `verkstead guide` and
+the rest work in a terminal opened *after* the install. One that was already
+open never read the entry — closing it and opening another is the whole of the
+fix — and the uninstall takes the entry away with the files.
+
+What is on the screen once **Verkstead** is opened from the Start menu is an
+icon in the notification area, and the menu on it is the Linux tray's four:
+**Open** brings the viewer back, and is what a double-click on the icon does;
+**View Logs** opens the file under `%LOCALAPPDATA%\Verkstead` that the server's
+logging goes to when there is no console to print it in; **Launch on Startup**
+is a checkbox over a `net.tobico.Verkstead` value under
 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`; and **Exit** stops the
 server. **Windows hides an icon it has not seen before**, in the flyout the `^`
 on the taskbar opens — dragging it out of there onto the taskbar is what pins
 it, and until you do, the app is running with its icon one click further away
 than this describes.
 
-**A moved exe repoints its own registration.** Every launch rewrites the Run
-value while it is there, with the path of the file that is running, so a
-portable exe that has been moved to another folder heals the entry the next time
-you start it by hand — and a machine that never ticked the box is never
-registered. What the box cannot see is Windows' own second opinion: the
-**Startup apps** tab in Task Manager, which Explorer records separately, so
-switching Verkstead off there leaves the box ticked and the value where it was.
+**The shortcut opens the shim rather than the binary**, and that is what keeps
+a console window off the screen: `verkstead.exe` is an ordinary console program
+on every platform, because that is what a terminal, a session and a test all
+want of it, so a shortcut naming it would put a black window in front of
+whoever clicked. The shim is the windows-subsystem exe that starts the binary
+beside it and exits with what it exited with, and there is nothing else about
+the two files to keep track of.
+
+**The startup registration is rewritten at every launch while it is there**,
+with the path of what is running and the `desktop` verb behind it, so a
+Verkstead installed somewhere else — a newer package, a profile that moved —
+heals the entry the next time you start it by hand, and a machine that never
+ticked the box is never registered. What the box cannot see is Windows' own
+second opinion: the **Startup apps** tab in Task Manager, which Explorer
+records separately, so switching Verkstead off there leaves the box ticked and
+the value where it was.
 
 `--no-open` starts it without the browser and `--data-dir` moves the Data
-Directory off `%APPDATA%\Verkstead`, both of them for a run from a terminal — an
-app started from Explorer is started with no arguments at all. It is a
-windows-subsystem binary, so double-clicking it opens no console window, and a
-run from PowerShell prints nothing where you started it: the log file is the
-account of a run either way.
+Directory off `%APPDATA%\Verkstead`, both of them for `verkstead desktop` run
+from a terminal — an app started from the Start menu is started with no
+arguments at all. Started that way there is no console to print in, so the log
+file is the whole account of the run; started from a terminal, whatever stops
+it is said there as well.
 
 **Sessions do not run on Windows**, and the workbench says so where one would be
 started rather than failing to start one: *Verkstead does not run sessions on

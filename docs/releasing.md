@@ -5,7 +5,7 @@ A release is a tag and nothing else.
 viewer once, then the bare CLI binary for each platform on a runner of that
 platform's own architecture, and beside them one desktop app per desktop
 platform — the Linux one as `Verkstead-x86_64.AppImage`, the macOS one as
-`Verkstead-universal.dmg`, the Windows one as `Verkstead-x86_64.exe`. Every leg
+`Verkstead-universal.dmg`, the Windows one as `Verkstead-x86_64.msi`. Every leg
 runs what it built, all of it is published as a GitHub Release under the tag,
 and finally the workflow commits
 [`nix/release.json`](../nix/release.json) to `main` so the flake fetches what
@@ -25,27 +25,64 @@ cannot drift apart. Move the image and both move.
 The macOS desktop leg is one runner for both Macs: `macos-15` is the Apple
 silicon image, an Apple host cross-compiles to the other Apple architecture, and
 [`tools/build-macos-dmg.sh`](../tools/build-macos-dmg.sh) builds both halves,
-`lipo`s them into one executable and packs the bundle into the image. Its floor
+`lipo`s them into one executable and packs the bundle into the image. What it
+joins is the unified `verkstead`, built with the `desktop` feature its default
+leaves on, and the bundle's executable is a launcher script beside it that
+supplies the `desktop` verb — a bundle names an executable and has nowhere to
+write a command line for it, so the launcher does the job `AppRun` does in the
+AppImage (ADR-0012, as amended). The script is called `Verkstead-launcher`
+rather than `Verkstead` because a Mac's filesystem is case-insensitive and the
+binary beside it is called `verkstead`. Its floor
 is written into the bundle rather than inherited from a runner —
 `LSMinimumSystemVersion`, 11.0, which is the Apple silicon half's own and the
 higher of the two — and it is the number
 [adoption.md](adoption.md#the-desktop-app-on-a-mac) gives a downloader.
 
-The Windows desktop leg is the shortest of the three and has no build script
-behind it, because a Windows download has nothing around it: cargo writes
-`verkstead-desktop.exe` with the icon and the version information compiled in as
-resources, and the leg renames that file and uploads it. There is no floor to
-hold it to either — what an AppImage promises about glibc and a bundle about
-macOS 11, an exe gets from the C runtime Windows itself ships.
+The Windows desktop leg is the one with an installer in it, and it is an
+installer because a Windows install became two files:
+[`tools/build-windows-msi.sh`](../tools/build-windows-msi.sh) builds the unified
+`verkstead` with the `desktop` feature its default leaves on, and beside it the
+windows-subsystem shim that supplies the `desktop` verb a Start-menu shortcut
+has nowhere to write — the job `AppRun` does in the AppImage and the launcher
+script does in the bundle. Two files beside each other are not a portable
+download, so [`tools/verkstead.wxs`](../tools/verkstead.wxs) wraps them
+in `Verkstead-x86_64.msi` (ADR-0012, as amended). That package is per-user
+throughout — the binaries under `%LOCALAPPDATA%\Programs\Verkstead`, the
+shortcut in the user's own Start menu, the install directory appended to the
+user's `PATH` — because the app is unsigned and elevation would buy a
+downloader nothing they wanted. The WiX toolset that compiles it is the runner
+image's own. There is no floor to hold any of it to: what an AppImage promises
+about glibc and a bundle about macOS 11, an exe gets from the C runtime Windows
+itself ships.
+
+One thing about that package cannot say what the tag says. A Windows Installer
+version is three numbers and nothing after them, so `v0.1.0-rc.1` and
+`v0.1.0-rc.2` both arrive in Apps & Features as `0.1.0` — which is why the
+package allows an upgrade from a version reading the same as its own, and the
+second rc replaces the first rather than standing beside it.
 
 Each desktop leg then asserts the artifact itself rather than what was lying
 beside it: the AppImage is run as the file that is uploaded, the dmg is mounted
-and run out of the mount, and the exe is renamed before it is run so that the
-file the assertions start is the file that goes to the Release. What they assert
-is the same three things — it starts, it serves a document with the viewer's
-bundle named in it, and its own log says an icon went up — and each of them is
-bounded, because the failures these apps draw are dialogs and a dialog nobody
-dismisses would hold a runner for six hours.
+and run out of the mount, and the msi is installed and everything afterwards
+asked of the install it left. What they assert is the same three things — it
+starts, it serves a document with the viewer's bundle named in it, and its own
+log says an icon went up — and each of them is bounded, because the failures
+these apps draw are dialogs and a dialog nobody dismisses would hold a runner
+for six hours.
+
+Every leg then asserts a fourth, and it is the one the running app cannot be
+asked for: the half of the binary a *session* gets. In the AppImage and the
+bundle that is the binary inside the artifact, run by path and asked for `ask`;
+on Windows it is `verkstead guide` in a terminal opened after the install, which
+is the same claim through the door an msi has — the `PATH` entry it wrote. An
+artifact carrying the tray alone would pass every assertion above it and hand
+each session it spawned a binary with no `ask` in it. The Windows leg checks two
+more that are the installer's own: the install is in the user's profile with its
+record under `HKCU`, and the Start-menu entry opens the shim rather than the
+console program beside it. The dmg's leg adds one still — that the app comes
+back out of the image with its signature intact — because the bundle's
+executable is a script now, and a signature over a script lives beside the file
+rather than inside it.
 
 The manifest is the nix systems alone, and that is the one place a count is
 still the right question: what the flake and the NixOS module run is the
@@ -54,8 +91,9 @@ fetches the Windows CLI binary through it either, there being no nix system to
 key one under. Four stays four however many assets a Release carries. The
 desktop assets are checked by name instead, in `publish`, which is the one place
 those names are written down, and the bare binaries are counted there: five of
-them since the Windows port, held apart from the desktop exe by the artifact
-each leg uploaded under rather than by the name of the file inside it.
+them since the Windows port, held apart from the desktop artifacts by the
+artifact name each leg uploaded under rather than by the name of the file inside
+it.
 
 A tag with a hyphen in it — `v0.1.0-rc.1` — is semver's own spelling of a
 pre-release, and the workflow marks the Release as one. That is the difference
@@ -117,8 +155,14 @@ newcomer actually follows.
    $ curl -fsSL -O \
        https://github.com/tobico/verkstead/releases/latest/download/Verkstead-x86_64.AppImage
    $ chmod +x Verkstead-x86_64.AppImage
-   $ ./Verkstead-x86_64.AppImage --version
+   $ ./Verkstead-x86_64.AppImage --help
    ```
+
+   The help that comes back is the tray app's rather than the CLI's, and that is
+   the file saying what it is: the entry point inside supplies the `desktop`
+   verb, because a desktop launcher names a file and cannot say one (ADR-0012,
+   as amended). Which release this is was step 2's question, and the bare binary
+   answered it.
 
    Then run it with no arguments: it serves, opens the viewer in the browser,
    and puts an icon in the tray. A desktop with no tray host shows no icon and
@@ -136,16 +180,20 @@ newcomer actually follows.
    [a downloader is told](adoption.md#the-desktop-app-on-a-mac). The icon lands
    in the menu bar and the viewer opens in the browser.
 
-5. **The exe, downloaded in a browser and double-clicked** on a Windows
-   machine. In a browser deliberately, for the reason the dmg is: the mark
-   SmartScreen reads is put on the file by whatever downloaded it, and `curl`
-   puts on nothing — an exe fetched with it starts with no warning at all, and
-   that warning is the one part of this install no workflow can rehearse.
+5. **The msi, downloaded in a browser and opened** on a Windows machine. In a
+   browser deliberately, for the reason the dmg is: the mark SmartScreen reads
+   is put on the file by whatever downloaded it, and `curl` puts on nothing — a
+   package fetched with it installs with no warning at all, and that warning is
+   the one part of this install no workflow can rehearse.
 
-   Click **More info** and then **Run anyway**, which is what
-   [a downloader is told](adoption.md#the-desktop-app-on-windows). The viewer
-   opens in the browser and the icon lands in the notification area — inside
-   the flyout the `^` opens, until it is dragged out onto the taskbar.
+   Walk past it the way
+   [a downloader is told](adoption.md#the-desktop-app-on-windows), then open
+   Verkstead from the Start menu. The viewer opens in the browser and the icon
+   lands in the notification area — inside the flyout the `^` opens, until it
+   is dragged out onto the taskbar. Then, in a terminal opened after the install
+   rather than one that was already up, `verkstead --version`: the `PATH` entry
+   is the half of this download a human at a terminal uses, and a terminal that
+   was already open never read it.
 
 6. **The flake, refreshed past nix's cache** — after the manifest commit has
    landed on `main`, which is a job later than the Release itself:

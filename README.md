@@ -29,10 +29,11 @@ download for both Macs, the same server again, with its icon in the menu bar.
 That app is unsigned, so the first launch is refused and System Settings is
 where it is allowed through; the steps are written out beside the download in
 [adoption](docs/adoption.md#the-desktop-app-on-a-mac). On Windows,
-`Verkstead-x86_64.exe` is the whole download: no installer, and it runs from
-wherever you put it, with its icon in the notification area. It is unsigned
-there too, so SmartScreen stops the first launch behind a **More info** link
-with **Run anyway** under it — also written out beside the download in
+`Verkstead-x86_64.msi` installs that same app into your own profile — no
+administrator, its icon in the notification area, and `verkstead` on your
+`PATH` for a terminal. It is unsigned there too, so SmartScreen stops the
+install behind a **More info** link with **Run anyway** under it — also written
+out beside the download in
 [adoption](docs/adoption.md#the-desktop-app-on-windows). Which of the four you
 want is [adoption](docs/adoption.md#getting-it-running).
 
@@ -65,7 +66,7 @@ request.
 and the loop for working on Verkstead itself.
 
 **[Releasing](docs/releasing.md)** — how a tag would become the published
-binaries, the AppImage, the dmg and the exe. Nothing has been released under
+binaries, the AppImage, the dmg and the msi. Nothing has been released under
 this name yet.
 
 ## License

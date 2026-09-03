@@ -93,12 +93,13 @@ impl Entry {
             .is_ok()
     }
 
-    /// Write the value, naming the executable that is running.
+    /// Write the value, naming the executable that is running and the `verb` it
+    /// was entered through — see [`Entered`](super::Entered).
     ///
     /// The key is created where it is not there, which is what `create` does to
     /// one that is: a Windows account has this key from the start, and asking
     /// for it either way is one call rather than two.
-    pub(super) fn write(&self) -> Result<()> {
+    pub(super) fn write(&self, verb: &str) -> Result<()> {
         let exe = std::env::current_exe().context("finding the path of the running executable")?;
         let exe = exe
             .to_str()
@@ -106,7 +107,7 @@ impl Entry {
 
         windows_registry::CURRENT_USER
             .create(&self.key)
-            .and_then(|key| key.set_string(crate::APP_ID, written(exe)))
+            .and_then(|key| key.set_string(crate::APP_ID, written(exe, verb)))
             .with_context(|| format!(r"writing HKEY_CURRENT_USER\{}", self.key))
     }
 
@@ -145,15 +146,20 @@ impl Entry {
     }
 }
 
-/// The command line the value holds, for a Verkstead at `exe`.
+/// The command line the value holds, for a Verkstead at `exe` entered through
+/// `verb`.
 ///
 /// **`--no-open` is in it**, which is the one decision the registration makes
 /// and the one both other arms make: a sign-in start is an ordinary launch of
 /// this app in every other way, and a browser window arriving over whatever the
 /// human is doing at every sign-in is the thing that gets the box unchecked.
+///
+/// The verb goes between the two, unquoted for the reason the Linux entry
+/// leaves it unquoted: it is a word of the binary's own grammar rather than a
+/// path, so there is nothing in it Windows could read as two arguments.
 #[cfg(any(windows, test))]
-fn written(exe: &str) -> String {
-    format!("{} --no-open", quoted(exe))
+fn written(exe: &str, verb: &str) -> String {
+    format!("{} {verb} --no-open", quoted(exe))
 }
 
 /// `exe` as the first word of a command line.
@@ -174,12 +180,14 @@ mod tests {
     use super::*;
 
     /// What the value starts, and the one decision it makes about how: the app
-    /// as anybody else starts it, with the browser left alone.
+    /// as anybody else starts it — through the verb, because the exe it names
+    /// has other verbs and only one of them is the app — with the browser left
+    /// alone.
     #[test]
-    fn the_value_starts_this_executable_without_opening_a_browser() {
+    fn the_value_starts_this_executable_through_the_verb_without_opening_a_browser() {
         assert_eq!(
-            written(r"C:\Users\you\Downloads\verkstead-desktop.exe"),
-            r#""C:\Users\you\Downloads\verkstead-desktop.exe" --no-open"#,
+            written(r"C:\Program Files\Verkstead\verkstead.exe", "desktop"),
+            r#""C:\Program Files\Verkstead\verkstead.exe" desktop --no-open"#,
         );
     }
 
@@ -188,8 +196,8 @@ mod tests {
     #[test]
     fn a_path_with_a_space_in_it_is_still_one_argument() {
         assert_eq!(
-            quoted(r"C:\Program Files\Verkstead\verkstead-desktop.exe"),
-            r#""C:\Program Files\Verkstead\verkstead-desktop.exe""#,
+            quoted(r"C:\Program Files\Verkstead\verkstead.exe"),
+            r#""C:\Program Files\Verkstead\verkstead.exe""#,
         );
     }
 
@@ -208,7 +216,7 @@ mod tests {
 
         assert!(!entry.on(), "nothing has been registered yet");
 
-        entry.write().unwrap();
+        entry.write("desktop").unwrap();
         assert!(entry.on(), "the value should be there");
         assert!(
             value(&key).contains(std::env::current_exe().unwrap().to_str().unwrap()),
@@ -245,11 +253,11 @@ mod tests {
             .unwrap()
             .set_string(
                 crate::APP_ID,
-                written(r"D:\where\it\used\to\be\verkstead-desktop.exe"),
+                written(r"D:\where\it\used\to\be\verkstead.exe", "desktop"),
             )
             .unwrap();
 
-        entry.write().unwrap();
+        entry.write("desktop").unwrap();
 
         let registered = value(&key);
         assert!(
@@ -272,7 +280,7 @@ mod tests {
     fn the_value_is_the_only_thing_writing_it_makes() {
         let key = scratch("alone");
 
-        Entry::under(&key).write().unwrap();
+        Entry::under(&key).write("desktop").unwrap();
 
         let written: Vec<_> = windows_registry::CURRENT_USER
             .open(&key)

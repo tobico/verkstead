@@ -74,17 +74,19 @@ impl Entry {
         std::fs::read_to_string(&self.file).is_ok_and(|entry| says_on(&entry))
     }
 
-    /// Write the entry, naming the executable that is running.
+    /// Write the entry, naming what is running and — where what is running is
+    /// not already a way into the app — the `verb` it was entered through, see
+    /// [`Entered`](super::Entered).
     ///
     /// The autostart directory is made where it is not there: a machine that
     /// has never registered anything has never needed one, and the
     /// specification's answer is to make it.
-    pub(super) fn write(&self) -> Result<()> {
-        let exe = executable()?;
-        let exe = exe.to_str().with_context(|| {
+    pub(super) fn write(&self, verb: &str) -> Result<()> {
+        let named = running()?;
+        let exe = named.path.to_str().with_context(|| {
             format!(
                 "{} is not a path an autostart entry can name",
-                exe.display()
+                named.path.display()
             )
         })?;
 
@@ -92,8 +94,11 @@ impl Entry {
             std::fs::create_dir_all(dir).with_context(|| format!("making {}", dir.display()))?;
         }
 
-        std::fs::write(&self.file, written(exe))
-            .with_context(|| format!("writing the autostart entry at {}", self.file.display()))
+        std::fs::write(
+            &self.file,
+            written(exe, named.says_the_verb.then_some(verb)),
+        )
+        .with_context(|| format!("writing the autostart entry at {}", self.file.display()))
     }
 
     /// Take the entry away.
@@ -131,26 +136,38 @@ fn autostart_dir(config: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> 
     Some(config.join(AUTOSTART))
 }
 
-/// The entry as it is written, for a Verkstead at `exe`.
+/// The entry as it is written, for a Verkstead at `exe` entered through `verb`
+/// — or through nothing at all, where `exe` is its own way in.
 ///
 /// **`--no-open` is in it**, which is the one decision the entry makes: a
 /// startup launch is an ordinary launch of this app in every other way, and a
 /// browser window arriving over whatever the human is doing at every login is
 /// the thing that gets the box unchecked.
 ///
+/// The verb goes between the two, unquoted: it is a word of the binary's own
+/// grammar rather than a path, so there is nothing in it a desktop could read
+/// as two arguments — see [`Entered::verb`](super::Entered::verb). And it is
+/// left out where the entry point says it itself, which is [`running`]'s to
+/// answer: an AppImage execs `verkstead desktop` from inside, so a `desktop`
+/// here as well would start `verkstead desktop desktop`, which clap refuses.
+///
 /// The icon is named rather than pointed at, the way the specification means:
 /// what a desktop draws beside this entry is whatever it has installed under
 /// the app id, and a desktop that has none draws none.
-fn written(exe: &str) -> String {
+fn written(exe: &str, verb: Option<&str>) -> String {
+    let start = match verb {
+        Some(verb) => format!("{} {verb}", quoted(exe)),
+        None => quoted(exe),
+    };
+
     format!(
         "[Desktop Entry]\n\
          Type=Application\n\
          Name={NAME}\n\
          Comment={COMMENT}\n\
-         Exec={} --no-open\n\
+         Exec={start} --no-open\n\
          Icon={APP_ID}\n\
-         Terminal=false\n",
-        quoted(exe)
+         Terminal=false\n"
     )
 }
 
@@ -205,24 +222,48 @@ fn says_on(entry: &str) -> bool {
     })
 }
 
-/// The executable an entry should name, which is the one that is running.
+/// What an entry names: the file, and whether the entry has to say the verb
+/// after it.
+struct Named {
+    path: PathBuf,
+
+    /// **False for an AppImage**, which is the one file here that is already a
+    /// way into the app rather than a binary with several. Its `AppRun` execs
+    /// `verkstead desktop "$@"`, so an entry that said the verb as well would
+    /// hand clap `verkstead desktop desktop --no-open` and get a login that
+    /// starts nothing at all.
+    says_the_verb: bool,
+}
+
+/// What this run should be registered as, asked of the environment.
+fn running() -> Result<Named> {
+    named(std::env::var_os("APPIMAGE").map(PathBuf::from))
+}
+
+/// And the same worked out from what `$APPIMAGE` said, which is where the whole
+/// of the decision is.
 ///
 /// `$APPIMAGE` before the process's own path, where the variable names an
 /// absolute one: an AppImage runs out of a filesystem its runtime mounted for
 /// this run alone, so `current_exe` there is a path under `/tmp` that will not
 /// be anything at the next login, and the runtime sets that variable to say
-/// where the file the human actually has is. Stage 03 is what makes an AppImage
-/// of this binary; the reading belongs here, beside the writing that would
-/// otherwise put a path with a lifetime of one run into a file meant to outlive
-/// every run.
-fn executable() -> Result<PathBuf> {
-    let appimage = std::env::var_os("APPIMAGE")
-        .map(PathBuf::from)
-        .filter(|path| path.is_absolute());
-
-    match appimage {
-        Some(appimage) => Ok(appimage),
-        None => std::env::current_exe().context("finding the path of the running executable"),
+/// where the file the human actually has is. The reading belongs here, beside
+/// the writing that would otherwise put a path with a lifetime of one run into
+/// a file meant to outlive every run.
+///
+/// Taken as an argument rather than read here, so that both answers are a test
+/// rather than a variable a suite would have to set on the process it is running
+/// in.
+fn named(appimage: Option<PathBuf>) -> Result<Named> {
+    match appimage.filter(|path| path.is_absolute()) {
+        Some(appimage) => Ok(Named {
+            path: appimage,
+            says_the_verb: false,
+        }),
+        None => Ok(Named {
+            path: std::env::current_exe().context("finding the path of the running executable")?,
+            says_the_verb: true,
+        }),
     }
 }
 
@@ -278,18 +319,64 @@ mod tests {
     }
 
     /// What the entry starts, and the one decision it makes about how: the app
-    /// as anybody else starts it, with the browser left alone.
+    /// as anybody else starts it — through the verb, because the executable it
+    /// names has other verbs and only one of them is the app — with the browser
+    /// left alone.
     #[test]
-    fn the_entry_starts_this_executable_without_opening_a_browser() {
-        let entry = written("/usr/local/bin/verkstead-desktop");
+    fn the_entry_starts_this_executable_through_the_verb_without_opening_a_browser() {
+        let entry = written("/usr/local/bin/verkstead", Some("desktop"));
 
         assert!(
-            entry.contains("Exec=\"/usr/local/bin/verkstead-desktop\" --no-open"),
+            entry.contains("Exec=\"/usr/local/bin/verkstead\" desktop --no-open"),
             "got:\n{entry}"
         );
         assert!(entry.starts_with("[Desktop Entry]\n"), "got:\n{entry}");
         assert!(entry.contains("Type=Application\n"), "got:\n{entry}");
         assert!(entry.contains("Name=Verkstead\n"), "got:\n{entry}");
+    }
+
+    /// And an AppImage is named without one, because it is a way into the app
+    /// rather than a binary with several verbs: its `AppRun` execs
+    /// `verkstead desktop "$@"`, so an entry that said the verb as well would
+    /// start `verkstead desktop desktop` and clap would refuse it.
+    #[test]
+    fn an_appimage_is_started_without_a_verb_because_it_says_its_own() {
+        let named = named(Some(PathBuf::from(
+            "/home/you/Apps/Verkstead-x86_64.AppImage",
+        )))
+        .expect("a variable naming an absolute path answers without asking the process");
+
+        assert_eq!(
+            named.path,
+            PathBuf::from("/home/you/Apps/Verkstead-x86_64.AppImage"),
+            "the file the human has is the one that outlives this run"
+        );
+        assert!(
+            !named.says_the_verb,
+            "and the entry point inside it is what says the verb"
+        );
+
+        let entry = written(named.path.to_str().unwrap(), None);
+        assert!(
+            entry.contains("Exec=\"/home/you/Apps/Verkstead-x86_64.AppImage\" --no-open\n"),
+            "got:\n{entry}"
+        );
+    }
+
+    /// And anything else is the running executable, said with the verb: what a
+    /// desktop starts then is one binary out of several verbs.
+    #[test]
+    fn anything_but_an_appimage_is_the_running_executable_and_its_verb() {
+        for said in [None, Some(PathBuf::from("relative/Verkstead.AppImage"))] {
+            let named = named(said.clone()).expect("this process knows where it is");
+
+            assert_eq!(
+                named.path,
+                std::env::current_exe().unwrap(),
+                "{said:?} names no file that will still be there at the next login"
+            );
+            assert!(named.says_the_verb, "so the entry has to say the verb");
+        }
     }
 
     /// A path a desktop would otherwise read as two arguments, which is what
@@ -298,8 +385,8 @@ mod tests {
     #[test]
     fn a_path_with_a_space_in_it_is_still_one_argument() {
         assert_eq!(
-            quoted("/home/you/My Apps/verkstead-desktop"),
-            "\"/home/you/My Apps/verkstead-desktop\"",
+            quoted("/home/you/My Apps/verkstead"),
+            "\"/home/you/My Apps/verkstead\"",
         );
         assert_eq!(quoted("/home/$you/it`s"), "\"/home/\\\\$you/it\\\\`s\"");
         assert_eq!(quoted("/home/you/a\\b"), "\"/home/you/a\\\\\\\\b\"");
@@ -309,7 +396,10 @@ mod tests {
     /// session.
     #[test]
     fn an_entry_that_is_there_is_a_checked_box() {
-        assert!(says_on(&written("/usr/local/bin/verkstead-desktop")));
+        assert!(says_on(&written(
+            "/usr/local/bin/verkstead",
+            Some("desktop")
+        )));
     }
 
     /// And a desktop's own settings turning it off is the human unchecking the
@@ -334,7 +424,7 @@ mod tests {
 
         assert!(!entry.on(), "nothing has been registered yet");
 
-        entry.write().unwrap();
+        entry.write("desktop").unwrap();
         assert!(entry.on(), "the entry should be there and say so");
         assert!(
             std::fs::read_to_string(&entry.file)
@@ -357,7 +447,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let autostart = dir.path().join("autostart");
 
-        Entry::in_dir(&autostart).write().unwrap();
+        Entry::in_dir(&autostart).write("desktop").unwrap();
 
         let made: Vec<_> = std::fs::read_dir(&autostart)
             .unwrap()

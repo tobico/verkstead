@@ -9,6 +9,16 @@ revises [ADR-0004](../../adr/0004-single-binary-distribution.md) from one
 binary to two single-file artifacts; the terms are in
 [CONTEXT.md](../../../CONTEXT.md), which each stage updates as its piece lands.
 
+**Finished, and since amended.** What this roadmap shipped as two binaries is
+one again: the tray app is `verkstead desktop`, a default-on feature of the CLI
+rather than a second binary, and the Windows download is an msi carrying that
+binary and the shim a Start-menu shortcut names. ADR-0012's amendment says why,
+and [adoption.md](../../adoption.md#getting-it-running) describes the artifacts
+as they now are. The briefs below are left exactly as they were written: they
+are the record of what each stage set out to build, rather than a description
+of what stands today — so a `verkstead-desktop` in one of them is that stage's
+own name for what is now a verb.
+
 Each stage is one feature: one branch, one review unit. Task chunkings inside
 the briefs are provisional — re-grounded against the codebase when the stage
 starts.

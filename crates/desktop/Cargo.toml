@@ -8,9 +8,39 @@ rust-version.workspace = true
 name = "verkstead_desktop"
 path = "src/lib.rs"
 
+# The Windows shim, and nothing but it: a windows-subsystem exe that starts
+# `verkstead desktop` beside itself, for the launchers that cannot say a verb —
+# a Start-menu shortcut names a file rather than a command line (ADR-0012,
+# amended). The app itself is the library above, reached through the CLI's verb
+# on every platform including this one.
+#
+# **Behind a feature because Cargo has no way to say a target is one
+# platform's.** A `[[bin]]` is built wherever the crate is, and what this crate
+# is on Linux and macOS is a library — so the feature is what says "build the
+# shim", the Windows legs are the only ones that turn it on, and a workspace
+# build anywhere else produces no `verkstead-desktop` artifact at all. See
+# `.github/workflows/ci.yml`, whose Windows job passes it.
 [[bin]]
 name = "verkstead-desktop"
 path = "src/main.rs"
+required-features = ["shim"]
+
+# And the shim's own suite, which reads and runs the exe the section above
+# builds — so it is gated on the same feature, there being nothing to read
+# where nothing was built.
+[[test]]
+name = "shim"
+path = "tests/shim.rs"
+required-features = ["shim"]
+# Its own `main` rather than the test harness's: a test here needs a
+# `verkstead.exe` to stand beside the shim, and what it puts there is a copy of
+# this very binary told by the environment to answer as one. See the file.
+harness = false
+
+[features]
+# Whether the Windows shim is built — see the `[[bin]]` above. Off by default,
+# because the platform that wants it is the exception rather than the rule.
+shim = []
 
 [dependencies]
 anyhow.workspace = true
@@ -125,6 +155,6 @@ windows-registry = "0.6"
 winresource = { version = "0.1", default-features = false }
 
 [dev-dependencies]
-# The tests run the real binary, so what they check is what an icon starts.
+# A directory of the test's own for a registration to be written into, and — in
+# the shim's suite — for a stand-in `verkstead.exe` to stand in.
 tempfile = "3"
-ureq = "3"

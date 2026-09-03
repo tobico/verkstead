@@ -162,8 +162,8 @@
           # follow and no rpath written into the binary to follow it by. On a
           # distribution the name is found in `/usr/lib` and nothing has to be
           # said; here it is a store path, and this is what says it — without it
-          # `cargo run --bin verkstead-desktop` panics inside that crate before
-          # a tray icon is ever drawn. The AppImage answers the same question
+          # `cargo run -- desktop` panics inside that crate before a tray icon
+          # is ever drawn. The AppImage answers the same question
           # the same way over its own bundle — see tools/build-appimage.sh.
           env.LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [ pkgs.libayatana-appindicator ];
 

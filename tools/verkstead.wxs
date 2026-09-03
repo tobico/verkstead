@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  What a Windows human downloads: the two exes a Verkstead install is, in the
+  installer that puts them somewhere and tells Windows where.
+
+  **Two files rather than one, which is why there is an installer at all.**
+  Verkstead is one binary again (ADR-0012, as amended) — the tray app is
+  `verkstead desktop` — but a Start-menu shortcut names a *file* and has
+  nowhere to write a verb, so beside the binary there is a windows-subsystem
+  shim that supplies one. Two files are not a portable download, and the msi is
+  what replaced it.
+
+  **Per-user, deliberately.** The app is unsigned, so elevation buys it nothing
+  a downloader would want: an installer that asked for administrator would be
+  an unsigned program asking for the machine. Everything below therefore lands
+  in the profile — the binaries under `%LOCALAPPDATA%\Programs\Verkstead`, the
+  shortcut in the user's own Start menu, the `PATH` entry in `HKCU` — and
+  `InstallScope="perUser"` is what says so once, leaving `ALLUSERS` unset and
+  the package's privileges limited.
+
+  **And the `PATH` entry is the point of the whole thing.** A session Verkstead
+  spawns is handed the server's own image, but a human at a terminal is handed
+  whatever `PATH` says — so `verkstead ask`, `verkstead guide` and the rest have
+  to work in a window that was opened after the install, and the entry below is
+  what makes them.
+
+  It lives here rather than under `packaging/` because that directory is
+  generated wholesale — `tools/generate-packaging.sh` clears it and writes it
+  again — and this is written by hand. The two preprocessor variables and the
+  version come from `tools/build-windows-msi.sh` beside it, which is the only
+  thing that compiles it.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <!--
+    `Id="*"` is a fresh ProductCode per build, which is what `MajorUpgrade`
+    below wants: an upgrade is one product code replacing another under a
+    shared UpgradeCode, and the UpgradeCode is the one identifier here that must
+    never change again — every future release recognises the installed one
+    through it.
+  -->
+  <Product
+    Id="*"
+    Name="Verkstead"
+    Language="1033"
+    Version="$(var.Version)"
+    Manufacturer="Tobico"
+    UpgradeCode="{A4727089-F5B9-40A6-A196-1856E8D6827A}">
+
+    <!--
+      `InstallerVersion="500"` is Windows Installer 5.0, which every Windows
+      this project ships to has had since Windows 7. `perUser` is the decision
+      the file header explains.
+    -->
+    <Package
+      InstallerVersion="500"
+      Compressed="yes"
+      InstallScope="perUser"
+      Description="Verkstead" />
+
+    <!--
+      One embedded cab, so the msi is the single file a download has to be —
+      the same promise the AppImage and the dmg make.
+    -->
+    <MediaTemplate EmbedCab="yes" />
+
+    <!--
+      Installing over an existing Verkstead replaces it rather than standing
+      beside it. `AllowSameVersionUpgrades` is what covers a second install of
+      what reads as the same version: an msi version is three numbers and
+      nothing else, so `v0.1.0-rc.1` and `v0.1.0-rc.2` both arrive here as
+      `0.1.0` — see the script, which is where the suffix is taken off.
+    -->
+    <MajorUpgrade
+      AllowSameVersionUpgrades="yes"
+      DowngradeErrorMessage="A newer version of Verkstead is already installed." />
+
+    <!--
+      The artwork Apps &amp; Features draws beside the entry. The shortcut takes
+      no icon of its own: the shim carries this same `.ico` compiled in as a
+      resource — see `crates/desktop/build.rs` — so a shortcut naming the file
+      is already drawn with it.
+    -->
+    <Icon Id="Verkstead.ico" SourceFile="$(var.Icon)" />
+    <Property Id="ARPPRODUCTICON" Value="Verkstead.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/tobico/verkstead" />
+
+    <!--
+      `%LOCALAPPDATA%\Programs\Verkstead`, which is where a per-user install of
+      a program goes on Windows, and the user's own Start menu beside it. Both
+      resolve to the profile rather than to the machine because `ALLUSERS` is
+      unset — see the package above.
+    -->
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="LocalAppDataFolder">
+        <Directory Id="ProgramsFolder" Name="Programs">
+          <Directory Id="INSTALLFOLDER" Name="Verkstead" />
+        </Directory>
+      </Directory>
+      <Directory Id="ProgramMenuFolder" />
+    </Directory>
+
+    <Feature Id="Complete" Title="Verkstead" Level="1">
+      <ComponentGroupRef Id="Installed" />
+    </Feature>
+
+    <!--
+      **Every component's key path is a registry value under `HKCU`**, and none
+      of them is one of the files. That is the rule for anything installed into
+      a user's profile — Windows Installer keeps its per-user bookkeeping there,
+      and its own validation refuses a package that does otherwise — so it is
+      the shape of all three below rather than a note on one of them.
+    -->
+    <ComponentGroup Id="Installed">
+      <!--
+        The binary, and the `PATH` entry that is the reason a human wanted an
+        installer. `Part="last"` appends to whatever the user's `PATH` already
+        said rather than replacing it, `System="no"` puts it in `HKCU` where a
+        per-user install belongs, and `Permanent="no"` takes it away again on
+        uninstall.
+      -->
+      <Component Id="Cli" Directory="INSTALLFOLDER" Guid="{8541AEE0-DF3A-46A9-8212-FBE31CBFE30E}">
+        <File Id="VerksteadExe" Name="verkstead.exe" Source="$(var.Cli)" />
+        <Environment
+          Id="UserPath"
+          Name="PATH"
+          Value="[INSTALLFOLDER]"
+          Action="set"
+          Part="last"
+          System="no"
+          Permanent="no" />
+        <RegistryValue
+          Root="HKCU"
+          Key="Software\Tobico\Verkstead"
+          Name="InstallFolder"
+          Type="string"
+          Value="[INSTALLFOLDER]"
+          KeyPath="yes" />
+      </Component>
+
+      <!--
+        The shim, and the two folders this package made. `RemoveFolder` takes
+        each away on uninstall if nothing else is left in it — which is what
+        Windows Installer asks of a package that creates directories inside a
+        profile, and what keeps an uninstall from leaving an empty `Verkstead`
+        behind.
+      -->
+      <Component Id="Shim" Directory="INSTALLFOLDER" Guid="{81911B4F-AAEB-4508-B6A5-17EEF146822C}">
+        <File Id="ShimExe" Name="verkstead-desktop.exe" Source="$(var.Shim)" />
+        <RemoveFolder Id="RemoveInstallFolder" Directory="INSTALLFOLDER" On="uninstall" />
+        <RemoveFolder Id="RemoveProgramsFolder" Directory="ProgramsFolder" On="uninstall" />
+        <RegistryValue
+          Root="HKCU"
+          Key="Software\Tobico\Verkstead"
+          Name="Shim"
+          Type="string"
+          Value="[#ShimExe]"
+          KeyPath="yes" />
+      </Component>
+
+      <!--
+        The way in. It names the shim rather than the binary, because what a
+        Start-menu entry has to open is the app: `verkstead.exe` is a console
+        program and would open a black window in front of whoever clicked, and
+        the shim is the windows-subsystem exe that starts `verkstead desktop`
+        without one (see `crates/desktop/src/main.rs`).
+
+        `[#ShimExe]` rather than a path written out: it is the file above,
+        wherever the install put it.
+      -->
+      <Component Id="StartMenu" Directory="ProgramMenuFolder" Guid="{30900C90-651D-46F8-BD69-61B86503003A}">
+        <Shortcut
+          Id="VerksteadShortcut"
+          Name="Verkstead"
+          Description="The workbench, in the notification area"
+          Target="[#ShimExe]"
+          WorkingDirectory="INSTALLFOLDER" />
+        <RegistryValue
+          Root="HKCU"
+          Key="Software\Tobico\Verkstead"
+          Name="StartMenu"
+          Type="integer"
+          Value="1"
+          KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Product>
+</Wix>

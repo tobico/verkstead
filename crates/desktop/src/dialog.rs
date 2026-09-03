@@ -1,4 +1,4 @@
-//! The two things this binary draws that carry words.
+//! The two things this app draws that carry words.
 //!
 //! Everything a human ever sees of Verkstead is the viewer in their browser and
 //! the icon in their tray, and what is left over is here. A Verkstead that could

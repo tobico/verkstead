@@ -12,9 +12,27 @@ path = "src/lib.rs"
 name = "verkstead"
 path = "src/main.rs"
 
+# The tray app is a verb of this binary rather than a second one, and the
+# feature is what a build says it wants the tray half of (ADR-0012, amended).
+#
+# **On by default**, because the invariant the sandbox stands on is that the
+# image a session is handed is the image the server is running: a Verkstead that
+# serves has to be one that also asks, and every build that says nothing gets
+# both halves. Off is what the headless artifacts say — the static musl CLI and
+# the nix daemon package — and turning it off is also what polices the GUI
+# dependencies: GTK is not linked into a build with the feature off, so a use of
+# it from outside this feature fails that leg loudly rather than arriving in the
+# headless binary by accident.
+[features]
+default = ["desktop"]
+desktop = ["dep:verkstead-desktop", "dep:tracing"]
+
 [dependencies]
 anyhow.workspace = true
 verkstead-schema.workspace = true
+# The tray app, run in-process out of this binary rather than out of a second
+# one — see the `desktop` feature above, which is what carries it.
+verkstead-desktop = { path = "../desktop", optional = true }
 # `verkstead serve` is the server: the CLI links the library and runs it, rather
 # than shipping a second binary beside this one (ADR-0004).
 verkstead-server = { path = "../server" }
@@ -23,6 +41,10 @@ serde-saphyr.workspace = true
 # The runtime `serve` starts. The other verbs are blocking calls and want none
 # of it, so it is started by that verb rather than wrapped around `main`.
 tokio.workspace = true
+# The one event this binary emits itself: a `desktop` that stopped, said in the
+# log file the tray app keeps because there is no terminal to say it in. The
+# other verbs write to a terminal and want none of it.
+tracing = { version = "0.1", optional = true }
 # Where the server's `tracing` goes is the starting binary's call rather than
 # the library's, so the subscriber lives here — see `serve`.
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

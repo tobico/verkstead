@@ -25,6 +25,16 @@
 //! whatever the human is doing at every login is the thing that gets the box
 //! unchecked.
 //!
+//! **What is registered is the invocation rather than the executable**, and the
+//! invocation is something this library is told rather than something it can
+//! read off the process. A registration is a command line — the path *and* what
+//! follows it — and one image now has more than one way in: `verkstead desktop`
+//! is this app, and `verkstead ask` is not. [`std::env::current_exe`] answers
+//! the same for both, so a registration written from what the process can see
+//! alone would name a Verkstead that comes up printing the Guide. So [`Entered`]
+//! is handed in at the door — see [`crate::Desktop::run`] — and the verb it
+//! carries goes on the command line between the path and `--no-open`.
+//!
 //! **The platform half is a module of its own**, and everything else in this
 //! file is the same wherever it is built. Linux registers with an XDG autostart
 //! entry, which is the `xdg` module; macOS with a launch agent plist, which is
@@ -56,6 +66,38 @@ mod xdg;
 
 use anyhow::{Context, Result, bail};
 
+/// How this app was entered, which is what its startup registration has to name.
+///
+/// Told to [`crate::Desktop::run`] by whatever ran it, because it is the one
+/// part of the running command the running process cannot see: where the
+/// executable is, is [`std::env::current_exe`]'s to answer, and which of that
+/// executable's verbs was said is the caller's.
+///
+/// **Always a verb.** There was a second way in while `verkstead-desktop` was
+/// an app of its own — a binary whose flags followed its path with nothing
+/// between — and it went when that binary did. Every launch of this library is
+/// `verkstead desktop` now, whether a human typed it, a bundle's launcher
+/// script execs it or the Windows shim starts it.
+#[derive(Debug, Clone)]
+pub struct Entered(String);
+
+impl Entered {
+    /// Through `verb` of the binary this app is a verb of, which is what goes
+    /// on the registration's command line between the path and the flags.
+    ///
+    /// A verb of that binary's own grammar rather than anything a human typed,
+    /// so it is written as it stands: what needs quoting on a command line is
+    /// the path, and every arm quotes that already.
+    pub fn verb(verb: &str) -> Entered {
+        Entered(verb.to_owned())
+    }
+
+    /// The verb, for the arm writing the registration.
+    fn as_verb(&self) -> &str {
+        &self.0
+    }
+}
+
 #[cfg(target_os = "macos")]
 use launchd::Entry;
 #[cfg(windows)]
@@ -70,12 +112,21 @@ use xdg::Entry;
 /// the app runs; what it *says* is read from the platform every time, because
 /// that does.
 #[derive(Debug, Clone)]
-pub struct Startup(Option<Entry>);
+pub struct Startup {
+    /// Where the registration goes, or this machine having nowhere for one.
+    entry: Option<Entry>,
+    /// What a registration written here names, which is how this app was run.
+    entered: Entered,
+}
 
 impl Startup {
-    /// Where this machine keeps the registration, asked of the platform.
-    pub fn here() -> Startup {
-        Startup(Entry::here())
+    /// Where this machine keeps the registration, asked of the platform, and
+    /// what a registration written there is to say — see [`Entered`].
+    pub fn here(entered: Entered) -> Startup {
+        Startup {
+            entry: Entry::here(),
+            entered,
+        }
     }
 
     /// Whether this machine can be registered with at all.
@@ -84,13 +135,13 @@ impl Startup {
     /// registration gets the item greyed rather than a box that ticks and does
     /// nothing.
     pub fn possible(&self) -> bool {
-        self.0.is_some()
+        self.entry.is_some()
     }
 
     /// Whether Verkstead starts with the desktop session, read from the
     /// registration itself.
     pub fn on(&self) -> bool {
-        self.0.as_ref().is_some_and(Entry::on)
+        self.entry.as_ref().is_some_and(Entry::on)
     }
 
     /// Register the running executable, or take the registration away.
@@ -99,7 +150,7 @@ impl Startup {
     /// does: no settings file is touched, because the registration is the state
     /// rather than a copy of it.
     pub fn set(&self, on: bool) -> Result<()> {
-        let Some(entry) = &self.0 else {
+        let Some(entry) = &self.entry else {
             bail!(
                 "Verkstead has nowhere to keep a startup registration on this machine, so it \
                  cannot start itself with your desktop session."
@@ -110,7 +161,7 @@ impl Startup {
         // because a human is who reads it: this is picked off a menu, and a
         // failure is put on the screen — see [`crate::dialog::refusal`].
         if on {
-            entry.write().context(
+            entry.write(self.entered.as_verb()).context(
                 "Verkstead could not ask this machine to start it with your desktop session",
             )
         } else {
@@ -152,10 +203,14 @@ mod tests {
 
     use super::*;
 
-    /// A registration kept in `dir`, which is what the tests have instead of
-    /// the machine's own.
+    /// A registration kept in `dir`, written for an app entered the one way in
+    /// there is — see [`Entered`] — which is what the tests have instead of the
+    /// machine's own.
     fn in_dir(dir: &Path) -> Startup {
-        Startup(Some(Entry::in_dir(dir)))
+        Startup {
+            entry: Some(Entry::in_dir(dir)),
+            entered: Entered::verb("desktop"),
+        }
     }
 
     /// The box, checked and unchecked: the registration follows and nothing
@@ -202,7 +257,7 @@ mod tests {
         std::fs::write(
             &entry,
             "[Desktop Entry]\nType=Application\nName=Verkstead\n\
-             Exec=\"/somewhere/it/used/to/be/verkstead-desktop\" --no-open\n",
+             Exec=\"/somewhere/it/used/to/be/verkstead\" desktop --no-open\n",
         )
         .unwrap();
 
@@ -238,11 +293,34 @@ mod tests {
         );
     }
 
+    /// The registration names the verb beside the path: the executable is the
+    /// same file every other verb is reached through, so the command line is
+    /// the whole of what says which Verkstead comes up at the next login.
+    #[test]
+    fn the_registration_names_the_verb_beside_the_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let startup = in_dir(dir.path());
+
+        startup.set(true).unwrap();
+
+        let registered =
+            std::fs::read_to_string(dir.path().join("net.tobico.Verkstead.desktop")).unwrap();
+        let here = std::env::current_exe().unwrap();
+
+        assert!(
+            registered.contains(&format!("\"{}\" desktop --no-open", here.display())),
+            "the entry should start the running executable through its verb, got:\n{registered}"
+        );
+    }
+
     /// A machine with nowhere to keep one has an item to grey rather than a box
     /// to tick, and the refusal it would give says what it is about.
     #[test]
     fn nowhere_to_keep_a_registration_is_an_item_that_cannot_be_picked() {
-        let nowhere = Startup(None);
+        let nowhere = Startup {
+            entry: None,
+            entered: Entered::verb("desktop"),
+        };
 
         assert!(!nowhere.possible());
         assert!(!nowhere.on());
@@ -272,10 +350,13 @@ mod tests {
         format!(r"Software\{}\tests\startup\{about}", crate::APP_ID)
     }
 
-    /// A registration kept in that key, which is what the tests have instead of
-    /// the machine's own.
+    /// A registration kept in that key, written by the binary itself, which is
+    /// what the tests have instead of the machine's own.
     fn under(about: &str) -> Startup {
-        Startup(Some(Entry::under(&key(about))))
+        Startup {
+            entry: Some(Entry::under(&key(about))),
+            entered: Entered::verb("desktop"),
+        }
     }
 
     /// The key this test wrote, taken away again so that a suite leaves the
@@ -329,7 +410,7 @@ mod tests {
             .unwrap()
             .set_string(
                 crate::APP_ID,
-                r#""D:\where\it\used\to\be\verkstead-desktop.exe" --no-open"#,
+                r#""D:\where\it\used\to\be\verkstead.exe" desktop --no-open"#,
             )
             .unwrap();
 
