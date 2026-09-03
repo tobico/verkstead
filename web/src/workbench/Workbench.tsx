@@ -41,6 +41,15 @@
 //! to pick from, and only where the path names no pane already — a cold load of
 //! a details pane keeps the selection it was opened at.
 //!
+//! And it stays there. A Timeline landed on the end of its record is advancing:
+//! each Event that arrives with a pane behind it is opened as it lands, so a
+//! human watching a session work is shown what it just did rather than what it
+//! had done when they opened it. There is nothing on screen to say so — the
+//! newest card is open and an open card looks like an open card — and nothing
+//! to turn on either: arriving is the whole of it, whether that was a press on
+//! the sidebar or the walk a Conversation is started with. Picking anything by
+//! hand ends it, and the next arrival begins it again.
+//!
 //! What a Conversation *is* is not drawn there — the setup it needs is on the
 //! Brief card, where it is used — and the way on to an empty pane is not
 //! offered, so a narrow window can only walk into the pane by opening something.
@@ -219,13 +228,41 @@ export function Workbench(): JSX.Element {
   /// Conversation's path names no detail of the old one's.
   const event = createMemo(() => openingAt(where.pathname));
 
+  /// The Conversation whose Timeline is advancing itself, or `null` where none
+  /// is — see [`advancing`].
+  const [followed, setFollowed] = createSignal<string | null>(null);
+
+  /// Whether what is open moves on to each Event as it lands.
+  ///
+  /// A Timeline opened at the end of its record goes on standing there: the
+  /// human asked to be shown where the work got to, and where the work got to
+  /// keeps moving. It has nothing on screen to say so — the newest card is open
+  /// and looks exactly as an open card looks — because it is the same answer as
+  /// before, given again as often as the answer changes.
+  ///
+  /// Held as the Conversation it belongs to rather than as a flag, so that
+  /// another Conversation is not advancing by the mere fact of being another
+  /// one. A flag would have had to be put out when the selection changed, and
+  /// putting it out is an effect racing the landing that sets it.
+  const advancing = () => followed() !== null && followed() === selected();
+
   /// Opening a details pane, which is a navigation to where that pane stands.
   ///
   /// It replaces rather than pushes: the details of one Conversation are places
   /// in a page rather than pages, so walking between them should not have to be
   /// walked back out of one at a time. What Back leaves is the Conversation.
-  const select = (opening: Opening) =>
+  ///
+  /// And it is the human picking, which is the whole of what takes a Timeline
+  /// out of advancing: every card on the record, every pinned card and the
+  /// Share button open what they open through here, and each of them is a
+  /// press. Somebody who has said what they want to be looking at does not have
+  /// it taken off them by the next thing a session does. Nothing else selects —
+  /// the landing below navigates for itself, so advancing cannot end its own
+  /// mode by advancing.
+  const select = (opening: Opening) => {
+    setFollowed(null);
     navigate(pathTo(selected(), opening), { replace: true });
+  };
 
   // Opening a Conversation is what walks a phone into the Timeline, and leaving
   // the workbench route walks it back out. Written as an effect on the URL
@@ -381,6 +418,11 @@ export function Workbench(): JSX.Element {
   // phone lands on the Timeline with the newest thing marked open and the details
   // one tap away, rather than being carried past the record it was opened to
   // read.
+  //
+  // And landing there is what puts the Timeline into advancing: arriving at the
+  // end of a record is arriving where the work got to, and a record that is
+  // still being written moves on from there. See [`advancing`] and the effect
+  // under this one.
   createEffect(() => {
     const id = selected();
     const read = conversation.data;
@@ -391,6 +433,34 @@ export function Workbench(): JSX.Element {
 
     const last = lastOpening(read.timeline);
     if (last !== null) {
+      navigate(pathTo(id, last), { replace: true });
+      setFollowed(id);
+    }
+  });
+
+  // A Timeline that is advancing stays at the end of its record: every Event
+  // that lands with a pane behind it is opened as it arrives, the way the
+  // landing opened the last one before it.
+  //
+  // The same walk as the landing's and made the same way — the URL rewritten to
+  // where the newest pane stands, with replace — because what is open is the
+  // URL's. It goes nowhere near [`select`]: that is the human picking, and this
+  // is the record moving under a human who picked nothing.
+  //
+  // Which level a narrow window is showing is untouched here too. A phone left
+  // on the Timeline stays on it while the cards under its finger open one after
+  // another, and one left in the details pane is reading the newest thing there
+  // — which is what advancing is for.
+  createEffect(() => {
+    const id = selected();
+    const read = conversation.data;
+
+    if (!advancing() || read === undefined) {
+      return;
+    }
+
+    const last = lastOpening(read.timeline);
+    if (last !== null && last !== event()) {
       navigate(pathTo(id, last), { replace: true });
     }
   });

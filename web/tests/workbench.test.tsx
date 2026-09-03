@@ -35,6 +35,7 @@ import type {
   ConversationView,
   GrillingStarted,
   Merging,
+  NoticeEvent,
   PairingView,
   ProfileEntry,
   PinnedEvent,
@@ -14889,6 +14890,191 @@ describe("the timeline following its bottom", () => {
       ).toHaveLength(record.length),
     );
     expect(scrolled.mock.calls.length).toBeGreaterThan(landed);
+  });
+});
+
+/// The selection read the same way: a Conversation opened at the end of its
+/// record goes on standing there, so what the details pane holds is the newest
+/// thing on the Timeline rather than the newest thing as of the moment it was
+/// opened.
+///
+/// Both ways in are the same walk — a press on a sidebar row, and the redirect a
+/// Conversation is started or drafted with, each of them a navigation to the
+/// Conversation with no pane named — so what is asked here of the press is true
+/// of the redirect, and mounting at a Conversation's own path is that redirect
+/// arriving.
+///
+/// Nothing is drawn for it. The mode's whole effect is which card is open, so
+/// what these read is the URL: what is open is the URL's, and a test reading the
+/// pane instead would be asking the same question through the pane's own
+/// spinners.
+describe("the selection following the end of the record", () => {
+  /// Two more Events for a record to grow by, in the order a session lands them.
+  /// Notices, that being the shortest thing Verkstead ever puts on one, and each
+  /// with a pane behind it — which is what the selection moves on to.
+  const SAID: NoticeEvent = {
+    id: 981,
+    at: "2026-08-03T09:07:11.000Z",
+    html: "<p>The session started.</p>\n",
+  };
+  const SAID_NEXT: NoticeEvent = {
+    id: 982,
+    at: "2026-08-03T09:09:23.000Z",
+    html: "<p>The session stopped.</p>\n",
+  };
+
+  /// The three Conversations, with the grilling one's record growing the way a
+  /// running session grows it: the endpoint answers with whatever the record
+  /// holds at the moment it is asked, so landing an Event and nudging the page
+  /// is a session having done something.
+  ///
+  /// What comes back lands them: it waits for the page to have read the record
+  /// again and drawn what grew, so an assertion after it is about the page the
+  /// re-read left rather than the page mid-flight.
+  function growing() {
+    let record: TimelineEvent[] = GRILLING.timeline;
+
+    theThree(
+      whenever(`/api/ui/conversations/${GRILLING.id}`, () =>
+        json({ ...GRILLING, timeline: record })(),
+      ),
+    );
+
+    return async (
+      container: ParentNode,
+      client: Parameters<typeof nudged>[0],
+      ...landed: TimelineEvent[]
+    ) => {
+      record = [...record, ...landed];
+      await nudged(client);
+
+      await waitFor(() =>
+        expect(
+          container.querySelectorAll(`.${timeline.timelineEvent}`),
+        ).toHaveLength(record.length),
+      );
+    };
+  }
+
+  /// Where the grilling conversation's record ends when it is opened, which is
+  /// the Set this build cannot read.
+  const END = `/conversations/${GRILLING.id}/events/${UNREADABLE_SET.id}`;
+
+  /// A press on the grilling conversation's row in the sidebar, found by the id
+  /// its card carries rather than by the branch name on it: the name is on the
+  /// Timeline's own header as well once the Conversation is open, and a press by
+  /// name would be two things by then.
+  async function opened(container: ParentNode): Promise<void> {
+    const rows = await cards(container);
+    const row = rows.find((row) => row.dataset.id === String(GRILLING.id));
+    if (row === undefined) {
+      throw new Error("the sidebar should be holding the grilling conversation");
+    }
+
+    fireEvent.click(row.querySelector("button")!);
+  }
+
+  it("opens each event that lands on a record opened at its end", async () => {
+    const lands = growing();
+    const { container, history, client } = mount();
+
+    await opened(container);
+    await waitFor(() => expect(history.get()).toBe(END));
+
+    await lands(container, client, { Notice: SAID });
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${GRILLING.id}/events/${SAID.id}`,
+      ),
+    );
+
+    // And again, the mode being where the Timeline stands rather than one
+    // advance it was owed.
+    await lands(container, client, { Notice: SAID_NEXT });
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${GRILLING.id}/events/${SAID_NEXT.id}`,
+      ),
+    );
+  });
+
+  /// The redirect a started or drafted Conversation is carried on by, which is a
+  /// navigation to the Conversation with no pane named — the same arrival as the
+  /// press above, made by the composer rather than by the sidebar.
+  it("advances a conversation arrived at by its own path", async () => {
+    const lands = growing();
+    const { container, history, client } = mount(
+      `/conversations/${GRILLING.id}`,
+    );
+
+    await waitFor(() => expect(history.get()).toBe(END));
+
+    await lands(container, client, { Notice: SAID });
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${GRILLING.id}/events/${SAID.id}`,
+      ),
+    );
+  });
+
+  /// And picking a card is the human saying what they want to be looking at,
+  /// which is the whole of what ends the mode.
+  it("stays on the card the human pressed once they have pressed one", async () => {
+    const lands = growing();
+    const { container, history, client } = mount(
+      `/conversations/${GRILLING.id}`,
+    );
+
+    await waitFor(() => expect(history.get()).toBe(END));
+
+    const at = `/conversations/${GRILLING.id}/events/${OUTPUT.id}`;
+    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
+    await waitFor(() => expect(history.get()).toBe(at));
+
+    await lands(container, client, { Notice: SAID });
+    expect(history.get()).toBe(at);
+  });
+
+  /// A cold load of a details pane keeps the selection it was opened at, and
+  /// goes on keeping it: a link somebody kept is a request to be shown that
+  /// thing, which the next Event landing does not answer.
+  it("leaves a pane opened by its own link where it was opened", async () => {
+    const at = `/conversations/${GRILLING.id}/events/${briefOf(GRILLING).id}`;
+    const lands = growing();
+    const { container, history, client } = mount(at);
+
+    await drawn(container, `.${shell.detailsPane} .${briefPane.brief}`);
+
+    await lands(container, client, { Notice: SAID });
+    expect(history.get()).toBe(at);
+  });
+
+  /// And the mode is off until it is arrived at again, rather than off for good:
+  /// pressing the row a second time is the same arrival as pressing it the
+  /// first, and the Timeline is following again from the end it lands on.
+  it("follows again when the conversation is opened again", async () => {
+    const lands = growing();
+    const { container, history, client } = mount();
+
+    await opened(container);
+    await waitFor(() => expect(history.get()).toBe(END));
+
+    fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${GRILLING.id}/events/${OUTPUT.id}`,
+      ),
+    );
+
+    await opened(container);
+    await waitFor(() => expect(history.get()).toBe(END));
+
+    await lands(container, client, { Notice: SAID });
+    await waitFor(() =>
+      expect(history.get()).toBe(
+        `/conversations/${GRILLING.id}/events/${SAID.id}`,
+      ),
+    );
   });
 });
 

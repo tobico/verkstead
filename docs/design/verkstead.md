@@ -583,6 +583,20 @@ scrolls up, and again once they come back down. A phone lands on the timeline
 with the newest thing marked open, never carried past the record into the
 details.
 
+**And the selection stays at that end** (*settled 2026-09-03, building
+auto-advance*): a timeline landed on the end of its record **auto-advances**,
+opening each event that arrives with a pane behind it, so a human watching a
+session work is shown what it just did rather than what it had done when they
+opened it. There is nothing on screen for the mode — the newest card is open,
+and an open card looks like an open card — and nothing turns it on but arriving
+at that end: a press on a sidebar row, or the redirect a conversation is started
+or drafted with, both of them a navigation naming no pane. Picking anything by
+hand ends it — every card on the record, every pinned card, the share button —
+because somebody who has said what they want to be looking at should not have it
+taken off them by the next thing a session does. The next arrival begins it
+again. A cold load of a details pane never begins it: a kept link is a request
+to be shown that one thing.
+
 What a Conversation needs settling before it runs — repo, branch, base commit,
 both Pairings, the readiness verdict — stands on the **composer**, which is the
 details pane a drafting Brief opens, drawn as the composer of a chat app: one
