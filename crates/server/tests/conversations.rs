@@ -3752,6 +3752,63 @@ async fn closing_a_conversation_whose_worktree_git_will_not_remove_sweeps_it_awa
     );
 }
 
+/// And a close whose browser left part-way through still closes.
+///
+/// The page draws a close at the press now and stops saying *not yet* — see the
+/// viewer's `eager.ts` — so a human who presses Close because they are finished
+/// with something and then shuts the tab is doing exactly what they were
+/// invited to. That takes the request away, and the work here is seconds long:
+/// a session to end, a worktree per repository to give back, a directory to
+/// sweep. Run on the request it would go with it, and it gives the worktrees
+/// back *before* it writes the record — so what a cancelled close would leave
+/// is a Conversation with no checkout and an open record, which is nowhere to
+/// work and what Resume then refuses. It runs on a task instead, and a task is
+/// nobody's to cancel.
+#[tokio::test]
+async fn a_close_the_browser_left_part_way_through_still_finishes() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, watched.path(), repo_id).await;
+    grill(&app, id).await;
+
+    let path = PathBuf::from(opened(&app, id).await.worktree.unwrap().path);
+
+    // One poll of the request and then nothing, which is what a browser that
+    // went away leaves behind. It is still Pending at that point — the answer
+    // has not been worked out yet — and dropping it here is the connection
+    // going.
+    let leaving = app.clone().oneshot(
+        Request::builder()
+            .method("POST")
+            .uri(format!("/api/ui/conversations/{id}/close"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from("{}"))
+            .unwrap(),
+    );
+
+    assert!(
+        tokio::time::timeout(std::time::Duration::ZERO, leaving)
+            .await
+            .is_err(),
+        "the close should still have been running when the caller left"
+    );
+
+    // And it finishes all the same: the record says so, and the worktree it
+    // gave back on the way is gone.
+    for _ in 0..200 {
+        if opened(&app, id).await.state == Lifecycle::Closed {
+            assert!(
+                !path.exists(),
+                "the worktree should have gone with the close"
+            );
+            return;
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+
+    panic!("the close nobody was left waiting for never finished");
+}
+
 /// A close sweeps the whole worktrees directory, not just its own: whatever an
 /// earlier close or a crash left unrecorded goes with it, and every checkout a
 /// live Conversation is still working in stays.

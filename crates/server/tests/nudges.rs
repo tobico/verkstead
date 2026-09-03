@@ -394,6 +394,56 @@ async fn every_open_page_hears_every_nudge() {
     }
 }
 
+/// Closing a Conversation is a lifecycle that moved, so it is announced the way
+/// every other move of one is — the Conversation everywhere it is drawn, its
+/// sidebar row included.
+///
+/// The row that closes and archives in one press has always announced; the plain
+/// close announced nothing, so a second device — and the tab that pressed —
+/// went on drawing an open Conversation until something else happened to send a
+/// Nudge. Which mattered once the browser started drawing the close at the press
+/// and holding what it drew until its own read agreed: the read it is waiting
+/// for is the one this asks for.
+#[tokio::test]
+async fn closing_a_conversation_nudges_the_open_pages() {
+    let (_dir, app) = fresh_app().await;
+    let mut page = Listening::open(&app).await;
+
+    post(
+        &app,
+        &format!("/api/ui/conversations/{ASKING_FROM}/close"),
+        serde_json::json!({}),
+    )
+    .await;
+
+    assert_eq!(
+        page.nudge().await,
+        Nudge::Conversation {
+            conversation: ASKING_FROM
+        },
+    );
+    page.nothing_more().await;
+}
+
+/// And a close that closed nothing announces nothing. A Conversation that was
+/// already closed has not moved, so there is no page anywhere with anything to
+/// read again.
+#[tokio::test]
+async fn closing_one_that_is_closed_already_nudges_nobody() {
+    let (_dir, app) = fresh_app().await;
+
+    let closing = format!("/api/ui/conversations/{ASKING_FROM}/close");
+    post(&app, &closing, serde_json::json!({})).await;
+
+    // Opened after the first close, so the only thing it could hear about is
+    // the second one.
+    let mut page = Listening::open(&app).await;
+
+    post(&app, &closing, serde_json::json!({})).await;
+
+    page.nothing_more().await;
+}
+
 #[tokio::test]
 async fn the_stream_says_something_while_nothing_is_happening() {
     let (_dir, app) = fresh_app().await;

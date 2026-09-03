@@ -78,6 +78,7 @@ import type { ConversationEntry } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { CardActions } from "./Actions";
+import { caughtUp, pressedRows } from "./eager";
 import shell from "../Panes.module.css";
 import styles from "./Conversations.module.css";
 import { SPOKEN } from "./Mark";
@@ -106,6 +107,19 @@ export function Conversations(props: {
     freshness: { reconcile: "id" },
   }));
 
+  /// Whether the ones put away are drawn among them, read under the key the
+  /// switch at the foot of the pane reads it under — so this is the answer
+  /// already in hand rather than a second fetch of it.
+  ///
+  /// Here as well as there because it is what decides whether an archive
+  /// pressed a moment ago takes a row off this list: the same rule the server's
+  /// own list is filtered by, read the same way. See `eager.ts`.
+  const archived = useReading(() => ({
+    queryKey: ["conversations", "archived"],
+    queryFn: showingArchived,
+    freshness: { reconcile: "id" } as const,
+  }));
+
   const queries = useQueryClient();
 
   // The order the human is making with their hand, until the server's own list
@@ -126,12 +140,14 @@ export function Conversations(props: {
     y: number;
   } | null>(null);
 
-  // The list to draw: the server's, in the order being dragged where there is
+  // The list to draw: the server's, with what a press has already said about a
+  // Conversation laid over it — a row closed a moment ago, one taken off the
+  // list, one put back on it — and in the order being dragged where there is
   // one. A Conversation that has appeared since the drag began is not in that
   // order and goes to the top, which is where an unplaced one goes on the
   // server too.
   const shown = (): ConversationEntry[] => {
-    const rows = conversations.data ?? [];
+    const rows = pressedRows(conversations.data ?? [], archived.data ?? false);
     const order = dragged();
     if (!order) return rows;
 
@@ -173,6 +189,14 @@ export function Conversations(props: {
       setDragged(null);
     }
   });
+
+  // And let go of what a press said the same way, for the same reason: the read
+  // behind a press comes back whether or not anything was read — a refetch that
+  // failed is swallowed, and a query nothing is reading is not fetched at all —
+  // so a press released on its request coming back would have the page take a
+  // close back the first time either happened. Released on this list having
+  // answered since instead, which is what `dataUpdatedAt` is. See `eager.ts`.
+  createEffect(() => caughtUp(conversations.dataUpdatedAt));
 
   // The list element, so a drag can ask where the rows actually are. A drag is
   // about pixels, and pixels are something only the DOM knows.

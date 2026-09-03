@@ -48,6 +48,7 @@ import { Icon } from "../Icon";
 import type { ConversationView } from "../api/types";
 import { Actions } from "./Actions";
 import { WAITING_ON_CHECKS } from "./conditions";
+import { pressed } from "./eager";
 import { ENDED, STATE } from "./states";
 import styles from "./StatusButton.module.css";
 
@@ -133,7 +134,12 @@ export function status(conversation: ConversationView): Status {
 export function StatusButton(props: {
   conversation: ConversationView;
 }): JSX.Element {
-  const said = createMemo(() => status(props.conversation));
+  // Off the Conversation as the page is drawing it rather than as the server
+  // last described it: a close pressed a moment ago has this line reading
+  // *Closed* at once, and the menu behind the button offering the rows a closed
+  // Conversation has. See `eager.ts`, and `Actions.tsx`, where the rows do the
+  // same to what they are handed.
+  const said = createMemo(() => status(pressed(props.conversation)));
 
   return (
     <Actions

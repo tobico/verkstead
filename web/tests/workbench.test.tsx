@@ -224,6 +224,7 @@ import {
   drawn,
   mount,
   mountSidebar,
+  nodes,
   nudged,
   theWorkbench,
 } from "./bench";
@@ -2572,16 +2573,32 @@ describe("the escape hatch on a conversation that will not load", () => {
     });
   });
 
-  /// And a refusal goes where every other refusal in this menu goes: a card
-  /// over the page, saying the refusal's own sentence.
+  /// And it leaves at the press rather than at the answer, as the ordinary
+  /// menu's eager rows do: the row goes off the sidebar and the page goes home
+  /// the moment the human presses, with the close still out.
+  it("leaves at the press, with the request still in flight", async () => {
+    theBrokenConversation(whenever(CLOSE_AND_ARCHIVE, hangs(), "POST"));
+    const { container, history } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+    expect(container.querySelector(`[data-id="${OPEN.id}"]`)).toBeTruthy();
+
+    fireEvent.click(await drawn(container, `.${actions.closeAndArchive}`));
+
+    await waitFor(() => expect(history.get()).toBe("/"));
+    expect(container.querySelector(`[data-id="${OPEN.id}"]`)).toBeNull();
+  });
+
+  /// A refusal is said in a toast, and what it takes back is the row: there is
+  /// no page left to put anything back on, the human having been carried off
+  /// the one that would not load.
   ///
-  /// It matters more here than anywhere else the card is drawn. Everywhere else
-  /// a refusal is a page drawn against a Conversation that has moved and the
-  /// re-read behind the press is the correction; here the reading is the thing
-  /// that failed, so a press that went quietly nowhere would leave the human on
-  /// a page that will not load with the one way off it apparently doing
-  /// nothing.
-  it("says over the page that the press did nothing, and stays where it is", async () => {
+  /// Saying it matters more here than anywhere else. Everywhere else a refusal
+  /// is a page drawn against a Conversation that has moved and the re-read
+  /// behind the press is the correction; here the reading is the thing that
+  /// failed, so a press that went quietly nowhere would leave the human
+  /// believing a Conversation was ended that was not.
+  it("says in a toast that the press did nothing, and puts the row back", async () => {
     theBrokenConversation(
       whenever(
         CLOSE_AND_ARCHIVE,
@@ -2594,19 +2611,25 @@ describe("the escape hatch on a conversation that will not load", () => {
     await openActions(container);
     fireEvent.click(await drawn(container, `.${actions.closeAndArchive}`));
 
-    const said = await drawn(document.body, `.${actions.refused} .${actions.refusedWhy}`);
-    expect(said.textContent).toBe(CLOSE_REFUSAL.NoSuchConversation);
+    const said = await waitFor(() =>
+      screen.getByText(CLOSE_REFUSAL.NoSuchConversation),
+    );
+    expect(said.closest(`.${toasts.toast}`)).toBeTruthy();
+    expect(refusal()).toBeNull();
 
-    // The menu goes as the card comes up, as it does in the ordinary menu: a
-    // dropdown left hanging behind a card is one nobody can see to close.
-    expect(container.querySelector(`.${dropdown.drop}`)).toBeNull();
-    expect(history.get()).toBe(`/conversations/${OPEN.id}`);
+    // The page went at the press and stays gone — the refusal is about the
+    // Conversation rather than about the navigation — and the row it took off
+    // the list is back.
+    expect(history.get()).toBe("/");
+    await waitFor(() =>
+      expect(container.querySelector(`[data-id="${OPEN.id}"]`)).toBeTruthy(),
+    );
   });
 
   /// And a request that fell over on the way out is answered the same way: the
-  /// press was made and nothing came of it, which is the whole of what the card
-  /// is for.
-  it("says over the page when the request itself fell over", async () => {
+  /// press was made and nothing came of it, which is the whole of what saying
+  /// it is for.
+  it("says in a toast when the request itself fell over", async () => {
     theBrokenConversation(
       whenever(
         CLOSE_AND_ARCHIVE,
@@ -2619,9 +2642,9 @@ describe("the escape hatch on a conversation that will not load", () => {
     await openActions(container);
     fireEvent.click(await drawn(container, `.${actions.closeAndArchive}`));
 
-    const said = await drawn(document.body, `.${actions.refused} .${actions.refusedWhy}`);
+    const said = await waitFor(() => screen.getByText(/could not be closed/));
 
-    expect(said.textContent).toContain("could not be closed");
+    expect(said.closest(`.${toasts.toast}`)).toBeTruthy();
     expect(said.textContent).toContain("the server is not answering");
   });
 });
@@ -7462,10 +7485,12 @@ describe("closing a conversation", () => {
     expect(screen.queryByText("This conversation has been closed.")).toBeNull();
   });
 
-  /// A page drawn against a conversation that has since gone: the press is
-  /// refused, and the refusal opens over the page rather than going to a
-  /// console nobody has open.
-  it("says over the page that the conversation has gone", async () => {
+  /// A page drawn against a conversation that has since gone. The close was
+  /// drawn at the press, so what the refusal does is take it back: the
+  /// conversation stands where it did, and the reason is said in a toast rather
+  /// than in the card the waiting rows open — there is nothing here to decide,
+  /// and the row coming back is what says which conversation it is about.
+  it("puts the conversation back and says why in a toast", async () => {
     theGrilling(
       whenever(
         `/api/ui/conversations/${GRILLING.id}/close`,
@@ -7478,9 +7503,47 @@ describe("closing a conversation", () => {
     await openActions(container);
     fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.close}`));
 
-    const said = await drawn(document.body, `.${actions.refused} .${actions.refusedWhy}`);
-
+    const said = await waitFor(() =>
+      screen.getByText(CLOSE_REFUSAL.NoSuchConversation),
+    );
+    expect(said.closest(`.${toasts.toast}`)).toBeTruthy();
+    // The reason alone: no branch name, no link back.
     expect(said.textContent).toBe(CLOSE_REFUSAL.NoSuchConversation);
+    expect(refusal()).toBeNull();
+
+    // And the conversation is where it was, on the page and in the list both.
+    await waitFor(async () =>
+      expect((await standing(container)).state).toBe(STATE.Grilling),
+    );
+    expect(spokenRow(container, GRILLING.id)).toContain(STATE.Grilling);
+  });
+
+  /// A request that never came back is said the same way. Nothing about it is a
+  /// refusal the server named, so the sentence is the page's own — but a press
+  /// the human has already watched happen and that did not is owed the same
+  /// answer either way.
+  it("says so in a toast when the request itself fell over", async () => {
+    theGrilling(
+      whenever(
+        `/api/ui/conversations/${GRILLING.id}/close`,
+        json({ error: "the server is not answering" }, 503),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.close}`));
+
+    const said = await waitFor(() =>
+      screen.getByText(/could not be closed/),
+    );
+    expect(said.closest(`.${toasts.toast}`)).toBeTruthy();
+    expect(said.textContent).toContain("the server is not answering");
+
+    await waitFor(async () =>
+      expect((await standing(container)).state).toBe(STATE.Grilling),
+    );
   });
 });
 
@@ -7551,7 +7614,9 @@ describe("closing and archiving a conversation", () => {
     );
   });
 
-  it("says over the page that the conversation has gone", async () => {
+  /// And a refusal puts both halves back: the conversation is on the list again
+  /// and reads as it did, with the reason in a toast.
+  it("puts the conversation back on the list and says why in a toast", async () => {
     theGrilling(
       whenever(
         `/api/ui/conversations/${GRILLING.id}/close-and-archive`,
@@ -7566,9 +7631,15 @@ describe("closing and archiving a conversation", () => {
       await drawn(container, `.${actions.conversationActions} .${actions.closeAndArchive}`),
     );
 
-    const said = await drawn(document.body, `.${actions.refused} .${actions.refusedWhy}`);
+    const said = await waitFor(() =>
+      screen.getByText(CLOSE_REFUSAL.NoSuchConversation),
+    );
+    expect(said.closest(`.${toasts.toast}`)).toBeTruthy();
+    expect(refusal()).toBeNull();
 
-    expect(said.textContent).toBe(CLOSE_REFUSAL.NoSuchConversation);
+    await waitFor(() =>
+      expect(spokenRow(container, GRILLING.id)).toContain(STATE.Grilling),
+    );
   });
 });
 
@@ -7626,8 +7697,9 @@ describe("archiving a conversation", () => {
   });
 
   /// A page drawn against a conversation that has since been steered back into
-  /// the work: the press is refused, and the refusal opens over the page.
-  it("says over the page that there is nothing to put away", async () => {
+  /// the work: the press is refused, the row comes back on the list, and the
+  /// reason is said in a toast.
+  it("puts the row back and says there was nothing to put away", async () => {
     theRecordedWith(
       { state: "Closed", ready_to_grill: false },
       whenever(
@@ -7641,9 +7713,13 @@ describe("archiving a conversation", () => {
     await openActions(container);
     fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.archive}`));
 
-    const said = await drawn(document.body, `.${actions.refused} .${actions.refusedWhy}`);
+    const said = await waitFor(() => screen.getByText(ARCHIVE_REFUSAL.NotClosed));
+    expect(said.closest(`.${toasts.toast}`)).toBeTruthy();
+    expect(refusal()).toBeNull();
 
-    expect(said.textContent).toBe(ARCHIVE_REFUSAL.NotClosed);
+    await waitFor(() =>
+      expect(container.querySelector(`[data-id="${OPEN.id}"]`)).toBeTruthy(),
+    );
   });
 });
 
@@ -7705,8 +7781,8 @@ describe("unarchiving a conversation", () => {
   });
 
   /// The one thing left to refuse: a page drawn against a conversation that has
-  /// since gone. Over the page, as every other refusal here goes.
-  it("says over the page that the conversation is gone", async () => {
+  /// since gone. In a toast, as every one of these four presses says a refusal.
+  it("says in a toast that the conversation is gone", async () => {
     theRecordedWith(
       { state: "Closed", ready_to_grill: false, archived: true },
       whenever(
@@ -7720,9 +7796,415 @@ describe("unarchiving a conversation", () => {
     await openActions(container);
     fireEvent.click(await drawn(container, `.${actions.conversationActions} .${actions.unarchive}`));
 
-    const said = await drawn(document.body, `.${actions.refused} .${actions.refusedWhy}`);
+    const said = await waitFor(() =>
+      screen.getByText(UNARCHIVE_REFUSAL.NoSuchConversation),
+    );
+    expect(said.closest(`.${toasts.toast}`)).toBeTruthy();
+    expect(refusal()).toBeNull();
+  });
+});
 
-    expect(said.textContent).toBe(UNARCHIVE_REFUSAL.NoSuchConversation);
+/// What a sidebar row says when it is read aloud, which is where everything the
+/// card draws in marks and paint is said in words: the branch, the repo, the
+/// state and whatever mark it is carrying.
+///
+/// Failing rather than answering where there is no such row, so that a test
+/// asking what a row says cannot pass by finding none.
+function spokenRow(container: ParentNode, id: number): string {
+  const row = container.querySelector(`[data-id="${id}"] button`);
+  expect(
+    row,
+    `the sidebar should be drawing a row for conversation ${id}`,
+  ).toBeTruthy();
+
+  return row!.getAttribute("aria-label") ?? "";
+}
+
+/// An answer the test lets go of when it is ready: the request goes out, the
+/// page draws whatever the press said, and the server answers only once the
+/// test has finished looking at that.
+///
+/// [`hangs`] is the half of this a test needs where the request never has to
+/// land; this is for the ones about what happens when it does.
+function held(body: unknown, status = 200) {
+  let land = (): void => {};
+  const waited = new Promise<void>((settle) => {
+    land = settle;
+  });
+
+  return {
+    answers: () =>
+      waited.then(
+        () =>
+          new Response(JSON.stringify(body), {
+            status,
+            headers: { "content-type": "application/json" },
+          }),
+      ),
+    lands: () => land(),
+  };
+}
+
+/// The four presses that end a conversation, as one behaviour rather than four:
+/// close, close and archive, archive and unarchive draw their outcome at the
+/// press and run the request behind the page.
+///
+/// Closing is what made it worth doing — the handler stops the session, waits
+/// for the task it was on, gives back a worktree per repository and sweeps a
+/// directory, all inside the POST — and the other three joined it so that the
+/// menu behaves the one way throughout. See `eager.ts`.
+describe("a press whose outcome is drawn before the server has answered", () => {
+  const CLOSING_IT = `/api/ui/conversations/${GRILLING.id}/close`;
+  const CLOSING_AWAY = `/api/ui/conversations/${GRILLING.id}/close-and-archive`;
+  const ARCHIVING_IT = `/api/ui/conversations/${GRILLING.id}/archive`;
+
+  /// The whole of it in one: the menu goes, the pane says Closed and the
+  /// sidebar row says Closed — with the request still out and never coming
+  /// back.
+  it("draws the close at the press, with the request still in flight", async () => {
+    theGrilling(whenever(CLOSING_IT, hangs(), "POST"));
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.close}`),
+    );
+
+    // The menu is gone, which is what the press does to it.
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${actions.conversationActions} > .${dropdown.drop}`),
+      ).toBeNull(),
+    );
+
+    // The state word on its own, which is what the button says of a
+    // conversation the work has ended in.
+    await waitFor(async () => {
+      const line = await standing(container);
+      expect(line.word).toBe(STATE.Closed);
+      expect(line.state).toBeNull();
+    });
+
+    expect(spokenRow(container, GRILLING.id)).toContain(STATE.Closed);
+  });
+
+  /// And the menu it drops is a closed conversation's: archive where close was,
+  /// no stops, and not one row saying it is waiting for anything.
+  it("stands archive where close was, without a pending label anywhere", async () => {
+    theGrilling(whenever(CLOSING_IT, hangs(), "POST"));
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.close}`),
+    );
+
+    const menu = await openActions(container);
+    await drawn(container, `.${actions.conversationActions} .${actions.archive}`);
+
+    expect(menu.querySelector(`.${actions.close}`)).toBeNull();
+    expect(menu.querySelector(`.${actions.closeAndArchive}`)).toBeNull();
+    expect(menu.querySelector(`.${actions.stop}`)).toBeNull();
+
+    // Nothing is standing disabled over a press that has already been drawn,
+    // and nothing is relabelled to say it is under way.
+    expect(
+      [...menu.querySelectorAll("button")].filter((row) => row.disabled),
+    ).toEqual([]);
+    expect(screen.queryByText("Closing…")).toBeNull();
+    expect(screen.queryByText("Archiving…")).toBeNull();
+  });
+
+  /// And the whole pane goes with it rather than the status line alone. A draft
+  /// that has been closed is a draft nobody is writing any more, so the brief
+  /// that was a field is the record it is about to be — which the composer
+  /// decides off the state, and the state is what the press has settled.
+  it("draws the closed conversation whole, not the status line alone", async () => {
+    theRecordedWith(
+      {},
+      whenever(`/api/ui/conversations/${OPEN.id}/close`, hangs(), "POST"),
+    );
+    const { container } = mount(COMPOSING);
+
+    await drawn(container, `.${shell.detailsPane} .${composer.composer}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.close}`),
+    );
+
+    await drawn(container, `.${shell.detailsPane} .${briefPane.brief}`);
+    expect(container.querySelector(`.${composer.composer}`)).toBeNull();
+  });
+
+  /// The row that puts it away takes it off the list at the press, which is
+  /// what the server's own list will say once the archive lands.
+  it("takes the row off the list where the press puts it away", async () => {
+    theGrilling(whenever(CLOSING_AWAY, hangs(), "POST"));
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    expect(container.querySelector(`[data-id="${GRILLING.id}"]`)).toBeTruthy();
+
+    fireEvent.click(
+      await drawn(
+        container,
+        `.${actions.conversationActions} .${actions.closeAndArchive}`,
+      ),
+    );
+
+    await waitFor(() =>
+      expect(container.querySelector(`[data-id="${GRILLING.id}"]`)).toBeNull(),
+    );
+  });
+
+  /// And the way back out puts a row on a list the server has none for: a
+  /// conversation taken out of the archive while the archived ones are hidden
+  /// is one the list it is being drawn into does not carry. It goes to the top,
+  /// which is where a conversation the order says nothing about goes.
+  it("puts a row back on the list where the press takes it out of the archive", async () => {
+    theRecordedWith(
+      { state: "Closed", ready_to_grill: false, archived: true },
+      whenever(
+        "/api/ui/conversations",
+        json(SIDEBAR.filter((row) => row.id !== OPEN.id)),
+      ),
+      whenever(`/api/ui/conversations/${OPEN.id}/unarchive`, hangs(), "POST"),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    await openActions(container);
+    expect(container.querySelector(`[data-id="${OPEN.id}"]`)).toBeNull();
+
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.unarchive}`),
+    );
+
+    await waitFor(() =>
+      expect(spokenRow(container, OPEN.id)).toContain(OPEN.branch),
+    );
+    expect(
+      nodes(container, `.${sidebar.conversationRow}`)[0]!.getAttribute("data-id"),
+    ).toBe(String(OPEN.id));
+  });
+
+  /// A Nudge landing while the request is still out does not flick the page
+  /// back to the conversation the server last described. Which is the whole
+  /// reason what the press said is held over the reads rather than written into
+  /// them: this page is re-read constantly.
+  it("holds what it drew through a read that lands mid-flight", async () => {
+    theGrilling(whenever(CLOSING_IT, hangs(), "POST"));
+    const { container, client } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.close}`),
+    );
+
+    await waitFor(async () =>
+      expect((await standing(container)).word).toBe(STATE.Closed),
+    );
+
+    // Everything the page is showing, read again — which is the whole of what a
+    // Nudge does to it. The server still says the conversation is being
+    // grilled, the close it would be told about not having landed.
+    await nudged(client);
+
+    expect((await standing(container)).word).toBe(STATE.Closed);
+    expect(spokenRow(container, GRILLING.id)).toContain(STATE.Closed);
+  });
+
+  /// And it is let go of once the read behind the press has landed, so what the
+  /// page draws from then on is the server's own answer again.
+  it("lets go of what it drew once the read behind the press has landed", async () => {
+    // The list as the server gives it: the conversation as it stands now, and
+    // closed from the moment the close lands.
+    let listed = SIDEBAR;
+
+    theGrilling(
+      whenever("/api/ui/conversations", () => json(listed)()),
+      whenever(
+        CLOSING_IT,
+        () => {
+          listed = SIDEBAR.map((row) =>
+            row.id === GRILLING.id
+              ? { ...row, state: "Closed" as const, waiting: false }
+              : row,
+          );
+          return json("Closed" satisfies ConversationClosed)();
+        },
+        "POST",
+      ),
+    );
+    const { container, client } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.close}`),
+    );
+
+    await waitFor(() =>
+      expect(spokenRow(container, GRILLING.id)).toContain(STATE.Closed),
+    );
+
+    // And then the server says something else about it — a steer on another
+    // device putting it back into the work. Which the page could not draw with
+    // the press still standing over the row.
+    listed = SIDEBAR;
+    await client.invalidateQueries({ queryKey: ["conversations"] });
+
+    await waitFor(() =>
+      expect(spokenRow(container, GRILLING.id)).toContain(STATE.Grilling),
+    );
+  });
+
+  /// And a read that never landed is not a read. The re-read a press ends with
+  /// comes back whatever became of it — `invalidateQueries` swallows a refetch
+  /// that failed, and fetches nothing at all for a query nothing is reading — so
+  /// a page that let go of what it drew when that came back would take a close
+  /// the server really made back the first time either happened. It holds until
+  /// a read has landed, and then lets go of it whatever that read says.
+  it("holds what it drew where the read behind the press never landed", async () => {
+    let listing = true;
+
+    const fetching = theGrilling(
+      whenever("/api/ui/conversations", () =>
+        listing ? json(SIDEBAR)() : json({ error: "not now" }, 503)(),
+      ),
+      whenever(
+        CLOSING_IT,
+        () => {
+          listing = false;
+          return json("Closed" satisfies ConversationClosed)();
+        },
+        "POST",
+      ),
+    );
+    const { container, client } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.close}`),
+    );
+
+    // The press has come back and the reads behind it are in: the list's fell
+    // over, which is what the sidebar is saying, and the conversation's own
+    // landed saying Grilling — which is what this server has said about it
+    // throughout, and what the page would be drawing if it had let go.
+    await waitFor(() => screen.getByText(/Could not read the conversations/));
+    await waitFor(() =>
+      expect(
+        askedFor(fetching, `/api/ui/conversations/${GRILLING.id}`),
+      ).toBeGreaterThan(1),
+    );
+
+    // Given every chance to let go of it, and it does not: the one read that
+    // ever lets go of a press is the list's, and the list did not answer.
+    for (let turn = 0; turn < 3; turn += 1) {
+      await new Promise((settle) => setTimeout(settle, 0));
+      expect((await standing(container)).word).toBe(STATE.Closed);
+    }
+
+    // And then one that does land, which lets go of it — and says what the
+    // server has been saying all along, because a read that landed is the
+    // server's own word however late it is.
+    listing = true;
+    await client.invalidateQueries({ queryKey: ["conversations"] });
+
+    await waitFor(async () =>
+      expect((await standing(container)).state).toBe(STATE.Grilling),
+    );
+  });
+
+  /// The menu offers Archive the instant Close is pressed, and an archive
+  /// posted while the close is still running would be refused: the record says
+  /// the conversation is open until the close commits. So the second press
+  /// waits for the first, and the page draws it all the same.
+  it("makes a press queued behind one still in flight once that one lands", async () => {
+    const closing = held("Closed" satisfies ConversationClosed);
+
+    const fetching = theGrilling(
+      whenever(CLOSING_IT, closing.answers, "POST"),
+      whenever(ARCHIVING_IT, json("Archived" satisfies ConversationArchived), "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.close}`),
+    );
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.archive}`),
+    );
+
+    // Drawn as put away at once, as everything here is — and not yet sent.
+    await waitFor(() =>
+      expect(container.querySelector(`[data-id="${GRILLING.id}"]`)).toBeNull(),
+    );
+    expect(askedFor(fetching, ARCHIVING_IT)).toBe(0);
+
+    closing.lands();
+
+    await waitFor(() => expect(askedFor(fetching, ARCHIVING_IT)).toBe(1));
+  });
+
+  /// And one queued behind a press that was refused is dropped rather than
+  /// sent: the state it assumed is gone, and the human has already been told.
+  it("drops a press queued behind one that was refused", async () => {
+    const closing = held("NoSuchConversation" satisfies ConversationClosed);
+
+    const fetching = theGrilling(
+      whenever(CLOSING_IT, closing.answers, "POST"),
+      whenever(ARCHIVING_IT, json("Archived" satisfies ConversationArchived), "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.close}`),
+    );
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.archive}`),
+    );
+
+    closing.lands();
+
+    await waitFor(() => screen.getByText(CLOSE_REFUSAL.NoSuchConversation));
+
+    // The conversation is back where it was, whole: the close was refused and
+    // the archive that was waiting on it never went out. One thing was said,
+    // because one press was made that did nothing.
+    await waitFor(() =>
+      expect(spokenRow(container, GRILLING.id)).toContain(STATE.Grilling),
+    );
+    expect(askedFor(fetching, ARCHIVING_IT)).toBe(0);
+    expect(document.body.querySelectorAll(`.${toasts.toast}`)).toHaveLength(1);
+  });
+
+  /// And a press that landed says nothing at all. Success is silent: the
+  /// outcome has been on the page since the press, and a toast saying it
+  /// happened would be the page telling the human what they watched.
+  it("says nothing where the press landed", async () => {
+    theGrilling(
+      whenever(CLOSING_IT, json("Closed" satisfies ConversationClosed), "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.close}`),
+    );
+
+    await waitFor(async () =>
+      expect((await standing(container)).word).toBe(STATE.Closed),
+    );
+
+    expect(document.body.querySelector(`.${toasts.toast}`)).toBeNull();
+    expect(refusal()).toBeNull();
   });
 });
 
@@ -13910,25 +14392,31 @@ describe("the resume row", () => {
 /// what the row is for, and there was never a way to tell those sentences from
 /// the rest.
 describe("what a refused press says", () => {
+  /// Where the card is still what a refusal comes to, which is the presses this
+  /// page cannot draw ahead of the server: the two stops, the steer and the
+  /// resume all end in a session actually starting or stopping.
+  const STOPPING_IT = `/api/ui/conversations/${WRAPPING.id}/stop`;
+
   /// A row that is not resume, to say that the card is the menu's answer rather
-  /// than the resume row's: a close on a conversation the server says is gone.
+  /// than the resume row's: a stop on a conversation the server says has
+  /// already stopped.
   it("opens the refusal's sentence over the page, whichever row was pressed", async () => {
     theWrapping(
       {},
       whenever(
-        `/api/ui/conversations/${WRAPPING.id}/close`,
-        json("NoSuchConversation" satisfies ConversationClosed),
+        STOPPING_IT,
+        json("AlreadyStopped" satisfies ConversationStopped),
         "POST",
       ),
     );
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
-    fireEvent.click(await drawn(await openActions(container), `.${actions.close}`));
+    fireEvent.click(await drawn(await openActions(container), `.${actions.stop}`));
 
     const card = await drawn(document.body, `.${actions.refused}`);
 
     expect(card.querySelector(`.${actions.refusedWhy}`)!.textContent).toBe(
-      CLOSE_REFUSAL.NoSuchConversation,
+      STOP_REFUSAL.AlreadyStopped,
     );
     // A heading that says what the card is, and one way out of it: nothing is
     // being decided here, the press having already been refused.
@@ -13944,14 +14432,14 @@ describe("what a refused press says", () => {
     theWrapping(
       {},
       whenever(
-        `/api/ui/conversations/${WRAPPING.id}/close`,
-        json("NoSuchConversation" satisfies ConversationClosed),
+        STOPPING_IT,
+        json("AlreadyStopped" satisfies ConversationStopped),
         "POST",
       ),
     );
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
-    fireEvent.click(await drawn(await openActions(container), `.${actions.close}`));
+    fireEvent.click(await drawn(await openActions(container), `.${actions.stop}`));
 
     await drawn(document.body, `.${actions.refused}`);
     expect(
@@ -13969,14 +14457,14 @@ describe("what a refused press says", () => {
     theWrapping(
       {},
       whenever(
-        `/api/ui/conversations/${WRAPPING.id}/close`,
-        json("NoSuchConversation" satisfies ConversationClosed),
+        STOPPING_IT,
+        json("AlreadyStopped" satisfies ConversationStopped),
         "POST",
       ),
     );
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
-    fireEvent.click(await drawn(await openActions(container), `.${actions.close}`));
+    fireEvent.click(await drawn(await openActions(container), `.${actions.stop}`));
 
     await drawn(document.body, `.${actions.refused}`);
     expect(document.activeElement).toBe(
@@ -13989,14 +14477,14 @@ describe("what a refused press says", () => {
     theWrapping(
       {},
       whenever(
-        `/api/ui/conversations/${WRAPPING.id}/close`,
-        json("NoSuchConversation" satisfies ConversationClosed),
+        STOPPING_IT,
+        json("AlreadyStopped" satisfies ConversationStopped),
         "POST",
       ),
     );
     const { container } = mount(`/conversations/${WRAPPING.id}`);
 
-    fireEvent.click(await drawn(await openActions(container), `.${actions.close}`));
+    fireEvent.click(await drawn(await openActions(container), `.${actions.stop}`));
 
     const card = await drawn(document.body, `.${actions.refused}`);
     fireEvent.click(card.querySelector(`.${actions.refusedOut} button`)!);
@@ -14039,6 +14527,31 @@ describe("what a refused press says", () => {
         container.querySelector(`.${actions.conversationActions} > .${dropdown.drop}`),
       ).toBeNull(),
     );
+    expect(refusal()).toBeNull();
+  });
+
+  /// And the four rows that draw their outcome at the press never open it at
+  /// all. Their refusals are rolled back and said in a toast — see the suite
+  /// about them — and a card over a page the human has already watched change
+  /// would be the page arguing with itself.
+  it("is not what the rows drawn at the press answer with", async () => {
+    theWrapping(
+      {},
+      whenever(
+        `/api/ui/conversations/${WRAPPING.id}/close`,
+        json("NoSuchConversation" satisfies ConversationClosed),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${WRAPPING.id}`);
+
+    fireEvent.click(await drawn(await openActions(container), `.${actions.close}`));
+
+    const said = await waitFor(() =>
+      screen.getByText(CLOSE_REFUSAL.NoSuchConversation),
+    );
+
+    expect(said.closest(`.${toasts.toast}`)).toBeTruthy();
     expect(refusal()).toBeNull();
   });
 });

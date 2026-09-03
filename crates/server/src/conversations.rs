@@ -1843,6 +1843,14 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
 /// The record says Closed by then, which is the order the rest of this is in:
 /// what has happened is written down, and then whatever outlived it is shut.
 ///
+/// **And the open pages are told**, which they were not: the row that closes and
+/// archives announced the list and this one announced nothing, so a second
+/// device went on drawing an open Conversation until something else happened to
+/// send a Nudge. One [`Nudge::Conversation`], which is both things that moved —
+/// the Conversation and its sidebar row — and it is the read the browser that
+/// pressed is waiting on as well: a close is drawn there at the press and held
+/// until a read of the server has landed since.
+///
 /// **The Conversation is read through [`store::closable`] rather than the whole
 /// of it**, which is a decision about what this may be stopped by rather than
 /// about how much is fetched. The full read parses the state word, the
@@ -1852,7 +1860,34 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
 /// is for. This read parses nothing: it wants a repository path and a worktree
 /// path per checkout, and the only thing it can be refused for is a
 /// Conversation that is not there.
+///
+/// **On a task of its own, which this still waits for.** Everything below takes
+/// seconds — a session to end and the task it was on to finish, a worktree per
+/// repository to give back, a directory to sweep — and the browser now draws
+/// the close at the press rather than watching a disabled row for the whole of
+/// it (see the viewer's `eager.ts`). So the page has stopped saying *not yet*,
+/// and a human who presses Close and archive because they are finished with
+/// something and then closes the tab is doing what the page invites. A
+/// connection going away drops the request, and a request is what a handler's
+/// future is polled by: run here it would be dropped part-way through, and the
+/// worktrees are given back *before* the record is written — so a close
+/// cancelled between the two leaves a Conversation whose checkouts have gone
+/// and whose record still says it is open, which is nowhere to work and what
+/// Resume then refuses with `NowhereToWork`. Nothing cancels a task, so what
+/// the human was told had happened happens.
+///
+/// It is not a fast answer: the outcome is still this close's own and still
+/// waited for, so a browser that stayed hears exactly what it heard before.
+/// What changes is only that a browser which left has stopped being the thing
+/// the work depends on.
 pub(crate) async fn close(state: &AppState, id: i64) -> Result<ConversationClosed> {
+    let running = state.clone();
+
+    tokio::spawn(async move { ending(&running, id).await }).await?
+}
+
+/// The close itself, as the task above runs it.
+async fn ending(state: &AppState, id: i64) -> Result<ConversationClosed> {
     let pool = &state.pool;
 
     let Some(conversation) = store::closable(pool, id).await? else {
@@ -1921,6 +1956,24 @@ pub(crate) async fn close(state: &AppState, id: i64) -> Result<ConversationClose
     // what makes its own directories orphans, and a sweep that ran first would
     // read them as live and leave them.
     worktrees::sweep(state).await;
+
+    // And the open pages hear that it happened. Only where this close is what
+    // did it: a Conversation that was already closed has not moved, and a
+    // Conversation that is not there never was.
+    //
+    // One Nudge for the two things that moved, because [`Nudge::Conversation`]
+    // is both — the Conversation everywhere it is drawn, its sidebar row
+    // included. Which is what the browser that pressed needs as much as the
+    // other devices: a close is drawn there the moment it is pressed and let go
+    // of when the read behind it agrees, and this is what makes the pressing
+    // tab's own read arrive rather than waiting on a session relay happening to
+    // end. The row that puts the Conversation away announces the list on top of
+    // this, that being a different fact about a different thing.
+    if closing == store::Closing::Closed {
+        state
+            .nudges
+            .announce(Nudge::Conversation { conversation: id });
+    }
 
     Ok(match closing {
         store::Closing::Closed => ConversationClosed::Closed,

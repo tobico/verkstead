@@ -65,6 +65,23 @@
 //! is for — a Conversation nothing is driving, and the reason nothing is — and
 //! there was never a way to tell those sentences from the rest.
 //!
+//! **Four of these rows do not wait for the server, and answer differently.**
+//! Close, Close and archive, Archive and Unarchive draw their outcome at the
+//! press: the menu shuts, the pane and the sidebar read as closed or as put
+//! away, and the request runs behind the page — see `eager.ts`, which holds
+//! what has been said until a read of the server has landed since. Closing
+//! is the one that made this worth doing, taking seconds inside the POST, and
+//! the other three joined it so that the menu behaves the one way throughout.
+//! A press of theirs that is refused is rolled back and said in a toast rather
+//! than in the card above: there is nothing to decide, and a modal over an
+//! outcome the human has already watched happen would be the page arguing with
+//! itself.
+//!
+//! The rest do wait, and keep the card. Resume, the two stops and Steer each
+//! end in a session actually starting or stopping, which is not something this
+//! page can truthfully draw ahead of the server — so they keep the pending
+//! label on the row and the refusal over the page.
+//!
 //! Two menus and one set of rows. The pane's is about the Conversation that is
 //! open, and the sidebar's right-click is about the card under the pointer,
 //! which is very often a different one — but *what there is to do about a
@@ -113,6 +130,7 @@ import type {
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import styles from "./Actions.module.css";
+import { eagerly, pressed, rowFor } from "./eager";
 import { NO_SESSIONS, noSessions } from "./sessions";
 import { Steer } from "./Steer";
 
@@ -244,14 +262,19 @@ export function Action(props: {
   /// Which row this is, for the paint and for the tests that look for it.
   class?: string;
   /// What it reads as, and what it reads as while its press is in flight.
+  ///
+  /// The eager rows say neither of the last two: their outcome is on the page
+  /// before the request goes out, so there is no waiting to report and nothing
+  /// to take the row for — a row that disabled itself over a press that has
+  /// already happened would be the one thing on the page still waiting.
   label: string;
-  pressing: string;
+  pressing?: string;
   /// A node rather than a string: most rows say one sentence, and the one that
   /// publishes says why it could not, with the way to the page that fixes it
   /// inside the sentence — see [`refusal`].
   says: JSX.Element;
   /// Whether that press is in flight, which is also what takes the row.
-  working: boolean;
+  working?: boolean;
   press: () => void;
 }): JSX.Element {
   return (
@@ -259,10 +282,12 @@ export function Action(props: {
       type="button"
       role="menuitem"
       class={props.class}
-      disabled={props.working}
+      disabled={props.working ?? false}
       onClick={() => props.press()}
     >
-      <span class={styles.title}>{props.working ? props.pressing : props.label}</span>
+      <span class={styles.title}>
+        {props.working ? props.pressing : props.label}
+      </span>
       <span class={styles.says}>{props.says}</span>
     </button>
   );
@@ -380,10 +405,15 @@ function actions(): {
   /// What every press here leaves behind: a page drawn against a conversation
   /// that has moved. Reading it again is both the correction and, where the
   /// press was refused, the answer — the row goes.
-  const reread = () => {
-    void queries.invalidateQueries({ queryKey: ["conversation"] });
-    void queries.invalidateQueries({ queryKey: ["conversations"] });
-  };
+  ///
+  /// Awaitable, for the eager rows: what lets go of what one of those said is
+  /// the read behind it landing, so this has to be something to wait for rather
+  /// than something set going — see `eager.ts`.
+  const reread = (): Promise<unknown> =>
+    Promise.all([
+      queries.invalidateQueries({ queryKey: ["conversation"] }),
+      queries.invalidateQueries({ queryKey: ["conversations"] }),
+    ]);
 
   /// Getting Verkstead driving again, which is the one row here that starts
   /// something rather than ending it. Its refusals are the whole of what it is
@@ -397,7 +427,7 @@ function actions(): {
         shut();
       }
 
-      reread();
+      void reread();
     },
     onError: (error: Error) =>
       refuse(`The conversation could not be resumed: ${error.message}`),
@@ -415,7 +445,7 @@ function actions(): {
         shut();
       }
 
-      reread();
+      void reread();
     },
     onError: (error: Error) =>
       refuse(`The conversation could not be stopped: ${error.message}`),
@@ -437,7 +467,7 @@ function actions(): {
     onSuccess: (outcome: SteerOpened, conversation: ConversationView) => {
       if (outcome === "NoSuchConversation") {
         refuse("This conversation is gone.");
-        reread();
+        void reread();
         return;
       }
 
@@ -449,7 +479,7 @@ function actions(): {
 
       // The conversation has stopped, whatever the human goes on to decide, so
       // the page behind the modal is already out of date.
-      reread();
+      void reread();
     },
     onError: (error: Error) =>
       refuse(
@@ -460,201 +490,220 @@ function actions(): {
   /// Both closing rows answer the same way, so both are pressed the same way:
   /// the one that only closes and the one that puts the conversation away as
   /// well are the same press with the same refusal behind it.
-  const closing = (ending: (id: number) => Promise<ConversationClosed>) => ({
-    mutationFn: ending,
-    onSuccess: (outcome: ConversationClosed) => {
-      if (CLOSE_REFUSAL[outcome]) {
-        refuse(CLOSE_REFUSAL[outcome]);
-        return;
-      }
+  ///
+  /// Eager, unlike everything above it. The menu goes and the page reads as
+  /// closed at once, and the close — which stops a session, gives back a
+  /// worktree per repository and sweeps a directory, all inside the POST —
+  /// runs behind it. A refusal rolls that back and says why in a toast. See
+  /// `eager.ts`.
+  const closing = (
+    conversation: ConversationView,
+    ending: (id: number) => Promise<ConversationClosed>,
+    away: boolean,
+  ) => {
+    shut();
 
-      // Closed or already closed: what was asked for holds either way.
-      shut();
-      reread();
-    },
-    onError: (error: Error) =>
-      refuse(`The conversation could not be closed: ${error.message}`),
-  });
-
-  const close = useMutation(() => closing(closeConversation));
-
-  /// The same press with the archive already made, which is one press rather
-  /// than two because it is one intention: a conversation the human is finished
-  /// with is usually one they are finished looking at.
-  const closeAway = useMutation(() => closing(closeAndArchiveConversation));
+    eagerly({
+      conversation: conversation.id,
+      // The archive is the half the two rows differ by, and it is said here
+      // rather than in a second press: the server makes both in one request,
+      // which is what stops a dropped connection leaving the pair half made.
+      says: away ? { closed: true, archived: true } : { closed: true },
+      post: () => ending(conversation.id),
+      refusal: (outcome: ConversationClosed) => CLOSE_REFUSAL[outcome],
+      fell: (error: Error) =>
+        `The conversation could not be closed: ${error.message}`,
+      reread,
+    });
+  };
 
   /// And putting the closed conversation away, which reads the same way: both
   /// of its refusals are a page drawn against a conversation that has moved,
   /// and both of its successes mean it is off the list.
-  const archive = useMutation(() => ({
-    mutationFn: (id: number) => archiveConversation(id),
-    onSuccess: (outcome: ConversationArchived) => {
-      if (ARCHIVE_REFUSAL[outcome]) {
-        refuse(ARCHIVE_REFUSAL[outcome]);
-        return;
-      }
+  ///
+  /// Eager for the reason the closes are, rather than for the wait — this one
+  /// is a single row written to the store. What it buys is that the menu
+  /// behaves the one way throughout: every row here that ends a conversation is
+  /// a press and it has happened.
+  const archiving = (conversation: ConversationView) => {
+    shut();
 
-      shut();
-      reread();
-    },
-    onError: (error: Error) =>
-      refuse(`The conversation could not be archived: ${error.message}`),
-  }));
+    eagerly({
+      conversation: conversation.id,
+      says: { archived: true },
+      post: () => archiveConversation(conversation.id),
+      refusal: (outcome: ConversationArchived) => ARCHIVE_REFUSAL[outcome],
+      fell: (error: Error) =>
+        `The conversation could not be archived: ${error.message}`,
+      reread,
+    });
+  };
 
   /// And the way back out, which is the same press mirrored: its one refusal is
   /// a conversation that has gone, and either success means it is on the list
   /// again.
-  const unarchive = useMutation(() => ({
-    mutationFn: (id: number) => unarchiveConversation(id),
-    onSuccess: (outcome: ConversationUnarchived) => {
-      if (UNARCHIVE_REFUSAL[outcome]) {
-        refuse(UNARCHIVE_REFUSAL[outcome]);
-        return;
-      }
+  ///
+  /// The one press here that has to say what the row *is*. A conversation
+  /// unarchived while the archived ones are hidden is one the server's own list
+  /// carries no row for, so the row it goes back on the list as is built from
+  /// the reading this press was made against — see `rowFor`.
+  const unarchiving = (conversation: ConversationView) => {
+    shut();
 
-      shut();
-      reread();
-    },
-    onError: (error: Error) =>
-      refuse(`The conversation could not be unarchived: ${error.message}`),
-  }));
+    eagerly({
+      conversation: conversation.id,
+      says: { archived: false, row: rowFor(conversation) },
+      post: () => unarchiveConversation(conversation.id),
+      refusal: (outcome: ConversationUnarchived) => UNARCHIVE_REFUSAL[outcome],
+      fell: (error: Error) =>
+        `The conversation could not be unarchived: ${error.message}`,
+      reread,
+    });
+  };
 
   return {
     closes: (close) => (shut = close),
 
-    rows: (conversation) => (
-      <>
-        {/* The one standing way to get Verkstead driving again, and the one row
-            here that starts something: above the stops because it is the *go*
-            among them, and drawn only where the server says there is something
-            to start — see `ready_to_resume`. It carries nothing: what to start
-            is worked out from where the work now stands at the moment of the
-            press.
+    rows: (given) => {
+      /// The Conversation as this menu is drawing it: what the server said,
+      /// with whatever a press here has already said about it laid over. Which
+      /// is what stands Archive where Close was the instant Close is pressed,
+      /// rather than a round trip later — see `eager.ts`.
+      const conversation = () => pressed(given());
 
-            What it says is the one thing that differs between two stops: an
-            exhausted usage window is the stop that waits for an account as well
-            as for this press, and the row is where that is said — see
-            [`resuming`]. */}
-        {/* And never on a Verkstead with no session to start: what Resume
-            works out is which session should be running, so a row offering it
-            there is a press that could only be refused. What says so is on the
-            conversation — see `sessions.tsx` — and the refusal is still mapped
-            above, a page being only as fresh as its last read. */}
-        <Show
-          when={conversation().ready_to_resume && !noSessions(conversation())}
-        >
-          <Action
-            class={styles.resume}
-            label="Resume"
-            pressing="Resuming…"
-            says={resuming(conversation())}
-            working={start.isPending}
-            press={() => start.mutate(conversation().id)}
-          />
-        </Show>
+      return (
+        <>
+          {/* The one standing way to get Verkstead driving again, and the one
+              row here that starts something: above the stops because it is the
+              *go* among them, and drawn only where the server says there is
+              something to start — see `ready_to_resume`. It carries nothing:
+              what to start is worked out from where the work now stands at the
+              moment of the press.
 
-        <Show when={conversation().ready_to_stop}>
-          {/* Until the press has been made. A stop waits for the step the run
-              is on to finish, and from then on the decision is recorded and the
-              run halts the moment it lands — so a row still offering it would
-              be asking for a decision Verkstead already has, and a second press
-              would do nothing and say nothing. */}
-          <Show when={!conversation().stop_asked}>
+              What it says is the one thing that differs between two stops: an
+              exhausted usage window is the stop that waits for an account as
+              well as for this press, and the row is where that is said — see
+              [`resuming`]. */}
+          {/* And never on a Verkstead with no session to start: what Resume
+              works out is which session should be running, so a row offering it
+              there is a press that could only be refused. What says so is on
+              the conversation — see `sessions.tsx` — and the refusal is still
+              mapped above, a page being only as fresh as its last read. */}
+          <Show
+            when={conversation().ready_to_resume && !noSessions(conversation())}
+          >
             <Action
-              class={styles.stop}
-              label="Stop"
-              pressing="Stopping…"
-              says="Stop after the current task until you resume."
-              working={stop.isPending}
-              press={() => stop.mutate(conversation().id)}
+              class={styles.resume}
+              label="Resume"
+              pressing="Resuming…"
+              says={resuming(conversation())}
+              working={start.isPending}
+              press={() => start.mutate(conversation().id)}
             />
           </Show>
 
-          {/* And force stop stays where it is, being the escalation from there
-              rather than the same press again: it is what the human presses
-              when they turn out not to want to wait for the step after all. */}
-          <Show when={conversation().working}>
-            <Action
-              class={styles.forceStop}
-              label="Force stop"
-              pressing="Stopping…"
-              says="End any running task and stop immediately."
-              working={force.isPending}
-              press={() => force.mutate(conversation().id)}
-            />
-          </Show>
-        </Show>
-
-        {/* Drawn whatever state the conversation is in, unlike everything
-            around it: every state is somewhere to steer *from* — a draft
-            nothing has run in, a run in flight, work Verkstead has finished
-            with — and which states it can be steered *to* is the modal's to
-            offer. */}
-        <Action
-          class={styles.steer}
-          label="Steer"
-          pressing="Stopping…"
-          says="Stop the run and move this conversation somewhere else."
-          working={click.isPending}
-          press={() => click.mutate(conversation())}
-        />
-
-        {/* And where Close was, on a conversation that has already had it: the
-            way to put the record out of sight once there is nothing left to
-            read on it. Reversible, so there is nothing to confirm — and on one
-            already put away it is the unarchive that stands here instead,
-            which is that same reversal made. */}
-        <Show
-          when={conversation().state !== "Closed"}
-          fallback={
-            <Show
-              when={conversation().archived}
-              fallback={
-                <Action
-                  class={styles.archive}
-                  label="Archive"
-                  pressing="Archiving…"
-                  says="Take it off the conversations list. Its record stays where it is."
-                  working={archive.isPending}
-                  press={() => archive.mutate(conversation().id)}
-                />
-              }
-            >
+          <Show when={conversation().ready_to_stop}>
+            {/* Until the press has been made. A stop waits for the step the run
+                is on to finish, and from then on the decision is recorded and
+                the run halts the moment it lands — so a row still offering it
+                would be asking for a decision Verkstead already has, and a
+                second press would do nothing and say nothing. */}
+            <Show when={!conversation().stop_asked}>
               <Action
-                class={styles.unarchive}
-                label="Unarchive"
-                pressing="Unarchiving…"
-                says="Put it back on the conversations list, where it stays."
-                working={unarchive.isPending}
-                press={() => unarchive.mutate(conversation().id)}
+                class={styles.stop}
+                label="Stop"
+                pressing="Stopping…"
+                says="Stop after the current task until you resume."
+                working={stop.isPending}
+                press={() => stop.mutate(conversation().id)}
               />
             </Show>
-          }
-        >
+
+            {/* And force stop stays where it is, being the escalation from
+                there rather than the same press again: it is what the human
+                presses when they turn out not to want to wait for the step
+                after all. */}
+            <Show when={conversation().working}>
+              <Action
+                class={styles.forceStop}
+                label="Force stop"
+                pressing="Stopping…"
+                says="End any running task and stop immediately."
+                working={force.isPending}
+                press={() => force.mutate(conversation().id)}
+              />
+            </Show>
+          </Show>
+
+          {/* Drawn whatever state the conversation is in, unlike everything
+              around it: every state is somewhere to steer *from* — a draft
+              nothing has run in, a run in flight, work Verkstead has finished
+              with — and which states it can be steered *to* is the modal's to
+              offer. */}
           <Action
-            class={styles.close}
-            label="Close conversation"
-            pressing="Closing…"
-            says="Permanently end the conversation and delete the worktree. The branch stays where it is."
-            working={close.isPending}
-            press={() => close.mutate(conversation().id)}
+            class={styles.steer}
+            label="Steer"
+            pressing="Stopping…"
+            says="Stop the run and move this conversation somewhere else."
+            working={click.isPending}
+            press={() => click.mutate(conversation())}
           />
 
-          {/* And the same press with the archive already made, which saves
-              coming back to a conversation there is nothing left to read on.
-              Under Close rather than over it, because it is Close and more:
-              what it adds is the reversible half. */}
-          <Action
-            class={styles.closeAndArchive}
-            label="Close and archive"
-            pressing="Closing…"
-            says="The same, and take it off the conversations list. Its record stays where it is."
-            working={closeAway.isPending}
-            press={() => closeAway.mutate(conversation().id)}
-          />
-        </Show>
-      </>
-    ),
+          {/* And where Close was, on a conversation that has already had it:
+              the way to put the record out of sight once there is nothing left
+              to read on it. Reversible, so there is nothing to confirm — and on
+              one already put away it is the unarchive that stands here instead,
+              which is that same reversal made.
+
+              None of these four says anything about being pressed, and none of
+              them takes itself: the outcome is on the page before the request
+              goes out, so there is nothing left here to wait for. */}
+          <Show
+            when={conversation().state !== "Closed"}
+            fallback={
+              <Show
+                when={conversation().archived}
+                fallback={
+                  <Action
+                    class={styles.archive}
+                    label="Archive"
+                    says="Take it off the conversations list. Its record stays where it is."
+                    press={() => archiving(conversation())}
+                  />
+                }
+              >
+                <Action
+                  class={styles.unarchive}
+                  label="Unarchive"
+                  says="Put it back on the conversations list, where it stays."
+                  press={() => unarchiving(conversation())}
+                />
+              </Show>
+            }
+          >
+            <Action
+              class={styles.close}
+              label="Close conversation"
+              says="Permanently end the conversation and delete the worktree. The branch stays where it is."
+              press={() => closing(conversation(), closeConversation, false)}
+            />
+
+            {/* And the same press with the archive already made, which saves
+                coming back to a conversation there is nothing left to read on.
+                Under Close rather than over it, because it is Close and more:
+                what it adds is the reversible half. */}
+            <Action
+              class={styles.closeAndArchive}
+              label="Close and archive"
+              says="The same, and take it off the conversations list. Its record stays where it is."
+              press={() =>
+                closing(conversation(), closeAndArchiveConversation, true)
+              }
+            />
+          </Show>
+        </>
+      );
+    },
 
     // Outside the menu, because the press that opens either of these shuts the
     // menu: what the human is looking at from here is one card over the page.

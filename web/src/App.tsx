@@ -11,6 +11,7 @@ import { Empty } from "./notices";
 import { listenForNudges } from "./nudge";
 import { SettingsPage, panes } from "./settings/SettingsPage";
 import { ComposePage } from "./workbench/Compose";
+import { forget } from "./workbench/eager";
 import { Workbench } from "./workbench/Workbench";
 
 /// One client for the whole app, made once rather than per render: it is where
@@ -117,6 +118,11 @@ export function App(): JSX.Element {
 /// test that supplied its own layer would be asking about a layer the app does
 /// not have.
 export function Shell(props: { children?: JSX.Element }): JSX.Element {
+  // And what a press has said ahead of the server goes with it, for the reason
+  // the toasts do: nothing there outlives its own request while the app is up,
+  // so this is about the app itself ending — see `eager.ts`.
+  onCleanup(forget);
+
   return (
     <>
       <main class={styles.shell}>{props.children}</main>
