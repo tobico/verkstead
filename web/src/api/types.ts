@@ -1932,8 +1932,13 @@ export type ProfileChosen = "Chosen" | "NoSuchConversation" | "NoSuchProfile" | 
 
 /**
  * What became of removing a Profile.
+ *
+ * Two answers, and neither of them is a refusal about what is using it: a
+ * Profile is always the human's to take away, and the Conversations that had
+ * chosen it are nulled out rather than standing in the way. The only thing
+ * that can go wrong is asking about one that has already gone.
  */
-export type ProfileDeleted = "Removed" | "NoSuchProfile" | "InUse";
+export type ProfileDeleted = "Removed" | "NoSuchProfile";
 
 /**
  * A Profile as the human has just written it, for saving or for rewriting.
@@ -2362,8 +2367,11 @@ review: PickedView, };
  * it, and what a removal changes is only what is offered for new work.
  *
  * Shaped like [`ProfileDeleted`](crate::ProfileDeleted), because it is the same
- * sentence about the other thing the settings page configures — and refused for
- * the same kind of reason.
+ * sentence about the other thing the settings page configures — with the
+ * refusal that one no longer has. A Repo is where the work is *being done*, and
+ * unregistering one out from under a run would take the directory the session
+ * is standing in; a Profile is an account the next session would have been
+ * launched under, and losing it costs that session rather than this one.
  */
 export type RepoRemoved = "Removed" | "NoSuchRepo" | "InUse";
 

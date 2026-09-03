@@ -152,11 +152,13 @@ export const PROFILE_REFUSAL: Record<ProfileSaved, string> = {
 };
 
 /// And what each way of being refused a removal says.
+///
+/// One row that says anything, because a removal is refused for one reason: the
+/// profile is not there to remove. A conversation running under it is no longer
+/// one — it loses the profile and is left with a picker to fill in again.
 export const PROFILE_REMOVAL_REFUSAL: Record<ProfileDeleted, string> = {
   Removed: "",
   NoSuchProfile: "That profile is gone already.",
-  InUse:
-    "A conversation is set to run under it. Change that conversation's profiles first.",
 };
 
 /// What is wrong with a profile whose pair is no longer where it was left.
@@ -850,9 +852,9 @@ export function ProfilePane(props: {
                   </button>
                 </div>
 
-                {/* Refused rather than taken away from the conversation that
-                    chose it, and said here because here is where the press was
-                    made. */}
+                {/* The one thing a removal can be refused for — a profile
+                    another tab took away first — said here because here is
+                    where the press was made. */}
                 <Show when={refusedRemoval()}>
                   {(outcome) => (
                     <ErrorLine class={styles.failure}>

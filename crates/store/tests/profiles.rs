@@ -1,6 +1,6 @@
-//! Agent Profiles: what saving one records, what removing one refuses, and the
-//! two Pairings — a Profile and one of its models — a Conversation chooses
-//! before it can be grilled.
+//! Agent Profiles: what saving one records, what removing one takes with it,
+//! and the two Pairings — a Profile and one of its models — a Conversation
+//! chooses before it can be grilled.
 //!
 //! Nothing here checks a path against the filesystem or against the Watched
 //! Paths. That is decided above the store, where the boundary lives — these
@@ -11,10 +11,11 @@ use std::path::{Path, PathBuf};
 use sqlx::SqlitePool;
 use verkstead_schema::Direction;
 use verkstead_store::{
-    Account, AgentType, Chosen, Deleting, Lifecycle, Picked, Profile, ProfileFacts, Saving,
-    create_profile, delete_profile, load_conversation, load_profile, open_database, profiles,
-    register_repo, set_grilling_pairing, set_implementation_pairing, set_review_pairing,
-    skip_grilling, skip_review, start_building, start_conversation, start_grilling, update_profile,
+    Account, AgentType, Chosen, Deleting, Event, Lifecycle, Pairing, Picked, Profile, ProfileFacts,
+    Saving, create_profile, delete_profile, load_conversation, load_profile, open_database,
+    profiles, register_repo, set_grilling_pairing, set_implementation_pairing, set_review_pairing,
+    skip_grilling, skip_review, start_building, start_capture, start_conversation, start_grilling,
+    timeline, update_profile,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -614,10 +615,15 @@ async fn a_profile_nobody_is_running_under_is_removed() {
     );
 }
 
-/// Refused rather than taken away: a Conversation pointing at a Profile that is
-/// not there is a session that fails to start with nobody watching.
+/// Taken away rather than refused, and the Conversation that had chosen it is
+/// nulled out: a Profile is always the human's to be finished with, and what it
+/// costs them is a picker to fill in again rather than a removal they cannot
+/// make.
+///
+/// One of the two Profiles here, so that the other says what is *not* touched:
+/// a role that named some other account is left exactly as it was.
 #[tokio::test]
-async fn a_profile_a_conversation_has_chosen_cannot_be_removed() {
+async fn a_profile_a_conversation_has_chosen_is_removed_and_nulled_out_of_it() {
     let (_dir, pool) = fresh_pool().await;
     let id = conversation(&pool).await;
     let grilling = saved(&pool, "fable").await;
@@ -632,13 +638,367 @@ async fn a_profile_a_conversation_has_chosen_cannot_be_removed() {
 
     assert_eq!(
         delete_profile(&pool, grilling.id).await.unwrap(),
-        Deleting::InUse
+        Deleting::Deleted
+    );
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+
+    assert_eq!(
+        conversation.grilling_pairing,
+        Picked::Nothing,
+        "the role that named it reads as one nothing has been picked for",
     );
     assert_eq!(
-        delete_profile(&pool, implementing.id).await.unwrap(),
-        Deleting::InUse
+        conversation
+            .implementation_pairing
+            .map(|pairing| pairing.profile.id),
+        Some(implementing.id),
+        "and the role that named another account is untouched",
     );
-    assert_eq!(profiles(&pool).await.unwrap().len(), 2);
+
+    assert_eq!(
+        profiles(&pool).await.unwrap().len(),
+        1,
+        "the Profile itself is gone",
+    );
+}
+
+/// Every role, not the two a Conversation must have: the review's column is
+/// nulled exactly as the other two are.
+#[tokio::test]
+async fn removing_a_profile_nulls_it_out_of_all_three_roles() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+    let one = saved(&pool, "work").await;
+
+    set_grilling_pairing(&pool, id, one.id, Some(MODEL))
+        .await
+        .unwrap();
+    set_implementation_pairing(&pool, id, one.id, Some(MODEL))
+        .await
+        .unwrap();
+    set_review_pairing(&pool, id, one.id, Some(MODEL))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        delete_profile(&pool, one.id).await.unwrap(),
+        Deleting::Deleted
+    );
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+
+    assert_eq!(conversation.grilling_pairing, Picked::Nothing);
+    assert_eq!(conversation.implementation_pairing, None);
+    assert_eq!(conversation.review_pairing, Picked::Nothing);
+}
+
+/// The model half goes with the Profile half. A Pairing is both, so a role left
+/// holding a model and no account would be half a choice nothing can launch —
+/// and it would prefill the picker with a model the next Profile may not list.
+#[tokio::test]
+async fn removing_a_profile_takes_the_model_paired_with_it_too() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+    let going = saved(&pool, "fable").await;
+    let staying = saved(&pool, "opus").await;
+
+    set_grilling_pairing(&pool, id, going.id, Some(MODEL))
+        .await
+        .unwrap();
+    set_implementation_pairing(&pool, id, staying.id, Some(MODEL))
+        .await
+        .unwrap();
+
+    delete_profile(&pool, going.id).await.unwrap();
+
+    let paired: Vec<(String,)> =
+        sqlx::query_as("SELECT role FROM pairing_models WHERE conversation_id = ?")
+            .bind(id)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+
+    assert_eq!(
+        paired
+            .iter()
+            .map(|(role,)| role.as_str())
+            .collect::<Vec<_>>(),
+        ["implementation"],
+        "the going Profile's model row goes with it and the staying one's stays",
+    );
+}
+
+/// Past drafting is where this matters most: a Conversation whose Pairings were
+/// fixed when its work started is exactly the one that cannot re-choose, and
+/// removing its Profile is still allowed.
+///
+/// What it leaves is a Conversation whose next session starts nothing, to be
+/// rescued with a steer — which is the cost the removal is worth paying.
+#[tokio::test]
+async fn a_profile_a_started_conversation_runs_under_is_removed_all_the_same() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+    let profile = saved(&pool, "work").await;
+
+    set_grilling_pairing(&pool, id, profile.id, Some(MODEL))
+        .await
+        .unwrap();
+    set_implementation_pairing(&pool, id, profile.id, Some(MODEL))
+        .await
+        .unwrap();
+
+    start_grilling(
+        &pool,
+        id,
+        "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+        Path::new("/var/lib/verkstead/worktrees/verkstead-amber-kestrel"),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        delete_profile(&pool, profile.id).await.unwrap(),
+        Deleting::Deleted
+    );
+
+    let conversation = load_conversation(&pool, id).await.unwrap().unwrap();
+
+    assert_eq!(conversation.state, Lifecycle::Grilling);
+    assert_eq!(conversation.grilling_pairing, Picked::Nothing);
+    assert_eq!(conversation.implementation_pairing, None);
+}
+
+/// A role the human picked away is not what a removal leaves behind.
+///
+/// *No review* is something they chose and *no Profile any more* is not, so the
+/// row that runs no session is neither written by a removal nor taken away by
+/// one: a Conversation that had picked the review away still has, and one that
+/// had paired it reads as unpicked rather than as having turned it off.
+#[tokio::test]
+async fn a_removal_neither_writes_nor_clears_the_row_that_runs_no_session() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .unwrap();
+
+    let kept = start_conversation(&pool, repo.id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+    let paired = start_conversation(&pool, repo.id, "russet-heron")
+        .await
+        .unwrap()
+        .unwrap();
+
+    let profile = saved(&pool, "work").await;
+
+    skip_review(&pool, kept).await.unwrap();
+    set_grilling_pairing(&pool, kept, profile.id, Some(MODEL))
+        .await
+        .unwrap();
+
+    set_review_pairing(&pool, paired, profile.id, Some(MODEL))
+        .await
+        .unwrap();
+
+    delete_profile(&pool, profile.id).await.unwrap();
+
+    assert_eq!(
+        load_conversation(&pool, kept)
+            .await
+            .unwrap()
+            .unwrap()
+            .review_pairing,
+        Picked::Skipped,
+        "the choice they made stands",
+    );
+    assert_eq!(
+        load_conversation(&pool, paired)
+            .await
+            .unwrap()
+            .unwrap()
+            .review_pairing,
+        Picked::Nothing,
+        "and losing an account is not making that choice for them",
+    );
+}
+
+/// What has already run is not rewritten by a removal.
+///
+/// A session's record keeps the Profile's *name* rather than its id, so the
+/// Timeline goes on saying what ran under what — which is the whole reason it
+/// was written down as a copy.
+#[tokio::test]
+async fn removing_a_profile_leaves_what_ran_under_it_on_the_record() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+    let profile = saved(&pool, "work").await;
+
+    set_grilling_pairing(&pool, id, profile.id, Some(MODEL))
+        .await
+        .unwrap();
+    set_implementation_pairing(&pool, id, profile.id, Some(MODEL))
+        .await
+        .unwrap();
+
+    start_grilling(
+        &pool,
+        id,
+        "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+        Path::new("/var/lib/verkstead/worktrees/verkstead-amber-kestrel"),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    start_capture(
+        &pool,
+        id,
+        Some("a-session"),
+        Some(&Pairing {
+            profile: profile.clone(),
+            model: Some(MODEL.to_owned()),
+        }),
+    )
+    .await
+    .unwrap();
+
+    delete_profile(&pool, profile.id).await.unwrap();
+
+    let ran = timeline(&pool, id)
+        .await
+        .unwrap()
+        .into_iter()
+        .find_map(|on| match on.event {
+            Event::AgentOutput(_, ran) => Some(ran),
+            _ => None,
+        })
+        .expect("the session it ran is on the Timeline");
+
+    assert_eq!(
+        ran.expect("and it says what it ran under").profile,
+        "work",
+        "a name written down is a name a removal cannot take",
+    );
+}
+
+/// Nothing anywhere still names a removed Profile, and the schema is what says
+/// where to look.
+///
+/// The walk is SQLite's own answer rather than a list written here: a table
+/// added next year that references `profiles` and is not reached by the removal
+/// fails this rather than failing a human years later, when the foreign key
+/// refuses a removal they cannot see the reason for. Every table it finds is
+/// filled first, so a table reached by the walk and never written in a test is
+/// not a walk nobody has run.
+#[tokio::test]
+async fn a_removal_leaves_no_row_anywhere_that_names_the_profile() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = conversation(&pool).await;
+
+    // A type that keeps a home, so that `profile_homes` has a row for the walk
+    // to find: a Claude Profile's account is the pair in its own row, and a
+    // fixture made of one would leave that table empty.
+    let profile = create_profile(&pool, &facts_for("work", codex("work")))
+        .await
+        .unwrap()
+        .unwrap();
+
+    set_grilling_pairing(&pool, id, profile.id, Some(MODEL))
+        .await
+        .unwrap();
+    set_implementation_pairing(&pool, id, profile.id, Some(MODEL))
+        .await
+        .unwrap();
+    set_review_pairing(&pool, id, profile.id, Some(MODEL))
+        .await
+        .unwrap();
+
+    // The Repo's memory of what it was last grilled with, which is the one
+    // table naming a Profile that is not a Conversation's own column.
+    start_grilling(
+        &pool,
+        id,
+        "6f32b11a0c4d1e8f5b3a97c2d0e4f6a8b1c3d5e7",
+        Path::new("/var/lib/verkstead/worktrees/verkstead-amber-kestrel"),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    let naming = names_a_profile(&pool).await;
+
+    assert!(
+        !naming.is_empty(),
+        "the schema has tables that name a Profile",
+    );
+
+    for (table, column) in &naming {
+        assert!(
+            naming_rows(&pool, table, column, profile.id).await > 0,
+            "nothing in {table}.{column} names the Profile, so its removal is \
+             something this test never sees happen",
+        );
+    }
+
+    assert_eq!(
+        delete_profile(&pool, profile.id).await.unwrap(),
+        Deleting::Deleted
+    );
+
+    for (table, column) in &naming {
+        assert_eq!(
+            naming_rows(&pool, table, column, profile.id).await,
+            0,
+            "{table}.{column} still names the Profile that was removed",
+        );
+    }
+}
+
+/// Every table-and-column pair the schema says points at `profiles`, asked of
+/// SQLite rather than written down here.
+async fn names_a_profile(pool: &SqlitePool) -> Vec<(String, String)> {
+    let tables: Vec<(String,)> = sqlx::query_as(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+
+    let mut naming = Vec::new();
+
+    for (table,) in tables {
+        let keys: Vec<(String, String)> = sqlx::query_as(&format!(
+            "SELECT \"table\", \"from\" FROM pragma_foreign_key_list('{table}')"
+        ))
+        .fetch_all(pool)
+        .await
+        .unwrap();
+
+        for (points_at, column) in keys {
+            if points_at == "profiles" {
+                naming.push((table.clone(), column));
+            }
+        }
+    }
+
+    naming.sort();
+    naming
+}
+
+/// How many rows of one of them name this Profile.
+async fn naming_rows(pool: &SqlitePool, table: &str, column: &str, id: i64) -> i64 {
+    let (rows,): (i64,) =
+        sqlx::query_as(&format!("SELECT COUNT(*) FROM {table} WHERE {column} = ?"))
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+
+    rows
 }
 
 /// The two are separate choices because they are genuinely separate accounts and

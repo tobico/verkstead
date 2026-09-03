@@ -1070,20 +1070,37 @@ async fn one_profile_can_be_every_one_of_a_conversations_choices() {
     assert!(view.ready_to_grill);
 }
 
-/// Refused rather than taken away from the Conversation: one pointing at a
-/// Profile that is not there is a session that fails to start with nobody
-/// watching.
+/// Taken away rather than refused, and the Conversation that had chosen it
+/// reads as one that has chosen nothing.
+///
+/// Which is the pane's own answer to the removal: the Configuration says *Not
+/// chosen* where it said the account's name, and the Conversation is no longer
+/// ready to grill — so the human is looking at the picker they have to fill in
+/// again rather than at a run that will fail later for reasons nothing shows.
 #[tokio::test]
-async fn a_profile_a_conversation_has_chosen_cannot_be_removed() {
+async fn a_profile_a_conversation_has_chosen_is_removed_and_nulled_out_of_it() {
     let (watched, _dir, app) = workbench().await;
     let id = conversation(&app, watched.path()).await;
     let profile = saved(&app, watched.path(), "work").await;
 
     choose_grilling(&app, id, profile.id, MODEL).await;
+    choose_implementation(&app, id, profile.id, MODEL).await;
+    choose_review(&app, id, profile.id, MODEL).await;
 
-    assert_eq!(remove(&app, profile.id).await, ProfileDeleted::InUse);
-    assert_eq!(listed(&app).await.len(), 1);
-    assert!(opened(&app, id).await.grilling_pairing.pairing().is_some());
+    assert!(opened(&app, id).await.ready_to_grill);
+
+    assert_eq!(remove(&app, profile.id).await, ProfileDeleted::Removed);
+    assert!(listed(&app).await.is_empty());
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.grilling_pairing, PickedView::Nothing);
+    assert_eq!(view.implementation_pairing, None);
+    assert_eq!(view.review_pairing, PickedView::Nothing);
+    assert!(
+        !view.ready_to_grill,
+        "a Conversation with no account to run under is not one to start",
+    );
 }
 
 #[tokio::test]

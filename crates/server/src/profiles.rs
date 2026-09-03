@@ -64,12 +64,16 @@ pub(crate) async fn edit(
     })
 }
 
-/// Remove one nobody is running under.
+/// Remove one, whoever had chosen it.
+///
+/// Nothing is judged here, which is why there is so little of it: the store
+/// takes the Profile out of every Pairing that named it in the one transaction
+/// that removes it, and a Conversation left with an empty picker is read as one
+/// that has not chosen — see [`picked`].
 pub(crate) async fn remove(pool: &SqlitePool, id: i64) -> Result<ProfileDeleted> {
     Ok(match store::delete_profile(pool, id).await? {
         store::Deleting::Deleted => ProfileDeleted::Removed,
         store::Deleting::NoSuchProfile => ProfileDeleted::NoSuchProfile,
-        store::Deleting::InUse => ProfileDeleted::InUse,
     })
 }
 

@@ -796,20 +796,19 @@ describe("removing a profile", () => {
     await waitFor(() => expect(done).toHaveBeenCalled());
   });
 
-  /// Refused rather than taken away from the conversation that chose it: one
-  /// pointing at a profile that is not there is a session that fails to start
-  /// with nobody watching. Said in the pane, which is where the press was made.
-  it("says why a profile in use could not be removed", async () => {
-    theProfiles(json("InUse"));
+  /// The one thing a removal is refused for: a profile another tab took away
+  /// first. A conversation running under it is not a refusal any more — it is
+  /// nulled out of that conversation and the removal goes through. Said in the
+  /// pane, which is where the press was made.
+  it("says why a profile that has already gone could not be removed", async () => {
+    theProfiles(json("NoSuchProfile"));
     const { done } = mountPane(FABLE.id);
 
     fireEvent.click(
       await waitFor(() => screen.getByRole("button", { name: "Remove" })),
     );
 
-    await waitFor(() =>
-      screen.getByText(/A conversation is set to run under it/),
-    );
+    await waitFor(() => screen.getByText(/That profile is gone already/));
     expect(done).not.toHaveBeenCalled();
   });
 

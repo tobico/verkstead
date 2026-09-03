@@ -332,15 +332,14 @@ pub enum Saving {
 }
 
 /// What became of removing one.
+///
+/// Two answers rather than three. A Conversation having chosen the Profile was
+/// the third of them and is not a refusal any more: it is nulled out of every
+/// Pairing that named it instead — see [`delete_profile`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Deleting {
     Deleted,
     NoSuchProfile,
-
-    /// A Conversation has chosen it. Removing it would leave that Conversation
-    /// pointing at nothing, which is a session that fails to start later rather
-    /// than a refusal now.
-    InUse,
 }
 
 /// The tables the Profiles live in.
@@ -507,32 +506,33 @@ pub async fn update_profile(pool: &SqlitePool, id: i64, facts: &ProfileFacts) ->
     Ok(Saving::Saved)
 }
 
-/// Remove a Profile nobody is running under.
+/// Remove a Profile, taking it out of everything that named it.
 ///
-/// A Profile a Conversation has chosen is refused rather than taken away from
-/// it: a Conversation pointing at a Profile that is not there is a session that
-/// fails to start with nobody watching, which is the failure this whole stage is
-/// arranged to move forward in time.
+/// **Always possible.** A Conversation that had chosen it used to stand in the
+/// way; now its choice is nulled out and the removal goes through. What that
+/// costs is a session that starts nothing the next time that Conversation is
+/// driven, and a steer to pick another account — which is the human's to spend
+/// on a Profile they have just decided they are finished with, rather than a
+/// refusal that leaves them unable to finish with it at all.
+///
+/// It costs a session already running nothing: one that has launched holds the
+/// account it launched under, and nothing re-reads this row to keep it going.
+///
+/// Both halves of every Pairing that named it go, not the Profile half alone: a
+/// Pairing is an account and a model chosen together, and a role left holding
+/// the model by itself would be half a choice nothing can launch. The Repo's
+/// memory of what it was last grilled with goes the same way — `repo_pairings`
+/// names the Profile in a column that cannot be null — so the next Conversation
+/// started there arrives with that picker empty rather than prefilled with an
+/// account that is gone.
+///
+/// What is deliberately left alone is the record of what has already run:
+/// [`super::session_pairings`] keeps the Profile's *name* rather than its id, so
+/// every session ever launched under it goes on saying so.
 pub async fn delete_profile(pool: &SqlitePool, id: i64) -> Result<Deleting> {
-    let chosen: Option<(i64,)> = sqlx::query_as(
-        "SELECT id FROM conversations
-         WHERE grilling_profile_id = ?
-            OR implementation_profile_id = ?
-            OR review_profile_id = ?",
-    )
-    .bind(id)
-    .bind(id)
-    .bind(id)
-    .fetch_optional(pool)
-    .await
-    .with_context(|| format!("looking for a Conversation using Profile {id}"))?;
-
-    if chosen.is_some() {
-        return Ok(Deleting::InUse);
-    }
-
     let mut tx = super::writing(pool, "removing a Profile").await?;
 
+    forget_pairings(&mut tx, id).await?;
     forget_models(&mut tx, id).await?;
     forget_home(&mut tx, id).await?;
 
@@ -729,6 +729,61 @@ async fn write_models(
             .await
             .with_context(|| format!("saving the models Profile {id} runs"))?;
     }
+
+    Ok(())
+}
+
+/// Take a Profile out of every Pairing that named it, on its way to being
+/// removed.
+///
+/// Four places: a Conversation names one per role, and a Repo remembers the one
+/// it was last grilled with in each of the three. Nothing is refused and nothing
+/// is reported — a Profile nobody has ever picked passes through here without
+/// touching a row, which is what the ordinary removal is.
+///
+/// The model rows go before the columns they are found by, because that is what
+/// finds them: a role's model is looked up through the Conversation whose column
+/// still names the Profile, so nulling first would leave the model half behind
+/// with nothing left pointing at it.
+///
+/// Nobody is put on the row that runs no session by this. A role picked away is
+/// something the human chose and *no Profile any more* is not: what the removal
+/// leaves is a picker with nothing in it, which is the state a Conversation
+/// starts in.
+async fn forget_pairings(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, id: i64) -> Result<()> {
+    for role in super::conversations::Role::ALL {
+        sqlx::query(&format!(
+            "DELETE FROM pairing_models
+             WHERE role = ?
+               AND conversation_id IN (SELECT id FROM conversations WHERE {} = ?)",
+            role.column(),
+        ))
+        .bind(role.stored())
+        .bind(id)
+        .execute(&mut **tx)
+        .await
+        .with_context(|| {
+            format!("clearing the models paired with Profile {id} in the {role:?} role")
+        })?;
+
+        sqlx::query(&format!(
+            "UPDATE conversations SET {} = NULL WHERE {} = ?",
+            role.column(),
+            role.column(),
+        ))
+        .bind(id)
+        .execute(&mut **tx)
+        .await
+        .with_context(|| {
+            format!("clearing Profile {id} off the Conversations that chose it to {role:?}")
+        })?;
+    }
+
+    sqlx::query("DELETE FROM repo_pairings WHERE profile_id = ?")
+        .bind(id)
+        .execute(&mut **tx)
+        .await
+        .with_context(|| format!("forgetting that a Repo was last grilled under Profile {id}"))?;
 
     Ok(())
 }
