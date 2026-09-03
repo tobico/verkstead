@@ -7805,6 +7805,39 @@ async fn until_written(path: &Path) -> String {
     }
 }
 
+/// The same, and then until the session that wrote it is on the Timeline —
+/// which is what a test about to ask on its behalf has to wait for.
+///
+/// A stub writes its prompt down as its first act, and the Event a session
+/// prints into is opened a moment *after* the process was spawned. So the file
+/// can be there while the Timeline still knows nothing of the session, and a
+/// Set posted inside that window lands on an Event of its own ahead of the
+/// session's. Which is a Set that belongs to nobody: every Set that landed
+/// after a session's Event is that session's, and one that landed before it is
+/// some earlier session's — so the session is read as idling on nothing and
+/// ended by the very rule that exists to keep one waiting on a human alive.
+/// See the runner's `asking`.
+///
+/// A real session cannot get in front of its own Event: it has a sandbox to
+/// come up in and a branch to read before it asks anything, and it is talking
+/// the whole time. This is the other half of what [`WHILE_NOBODY_HAS_ASKED`]
+/// does — the two of them together putting the test's ask back where a real
+/// one happens, after the session it is coming from.
+async fn until_asking(fixture: &Grilling, path: &Path) -> String {
+    let written = until_written(path).await;
+
+    fixture
+        .until(|view| {
+            outputs(view)
+                .last()
+                .filter(|output| output.running)
+                .map(|_| ())
+        })
+        .await;
+
+    written
+}
+
 /// The same, waiting until what is there says something in particular — for the
 /// tests where an earlier session has already written to the file, so that
 /// merely finding it there says nothing about the one being waited on.
@@ -7891,7 +7924,7 @@ async fn the_review_proposes_its_findings_and_then_fixes_what_was_accepted() {
 
     worked_to_empty(&fixture).await;
 
-    let told = until_written(&reviews).await;
+    let told = until_asking(&fixture, &reviews).await;
     let started = prompts(&told);
 
     assert_eq!(started.len(), 1, "one review and one only: {told}");
@@ -8120,7 +8153,7 @@ async fn a_review_waiting_on_its_ask_is_left_alone_until_the_answers_are_in() {
     .await;
 
     worked_to_empty(&fixture).await;
-    until_written(&reviews).await;
+    until_asking(&fixture, &reviews).await;
 
     let set = fixture.ask(REVIEW).await;
 
@@ -8206,7 +8239,7 @@ async fn a_deferred_ask_of_a_reviews_own_does_not_hold_its_session_open() {
     .await;
 
     worked_to_empty(&fixture).await;
-    until_written(&reviews).await;
+    until_asking(&fixture, &reviews).await;
 
     let set = fixture.ask_deferred(REVIEW).await;
 
@@ -8285,7 +8318,7 @@ async fn an_ask_on_a_store_and_nudge_backend_is_stored_and_holds_its_session_ope
     .await;
 
     worked_to_empty(&fixture).await;
-    until_written(&reviews).await;
+    until_asking(&fixture, &reviews).await;
 
     // The ask itself says nothing about the channel — it is the same `verkstead
     // ask` it would be anywhere — and what comes back says the Set was stored.
@@ -8383,7 +8416,7 @@ async fn a_deferred_ask_on_a_store_and_nudge_backend_still_holds_nothing_open() 
     .await;
 
     worked_to_empty(&fixture).await;
-    until_written(&reviews).await;
+    until_asking(&fixture, &reviews).await;
 
     let set = fixture.ask_deferred(REVIEW).await;
 
@@ -8455,7 +8488,7 @@ async fn a_response_to_a_store_and_nudge_ask_is_typed_into_the_session_that_stor
     .await;
 
     worked_to_empty(&fixture).await;
-    until_written(&reviews).await;
+    until_asking(&fixture, &reviews).await;
 
     let set = fixture.ask_stored(REVIEW).await;
 
@@ -8718,7 +8751,7 @@ async fn a_response_to_a_deferred_ask_types_nothing_into_the_session_that_stored
     .await;
 
     worked_to_empty(&fixture).await;
-    until_written(&reviews).await;
+    until_asking(&fixture, &reviews).await;
 
     let set = fixture.ask_deferred(REVIEW).await;
 
@@ -8773,7 +8806,7 @@ async fn a_response_to_a_blocking_ask_types_nothing_into_the_session_waiting_on_
     .await;
 
     worked_to_empty(&fixture).await;
-    until_written(&reviews).await;
+    until_asking(&fixture, &reviews).await;
 
     let set = fixture.ask(REVIEW).await;
 
@@ -9059,7 +9092,7 @@ async fn a_review_that_dies_on_its_own_ask_closes_its_questions_and_reads_the_br
     .await;
 
     worked_to_empty(&fixture).await;
-    until_written(&reviews).await;
+    until_asking(&fixture, &reviews).await;
 
     // The findings go up, and the session that would have read the answers dies
     // where it stood.
@@ -9155,7 +9188,7 @@ async fn a_restart_over_a_review_waiting_on_its_ask_stops_the_run_rather_than_le
     let fixture = grilling_spilling(spill, &stub, &gh).await;
 
     worked_to_empty(&fixture).await;
-    until_written(&reviews).await;
+    until_asking(&fixture, &reviews).await;
 
     let set = fixture.ask(REVIEW).await;
 
@@ -9223,7 +9256,7 @@ async fn a_restart_over_an_answered_review_stops_the_run_rather_than_landing_any
     let fixture = grilling_spilling(spill, &stub, PULL_REQUEST).await;
 
     worked_to_empty(&fixture).await;
-    until_written(&reviews).await;
+    until_asking(&fixture, &reviews).await;
 
     let set = fixture.ask(REVIEW).await;
 
@@ -9300,7 +9333,7 @@ async fn a_review_that_landed_nothing_still_settles_on_its_session_ending() {
     .await;
 
     worked_to_empty(&fixture).await;
-    until_written(&reviews).await;
+    until_asking(&fixture, &reviews).await;
 
     // One accepted, one declined, and the session lands neither.
     let set = fixture.ask(REVIEW).await;
@@ -9384,7 +9417,7 @@ async fn a_review_that_dies_after_the_answers_stops_the_run_and_dispatches_nothi
     .await;
 
     worked_to_empty(&fixture).await;
-    until_written(&reviews).await;
+    until_asking(&fixture, &reviews).await;
 
     let set = fixture.ask(REVIEW).await;
 
@@ -9495,7 +9528,7 @@ async fn a_conversation_sent_back_to_be_built_wraps_up_and_reviews_again() {
     let fixture = grilling_spilling(spill, &stub, &gh).await;
 
     worked_to_empty(&fixture).await;
-    until_written(&reviews).await;
+    until_asking(&fixture, &reviews).await;
 
     // The first wrap, whole: findings put, answered, fixed and settled.
     let set = fixture.ask(REVIEW).await;
@@ -9743,7 +9776,7 @@ async fn a_review_that_split_a_finding_out_sends_the_work_back_to_be_built() {
     let fixture = grilling_spilling(spill, &stub, &gh).await;
 
     worked_to_empty(&fixture).await;
-    until_written(&reviews).await;
+    until_asking(&fixture, &reviews).await;
 
     let set = fixture.ask(REVIEW_WITH_A_SPLIT).await;
 
@@ -9864,7 +9897,7 @@ async fn a_split_with_nothing_else_accepted_still_sends_the_work_back() {
     let fixture = grilling_spilling(spill, &stub, &gh).await;
 
     worked_to_empty(&fixture).await;
-    until_written(&reviews).await;
+    until_asking(&fixture, &reviews).await;
 
     let set = fixture.ask(REVIEW_WITH_A_SPLIT).await;
 
@@ -9981,7 +10014,7 @@ async fn a_split_out_backlog_lands_on_the_record_of_a_run_that_never_had_one() {
     let set = fixture.ask(PROPOSING).await;
     assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
 
-    until_written(&reviews).await;
+    until_asking(&fixture, &reviews).await;
 
     // Nothing has been broken down and nothing ever will be by this run, so
     // there is no landing to have stamped yet.
@@ -10064,7 +10097,7 @@ async fn a_split_no_backlog_was_written_for_settles_like_any_other_review() {
     .await;
 
     worked_to_empty(&fixture).await;
-    until_written(&reviews).await;
+    until_asking(&fixture, &reviews).await;
 
     let set = fixture.ask(REVIEW_WITH_A_SPLIT).await;
 
@@ -10156,7 +10189,7 @@ async fn a_red_check_waits_for_the_worktree_rather_than_ending_the_review() {
     .await;
 
     worked_to_empty(&fixture).await;
-    until_written(&reviews).await;
+    until_asking(&fixture, &reviews).await;
 
     // The review puts its findings down and the human answers them, which is the
     // hours a red check has to wait through.
@@ -10606,7 +10639,7 @@ async fn comments_said_while_the_review_runs_reach_one_batch_session_afterwards(
 
     worked_to_empty(&fixture).await;
 
-    let told = until_written(&reviews).await;
+    let told = until_asking(&fixture, &reviews).await;
 
     assert!(
         !told.contains("Rename the window field."),
@@ -10720,7 +10753,7 @@ async fn a_batch_of_comments_is_proposed_about_and_then_fixed_in_the_same_sessio
 
     worked_to_empty(&fixture).await;
 
-    let told = until_written(&batches).await;
+    let told = until_asking(&fixture, &batches).await;
 
     assert_eq!(prompts(&told).len(), 1, "one session for the batch: {told}");
     assert!(
@@ -10956,7 +10989,7 @@ async fn a_wrap_up_waits_for_the_run_the_review_pushed() {
     .await;
 
     worked_to_empty(&fixture).await;
-    until_written(&reviews).await;
+    until_asking(&fixture, &reviews).await;
 
     let set = fixture.ask(REVIEW).await;
 
@@ -11141,7 +11174,7 @@ async fn checks_that_have_gone_from_a_pull_request_that_had_them_settle_nothing(
     .await;
 
     worked_to_empty(&fixture).await;
-    until_written(&reviews).await;
+    until_asking(&fixture, &reviews).await;
 
     let set = fixture.ask(REVIEW).await;
 
@@ -12304,7 +12337,7 @@ async fn a_restart_over_a_batch_waiting_on_its_ask_stops_the_run_and_reads_what_
     let fixture = grilling_spilling(spill, &stub, &gh).await;
 
     worked_to_empty(&fixture).await;
-    until_written(&batches).await;
+    until_asking(&fixture, &batches).await;
 
     let set = fixture.ask(ANSWERING_THE_COMMENTS).await;
 
@@ -12401,7 +12434,7 @@ async fn a_batch_that_landed_nothing_still_leaves_what_was_said_addressed() {
     .await;
 
     worked_to_empty(&fixture).await;
-    until_written(&batches).await;
+    until_asking(&fixture, &batches).await;
 
     // One accepted, one declined, and the session lands neither.
     let set = fixture.ask(ANSWERING_THE_COMMENTS).await;
@@ -12489,7 +12522,7 @@ async fn a_batch_that_dies_after_the_answers_stops_the_run_and_dispatches_nothin
     .await;
 
     worked_to_empty(&fixture).await;
-    until_written(&batches).await;
+    until_asking(&fixture, &batches).await;
 
     let set = fixture.ask(ANSWERING_THE_COMMENTS).await;
 
@@ -24711,7 +24744,7 @@ async fn the_second_wrap_of_a_split_out_backlog_reviews_every_pull_request_again
     .await;
 
     worked_to_empty(&fixture).await;
-    until_written(&reviews).await;
+    until_asking(&fixture, &reviews).await;
 
     let set = fixture.ask(REVIEW_WITH_A_SPLIT).await;
 
@@ -24799,7 +24832,7 @@ async fn a_review_that_accepts_findings_in_two_repositories_lands_them_in_both()
     .await;
 
     worked_to_empty(&fixture).await;
-    until_written(&reviews).await;
+    until_asking(&fixture, &reviews).await;
 
     // The review is up and waiting on the human, which is the Set the test puts
     // on its behalf and the answer it writes the marker for. Put once the session
