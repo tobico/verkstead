@@ -1843,6 +1843,14 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
 /// The record says Closed by then, which is the order the rest of this is in:
 /// what has happened is written down, and then whatever outlived it is shut.
 ///
+/// **And the open pages are told**, which they were not: the row that closes and
+/// archives announced the list and this one announced nothing, so a second
+/// device went on drawing an open Conversation until something else happened to
+/// send a Nudge. One [`Nudge::Conversation`], which is both things that moved —
+/// the Conversation and its sidebar row — and it is the read the browser that
+/// pressed is waiting on as well: a close is drawn there at the press and held
+/// until that read agrees with it.
+///
 /// **The Conversation is read through [`store::closable`] rather than the whole
 /// of it**, which is a decision about what this may be stopped by rather than
 /// about how much is fetched. The full read parses the state word, the
@@ -1921,6 +1929,24 @@ pub(crate) async fn close(state: &AppState, id: i64) -> Result<ConversationClose
     // what makes its own directories orphans, and a sweep that ran first would
     // read them as live and leave them.
     worktrees::sweep(state).await;
+
+    // And the open pages hear that it happened. Only where this close is what
+    // did it: a Conversation that was already closed has not moved, and a
+    // Conversation that is not there never was.
+    //
+    // One Nudge for the two things that moved, because [`Nudge::Conversation`]
+    // is both — the Conversation everywhere it is drawn, its sidebar row
+    // included. Which is what the browser that pressed needs as much as the
+    // other devices: a close is drawn there the moment it is pressed and let go
+    // of when the read behind it agrees, and this is what makes the pressing
+    // tab's own read arrive rather than waiting on a session relay happening to
+    // end. The row that puts the Conversation away announces the list on top of
+    // this, that being a different fact about a different thing.
+    if closing == store::Closing::Closed {
+        state
+            .nudges
+            .announce(Nudge::Conversation { conversation: id });
+    }
 
     Ok(match closing {
         store::Closing::Closed => ConversationClosed::Closed,

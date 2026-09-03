@@ -3056,6 +3056,11 @@ async fn steer_submit(
 }
 
 /// `POST /api/ui/conversations/{id}/close` — stop it wherever it has got to.
+///
+/// The Nudge is [`crate::conversations::close`]'s own rather than this
+/// handler's, unlike the three rows below: what it announces is a Conversation
+/// that moved, which is true of the close wherever it is made from, and the
+/// row that archives as well announces the list on top of it.
 async fn close(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return Json(ConversationClosed::NoSuchConversation).into_response();
