@@ -117,8 +117,14 @@ newcomer actually follows.
    $ curl -fsSL -O \
        https://github.com/tobico/verkstead/releases/latest/download/Verkstead-x86_64.AppImage
    $ chmod +x Verkstead-x86_64.AppImage
-   $ ./Verkstead-x86_64.AppImage --version
+   $ ./Verkstead-x86_64.AppImage --help
    ```
+
+   The help that comes back is the tray app's rather than the CLI's, and that is
+   the file saying what it is: the entry point inside supplies the `desktop`
+   verb, because a desktop launcher names a file and cannot say one (ADR-0012,
+   as amended). Which release this is was step 2's question, and the bare binary
+   answered it.
 
    Then run it with no arguments: it serves, opens the viewer in the browser,
    and puts an icon in the tray. A desktop with no tray host shows no icon and

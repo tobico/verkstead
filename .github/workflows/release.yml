@@ -164,25 +164,47 @@ jobs:
       # `nix/verkstead-source.nix` gives: `verkstead-render`'s default features
       # turn on the TypeScript emitter, which is a test's business, and a
       # workspace-wide build would unify it into the release binary.
+      #
+      # **`--no-default-features` is what makes these the headless assets.** The
+      # tray is a default-on `desktop` feature of this same package now
+      # (ADR-0012, as amended), and what the five rows above ship is the bare
+      # server-and-CLI: turning it off is what keeps the two musl legs linkable
+      # at all — GTK does not build against musl — and what keeps a toolkit out
+      # of the other three. The desktop legs below build the same package with
+      # the feature left where it is.
       - name: Build
         run: >
-          cargo build --release --locked
+          cargo build --release --locked --no-default-features
           --package verkstead-cli --target ${{ matrix.target }}
 
-      # The claim the paragraph above makes, checked rather than trusted: the
+      # Both claims the two paragraphs above make, checked rather than trusted —
+      # and from now on this is what holds the GUI out of the released CLI. The
       # emitter is a normal dependency of `verkstead-render` whenever its
-      # `typescript` feature is on, so it is in this tree or it is in nothing
-      # that was linked. `--edges normal` is what makes that the binary's
-      # question — dev-dependencies enable the feature and are no part of it.
-      - name: The build does not carry the TypeScript emitter
+      # `typescript` feature is on; `verkstead-desktop` and the GTK under it are
+      # normal dependencies of this package the moment anything outside the
+      # `desktop` feature reaches for the tray half. Either is in this tree or it
+      # is in nothing that was linked.
+      #
+      # `--no-default-features` here for the reason the build has it: `cargo
+      # tree` resolves the default features unless it is told otherwise, and a
+      # tree that is not the one that was built answers a question nobody asked.
+      # `--edges normal` is what makes this the binary's question — a
+      # dev-dependency turns features on and is no part of what shipped.
+      #
+      # A creep would fail to link on the two musl legs as well, loudly and much
+      # later; on the macOS and Windows ones it would link, and ship. So it is
+      # named here, on every leg, rather than left to a linker on two of them.
+      - name: The build carries neither the emitter nor the toolkit
         run: |
           tree=$(cargo tree --package verkstead-cli --edges normal \
-            --target ${{ matrix.target }})
+            --no-default-features --target ${{ matrix.target }})
           echo "$tree"
-          if printf '%s\n' "$tree" | grep -q 'ts-rs'; then
-            echo "::error::ts-rs was linked into the release binary."
-            exit 1
-          fi
+          for crate in ts-rs verkstead-desktop gtk; do
+            if printf '%s\n' "$tree" | grep -q "$crate"; then
+              echo "::error::$crate was linked into the release binary."
+              exit 1
+            fi
+          done
 
       - name: The binary runs
         run: ./"$BINARY" --help
@@ -391,7 +413,7 @@ jobs:
         env:
           FLOOR: "2.35"
         run: |
-          asked=$(objdump -T target/appimage/AppDir/usr/bin/verkstead-desktop \
+          asked=$(objdump -T target/appimage/AppDir/usr/bin/verkstead \
             target/appimage/AppDir/usr/lib/* 2> /dev/null |
             grep -o 'GLIBC_[0-9][0-9.]*' | sort -u -V | tail -1)
           asked=${asked#GLIBC_}
@@ -410,8 +432,37 @@ jobs:
             exit 1
           fi
 
+      # Which is the tray app's help, `AppRun` having supplied the verb: it is
+      # the only half of this binary that a run of the file itself can reach.
       - name: The AppImage runs
         run: ./"$APPIMAGE" --help
+
+      # And the other half, which nothing going through `AppRun` can ask for:
+      # what a session spawned by this app runs is the binary inside the mounted
+      # image, by path, saying `ask`. The two halves being one file is the
+      # invariant the sandbox stands on (ADR-0012, as amended) — an AppImage
+      # carrying the tray alone would come up, serve, draw its icon, pass every
+      # assertion above, and hand each session it spawned a binary with no `ask`
+      # in it.
+      #
+      # Asked of the file that was packed, which is what the glibc floor above
+      # reads too, and under the library path `AppRun` exports: a dynamically
+      # linked binary out of this bundle runs over the bundle's own libraries or
+      # it does not run at all. The help is read rather than the exit status
+      # alone, so that a binary answering with some other command's usage fails
+      # here rather than passing.
+      - name: The binary inside answers ask
+        run: |
+          help=$(LD_LIBRARY_PATH=target/appimage/AppDir/usr/lib \
+            target/appimage/AppDir/usr/bin/verkstead ask --help)
+          printf '%s\n' "$help"
+          case "$help" in
+            *"Question Set"*) ;;
+            *)
+              echo "::error::The binary inside the AppImage does not answer ask."
+              exit 1
+              ;;
+          esac
 
       # The two halves of what a human downloads this file for, asserted on one
       # run of it: a tray icon, and the viewer behind it.

@@ -1,13 +1,21 @@
 #!/usr/bin/env bash
-# Build Verkstead-x86_64.AppImage: the desktop app, the packaging assets and
-# every library it is drawn over, in one file that runs on a machine which has
-# none of them installed.
+# Build Verkstead-x86_64.AppImage: the one `verkstead` binary with the tray in
+# it, the packaging assets and every library it is drawn over, in one file that
+# runs on a machine which has none of them installed.
 #
-# The CLI ships as a static musl binary and needs none of this. The desktop app
-# is the one artifact that links system libraries — GTK3, and the appindicator
-# the tray is drawn over (ADR-0012) — and making *it* static is not on: the
-# toolkit is not built that way. So it stays dynamic and carries what it links,
-# which is what an AppImage is for.
+# **What is inside is the whole of Verkstead** — built with the `desktop`
+# feature, which is that binary's default (ADR-0012, as amended). So the file a
+# human double-clicks and the file a session it spawned runs `ask` with are one
+# file, which is the invariant the sandbox stands on. Each half is reached its
+# own way: `AppRun` supplies the `desktop` verb, because a human executing an
+# AppImage passes no command line, and a session runs the binary inside the
+# mounted image by path, saying a verb of its own.
+#
+# The released CLI is that same binary with the feature off — a static musl
+# one, which needs none of this. This is the artifact that links system
+# libraries — GTK3, and the appindicator the tray is drawn over (ADR-0012) —
+# and making *it* static is not on: the toolkit is not built that way. So it
+# stays dynamic and carries what it links, which is what an AppImage is for.
 #
 # Run it in the dev shell, or on a runner that has installed the two development
 # packages `ci.yml` installs to build `crates/desktop` at all. It takes
@@ -20,7 +28,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 APP_ID="net.tobico.Verkstead"
-BINARY="verkstead-desktop"
+# Two names where there was one: the package cargo is asked for, and the file
+# it leaves — the tray app being a verb of the CLI's binary rather than a
+# binary of its own.
+PACKAGE="verkstead-cli"
+BINARY="verkstead"
 
 # Where everything this script makes goes, under the directory cargo already
 # writes to, so that one `.gitignore` line covers it and `cargo clean` takes it
@@ -81,12 +93,18 @@ done
 # crates that carry the viewer rather than the whole workspace.
 touch crates/server/src/viewer.rs
 
-# The desktop binary itself, for whatever this machine is, which by the header
-# above is x86_64 Linux. No `--target`: the tray links system libraries, so a
-# cross build would have nothing to link against — this leg is native or it is
+# The binary itself, for whatever this machine is, which by the header above is
+# x86_64 Linux. No `--target`: the tray links system libraries, so a cross
+# build would have nothing to link against — this leg is native or it is
 # nothing, which is why the release workflow gives it a Linux runner of its own.
+#
+# The package by name rather than the whole workspace, for the reason
+# `nix/verkstead-source.nix` gives: `verkstead-render`'s own default features
+# turn on the TypeScript emitter, which is a test's business. And nothing here
+# turns the `desktop` feature off, unlike every headless build of the same
+# package — this is the artifact that wants the tray half.
 say "Building $BINARY…"
-cargo build --release --locked --package "$BINARY"
+cargo build --release --locked --package "$PACKAGE"
 
 rm -rf "$APPDIR"
 mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/lib" "$APPDIR/usr/share/applications" \
@@ -189,13 +207,19 @@ cp "$APPDIR/$APP_ID.png" "$APPDIR/.DirIcon"
 # Nothing is said about gdk-pixbuf's loadable modules, and deliberately: PNG is
 # compiled into that library itself, and the formats those modules add — TIFF,
 # XPM, the rest — are ones nothing in this app decodes.
+#
+# `desktop` sits between the binary and whatever the caller said, because that
+# is the half of the binary somebody executing this file is asking for: a
+# desktop launcher names a file and has no way to say a verb. The agents' half
+# of the same file is reached without passing through here at all — see the
+# header.
 cat > "$APPDIR/AppRun" << 'APPRUN'
 #!/bin/sh
 set -eu
 APPDIR="${APPDIR:-$(dirname "$(readlink -f "$0")")}"
 export LD_LIBRARY_PATH="$APPDIR/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export XDG_DATA_DIRS="$APPDIR/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
-exec "$APPDIR/usr/bin/verkstead-desktop" "$@"
+exec "$APPDIR/usr/bin/verkstead" desktop "$@"
 APPRUN
 chmod +x "$APPDIR/AppRun"
 
