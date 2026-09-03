@@ -251,6 +251,19 @@ pub(crate) fn under(directory: &Path, name: &str) -> PathBuf {
 const BIN: &str = "bin";
 const VERKSTEAD: &str = "verkstead";
 
+/// And the verb the server runs its own image with before it equips anybody
+/// with it — see [`Executable::probe`], which is where the choice of this one
+/// is argued.
+const GUIDE: &str = "guide";
+
+/// How much of what a refused image said for itself is carried into the log
+/// line that refuses it.
+///
+/// A loader naming the library it could not find says it in a few words; an
+/// image that failed some other way could say anything at all, and a log record
+/// is no place to find out how much.
+const COMPLAINT: usize = 500;
+
 /// Where each agent type's account lands in HOME.
 ///
 /// Claude's pair, and the one directory each backend after it keeps its whole
@@ -619,9 +632,15 @@ impl Home {
 /// refused as unknown, so no grilling could reach its closing move.
 ///
 /// A machine's own install is therefore not a fallback. A session asking with a
-/// binary nobody chose is the failure this removes, and where the server cannot
-/// find its own image the session is not started at all, and what is logged is
-/// which session that cost.
+/// binary nobody chose is the failure this removes, and where the server has no
+/// image of its own to hand over the session is not started at all, and what is
+/// logged is which session that cost.
+///
+/// **Having none is the wider of the two things that sounds like**: an image
+/// the server cannot find, and one it found that will not run. The second is
+/// asked at startup by running it — see [`Executable::probed`] — because the
+/// invariant this type exists to keep is not one an existence check can stand
+/// on.
 #[derive(Debug, Clone)]
 pub struct Executable {
     path: PathBuf,
@@ -657,6 +676,84 @@ impl Executable {
             path,
             inside: under(&own_bin(Platform::HERE, data_dir), VERKSTEAD),
         })
+    }
+
+    /// The same image, having proved it runs — and `None`, with the reason in
+    /// the log, where it does not.
+    ///
+    /// Run once, at startup, because that is when there is something to do
+    /// about it: an image that will not run is a Verkstead nobody can grill
+    /// with, and a human reading the startup line is the one who can replace
+    /// it. Not a reason to refuse to start, for the reason a missing image is
+    /// not — the workbench, the Timeline and every record in it are still
+    /// there to read — so what is refused is sessions, one at a time and each
+    /// of them named as it is refused (see [`crate::sessions`]).
+    ///
+    /// The *why* is therefore said here and the *which* is said there. Nothing
+    /// probes at spawn: an image that ran at startup is the same file every
+    /// session after it is handed, and running it once per session would be a
+    /// second answer to a question already answered.
+    pub fn probed(self) -> Option<Executable> {
+        match self.probe() {
+            Ok(()) => Some(self),
+            Err(error) => {
+                tracing::error!(
+                    verkstead = %self.path.display(),
+                    error = ?error,
+                    "Verkstead's own image will not run in the environment a session runs it \
+                     in, so no session can be equipped to ask with it and none will be started"
+                );
+                None
+            }
+        }
+    }
+
+    /// Whether it runs at all, asked by running it.
+    ///
+    /// `guide` is the verb, because it is the one that reaches for nothing: it
+    /// prints a document compiled into the binary and opens no socket, reads no
+    /// directory and asks no server. So a non-zero exit says the file itself
+    /// would not run, which is the whole of what is being asked.
+    ///
+    /// **In the environment a session would get rather than the server's own**,
+    /// which is the only reason the answer is worth having. A sandbox clears
+    /// the environment and sets the handful of variables inside — see
+    /// [`Sandbox::surface`] — so an image that runs only by grace of something
+    /// its launcher exported runs for the server and for nobody the server
+    /// starts. The AppImage is exactly that: `AppRun` points the loader at the
+    /// libraries bundled beside it with `LD_LIBRARY_PATH` and execs the binary
+    /// under it, so a probe inheriting this process's environment would pass on
+    /// precisely the machine where every session fails.
+    fn probe(&self) -> anyhow::Result<()> {
+        let output = Command::new(&self.path)
+            .arg(GUIDE)
+            .env_clear()
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|error| anyhow::anyhow!("running {} {GUIDE}: {error}", self.path.display()))?;
+
+        if output.status.success() {
+            return Ok(());
+        }
+
+        // What it said before it gave up, which on the failure this is here to
+        // catch is the loader naming the library it could not find. On one line
+        // and no longer than a line, because where it is going is a field of a
+        // log record rather than a terminal.
+        let complaint: String = String::from_utf8_lossy(&output.stderr)
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .chars()
+            .take(COMPLAINT)
+            .collect();
+
+        anyhow::bail!(
+            "{} {GUIDE} failed ({}){}{complaint}",
+            self.path.display(),
+            output.status,
+            if complaint.is_empty() { "" } else { ": " },
+        )
     }
 
     /// Where it is on the host, which is what a sandbox binds.
@@ -1850,5 +1947,107 @@ mod tests {
         let bin = tempfile::tempdir().unwrap();
 
         assert!(Executable::at(bin.path().join("verkstead"), bin.path()).is_none());
+    }
+
+    /// An image that runs `script` as the whole of whatever verb it is given.
+    ///
+    /// A script rather than a binary because what the probe asks of an image is
+    /// whether the machine will run the file at all — and a shell script that
+    /// exits 127 with a loader's complaint on stderr is the same answer to that
+    /// question as an ELF whose libraries are missing. Unix alone: the mode bit
+    /// is what makes it an image, and Windows has no such thing.
+    #[cfg(unix)]
+    fn image(dir: &Path, script: &str) -> Executable {
+        use std::os::unix::fs::PermissionsExt;
+
+        let path = dir.join(VERKSTEAD);
+        std::fs::write(&path, format!("#!/bin/sh\n{script}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        Executable::at(path, dir).expect("the file was just written")
+    }
+
+    /// The probe is a run of the image, and the verb is the one that reaches
+    /// for nothing — see [`Executable::probe`].
+    ///
+    /// Once, and at startup: the count is what says a session's spawn asks the
+    /// image nothing, because a probe per spawn would be a process started for
+    /// every session to answer what was already known.
+    #[test]
+    #[cfg(unix)]
+    fn an_image_that_answers_the_guide_equips_every_session_after_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let ran = dir.path().join("ran");
+        let image = image(dir.path(), &format!("echo \"$@\" >> {}", ran.display()));
+
+        assert!(
+            image.probed().is_some(),
+            "an image that runs is one every session can ask with"
+        );
+
+        let runs = std::fs::read_to_string(&ran).unwrap();
+        assert_eq!(
+            runs.lines().collect::<Vec<_>>(),
+            [GUIDE],
+            "the image is run once, with the verb that opens nothing"
+        );
+    }
+
+    /// And one that will not run equips nobody, the same as one that is not
+    /// there — with what the machine said about it carried out for the startup
+    /// log, which is the only place a human finds out what to replace.
+    #[test]
+    #[cfg(unix)]
+    fn an_image_that_will_not_run_equips_nobody() {
+        let dir = tempfile::tempdir().unwrap();
+        let image = image(
+            dir.path(),
+            "echo 'libgtk-3.so.0: cannot open shared object file' >&2\nexit 127",
+        );
+
+        let refused = format!("{:?}", image.probe().expect_err("it exits 127"));
+
+        assert!(
+            refused.contains("libgtk-3.so.0"),
+            "the log line has to say what would not load, got {refused:?}"
+        );
+        assert!(
+            image.probed().is_none(),
+            "an image that will not run is one no session can ask with"
+        );
+    }
+
+    /// And it is run in the environment a session would get rather than in this
+    /// process's own, which is the whole of what the probe is worth.
+    ///
+    /// `HOME` stands for the environment here: it is set for anything a human
+    /// or a service manager started, a shell that inherits nothing does not
+    /// invent one, and it is not a variable a sandbox passes through — see
+    /// [`Sandbox::surface`], which sets a home of the session's own. An image
+    /// that saw this process's would have seen its `LD_LIBRARY_PATH` too, which
+    /// is the variable that makes a bundled AppImage pass a probe it should
+    /// fail.
+    #[test]
+    #[cfg(unix)]
+    fn the_probe_runs_the_image_in_a_session_environment_rather_than_the_servers() {
+        assert!(
+            std::env::var_os("HOME").is_some(),
+            "this process has to have a HOME for its absence inside to mean anything"
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let saw = dir.path().join("saw");
+        let image = image(
+            dir.path(),
+            &format!("echo \"${{HOME-nothing}}\" > {}", saw.display()),
+        );
+
+        image.probe().expect("the image runs");
+
+        assert_eq!(
+            std::fs::read_to_string(&saw).unwrap().trim(),
+            "nothing",
+            "the server's own environment is not what a session runs the image in"
+        );
     }
 }
