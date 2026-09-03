@@ -188,9 +188,23 @@ borrowed=$(
 # specification's own directories under `usr/share`, for whatever integrates the
 # AppImage into a menu, and the AppDir's root, which is where the format itself
 # reads the entry and the icon it shows the file under.
-cp "packaging/$APP_ID.desktop" "$APPDIR/usr/share/applications/$APP_ID.desktop"
+#
+# **The verb comes off the entry on the way in**, which is this format's own
+# wrinkle. `packaging/`'s entry says `Exec=verkstead desktop`, which is right
+# for an install that puts the binary on the `PATH` — and wrong here, because
+# what integrates an AppImage rewrites `Exec` to name the AppImage and keeps
+# what followed it, and the AppImage is already a way into the app: `AppRun`
+# below supplies the verb. An entry that said it as well would start
+# `verkstead desktop desktop`, which is refused. Nothing outside the entry point
+# says the verb, which is the same rule the app's own startup registration
+# follows — see `crates/desktop/src/startup/xdg.rs`.
+entry() { sed 's|^Exec=verkstead desktop$|Exec=verkstead|' "packaging/$APP_ID.desktop"; }
+[ "$(entry | grep -c '^Exec=verkstead$')" -eq 1 ] ||
+  die "packaging/$APP_ID.desktop no longer holds the Exec line this takes the verb off."
+
+entry > "$APPDIR/usr/share/applications/$APP_ID.desktop"
 cp -r packaging/icons/hicolor "$APPDIR/usr/share/icons/hicolor"
-cp "packaging/$APP_ID.desktop" "$APPDIR/$APP_ID.desktop"
+entry > "$APPDIR/$APP_ID.desktop"
 cp "packaging/icons/hicolor/256x256/apps/$APP_ID.png" "$APPDIR/$APP_ID.png"
 cp "$APPDIR/$APP_ID.png" "$APPDIR/.DirIcon"
 
