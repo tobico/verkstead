@@ -1,12 +1,23 @@
 #!/usr/bin/env bash
-# Build Verkstead-universal.dmg: the desktop app as a macOS application bundle,
-# built for both Macs at once, inside the disk image a download arrives as.
+# Build Verkstead-universal.dmg: the one `verkstead` binary with the tray in it,
+# as a macOS application bundle built for both Macs at once, inside the disk
+# image a download arrives as.
+#
+# **What is inside is the whole of Verkstead** — built with the `desktop`
+# feature, which is that binary's default (ADR-0012, as amended). So the file a
+# human double-clicks and the file a session it spawned runs `ask` with are one
+# file, which is the invariant the sandbox stands on. Each half is reached its
+# own way: the bundle's executable is a launcher script that supplies the
+# `desktop` verb, because a bundle names an executable and has nowhere to write
+# a command line for it, and a session runs the binary beside that script by
+# path, saying a verb of its own.
 #
 # The Linux artifact is an AppImage because the tray is drawn over system
-# libraries that have to be carried — see tools/build-appimage.sh. None of that
-# applies here: AppKit is the operating system, so the bundle holds the binary
-# and its icon and nothing else, and what makes it an artifact is the .app
-# layout around it and the dmg around that.
+# libraries that have to be carried — see tools/build-appimage.sh, whose
+# `AppRun` supplies the same verb for the same reason. None of that applies
+# here: AppKit is the operating system, so the bundle holds the binary, the
+# launcher and the icon and nothing else, and what makes it an artifact is the
+# .app layout around it and the dmg around that.
 #
 # Run it on a Mac, in the dev shell or on a runner. It takes everything from the
 # working tree — the viewer from `web/dist`, the icon from `packaging/` — and
@@ -22,7 +33,16 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 APP_ID="net.tobico.Verkstead"
-BINARY="verkstead-desktop"
+# Three names where there was one: the package cargo is asked for, the file it
+# leaves — the tray app being a verb of the CLI's binary rather than a binary of
+# its own — and the script beside it that `CFBundleExecutable` names.
+PACKAGE="verkstead-cli"
+BINARY="verkstead"
+# Not `Verkstead`, which is the name a bundle's executable would otherwise want:
+# HFS+ and the APFS a Mac formats itself with are both case-insensitive, so a
+# script called that could not sit in one directory with a binary called
+# `verkstead` at all — one of the two would be the other.
+LAUNCHER="Verkstead-launcher"
 
 # The two Apple targets the release already builds the bare CLI for, joined into
 # one file below — each paired with the name `lipo` knows that architecture by,
@@ -64,7 +84,7 @@ ICNS="packaging/$APP_ID.icns"
 [ -f "$ICNS" ] ||
   die "$ICNS is not there: run tools/generate-packaging.sh."
 
-for tool in cargo rustc lipo codesign plutil hdiutil; do
+for tool in cargo rustc lipo codesign plutil hdiutil ditto; do
   command -v "$tool" > /dev/null ||
     die "$tool is needed to build the dmg and is not on the PATH."
 done
@@ -86,11 +106,17 @@ done
 # the file that declares the embed is what says otherwise.
 touch crates/server/src/viewer.rs
 
+# The package by name rather than the whole workspace, for the reason
+# `nix/verkstead-source.nix` gives: `verkstead-render`'s own default features
+# turn on the TypeScript emitter, which is a test's business. And nothing here
+# turns the `desktop` feature off, unlike every headless build of the same
+# package — this is the artifact that wants the tray half, and it wants the
+# other half in the same file.
 halves=()
 for entry in $TARGETS; do
   target="${entry%%:*}"
   say "Building $BINARY for ${target}…"
-  cargo build --release --locked --package "$BINARY" --target "$target"
+  cargo build --release --locked --package "$PACKAGE" --target "$target"
   halves+=("target/$target/release/$BINARY")
 done
 
@@ -116,12 +142,32 @@ for entry in $TARGETS; do
     die "The binary has no $arch in it."
 done
 
+# The launcher, which is what `CFBundleExecutable` names below and so what
+# Launch Services starts. A bundle names an executable and has nowhere to write
+# a command line for it — a double-click passes none, and neither does anything
+# else that opens an app — so the verb is supplied here, which is the same job
+# `tools/build-appimage.sh`'s `AppRun` does. And the whole of the job: the other
+# half of this binary is reached by running it directly, without passing through
+# this script at all.
+#
+# `dirname "$0"` rather than a path written in: Launch Services starts this by
+# its full path, so that is the directory the binary is in wherever the app was
+# dragged to. Nothing is stripped from `"$@"` — the `-psn_` argument macOS used
+# to hand a bundle went in 10.9, long before the 11.0 this bundle's floor is.
+say "Writing the launcher…"
+cat > "$APP/Contents/MacOS/$LAUNCHER" << LAUNCHER_EOF
+#!/bin/sh
+set -eu
+exec "\$(dirname "\$0")/$BINARY" desktop "\$@"
+LAUNCHER_EOF
+chmod +x "$APP/Contents/MacOS/$LAUNCHER"
+
 cp "$ICNS" "$APP/Contents/Resources/$APP_ID.icns"
 
 # The version the plist claims, asked of cargo rather than read off `Cargo.toml`
 # — `cargo pkgid` answers for the package that was just built, so the number in
 # Finder's Get Info is the number the binary was built at.
-VERSION="$(cargo pkgid --package "$BINARY")"
+VERSION="$(cargo pkgid --package "$PACKAGE")"
 VERSION="${VERSION##*@}"
 
 # What Launch Services reads before the process starts. `LSUIElement` is the one
@@ -144,7 +190,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleExecutable</key>
-	<string>$BINARY</string>
+	<string>$LAUNCHER</string>
 	<key>CFBundleIconFile</key>
 	<string>$APP_ID</string>
 	<key>CFBundleIdentifier</key>
@@ -178,18 +224,36 @@ plutil -lint "$APP/Contents/Info.plist" > /dev/null ||
 # downloader has to do about that is the install story's to document. This is
 # the other thing a signature is for: on Apple silicon the kernel refuses to
 # execute a binary carrying no signature at all, so an unsigned bundle would not
-# start on half the Macs it is built for. Signing the bundle rather than the
-# binary is what takes the Info.plist and the icon into what is sealed.
+# start on half the Macs it is built for.
+#
+# **The binary is signed first, and on its own**, which is what the launcher
+# costs: `codesign` over a bundle signs the executable the plist names and
+# seals everything else as a resource, and the executable the plist names is
+# now a shell script. So the Mach-O half — the one the kernel has the opinion
+# about — is signed before the bundle is, and the bundle then seals the signed
+# file rather than an unsigned one. Signing the bundle around it is what takes
+# the Info.plist and the icon into what is sealed, as it always was.
 say "Sealing the bundle…"
+codesign --force --sign - "$APP/Contents/MacOS/$BINARY"
 codesign --force --sign - "$APP"
 codesign --verify --strict "$APP" ||
   die "The bundle did not verify against the signature just written."
+codesign --verify --strict "$APP/Contents/MacOS/$BINARY" ||
+  die "The binary inside did not verify against its own signature."
 
 # What the mounted image shows: the app, and the folder to drag it into. The
 # symlink is the whole of the installer — a dmg is a disk, and Finder's copy is
 # what installing a Mac app has always been.
+#
+# `ditto` rather than `cp -R`, which is the launcher's second cost: a signature
+# over a script has nowhere inside the file to live, so `codesign` writes it to
+# an extended attribute — and `cp` carries those only when it is asked to,
+# where `ditto` is the copy that carries everything. A signature lost here
+# would not be an app that starts unsigned; it would be an app whose seal
+# disagrees with what is under it, which is the "damaged" a Mac refuses to open
+# rather than the "unidentified developer" it offers a way past.
 mkdir -p "$STAGE"
-cp -R "$APP" "$STAGE/Verkstead.app"
+ditto "$APP" "$STAGE/Verkstead.app"
 ln -s /Applications "$STAGE/Applications"
 
 # The image itself: compressed, read-only, and HFS+ because that is the

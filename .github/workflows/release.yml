@@ -587,10 +587,10 @@ jobs:
   # with `lipo` over them, and an Apple host cross-compiles to the other Apple
   # architecture — one SDK carries both, and clang is told which by `-arch`. So
   # this leg builds both halves itself rather than joining the two macOS legs
-  # of the matrix in a third job: those build the bare CLI, this builds the
-  # desktop app, and a job that fetched them would be fetching the wrong
-  # binary. `macos-15` is the Apple silicon image, which is the half more
-  # people download.
+  # of the matrix in a third job: those build the same package with the
+  # `desktop` feature off, which is the headless CLI, and a job that fetched
+  # them would be wrapping a binary with no tray in it. `macos-15` is the Apple
+  # silicon image, which is the half more people download.
   desktop-macos:
     name: Verkstead-universal.dmg
     needs: viewer
@@ -656,9 +656,61 @@ jobs:
           hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$PWD/$MOUNT"
           ls -l "$MOUNT"
 
+      # Which is the tray app's help, the launcher having supplied the verb: it
+      # is the only half of this bundle that entering it as a bundle can reach.
       - name: The app runs
         run: |
-          "$MOUNT/Verkstead.app/Contents/MacOS/verkstead-desktop" --help
+          "$MOUNT/Verkstead.app/Contents/MacOS/Verkstead-launcher" --help
+
+      # And the other half, which nothing going through the launcher can ask
+      # for: what a session spawned by this app runs is the binary beside that
+      # script, by path, saying a verb of its own. The two halves being one file
+      # is the invariant the sandbox stands on (ADR-0012, as amended) — a bundle
+      # carrying the tray alone would come up, serve, draw its icon, pass every
+      # assertion beside this one, and hand each session it spawned a binary
+      # with no `ask` in it.
+      #
+      # Both of the verbs an agent has rather than the exit status alone: the
+      # help is read for what only `ask`'s prints, and the Guide for its own
+      # first heading, so a binary answering with some other command's usage
+      # fails here rather than passing.
+      - name: The binary inside answers ask and guide
+        run: |
+          binary="$MOUNT/Verkstead.app/Contents/MacOS/verkstead"
+
+          help=$("$binary" ask --help)
+          printf '%s\n' "$help"
+          case "$help" in
+            *"Question Set"*) ;;
+            *)
+              echo "::error::The binary inside the dmg does not answer ask."
+              exit 1
+              ;;
+          esac
+
+          guide=$("$binary" guide)
+          case "$guide" in
+            *"Asking the human"*) ;;
+            *)
+              echo "::error::The binary inside the dmg does not print the Guide."
+              printf '%s\n' "$guide"
+              exit 1
+              ;;
+          esac
+
+      # And that what a downloader mounts is still sealed.
+      # `tools/build-macos-dmg.sh` verifies the bundle it signed; this verifies
+      # the copy that was packed, which is a different question now that the
+      # bundle's executable is a script — a signature over one lives in an
+      # extended attribute rather than inside the file, so a copy that dropped
+      # it would leave an app whose seal disagrees with what is under it. That
+      # is the "damaged" a Mac refuses to open rather than the "unidentified
+      # developer" it offers a way past, and it is worth failing a tag over.
+      - name: The signature survived the packing
+        run: |
+          codesign --verify --strict --verbose=2 "$MOUNT/Verkstead.app"
+          codesign --verify --strict \
+            "$MOUNT/Verkstead.app/Contents/MacOS/verkstead"
 
       # The two halves of what a human downloads this file for, asserted on one
       # run of it: an icon in the menu bar, and the viewer behind it.
@@ -692,7 +744,7 @@ jobs:
           log="$HOME/Library/Logs/Verkstead/verkstead.log"
           rm -f "$log"
 
-          "$MOUNT/Verkstead.app/Contents/MacOS/verkstead-desktop" --no-open \
+          "$MOUNT/Verkstead.app/Contents/MacOS/Verkstead-launcher" --no-open \
             --listen 127.0.0.1:8422 --data-dir "$RUNNER_TEMP/desktop" &
           app=$!
           document=$(curl --fail --silent --show-error \

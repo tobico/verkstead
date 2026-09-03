@@ -25,7 +25,14 @@ cannot drift apart. Move the image and both move.
 The macOS desktop leg is one runner for both Macs: `macos-15` is the Apple
 silicon image, an Apple host cross-compiles to the other Apple architecture, and
 [`tools/build-macos-dmg.sh`](../tools/build-macos-dmg.sh) builds both halves,
-`lipo`s them into one executable and packs the bundle into the image. Its floor
+`lipo`s them into one executable and packs the bundle into the image. What it
+joins is the unified `verkstead`, built with the `desktop` feature its default
+leaves on, and the bundle's executable is a launcher script beside it that
+supplies the `desktop` verb — a bundle names an executable and has nowhere to
+write a command line for it, so the launcher does the job `AppRun` does in the
+AppImage (ADR-0012, as amended). The script is called `Verkstead-launcher`
+rather than `Verkstead` because a Mac's filesystem is case-insensitive and the
+binary beside it is called `verkstead`. Its floor
 is written into the bundle rather than inherited from a runner —
 `LSMinimumSystemVersion`, 11.0, which is the Apple silicon half's own and the
 higher of the two — and it is the number
@@ -46,6 +53,16 @@ is the same three things — it starts, it serves a document with the viewer's
 bundle named in it, and its own log says an icon went up — and each of them is
 bounded, because the failures these apps draw are dialogs and a dialog nobody
 dismisses would hold a runner for six hours.
+
+The two legs whose artifact carries the binary behind a launcher assert a
+fourth, and it is the one the running app cannot be asked for: the binary
+*inside* the artifact answers `ask`. That is the half a session gets, reached by
+path rather than by starting the file, so an artifact carrying the tray alone
+would pass every assertion above it and hand each session it spawned a binary
+with no `ask` in it. The dmg's leg adds one more still — that the app comes back
+out of the image with its signature intact — because the bundle's executable is
+a script now, and a signature over a script lives beside the file rather than
+inside it.
 
 The manifest is the nix systems alone, and that is the one place a count is
 still the right question: what the flake and the NixOS module run is the
