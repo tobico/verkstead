@@ -164,6 +164,15 @@ testers.runNixOSTest {
             exit 1
         fi
 
+        # And the sccache a session compiles through, resolved off this unit's
+        # own path rather than named by store path: that the module put one
+        # within the service's reach is half of what the cache lines below ask,
+        # and a path written here would be the test agreeing with itself again.
+        if ! sccache=$(command -v sccache); then
+            echo "no sccache on the unit's path" >&2
+            exit 1
+        fi
+
         exec bwrap \
             --die-with-parent \
             --unshare-all --share-net --hostname verkstead \
@@ -177,9 +186,15 @@ testers.runNixOSTest {
             --bind ${grillingRepo}/.git ${grillingRepo}/.git \
             --bind ${account}/.claude "$HOME/.claude" \
             --bind ${account}/.claude.json "$HOME/.claude.json" \
+            --bind ${cacheDir} ${cacheDir} \
+            --ro-bind "$sccache" /verkstead/bin/sccache \
             --chdir "$worktree" \
             --setenv HOME "$HOME" \
             --setenv PATH /run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/usr/bin:/bin \
+            --setenv CARGO_HOME ${cacheDir}/cargo \
+            --setenv RUSTC_WRAPPER /verkstead/bin/sccache \
+            --setenv SCCACHE_DIR ${cacheDir}/sccache \
+            --setenv SCCACHE_CACHE_SIZE 30G \
             ${report} "$worktree"
       '';
     in
