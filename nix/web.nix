@@ -57,6 +57,14 @@ stdenvNoCC.mkDerivation (finalAttrs: {
       # above, so the check needs it in the source even though the build does
       # not.
       ../crates/server/share-viewer.html
+      # And the two files that say where that page is published, which the same
+      # suite reads as text and holds against each other: the workflow that puts
+      # it on GitHub Pages, and the module that composes every share's link
+      # through it. One of them drifting is a 404 on every share ever published,
+      # so the check is worth having — and it can only run on a source that has
+      # them.
+      ../.github/workflows/pages.yml
+      ../crates/server/src/sharing.rs
     ];
   };
 
