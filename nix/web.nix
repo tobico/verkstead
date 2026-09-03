@@ -72,7 +72,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     pname = "verkstead-web";
     sourceRoot = "${finalAttrs.src.name}/web";
     fetcherVersion = 2;
-    hash = "sha256-37ClFK7yQy4RmBsej8Xt8DppFmyRGg+l0aOdJ9YmLU0=";
+    hash = "sha256-DjRtBWJTSZf55Ff2Pc6FnCzlcU3nr92XRxDGoqi8nAk=";
   };
 
   sourceRoot = "${finalAttrs.src.name}/web";
