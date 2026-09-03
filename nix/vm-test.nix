@@ -259,8 +259,10 @@ testers.runNixOSTest {
       environment.etc = {
         "verkstead-vm-test/set.yaml".text = ''
           # A Question Set as an agent sends it. `project`, `branch` and `diff`
-          # are absent on purpose: the CLI derives them from the working
-          # directory and overwrites whatever a Set claims.
+          # are absent on purpose: the CLI derives the first two from the
+          # working directory, the server composes the third off the Worktree
+          # the Set was asked from, and whatever a Set claims of any of them is
+          # overwritten.
 
           title: Does the module hold up in a VM?
 
@@ -601,14 +603,14 @@ testers.runNixOSTest {
     # test standing in for a session has to be given the same thing.
     #
     # Against a registered Repo, which is the only kind there is; the directory
-    # the CLI derives `project`, `branch` and the Diff from is the agent's own
-    # working directory below, and deliberately not this one.
+    # the CLI derives `project` and `branch` from is the agent's own working
+    # directory below, and deliberately not this one.
     repos = json.loads(machine.succeed("curl -sf http://127.0.0.1:8422/api/ui/repos"))
     started = json.loads(post("/api/ui/conversations", {"repo_id": repos[0]["id"]}))
     ASKING_FROM = started["Started"]["id"]
 
     # The repository an agent always asks from, and which the CLI reads
-    # `project`, `branch` and the Diff out of by shelling out to git.
+    # `project` and `branch` out of by shelling out to git.
     machine.succeed(f"git -c init.defaultBranch={BRANCH} init -q {REPO}")
     machine.succeed(f"echo committed > {REPO}/tracked.txt")
     machine.succeed(f"git -C {REPO} add -A")
@@ -616,8 +618,6 @@ testers.runNixOSTest {
         f"git -C {REPO} -c user.name=Verkstead -c user.email=vm@verkstead.invalid"
         " -c commit.gpgsign=false commit -q -m init"
     )
-    # Left uncommitted, so the Set carries a Diff as well.
-    machine.succeed(f"echo uncommitted > {REPO}/tracked.txt")
 
     with subtest("an agent's Set is answered through the API and printed by the CLI"):
         ask("first")
@@ -637,10 +637,15 @@ testers.runNixOSTest {
         # the Set claimed, comes with the Set itself: the Timeline carries the
         # table of what was asked, and the document is what the pane showing it
         # fetches.
+        #
+        # The Diff is not among them, and nothing here asks for one: it is the
+        # server's to compose now, off the Worktree of the Conversation the Set
+        # was asked from — and this Conversation is a Draft, which has none.
+        # `crates/server/tests/sets.rs` is where that composition is proved,
+        # over a Conversation that has been checked out.
         detail = machine.succeed(f"curl -sf http://127.0.0.1:8422/api/ui/sets/{first}")
         assert "vm-project" in detail, "the CLI did not derive the project"
         assert BRANCH in detail, "the CLI did not derive the branch"
-        assert "uncommitted" in detail, "the CLI did not derive the Diff"
 
         answer(first, "first-response.json")
         printed = collect("first")
