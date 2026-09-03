@@ -291,9 +291,11 @@ is drawn from reading it, checking writes it and unchecking removes it, and
 neither settings file has an entry for this or ever will: a human who turns it
 off with their desktop's own settings has unchecked the box, and Verkstead
 agrees with them rather than argues. **Every launch rewrites it while it is
-there**, with the path of the executable that is running, so a binary that was
-moved — downloaded again elsewhere, an AppImage put somewhere else — heals its
-own registration the next time it is started by hand; a machine that never
+there**, with the path of the executable that is running and the `desktop` verb
+that is the app — one image has more than one way in, and a registration naming
+the path alone would start a Verkstead that printed the Guide — so a binary that
+was moved — downloaded again elsewhere, an AppImage put somewhere else — heals
+its own registration the next time it is started by hand; a machine that never
 asked for one is left alone. What it starts is an ordinary launch of the app
 with the browser left alone, because a login is not a moment to be handed a
 browser window.

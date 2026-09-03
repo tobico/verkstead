@@ -19,4 +19,4 @@ ADR-0012 is amended beside this plan.
 - [x] 04: The macOS bundle — [details](04-macos-bundle.md)
 - [x] 05: The Windows msi — [details](05-windows-msi.md)
 - [x] 06: The startup probe — [details](06-startup-probe.md)
-- [ ] 07: The record — [details](07-the-record.md)
+- [x] 07: The record — [details](07-the-record.md)

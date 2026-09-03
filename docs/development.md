@@ -58,18 +58,22 @@ out of a checkout does: `--data-dir .` is why every command here says it, and
 it keeps the database, the worktrees and the settings beside the checkout where
 they can be deleted with it.
 
-The desktop app is the other binary, and the same server: `cargo run -p
-verkstead-desktop -- --data-dir .` serves what the command above serves and
-opens the viewer in your browser as it comes up. `--no-open` leaves the browser
-alone, and every other flag is the server's own, because the app *is* the
-server ([ADR 0012](adr/0012-desktop-tray-binary.md)) — started with nothing
-said it is the platform's Data Directory again, which is what a machine that
-installed it wants and not what a checkout does. It is the one crate here that
-links a system toolkit — GTK on Linux, which is why it builds in the dev shell
-and nowhere else here; AppKit on a Mac and Win32 on Windows, which are those
-platforms' own and want nothing installed. An address something is already
-listening on — the command above, say — is a dialog and a nonzero exit rather
-than a second Verkstead beside the first.
+The desktop app is a verb of that same binary, and the same server: `cargo run
+-p verkstead-cli -- desktop --data-dir .` serves what the command above serves
+and opens the viewer in your browser as it comes up. `--no-open` leaves the
+browser alone, and every other flag is the server's own, because the app *is*
+the server ([ADR 0012](adr/0012-desktop-tray-binary.md), as amended) — started
+with nothing said it is the platform's Data Directory again, which is what a
+machine that installed it wants and not what a checkout does. The tray half is
+`crates/desktop`, a library the CLI carries behind its default-on `desktop`
+feature: a build that says nothing gets both halves, which is what makes every
+image that can serve one that can also `ask`, and `--no-default-features` is
+the headless build the musl CLI and the nix package take. It is the one crate
+here that links a system toolkit — GTK on Linux, which is why the workspace
+builds in the dev shell and nowhere else here; AppKit on a Mac and Win32 on
+Windows, which are those platforms' own and want nothing installed. An address
+something is already listening on — the command above, say — is a dialog and a
+nonzero exit rather than a second Verkstead beside the first.
 
 What it puts on the screen is an icon in the system tray, and the menu on it is
 **Open** — the viewer again, in your browser — **View Logs**, which opens the
@@ -88,8 +92,9 @@ registration is the whole of the state: checking the box writes it, unchecking
 removes it, turning it off in your desktop's own settings unchecks it, and no
 setting of Verkstead's own keeps a second copy of the answer. Every
 launch rewrites it while it is there, with the path of the executable that is
-running, so a binary you moved heals its own entry the next time you start it
-by hand. What it writes starts the app with `--no-open`: a login is not a
+running and the `desktop` verb behind it — one image has more than one way in
+now — so a binary you moved heals its own entry the next time you start it by
+hand. What it writes starts the app with `--no-open`: a login is not a
 moment to be handed a browser window. The one thing the box cannot see is the
 platform's own second opinion about it — macOS's Login Items list, which
 `launchd` keeps in a database rather than in the file, and Windows' Startup tab
@@ -496,10 +501,12 @@ the dmg wants a Mac for `lipo` and `hdiutil`, and the msi wants Windows for the
 WiX toolset and the MSVC build under it, so the dev shell has the first of the
 three and nothing of the other two.
 
-The AppImage is the desktop binary, the packaging assets and every library the
+The AppImage is the unified binary, the packaging assets and every library the
 tray is drawn over, in one file, and it is the same command CI runs. It builds
-what `cargo build --release -p verkstead-desktop` builds, so it wants the dev
-shell for the same reason that does.
+what `cargo build --release -p verkstead-cli` builds, feature and all, and its
+`AppRun` supplies the `desktop` verb — a desktop launcher names a file and has
+nowhere to say one — so it wants the dev shell for the same reason that build
+does.
 
 The dmg is `Verkstead.app` — the same binary built for both Apple targets and
 `lipo`-ed into one, the icns from `packaging/`, and an `Info.plist` that says
