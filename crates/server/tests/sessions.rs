@@ -17380,10 +17380,18 @@ async fn typing_into_a_driven_session_changes_nothing_about_when_it_ends() {
     std::fs::write(&gate, "go").unwrap();
 
     // And the run picks up behind it, with nothing pressed.
+    //
+    // The second commit rather than the second of exactly two. The run does not
+    // stop where the task does: the finish step launches behind it and this
+    // stub commits in that one too, so a Timeline holding exactly two is a
+    // moment between the two sessions rather than anything the run settles at.
+    // A machine slow enough to poll straight past that moment would never see
+    // the count it was waiting for, and the commit it is really waiting on is
+    // there in either read.
     let landed = fixture
         .until(|view| {
             let landed = commits(view);
-            (landed.len() == 2).then(|| landed[1].subject.clone())
+            (landed.len() >= 2).then(|| landed[1].subject.clone())
         })
         .await;
 
