@@ -745,6 +745,29 @@ Timeline events:
   is held to one line and cut at the front, in both places, so the header's own
   controls keep the top right and the sidebar's rows keep one height (*refined
   2026-09-02, building timeline-pinned-polish*).
+- **The presses that end a conversation happen at the press** (*settled
+  2026-09-03, building eagerly-update-conversations*). Close, Close and
+  archive, Archive and Unarchive draw their outcome the moment they are
+  pressed — the menu shuts, the pane reads as closed, the row leaves or rejoins
+  the sidebar — and the request runs behind the page. Closing is what made it
+  worth doing: the handler stops the running session and waits for the task it
+  was on, gives back a worktree per repository, deletes the handoff directory,
+  locks the open Question Sets and sweeps the worktrees directory, all inside
+  the POST, and the menu row used to sit disabled reading *Closing…* for the
+  whole of it. The other three joined it so the menu behaves the one way
+  throughout. What a press said is held over the reads rather than written into
+  them — this page is re-read on every Nudge — and let go of once the read
+  behind the press has landed, so nothing flicks back to the old state
+  in between. A press refused, or a request that fell over, rolls the page back
+  and says the reason in a toast: the reason alone, the row reappearing being
+  what says which conversation it is about. Success says nothing, the human
+  having watched it happen. A press made while the one before it is still out —
+  the Archive the menu offers the instant Close is pressed — waits for it and
+  is dropped if it failed, the state it assumed being gone. **Resume, the two
+  stops and Steer are deliberately not among them**: each ends in a session
+  actually starting or stopping, which the page cannot truthfully draw ahead of
+  the server, so they keep the pending label on the row and answer a refusal
+  with the card over the page.
 - **Push notifications** for needs-you — a blocking question set, a stop
   Verkstead decided on, an exhausted usage window among them — **and
   milestones** (PR opened, stage complete, conversation done). A stop nobody

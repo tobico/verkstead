@@ -58,7 +58,6 @@
 //! first one's page.
 
 import { useLocation, useNavigate, useParams } from "@solidjs/router";
-import type { UseQueryResult } from "@tanstack/solid-query";
 import {
   Match,
   Show,
@@ -99,6 +98,7 @@ import { PullRequest } from "./PullRequest";
 import { Roadmap } from "./Roadmap";
 import { Share } from "./Share";
 import { Timeline } from "./Timeline";
+import { pressed } from "./eager";
 import {
   lastOpening,
   openingAt,
@@ -110,7 +110,17 @@ import {
 
 /// The read the two panes share, as each of them is handed it: one query behind
 /// both, because they are two views of the one Conversation.
-type Read = UseQueryResult<ConversationView, Error>;
+///
+/// The query's own four fields rather than the query, because what the panes
+/// are handed is not quite the query's answer: whatever a press has already
+/// said about this Conversation is laid over it on the way through — see
+/// `eager.ts`, and [`Workbench`], where the two are put together.
+type Read = {
+  data: ConversationView | undefined;
+  isPending: boolean;
+  isError: boolean;
+  error: Error | null;
+};
 
 /// An Event with a full self, as the details pane holds it: which kind, and the
 /// Event itself.
@@ -287,7 +297,7 @@ export function Workbench(): JSX.Element {
   /// they are two views of the one thing, and a query apiece would be two reads
   /// of it. Out here rather than inside either, so that neither pane being
   /// built again is a re-read.
-  const conversation = useReading(() => ({
+  const read = useReading(() => ({
     queryKey: ["conversation", selected()],
     queryFn: () => loadConversation(selected()),
     enabled: selected() !== "",
@@ -320,6 +330,37 @@ export function Workbench(): JSX.Element {
     // turns carry their `id` flat for exactly this reason.
     freshness: { reconcile: "id" },
   }));
+
+  /// The same Conversation as the panes are handed it: the server's answer with
+  /// whatever a press has already said about it laid over — a close drawn at
+  /// the press rather than a round trip later. See `eager.ts`.
+  ///
+  /// A memo rather than a call per reader, because the panes are merged into
+  /// rather than rebuilt: with nothing pressed this is the very object the query
+  /// answered with, and while something is it is one object rather than a fresh
+  /// one for every look.
+  const overlaid = createMemo(() => {
+    const answer = read.data;
+    return answer === undefined ? undefined : pressed(answer);
+  });
+
+  /// Which the two panes read through, as they read the query itself before:
+  /// getters, so that what they are reading is still the reading rather than a
+  /// copy of one moment of it.
+  const conversation: Read = {
+    get data() {
+      return overlaid();
+    },
+    get isPending() {
+      return read.isPending;
+    },
+    get isError() {
+      return read.isError;
+    },
+    get error() {
+      return read.error;
+    },
+  };
 
   /// Whether this Conversation's record is the one Event, which is what takes
   /// the Timeline away.
