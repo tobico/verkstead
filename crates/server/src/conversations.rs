@@ -1860,7 +1860,34 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
 /// is for. This read parses nothing: it wants a repository path and a worktree
 /// path per checkout, and the only thing it can be refused for is a
 /// Conversation that is not there.
+///
+/// **On a task of its own, which this still waits for.** Everything below takes
+/// seconds — a session to end and the task it was on to finish, a worktree per
+/// repository to give back, a directory to sweep — and the browser now draws
+/// the close at the press rather than watching a disabled row for the whole of
+/// it (see the viewer's `eager.ts`). So the page has stopped saying *not yet*,
+/// and a human who presses Close and archive because they are finished with
+/// something and then closes the tab is doing what the page invites. A
+/// connection going away drops the request, and a request is what a handler's
+/// future is polled by: run here it would be dropped part-way through, and the
+/// worktrees are given back *before* the record is written — so a close
+/// cancelled between the two leaves a Conversation whose checkouts have gone
+/// and whose record still says it is open, which is nowhere to work and what
+/// Resume then refuses with `NowhereToWork`. Nothing cancels a task, so what
+/// the human was told had happened happens.
+///
+/// It is not a fast answer: the outcome is still this close's own and still
+/// waited for, so a browser that stayed hears exactly what it heard before.
+/// What changes is only that a browser which left has stopped being the thing
+/// the work depends on.
 pub(crate) async fn close(state: &AppState, id: i64) -> Result<ConversationClosed> {
+    let running = state.clone();
+
+    tokio::spawn(async move { ending(&running, id).await }).await?
+}
+
+/// The close itself, as the task above runs it.
+async fn ending(state: &AppState, id: i64) -> Result<ConversationClosed> {
     let pool = &state.pool;
 
     let Some(conversation) = store::closable(pool, id).await? else {

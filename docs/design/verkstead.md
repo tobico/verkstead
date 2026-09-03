@@ -770,7 +770,11 @@ Timeline events:
   stops and Steer are deliberately not among them**: each ends in a session
   actually starting or stopping, which the page cannot truthfully draw ahead of
   the server, so they keep the pending label on the row and answer a refusal
-  with the card over the page.
+  with the card over the page. And **the close runs on a task of its own** that
+  its handler still waits for: the page no longer says *not yet*, so a human
+  who presses Close and shuts the tab takes the request away — and the close
+  gives the worktrees back before it writes the record, so one cancelled
+  between the two would leave a conversation with nowhere to work.
 - **Push notifications** for needs-you — a blocking question set, a stop
   Verkstead decided on, an exhausted usage window among them — **and
   milestones** (PR opened, stage complete, conversation done). A stop nobody
