@@ -756,14 +756,17 @@ Timeline events:
   the POST, and the menu row used to sit disabled reading *Closing…* for the
   whole of it. The other three joined it so the menu behaves the one way
   throughout. What a press said is held over the reads rather than written into
-  them — this page is re-read on every Nudge — and let go of once the read
-  behind the press has landed, so nothing flicks back to the old state
-  in between. A press refused, or a request that fell over, rolls the page back
-  and says the reason in a toast: the reason alone, the row reappearing being
-  what says which conversation it is about. Success says nothing, the human
-  having watched it happen. A press made while the one before it is still out —
-  the Archive the menu offers the instant Close is pressed — waits for it and
-  is dropped if it failed, the state it assumed being gone. **Resume, the two
+  them — this page is re-read on every Nudge — and let go of once a read has
+  landed since the press did, so nothing flicks back to the old state in
+  between and nothing is uncovered by a read that never answered: the request
+  behind a press comes back whether or not anything was read, and a page
+  released on that alone would take a close back the first time a refetch fell
+  over. A press refused, or a request that fell over, rolls the page back and
+  says the reason in a toast: the reason alone, the row reappearing being what
+  says which conversation it is about. Success says nothing, the human having
+  watched it happen. A press made while the one before it is still out — the
+  Archive the menu offers the instant Close is pressed — waits for it and is
+  dropped if it failed, the state it assumed being gone. **Resume, the two
   stops and Steer are deliberately not among them**: each ends in a session
   actually starting or stopping, which the page cannot truthfully draw ahead of
   the server, so they keep the pending label on the row and answer a refusal

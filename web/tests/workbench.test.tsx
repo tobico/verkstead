@@ -8057,6 +8057,64 @@ describe("a press whose outcome is drawn before the server has answered", () => 
     );
   });
 
+  /// And a read that never landed is not a read. The re-read a press ends with
+  /// comes back whatever became of it — `invalidateQueries` swallows a refetch
+  /// that failed, and fetches nothing at all for a query nothing is reading — so
+  /// a page that let go of what it drew when that came back would take a close
+  /// the server really made back the first time either happened. It holds until
+  /// a read has landed, and then lets go of it whatever that read says.
+  it("holds what it drew where the read behind the press never landed", async () => {
+    let listing = true;
+
+    const fetching = theGrilling(
+      whenever("/api/ui/conversations", () =>
+        listing ? json(SIDEBAR)() : json({ error: "not now" }, 503)(),
+      ),
+      whenever(
+        CLOSING_IT,
+        () => {
+          listing = false;
+          return json("Closed" satisfies ConversationClosed)();
+        },
+        "POST",
+      ),
+    );
+    const { container, client } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.close}`),
+    );
+
+    // The press has come back and the reads behind it are in: the list's fell
+    // over, which is what the sidebar is saying, and the conversation's own
+    // landed saying Grilling — which is what this server has said about it
+    // throughout, and what the page would be drawing if it had let go.
+    await waitFor(() => screen.getByText(/Could not read the conversations/));
+    await waitFor(() =>
+      expect(
+        askedFor(fetching, `/api/ui/conversations/${GRILLING.id}`),
+      ).toBeGreaterThan(1),
+    );
+
+    // Given every chance to let go of it, and it does not: the one read that
+    // ever lets go of a press is the list's, and the list did not answer.
+    for (let turn = 0; turn < 3; turn += 1) {
+      await new Promise((settle) => setTimeout(settle, 0));
+      expect((await standing(container)).word).toBe(STATE.Closed);
+    }
+
+    // And then one that does land, which lets go of it — and says what the
+    // server has been saying all along, because a read that landed is the
+    // server's own word however late it is.
+    listing = true;
+    await client.invalidateQueries({ queryKey: ["conversations"] });
+
+    await waitFor(async () =>
+      expect((await standing(container)).state).toBe(STATE.Grilling),
+    );
+  });
+
   /// The menu offers Archive the instant Close is pressed, and an archive
   /// posted while the close is still running would be refused: the record says
   /// the conversation is open until the close commits. So the second press

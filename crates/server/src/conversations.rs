@@ -1849,7 +1849,7 @@ fn predecessor(repo: &Path, commit: &str, named: &str, default: &str) -> Option<
 /// send a Nudge. One [`Nudge::Conversation`], which is both things that moved —
 /// the Conversation and its sidebar row — and it is the read the browser that
 /// pressed is waiting on as well: a close is drawn there at the press and held
-/// until that read agrees with it.
+/// until a read of the server has landed since.
 ///
 /// **The Conversation is read through [`store::closable`] rather than the whole
 /// of it**, which is a decision about what this may be stopped by rather than

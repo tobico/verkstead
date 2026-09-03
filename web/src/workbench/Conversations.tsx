@@ -78,7 +78,7 @@ import type { ConversationEntry } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { CardActions } from "./Actions";
-import { pressedRows } from "./eager";
+import { caughtUp, pressedRows } from "./eager";
 import shell from "../Panes.module.css";
 import styles from "./Conversations.module.css";
 import { SPOKEN } from "./Mark";
@@ -189,6 +189,14 @@ export function Conversations(props: {
       setDragged(null);
     }
   });
+
+  // And let go of what a press said the same way, for the same reason: the read
+  // behind a press comes back whether or not anything was read — a refetch that
+  // failed is swallowed, and a query nothing is reading is not fetched at all —
+  // so a press released on its request coming back would have the page take a
+  // close back the first time either happened. Released on this list having
+  // answered since instead, which is what `dataUpdatedAt` is. See `eager.ts`.
+  createEffect(() => caughtUp(conversations.dataUpdatedAt));
 
   // The list element, so a drag can ask where the rows actually are. A drag is
   // about pixels, and pixels are something only the DOM knows.

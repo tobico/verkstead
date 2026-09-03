@@ -69,7 +69,7 @@
 //! Close, Close and archive, Archive and Unarchive draw their outcome at the
 //! press: the menu shuts, the pane and the sidebar read as closed or as put
 //! away, and the request runs behind the page — see `eager.ts`, which holds
-//! what has been said until the read behind the press agrees with it. Closing
+//! what has been said until a read of the server has landed since. Closing
 //! is the one that made this worth doing, taking seconds inside the POST, and
 //! the other three joined it so that the menu behaves the one way throughout.
 //! A press of theirs that is refused is rolled back and said in a toast rather
