@@ -35,6 +35,12 @@
 //! platform's own startup registration — read from it, written to it, and
 //! rewritten at every launch while it is there, with nothing of Verkstead's own
 //! keeping a second copy of the answer. See [`startup`].
+//!
+//! **And what it registers is the invocation that started it**, which is the one
+//! thing this library is told rather than reads. The image it is running out of
+//! has other verbs — `verkstead ask` is the same file — so the executable's path
+//! alone is no longer a command that starts the app. Whatever entered here says
+//! which way it came in: see [`startup::Entered`], handed to [`Desktop::run`].
 
 /// The two things this binary draws that carry words.
 pub mod dialog;
@@ -117,6 +123,11 @@ impl Desktop {
     /// So the server is spawned onto a runtime and the main thread goes to the
     /// tray's loop — or waits on the server, where there is no tray to have.
     ///
+    /// `entered` is how this app was run — the verb it came in through, where
+    /// it came in through one — which is what a startup registration written
+    /// from in here has to name beside the executable's own path. See
+    /// [`startup::Entered`].
+    ///
     /// **Exit is a stop where it stands.** The server has never had a shutdown
     /// path — nothing in it handles a signal, and under systemd it is stopped
     /// by SIGTERM and dies where it is — so the tray does not get machinery no
@@ -126,7 +137,7 @@ impl Desktop {
     /// saying so — `bwrap --die-with-parent` on Linux, and a keeper watching
     /// from outside the process on a Mac, which has no such flag. Neither
     /// needs a word from here, which is why Exit can be a stop at all.
-    pub fn run(self, listener: TcpListener) -> Result<()> {
+    pub fn run(self, listener: TcpListener, entered: startup::Entered) -> Result<()> {
         // Before anything has anything to report, and by this binary rather
         // than by the server: where the events go is the starting binary's
         // call, and this one was started from an icon — see [`logs`].
@@ -134,10 +145,10 @@ impl Desktop {
 
         // And before anything else this launch does, because it is about *this*
         // launch: while the box is checked, the startup registration is
-        // rewritten with the path of the executable that is running, so a
-        // binary somebody moved heals its own registration the next time they
-        // start it by hand — see [`startup`].
-        let startup = startup::Startup::here();
+        // rewritten with the invocation that is running, so a binary somebody
+        // moved heals its own registration the next time they start it by hand
+        // — see [`startup`].
+        let startup = startup::Startup::here(entered);
         startup.refresh();
 
         let viewer = viewer_url(self.server.listen);

@@ -74,12 +74,14 @@ impl Entry {
         std::fs::read_to_string(&self.file).is_ok_and(|entry| says_on(&entry))
     }
 
-    /// Write the entry, naming the executable that is running.
+    /// Write the entry, naming the executable that is running and the `verb` it
+    /// was entered through, where it was entered through one — see
+    /// [`Entered`](super::Entered).
     ///
     /// The autostart directory is made where it is not there: a machine that
     /// has never registered anything has never needed one, and the
     /// specification's answer is to make it.
-    pub(super) fn write(&self) -> Result<()> {
+    pub(super) fn write(&self, verb: Option<&str>) -> Result<()> {
         let exe = executable()?;
         let exe = exe.to_str().with_context(|| {
             format!(
@@ -92,7 +94,7 @@ impl Entry {
             std::fs::create_dir_all(dir).with_context(|| format!("making {}", dir.display()))?;
         }
 
-        std::fs::write(&self.file, written(exe))
+        std::fs::write(&self.file, written(exe, verb))
             .with_context(|| format!("writing the autostart entry at {}", self.file.display()))
     }
 
@@ -131,23 +133,30 @@ fn autostart_dir(config: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> 
     Some(config.join(AUTOSTART))
 }
 
-/// The entry as it is written, for a Verkstead at `exe`.
+/// The entry as it is written, for a Verkstead at `exe` entered through `verb`
+/// — or through no verb at all, which is the binary started as itself.
 ///
 /// **`--no-open` is in it**, which is the one decision the entry makes: a
 /// startup launch is an ordinary launch of this app in every other way, and a
 /// browser window arriving over whatever the human is doing at every login is
 /// the thing that gets the box unchecked.
 ///
+/// The verb goes between the two, unquoted: it is a word of the binary's own
+/// grammar rather than a path, so there is nothing in it a desktop could read
+/// as two arguments — see [`Entered::verb`](super::Entered::verb).
+///
 /// The icon is named rather than pointed at, the way the specification means:
 /// what a desktop draws beside this entry is whatever it has installed under
 /// the app id, and a desktop that has none draws none.
-fn written(exe: &str) -> String {
+fn written(exe: &str, verb: Option<&str>) -> String {
+    let verb = verb.map(|verb| format!(" {verb}")).unwrap_or_default();
+
     format!(
         "[Desktop Entry]\n\
          Type=Application\n\
          Name={NAME}\n\
          Comment={COMMENT}\n\
-         Exec={} --no-open\n\
+         Exec={}{verb} --no-open\n\
          Icon={APP_ID}\n\
          Terminal=false\n",
         quoted(exe)
@@ -281,7 +290,7 @@ mod tests {
     /// as anybody else starts it, with the browser left alone.
     #[test]
     fn the_entry_starts_this_executable_without_opening_a_browser() {
-        let entry = written("/usr/local/bin/verkstead-desktop");
+        let entry = written("/usr/local/bin/verkstead-desktop", None);
 
         assert!(
             entry.contains("Exec=\"/usr/local/bin/verkstead-desktop\" --no-open"),
@@ -290,6 +299,19 @@ mod tests {
         assert!(entry.starts_with("[Desktop Entry]\n"), "got:\n{entry}");
         assert!(entry.contains("Type=Application\n"), "got:\n{entry}");
         assert!(entry.contains("Name=Verkstead\n"), "got:\n{entry}");
+    }
+
+    /// And a Verkstead entered through a verb starts the same way through the
+    /// same verb: the executable it names has other verbs, and one of them is
+    /// the app.
+    #[test]
+    fn an_entry_for_a_verb_starts_the_executable_through_it() {
+        let entry = written("/usr/local/bin/verkstead", Some("desktop"));
+
+        assert!(
+            entry.contains("Exec=\"/usr/local/bin/verkstead\" desktop --no-open"),
+            "got:\n{entry}"
+        );
     }
 
     /// A path a desktop would otherwise read as two arguments, which is what
@@ -309,7 +331,7 @@ mod tests {
     /// session.
     #[test]
     fn an_entry_that_is_there_is_a_checked_box() {
-        assert!(says_on(&written("/usr/local/bin/verkstead-desktop")));
+        assert!(says_on(&written("/usr/local/bin/verkstead-desktop", None)));
     }
 
     /// And a desktop's own settings turning it off is the human unchecking the
@@ -334,7 +356,7 @@ mod tests {
 
         assert!(!entry.on(), "nothing has been registered yet");
 
-        entry.write().unwrap();
+        entry.write(None).unwrap();
         assert!(entry.on(), "the entry should be there and say so");
         assert!(
             std::fs::read_to_string(&entry.file)
@@ -357,7 +379,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let autostart = dir.path().join("autostart");
 
-        Entry::in_dir(&autostart).write().unwrap();
+        Entry::in_dir(&autostart).write(None).unwrap();
 
         let made: Vec<_> = std::fs::read_dir(&autostart)
             .unwrap()

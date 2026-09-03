@@ -3691,8 +3691,10 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tracing",
  "tracing-subscriber",
  "ureq",
+ "verkstead-desktop",
  "verkstead-schema",
  "verkstead-server",
 ]

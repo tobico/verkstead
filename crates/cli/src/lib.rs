@@ -7,6 +7,13 @@
 //! `project` and `branch` from the working directory, so neither is ever at the
 //! mercy of what an agent claims. The Diff is the same rule answered by the
 //! other end: the server reads it off the Worktrees the Set was asked from.
+//!
+//! **And it is the only binary** (ADR-0004, and ADR-0012 as amended). `serve`
+//! runs the server out of the same file the agent asks with, and `desktop` runs
+//! that server with a tray icon over it — so the image a sandboxed session is
+//! handed is the image its server is running, and the two halves of an ask
+//! cannot skew. The tray half is a default-on `desktop` cargo feature, and the
+//! headless artifacts are the same binary built with the feature off.
 
 use std::path::PathBuf;
 
@@ -16,6 +23,8 @@ use clap::{Parser, Subcommand};
 mod answers;
 mod ask;
 mod client;
+#[cfg(feature = "desktop")]
+mod desktop;
 mod guide;
 pub mod repo;
 mod serve;
@@ -106,6 +115,20 @@ enum Command {
     /// agent's — everything else in this binary talks *to* a server.
     Serve(verkstead_server::Config),
 
+    /// Run Verkstead on the desktop: the server, and a tray icon over it.
+    ///
+    /// `serve` with a screen in front of it — the viewer opened in the default
+    /// browser at startup unless `--no-open` says otherwise, an icon in the
+    /// system tray, and the log written to a file rather than to a terminal
+    /// nobody started this from. The flags are `serve`'s own beneath that one.
+    ///
+    /// Here rather than in a binary of its own so that the image the server is
+    /// running out of is an image that can also `ask` (ADR-0012, amended). A
+    /// build made with `--no-default-features` has no tray half and no verb for
+    /// it.
+    #[cfg(feature = "desktop")]
+    Desktop(verkstead_desktop::Desktop),
+
     /// Print the Guide: everything an agent needs in order to ask well.
     ///
     /// Markdown on stdout, exit 0. With no topic, the core Guide — the same
@@ -128,6 +151,8 @@ impl Cli {
             }) => ask::ask(file.as_deref(), deferred, &server),
             Some(Command::Answers { id, server }) => answers::answers(id, &server),
             Some(Command::Serve(config)) => serve::serve(config),
+            #[cfg(feature = "desktop")]
+            Some(Command::Desktop(app)) => desktop::desktop(app),
             Some(Command::Guide { topic }) => guide::guide(topic.as_deref()),
             None => guide::guide(None),
         }

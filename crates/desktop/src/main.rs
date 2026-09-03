@@ -21,7 +21,7 @@
 use std::process::ExitCode;
 
 use clap::Parser;
-use verkstead_desktop::{Desktop, dialog};
+use verkstead_desktop::{Desktop, dialog, startup::Entered};
 
 fn main() -> ExitCode {
     let desktop = Desktop::parse();
@@ -51,7 +51,12 @@ fn main() -> ExitCode {
     // error for whoever started this from a shell, in the log file for whoever
     // goes looking afterwards, and on the screen, because an icon that appeared
     // and vanished is otherwise the whole of what the human was told.
-    match desktop.run(listener) {
+    //
+    // Entered as the binary itself, which is what this one is: it has no verbs,
+    // so a registration naming its path and nothing else starts it — see
+    // `Entered`, and `verkstead desktop`, which is the same app entered the
+    // other way.
+    match desktop.run(listener, Entered::binary()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             let why = format!("{error:#}");
