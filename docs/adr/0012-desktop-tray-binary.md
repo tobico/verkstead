@@ -20,6 +20,27 @@ CLI never carries GUI dependencies and neither artifact can half-include the
 other. Everything ADR-0004 argued still holds per artifact: each is one file,
 downloaded whole, unable to version-skew against itself.
 
+Amended: **the artifacts keep their builds and lose their separate grammars —
+`verkstead` is the one binary again, and the tray is its `desktop` verb.** What
+ADR-0004 guarded against arrived by a door this ADR did not watch: the sandbox
+hands every session the running server's own image, bound first on the
+session's PATH so the two halves of an ask cannot skew — and once the server
+moved in-process here, that image was a desktop binary with no `ask` in it at
+all. So the desktop crate becomes a library behind a default-on `desktop`
+cargo feature of the CLI, and every image that can serve can also ask. The
+headless artifact still ships exactly as it does today: the static musl CLI is
+built with the feature off, which is also what now polices GUI dependencies
+creeping into it — GTK will not link there, so the creep this paragraph feared
+fails that leg loudly instead of arriving by accident. The nix daemon package
+builds the same slim way. What stays two files is packaging rather than
+grammar: the launchers that cannot say a verb get a shim — a windows-subsystem
+exe beside the CLI, a launcher script naming the bundle's executable on a Mac
+— and the Windows download becomes an msi carrying both, a shim beside its
+binary never having been one portable file. And the server stops trusting the
+invariant it stands on: at startup it probes its own image with `guide`, in
+the environment a session would get rather than its own, and a failed probe
+refuses sessions the way a missing image already does.
+
 The desktop app is deliberately plain about its limits:
 
 - **Sessions stay Linux-only for now.** Sandboxing is bubblewrap and the PTY is
