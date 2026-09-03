@@ -1450,6 +1450,89 @@ async fn the_verkstead_a_session_asks_with_is_the_one_serving_it() {
     );
 }
 
+/// And where that image was packed with the libraries it runs over, a session
+/// still finds one `verkstead` and nothing beside it: the launcher that points
+/// the loader at them and execs the image behind it.
+///
+/// **The AppImage is the whole of why there is a launcher.** It carries GTK and
+/// everything under it because the machine it lands on may have none of them,
+/// and `AppRun` points the loader there before it execs the binary — but a
+/// session gets no `AppRun` and no such variable, so the file alone is a binary
+/// that cannot load on exactly the machine the artifact was made for.
+///
+/// So the libraries go in with it, and the loader is pointed at them for the one
+/// binary that needs them rather than for the session: what is in that directory
+/// is `libz`, `libexpat` and forty more besides GTK, and a session whose `git`
+/// and `rustc` loaded those instead of the machine's would be a session with a
+/// quietly re-pointed toolchain. This is that, asked of a shell inside: what the
+/// image saw, and what everything else in the sandbox did not.
+#[tokio::test]
+async fn an_image_packed_with_libraries_is_reached_through_a_launcher() {
+    let mut fixture = grilling().await;
+
+    // An AppDir as `tools/build-appimage.sh` packs one: the image under
+    // `usr/bin`, and in `usr/lib` beside it a file standing in for the
+    // libraries — what a test can ask of a loader path is what is on it, and a
+    // real ELF would prove no more than a name does.
+    let appdir = fixture.state.path().join("appdir");
+    let bin = appdir.join("usr/bin");
+    let lib = appdir.join("usr/lib");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::create_dir_all(&lib).unwrap();
+    std::fs::write(lib.join("libpacked-with-it.so.0"), "not really an ELF\n").unwrap();
+
+    // Which says what it was given to load over as well as which build it is:
+    // the launcher is what put that there, and the image is where it can be
+    // read back.
+    let image = bin.join("verkstead");
+    std::fs::write(
+        &image,
+        "#!/bin/sh\nprintf 'the-servers-own over %s\\n' \"${LD_LIBRARY_PATH-nothing}\"\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&image, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    fixture.verkstead = Executable::at(image, fixture.state.path())
+        .expect("the image was just written")
+        .bundling(fixture.state.path(), Some(&appdir));
+
+    let sandbox = fixture.sandbox(vec![]);
+
+    let reported = probe(
+        &sandbox,
+        r#"
+        found=$(command -v verkstead)
+        say found "$found"
+        say ran "$(verkstead)"
+        say beside "$(ls "$(dirname "$found")")"
+        say packed "$(ls /verkstead/lib)"
+        say session-loader "${LD_LIBRARY_PATH-nothing}"
+        "#,
+    );
+
+    assert_eq!(
+        reported["found"], "/verkstead/bin/verkstead",
+        "a bare `verkstead` is still the one thing on the server's own PATH entry"
+    );
+    assert_eq!(
+        reported["ran"], "the-servers-own over /verkstead/lib",
+        "and running it runs the server's own image, over the libraries it was packed with"
+    );
+    assert_eq!(
+        reported["beside"], "verkstead",
+        "the image itself is behind the launcher rather than beside it on the PATH"
+    );
+    assert_eq!(
+        reported["packed"], "libpacked-with-it.so.0",
+        "the libraries a session gets are the ones the image was packed with"
+    );
+    assert_eq!(
+        reported["session-loader"], "nothing",
+        "and the session's own environment says nothing to the loader, so nothing else \
+         it runs loads out of that directory"
+    );
+}
+
 #[tokio::test]
 async fn no_other_checkout_on_the_machine_is_reachable() {
     let fixture = grilling().await;

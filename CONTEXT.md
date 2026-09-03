@@ -200,7 +200,9 @@ inside, it is the host's own, whole and unfiltered, because what stops a
 session doing harm is that there is nothing within reach to harm. The
 `verkstead` a session asks with is the running server's own image, first on the
 `PATH` inside, so the CLI a session asks with and the server it asks are one
-build and cannot disagree about a schema.
+build and cannot disagree about a schema — with the libraries that image was
+packed with, where it was packed with any, reached through a launcher of
+Verkstead's own so that nothing else the session runs loads out of them.
 _Avoid_: container, jail, isolation, environment
 
 **Sandbox Configuration**:

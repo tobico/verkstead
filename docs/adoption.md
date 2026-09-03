@@ -145,7 +145,9 @@ the entry point in the file runs `verkstead desktop`, because a desktop
 launcher names a file and has nowhere to say a verb — which is also why the
 flags above are the app's rather than the CLI's. The same binary is what a
 session started here is handed to ask with, so the two halves of an ask are
-one build ([ADR-0012](adr/0012-desktop-tray-binary.md), as amended).
+one build ([ADR-0012](adr/0012-desktop-tray-binary.md), as amended) — and the
+libraries it was packed with go in beside it, so a session can run it on the
+machine this file was made for as surely as you can.
 
 **A desktop with no tray host shows no icon, and nothing is wrong.** Vanilla
 GNOME is the case people meet — it draws no tray, and an AppIndicator extension

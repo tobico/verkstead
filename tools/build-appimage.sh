@@ -227,10 +227,19 @@ cp "$APPDIR/$APP_ID.png" "$APPDIR/.DirIcon"
 # desktop launcher names a file and has no way to say a verb. The agents' half
 # of the same file is reached without passing through here at all — see the
 # header.
+#
+# `APPDIR` is exported rather than only set, which is what the server inside
+# reads to find these same libraries again: a session it spawns is handed the
+# binary through a launcher of Verkstead's own that points the loader at them,
+# because a session gets none of this environment — see
+# `crates/server/src/sandbox.rs`. The runtime exports the variable itself, so
+# the export is only what covers the other way in, an AppDir run through this
+# script directly.
 cat > "$APPDIR/AppRun" << 'APPRUN'
 #!/bin/sh
 set -eu
 APPDIR="${APPDIR:-$(dirname "$(readlink -f "$0")")}"
+export APPDIR
 export LD_LIBRARY_PATH="$APPDIR/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export XDG_DATA_DIRS="$APPDIR/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
 exec "$APPDIR/usr/bin/verkstead" desktop "$@"
