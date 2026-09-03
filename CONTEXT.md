@@ -45,9 +45,10 @@ dropdown on the compose page, the roadmaps waiting to be adopted — while every
 Conversation ever worked in it goes on naming it, because a record that could
 not say which repository its work was done in would be no record. The directory
 is untouched either way. Refused while a Conversation that is neither Done nor
-Closed is on it, the way removing an Agent Profile a Conversation is set to run
-under is; and registering the same path again brings the same Repo back rather
-than making a second one.
+Closed is on it — unlike removing an Agent Profile, which is refused for
+nothing: a Repo is the directory a session is standing in, where a Profile is
+only the account the next one would have been launched under. Registering the
+same path again brings the same Repo back rather than making a second one.
 One thing about a registered Repo is configured rather than read off the
 repository: its **resolution strategy**, where its conflicts are to be resolved
 differently from every other Repo's.
@@ -815,6 +816,16 @@ account paths. The models are a list and the list is the Profile's own, because
 different Profiles reach different accounts and each can launch different
 things; none of them is a default, so which one a session runs is always picked
 — as a Pairing, alongside the Profile itself.
+**Removing one is always allowed**, and it is a delete rather than an
+unregistering: a Profile is a way in to an account, so one the human is finished
+with is one Verkstead should stop holding. Every Conversation that had chosen it
+is nulled out of — both halves of the Pairing, and the memory its Repo kept of
+what it was last grilled with — so the picker that named it reads as one nothing
+has been picked for. A session already running is untouched, having in hand the
+account it launched under; the next session that Conversation would start finds
+no account and starts nothing, and a **Steer** is how the human picks another and
+carries on. What has already run goes on saying so, a session's record holding
+the Profile's name rather than a pointer to its row.
 _Avoid_: account, identity, persona, agent config
 
 **Pairing**:

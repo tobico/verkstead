@@ -87,8 +87,11 @@ pub enum Registered {
 /// it, and what a removal changes is only what is offered for new work.
 ///
 /// Shaped like [`ProfileDeleted`](crate::ProfileDeleted), because it is the same
-/// sentence about the other thing the settings page configures — and refused for
-/// the same kind of reason.
+/// sentence about the other thing the settings page configures — with the
+/// refusal that one no longer has. A Repo is where the work is *being done*, and
+/// unregistering one out from under a run would take the directory the session
+/// is standing in; a Profile is an account the next session would have been
+/// launched under, and losing it costs that session rather than this one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum RepoRemoved {

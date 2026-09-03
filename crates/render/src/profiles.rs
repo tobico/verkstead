@@ -215,15 +215,16 @@ pub enum ProfileSaved {
 }
 
 /// What became of removing a Profile.
+///
+/// Two answers, and neither of them is a refusal about what is using it: a
+/// Profile is always the human's to take away, and the Conversations that had
+/// chosen it are nulled out rather than standing in the way. The only thing
+/// that can go wrong is asking about one that has already gone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum ProfileDeleted {
     Removed,
     NoSuchProfile,
-
-    /// A Conversation has chosen it. Taking it away would leave that
-    /// Conversation pointing at nothing.
-    InUse,
 }
 
 /// One of a Conversation's Pairings, as the page shows it: the Profile

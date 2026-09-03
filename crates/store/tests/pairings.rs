@@ -285,11 +285,14 @@ async fn a_model_a_profile_no_longer_lists_still_comes_back_as_it_was_written() 
     assert_eq!(grilling.model.as_deref(), Some(MODEL));
     assert_eq!(grilling.profile.models, ["claude-sonnet-5"]);
 }
-/// The memory never dangles: the Conversation that was grilled under a Profile
-/// still names it, so removing that Profile is refused long before the row
-/// remembering it could be left pointing at nothing.
+/// The memory never dangles: a removed Profile is taken out of the row that
+/// remembered it, in the transaction that removes it.
+///
+/// Which is what the memory is for — the next Conversation on this Repo arrives
+/// with that picker to fill in rather than prefilled with an account nobody can
+/// launch. The roles it did not name are left exactly where they were.
 #[tokio::test]
-async fn a_remembered_profile_cannot_be_removed_out_from_under_the_memory() {
+async fn a_removed_profile_is_taken_out_of_the_memory_that_named_it() {
     let (_dir, pool) = fresh_pool().await;
     let repo = repo(&pool, "verkstead").await;
     let fable = saved(&pool, "fable").await;
@@ -300,24 +303,21 @@ async fn a_remembered_profile_cannot_be_removed_out_from_under_the_memory() {
     grilled(&pool, &repo, &fable, &opus, &haiku).await;
 
     assert_eq!(
-        delete_profile(&pool, fable.id).await.unwrap(),
-        Deleting::InUse
-    );
-    assert_eq!(
         delete_profile(&pool, opus.id).await.unwrap(),
-        Deleting::InUse
-    );
-    assert_eq!(
-        delete_profile(&pool, haiku.id).await.unwrap(),
-        Deleting::InUse,
-        "the review half is in use exactly as the other two are",
+        Deleting::Deleted
     );
 
     let remembered = remembered_pairings(&pool, repo.id).await.unwrap();
-    assert_eq!(remembered.grilling.pairing().unwrap().profile.id, fable.id);
+
     assert_eq!(
-        remembered.implementation.pairing().unwrap().profile.id,
-        opus.id
+        remembered.implementation,
+        Picked::Nothing,
+        "the role that remembered it has nothing to prefill with",
+    );
+    assert_eq!(
+        remembered.grilling.pairing().unwrap().profile.id,
+        fable.id,
+        "and the roles that remembered another account still do",
     );
     assert_eq!(remembered.review.pairing().unwrap().profile.id, haiku.id);
 }

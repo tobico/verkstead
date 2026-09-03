@@ -3357,7 +3357,7 @@ async fn edit_profile(
     }
 }
 
-/// `POST /api/ui/profiles/{id}/delete` — remove one nobody is running under.
+/// `POST /api/ui/profiles/{id}/delete` — remove one, whoever had chosen it.
 async fn delete_profile(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return Json(verkstead_render::ProfileDeleted::NoSuchProfile).into_response();

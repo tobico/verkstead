@@ -314,6 +314,31 @@ impl Grilling {
         capture.text
     }
 
+    /// Wait until a session has printed something, or give up.
+    ///
+    /// For the tests whose stub prints a line to say where it has got to, and
+    /// which then do something to the workbench before letting it go on. What
+    /// the Capture holds is the whole of what a session has said, so a line
+    /// that has landed in it is a session that has reached that point.
+    async fn printed(&self, event: i64, said: &str) {
+        let deadline = Instant::now() + *PATIENCE;
+
+        loop {
+            let capture = self.capture(event).await;
+
+            if capture.contains(said) {
+                return;
+            }
+
+            assert!(
+                Instant::now() < deadline,
+                "the session never printed {said:?}. It printed: {capture:?}",
+            );
+
+            pause(Duration::from_millis(25)).await;
+        }
+    }
+
     /// The Transcript of a session, as the store holds it: every line the agent
     /// wrote in its own log, in the order it wrote them.
     ///
@@ -3266,6 +3291,86 @@ async fn a_sessions_own_log_is_followed_line_by_line_while_it_runs() {
     assert!(
         said.contains("Reading the brief.\n") && said.contains("Asking.\n"),
         "following the log should not cost the Capture anything: {said:?}"
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+}
+
+/// A session already running is untouched when the Agent Profile it was
+/// launched under is removed.
+///
+/// Which is the whole of what removing one promises about work in flight. The
+/// account is bind-mounted into a sandbox that is already standing, and what
+/// says which backend is running is the register the launch wrote rather than
+/// the row — so there is nothing left for a removed Profile to interrupt.
+///
+/// The stub prints, waits on a file the test writes, and prints again, so the
+/// removal lands squarely in the middle of the session rather than racing it:
+/// the second line is a session that went on running after the Profile it names
+/// had gone, and it could not have been printed before the removal.
+#[tokio::test]
+async fn removing_the_profile_a_running_session_was_launched_under_leaves_it_running() {
+    let spill = tempfile::tempdir().unwrap();
+    let carry_on = spill.path().join("carry-on");
+
+    let fixture = grilling_spilling(
+        spill,
+        &format!(
+            r#"
+            printf 'Reading the brief.\n'
+
+            while [ ! -f {carry_on} ]; do sleep 0.05; done
+
+            printf 'Still here.\n'
+            sleep 300
+            "#,
+            carry_on = carry_on.display(),
+        ),
+        PULL_REQUEST,
+    )
+    .await;
+
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+    fixture.printed(event, "Reading the brief.").await;
+
+    let saved: Vec<verkstead_render::ProfileEntry> = get(&fixture.app, "/api/ui/profiles").await;
+    assert!(
+        !saved.is_empty(),
+        "the bench saved the Profile it grills on"
+    );
+
+    for profile in &saved {
+        let removed: verkstead_render::ProfileDeleted = post(
+            &fixture.app,
+            &format!("/api/ui/profiles/{}/delete", profile.id),
+            &serde_json::json!({}),
+        )
+        .await;
+
+        assert_eq!(
+            removed,
+            verkstead_render::ProfileDeleted::Removed,
+            "a Profile is removed with a session running under it",
+        );
+    }
+
+    assert_eq!(
+        fixture.view().await.grilling_pairing,
+        PickedView::Nothing,
+        "the Conversation is nulled out of while its session runs",
+    );
+
+    std::fs::write(&carry_on, "").unwrap();
+    fixture.printed(event, "Still here.").await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        output(&view)
+            .expect("the session is on the Timeline")
+            .running,
+        "the session should still be sitting on its `sleep` with the Profile it \
+         was launched under gone",
     );
 
     assert_eq!(fixture.close().await, ConversationClosed::Closed);
@@ -17308,10 +17413,18 @@ async fn typing_into_a_driven_session_changes_nothing_about_when_it_ends() {
     std::fs::write(&gate, "go").unwrap();
 
     // And the run picks up behind it, with nothing pressed.
+    //
+    // The second commit rather than the second of exactly two. The run does not
+    // stop where the task does: the finish step launches behind it and this
+    // stub commits in that one too, so a Timeline holding exactly two is a
+    // moment between the two sessions rather than anything the run settles at.
+    // A machine slow enough to poll straight past that moment would never see
+    // the count it was waiting for, and the commit it is really waiting on is
+    // there in either read.
     let landed = fixture
         .until(|view| {
             let landed = commits(view);
-            (landed.len() == 2).then(|| landed[1].subject.clone())
+            (landed.len() >= 2).then(|| landed[1].subject.clone())
         })
         .await;
 
