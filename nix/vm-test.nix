@@ -715,12 +715,19 @@ testers.runNixOSTest {
         # Profile and picked again with it, and the two have to agree.
         model = "claude-opus-5"
 
+        # The account goes in the shape its own agent type keeps one, with the
+        # type beside it: a Claude Profile is the pair bound over `~/.claude`
+        # and `~/.claude.json`, where every other type this knows about is one
+        # home. Flat on the wire, which is what `ProfileAccount` is.
         saved = post(
             "/api/ui/profiles",
             {
                 "name": "vm",
-                "claude_dir": "${account}/.claude",
-                "config_file": "${account}/.claude.json",
+                "account": {
+                    "agent_type": "Claude",
+                    "claude_dir": "${account}/.claude",
+                    "config_file": "${account}/.claude.json",
+                },
                 "models": [model],
             },
         )
@@ -739,18 +746,28 @@ testers.runNixOSTest {
         started = json.loads(post("/api/ui/conversations", {"repo_id": repo_id}))
         conversation = started["Started"]["id"]
 
-        # Every precondition `start_grilling` checks, in the order it checks
-        # them — a Brief, and both Pairings picked. A Pairing is a Profile and
-        # one of its models together: there is no default model anywhere, so
-        # neither half is left to be assumed.
+        # Every precondition `start_grilling` checks — a Brief, and all three
+        # roles settled. A Pairing is a Profile and one of its models together:
+        # there is no default model anywhere, so neither half is left to be
+        # assumed.
         post(
             f"/api/ui/conversations/{conversation}/brief",
             {"markdown": "Whether the packaged unit can host a sandbox."},
         )
-        for which in ["grilling-pairing", "implementation-pairing"]:
+
+        # The two roles that can be picked away — the grilling and the review —
+        # are chosen inside a wrapper naming the Pairing, because the absence of
+        # one there is the picker's own "no grilling" row rather than a choice
+        # nobody has made yet. The implementation has no such row: something has
+        # to build the work.
+        pairing = {"profile_id": profile_id, "model": model}
+        for which, choice in [
+            ("grilling-pairing", {"pairing": pairing}),
+            ("implementation-pairing", pairing),
+            ("review-pairing", {"pairing": pairing}),
+        ]:
             chosen = post(
-                f"/api/ui/conversations/{conversation}/{which}",
-                {"profile_id": profile_id, "model": model},
+                f"/api/ui/conversations/{conversation}/{which}", choice
             )
             assert chosen == '"Chosen"', f"the {which} was answered {chosen}"
 
