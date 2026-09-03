@@ -14,7 +14,7 @@ ADR-0012 is amended beside this plan.
 ## Tasks
 
 - [x] 01: The desktop verb — [details](01-desktop-verb.md)
-- [ ] 02: The desktop binary retired into the Windows shim — [details](02-windows-shim.md)
+- [x] 02: The desktop binary retired into the Windows shim — [details](02-windows-shim.md)
 - [ ] 03: The Linux artifacts — [details](03-linux-artifacts.md)
 - [ ] 04: The macOS bundle — [details](04-macos-bundle.md)
 - [ ] 05: The Windows msi — [details](05-windows-msi.md)

@@ -72,28 +72,29 @@ use anyhow::{Context, Result, bail};
 /// part of the running command the running process cannot see: where the
 /// executable is, is [`std::env::current_exe`]'s to answer, and which of that
 /// executable's verbs was said is the caller's.
+///
+/// **Always a verb.** There was a second way in while `verkstead-desktop` was
+/// an app of its own — a binary whose flags followed its path with nothing
+/// between — and it went when that binary did. Every launch of this library is
+/// `verkstead desktop` now, whether a human typed it, a bundle's launcher
+/// script execs it or the Windows shim starts it.
 #[derive(Debug, Clone)]
-pub struct Entered(Option<String>);
+pub struct Entered(String);
 
 impl Entered {
-    /// The binary itself, whose flags follow its path with nothing between.
-    pub fn binary() -> Entered {
-        Entered(None)
-    }
-
-    /// Through `verb` of a binary with more than one way in, which is what goes
+    /// Through `verb` of the binary this app is a verb of, which is what goes
     /// on the registration's command line between the path and the flags.
     ///
     /// A verb of that binary's own grammar rather than anything a human typed,
     /// so it is written as it stands: what needs quoting on a command line is
     /// the path, and every arm quotes that already.
     pub fn verb(verb: &str) -> Entered {
-        Entered(Some(verb.to_owned()))
+        Entered(verb.to_owned())
     }
 
     /// The verb, for the arm writing the registration.
-    fn as_verb(&self) -> Option<&str> {
-        self.0.as_deref()
+    fn as_verb(&self) -> &str {
+        &self.0
     }
 }
 
@@ -202,17 +203,13 @@ mod tests {
 
     use super::*;
 
-    /// A registration kept in `dir`, written by the binary itself, which is
-    /// what the tests have instead of the machine's own.
+    /// A registration kept in `dir`, written for an app entered the one way in
+    /// there is — see [`Entered`] — which is what the tests have instead of the
+    /// machine's own.
     fn in_dir(dir: &Path) -> Startup {
-        entered_in_dir(dir, Entered::binary())
-    }
-
-    /// And the same for an app entered some other way — see [`Entered`].
-    fn entered_in_dir(dir: &Path, entered: Entered) -> Startup {
         Startup {
             entry: Some(Entry::in_dir(dir)),
-            entered,
+            entered: Entered::verb("desktop"),
         }
     }
 
@@ -260,7 +257,7 @@ mod tests {
         std::fs::write(
             &entry,
             "[Desktop Entry]\nType=Application\nName=Verkstead\n\
-             Exec=\"/somewhere/it/used/to/be/verkstead-desktop\" --no-open\n",
+             Exec=\"/somewhere/it/used/to/be/verkstead\" desktop --no-open\n",
         )
         .unwrap();
 
@@ -296,14 +293,13 @@ mod tests {
         );
     }
 
-    /// An app entered through a verb registers the verb beside the path: the
-    /// executable is the same file whichever way in was taken, so the command
-    /// line is the whole of what says which Verkstead comes up at the next
-    /// login.
+    /// The registration names the verb beside the path: the executable is the
+    /// same file every other verb is reached through, so the command line is
+    /// the whole of what says which Verkstead comes up at the next login.
     #[test]
-    fn an_app_entered_through_a_verb_registers_the_verb_too() {
+    fn the_registration_names_the_verb_beside_the_path() {
         let dir = tempfile::tempdir().unwrap();
-        let startup = entered_in_dir(dir.path(), Entered::verb("desktop"));
+        let startup = in_dir(dir.path());
 
         startup.set(true).unwrap();
 
@@ -317,32 +313,13 @@ mod tests {
         );
     }
 
-    /// And one entered as the binary itself registers what it always did: the
-    /// path, and the flags straight after it.
-    #[test]
-    fn an_app_entered_as_the_binary_registers_the_path_alone() {
-        let dir = tempfile::tempdir().unwrap();
-        let startup = in_dir(dir.path());
-
-        startup.set(true).unwrap();
-
-        let registered =
-            std::fs::read_to_string(dir.path().join("net.tobico.Verkstead.desktop")).unwrap();
-        let here = std::env::current_exe().unwrap();
-
-        assert!(
-            registered.contains(&format!("\"{}\" --no-open", here.display())),
-            "the entry should start the running executable itself, got:\n{registered}"
-        );
-    }
-
     /// A machine with nowhere to keep one has an item to grey rather than a box
     /// to tick, and the refusal it would give says what it is about.
     #[test]
     fn nowhere_to_keep_a_registration_is_an_item_that_cannot_be_picked() {
         let nowhere = Startup {
             entry: None,
-            entered: Entered::binary(),
+            entered: Entered::verb("desktop"),
         };
 
         assert!(!nowhere.possible());
@@ -378,7 +355,7 @@ mod tests {
     fn under(about: &str) -> Startup {
         Startup {
             entry: Some(Entry::under(&key(about))),
-            entered: Entered::binary(),
+            entered: Entered::verb("desktop"),
         }
     }
 
@@ -433,7 +410,7 @@ mod tests {
             .unwrap()
             .set_string(
                 crate::APP_ID,
-                r#""D:\where\it\used\to\be\verkstead-desktop.exe" --no-open"#,
+                r#""D:\where\it\used\to\be\verkstead.exe" desktop --no-open"#,
             )
             .unwrap();
 

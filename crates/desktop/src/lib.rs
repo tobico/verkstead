@@ -1,19 +1,25 @@
-//! `verkstead-desktop` — Verkstead started from an icon: the server in-process,
-//! the viewer in the default browser, and an icon in the tray over the two of
-//! them.
+//! Verkstead started from an icon: the server in-process, the viewer in the
+//! default browser, and an icon in the tray over the two of them.
+//!
+//! A library rather than a binary, and reached as `verkstead desktop` (ADR-0012,
+//! amended): one image serves the workbench and answers `ask`, so a session
+//! handed the running server's own file can ask with it. What is left of the old
+//! `verkstead-desktop` is the Windows shim beside this file, which starts that
+//! verb for a Start-menu shortcut that cannot say one.
 //!
 //! There is no window here and no second UI (ADR-0012). The viewer is embedded
 //! in the server and installs as a PWA, so what a desktop app adds is lifecycle
 //! rather than interface: take the address, run the server, put the viewer in
 //! front of the human, and stay out of the way. The headless `verkstead` is
 //! untouched by any of it — the GUI dependencies are this crate's alone, which
-//! is why this is a crate at all.
+//! is why this is a crate at all, and turning the CLI's `desktop` feature off is
+//! what leaves them out.
 //!
-//! **The address is settled first, and by this binary.** A Verkstead started
-//! from an icon has no terminal for a startup error to be read in, so the one
-//! failure that has to be *shown* — something already listening on the port —
-//! is found before the server has made anything, while there is still nothing
-//! to undo. That is [`Desktop::settle`], and it is why the server has a
+//! **The address is settled first, and by the app.** A Verkstead started from an
+//! icon has no terminal for a startup error to be read in, so the one failure
+//! that has to be *shown* — something already listening on the port — is found
+//! before the server has made anything, while there is still nothing to undo.
+//! That is [`Desktop::settle`], and it is why the server has a
 //! [`verkstead_server::run_on`] to be handed the socket.
 //!
 //! **The main thread is the tray's**, and the server runs beside it. The
@@ -39,10 +45,10 @@
 //! **And what it registers is the invocation that started it**, which is the one
 //! thing this library is told rather than reads. The image it is running out of
 //! has other verbs — `verkstead ask` is the same file — so the executable's path
-//! alone is no longer a command that starts the app. Whatever entered here says
-//! which way it came in: see [`startup::Entered`], handed to [`Desktop::run`].
+//! alone is not a command that starts the app. Whatever entered here says which
+//! verb it came in through: see [`startup::Entered`], handed to [`Desktop::run`].
 
-/// The two things this binary draws that carry words.
+/// The two things this app draws that carry words.
 pub mod dialog;
 /// Where the server's `tracing` goes, and what View Logs opens.
 pub mod logs;
@@ -79,13 +85,12 @@ pub const APP_ID: &str = "net.tobico.Verkstead";
 /// is what points `verkstead serve` at them, said the same way and read from the
 /// same environment. Nothing here resolves a directory — started with nothing
 /// said, that is the platform's own Data Directory, which is the server's
-/// default rather than this binary's doing.
-#[derive(Debug, clap::Parser)]
-#[command(
-    name = "verkstead-desktop",
-    version,
-    about = "Verkstead on the desktop"
-)]
+/// default rather than the app's doing.
+///
+/// [`clap::Args`] rather than [`clap::Parser`], because this is what a verb
+/// takes rather than what a binary is: what names the command, versions it and
+/// describes it is `crates/cli`'s own enum — see `Command::Desktop` there.
+#[derive(Debug, clap::Args)]
 pub struct Desktop {
     /// Don't open the viewer in a browser at startup.
     ///
@@ -117,16 +122,15 @@ impl Desktop {
     /// viewer opened in front of the human unless [`Desktop::no_open`] said not
     /// to.
     ///
-    /// **The runtime runs on threads of its own.** `crates/cli` builds one and
-    /// blocks the main thread on it; this binary cannot, because the toolkit
+    /// **The runtime runs on threads of its own.** `verkstead serve` builds one
+    /// and blocks the main thread on it; this verb cannot, because the toolkit
     /// the tray icon is drawn with wants the main thread and will not share it.
     /// So the server is spawned onto a runtime and the main thread goes to the
     /// tray's loop — or waits on the server, where there is no tray to have.
     ///
-    /// `entered` is how this app was run — the verb it came in through, where
-    /// it came in through one — which is what a startup registration written
-    /// from in here has to name beside the executable's own path. See
-    /// [`startup::Entered`].
+    /// `entered` is how this app was run — the verb it came in through — which
+    /// is what a startup registration written from in here has to name beside
+    /// the executable's own path. See [`startup::Entered`].
     ///
     /// **Exit is a stop where it stands.** The server has never had a shutdown
     /// path — nothing in it handles a signal, and under systemd it is stopped
@@ -138,9 +142,9 @@ impl Desktop {
     /// from outside the process on a Mac, which has no such flag. Neither
     /// needs a word from here, which is why Exit can be a stop at all.
     pub fn run(self, listener: TcpListener, entered: startup::Entered) -> Result<()> {
-        // Before anything has anything to report, and by this binary rather
-        // than by the server: where the events go is the starting binary's
-        // call, and this one was started from an icon — see [`logs`].
+        // Before anything has anything to report, and by the app rather than by
+        // the server: where the events go is the starting binary's call, and
+        // this verb of it was started from an icon — see [`logs`].
         let logging = logs::start();
 
         // And before anything else this launch does, because it is about *this*
@@ -336,7 +340,7 @@ fn viewer_url(listen: SocketAddr) -> String {
     format!("http://{host}/")
 }
 
-/// The address could not be taken, which is the one failure this binary draws
+/// The address could not be taken, which is the one failure the app draws
 /// rather than prints.
 ///
 /// A second copy of the app and the daemon a NixOS module starts are the two

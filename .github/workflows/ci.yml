@@ -170,11 +170,11 @@ jobs:
   # does. This job is the Windows machine this project has, and it is what will
   # say the port goes on holding.
   #
-  # The desktop crate is in it, which is where the exe comes from: its tray, its
-  # dialogs and its Run key are Win32, and this is the machine that compiles
-  # them. Its own suite says at each test what a Windows machine can be asked —
-  # see `crates/desktop/tests/desktop.rs`, and the registry tests in
-  # `crates/desktop/src/startup/run_key.rs`, which run nowhere else.
+  # The desktop crate is in it, which is where the shim comes from: its tray,
+  # its dialogs and its Run key are Win32, and this is the machine that compiles
+  # them. The registry tests in `crates/desktop/src/startup/run_key.rs` run
+  # nowhere else, and neither does `crates/desktop/tests/shim.rs` — the app
+  # itself is `crates/cli/tests/desktop.rs`, which runs on every platform.
   windows:
     name: Windows
     runs-on: windows-2025
@@ -207,17 +207,24 @@ jobs:
       # compile without the viewer.
       #
       # The desktop crate's build script compiles the icon and the version
-      # information into the exe with the SDK's `rc.exe`, which is the runner
+      # information into the shim with the SDK's `rc.exe`, which is the runner
       # image's own — see `crates/desktop/build.rs`.
+      #
+      # **The `shim` feature is what builds that exe at all**, and this is the
+      # only job that passes it: Cargo has no way to say a `[[bin]]` is one
+      # platform's, so the feature says it instead and a workspace build
+      # anywhere else produces no `verkstead-desktop` — see
+      # `crates/desktop/Cargo.toml`.
       - name: Build
-        run: cargo build --workspace --all-targets
+        run: cargo build --workspace --all-targets --features verkstead-desktop/shim
 
       # What is left out of the run is left out of the build above: a suite that
       # stands on a mount namespace, on Apple's sandbox or on a pseudo-terminal
       # is `cfg`-gated at its own file, so this is the whole of what a Windows
-      # Verkstead has to say for itself.
+      # Verkstead has to say for itself. The shim's own suite is in it under the
+      # same feature, which is what runs the exe the build above made.
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --features verkstead-desktop/shim
 
   # The viewer's own checks, on the viewer's own sources. Nothing here waits on
   # the Rust job and nothing there waits on this one: neither produces anything

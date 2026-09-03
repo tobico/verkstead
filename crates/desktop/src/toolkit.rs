@@ -29,8 +29,8 @@ use anyhow::Result;
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 compile_error!(
-    "verkstead-desktop draws its tray with GTK on Linux, with AppKit on macOS and with Win32 on \
-     Windows, and this is none of the three."
+    "the Verkstead desktop app draws its tray with GTK on Linux, with AppKit on macOS and with Win32 \
+     on Windows, and this is none of the three."
 );
 
 /// Start the toolkit, on the thread the loop is to run on.

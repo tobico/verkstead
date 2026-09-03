@@ -75,13 +75,12 @@ impl Entry {
     }
 
     /// Write the entry, naming the executable that is running and the `verb` it
-    /// was entered through, where it was entered through one — see
-    /// [`Entered`](super::Entered).
+    /// was entered through — see [`Entered`](super::Entered).
     ///
     /// The autostart directory is made where it is not there: a machine that
     /// has never registered anything has never needed one, and the
     /// specification's answer is to make it.
-    pub(super) fn write(&self, verb: Option<&str>) -> Result<()> {
+    pub(super) fn write(&self, verb: &str) -> Result<()> {
         let exe = executable()?;
         let exe = exe.to_str().with_context(|| {
             format!(
@@ -133,8 +132,7 @@ fn autostart_dir(config: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> 
     Some(config.join(AUTOSTART))
 }
 
-/// The entry as it is written, for a Verkstead at `exe` entered through `verb`
-/// — or through no verb at all, which is the binary started as itself.
+/// The entry as it is written, for a Verkstead at `exe` entered through `verb`.
 ///
 /// **`--no-open` is in it**, which is the one decision the entry makes: a
 /// startup launch is an ordinary launch of this app in every other way, and a
@@ -148,15 +146,13 @@ fn autostart_dir(config: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> 
 /// The icon is named rather than pointed at, the way the specification means:
 /// what a desktop draws beside this entry is whatever it has installed under
 /// the app id, and a desktop that has none draws none.
-fn written(exe: &str, verb: Option<&str>) -> String {
-    let verb = verb.map(|verb| format!(" {verb}")).unwrap_or_default();
-
+fn written(exe: &str, verb: &str) -> String {
     format!(
         "[Desktop Entry]\n\
          Type=Application\n\
          Name={NAME}\n\
          Comment={COMMENT}\n\
-         Exec={}{verb} --no-open\n\
+         Exec={} {verb} --no-open\n\
          Icon={APP_ID}\n\
          Terminal=false\n",
         quoted(exe)
@@ -220,10 +216,9 @@ fn says_on(entry: &str) -> bool {
 /// absolute one: an AppImage runs out of a filesystem its runtime mounted for
 /// this run alone, so `current_exe` there is a path under `/tmp` that will not
 /// be anything at the next login, and the runtime sets that variable to say
-/// where the file the human actually has is. Stage 03 is what makes an AppImage
-/// of this binary; the reading belongs here, beside the writing that would
-/// otherwise put a path with a lifetime of one run into a file meant to outlive
-/// every run.
+/// where the file the human actually has is. The reading belongs here, beside
+/// the writing that would otherwise put a path with a lifetime of one run into
+/// a file meant to outlive every run.
 fn executable() -> Result<PathBuf> {
     let appimage = std::env::var_os("APPIMAGE")
         .map(PathBuf::from)
@@ -287,31 +282,20 @@ mod tests {
     }
 
     /// What the entry starts, and the one decision it makes about how: the app
-    /// as anybody else starts it, with the browser left alone.
+    /// as anybody else starts it — through the verb, because the executable it
+    /// names has other verbs and only one of them is the app — with the browser
+    /// left alone.
     #[test]
-    fn the_entry_starts_this_executable_without_opening_a_browser() {
-        let entry = written("/usr/local/bin/verkstead-desktop", None);
-
-        assert!(
-            entry.contains("Exec=\"/usr/local/bin/verkstead-desktop\" --no-open"),
-            "got:\n{entry}"
-        );
-        assert!(entry.starts_with("[Desktop Entry]\n"), "got:\n{entry}");
-        assert!(entry.contains("Type=Application\n"), "got:\n{entry}");
-        assert!(entry.contains("Name=Verkstead\n"), "got:\n{entry}");
-    }
-
-    /// And a Verkstead entered through a verb starts the same way through the
-    /// same verb: the executable it names has other verbs, and one of them is
-    /// the app.
-    #[test]
-    fn an_entry_for_a_verb_starts_the_executable_through_it() {
-        let entry = written("/usr/local/bin/verkstead", Some("desktop"));
+    fn the_entry_starts_this_executable_through_the_verb_without_opening_a_browser() {
+        let entry = written("/usr/local/bin/verkstead", "desktop");
 
         assert!(
             entry.contains("Exec=\"/usr/local/bin/verkstead\" desktop --no-open"),
             "got:\n{entry}"
         );
+        assert!(entry.starts_with("[Desktop Entry]\n"), "got:\n{entry}");
+        assert!(entry.contains("Type=Application\n"), "got:\n{entry}");
+        assert!(entry.contains("Name=Verkstead\n"), "got:\n{entry}");
     }
 
     /// A path a desktop would otherwise read as two arguments, which is what
@@ -320,8 +304,8 @@ mod tests {
     #[test]
     fn a_path_with_a_space_in_it_is_still_one_argument() {
         assert_eq!(
-            quoted("/home/you/My Apps/verkstead-desktop"),
-            "\"/home/you/My Apps/verkstead-desktop\"",
+            quoted("/home/you/My Apps/verkstead"),
+            "\"/home/you/My Apps/verkstead\"",
         );
         assert_eq!(quoted("/home/$you/it`s"), "\"/home/\\\\$you/it\\\\`s\"");
         assert_eq!(quoted("/home/you/a\\b"), "\"/home/you/a\\\\\\\\b\"");
@@ -331,7 +315,7 @@ mod tests {
     /// session.
     #[test]
     fn an_entry_that_is_there_is_a_checked_box() {
-        assert!(says_on(&written("/usr/local/bin/verkstead-desktop", None)));
+        assert!(says_on(&written("/usr/local/bin/verkstead", "desktop")));
     }
 
     /// And a desktop's own settings turning it off is the human unchecking the
@@ -356,7 +340,7 @@ mod tests {
 
         assert!(!entry.on(), "nothing has been registered yet");
 
-        entry.write(None).unwrap();
+        entry.write("desktop").unwrap();
         assert!(entry.on(), "the entry should be there and say so");
         assert!(
             std::fs::read_to_string(&entry.file)
@@ -379,7 +363,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let autostart = dir.path().join("autostart");
 
-        Entry::in_dir(&autostart).write(None).unwrap();
+        Entry::in_dir(&autostart).write("desktop").unwrap();
 
         let made: Vec<_> = std::fs::read_dir(&autostart)
             .unwrap()

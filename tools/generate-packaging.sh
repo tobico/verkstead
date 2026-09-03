@@ -41,17 +41,20 @@ mkdir -p "$OUT"
 # clicked, so it opens the viewer, which is the whole of what clicking Verkstead
 # is for.
 #
-# `Exec` is the bare name rather than a path: inside an AppImage the file lives
-# at a path made for that one run, and what installs this entry — the desktop's
-# own integration, or a package's install step — is what knows where the binary
-# ended up. `Icon` is named rather than pointed at for the same reason, and it
-# is the app id, which is what the icons below are installed as.
+# `Exec` is the bare name and then the verb: the tray app is `verkstead desktop`
+# rather than a binary of its own (ADR-0012, amended), and an entry naming the
+# path alone would start a Verkstead that printed the Guide. The name rather
+# than a path because inside an AppImage the file lives at a path made for that
+# one run, and what installs this entry — the desktop's own integration, or a
+# package's install step — is what knows where the binary ended up. `Icon` is
+# named rather than pointed at for the same reason, and it is the app id, which
+# is what the icons below are installed as.
 cat > "$OUT/$APP_ID.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=Verkstead
 Comment=The workbench, in the system tray
-Exec=verkstead-desktop
+Exec=verkstead desktop
 Icon=$APP_ID
 Terminal=false
 Categories=Development;
@@ -156,9 +159,9 @@ fi
 # And the Windows icon, which is those same downscales again inside the one
 # container Windows reads an executable's icon out of. It is not copied into a
 # bundle the way the .icns is: `crates/desktop/build.rs` compiles it into
-# verkstead-desktop.exe as a resource, so Explorer, the taskbar and the
-# window that a dialog opens all draw Verkstead out of the file itself — which
-# is what a portable exe with nothing beside it needs.
+# verkstead-desktop.exe — the shim a Start-menu shortcut names — as a resource,
+# so Explorer, the taskbar and the window that a dialog opens all draw Verkstead
+# out of the file itself.
 #
 # Written with `magick` rather than by hand, which is where this differs from
 # the .icns above: the tool that writes an .icns is a Mac's and the format had

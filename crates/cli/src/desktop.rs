@@ -13,14 +13,16 @@
 //!
 //! **Nothing here is the app's own doing.** Settling the address before the
 //! server has made anything, the dialogs, the log file, `--no-open` — all of it
-//! is the library's, said exactly as `verkstead-desktop` says it, so that the
-//! two ways in are one app.
+//! is the library's; this verb is the one door into it. The Windows shim that
+//! stands in front of a Start-menu shortcut comes in the same way, running
+//! `verkstead desktop` rather than reaching for the library itself.
 
 use anyhow::{Result, anyhow};
 use verkstead_desktop::{Desktop, dialog, startup::Entered};
 
 /// What this verb is called, which is what a startup registration written from
-/// inside it has to name after the executable's path.
+/// inside it has to name after the executable's path — and what the Windows
+/// shim says to reach it; see `crates/desktop/src/main.rs`.
 ///
 /// Said here rather than read back off `argv`: a registration is a command line
 /// the platform will run at every login for years, and what is in `argv` is

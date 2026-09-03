@@ -3717,7 +3717,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tray-icon",
- "ureq",
  "verkstead-server",
  "windows-registry",
  "windows-sys 0.61.2",

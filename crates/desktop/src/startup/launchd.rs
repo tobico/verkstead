@@ -83,13 +83,12 @@ impl Entry {
     }
 
     /// Write the agent, naming the executable that is running and the `verb` it
-    /// was entered through, where it was entered through one — see
-    /// [`Entered`](super::Entered).
+    /// was entered through — see [`Entered`](super::Entered).
     ///
     /// The agents directory is made where it is not there: a machine that has
     /// never registered anything has never needed one, and `launchd` reads the
     /// directory rather than requiring it.
-    pub(super) fn write(&self, verb: Option<&str>) -> Result<()> {
+    pub(super) fn write(&self, verb: &str) -> Result<()> {
         let exe = std::env::current_exe().context("finding the path of the running executable")?;
         let exe = exe
             .to_str()
@@ -142,8 +141,7 @@ fn agents_dir(home: Option<&Path>) -> Option<PathBuf> {
     Some(home.filter(|dir| dir.has_root())?.join(LAUNCH_AGENTS))
 }
 
-/// The agent as it is written, for a Verkstead at `exe` entered through `verb`
-/// — or through no verb at all, which is the binary started as itself.
+/// The agent as it is written, for a Verkstead at `exe` entered through `verb`.
 ///
 /// **`--no-open` is in it**, which is the one decision the agent makes and the
 /// one the Linux entry makes: a login start is an ordinary launch of this app
@@ -159,11 +157,7 @@ fn agents_dir(home: Option<&Path>) -> Option<PathBuf> {
 /// Verkstead then rather than to wait for something to ask. Nothing else is in
 /// it: no `KeepAlive`, because Exit on the tray menu is a human stopping
 /// Verkstead and an agent that restarted it would be arguing with them.
-fn written(exe: &str, verb: Option<&str>) -> String {
-    let verb = verb
-        .map(|verb| format!("\t\t<string>{}</string>\n", escaped(verb)))
-        .unwrap_or_default();
-
+fn written(exe: &str, verb: &str) -> String {
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
          <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \
@@ -175,14 +169,15 @@ fn written(exe: &str, verb: Option<&str>) -> String {
          \t<key>ProgramArguments</key>\n\
          \t<array>\n\
          \t\t<string>{}</string>\n\
-         {verb}\
+         \t\t<string>{}</string>\n\
          \t\t<string>--no-open</string>\n\
          \t</array>\n\
          \t<key>RunAtLoad</key>\n\
          \t<true/>\n\
          </dict>\n\
          </plist>\n",
-        escaped(exe)
+        escaped(exe),
+        escaped(verb)
     )
 }
 
@@ -274,38 +269,19 @@ mod tests {
         );
         assert!(
             written(
-                "/Applications/Verkstead.app/Contents/MacOS/verkstead-desktop",
-                None
+                "/Applications/Verkstead.app/Contents/MacOS/verkstead",
+                "desktop"
             )
             .contains("<key>Label</key>\n\t<string>net.tobico.Verkstead</string>"),
         );
     }
 
     /// What the agent starts, and the one decision it makes about how: the app
-    /// as anybody else starts it, with the browser left alone.
+    /// as anybody else starts it — through the verb, which is one argument of
+    /// the array in front of the flag — with the browser left alone.
     #[test]
-    fn the_agent_starts_this_executable_without_opening_a_browser() {
-        let agent = written("/usr/local/bin/verkstead-desktop", None);
-
-        assert!(
-            agent.contains(
-                "\t<key>ProgramArguments</key>\n\
-                 \t<array>\n\
-                 \t\t<string>/usr/local/bin/verkstead-desktop</string>\n\
-                 \t\t<string>--no-open</string>\n\
-                 \t</array>\n"
-            ),
-            "got:\n{agent}"
-        );
-        assert!(agent.starts_with("<?xml version=\"1.0\""), "got:\n{agent}");
-        assert!(agent.contains("<plist version=\"1.0\">\n"), "got:\n{agent}");
-    }
-
-    /// And a Verkstead entered through a verb starts the same way through the
-    /// same verb, which is one more argument in the array before the flag.
-    #[test]
-    fn an_agent_for_a_verb_starts_the_executable_through_it() {
-        let agent = written("/usr/local/bin/verkstead", Some("desktop"));
+    fn the_agent_starts_this_executable_through_the_verb_without_opening_a_browser() {
+        let agent = written("/usr/local/bin/verkstead", "desktop");
 
         assert!(
             agent.contains(
@@ -318,6 +294,8 @@ mod tests {
             ),
             "got:\n{agent}"
         );
+        assert!(agent.starts_with("<?xml version=\"1.0\""), "got:\n{agent}");
+        assert!(agent.contains("<plist version=\"1.0\">\n"), "got:\n{agent}");
     }
 
     /// A path with something in it that XML reads as markup, which is what the
@@ -326,20 +304,20 @@ mod tests {
     #[test]
     fn a_path_xml_would_read_as_markup_is_still_a_path() {
         assert_eq!(
-            escaped("/Users/you/Apps & Things/verkstead-desktop"),
-            "/Users/you/Apps &amp; Things/verkstead-desktop",
+            escaped("/Users/you/Apps & Things/verkstead"),
+            "/Users/you/Apps &amp; Things/verkstead",
         );
         assert_eq!(escaped("/Users/you/<a>/b"), "/Users/you/&lt;a&gt;/b");
         assert_eq!(
-            escaped("/Users/you/My Apps/verkstead-desktop"),
-            "/Users/you/My Apps/verkstead-desktop",
+            escaped("/Users/you/My Apps/verkstead"),
+            "/Users/you/My Apps/verkstead",
         );
     }
 
     /// The whole of the state: the file is there, so Verkstead starts at login.
     #[test]
     fn an_agent_that_is_there_is_a_checked_box() {
-        assert!(says_on(&written("/usr/local/bin/verkstead-desktop", None)));
+        assert!(says_on(&written("/usr/local/bin/verkstead", "desktop")));
     }
 
     /// And an agent somebody turned off is the human unchecking the box,
@@ -374,7 +352,7 @@ mod tests {
 
         assert!(!entry.on(), "nothing has been registered yet");
 
-        entry.write(None).unwrap();
+        entry.write("desktop").unwrap();
         assert!(entry.on(), "the agent should be there and say so");
         assert!(
             std::fs::read_to_string(&entry.file)
@@ -401,11 +379,11 @@ mod tests {
 
         std::fs::write(
             &entry.file,
-            written("/somewhere/it/used/to/be/verkstead-desktop", None),
+            written("/somewhere/it/used/to/be/verkstead", "desktop"),
         )
         .unwrap();
 
-        entry.write(None).unwrap();
+        entry.write("desktop").unwrap();
 
         let registered = std::fs::read_to_string(&entry.file).unwrap();
         let here = std::env::current_exe().unwrap();
@@ -427,7 +405,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let agents = dir.path().join("Library/LaunchAgents");
 
-        Entry::in_dir(&agents).write(None).unwrap();
+        Entry::in_dir(&agents).write("desktop").unwrap();
 
         let made: Vec<_> = std::fs::read_dir(&agents)
             .unwrap()
