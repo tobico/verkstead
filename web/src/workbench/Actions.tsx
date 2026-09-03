@@ -192,10 +192,15 @@ export const RESUME_REFUSAL: Record<Resumed, string> = {
     "Nothing on the record says how this work is being built, so there is no run to pick up.",
   NothingToWork:
     "There is no backlog left to work and nothing was ever written on this branch, so there is nothing built here to carry anywhere. Set the next thing going by hand.",
+  // Steer rather than the brief, which is where the drafting presses send
+  // somebody: a conversation's pairings are fixed when its work starts, so the
+  // pickers on the brief are past changing by the time Resume is a row at all.
+  // Which is how a conversation arrives here — the agent profile it was set to
+  // run under was removed, and steering is how another is picked.
   NoGrillingPairing:
-    "Choose a grilling profile and model first, on the brief.",
+    "The account this conversation grills under is gone. Steer it into Grilling and pick another.",
   NoImplementationPairing:
-    "Choose an implementation profile and model first, on the brief.",
+    "The account this conversation builds under is gone. Steer it into Implementing and pick another.",
   NoFollowUpBrief:
     "Nothing on the record says what this follow-up was opened about. Steer it into Follow-up again with a fresh brief.",
 };

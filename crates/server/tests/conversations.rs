@@ -2610,6 +2610,78 @@ async fn steering_into_grilling_with_no_brief_anywhere_is_refused_by_name() {
     );
 }
 
+/// A Conversation whose Agent Profile was removed out from under it is rescued
+/// by a steer, which is the whole of what removing one costs.
+///
+/// The steer is refused with nothing picked, because a Conversation with no
+/// account settled is one nothing could be started in — and that refusal is the
+/// modal asking for the account, so the same submit carrying one goes through
+/// and the work runs under it. Nothing else about the Conversation moved: it is
+/// where it was, on the branch it was on, with the round it was in.
+#[tokio::test]
+async fn a_conversation_whose_profile_was_removed_is_steered_back_onto_another() {
+    let (watched, _dir, app, _repo, repo_id) = workbench().await;
+    let id = grilling(&app, watched.path(), repo_id).await;
+
+    let interviewing = opened(&app, id)
+        .await
+        .grilling_pairing
+        .pairing()
+        .expect("the fixture picks one per role")
+        .profile
+        .id;
+
+    let removed: verkstead_render::ProfileDeleted = post(
+        &app,
+        &format!("/api/ui/profiles/{interviewing}/delete"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(removed, verkstead_render::ProfileDeleted::Removed);
+
+    assert_eq!(
+        opened(&app, id).await.grilling_pairing,
+        PickedView::Nothing,
+        "the role that named it has nothing settled for it any more",
+    );
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        steer_grilling(&app, id, None).await,
+        ConversationSteered::NoPairing,
+        "a state a session runs in needs one, and the modal is where it is picked",
+    );
+
+    let rescue = profile(&app, watched.path(), "rescue").await;
+
+    let steered: ConversationSteered = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/steer/submit"),
+        &serde_json::json!({
+            "target": "Grilling",
+            "interrupt": false,
+            "pairing": { "profile_id": rescue, "model": "claude-opus-5" },
+        }),
+    )
+    .await;
+    assert_eq!(steered, ConversationSteered::Steered);
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(
+        view.grilling_pairing
+            .pairing()
+            .expect("the steer settled the role that had lost its account")
+            .profile
+            .id,
+        rescue,
+    );
+    assert_eq!(view.state, Lifecycle::Grilling);
+}
+
 /// The Pairing picked in the modal for a steer into Grilling is the *grilling*
 /// one, and it is recorded as the Conversation's own.
 ///
