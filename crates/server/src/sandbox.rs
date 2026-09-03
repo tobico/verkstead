@@ -640,7 +640,8 @@ impl Home {
 /// the server cannot find, and one it found that will not run. The second is
 /// asked at startup by running it — see [`Executable::probed`] — because the
 /// invariant this type exists to keep is not one an existence check can stand
-/// on.
+/// on. Both say *why* in the startup log as they happen, because by the time a
+/// session is refused for want of an image there is nothing left to look at.
 #[derive(Debug, Clone)]
 pub struct Executable {
     path: PathBuf,
@@ -659,9 +660,35 @@ impl Executable {
     /// `None` where the process cannot say what it is running, and `None` too
     /// where what it names is no longer a file: a binary replaced under a
     /// running server is exactly that, and `/proc` answers for it with a path
-    /// marked `(deleted)` that no bind can be made from.
+    /// marked `(deleted)` that no bind can be made from. **Both are said in the
+    /// log here**, because neither is said anywhere else: the session that is
+    /// refused for want of an image names which session it cost and cannot name
+    /// why, there being nothing left by then to look at.
     pub fn of_the_server(data_dir: &Path) -> Option<Executable> {
-        Executable::at(std::env::current_exe().ok()?, data_dir)
+        let running = match std::env::current_exe() {
+            Ok(running) => running,
+            Err(error) => {
+                tracing::error!(
+                    error = ?error,
+                    "Verkstead cannot say what image it is running, so no session can be \
+                     equipped to ask with it and none will be started"
+                );
+                return None;
+            }
+        };
+
+        let image = Executable::at(running.clone(), data_dir);
+
+        if image.is_none() {
+            tracing::error!(
+                verkstead = %running.display(),
+                "Verkstead's own image is not a file any more — a binary replaced under a \
+                 running server reads exactly like this — so no session can be equipped to \
+                 ask with it and none will be started"
+            );
+        }
+
+        image
     }
 
     /// A named one, which is how a test puts the real CLI where the server's own

@@ -863,8 +863,12 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
     // Not a reason to refuse to start, unlike the two above. A server with no
     // image to hand over has nothing to equip a session with, and which session
     // that costs is the thing worth reporting — so *which* is said as one is
-    // started rather than here, where there is nothing to name, and *why* is
-    // said by the probe itself, here, where the file is in hand.
+    // started rather than here, where there is nothing to name.
+    //
+    // And *why* is said here, by whichever of the two steps found out: neither
+    // an image that could not be found nor one that will not run leaves anything
+    // to look at by the time a session is refused, so each says so as it
+    // happens. See [`Executable::of_the_server`] and [`Executable::probed`].
     let verkstead =
         sandbox::Executable::of_the_server(&data_dir).and_then(sandbox::Executable::probed);
 
