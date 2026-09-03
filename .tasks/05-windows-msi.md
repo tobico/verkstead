@@ -13,7 +13,7 @@ ships as it does today.
 
 ## Acceptance criteria
 
-- [ ] The msi installs per-user, and its Start-menu entry opens the app with
+- [x] The msi installs per-user, and its Start-menu entry opens the app with
       no console window.
-- [ ] `verkstead guide` answers in a fresh terminal after the install.
-- [ ] The release workflow uploads the msi where it uploaded the portable exe.
+- [x] `verkstead guide` answers in a fresh terminal after the install.
+- [x] The release workflow uploads the msi where it uploaded the portable exe.

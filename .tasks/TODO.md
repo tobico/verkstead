@@ -17,6 +17,6 @@ ADR-0012 is amended beside this plan.
 - [x] 02: The desktop binary retired into the Windows shim — [details](02-windows-shim.md)
 - [x] 03: The Linux artifacts — [details](03-linux-artifacts.md)
 - [x] 04: The macOS bundle — [details](04-macos-bundle.md)
-- [ ] 05: The Windows msi — [details](05-windows-msi.md)
+- [x] 05: The Windows msi — [details](05-windows-msi.md)
 - [ ] 06: The startup probe — [details](06-startup-probe.md)
 - [ ] 07: The record — [details](07-the-record.md)
