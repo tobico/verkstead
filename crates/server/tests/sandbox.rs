@@ -722,8 +722,7 @@ file() {
 fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
     let whole = format!("{PROBE}\n{script}\n");
 
-    let output = sandbox
-        .command(&[SH, "-c", &whole])
+    let output = Command::from(&sandbox.command(&[SH, "-c", &whole]))
         .stdin(Stdio::null())
         .output()
         .expect("bwrap should be on the PATH: the dev shell declares bubblewrap");

@@ -30,7 +30,6 @@ use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
 use sqlx::SqlitePool;
-use tokio::process::{Child, Command};
 use tokio::sync::{oneshot, watch};
 use tokio::task::JoinHandle;
 use verkstead_render::SessionsHere;
@@ -48,7 +47,7 @@ use crate::screen::Live;
 use crate::settings::Settings;
 use crate::skills::{self, Skills};
 use crate::store;
-use crate::terminal::Terminal;
+use crate::terminal::{Child, Terminal};
 use crate::transcript::Tail;
 
 /// How much of what is running on a pseudo-terminal to take off it at once.
@@ -1285,9 +1284,10 @@ struct Running {
 
 /// Whether a Verkstead built for `platform` runs sessions at all.
 ///
-/// The one place the fact is decided, and the whole of the decision: a session's
-/// agent runs on a pseudo-terminal, both Unixes have one to open and Windows has
-/// not — see [`crate::terminal`], whose Windows arm is a terminal that refuses.
+/// The one place the fact is decided, and the whole of the decision: the two
+/// Unixes run sessions and a Windows Verkstead does not start one yet. What
+/// stood in the way of one was a terminal and a Sandbox, and the terminal is
+/// there now — see [`crate::terminal`], whose Windows arm is a pseudoconsole.
 ///
 /// A function of the platform rather than a `cfg!`, for the reason
 /// [`Platform`] is a value: the arm this machine will never run is still an arm
@@ -1788,7 +1788,10 @@ impl Sessions {
         // to have. See [`Sessions::channel`].
         let _launching = self.launching(conversation_id, pairing.profile.agent_type());
 
-        let child = match terminal.spawn(&mut captured(&sandbox, &argv)) {
+        // `argv` inside the sandbox with nothing between the two, and the three
+        // streams left to the terminal — which is the whole of what says a
+        // session runs on one.
+        let child = match terminal.spawn(&sandbox.command(&argv)) {
             Ok(child) => child,
             Err(error) => {
                 tracing::error!(
@@ -2128,21 +2131,6 @@ fn session_name() -> Option<String> {
     }
 
     Some(name)
-}
-
-/// `argv` as a session: run inside `sandbox`, with nothing between the two.
-///
-/// One argument vector all the way down, and the three streams are left to
-/// [`Terminal::spawn`] — which is the whole of what says a session runs on a
-/// terminal.
-fn captured(sandbox: &Sandbox, argv: &[String]) -> Command {
-    let mut command = Command::from(sandbox.command(argv));
-
-    // The relay ends the session itself, and a child left behind by a panicking
-    // task is one nothing would ever reap.
-    command.kill_on_drop(true);
-
-    command
 }
 
 /// Where a running session's output goes: the Timeline Event it is written into,

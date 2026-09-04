@@ -42,8 +42,9 @@
 //! that has one. Nothing stands in for the shell there: the shell is the thing.
 //!
 //! **On the platforms a session runs on.** The sandbox is bwrap and the
-//! terminal is a real pseudo-terminal, and a Windows Verkstead has neither: it
-//! runs no session at all, and says so above the spawn rather than under it.
+//! terminal is a real pseudo-terminal. A Windows Verkstead has a terminal of
+//! its own now — a pseudoconsole — and no sandbox yet, so it runs no session at
+//! all and says so above the spawn rather than under it.
 #![cfg(unix)]
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};

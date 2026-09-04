@@ -74,7 +74,6 @@ use axum::extract::ws::{WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response as HttpResponse};
-use tokio::process::{Child, Command};
 use tokio::sync::oneshot;
 use verkstead_render::TerminalOpened;
 
@@ -85,7 +84,7 @@ use crate::sandbox::outliving;
 use crate::screen::Live;
 use crate::sessions::CHUNK;
 use crate::store;
-use crate::terminal::Terminal;
+use crate::terminal::{Child, Terminal};
 
 /// How that shell is started.
 ///
@@ -312,9 +311,9 @@ impl Terminals {
 /// there is none — see [`TerminalOpened`], whose refusals are the ones a
 /// session's start refuses by, asked about a shell.
 pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Result<TerminalOpened> {
-    // A build with no pseudo-terminal to open has nothing to run a shell on, and
-    // it says so in front of everything else — the same rule, asked in the same
-    // place, that refuses a session there.
+    // A build that runs no sessions runs no terminals either, and it says so in
+    // front of everything else — the same rule, asked in the same place, that
+    // refuses a session there.
     if state.sessions.here().absent() {
         return Ok(TerminalOpened::NotOnWindowsYet);
     }
@@ -392,12 +391,7 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
         }
     };
 
-    let mut command = Command::from(sandbox.command(&argv));
-
-    // A shell left behind by a panicking task is one nothing would ever reap.
-    command.kill_on_drop(true);
-
-    let child = match terminal.spawn(&mut command) {
+    let child = match terminal.spawn(&sandbox.command(&argv)) {
         Ok(child) => child,
         Err(error) => {
             tracing::error!(
@@ -610,7 +604,7 @@ fn hang_up(child: &Child, conversation_id: i64, number: i64) {
 }
 
 /// And where there are no process groups to hang up — which is Windows, where
-/// there is no pseudo-terminal to have opened a shell on either.
+/// what a shell started is held by a Job instead — see [`crate::terminal`].
 ///
 /// The kill after [`LINGERING`] is the whole of the ending there, which is what
 /// a session gets on every platform.

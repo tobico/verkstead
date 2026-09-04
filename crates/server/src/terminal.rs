@@ -17,26 +17,39 @@
 //! Everything above this — the sessions module, the runner, the Screen, the
 //! Capture — is ordinary portable Rust and is compiled wherever Verkstead is.
 //! A pseudo-terminal is not: it is a pair of file descriptors and a controlling
-//! terminal on Unix, and Windows has neither of those things. So there are two
-//! arms here, and this is a `cfg` where the rest of the codebase would reach
-//! for a value — see [`crate::platform::Platform`] for why that is the
+//! terminal on Unix, and a pseudoconsole and two pipes on Windows. So there are
+//! two arms here, and this is a `cfg` where the rest of the codebase would
+//! reach for a value — see [`crate::platform::Platform`] for why that is the
 //! preference — because there is no value to be had. The type on one platform
-//! is a descriptor the runtime is watching, and on the other it is nothing at
-//! all.
+//! is a descriptor the runtime is watching, and on the other it is a console
+//! handle with a pipe at each end of it.
+//!
+//! **What the two arms agree on is the whole of what is above them.** A
+//! [`Terminal`] is opened, something is started on it, it is resized, written
+//! into and read; a [`Child`] has an id, is waited for and can be killed, and
+//! goes away taking whatever it started with it. Nothing above here knows which
+//! arm it got.
+//!
+//! And what is started is a [`crate::sandbox::Rendering`] rather than a command
+//! of the standard library's: a `Command` has already decided how a process is
+//! spawned, and on Windows that decision is Verkstead's own — a
+//! `CreateProcessW` carrying the pseudoconsole in an attribute list. So the
+//! seam carries what the Sandbox described and each arm starts it the way its
+//! platform starts anything.
 
-/// The terminal on the platforms that have one — see [`pty::Terminal`].
+/// The terminal on the platforms with a pseudo-terminal — see
+/// [`pty::Terminal`].
 #[cfg(unix)]
 mod pty;
 
-/// And where there is none to open, which today is Windows — see
-/// [`absent::Terminal`].
-#[cfg(not(unix))]
-mod absent;
+/// And on the one with a pseudoconsole instead — see [`conpty::Terminal`].
+#[cfg(windows)]
+mod conpty;
 
-#[cfg(not(unix))]
-pub use absent::Terminal;
+#[cfg(windows)]
+pub use conpty::{Child, Terminal};
 #[cfg(unix)]
-pub use pty::Terminal;
+pub use pty::{Child, Terminal};
 
 /// How wide a session's terminal is until somebody watching says otherwise, and
 /// how tall.

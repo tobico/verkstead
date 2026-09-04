@@ -540,7 +540,7 @@ fn compile_server(dir: &Path, sccache: &Path, data_dir: &Path, size: &str) -> Co
         .set("SCCACHE_IDLE_TIMEOUT", "0")
         .running(&[&inside]);
 
-    let mut compiling = sandbox::rendered(&surface);
+    let mut compiling = Command::from(&sandbox::rendered(&surface));
 
     // In a process group of its own where the platform needs one, which is what
     // a keeper ends when the server has gone — see

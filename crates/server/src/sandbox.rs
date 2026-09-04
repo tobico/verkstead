@@ -54,7 +54,7 @@
 //! the seam for it is that nothing here reads the network's absence.
 
 // Built wherever the tests are rather than on its own platform alone: a
-// rendering is a description going in and a command coming out, so the arm this
+// rendering is a description going in and a process coming out, so the arm this
 // machine will never run is still an arm its tests call — the same reason
 // `crates/desktop`'s startup registrations are all built here.
 #[cfg(any(not(target_os = "macos"), test))]
@@ -66,6 +66,9 @@ mod bwrap;
 // left out rather than made portable for a platform it says nothing about.
 #[cfg(any(target_os = "macos", all(test, unix)))]
 mod seatbelt;
+// And the two ends of what a renderer is: the description going in, and the
+// process coming out.
+mod rendering;
 mod surface;
 
 // And what a rendering cannot say on the platform it is for: how long what it
@@ -91,6 +94,11 @@ use std::process::{Command, Stdio};
 // by the same renderer — see [`crate::build_cache`], and [`on_the_machine`]
 // for the part of it the two share.
 pub(crate) use surface::{Access, Reach, Surface};
+
+// And what a renderer hands back, which is not this module's alone either: it
+// is what a session is started from, on whichever of the two arms of
+// [`crate::terminal`] this machine has.
+pub use rendering::Rendering;
 
 use crate::build_cache::{self, BuildCache};
 use crate::handoffs::{self, Handoffs};
@@ -461,12 +469,12 @@ pub(crate) fn on_the_machine(chdir: PathBuf) -> Surface {
     surface
 }
 
-/// And `surface` as the command that runs it, by whichever mechanism this
+/// And `surface` as the process that runs it, by whichever mechanism this
 /// machine has one.
 ///
 /// The one place either rendering is reached from, so that a sandbox is a
-/// description going in and a command coming out wherever one is made.
-pub(crate) fn rendered(surface: &Surface) -> Command {
+/// description going in and a [`Rendering`] coming out wherever one is made.
+pub(crate) fn rendered(surface: &Surface) -> Rendering {
     render(surface)
 }
 
@@ -1606,7 +1614,7 @@ impl Sandbox {
     /// The command is not put through a shell: what runs inside is an argument
     /// vector the orchestrator built, and a shell between it and the sandbox
     /// would be one more thing to quote for.
-    pub fn command<S: AsRef<OsStr>>(&self, argv: &[S]) -> Command {
+    pub fn command<S: AsRef<OsStr>>(&self, argv: &[S]) -> Rendering {
         render(&self.surface(argv))
     }
 

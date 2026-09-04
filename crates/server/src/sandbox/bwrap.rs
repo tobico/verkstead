@@ -2,15 +2,15 @@
 //!
 //! What was written straight into a `Command` until the description was a thing
 //! of its own — the same flags, in the same order, said about a description
-//! rather than about a Conversation.
+//! rather than about a Conversation, and handed back as a [`Rendering`] rather
+//! than as a way of spawning one.
 //!
 //! **Everything here is a mount namespace.** A path a session may reach is bound
 //! into one, and everything else is not there at all: the boundary hides rather
 //! than refuses, which is the whole of the difference from [`super::seatbelt`]
 //! and the reason a probe on one platform cannot be a probe on the other.
 
-use std::process::Command;
-
+use super::rendering::Rendering;
 use super::surface::{Access, Reach, Surface};
 
 /// What the machine calls itself inside.
@@ -21,14 +21,13 @@ use super::surface::{Access, Reach, Surface};
 const HOSTNAME: &str = "verkstead";
 
 /// `surface` as the `bwrap` invocation that makes it.
-pub(crate) fn command(surface: &Surface) -> Command {
-    let mut bwrap = Command::new("bwrap");
-
-    // Nothing of the server's environment comes through. What the sandbox holds
-    // is the description's to say, and a variable the unit happened to be
-    // started with — where the database is, what the server listens on — is not
-    // part of it.
-    bwrap.env_clear();
+///
+/// Nothing of the server's environment comes through, which is said by there
+/// being none here at all: a [`Rendering`] is the whole of what the process is
+/// handed — see that module — and what the sandbox holds is said in
+/// `--setenv` flags below rather than to `bwrap` itself.
+pub(crate) fn command(surface: &Surface) -> Rendering {
+    let mut bwrap = Rendering::running("bwrap");
 
     bwrap.args([
         // A session outlives nothing: if the orchestrator goes, so does

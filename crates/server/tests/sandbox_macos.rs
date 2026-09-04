@@ -60,7 +60,9 @@ use std::process::{Command, Stdio};
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::platform::Platform;
-use verkstead_server::sandbox::{Bind, Executable, Homes, Reachable, Sandbox, SandboxConfig};
+use verkstead_server::sandbox::{
+    Bind, Executable, Homes, Reachable, Rendering, Sandbox, SandboxConfig,
+};
 use verkstead_server::settings::{RustBuildCache, Settings};
 use verkstead_server::skills::Skills;
 use verkstead_server::store;
@@ -679,9 +681,9 @@ file() {
 /// them is about.
 fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
     let whole = format!("{PROBE}\n{script}\n");
-    let mut command = sandbox.command(&[SH, "-c", &whole]);
+    let rendering = sandbox.command(&[SH, "-c", &whole]);
 
-    let output = command
+    let output = Command::from(&rendering)
         .stdin(Stdio::null())
         .output()
         .expect("sandbox-exec is part of macOS");
@@ -696,7 +698,7 @@ fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
         output.status,
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
-        policy_of(&command),
+        policy_of(&rendering),
     );
 
     String::from_utf8_lossy(&output.stdout)
@@ -711,8 +713,8 @@ fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
 /// Off the command rather than asked of the server, because that is what was
 /// actually handed to `sandbox-exec`: a reader of a failure wants the string
 /// that failed rather than one built again beside it.
-fn policy_of(command: &Command) -> String {
-    let mut args = command.get_args();
+fn policy_of(rendering: &Rendering) -> String {
+    let mut args = rendering.argv().iter();
 
     while let Some(arg) = args.next() {
         if arg == "-p" {
