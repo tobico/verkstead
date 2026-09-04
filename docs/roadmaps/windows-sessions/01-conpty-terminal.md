@@ -63,11 +63,17 @@ is not repeated here beyond what a task needs.
   there is no Sandbox of its own to run it in yet.
 - **The unsandboxed note** (Q1a, Q8): one server-decided value on the
   Conversation view, the way `compiles_uncached` is, drawn above **Start work**
-  on the composer and beside the terminal on the session pane. `SessionsHere`
-  loses `NotOnWindowsYet`; `run_on(Platform::Windows)` says `Run`. The five
-  refusal call sites and the viewer's `NoSessions` go with it. Draft wording,
-  the human's to change: *"This session is not sandboxed: on Windows the agent
-  runs with your own account's reach until the sandbox stage lands."*
+  on the composer, beside the terminal on the session pane, and on the
+  Conversation Terminal pane. `SessionsHere` loses `NotOnWindowsYet`;
+  `run_on(Platform::Windows)` says `Run`. The five refusal call sites and the
+  viewer's `NoSessions` go with it. Draft wording, the human's to change:
+  *"This session is not sandboxed: on Windows the agent runs with your own
+  account's reach until the sandbox stage lands."*
+  **Three places rather than two**: a Conversation Terminal is a shell in the
+  Conversation's Sandbox and on Windows there is none, so the pane at
+  `/terminal` says it too — a human who opens a tab from the Timeline's header
+  reaches neither of the other two. One value, read in three, and the terminal
+  pane's wording is about the shell in front of them rather than the agent.
 - **Conversation Terminals** (Q4, Q11): `pwsh` where `where.exe` finds it,
   else Windows PowerShell, on the same ConPTY; `terminals::shell` gains a
   Windows answer beside the passwd one. Ending is the Job's kill after
@@ -128,11 +134,15 @@ is not repeated here beyond what a task needs.
 5. **Sessions turn on, with the note** — `run_on` says `Run` for Windows, the
    view carries the unsandboxed value, the composer and session pane draw it,
    `NotOnWindowsYet` and `NoSessions` are removed with their tests. Accepts:
-   vitest covers the note in both places; the refusal call sites are gone;
-   the Rust test that said Windows runs no sessions says the opposite.
-6. **Terminals on pwsh** — the Windows shell answer, on the same ConPTY.
+   vitest covers the note on the composer and the session pane — the terminal
+   pane is task 6's; the refusal call sites are gone; the Rust test that said
+   Windows runs no sessions says the opposite.
+6. **Terminals on pwsh, and the note on their pane** — the Windows shell
+   answer, on the same ConPTY, and the unsandboxed note drawn at `/terminal`.
    Accepts: a terminal tab on Windows runs `pwsh` where present and
-   `powershell` where not; `$PSVersionTable` prints on the screen.
+   `powershell` where not; `$PSVersionTable` prints on the screen; vitest
+   draws the note on the terminal pane of an unsandboxed view and draws none
+   on a sandboxed one.
 7. **The Windows end-to-end suite and CI** — the `cfg(windows)` suite with
    the PowerShell stand-in, on the `windows-2025` job. Accepts: the job runs
    it green; a session's Capture holds what the stand-in printed; the sccache

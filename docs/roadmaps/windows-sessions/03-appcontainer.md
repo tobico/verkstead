@@ -54,9 +54,10 @@ All from [ADR-0014](../../adr/0014-windows-sessions.md).
   linked across — as a missing `bwrap` does on Linux. No fall-back to the
   unsandboxed session.
 - **The note goes.** The server-decided value from stage 01 says sandboxed;
-  the composer and session pane draw nothing; `adoption.md`'s Windows section
-  says what a session can and cannot get to, the way the Mac's does, with the
-  entries left on real directories written down where a reader will look. And
+  the composer, the session pane and the terminal pane draw nothing;
+  `adoption.md`'s Windows section says what a session can and cannot get to,
+  the way the Mac's does, with the entries left on real directories written
+  down where a reader will look. And
   **CONTEXT.md's Sandbox term** loses stage 01's unsandboxed sentence and names
   the third rendering beside bubblewrap's and the seatbelt's — the term says
   what the product is, so the AppContainer goes into it here rather than while

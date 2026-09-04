@@ -10,8 +10,13 @@ they land separately: the **pseudo-terminal**, which is ConPTY, and the
 
 The order is the terminal first. A Windows session runs **unsandboxed** from
 the moment the terminal works until the container lands, and the workbench says
-so on every one — above **Start work** on the composer and beside the terminal
-on the session pane — in the same voice the "not on Windows yet" state used.
+so on every one — above **Start work** on the composer, beside the terminal on
+the session pane, and on the Conversation Terminal pane — in the same voice the
+"not on Windows yet" state used. That third place because a Conversation
+Terminal is a shell inside the Conversation's Sandbox and on Windows there is
+none: the human at that keyboard has their own account's reach, which is the
+same fact the other two say about the agent, said where they will not see
+either of them.
 Chosen over holding sessions back until the container is there, for the reason
 ADR-0012 chose a clear notice over waiting for the ports: the container's
 unknowns can only be settled on a Windows machine, and a terminal held hostage
