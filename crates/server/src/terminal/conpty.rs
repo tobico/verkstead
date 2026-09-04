@@ -64,11 +64,6 @@ use windows_sys::Win32::Storage::FileSystem::{
 use windows_sys::Win32::System::Console::{
     COORD, ClosePseudoConsole, CreatePseudoConsole, HPCON, ResizePseudoConsole,
 };
-use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-    SetInformationJobObject, TerminateJobObject,
-};
 use windows_sys::Win32::System::Pipes::{
     CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_WAIT,
 };
@@ -81,6 +76,7 @@ use windows_sys::Win32::System::Threading::{
 
 use super::{COLUMNS, ROWS};
 use crate::sandbox::Rendering;
+use crate::sandbox::outliving::job::Job;
 
 /// How much of each direction the console host may get ahead by, in bytes.
 ///
@@ -411,11 +407,7 @@ impl Child {
     /// Asked for rather than waited on, the way tokio's is — what says it is
     /// over is [`Child::wait`].
     pub fn start_kill(&mut self) -> io::Result<()> {
-        if unsafe { TerminateJobObject(self.job.handle(), KILLED) } == 0 {
-            return Err(io::Error::last_os_error());
-        }
-
-        Ok(())
+        self.job.terminate(KILLED)
     }
 }
 
@@ -424,7 +416,7 @@ impl Child {
 fn held_in_a_job(process: &Handle, thread: &Handle) -> io::Result<Job> {
     let job = Job::killing_everything_in_it()?;
 
-    job.take(process)?;
+    job.take(process.0)?;
 
     if unsafe { ResumeThread(thread.0) } == u32::MAX {
         return Err(io::Error::last_os_error());
@@ -562,58 +554,6 @@ impl Drop for Handle {
         if !self.0.is_null() && self.0 != INVALID_HANDLE_VALUE {
             unsafe { CloseHandle(self.0) };
         }
-    }
-}
-
-/// The Job a session and everything it starts is in — see this module's own
-/// documentation for what it is the answer to.
-struct Job(Handle);
-
-impl Job {
-    /// A Job that kills everything left in it when the last handle to it
-    /// closes, which is what makes dropping a [`Child`] end a session.
-    fn killing_everything_in_it() -> io::Result<Job> {
-        let job = unsafe { CreateJobObjectW(ptr::null(), ptr::null()) };
-
-        if job.is_null() {
-            return Err(io::Error::last_os_error());
-        }
-
-        let job = Job(Handle(job));
-
-        let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
-        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-
-        let told = unsafe {
-            SetInformationJobObject(
-                job.handle(),
-                JobObjectExtendedLimitInformation,
-                (&raw const limits).cast::<c_void>(),
-                u32::try_from(size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>())
-                    .unwrap_or(u32::MAX),
-            )
-        };
-
-        if told == 0 {
-            return Err(io::Error::last_os_error());
-        }
-
-        Ok(job)
-    }
-
-    /// The handle itself, for the calls that take one.
-    fn handle(&self) -> HANDLE {
-        self.0.0
-    }
-
-    /// Put `process` in it. Everything that process goes on to start is in it
-    /// too, which is what makes the Job a session's whole tree.
-    fn take(&self, process: &Handle) -> io::Result<()> {
-        if unsafe { AssignProcessToJobObject(self.handle(), process.0) } == 0 {
-            return Err(io::Error::last_os_error());
-        }
-
-        Ok(())
     }
 }
 

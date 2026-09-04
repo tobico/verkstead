@@ -1,5 +1,12 @@
-//! What a Mac has where Linux has `--die-with-parent`: a keeper beside every
-//! sandbox, and a process group for it to end.
+//! What a Mac has where Linux has `--die-with-parent`, and what Windows has
+//! instead of either: a keeper beside every sandbox with a process group for it
+//! to end, and a Job Object holding what it cannot.
+//!
+//! One question, three answers, and this module is where the two Verkstead has
+//! to give itself live. What is being promised is the same on all three:
+//! **nothing Verkstead started outlives the server that started it** — see
+//! [`keep`] for the Mac's, [`held`] for the Windows one, and [`job`] for what
+//! that is made of.
 //!
 //! On Linux a sandbox outlives nothing because bubblewrap says so. Every
 //! session and the compile server are started `--die-with-parent` — see the
@@ -50,8 +57,18 @@
 //! starts forks the loop and exits, so the server has one shell to reap and no
 //! keeper of its own to remember.
 
+/// And the third platform's answer, which is a handle rather than a keeper —
+/// see [`job::Job`], and [`held`], which is where the Compile Server gets one.
+///
+/// A `cfg` rather than an arm compiled everywhere, for the reason
+/// [`crate::terminal`] is one: a Job Object is not a thing a machine that is
+/// not Windows has any way to make, so there is no value to be had here and
+/// nothing for a test elsewhere to call.
+#[cfg(windows)]
+pub(crate) mod job;
+
 use std::io;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 
 use crate::platform::Platform;
 
@@ -75,8 +92,11 @@ const EVERY: u32 = 1;
 /// server running as `server`.
 ///
 /// A no-op on the platforms whose sandbox says this for itself. Linux is the
-/// one that does — see this module's own documentation — and Windows has no
-/// session machinery to say it about yet.
+/// one that does — see this module's own documentation — and on Windows what
+/// says it is the Job Object a process is put in: a session's terminal makes
+/// one around what it starts (see [`crate::terminal`]), and everything else
+/// gets one from [`held`], which is a value the caller holds rather than
+/// something started beside it.
 ///
 /// **The platform is a value and the server is said**, for the reason
 /// [`Platform`] is a value at all: the arm this machine will never run is still
@@ -90,8 +110,9 @@ const EVERY: u32 = 1;
 /// cannot, and more than one that was never started at all.
 pub(crate) fn keep(platform: Platform, sandbox: u32, server: u32) {
     match platform {
-        // Whose sandboxes are `bwrap --die-with-parent` children, and whose
-        // lifetimes nothing here has anything to add to.
+        // Linux, whose sandboxes are `bwrap --die-with-parent` children; and
+        // Windows, whose are inside a Job — see [`held`]. Neither has anything
+        // for a keeper to add.
         Platform::Linux | Platform::Windows => {}
 
         Platform::MacOs => {
@@ -105,6 +126,103 @@ pub(crate) fn keep(platform: Platform, sandbox: u32, server: u32) {
             }
         }
     }
+}
+
+/// And the other half of the same promise, on the platform that keeps it with a
+/// handle: `child` put in a Job that kills everything left in it when the last
+/// handle to that Job closes.
+///
+/// **What comes back is held rather than read.** A Job is a promise for exactly
+/// as long as somebody has a handle to it, so this hands one back and the
+/// caller keeps it beside the child it is about — see [`Held`]. Dropping it, or
+/// the server going down however it goes down, closes it and ends the tree.
+///
+/// **Its one caller is the Compile Server**, for the reason
+/// [`in_its_own_group`] has the same one: a session's sandbox is already inside
+/// a Job, because it runs on a pseudoconsole and
+/// [`crate::terminal::Terminal::spawn`] makes one there. The Compile Server
+/// runs on no terminal, so it says this for itself.
+///
+/// **The child is running by the time it is put in**, which is a window this
+/// cannot close: `CreateProcessW` can start a process suspended and the
+/// standard library's spawn will not hand back the thread to resume, so there
+/// is no way from here to have the Job before the first instruction. What is at
+/// risk in that window is a grandchild started in the microseconds between the
+/// spawn and this call, and what runs there is an sccache server that starts
+/// compilers on demand minutes later.
+///
+/// Nothing is refused for, as nothing is for a keeper: a Job that could not be
+/// made is said in the log, and the Compile Server it was to have held goes on
+/// running.
+pub(crate) fn held(platform: Platform, child: &Child) -> Held {
+    match platform {
+        // Whose lifetimes are the sandbox's own to say — `--die-with-parent`
+        // on one and a keeper on the other.
+        Platform::Linux | Platform::MacOs => Held::nothing(),
+
+        Platform::Windows => holding(child),
+    }
+}
+
+/// What holds a child to the life of the server that started it, where the
+/// platform's answer is something to hold.
+///
+/// Nothing at all on the two platforms whose answer is said elsewhere, which is
+/// why this is a value rather than an `Option` of a handle: what a caller does
+/// with one is keep it, and that is the same on all three.
+#[derive(Debug)]
+pub(crate) struct Held {
+    #[cfg(windows)]
+    #[expect(
+        dead_code,
+        reason = "\
+        held rather than read: what ends the tree is this handle closing, so \
+        there is nothing to ask it and nothing to do with it but keep it"
+    )]
+    job: Option<job::Job>,
+}
+
+impl Held {
+    /// Nothing to hold, which is what the two platforms that say this elsewhere
+    /// hand back — and what a Job that could not be made comes to.
+    fn nothing() -> Held {
+        Held {
+            #[cfg(windows)]
+            job: None,
+        }
+    }
+}
+
+/// `child` in a Job of its own — see [`held`], which is the whole of the why.
+#[cfg(windows)]
+fn holding(child: &Child) -> Held {
+    use std::os::windows::io::AsRawHandle;
+
+    let made = job::Job::killing_everything_in_it()
+        .and_then(|job| job.take(child.as_raw_handle().cast()).map(|()| job));
+
+    match made {
+        Ok(job) => Held { job: Some(job) },
+        Err(error) => {
+            tracing::error!(
+                %error,
+                child = child.id(),
+                "no Job could be made for this process, so it would outlive the server",
+            );
+
+            Held::nothing()
+        }
+    }
+}
+
+/// And where there is no Job to make — see the arm above.
+///
+/// Reached only by a test asking what a Windows build answers, on a machine
+/// that is not one: there is no kernel object here to stand for the promise, so
+/// what it answers is that it holds nothing.
+#[cfg(not(windows))]
+fn holding(_child: &Child) -> Held {
+    Held::nothing()
 }
 
 /// Start `command` in a process group of its own, so that ending it is ending
@@ -408,5 +526,121 @@ mod tests {
             "nothing was started to notice the server going",
         );
         assert!(still_there(inside), "so nothing was ended either");
+    }
+}
+
+/// And the other machine's own, which asks the one thing a Job is for: that
+/// letting go of it ends what is inside it.
+///
+/// Asked of Windows alone because a Job is a Windows object — see [`job`],
+/// which is why that module is a `cfg` rather than a value. The `windows-2025`
+/// job is where these run.
+#[cfg(all(test, windows))]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::*;
+
+    /// How long to wait for a kill the kernel makes on its own account, which
+    /// is something it gets round to rather than something that has already
+    /// happened when the handle closes.
+    const PATIENTLY: Duration = Duration::from_secs(20);
+
+    /// Something that will sit there until something ends it, standing in for
+    /// the Compile Server this is really about.
+    fn standing() -> Child {
+        Command::new("cmd.exe")
+            .args(["/c", "ping -n 120 127.0.0.1 >nul"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("cmd.exe is part of Windows")
+    }
+
+    /// Whether process `running` is no longer on this machine, waited for.
+    ///
+    /// Asked of Windows rather than of the [`Child`], because what is being
+    /// tested is a kill nothing in this process made: `tasklist` is what says
+    /// whether an id is anybody.
+    fn gone(running: u32) -> bool {
+        let deadline = Instant::now() + PATIENTLY;
+
+        while Instant::now() < deadline {
+            let listed = Command::new("tasklist.exe")
+                .args(["/fi", &format!("PID eq {running}")])
+                .stdin(Stdio::null())
+                .output()
+                .expect("tasklist is part of Windows");
+
+            if !String::from_utf8_lossy(&listed.stdout).contains(&running.to_string()) {
+                return true;
+            }
+
+            std::thread::sleep(Duration::from_millis(200));
+        }
+
+        false
+    }
+
+    /// The whole of what a Job buys: what was put in one goes when the last
+    /// handle to it closes.
+    ///
+    /// Which is what a server exiting does, however it exits — the tray's
+    /// **Exit**, a `kill`, a crash — so this is the promise the Compile Server
+    /// is held to on this platform, asked by letting go on purpose.
+    #[test]
+    fn what_is_in_a_job_goes_when_the_last_handle_to_it_closes() {
+        let mut child = standing();
+        let running = child.id();
+
+        let held = held(Platform::Windows, &child);
+
+        assert!(
+            !gone_already(running),
+            "the process should still be running while the Job is held",
+        );
+
+        drop(held);
+
+        assert!(
+            gone(running),
+            "letting go of the Job should have ended process {running}",
+        );
+
+        let _ = child.wait();
+    }
+
+    /// And the two platforms that say this elsewhere hold nothing here, so
+    /// letting go of what they answered ends nothing.
+    #[test]
+    fn the_platforms_whose_sandbox_says_it_hold_nothing() {
+        for platform in [Platform::Linux, Platform::MacOs] {
+            let mut child = standing();
+            let running = child.id();
+
+            drop(held(platform, &child));
+
+            assert!(
+                !gone_already(running),
+                "{platform:?} has its own answer to this, so nothing here should \
+                 have ended process {running}",
+            );
+
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+
+    /// Whether `running` has gone by now, asked once rather than waited for —
+    /// which is what a test asserting that something has *not* happened wants.
+    fn gone_already(running: u32) -> bool {
+        let listed = Command::new("tasklist.exe")
+            .args(["/fi", &format!("PID eq {running}")])
+            .stdin(Stdio::null())
+            .output()
+            .expect("tasklist is part of Windows");
+
+        !String::from_utf8_lossy(&listed.stdout).contains(&running.to_string())
     }
 }

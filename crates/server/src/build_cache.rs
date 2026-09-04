@@ -156,6 +156,13 @@ pub struct BuildCache {
 struct Compiling {
     server: Child,
     size: String,
+
+    /// And what holds it to this server's life on the platform whose answer is
+    /// something to hold: the Job Object it is in — see
+    /// [`crate::sandbox::outliving::held`]. Nothing at all on the two whose
+    /// answer is said elsewhere, and held rather than read either way: letting
+    /// go of it is what ends the tree.
+    _held: outliving::Held,
 }
 
 impl Drop for Compiling {
@@ -163,11 +170,13 @@ impl Drop for Compiling {
     ///
     /// What makes the server Verkstead's rather than something left running on
     /// the machine is the platform's own answer to the case that matters — the
-    /// server exiting: `--die-with-parent` on Linux, and a keeper of
-    /// Verkstead's own on a Mac, which has no such flag to be started with (see
-    /// [`crate::sandbox::outliving`]). This covers the other case: a size the
-    /// human changed, where the old server is replaced while Verkstead carries
-    /// on, and where nothing else would ever tell it to go.
+    /// server exiting: `--die-with-parent` on Linux, a keeper of Verkstead's
+    /// own on a Mac, which has no such flag to be started with, and on Windows
+    /// the Job Object above, whose promise is kept by the handle closing
+    /// however this process ends (see [`crate::sandbox::outliving`]). This
+    /// covers the other case: a size the human changed, where the old server is
+    /// replaced while Verkstead carries on, and where nothing else would ever
+    /// tell it to go.
     fn drop(&mut self) {
         let _ = self.server.kill();
         let _ = self.server.wait();
@@ -359,7 +368,8 @@ impl BuildCache {
                 // [`crate::sandbox::outliving`], and [`compile_server`] for the
                 // process group of its own this is the other half of. Nothing
                 // at all on Linux, where `--die-with-parent` is the whole of
-                // it.
+                // it, and nothing on Windows either, where what says it is the
+                // Job the [`Compiling`] below is holding.
                 outliving::keep(Platform::HERE, server.id(), std::process::id());
 
                 tracing::info!(
@@ -370,6 +380,7 @@ impl BuildCache {
                 );
 
                 *running = Some(Compiling {
+                    _held: outliving::held(Platform::HERE, &server),
                     server,
                     size: settings.size().to_owned(),
                 });
