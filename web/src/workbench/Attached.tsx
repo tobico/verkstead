@@ -53,8 +53,15 @@
 //! the pane, and two of them measuring one pane would be the oscillation the
 //! de-dupe below guards against, with a hidden window's nothing always winning.
 //!
-//! The grid and nothing above it: no scrollback here either, matching the server
-//! that decided the repaint.
+//! **What is above the grid is the caller's.** The server holds the grid alone,
+//! so a repaint is where a window starts and there is nothing to fetch a
+//! scrollback from — but a window can keep what it watched go past, and whether
+//! it is worth keeping is a question about what is at the far end. A session's
+//! Screen keeps none: what it is watching is an agent's interface redrawing
+//! itself, and everything it ever printed is in the Transcript beside it and
+//! the Capture under it. A Terminal keeps `scrollback` lines, because a human
+//! who has just run a build in one wants to read it, and nothing else here
+//! wrote it down.
 
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
@@ -117,6 +124,16 @@ export function Attached(props: {
   /// repaint, so a caller reaching in for one would be reaching for something
   /// that may not have arrived yet.
   showing?: boolean;
+
+  /// How many lines this window keeps above the grid, or none where the caller
+  /// says nothing — see the note at the top, which is where the two callers
+  /// differ.
+  ///
+  /// The window's own and no part of what the server holds: a repaint clears it,
+  /// because a repaint says what the whole grid is and the lines above it are
+  /// this window's memory of watching rather than anything the far end can
+  /// account for. So a reload, or a second device, starts at the grid.
+  scrollback?: number;
 
   /// The far end has gone, and this is the line to stand under the grid saying
   /// so — the shell ended, or its open was refused.
@@ -198,7 +215,7 @@ export function Attached(props: {
     }
 
     if (!terminal) {
-      terminal = opened(painted, true);
+      terminal = opened(painted, true, props.scrollback ?? 0);
       fit = new FitAddon();
       terminal.loadAddon(fit);
       terminal.open(host);
@@ -422,7 +439,7 @@ export function Standing(props: { painted: Painted; say: string }): JSX.Element 
     }
 
     if (!terminal) {
-      terminal = opened(painted, false);
+      terminal = opened(painted, false, 0);
       terminal.open(host);
     } else {
       terminal.resize(painted.columns, painted.rows);
@@ -449,14 +466,15 @@ export function Standing(props: { painted: Painted; say: string }): JSX.Element 
 /// told its size and the repaint is where the size comes from: the same
 /// sequences put a display in different places on a grid of a different width.
 ///
-/// `typing` is whether there is anything at the other end of a keystroke.
-function opened(painted: Painted, typing: boolean): Terminal {
+/// `typing` is whether there is anything at the other end of a keystroke, and
+/// `keeping` how many lines this window holds above the grid — see the note at
+/// the top, where the difference between the two callers is.
+function opened(painted: Painted, typing: boolean, keeping: number): Terminal {
   return new Terminal({
     cols: painted.columns,
     rows: painted.rows,
     disableStdin: !typing,
-    // The grid and nothing above it, as the server holds it.
-    scrollback: 0,
+    scrollback: keeping,
     // The cursor is where the far end left it. Blinking on the one that can be
     // typed into and still on the one that cannot, because that is the
     // difference a reader is being shown.

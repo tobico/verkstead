@@ -133,6 +133,21 @@ export const TERMINAL_REFUSAL: Record<
   Refused: "The shell would not start. The server's log says why.",
 };
 
+/// How many lines a tab keeps above the grid, so that what scrolled past can be
+/// read back.
+///
+/// The server holds the grid alone — a terminal is memory only, and a repaint is
+/// the whole of what a fresh attach is given (ADR 0013) — so this is the tab's
+/// own memory of watching and goes when the tab does. A Screen keeps none, and
+/// is right to: what an agent printed is in the Transcript beside it and the
+/// Capture under it. Nothing writes down what a shell printed, and a human who
+/// has just run a build in one wants to read it.
+///
+/// Enough for a build or a test run and not much more, because it is held per
+/// tab and a pane may have several. What a repaint clears with it is this and
+/// nothing of the server's — see [`./Attached`].
+export const SCROLLBACK = 5_000;
+
 /// How soon after being asked for a shell has to end for its tab to stay.
 ///
 /// The line between a shell that ran and a shell that could not start, and there
@@ -521,6 +536,7 @@ export function Terminal(props: {
                   at={terminalSocket(props.conversation.id, tab)}
                   class={shell.paneWide}
                   showing={showing() === tab}
+                  scrollback={SCROLLBACK}
                   over={over()[tab]}
                   titled={(title) =>
                     setTitles((was) => ({ ...was, [tab]: title }))

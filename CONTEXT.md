@@ -785,8 +785,10 @@ A tab is called whatever its shell sets the terminal's title to, and *Terminal N
 by the server's number where it has set none — a fresh attach reads the number
 again, a repaint carrying the grid and not the title.
 The same server-held pseudo-terminal, virtual terminal and xterm window as a
-Screen, and the same rule about the human: typing into one holds nothing off and
-records nothing. **Not a record**: memory only, no Capture, no Event, nothing in
+Screen, save that a tab keeps what scrolled past it where a Screen keeps
+nothing — the server holds the grid alone either way, so those lines are the
+window's own and go with the tab. And the same rule about the human: typing into
+one holds nothing off and records nothing. **Not a record**: memory only, no Capture, no Event, nothing in
 a Share, and gone with the server. Lives until its shell exits, it is closed, the
 Conversation closes or the server stops, and comes back as a tab whenever the
 pane is reopened in between. See ADR-0013.

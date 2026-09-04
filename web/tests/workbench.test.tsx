@@ -15963,6 +15963,52 @@ describe("a conversation's terminal", () => {
     ).toHaveLength(1);
   });
 
+  /// And a tab keeps what scrolled past it, which is what makes a build worth
+  /// running in one.
+  ///
+  /// The server holds the grid alone, so the lines above it are this window's
+  /// own memory of watching — and where a window has them the wheel reads them
+  /// back rather than being reported to the far end. Which is the one thing
+  /// that tells the two windows apart from out here: the Screen's, with nothing
+  /// above its grid, sends the same gesture up its socket as a pair of arrow
+  /// keys — see "sends what the mouse did up the same socket".
+  it("keeps what scrolled past, so the wheel reads it back", async () => {
+    withTerminals([1]);
+    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+
+    const socket = await attached();
+    socket.says(PAINTED);
+
+    const grid = await drawn(
+      container,
+      `.${shell.detailsPane} .${attachedPane.screen} .xterm-rows`,
+    );
+
+    // More than the grid holds, so there is something above it to go back to.
+    const over = SCREEN.rows * 3;
+    let printed = "";
+    for (let line = 0; line < over; line += 1) {
+      printed += `line ${line}\r\n`;
+    }
+    socket.says({ Printed: printed });
+
+    await waitFor(() =>
+      expect(grid.textContent).toContain(`line ${over - 1}`),
+    );
+
+    const said = socket.sent.length;
+
+    fireEvent.wheel(
+      await drawn(
+        container,
+        `.${shell.detailsPane} .${attachedPane.screen} .xterm-screen`,
+      ),
+      { deltaY: -120 },
+    );
+
+    expect(socket.sent).toHaveLength(said);
+  });
+
   /// The terminal fills the pane: the reading measure comes off, and the pane
   /// ends where the window does rather than scrolling on down the page.
   it("fills the pane, with no reading measure and nothing to scroll", async () => {
