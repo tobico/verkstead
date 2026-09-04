@@ -90,6 +90,14 @@ is not repeated here beyond what a task needs.
   gains the unsandboxed state here — the term is written as what the product
   is, so it moves when the stage moves it rather than ahead of it; stage 03
   takes the same sentence back out. ADR-0014 already says the why.
+- **And CONTEXT.md's Terminal term**, which this stage makes wrong in four
+  ways at once. It says a Terminal is the server user's login shell, `/bin/sh`
+  where there is no usable one, inside the worktree's dev shell and inside the
+  Conversation's Sandbox — and on Windows it is `pwsh` or Windows PowerShell,
+  there is no passwd entry to read, `nix develop` is skipped by Platform, and
+  there is no Sandbox at all until stage 03. The term says what a word means
+  rather than what one platform does, so what it gains is the Windows answer
+  beside the Unix one rather than a second entry.
 
 ## Proposed tasks (provisional)
 
@@ -132,7 +140,8 @@ is not repeated here beyond what a task needs.
 8. **Docs** — README, adoption, design, development, CONTEXT.md. Accepts:
    nothing left in the docs says Windows runs no sessions; the unsandboxed
    state is written where a Windows reader will find it; CONTEXT.md's Sandbox
-   term says what a Windows session gets today.
+   term says what a Windows session gets today, and its Terminal term names
+   the shell a Windows terminal opens on rather than only the passwd one.
 
 ## Re-verify at start
 
