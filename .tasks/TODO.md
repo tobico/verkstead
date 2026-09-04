@@ -26,5 +26,5 @@ Roadmap stage: [01: The ConPTY terminal and unsandboxed sessions](docs/roadmaps/
 - [x] 05: The prompt goes to a file — [details](05-prompt-file.md)
 - [x] 06: Sessions turn on, with the note — [details](06-sessions-turn-on.md)
 - [x] 07: Terminals on pwsh, and the note on their pane — [details](07-terminals-on-pwsh.md)
-- [ ] 08: The Windows end-to-end suite — [details](08-windows-suite.md)
+- [x] 08: The Windows end-to-end suite — [details](08-windows-suite.md)
 - [ ] 09: Docs — [details](09-docs.md)

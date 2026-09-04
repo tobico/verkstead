@@ -203,6 +203,31 @@ jobs:
         with:
           key: windows
 
+      # The one thing the sessions suite needs that the runner image has not
+      # got. The Compile Server is the only thing the open rendering runs that
+      # is not a session, and it comes up only where the server can see an
+      # sccache — so without this, the two tests about it in
+      # `crates/server/tests/sessions_windows.rs` have nothing to prove and say
+      # so by failing rather than by quietly passing.
+      #
+      # Pinned to a release like everything else here, unpacked, and put on the
+      # `PATH`: that variable is what *installed* means on this platform, both
+      # for this and for the `pwsh` a Conversation Terminal opens on. Nothing
+      # here compiles through it — `RUSTC_WRAPPER` is unset, so the build and
+      # the test run below are as cold as they were.
+      - name: Install sccache
+        shell: pwsh
+        run: |
+          $version = 'v0.12.0'
+          $release = "sccache-$version-x86_64-pc-windows-msvc"
+          $archive = Join-Path $env:RUNNER_TEMP 'sccache.zip'
+          $into = Join-Path $env:RUNNER_TEMP 'sccache'
+
+          Invoke-WebRequest -Uri "https://github.com/mozilla/sccache/releases/download/$version/$release.zip" -OutFile $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $into
+
+          Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $into $release)
+
       # No `web/dist` here either — the embed is `allow_missing`, so the crates
       # compile without the viewer.
       #
@@ -219,10 +244,15 @@ jobs:
         run: cargo build --workspace --all-targets --features verkstead-desktop/shim
 
       # What is left out of the run is left out of the build above: a suite that
-      # stands on a mount namespace, on Apple's sandbox or on a pseudo-terminal
-      # is `cfg`-gated at its own file, so this is the whole of what a Windows
-      # Verkstead has to say for itself. The shim's own suite is in it under the
-      # same feature, which is what runs the exe the build above made.
+      # stands on a mount namespace or on Apple's sandbox is `cfg`-gated at its
+      # own file, so this is the whole of what a Windows Verkstead has to say
+      # for itself. The shim's own suite is in it under the same feature, which
+      # is what runs the exe the build above made.
+      #
+      # **And a session end to end is in it**, which is this machine's alone to
+      # answer: `crates/server/tests/sessions_windows.rs` runs a real grilling
+      # on a real pseudoconsole with a PowerShell stand-in where the agent goes,
+      # and `tests/sessions.rs` stays the Unix arm of the same questions.
       - name: Test
         run: cargo test --workspace --features verkstead-desktop/shim
 

@@ -448,11 +448,34 @@ pub const AGENT_TYPE: &str = "VERKSTEAD_AGENT";
 /// **A session on Windows leads its `PATH` with something else**, and this is
 /// the compile server's alone there: nothing is bound and nothing is linked, so
 /// what a session asks with is the running image where it really is — see
-/// [`Executable::at`] — and the directory holding *that* is what leads. Which
-/// leaves the sccache, whose two ends this is the whole of: the stage that runs
-/// a compile server on Windows is the stage that decides where it goes.
+/// [`Executable::at`] — and the directory holding *that* is what leads. The
+/// sccache is not in it either, and for the same reason — see
+/// [`sccache_inside`], which is where a session finds one on each platform.
 pub(crate) fn own_bin(platform: Platform, data_dir: &Path) -> PathBuf {
     under(&own_directory(platform, data_dir), BIN)
+}
+
+/// And where the sccache the shared build cache compiles through is found from
+/// inside: in that directory on the platforms that join it in, and where it
+/// really is on the one that joins in nothing.
+///
+/// One answer for the two things that ask — a session's sandbox and the compile
+/// server's own surface — because they are one fact: what is on the far end of
+/// a `RUSTC_WRAPPER` and what the compile server runs are the same file, and
+/// two readings of where it is would be two ways for them to disagree.
+///
+/// **Windows joins in nothing here, and needs to join in nothing.** There is no
+/// boundary on that platform yet, so the path outside *is* the path inside —
+/// and a hard link into Verkstead's own directory would drop the extension the
+/// name is found by, which is to say it would make a file nothing on that
+/// platform can start. What the description then says of it collapses to
+/// nothing at all: a path bound onto itself is a path already where it is — see
+/// [`Surface::elsewhere`].
+pub(crate) fn sccache_inside(platform: Platform, ours: &Path, sccache: &Path) -> PathBuf {
+    match platform {
+        Platform::Linux | Platform::MacOs => ours.join(build_cache::SCCACHE),
+        Platform::Windows => sccache.to_owned(),
+    }
 }
 
 /// What a session's `PATH` is inside: `ours` first, and then the machine's own.
@@ -706,7 +729,7 @@ const TEMPORARY: &str = "Temp";
 /// Said in two places off this one function: it is what [`windows_names`] sets
 /// the variable to, and what the description says a session is given somewhere
 /// to write — see [`Access::Temporary`], which is what really makes it.
-fn temporary_inside(home: &Path) -> PathBuf {
+pub(crate) fn temporary_inside(home: &Path) -> PathBuf {
     home.join(APP_DATA).join(LOCAL).join(TEMPORARY)
 }
 
@@ -725,7 +748,7 @@ fn temporary_inside(home: &Path) -> PathBuf {
 /// read it, and a session's is the one this sandbox chose.
 ///
 /// And then [`MACHINE_NAMES`], which are the machine's own to say.
-fn windows_names(home: &Path) -> Vec<(&'static str, OsString)> {
+pub(crate) fn windows_names(home: &Path) -> Vec<(&'static str, OsString)> {
     let local = home.join(APP_DATA).join(LOCAL);
     let temporary = temporary_inside(home);
 
@@ -2114,14 +2137,15 @@ impl Sandbox {
         self
     }
 
-    /// Where a session finds the sccache it compiles through, which is beside
-    /// the binary it asks with — see [`own_bin`].
+    /// Where a session finds the sccache it compiles through — see
+    /// [`sccache_inside`], which is the whole of the answer and is shared with
+    /// the compile server.
     ///
     /// Read off the executable rather than said again, so that the one answer
     /// about where a directory of Verkstead's own is on this machine serves
     /// both of the things in it.
-    fn sccache_inside(&self) -> PathBuf {
-        self.verkstead.bin().join(build_cache::SCCACHE)
+    fn sccache_inside(&self, sccache: &Path) -> PathBuf {
+        sccache_inside(self.platform, self.verkstead.bin(), sccache)
     }
 
     /// `argv` as it will be run inside the sandbox, by whichever mechanism this
@@ -2263,7 +2287,7 @@ impl Sandbox {
             surface.own(cache.dir(), Reach::ReadWrite);
 
             if let Some(sccache) = cache.sccache() {
-                surface.elsewhere(sccache, self.sccache_inside(), Reach::ReadOnly);
+                surface.elsewhere(sccache, self.sccache_inside(sccache), Reach::ReadOnly);
             }
         }
 
@@ -2361,9 +2385,9 @@ impl Sandbox {
             // client would start a server of its own into if Verkstead's were
             // somehow missing, and that server should write into the machine's
             // one cache like every other.
-            if cache.sccache().is_some() {
+            if let Some(sccache) = cache.sccache() {
                 surface
-                    .set("RUSTC_WRAPPER", self.sccache_inside())
+                    .set("RUSTC_WRAPPER", self.sccache_inside(sccache))
                     .set("SCCACHE_DIR", cache.sccache_dir())
                     .set("SCCACHE_CACHE_SIZE", cache.size());
             }
