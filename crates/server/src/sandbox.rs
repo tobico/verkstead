@@ -1109,7 +1109,7 @@ impl Homes {
     /// and — where nothing can be mounted anywhere — that the Conversation's
     /// handoff directory is under it rather than at a `/tmp` every Conversation
     /// on the machine would be sharing. See [`handoffs::inside`].
-    fn for_conversation(&self, conversation_id: i64) -> Home {
+    pub(crate) fn for_conversation(&self, conversation_id: i64) -> Home {
         let path = match self.platform {
             Platform::MacOs | Platform::Windows => self.root.join(conversation_id.to_string()),
             Platform::Linux => self.servers.clone(),

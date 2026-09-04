@@ -312,8 +312,8 @@ impl Agents {
         ))
     }
 
-    /// What a session under `pairing` on `prompt`, named `session`, working in
-    /// `worktree`, runs.
+    /// What a session of `conversation_id` under `pairing` on `prompt`, named
+    /// `session`, working in `worktree`, runs.
     ///
     /// The binary is the Profile's agent type's — see [`binary`] — or whatever
     /// is standing where every type's goes, which is how a test proves this
@@ -352,13 +352,36 @@ impl Agents {
     /// Last of all comes the tail the backend itself needs — see [`Line::tail`]
     /// — which with the two above is the whole of what reads differently for one
     /// agent type than for another.
+    ///
+    /// **And on one platform the prompt is not on the line at all.** Windows
+    /// caps a command line at 32,767 characters and an implementing session's
+    /// prompt carries the whole handoff document inlined, so there the prompt is
+    /// written into the Conversation's handoff directory and what goes in its
+    /// place is one line naming the file — see [`Handoffs::wrote_prompt`].
+    /// *Always* there rather than only where it would not fit, so a Windows
+    /// session has one shape rather than two and nothing turns on a length
+    /// nobody measured; and only there, because nothing on the other two
+    /// platforms is the worse for the argument.
+    ///
+    /// The choice is off [`Platform`] as a value rather than a `cfg!`, for the
+    /// reason every other choice here is: the arm this machine will never run
+    /// is still an arm a test on it can ask for.
+    ///
+    /// `None` is a prompt that could not be written down, which is a session
+    /// with nothing to be started on — the caller starts none, the way it
+    /// starts none for a sandbox it could not build. Nothing else here can fail,
+    /// so the platform that keeps its prompt on the line is always `Some`.
+    ///
+    /// **This blocks on the platform that writes the file**, which is why it is
+    /// asked from the same blocking thread the sandbox is built on.
     fn argv(
         &self,
+        conversation_id: i64,
         pairing: &store::Pairing,
         prompt: &str,
         session: Option<&str>,
         worktree: Option<&Path>,
-    ) -> Vec<String> {
+    ) -> Option<Vec<String>> {
         let agent_type = pairing.profile.agent_type();
         let line = line(agent_type, worktree);
 
@@ -376,7 +399,14 @@ impl Agents {
             argv.push(flag.to_owned());
         }
 
-        argv.push(prompt.to_owned());
+        argv.push(match self.homes.platform() {
+            Platform::Windows => self.handoffs.wrote_prompt(
+                conversation_id,
+                self.homes.for_conversation(conversation_id).handoffs(),
+                prompt,
+            )?,
+            Platform::Linux | Platform::MacOs => prompt.to_owned(),
+        });
 
         if let Some(session) = session.filter(|_| line.names_the_session) {
             argv.push("--session-id".to_owned());
@@ -385,7 +415,7 @@ impl Agents {
 
         argv.extend(line.tail);
 
-        argv
+        Some(argv)
     }
 
     /// What a session of `agent_type` has on its Screen that says whether it has
@@ -1730,30 +1760,37 @@ impl Sessions {
         // [`skills::naming`].
         let prompt = skills::naming(&prompt, conversation.naming);
 
-        let argv = agents.argv(
-            pairing,
-            &prompt,
-            session.as_deref(),
-            conversation.worktree.as_deref(),
-        );
         let conversation_id = conversation.id;
 
         // The sandbox asks git where the worktree's object database is, and the
-        // dev-shell question is a `nix eval` or two. Both block, and both are
-        // decided before anything is spawned.
+        // dev-shell question is a `nix eval` or two. The line itself blocks on
+        // the platform that writes the prompt to a file — see [`Agents::argv`].
+        // All of it blocks, and all of it is decided before anything is spawned.
         let built = tokio::task::spawn_blocking({
             let agents = agents.clone();
             let conversation = conversation.clone();
-            let profile = pairing.profile.clone();
+            let pairing = pairing.clone();
+            let session = session.clone();
 
-            move || agents.sandboxed(&conversation, &profile, &argv)
+            move || {
+                let argv = agents.argv(
+                    conversation_id,
+                    &pairing,
+                    &prompt,
+                    session.as_deref(),
+                    conversation.worktree.as_deref(),
+                )?;
+
+                agents.sandboxed(&conversation, &pairing.profile, &argv)
+            }
         })
         .await?;
 
         let Some((sandbox, argv)) = built else {
             tracing::error!(
                 conversation_id,
-                "there is no sandbox to run a session in, so none was started"
+                "there is nothing to run a session on — no sandbox to run it in, or no \
+                 prompt it could be started on — so none was started"
             );
             return Ok(None);
         };
@@ -2529,6 +2566,31 @@ mod tests {
 
     use super::*;
 
+    /// The Conversation every line below is built for.
+    ///
+    /// Any id does: what it names is the directory a prompt would be written
+    /// into, and that is one platform's business — see [`Agents::argv`].
+    const CONVERSATION: i64 = 7;
+
+    impl Agents {
+        /// [`Agents::argv`] for [`CONVERSATION`], with the line it always has.
+        ///
+        /// The `None` that method can answer is a prompt that could not be
+        /// written down, which is a thing only the platform that writes one to
+        /// a file can do. Every case here but that platform's own keeps its
+        /// prompt on the command line, so every one of them has a line.
+        fn launched(
+            &self,
+            pairing: &store::Pairing,
+            prompt: &str,
+            session: Option<&str>,
+            worktree: Option<&Path>,
+        ) -> Vec<String> {
+            self.argv(CONVERSATION, pairing, prompt, session, worktree)
+                .expect("a prompt that stays on the command line is always a line")
+        }
+    }
+
     fn profile() -> store::Profile {
         store::Profile {
             id: 1,
@@ -2649,7 +2711,7 @@ mod tests {
     #[test]
     fn a_session_runs_the_pairings_model_on_the_prompt() {
         let state = tempfile::tempdir().unwrap();
-        let argv = agents(vec!["claude".to_owned()], state.path()).argv(
+        let argv = agents(vec!["claude".to_owned()], state.path()).launched(
             &pairing(),
             "# Rate limiting\n",
             None,
@@ -2678,7 +2740,7 @@ mod tests {
             profile: profile(),
             model: None,
         };
-        let argv = agents(vec!["claude".to_owned()], state.path()).argv(
+        let argv = agents(vec!["claude".to_owned()], state.path()).launched(
             &unpaired,
             "# Rate limiting\n",
             None,
@@ -2702,7 +2764,7 @@ mod tests {
     #[test]
     fn a_named_session_is_run_under_the_name_it_was_given() {
         let state = tempfile::tempdir().unwrap();
-        let argv = agents(vec!["claude".to_owned()], state.path()).argv(
+        let argv = agents(vec!["claude".to_owned()], state.path()).launched(
             &pairing(),
             "# Rate limiting\n",
             Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
@@ -2732,28 +2794,28 @@ mod tests {
 
         assert_eq!(
             agents
-                .argv(&pairing(), "# Rate limiting\n", None, worktree())
+                .launched(&pairing(), "# Rate limiting\n", None, worktree())
                 .first()
                 .map(String::as_str),
             Some("claude")
         );
         assert_eq!(
             agents
-                .argv(&codex_pairing(), "# Rate limiting\n", None, worktree())
+                .launched(&codex_pairing(), "# Rate limiting\n", None, worktree())
                 .first()
                 .map(String::as_str),
             Some("codex")
         );
         assert_eq!(
             agents
-                .argv(&grok_pairing(), "# Rate limiting\n", None, worktree())
+                .launched(&grok_pairing(), "# Rate limiting\n", None, worktree())
                 .first()
                 .map(String::as_str),
             Some("grok")
         );
         assert_eq!(
             agents
-                .argv(&opencode_pairing(), "# Rate limiting\n", None, worktree())
+                .launched(&opencode_pairing(), "# Rate limiting\n", None, worktree())
                 .first()
                 .map(String::as_str),
             Some("opencode")
@@ -2772,7 +2834,7 @@ mod tests {
     #[test]
     fn a_codex_session_takes_the_line_codex_takes() {
         let state = tempfile::tempdir().unwrap();
-        let argv = agents(vec!["codex".to_owned()], state.path()).argv(
+        let argv = agents(vec!["codex".to_owned()], state.path()).launched(
             &codex_pairing(),
             "# Rate limiting\n",
             Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
@@ -2802,7 +2864,7 @@ mod tests {
     #[test]
     fn a_codex_session_with_no_worktree_trusts_nothing() {
         let state = tempfile::tempdir().unwrap();
-        let argv = agents(vec!["codex".to_owned()], state.path()).argv(
+        let argv = agents(vec!["codex".to_owned()], state.path()).launched(
             &codex_pairing(),
             "# Rate limiting\n",
             None,
@@ -2831,7 +2893,7 @@ mod tests {
     #[test]
     fn a_grok_session_takes_the_line_grok_takes() {
         let state = tempfile::tempdir().unwrap();
-        let argv = agents(vec!["grok".to_owned()], state.path()).argv(
+        let argv = agents(vec!["grok".to_owned()], state.path()).launched(
             &grok_pairing(),
             "# Rate limiting\n",
             Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
@@ -2870,7 +2932,7 @@ mod tests {
     #[test]
     fn an_opencode_session_takes_the_line_opencode_takes() {
         let state = tempfile::tempdir().unwrap();
-        let argv = agents(vec!["opencode".to_owned()], state.path()).argv(
+        let argv = agents(vec!["opencode".to_owned()], state.path()).launched(
             &opencode_pairing(),
             "# Rate limiting\n",
             Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
@@ -2890,6 +2952,217 @@ mod tests {
         );
     }
 
+    /// A server told it is running on `platform`, which is the whole of what
+    /// decides whether a prompt goes on the command line or into a file.
+    ///
+    /// A value rather than a `cfg!`, so the runner this suite is on asks every
+    /// arm — see [`Agents::argv`].
+    fn on(platform: Platform, state: &std::path::Path) -> Agents {
+        Agents {
+            homes: Homes::on(platform, PathBuf::from("/home/verkstead"), state),
+            ..agents(vec!["claude".to_owned()], state)
+        }
+    }
+
+    /// Where the Conversation's prompt file is written, seen from outside the
+    /// session — the handoff directory under the Data Directory.
+    fn written_at(state: &std::path::Path) -> PathBuf {
+        state
+            .join("handoffs")
+            .join(CONVERSATION.to_string())
+            .join("prompt.md")
+    }
+
+    /// And where the session opens it: the same directory reached from inside,
+    /// which is under the profile Windows gives a Conversation.
+    fn opened_at(state: &std::path::Path) -> PathBuf {
+        state
+            .join("homes")
+            .join(CONVERSATION.to_string())
+            .join("verkstead")
+            .join("prompt.md")
+    }
+
+    /// A prompt with everything a real one carries: what the builders above put
+    /// under the Brief, rather than a line invented here.
+    fn built_prompt() -> String {
+        skills::naming("# Rate limiting\n", true)
+    }
+
+    /// Windows caps a command line at 32,767 characters, so a session there is
+    /// started on one line naming a file rather than on the prompt itself — and
+    /// the file holds the whole of what the builders produced.
+    #[test]
+    fn a_windows_session_is_started_on_a_line_naming_its_prompt() {
+        let state = tempfile::tempdir().unwrap();
+        let prompt = built_prompt();
+
+        let argv = on(Platform::Windows, state.path())
+            .argv(CONVERSATION, &pairing(), &prompt, None, worktree())
+            .expect("a prompt that could be written down");
+
+        assert_eq!(
+            argv.len(),
+            5,
+            "the line is the backend's own, with one argument where the prompt was: {argv:?}",
+        );
+        assert!(
+            !argv
+                .iter()
+                .any(|argument| argument.contains("Rate limiting")),
+            "nothing of the prompt itself is on the line: {argv:?}",
+        );
+
+        let started_on = &argv[3];
+
+        assert!(
+            !started_on.contains('\n'),
+            "what is there instead is one line: {started_on:?}",
+        );
+        assert!(
+            started_on.contains(&opened_at(state.path()).display().to_string()),
+            "and it names the file by the path the session opens it at: {started_on:?}",
+        );
+
+        assert_eq!(
+            std::fs::read_to_string(written_at(state.path())).expect("a prompt file"),
+            prompt,
+            "and the file holds the whole prompt, the naming instruction included",
+        );
+    }
+
+    /// And a prompt no Windows command line could have carried starts a session
+    /// all the same, which is what writing it down is for. An implementing
+    /// session's prompt carries the whole handoff document inlined, and a
+    /// grilling that settled a lot settles more than 32,767 characters of it.
+    #[test]
+    fn a_prompt_too_long_for_a_command_line_starts_a_session_all_the_same() {
+        /// What Windows will take, as `CreateProcessW` documents it.
+        const LIMIT: usize = 32_767;
+
+        let state = tempfile::tempdir().unwrap();
+        let prompt = format!(
+            "# What we settled\n\n{}",
+            "A paragraph of the handoff document. ".repeat(1_000),
+        );
+        assert!(prompt.len() > LIMIT, "the prompt is longer than a line");
+
+        let argv = on(Platform::Windows, state.path())
+            .argv(CONVERSATION, &pairing(), &prompt, None, worktree())
+            .expect("a prompt that could be written down");
+
+        // The line as the machine measures it: every argument, and a space and
+        // a pair of quotes around each.
+        let measured: usize = argv.iter().map(|argument| argument.len() + 3).sum();
+
+        assert!(
+            measured < LIMIT,
+            "the line is {measured} characters, which is one Windows would refuse: {argv:?}",
+        );
+        assert_eq!(
+            std::fs::read_to_string(written_at(state.path())).expect("a prompt file"),
+            prompt,
+            "and the whole of it is in the file",
+        );
+    }
+
+    /// The two platforms whose command line is long enough keep the prompt on
+    /// it, byte for byte as they always have — and write nothing down.
+    #[test]
+    fn the_platforms_with_a_long_enough_line_keep_the_prompt_on_it() {
+        for platform in [Platform::Linux, Platform::MacOs] {
+            let state = tempfile::tempdir().unwrap();
+
+            let argv = on(platform, state.path())
+                .argv(
+                    CONVERSATION,
+                    &pairing(),
+                    "# Rate limiting\n",
+                    None,
+                    worktree(),
+                )
+                .expect("a prompt that stays on the command line");
+
+            assert_eq!(
+                argv,
+                vec![
+                    "claude".to_owned(),
+                    "--model".to_owned(),
+                    "claude-opus-5".to_owned(),
+                    "# Rate limiting\n".to_owned(),
+                    "--dangerously-skip-permissions".to_owned(),
+                ],
+                "{platform:?} runs the prompt itself",
+            );
+            assert!(
+                !state.path().join("handoffs").exists(),
+                "and nothing was written down for it on {platform:?}",
+            );
+        }
+    }
+
+    /// What a stand-in agent does with such a line: read the arguments it was
+    /// started with, find the one naming a file, and print what is in it.
+    ///
+    /// Which is the whole of what the stand-in agent in the Windows suite does
+    /// with the same line, written here in the shell this suite's machine has.
+    #[cfg(unix)]
+    const STAND_IN: &str = r#"
+for word in "$@"; do
+    file=$(printf '%s' "$word" | sed -n 's/.*`\(.*\)`.*/\1/p')
+    if [ -n "$file" ]; then
+        cat "$file"
+        exit 0
+    fi
+done
+exit 1
+"#;
+
+    /// And the line works: an agent that reads it finds the file and gets the
+    /// Brief out of it.
+    ///
+    /// The two ends of the path are one directory on Windows because the open
+    /// rendering joins the handoff directory into the session's profile by a
+    /// directory junction — see [`crate::sandbox::open`]. There are no
+    /// junctions on the machine this runs on, so a symbolic link stands where
+    /// one goes: what is being asked is whether the *line* names the file, and
+    /// a link makes the path it names the file it wrote.
+    #[cfg(unix)]
+    #[test]
+    fn a_stand_in_agent_reads_the_brief_out_of_the_file() {
+        let state = tempfile::tempdir().unwrap();
+        let prompt = built_prompt();
+
+        let argv = on(Platform::Windows, state.path())
+            .argv(CONVERSATION, &pairing(), &prompt, None, worktree())
+            .expect("a prompt that could be written down");
+
+        let opened = opened_at(state.path());
+        std::fs::create_dir_all(opened.parent().unwrap().parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(
+            written_at(state.path()).parent().unwrap(),
+            opened.parent().unwrap(),
+        )
+        .unwrap();
+
+        let read = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(STAND_IN)
+            .args(&argv)
+            .output()
+            .expect("a shell to stand where the agent goes");
+
+        assert!(
+            read.status.success(),
+            "the stand-in found no file to read in {argv:?}",
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&read.stdout),
+            prompt,
+            "and what it read is the Brief the session was started on",
+        );
+    }
+
     /// The stub the suite stands where an agent goes stands there for every
     /// type, and reads the line it reads today: the model first and the prompt
     /// after it, whichever backend's line that is.
@@ -2897,7 +3170,7 @@ mod tests {
     fn a_stub_stands_where_every_types_binary_goes() {
         let state = tempfile::tempdir().unwrap();
         let stub = vec!["/bin/sh".to_owned(), "-c".to_owned(), "printf x".to_owned()];
-        let argv = agents(stub.clone(), state.path()).argv(
+        let argv = agents(stub.clone(), state.path()).launched(
             &codex_pairing(),
             "# Rate limiting\n",
             None,

@@ -23,7 +23,7 @@ Roadmap stage: [01: The ConPTY terminal and unsandboxed sessions](docs/roadmaps/
 - [x] 02: The open rendering — [details](02-open-rendering.md)
 - [x] 03: The fresh profile — [details](03-fresh-profile.md)
 - [x] 04: A replaced link is written back — [details](04-written-back.md)
-- [ ] 05: The prompt goes to a file — [details](05-prompt-file.md)
+- [x] 05: The prompt goes to a file — [details](05-prompt-file.md)
 - [ ] 06: Sessions turn on, with the note — [details](06-sessions-turn-on.md)
 - [ ] 07: Terminals on pwsh, and the note on their pane — [details](07-terminals-on-pwsh.md)
 - [ ] 08: The Windows end-to-end suite — [details](08-windows-suite.md)
