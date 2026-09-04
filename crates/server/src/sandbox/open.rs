@@ -427,17 +427,23 @@ mod tests {
     /// The machine's own names beside them where the tests are on the machine
     /// they are about, because a probe started with none of them is a program
     /// that does not load — see [`super::super::windows_names`].
+    ///
+    /// **Those first and this test's after them**, because the last of a name
+    /// is the one that stands — see [`said`]. Two of the three names above are
+    /// in that set on a Windows runner, so said the other way round these
+    /// assertions would be about the machine's own `ComSpec` and `PATHEXT`
+    /// rather than about the values they were written for.
     fn described(bin: &Path, argv: &[&str]) -> Surface {
         let mut surface = Surface::starting_in(bin.to_owned());
+
+        for (name, value) in super::super::windows_names(bin) {
+            surface.set(name, value);
+        }
 
         surface
             .set(PATH, bin.as_os_str())
             .set(PATHEXT, EXTENSIONS)
             .set(COMSPEC, CMD);
-
-        for (name, value) in super::super::windows_names(bin) {
-            surface.set(name, value);
-        }
 
         surface.running(argv);
 

@@ -2980,12 +2980,19 @@ mod tests {
 
     /// And where the session opens it: the same directory reached from inside,
     /// which is under the profile Windows gives a Conversation.
+    ///
+    /// Composed the way the server composes it rather than by joining the names
+    /// again here. What a session is told is a path it can *open*, so the
+    /// handoff directory inside a HOME is spelled with a forward slash whichever
+    /// machine composed it — see [`crate::sandbox::under`] — and a `join` here
+    /// would put this machine's own separator where that one is and match
+    /// nothing.
     fn opened_at(state: &std::path::Path) -> PathBuf {
-        state
-            .join("homes")
-            .join(CONVERSATION.to_string())
-            .join("verkstead")
-            .join("prompt.md")
+        crate::handoffs::inside(
+            Platform::Windows,
+            &state.join("homes").join(CONVERSATION.to_string()),
+        )
+        .join("prompt.md")
     }
 
     /// A prompt with everything a real one carries: what the builders above put

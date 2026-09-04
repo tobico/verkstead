@@ -2649,15 +2649,25 @@ mod tests {
             Some("verkstead"),
             "the name on `PATH` is the name the skills and the Guide tell a session to run"
         );
+        // Read as *what it begins with* rather than by splitting on the
+        // separator: the directory is this machine's own whichever platform is
+        // being rendered for, and a Windows path split on a colon comes apart
+        // at the drive letter.
         for platform in [Platform::Linux, Platform::MacOs, Platform::Windows] {
             let inside = path(platform, equipped.bin());
-            let inside = inside.to_string_lossy();
+            let leads = {
+                let mut leads = equipped.bin().as_os_str().to_owned();
+                leads.push(separator(platform));
 
-            assert_eq!(
-                inside.split(separator(platform)).next().map(Path::new),
-                Some(equipped.bin()),
+                leads
+            };
+
+            assert!(
+                inside
+                    .as_encoded_bytes()
+                    .starts_with(leads.as_encoded_bytes()),
                 "on {platform:?} the server's own build has to be found before the \
-                 machine's install"
+                 machine's install, and the `PATH` is {inside:?}"
             );
         }
     }
@@ -2668,8 +2678,15 @@ mod tests {
     /// The one that joins a file into a session's profile by hard link leaves
     /// that file, because a link stops being one file the moment something
     /// renames over it; the two whose links follow their own target leave
-    /// nothing at all. Asked of all three here because this is the one place a
-    /// Mac's rendering can be asked from a machine that is not one.
+    /// nothing at all.
+    ///
+    /// **Of whichever renderings this build carries**, which is the one thing
+    /// here that is not a value. A renderer is compiled where there is a
+    /// machine to run it or a test to ask it — see the modules at the top of
+    /// this file — and the seatbelt one is neither on a Windows build: what it
+    /// renders is a policy about a filesystem where every path is a Unix path.
+    /// So a Mac's rendering is asked for from a Unix, which is where the whole
+    /// of that arm is asked about anyway.
     #[test]
     fn only_the_rendering_that_links_a_file_by_hand_leaves_anything_to_close() {
         let account = tempfile::tempdir().unwrap();
@@ -2689,8 +2706,14 @@ mod tests {
             surface
         };
 
-        for platform in [Platform::Linux, Platform::MacOs] {
-            let (_, closing) = rendered(platform, &described());
+        let following: &[Platform] = if cfg!(unix) {
+            &[Platform::Linux, Platform::MacOs]
+        } else {
+            &[Platform::Linux]
+        };
+
+        for platform in following {
+            let (_, closing) = rendered(*platform, &described());
 
             assert_eq!(
                 closing.linked().count(),
