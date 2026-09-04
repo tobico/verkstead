@@ -19,7 +19,7 @@ beside this plan.
 ## Tasks
 
 - [x] 01: One terminal, end to end — [details](01-one-terminal.md)
-- [ ] 02: The login shell — [details](02-login-shell.md)
+- [x] 02: The login shell — [details](02-login-shell.md)
 - [ ] 03: Tabs — [details](03-tabs.md)
 - [ ] 04: Tabs ending — [details](04-tabs-ending.md)
 - [ ] 05: Closing — [details](05-closing.md)

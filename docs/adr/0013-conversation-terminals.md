@@ -40,6 +40,16 @@ configure one. Interactive and not a login shell, because a login shell reads
 the system profile, which rebuilds `PATH`, and the Sandbox's invariant that
 the running server's own `verkstead` is first on `PATH` has to hold here too.
 
+Not being a login shell turned out not to be enough on the machine this is
+built on. Every shell on NixOS — `/etc/bashrc`, `/etc/zshenv`, fish's own
+preinit — sources `/etc/set-environment` unless
+`__NIXOS_SET_ENVIRONMENT_DONE` is already set, and that file rebuilds `PATH`
+out of the *host's* profiles: a terminal's `verkstead ask` would have run
+whatever the machine had installed rather than the server's own image. So a
+Sandbox built to run a shell says that variable, which is the plain truth of
+it — the environment was set, here, by the Sandbox — and off NixOS it is a
+variable nothing reads.
+
 ## What a terminal is not
 
 **Not a record.** A terminal is memory only: no Capture, no Event on the

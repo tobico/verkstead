@@ -143,7 +143,12 @@ mod tasks;
 pub mod terminal;
 /// The terminals a Conversation holds of its own: a human's shell inside its
 /// Sandbox, in the Screen's own machinery pointed at a shell.
-mod terminals;
+///
+/// Public for the reason the sandbox is: which shell a human gets at their own
+/// machine is the product's answer rather than an endpoint's, and what proves
+/// one is a shell really running inside a Sandbox — a test standing where the
+/// orchestrator does, asking the machine the same question it asks.
+pub mod terminals;
 mod transcript;
 /// What Verkstead says to a running session: the keystrokes the rescue and the
 /// nudge both go in as.

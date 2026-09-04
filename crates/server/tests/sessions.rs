@@ -25604,6 +25604,89 @@ async fn a_terminal_runs_a_shell_in_the_conversations_worktree() {
     );
 }
 
+/// And the shell it comes up in is the server user's own, with `SHELL` naming it
+/// inside and the running server's own `verkstead` still the first one found.
+///
+/// Which shell that is, is the machine's answer rather than this test's: the
+/// rules for reading a passwd entry are asked of each kind of entry as values,
+/// in the server's own unit tests, and what is asked here is the half no unit
+/// test can — that whatever this machine named really comes up on a
+/// pseudo-terminal inside a Sandbox, and that entering it left the environment
+/// the Sandbox handed it as it was. A login shell would not have: it reads the
+/// system's profile, which on NixOS rebuilds `PATH`, and a `verkstead` found
+/// somewhere other than the one bound in is the two halves of an ask being two
+/// different builds.
+#[tokio::test]
+async fn a_terminal_comes_up_in_the_server_users_own_shell() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    // What the server chose, asked of this machine the way the server asks it —
+    // so that a suite run under one account and a suite run under another are
+    // both asking whether the terminal came up in *that* account's shell.
+    let chosen = verkstead_server::terminals::shell::of_the_server();
+
+    // And where a session's `verkstead` is inside, which is where a terminal's
+    // has to be too: the directory the binds make on Linux, and the Data
+    // Directory itself on a Mac, where nothing can be made at the root.
+    let ours = verkstead_server::sandbox::own_directory(Platform::HERE, fixture.state.path())
+        .join("bin")
+        .join("verkstead");
+
+    fixture
+        .until(|view| view.worktree.as_ref().map(|worktree| worktree.path.clone()))
+        .await;
+
+    let at = fixture.listening().await;
+
+    let opened: TerminalOpened = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+        &serde_json::json!({}),
+    )
+    .await;
+
+    let TerminalOpened::Opened { number } = opened else {
+        panic!("expected a terminal to open, and the server said: {opened:?}");
+    };
+
+    let mut watcher = Watcher::terminal(at, fixture.id, number).await;
+
+    // Wide enough for a store path and its answer to land on one row — a
+    // wrapped line being one no `contains` finds.
+    watcher.resize(200, 40).await;
+
+    watcher.types("printf 'shell=%s\\n' \"$SHELL\"\r").await;
+
+    let said = format!("shell={chosen}");
+    let showing = watcher.until(|grid| grid.contains(&said)).await;
+
+    assert!(
+        showing.iter().any(|row| row.contains(&said)),
+        "`SHELL` inside should name the shell the terminal is running, which on \
+         this machine is {chosen:?}, and it is showing: {showing:?}",
+    );
+
+    // Asked of a lookup rather than of the variable, for the reason the sandbox's
+    // own test asks it that way: what settles which binary is first on `PATH` is
+    // something inside looking one up.
+    watcher.types("command -v verkstead\r").await;
+
+    let found = ours.display().to_string();
+    let showing = watcher.until(|grid| grid.contains(&found)).await;
+
+    assert!(
+        showing.iter().any(|row| row.contains(&found)),
+        "a bare `verkstead` in a terminal should be the one the server bound in at \
+         {found:?}, and it is showing: {showing:?}",
+    );
+}
+
 /// And opening one leaves nothing behind: a terminal is memory only — no
 /// Capture, no Event on the Timeline, nothing in the store at all.
 ///

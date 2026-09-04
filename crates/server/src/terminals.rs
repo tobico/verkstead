@@ -24,6 +24,12 @@
 //! under. Running one outside the Sandbox was never on the table: the filesystem
 //! boundary is what makes a shell in a Conversation safe to offer at all.
 //!
+//! **Running the shell the machine's own human would get.** The server user's
+//! login shell out of passwd, where that is a shell a Sandbox can run, and
+//! `/bin/sh` where it is not — see [`shell`]. There is no setting for it: on a
+//! packaged install the nix module gives the service user a shell, which is
+//! where a machine's shells are said already.
+//!
 //! **A register of its own.** A Conversation has one session and may have any
 //! number of terminals, so these are kept apart from the sessions' map rather
 //! than bent into it, keyed by a number this server issues in order and never
@@ -38,6 +44,11 @@
 //! **And not a hold on the run**, exactly as typing into a Screen is not: a
 //! terminal opened beside a running session is somebody looking, and somebody
 //! who means to take the work on by hand presses **Stop** first.
+
+/// Which shell a terminal comes up in: the server user's own, where the machine
+/// has given it a usable one — see [`shell`], which is the whole of the
+/// choosing.
+pub mod shell;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -57,18 +68,18 @@ use crate::sessions::CHUNK;
 use crate::store;
 use crate::terminal::Terminal;
 
-/// What a Terminal runs.
+/// How that shell is started.
 ///
-/// The shell every machine Verkstead runs on has, at the one path the Sandbox's
-/// own surface is certain to have one at, and interactive because what is at the
-/// other end of it is a human at a keyboard. Not a login shell: one reads the
-/// system profile, which rebuilds `PATH`, and the Sandbox's invariant that the
-/// running server's own `verkstead` is first on it has to hold here too.
+/// Interactive, because what is at the other end of it is a human at a keyboard.
+/// And not a login shell, because a login shell reads the system's profile,
+/// which rebuilds `PATH` — the Sandbox's invariant that the running server's own
+/// `verkstead` is first on it has to hold in a terminal as it does in a session.
 ///
-/// The server user's own login shell is what a human should get, and a later
-/// task reads it out of passwd; this is what stands there until it does, and
-/// what a machine with no usable one falls back to either way.
-const SHELL: &str = "/bin/sh";
+/// That is not the whole of holding it, and the rest is the Sandbox's: on NixOS
+/// every shell rebuilds the environment as it starts whether it is a login shell
+/// or not, and what stops it is said in the environment — see
+/// [`crate::sandbox::Sandbox::shelled`].
+const INTERACTIVE: &str = "-i";
 
 /// The terminals this server is holding, by the Conversation each belongs to.
 #[derive(Clone, Default)]
@@ -214,9 +225,22 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
         let agents = agents.clone();
         let conversation = conversation.clone();
         let profile = pairing.profile.clone();
-        let argv = vec![SHELL.to_owned(), "-i".to_owned()];
 
-        move || agents.sandboxed(&conversation, &profile, &argv)
+        move || {
+            // What this machine's own human gets at a keyboard, which is what a
+            // terminal is for. Asked here rather than above because it is the
+            // machine that answers — the passwd database and the filesystem —
+            // and this is the thread that is allowed to wait on either.
+            let chosen = shell::of_the_server();
+            let argv = vec![chosen.clone(), INTERACTIVE.to_owned()];
+
+            // Said twice: it is the command the Sandbox runs, and it is what
+            // `SHELL` names inside — so what the human is typing into and what
+            // anything they start reads out of the environment are one shell.
+            agents
+                .sandboxed(&conversation, &profile, &argv)
+                .map(|(sandbox, argv)| (sandbox.shelled(&chosen), argv))
+        }
     })
     .await?;
 
