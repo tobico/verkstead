@@ -107,3 +107,10 @@ whose open was refused, stays showing why and nothing opens until the human
 presses plus — otherwise a refused Sandbox would be an endless spawn loop.
 Close is on a context menu, right-click on a pointer and long press on a
 finger, so a close cannot be pressed by accident.
+
+A tab is called what its shell calls itself: xterm reads the terminal title
+escape, and the tab's label follows it, most prompts setting one at every
+prompt. Where the shell has set none, or has cleared the one it set, the label
+is *Terminal N* by the number the server issued — which is why those numbers are
+never reused. A repaint carries the grid and not the title, so a fresh attach
+reads the number again until the shell next says a name.

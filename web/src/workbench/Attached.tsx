@@ -34,6 +34,13 @@
 //! a terminal's business is what it makes of a keystroke, and what it makes of
 //! one comes back down the socket like everything else it prints.
 //!
+//! **And what the far end calls itself comes back out.** A shell sets a title
+//! the way it prints anything else, and xterm reads it out of the escape —
+//! which is the one thing a window learns about what is running on it. There is
+//! nowhere on a grid for a title, so it is handed to whoever drew this window
+//! instead: a Terminal's tabs are named by it, and a Screen has no name to draw
+//! and asks for none.
+//!
 //! **A grid with nothing on it yet says so.** An empty black rectangle is
 //! exactly what a terminal that has failed looks like, so until the first
 //! repaint has landed the pane says it is waiting for one — which is the
@@ -123,6 +130,21 @@ export function Attached(props: {
   /// it rather than left attached to nothing.
   over?: string;
 
+  /// What the shell at the far end calls itself, said again every time it
+  /// changes it — the terminal title escape, which is what a prompt sets at
+  /// every prompt.
+  ///
+  /// Reported rather than drawn, because there is nowhere on a grid for a title
+  /// to go: what is made of it belongs to whatever put this window on a pane,
+  /// and for a Conversation's Terminal that is the tab's label. Empty where the
+  /// shell cleared it, which is a name taken back rather than a name of no
+  /// letters.
+  ///
+  /// Nothing is said until the shell says something: a repaint carries the grid
+  /// and not the title, so a window that has just attached knows no more about
+  /// what is running on it than it did before.
+  titled?: (title: string) => void;
+
   /// And what to call when the socket closes with this window still drawn,
   /// which is what a shell ending looks like from here: the server takes the
   /// terminal off its register and every watcher's socket closes with it.
@@ -187,6 +209,12 @@ export function Attached(props: {
       // those bytes are what goes up. And what the mouse does, which comes out
       // of the same callback and goes up as the same kind of thing.
       terminal.onData((input) => putIn?.({ PutIn: input }));
+
+      // And what the shell calls itself, for whoever is drawing a name for this
+      // window. On the terminal for the reason the typing is: it is xterm that
+      // reads a title out of the escape the shell printed, and this side only
+      // passes on what it read.
+      terminal.onTitleChange((title) => props.titled?.(title));
 
       // And the typing, where this is the window showing. Here as well as in
       // the effect below, because the two are the two ways a window comes to be

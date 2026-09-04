@@ -190,6 +190,7 @@ import conflictMark from "../src/workbench/Merging.module.css";
 // rules that give it one are what jsdom cannot lay out.
 import attachedPane from "../src/workbench/Attached.module.css";
 import attachedCss from "../src/workbench/Attached.module.css?raw";
+import terminalCss from "../src/workbench/Terminal.module.css?raw";
 // What a Conversation is called where nobody has named its branch, which the
 // sidebar and the pane header are both drawn with.
 import { AUTOMATIC, DRAFT, titled } from "../src/workbench/naming";
@@ -16607,6 +16608,118 @@ describe("the terminal pane's tabs", () => {
       ).toHaveLength(0);
 
       await waitFor(() => expect(asked(fetching)).toBe(2));
+    });
+  });
+
+  describe("what a tab is called", () => {
+    /// The title escape a shell prints to say what it is: OSC 0, which is what
+    /// a prompt sets at every prompt.
+    const namesItself = (title: string): Shown => ({
+      Printed: `\u001b]0;${title}\u0007`,
+    });
+
+    /// A shell names its own tab, and takes the name back by clearing it — a
+    /// title of nothing is a shell saying it is nothing in particular again,
+    /// which is the number.
+    it("calls a tab what its shell calls itself", async () => {
+      withTerminals([1]);
+      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+
+      const socket = await attachedTo(1);
+
+      // Nothing until the shell says something: the repaint that makes the
+      // terminal carries the grid and not a title.
+      socket.says(PAINTED);
+      await waitFor(() => expect(tabs(container)).toHaveLength(1));
+      expect(tabs(container)[0]!.textContent).toBe("Terminal 1");
+
+      socket.says(namesItself("~/worktrees/it"));
+
+      await waitFor(() =>
+        expect(tabs(container)[0]!.textContent).toBe("~/worktrees/it"),
+      );
+
+      socket.says(namesItself(""));
+
+      await waitFor(() =>
+        expect(tabs(container)[0]!.textContent).toBe("Terminal 1"),
+      );
+    });
+
+    /// One shell's title is one tab's, and the others go on saying their
+    /// numbers: the name comes down the socket the window is watching, so
+    /// nothing about it can reach another tab.
+    it("names only the tab whose shell said it", async () => {
+      withTerminals([1, 2]);
+      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+
+      const first = await attachedTo(1);
+      const second = await attachedTo(2);
+
+      first.says(PAINTED);
+      second.says(PAINTED);
+      second.says(namesItself("git rebase -i"));
+
+      await waitFor(() =>
+        expect(tabs(container).map((tab) => tab.textContent)).toEqual([
+          "Terminal 1",
+          "git rebase -i",
+        ]),
+      );
+    });
+
+    /// And a fresh attach reads the number again. A repaint is the grid and
+    /// nothing else, so a pane that has just loaded knows what the server
+    /// numbered the shell and no more — until the shell next draws a prompt.
+    it("reads the number again after a reload", async () => {
+      withTerminals([1]);
+      const before = mount(`/conversations/${GRILLING.id}/terminal`);
+
+      const first = await attachedTo(1);
+      first.says(PAINTED);
+      first.says(namesItself("~/worktrees/it"));
+
+      await waitFor(() =>
+        expect(tabs(before.container)[0]!.textContent).toBe("~/worktrees/it"),
+      );
+
+      // The page loaded again: a new window on the same shell, which comes
+      // back to a grid and to nothing that says what it is called.
+      before.unmount();
+
+      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+
+      const again = await waitFor(() => {
+        const opened = Attached.opened.filter((one) =>
+          one.url.endsWith(`${TERMINALS_OF_IT}/1/attach`),
+        );
+
+        if (opened.length < 2) {
+          throw new Error("the pane has not attached again");
+        }
+
+        return opened.at(-1)!;
+      });
+
+      again.says(PAINTED);
+
+      await waitFor(() =>
+        expect(tabs(container)[0]!.textContent).toBe("Terminal 1"),
+      );
+
+      // And the shell saying its name again is the tab's again.
+      again.says(namesItself("~/worktrees/it"));
+
+      await waitFor(() =>
+        expect(tabs(container)[0]!.textContent).toBe("~/worktrees/it"),
+      );
+    });
+
+    /// However long a name is, the strip is a strip: a title the length of a
+    /// path is cut off rather than allowed to push every other tab out of it.
+    it("cuts a long name off rather than widening the strip", () => {
+      expect(terminalCss).toContain("max-width: 12rem;");
+      expect(terminalCss).toContain("text-overflow: ellipsis;");
     });
   });
 });

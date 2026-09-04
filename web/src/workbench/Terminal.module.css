@@ -29,7 +29,16 @@
   padding: 0.35rem 0.7rem;
   font: inherit;
   font-size: 0.85rem;
+
+  /* A tab is called what its shell calls itself, and what a shell calls itself
+     is whatever it likes — a prompt that puts a whole path in its title would
+     otherwise be one tab wide enough to push every other one out of the strip.
+     Cut off at a measure a name reads in, and the strip scrolls as it always
+     did for the ones past the edge. */
+  max-width: 12rem;
+  overflow: hidden;
   white-space: nowrap;
+  text-overflow: ellipsis;
   color: var(--ink-soft);
   background: none;
   border: 0;

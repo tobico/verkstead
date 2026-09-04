@@ -25,8 +25,20 @@
 //! per terminal, in the order they were opened, and a plus at the end opens
 //! another. It is the Output pane's Transcript/Screen switch built again —
 //! pressed-or-not buttons in a group rather than a tablist, which is the house's
-//! answer to this shape — and each tab is called *Terminal N* by the number the
-//! server gave it, which is why those numbers are never reused.
+//! answer to this shape.
+//!
+//! **And a tab is called what its shell calls itself.** A prompt sets the
+//! terminal's title at every prompt — the directory it is in, the command it is
+//! running — and that is a better name for a tab than anything this side could
+//! invent, so xterm's reading of the title escape is the label. Where the shell
+//! has set none, or has cleared the one it set, the tab falls back to
+//! *Terminal N* by the number the server gave it, which is why those numbers are
+//! never reused.
+//!
+//! A fresh attach starts from the number again: a repaint carries the grid and
+//! not the title, so a pane that has just loaded knows the number and nothing
+//! else until the shell next says a name — which, for most prompts, is the next
+//! time it draws one.
 //!
 //! Every tab keeps its socket open and its grid mounted whether or not it is the
 //! one showing, so a shell that printed while somebody was reading another tab
@@ -175,6 +187,15 @@ export function Terminal(props: {
   /// typing, and one without is a shell somebody is working in.
   const [over, setOver] = createSignal<Record<number, string>>({});
 
+  /// What each tab's shell has called itself, where it has called itself
+  /// anything: the title it last set, which is what the tab is labelled by.
+  ///
+  /// Kept here rather than in the window that heard it, because a name is a
+  /// thing about the tab bar and the window drawing the grid may be hidden. A
+  /// tab that has gone may leave an entry behind it, which names nothing: the
+  /// server never reuses a number, so nothing can ever come back under it.
+  const [titles, setTitles] = createSignal<Record<number, string>>({});
+
   /// Which tab the human turned to, where they have turned to one.
   const [chosen, setChosen] = createSignal<number | undefined>();
 
@@ -222,12 +243,23 @@ export function Terminal(props: {
       : open[0];
   });
 
-  /// What a tab is called. The number the server issued it, and the bare word
-  /// for one standing on an open that was refused — the server never got as far
-  /// as a number for that one, and a made-up one would be a name for a shell
-  /// that is not there.
-  const called = (tab: number): string =>
-    tab > 0 ? `Terminal ${tab}` : "Terminal";
+  /// What a tab is called. What its shell last called itself, where it has
+  /// called itself anything at all: a title of nothing but spaces is a shell
+  /// clearing its name rather than setting a blank one, and reads as none.
+  ///
+  /// Failing that, the number the server issued it — and the bare word for one
+  /// standing on an open that was refused, the server never having got as far as
+  /// a number for that one, where a made-up one would be a name for a shell that
+  /// is not there.
+  const called = (tab: number): string => {
+    const said = titles()[tab]?.trim();
+
+    if (said) {
+      return said;
+    }
+
+    return tab > 0 ? `Terminal ${tab}` : "Terminal";
+  };
 
   /// Take away whatever is only standing there to say why, which is what plus
   /// replacing one means: a tab that is a sentence about a shell that never
@@ -467,6 +499,9 @@ export function Terminal(props: {
                   class={shell.paneWide}
                   showing={showing() === tab}
                   over={over()[tab]}
+                  titled={(title) =>
+                    setTitles((was) => ({ ...was, [tab]: title }))
+                  }
                   ended={() => ended(tab)}
                   say={{
                     waiting: "Starting a shell in this conversation's worktree…",

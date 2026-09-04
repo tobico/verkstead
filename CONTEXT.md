@@ -781,6 +781,9 @@ another, a tab goes when its shell ends, and the pane never stands empty — the
 last tab going opens a fresh one, unless the shell ended within moments of
 starting or could not start at all, in which case the tab stays saying why until
 plus is pressed. Close is on the tab's menu, a right-click or a long press.
+A tab is called whatever its shell sets the terminal's title to, and *Terminal N*
+by the server's number where it has set none — a fresh attach reads the number
+again, a repaint carrying the grid and not the title.
 The same server-held pseudo-terminal, virtual terminal and xterm window as a
 Screen, and the same rule about the human: typing into one holds nothing off and
 records nothing. **Not a record**: memory only, no Capture, no Event, nothing in

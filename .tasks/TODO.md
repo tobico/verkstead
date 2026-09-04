@@ -23,4 +23,4 @@ beside this plan.
 - [x] 03: Tabs — [details](03-tabs.md)
 - [x] 04: Tabs ending — [details](04-tabs-ending.md)
 - [x] 05: Closing — [details](05-closing.md)
-- [ ] 06: Titles — [details](06-titles.md)
+- [x] 06: Titles — [details](06-titles.md)
