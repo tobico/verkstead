@@ -79,6 +79,12 @@ pub fn of_the_server() -> String {
 /// no Sandbox binds is one nothing inside can run; there, because a path naming
 /// nothing is a terminal that would not start; and not one of [`REFUSED`],
 /// because those are an account saying there is no shell to give.
+///
+/// **Absolute by the entry's own rules rather than by the machine reading it.**
+/// A passwd shell is a Unix path whichever platform this is compiled for, and
+/// `Path::is_absolute` on Windows says `/bin/bash` is relative — which would
+/// make every rule below unreachable on a build that has no passwd database to
+/// break anyway, and every test of them pass for the wrong reason.
 fn usable(passwd: Option<&str>, there: impl Fn(&Path) -> bool) -> String {
     let Some(shell) = passwd.filter(|shell| !shell.is_empty()) else {
         return FALLBACK.to_owned();
@@ -91,7 +97,7 @@ fn usable(passwd: Option<&str>, there: impl Fn(&Path) -> bool) -> String {
         .and_then(|name| name.to_str())
         .unwrap_or_default();
 
-    if !path.is_absolute() || REFUSED.contains(&named) || !reachable(path) || !there(path) {
+    if !shell.starts_with('/') || REFUSED.contains(&named) || !reachable(shell) || !there(path) {
         return FALLBACK.to_owned();
     }
 
@@ -106,12 +112,15 @@ fn usable(passwd: Option<&str>, there: impl Fn(&Path) -> bool) -> String {
 /// is a different list on a Mac than on Linux. Bound at the path they are really
 /// at, so a shell under one of them is the same path inside as out.
 ///
-/// Whole components rather than letters: `/opt/homebrew-something` is not under
-/// `/opt/homebrew`, and a check on the spelling would say it was.
-fn reachable(shell: &Path) -> bool {
-    crate::sandbox::SYSTEM
-        .iter()
-        .any(|root| shell.starts_with(root))
+/// *Under*, which is why the rest of the path has to start with a separator:
+/// `/opt/homebrew-something` is not inside `/opt/homebrew`, and a root by itself
+/// is a directory rather than a shell.
+fn reachable(shell: &str) -> bool {
+    crate::sandbox::SYSTEM.iter().any(|root| {
+        shell
+            .strip_prefix(root)
+            .is_some_and(|below| below.starts_with('/'))
+    })
 }
 
 /// The login shell the passwd database gives the user this server runs as, or
