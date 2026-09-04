@@ -98,6 +98,13 @@ The desktop app is deliberately plain about its limits:
   session will want when one arrives. And the state says **Windows**, and says
   **not yet** — a Mac runs sessions now, and a stage after the port brings them
   to Windows as well.
+
+  Amended: **that stage is [ADR-0014](0014-windows-sessions.md).** The
+  terminal is a ConPTY and the Sandbox an AppContainer, and they land in that
+  order: the not-yet state gives way to sessions that run unsandboxed and say
+  so, and the saying-so gives way to the container. What is decided about
+  each — the fresh profile, the prompt file, the named pipe a container asks
+  through, the probe that opens the container's stage — is that ADR's.
 - **A taken port is an error.** If `127.0.0.1:8422` is already bound — a second
   copy, or the NixOS-module daemon — the app shows an error dialog and exits
   rather than fronting the running server or picking another port.
