@@ -28,6 +28,10 @@
 //! why a HOME is a different directory per Conversation there and the same one
 //! here.
 //!
+//! Windows is that second kind twice over: nothing is bound there either, and
+//! `/tmp` is not a path that machine has at all. So it is the HOME answer, and
+//! for the same reason the Mac's is.
+//!
 //! Taking it is a move rather than a read: the copy in the directory goes as the
 //! Timeline gets one, so the Event is the handoff from then on and there is
 //! never a second one to go stale.
@@ -62,8 +66,8 @@ pub(crate) const SAID_INSIDE_HOME: &str = "$HOME/verkstead";
 /// ask for, and this one decides a path a session is told about in prose.
 pub(crate) fn inside(platform: Platform, home: &Path) -> PathBuf {
     match platform {
-        Platform::MacOs => crate::sandbox::under(home, INSIDE_HOME),
-        Platform::Linux | Platform::Windows => PathBuf::from(INSIDE),
+        Platform::MacOs | Platform::Windows => crate::sandbox::under(home, INSIDE_HOME),
+        Platform::Linux => PathBuf::from(INSIDE),
     }
 }
 
@@ -73,8 +77,8 @@ pub(crate) fn inside(platform: Platform, home: &Path) -> PathBuf {
 /// [`SAID_INSIDE_HOME`].
 pub(crate) fn said(platform: Platform) -> &'static str {
     match platform {
-        Platform::MacOs => SAID_INSIDE_HOME,
-        Platform::Linux | Platform::Windows => INSIDE,
+        Platform::MacOs | Platform::Windows => SAID_INSIDE_HOME,
+        Platform::Linux => INSIDE,
     }
 }
 
@@ -262,10 +266,23 @@ mod tests {
         );
 
         assert_eq!(
+            inside(Platform::Windows, sevens),
+            Path::new("/data/homes/7/verkstead"),
+            "and Windows the same, having no mounts either and no `/tmp` at all",
+        );
+
+        assert_eq!(
             inside(Platform::Linux, sevens),
             Path::new(INSIDE),
             "where a tmpfs of the session's own makes that path one directory \
              per session already",
+        );
+
+        assert_eq!(
+            said(Platform::Windows),
+            said(Platform::MacOs),
+            "and a skill names it the same way on both: through the variable \
+             that already differs per Conversation",
         );
     }
 

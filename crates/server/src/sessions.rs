@@ -306,7 +306,10 @@ impl Agents {
 
         let worktree = conversation.worktree.clone()?;
 
-        Some((sandbox, under_dev_shell(&worktree, argv)))
+        Some((
+            sandbox,
+            under_dev_shell(self.homes.platform(), &worktree, argv),
+        ))
     }
 
     /// What a session under `pairing` on `prompt`, named `session`, working in

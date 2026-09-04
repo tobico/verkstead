@@ -490,9 +490,10 @@ pub fn builds_rust(repo: &Path) -> bool {
 /// credentials a session commits with — and none of it applies to a process
 /// that serves every Conversation and belongs to none. **It is a
 /// [`crate::sandbox::Surface`] all the same**, and rendered by the renderer a
-/// session's is: what a sandbox holds is one description on both platforms, so
-/// this is bubblewrap's flags on Linux and a deny-by-default policy on a Mac
-/// without a word here saying which — see [`crate::sandbox::rendered`].
+/// session's is: what a sandbox holds is one description on every platform, so
+/// this is bubblewrap's flags on Linux, a deny-by-default policy on a Mac and a
+/// plain process on Windows without a word here saying which — see
+/// [`crate::sandbox::rendered`].
 ///
 /// What it gave up to be one is the hostname it used to be given inside. A name
 /// for the machine is something one of the two mechanisms can say and the other
@@ -532,7 +533,7 @@ fn compile_server(dir: &Path, sccache: &Path, data_dir: &Path, size: &str) -> Co
         // this runs is beside where a session's `verkstead` goes, and what is
         // in front of the machine's own paths is that directory either way —
         // see [`crate::sandbox::path`].
-        .set("PATH", sandbox::path(&ours))
+        .set("PATH", sandbox::path(Platform::HERE, &ours))
         .set("SCCACHE_DIR", dir.join(SCCACHE_DIR))
         .set("SCCACHE_CACHE_SIZE", size)
         .set("SCCACHE_START_SERVER", "1")
@@ -540,7 +541,7 @@ fn compile_server(dir: &Path, sccache: &Path, data_dir: &Path, size: &str) -> Co
         .set("SCCACHE_IDLE_TIMEOUT", "0")
         .running(&[&inside]);
 
-    let mut compiling = Command::from(&sandbox::rendered(&surface));
+    let mut compiling = Command::from(&sandbox::rendered(Platform::HERE, &surface));
 
     // In a process group of its own where the platform needs one, which is what
     // a keeper ends when the server has gone — see

@@ -62,8 +62,9 @@ struct Bundled;
 /// any path (ADR-0011).
 ///
 /// Where no bind can make it — a Mac, whose root volume nothing may be created
-/// on — a session reads them where they were really written, and this is what
-/// is rewritten to that as they are written out. See
+/// on, and Windows, which has no binds at all yet — a session reads them where
+/// they were really written, and this is what is rewritten to that as they are
+/// written out. See
 /// [`crate::sandbox::own_directory`] for the whole of that difference, and
 /// [`Skills::inside`] for which of the two a session got.
 pub(crate) const INSIDE: &str = "/verkstead/skills";
@@ -245,11 +246,13 @@ impl Skills {
     /// And where a session reads them: [`INSIDE`] where a bind makes that path,
     /// and the directory they were written to where none can.
     ///
-    /// The one place the two are the same thing is a Mac, where nothing can be
-    /// created at `/` at all — see [`crate::sandbox::own_directory`]. What that
-    /// costs is the path being the Data Directory's rather than nobody's; what
-    /// keeps it Verkstead's is the policy, which reaches this directory and no
-    /// other part of that one.
+    /// The two are the same thing on a Mac, where nothing can be created at `/`
+    /// at all, and on Windows, where nothing is bound anywhere yet — see
+    /// [`crate::sandbox::own_directory`]. What that costs is the path being the
+    /// Data Directory's rather than nobody's; what keeps it Verkstead's is the
+    /// policy on the first of them, which reaches this directory and no other
+    /// part of that one, and on the second is that Verkstead wrote it, there
+    /// being no policy there yet.
     pub fn inside(&self) -> &Path {
         &self.inside
     }

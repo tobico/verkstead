@@ -4,9 +4,18 @@
 //! **What is inside is one description, and the mechanism under it is the
 //! platform's.** [`Sandbox::surface`] says what a session may reach, once; a
 //! renderer turns that into bubblewrap's flags on Linux — see [`bwrap`] — or
-//! into a deny-by-default policy on a Mac — see [`seatbelt`]. Neither rendering
-//! is the description, the two are not the same boundary, and nothing above
+//! into a deny-by-default policy on a Mac — see [`seatbelt`]. No rendering is
+//! the description, no two of them are the same boundary, and nothing above
 //! this module learns which one it got (ADR-0012).
+//!
+//! **And on Windows into the process itself, with no boundary at all** — see
+//! [`open`]. That arm sets the environment, starts in the Worktree and runs the
+//! vector, which is the whole of what a rendering with nothing to hide behind
+//! comes to: a session there runs with the reach of the account running the
+//! server, and the workbench says so in words rather than pretending otherwise
+//! (ADR-0014). The description is the same description, which is what lets the
+//! stage that gives that platform a boundary change the renderer and nothing
+//! above it.
 //!
 //! Evolved from `tobico-scripts/bin/sandbox`, which is the working reference —
 //! but narrowed where it matters. That script binds the whole of `~/src`
@@ -56,8 +65,10 @@
 // Built wherever the tests are rather than on its own platform alone: a
 // rendering is a description going in and a process coming out, so the arm this
 // machine will never run is still an arm its tests call — the same reason
-// `crates/desktop`'s startup registrations are all built here.
-#[cfg(any(not(target_os = "macos"), test))]
+// `crates/desktop`'s startup registrations are all built here. Not on a Windows
+// build outside one: there is no namespace to unshare there, and the renderer a
+// Windows session gets is the third of them below.
+#[cfg(any(not(any(target_os = "macos", target_os = "windows")), test))]
 mod bwrap;
 // The Apple rendering is built for its tests on a Unix and nowhere else: what
 // it renders is a policy about a filesystem where every path is a Unix path,
@@ -66,6 +77,11 @@ mod bwrap;
 // left out rather than made portable for a platform it says nothing about.
 #[cfg(any(target_os = "macos", all(test, unix)))]
 mod seatbelt;
+// And the third, built everywhere and gated by nothing. What it renders is the
+// process the description describes — the environment said, the directory
+// started in, the vector run — with no wrapper in front of it and no call any
+// one platform has to itself, so there is nothing here for a `cfg` to be about.
+mod open;
 // And the two ends of what a renderer is: the description going in, and the
 // process coming out.
 mod rendering;
@@ -76,15 +92,7 @@ mod surface;
 // arms are built and called wherever the tests are.
 pub(crate) mod outliving;
 
-// And which of them a session actually gets, which is the one thing about the
-// seam that is a `cfg` rather than a description: bubblewrap wherever there is
-// a kernel with namespaces to unshare, and Apple's own on a Mac.
-#[cfg(not(target_os = "macos"))]
-use bwrap::command as render;
-#[cfg(target_os = "macos")]
-use seatbelt::command as render;
-
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -222,13 +230,15 @@ const APPLE_SYSTEM: &[&str] = &[
 /// directory being nobody's. What a session is then told to read is the path
 /// the file is really at.
 ///
-/// Windows keeps the Linux spelling, having no sandbox at all yet: the stage
-/// that gives it one is the stage that decides what a directory of Verkstead's
-/// own is there.
+/// Windows is the Mac's answer for the Mac's reason, arrived at from the other
+/// end: there are no binds there either, so a path nothing makes is a path
+/// nothing is at. What a session is told to read is therefore where the file
+/// really is, under the Data Directory — and what keeps it Verkstead's is that
+/// Verkstead wrote it, rather than a boundary, there being none yet.
 pub fn own_directory(platform: Platform, data_dir: &Path) -> PathBuf {
     match platform {
-        Platform::MacOs => data_dir.to_owned(),
-        Platform::Linux | Platform::Windows => PathBuf::from(OWN_DIRECTORY),
+        Platform::MacOs | Platform::Windows => data_dir.to_owned(),
+        Platform::Linux => PathBuf::from(OWN_DIRECTORY),
     }
 }
 
@@ -240,11 +250,15 @@ const OWN_DIRECTORY: &str = "/verkstead";
 ///
 /// [`Path::join`] is the wrong tool for this and looks like the right one: it
 /// composes with the *host's* separator, and these are paths a session opens
-/// inside its sandbox rather than paths this process opens. On the two
-/// platforms that run sessions the two characters are the same one, so nothing
-/// has ever turned on the difference — but a Windows host composing one gets a
-/// backslash in the middle of a POSIX path, and these are the paths the skills'
-/// own text is written out of and that a session is told in prose.
+/// inside its sandbox rather than paths this process opens. On the two Unixes
+/// the two characters are the same one, so nothing has ever turned on the
+/// difference — but a Windows host composing a Linux path gets a backslash in
+/// the middle of a POSIX one, and these are the paths the skills' own text is
+/// written out of and that a session is told in prose.
+///
+/// A forward slash on Windows itself is what that costs, and it costs nothing:
+/// every call there opens the path with Win32, which reads both separators, and
+/// what a session is told in prose is a path it can open.
 pub(crate) fn under(directory: &Path, name: &str) -> PathBuf {
     PathBuf::from(format!("{}/{name}", directory.display()))
 }
@@ -416,6 +430,13 @@ pub const AGENT_TYPE: &str = "VERKSTEAD_AGENT";
 /// server's alike. Made by the bind on Linux and really there on a Mac, which
 /// is why it is a function of where the Data Directory is rather than a name.
 /// See [`path`], [`Executable`] and [`crate::build_cache`].
+///
+/// **A session on Windows leads its `PATH` with something else**, and this is
+/// the compile server's alone there: nothing is bound and nothing is linked, so
+/// what a session asks with is the running image where it really is — see
+/// [`Executable::at`] — and the directory holding *that* is what leads. Which
+/// leaves the sccache, whose two ends this is the whole of: the stage that runs
+/// a compile server on Windows is the stage that decides where it goes.
 pub(crate) fn own_bin(platform: Platform, data_dir: &Path) -> PathBuf {
     under(&own_directory(platform, data_dir), BIN)
 }
@@ -425,19 +446,42 @@ pub(crate) fn own_bin(platform: Platform, data_dir: &Path) -> PathBuf {
 /// `ours` is the directory of Verkstead's own that the binary a session asks
 /// with is in — see [`Executable`] for why a session asks with the server's own
 /// build rather than with whatever the machine has installed. It goes first on
-/// both platforms, and it is passed in rather than said here because where it
+/// every platform, and it is passed in rather than said here because where it
 /// is, is a fact about the machine too: `/verkstead/bin` where a bind makes it,
-/// and a directory under the Data Directory where nothing can — see
-/// [`own_directory`].
+/// a directory under the Data Directory where nothing can, and the directory
+/// the running image is really in where nothing is linked either — see
+/// [`own_directory`] and [`Executable::at`].
 ///
-/// Nothing here is inherited from the server's own environment: what a session
-/// can run should be a fact about the sandbox rather than about however the
-/// unit that started the orchestrator happened to be launched.
+/// Nothing on the two Unixes is inherited from the server's own environment:
+/// what a session can run should be a fact about the sandbox rather than about
+/// however the unit that started the orchestrator happened to be launched. On
+/// Windows the machine's own half *is* that environment, which is the one place
+/// this gives that up and is argued at [`servers_path`].
 ///
 /// And what the compile server has, for the same reason: it is a fact about
 /// what a sandbox holds rather than about either process.
-pub(crate) fn path(ours: &Path) -> String {
-    format!("{}:{MACHINE_PATH}", ours.display())
+///
+/// **On Windows the machine's own half is the server's own `PATH`** rather than
+/// a list written down here — see [`servers_path`], which is where that is
+/// argued — and the two halves are joined by that platform's separator rather
+/// than by a colon, which there is a drive letter's own punctuation. The
+/// separator is this one's own: `crate::PATH_LIST_SEPARATOR` is what a flag is
+/// parsed with, and a session's `PATH` is not a flag.
+pub(crate) fn path(platform: Platform, ours: &Path) -> OsString {
+    let mut path = ours.as_os_str().to_owned();
+
+    path.push(separator(platform));
+    path.push(machine_path(platform));
+
+    path
+}
+
+/// How `PATH` is written on `platform` where it holds more than one directory.
+fn separator(platform: Platform) -> &'static str {
+    match platform {
+        Platform::Linux | Platform::MacOs => ":",
+        Platform::Windows => ";",
+    }
 }
 
 /// The floor every sandbox Verkstead makes stands on, whatever it is for: the
@@ -469,23 +513,70 @@ pub(crate) fn on_the_machine(chdir: PathBuf) -> Surface {
     surface
 }
 
-/// And `surface` as the process that runs it, by whichever mechanism this
-/// machine has one.
+/// And `surface` as the process that runs it, by whichever mechanism
+/// `platform` has one: bubblewrap wherever there is a kernel with namespaces to
+/// unshare, Apple's own on a Mac, and the open one where there is no boundary
+/// yet — see [`bwrap`], [`seatbelt`] and [`open`].
 ///
-/// The one place either rendering is reached from, so that a sandbox is a
+/// The one place any rendering is reached from, so that a sandbox is a
 /// description going in and a [`Rendering`] coming out wherever one is made.
-pub(crate) fn rendered(surface: &Surface) -> Rendering {
-    render(surface)
+///
+/// **A value rather than the `cfg` this used to be**, for the reason
+/// [`Platform`] is a value everywhere else: the arm this machine will never run
+/// is still an arm its tests call. The arms are `cfg`-ed all the same, because
+/// a renderer is compiled where there is a machine to run it or a test to ask
+/// it — see the modules at the top of this file — and the last arm is what a
+/// build with none for the platform it was handed has to say. Nothing outside a
+/// test passes anything but [`Platform::HERE`], whose arm is always here.
+pub(crate) fn rendered(platform: Platform, surface: &Surface) -> Rendering {
+    match platform {
+        #[cfg(any(not(any(target_os = "macos", target_os = "windows")), test))]
+        Platform::Linux => bwrap::command(surface),
+        #[cfg(any(target_os = "macos", all(test, unix)))]
+        Platform::MacOs => seatbelt::command(surface),
+        Platform::Windows => open::command(surface),
+        #[allow(unreachable_patterns)]
+        elsewhere => {
+            unreachable!("this build carries no rendering for {elsewhere:?}")
+        }
+    }
 }
 
-/// The machine's own half of that, which is one list or the other and never
-/// both: a NixOS box has nothing under `/opt/homebrew` and a Mac has nothing
-/// under `/run/current-system/sw` unless somebody put it there.
-const MACHINE_PATH: &str = if cfg!(target_os = "macos") {
-    APPLE_PATH
-} else {
-    LINUX_PATH
-};
+/// The machine's own half of a session's `PATH`, on the platform whose answer
+/// is a list rather than a lookup — see [`path`], and [`servers_path`] for the
+/// one whose answer is neither.
+///
+/// One list or the other and never both: a NixOS box has nothing under
+/// `/opt/homebrew` and a Mac has nothing under `/run/current-system/sw` unless
+/// somebody put it there.
+fn machine_path(platform: Platform) -> OsString {
+    match platform {
+        Platform::Linux => OsString::from(LINUX_PATH),
+        Platform::MacOs => OsString::from(APPLE_PATH),
+        Platform::Windows => servers_path(),
+    }
+}
+
+/// And what it is on Windows, which is not a list here at all: the `PATH` the
+/// server itself was started with.
+///
+/// **There is no `WINDOWS_PATH` beside [`LINUX_PATH`] and [`APPLE_PATH`]**, and
+/// that is the decision rather than an omission. Those two are lists of where a
+/// packaged system puts its tools, and they are worth writing down because a
+/// session should reach the machine's own toolchain whatever the unit that
+/// started the orchestrator was handed. A Windows machine has no such list:
+/// where `git`, `node` and an agent live there is wherever their installers put
+/// them and wherever the human added, which is written down in one place and
+/// that place is the machine's `PATH`. So a session gets that, behind
+/// Verkstead's own directory.
+///
+/// What it costs is the one thing the other two arms buy: a session's `PATH` is
+/// a fact about how the server was launched. Which is the same trade the
+/// unsandboxed note is about — there is no boundary on this platform yet, so
+/// there is nothing here for a narrower `PATH` to protect.
+fn servers_path() -> OsString {
+    std::env::var_os("PATH").unwrap_or_default()
+}
 
 /// What that is on Linux: the system profile, then the Nix default profile,
 /// then the paths a non-NixOS `/usr` would put things in.
@@ -516,10 +607,79 @@ const APPLE_PATH: &str = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/u
 /// on its way up, which is why that path is in [`APPLE_SYSTEM`] — so the answer
 /// that was right for one machine is right for the other.
 ///
+/// And on Windows it is a name nothing reads: what a program shelling out there
+/// runs is `ComSpec` — see [`MACHINE_NAMES`], which is where that is said — and
+/// the shell a human types into is the terminals' to name, exactly as it is on
+/// the two Unixes. So this stays the one answer rather than growing an arm for
+/// a platform that asks the question elsewhere.
+///
 /// What every sandbox says unless its maker says otherwise — see
 /// [`Sandbox::shelled`], which is a Conversation's own terminal naming the shell
 /// it is about to run instead.
 pub(crate) const SHELL: &str = "/bin/sh";
+
+/// The names a Windows session is told about the machine it is on, which are
+/// the machine's own to say.
+///
+/// Nothing on that platform runs without them. `cmd.exe` with no `SystemRoot`
+/// does not start; a program that looks for a system library resolves it
+/// against `SystemDrive`; `ComSpec` is what anything shelling out runs, and
+/// [`open`] is one of them — see that module, which runs a batch file through
+/// it; and `PATHEXT` is half of what finding a program on this platform means,
+/// which is the other thing that module reads.
+///
+/// Read off the server's own environment because that is what they are: facts
+/// about the machine, not choices a sandbox makes. One that is somehow unset is
+/// left unsaid rather than invented — a Windows machine has all four, and a
+/// value guessed here would be a wrong answer standing where a missing one
+/// would have said which.
+const MACHINE_NAMES: [&str; 4] = ["SystemRoot", "SystemDrive", "ComSpec", "PATHEXT"];
+
+/// Where the halves of a Windows profile are under it, which is where Windows
+/// itself puts them: the roaming application data, the local application data,
+/// and the temporary directory inside the second.
+const APP_DATA: &str = "AppData";
+const ROAMING: &str = "Roaming";
+const LOCAL: &str = "Local";
+const TEMPORARY: &str = "Temp";
+
+/// Everything a Windows session is told beyond what every session is told: the
+/// profile it keeps its own things under, and the machine it is on.
+///
+/// **A Windows program does not read `HOME`.** What it reads is `USERPROFILE`
+/// for the account's own directory, `APPDATA` and `LOCALAPPDATA` for the two
+/// halves of where a program keeps its settings, and `TEMP` and `TMP` for
+/// somewhere to write a file it will throw away. All five are pointed inside
+/// the HOME this sandbox was given, so that all five follow it — which is what
+/// makes a fresh profile fresh once there is one, and until then is the
+/// directory the machine would have given anyway. `HOME` is said beside them
+/// and not for Windows' sake: `git` and every agent that grew up on a Unix read
+/// it, and a session's is the one this sandbox chose.
+///
+/// And then [`MACHINE_NAMES`], which are the machine's own to say.
+fn windows_names(home: &Path) -> Vec<(&'static str, OsString)> {
+    let local = home.join(APP_DATA).join(LOCAL);
+    let temporary = local.join(TEMPORARY);
+
+    let mut named = vec![
+        ("USERPROFILE", home.as_os_str().to_owned()),
+        (
+            "APPDATA",
+            home.join(APP_DATA).join(ROAMING).into_os_string(),
+        ),
+        ("LOCALAPPDATA", local.into_os_string()),
+        ("TEMP", temporary.as_os_str().to_owned()),
+        ("TMP", temporary.into_os_string()),
+    ];
+
+    named.extend(
+        MACHINE_NAMES
+            .into_iter()
+            .filter_map(|name| Some((name, std::env::var_os(name)?))),
+    );
+
+    named
+}
 
 /// What NixOS's own shell initialisation reads to decide whether it has already
 /// run, said inside a sandbox that runs a shell.
@@ -641,6 +801,16 @@ impl Homes {
     /// says which machine this is running on.
     pub fn servers(&self) -> &Path {
         &self.servers
+    }
+
+    /// And whose platform these are, which is the same answer to two more
+    /// questions a sandbox built against them has to have: which rendering it
+    /// gets, and which platform's names its environment holds.
+    ///
+    /// Read off here rather than passed beside it, so that a test building a
+    /// sandbox for a platform it is not on says which platform once.
+    pub fn platform(&self) -> Platform {
+        self.platform
     }
 
     /// And one Conversation's own, with the handoff directory it reaches
@@ -868,12 +1038,29 @@ impl Executable {
     ///
     /// `None` for a path with nothing behind it, for the reason above: what this
     /// is for is a bind, and a bind of nothing is a session that will not start.
+    ///
+    /// **On Windows a session finds it where it already is.** The other two
+    /// platforms put it at `bin/verkstead` under the directory of Verkstead's
+    /// own — made by a bind on Linux and linked into the Data Directory on a
+    /// Mac — and neither of those happens on this one: nothing is bound and
+    /// nothing is linked yet, so a name invented here would be a name pointing
+    /// at nothing. The real path of the running image is what a session is
+    /// given, and the directory holding it is what leads its `PATH` — which is
+    /// the same invariant said of a different directory: what a session asks
+    /// with is the build that is serving it.
     pub fn at(path: PathBuf, data_dir: &Path) -> Option<Executable> {
         let path = unwrapped(&path);
 
+        let inside = match Platform::HERE {
+            Platform::Windows => path.clone(),
+            Platform::Linux | Platform::MacOs => {
+                under(&own_bin(Platform::HERE, data_dir), VERKSTEAD)
+            }
+        };
+
         path.is_file().then_some(Executable {
             path,
-            inside: under(&own_bin(Platform::HERE, data_dir), VERKSTEAD),
+            inside,
             bundled: None,
         })
     }
@@ -1502,6 +1689,15 @@ pub struct Sandbox {
     /// file is read at every spawn, so flipping it in the workbench applies to
     /// the next session and a running one keeps what it started with.
     build_cache: Option<build_cache::Shared>,
+
+    /// And which of the three renderings this description is turned into, and
+    /// which platform's names its environment holds.
+    ///
+    /// Taken off the [`Homes`] the sandbox was built against rather than read
+    /// from a `cfg`, for the reason that type carries one: the arm this machine
+    /// will never run is still an arm a test can build a sandbox on. Everything
+    /// outside a test hands over a `Homes` made with [`Platform::HERE`].
+    platform: Platform,
 }
 
 impl Sandbox {
@@ -1582,6 +1778,7 @@ impl Sandbox {
             binds,
             shell: None,
             build_cache: cache.shared(config.rust_build_cache()),
+            platform: homes.platform(),
         })
     }
 
@@ -1615,7 +1812,7 @@ impl Sandbox {
     /// vector the orchestrator built, and a shell between it and the sandbox
     /// would be one more thing to quote for.
     pub fn command<S: AsRef<OsStr>>(&self, argv: &[S]) -> Rendering {
-        render(&self.surface(argv))
+        rendered(self.platform, &self.surface(argv))
     }
 
     /// And what that mechanism is given: everything a session may reach, said
@@ -1779,7 +1976,7 @@ impl Sandbox {
 
         surface
             .set("HOME", self.home.path())
-            .set("PATH", path(self.verkstead.bin()))
+            .set("PATH", path(self.platform, self.verkstead.bin()))
             // Which shell is inside, for the same reason `PATH` is said here:
             // the environment is cleared, so a tool that shells out reaches for
             // whatever this holds — and with nothing in it, it would fall back
@@ -1804,6 +2001,14 @@ impl Sandbox {
             // so nothing has to be plumbed through to say which agent is being
             // launched.
             .set(AGENT_TYPE, self.account.agent_type().word());
+
+        // And the names nothing on Windows runs without, which the two Unixes
+        // have no equivalent of — see [`windows_names`].
+        if self.platform == Platform::Windows {
+            for (name, value) in windows_names(self.home.path()) {
+                surface.set(name, value);
+            }
+        }
 
         // And where the command *is* a shell, that this machine's own
         // environment has already been said — see [`NIXOS_ENVIRONMENT_DONE`],
@@ -2006,8 +2211,15 @@ fn companion_binds(conversation: &store::Conversation) -> Option<Vec<Bind>> {
 /// a session being one command — and it does not need to be: `nix` is on the
 /// sandbox's `PATH`, so an agent that has to build in a companion enters its
 /// shell there the way it would in any checkout it had walked into.
-pub fn under_dev_shell(worktree: &Path, argv: &[String]) -> Vec<String> {
-    if !dev_shell(worktree) {
+///
+/// **And nothing is asked at all on Windows**, which is why the platform is a
+/// parameter. There is no `nix` on that machine to answer with, so the question
+/// has one answer whatever the worktree holds — and asking it anyway would be a
+/// process started, failed and read per session for a result already known.
+/// Said as the first half of the condition, so that the arm the answer is known
+/// on never reaches the arm that shells out.
+pub fn under_dev_shell(platform: Platform, worktree: &Path, argv: &[String]) -> Vec<String> {
+    if platform == Platform::Windows || !dev_shell(worktree) {
         return argv.to_vec();
     }
 
@@ -2108,11 +2320,17 @@ mod tests {
             Some("verkstead"),
             "the name on `PATH` is the name the skills and the Guide tell a session to run"
         );
-        assert_eq!(
-            path(equipped.bin()).split(':').next().map(Path::new),
-            Some(equipped.bin()),
-            "the server's own build has to be found before the machine's install"
-        );
+        for platform in [Platform::Linux, Platform::MacOs, Platform::Windows] {
+            let inside = path(platform, equipped.bin());
+            let inside = inside.to_string_lossy();
+
+            assert_eq!(
+                inside.split(separator(platform)).next().map(Path::new),
+                Some(equipped.bin()),
+                "on {platform:?} the server's own build has to be found before the \
+                 machine's install"
+            );
+        }
     }
 
     /// And what a session finds it under is a directory a mount can make, or
@@ -2128,9 +2346,38 @@ mod tests {
              file really is"
         );
         assert_eq!(
+            own_directory(Platform::Windows, data),
+            data,
+            "and neither can Windows, having no binds at all yet"
+        );
+        assert_eq!(
             own_directory(Platform::Linux, data),
             Path::new(OWN_DIRECTORY),
             "and a bind makes a directory that is nobody's on the host"
+        );
+    }
+
+    /// What a session's `PATH` holds after the directory of Verkstead's own,
+    /// which is where a Windows machine differs from the other two in kind: the
+    /// two Unixes are told a list written down here, and Windows is handed the
+    /// `PATH` the server itself was started with — see [`servers_path`].
+    #[test]
+    fn a_windows_session_is_given_the_machines_own_path_rather_than_a_list() {
+        let ours = Path::new("C:/verkstead/bin");
+        let inside = path(Platform::Windows, ours);
+        let inside = inside.to_string_lossy();
+        let servers = servers_path();
+
+        assert_eq!(
+            inside.split_once(';'),
+            Some((
+                ours.to_str().expect("a name this test wrote"),
+                &*servers.to_string_lossy()
+            )),
+            "the whole of it is Verkstead's own directory, a semicolon because a \
+             colon on this platform is a drive letter's own, and then the `PATH` \
+             the server itself was started with — there is no list of Windows \
+             paths written down anywhere"
         );
     }
 

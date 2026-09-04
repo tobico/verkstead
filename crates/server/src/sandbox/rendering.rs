@@ -2,7 +2,8 @@
 //!
 //! A [`Surface`](super::surface::Surface) is what a session may reach and a
 //! rendering is how this machine makes that true — bubblewrap's flags, Apple's
-//! policy — and what either of them ends at is the same four things: a program,
+//! policy, or nothing at all where there is no boundary yet — and what each of
+//! them ends at is the same four things: a program,
 //! its arguments, the environment it is handed and the directory it starts in.
 //! This is those four, said once, and it is what every renderer returns.
 //!

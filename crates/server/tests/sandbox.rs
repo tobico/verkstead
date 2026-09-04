@@ -22,7 +22,7 @@
 
 #![cfg(target_os = "linux")]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
 use std::os::unix::fs::PermissionsExt;
@@ -269,6 +269,26 @@ fi
             &self.settings.config(),
             cache,
             extra,
+        )
+        .expect("a grilling Conversation has a worktree to build a sandbox around")
+    }
+
+    /// And one built the way `platform` builds one, which is how the open
+    /// rendering is reached from a machine that is not the one it is for — see
+    /// [`the_open_rendering_hands_a_session_the_environment_it_was_described_with`].
+    fn sandbox_on(&self, platform: Platform) -> Sandbox {
+        Sandbox::for_conversation(
+            &self.conversation,
+            &self.profile,
+            &Homes::on(platform, self.home.path().to_owned(), self.state.path()),
+            &Reachable::at(LISTENING),
+            &self.skills,
+            &self.verkstead,
+            &self.handoffs,
+            &self.settings.secrets(),
+            &self.settings.config(),
+            &BuildCache::none(),
+            vec![],
         )
         .expect("a grilling Conversation has a worktree to build a sandbox around")
     }
@@ -740,6 +760,31 @@ fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
         .collect()
 }
 
+/// And what the process a sandbox renders to is actually handed, read off the
+/// machine's own `env` run with nothing in front of it.
+///
+/// Not the probe above, which is a shell script and therefore a shell: what is
+/// being asked here is what the *first* thing started inside gets, and a shell
+/// between it and the rendering is a shell that says something of its own.
+fn environment(sandbox: &Sandbox) -> BTreeMap<String, String> {
+    let output = Command::from(&sandbox.command(&[on_the_host("env")]))
+        .stdin(Stdio::null())
+        .output()
+        .expect("the rendering to be startable");
+
+    assert!(
+        output.status.success(),
+        "the probe failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect()
+}
+
 /// Where a program is on the host, absolute.
 ///
 /// The probe calls the few tools it needs by their whole path, because the
@@ -989,6 +1034,112 @@ async fn the_url_form_of_an_ssh_github_remote_is_rewritten_too() {
     assert_eq!(
         reported["remote"], "https://github.com/tobico/verkstead.git",
         "`ssh://git@github.com/` is the same remote written another way"
+    );
+}
+
+/// The third rendering, asked here rather than in a suite of its own: what a
+/// session on the platform with no boundary yet is handed.
+///
+/// **The rendering is portable and the boundary is what is not**, which is why
+/// this can be asked on the machine running these tests at all. There are no
+/// flags and no policy in it — it sets the environment, starts in the
+/// Conversation's Worktree and runs the vector — so a Conversation built
+/// against a Windows [`Homes`] renders to a process this machine can start and
+/// read back. What that cannot say is what a Windows machine makes of it, which
+/// is the Windows job's to say; what it does say is the whole of the
+/// description, which is what a rendering is.
+///
+/// The probe is the machine's own `env`, run with nothing in front of it: a
+/// wrapper would be the first thing in the report.
+#[tokio::test]
+async fn the_open_rendering_hands_a_session_the_environment_it_was_described_with() {
+    let fixture = grilling().await;
+    let sandbox = fixture.sandbox_on(Platform::Windows);
+
+    let reported = environment(&sandbox);
+
+    // Counted by its own variable rather than written down here: how many
+    // pairs git's configuration comes to is that configuration's business.
+    let git_config: usize = reported["GIT_CONFIG_COUNT"].parse().expect("a count");
+
+    let mut expected: BTreeSet<String> = [
+        "HOME",
+        "PATH",
+        "SHELL",
+        "TERM",
+        "VERKSTEAD_SERVER",
+        "VERKSTEAD_AGENT",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "TEMP",
+        "TMP",
+        "GIT_CONFIG_COUNT",
+        "GIT_TERMINAL_PROMPT",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .chain((0..git_config).flat_map(|n| {
+        [
+            format!("GIT_CONFIG_KEY_{n}"),
+            format!("GIT_CONFIG_VALUE_{n}"),
+        ]
+    }))
+    .collect();
+
+    // And whichever of the machine's own names the machine has. None of them on
+    // the Linux this suite runs on, which is what makes the set above the whole
+    // of it here — they are read off the server's environment, and a Windows
+    // machine is the only one that has them.
+    expected.extend(
+        ["SystemRoot", "SystemDrive", "ComSpec", "PATHEXT"]
+            .into_iter()
+            .filter(|name| std::env::var_os(name).is_some())
+            .map(str::to_owned),
+    );
+
+    assert_eq!(
+        reported.keys().cloned().collect::<BTreeSet<String>>(),
+        expected,
+        "what a session has is what the description said and nothing else — \
+         the environment is cleared, so the harness's own is not in it"
+    );
+
+    assert_eq!(
+        reported["HOME"],
+        fixture.home_path().display().to_string(),
+        "and the one name both platforms read is the sandbox's rather than the \
+         server's"
+    );
+    assert_eq!(
+        reported["PATH"],
+        format!(
+            "/verkstead/bin;{}",
+            std::env::var("PATH").expect("this machine has a PATH")
+        ),
+        "Verkstead's own directory leads, and what follows it is where the human \
+         on this machine put their tools"
+    );
+
+    // The five that follow HOME on this platform, which is where a Windows
+    // program looks for the account's own things — see the sandbox module.
+    let profile = Path::new(&reported["USERPROFILE"]);
+
+    assert_eq!(profile, fixture.home_path());
+    assert_eq!(
+        Path::new(&reported["APPDATA"]),
+        profile.join("AppData").join("Roaming")
+    );
+    assert_eq!(
+        Path::new(&reported["LOCALAPPDATA"]),
+        profile.join("AppData").join("Local")
+    );
+    assert_eq!(reported["TEMP"], reported["TMP"]);
+    assert!(
+        Path::new(&reported["TEMP"]).starts_with(profile),
+        "a file a session throws away should land under its own profile, and \
+         TEMP is {}",
+        reported["TEMP"]
     );
 }
 
@@ -2502,7 +2653,7 @@ fn a_repository_whose_flake_has_a_dev_shell_runs_its_command_under_nix_develop()
     std::fs::write(dir.path().join("flake.nix"), DEV_SHELL).unwrap();
 
     assert_eq!(
-        under_dev_shell(dir.path(), &["claude".to_owned()]),
+        under_dev_shell(Platform::HERE, dir.path(), &["claude".to_owned()]),
         vec![
             "nix".to_owned(),
             "develop".to_owned(),
@@ -2518,7 +2669,7 @@ fn a_flake_that_defines_no_shell_runs_the_command_as_it_stands() {
     std::fs::write(dir.path().join("flake.nix"), NO_DEV_SHELL).unwrap();
 
     assert_eq!(
-        under_dev_shell(dir.path(), &["claude".to_owned()]),
+        under_dev_shell(Platform::HERE, dir.path(), &["claude".to_owned()]),
         vec!["claude".to_owned()],
         "`nix develop` errors out where none of the attributes it falls through exist"
     );
@@ -2529,7 +2680,25 @@ fn a_repository_with_no_flake_at_all_runs_the_command_as_it_stands() {
     let dir = tempfile::tempdir().unwrap();
 
     assert_eq!(
-        under_dev_shell(dir.path(), &["claude".to_owned()]),
+        under_dev_shell(Platform::HERE, dir.path(), &["claude".to_owned()]),
+        vec!["claude".to_owned()],
+    );
+}
+
+/// And a Windows session is never put under one, whatever the worktree holds.
+///
+/// The same worktree the test above this one wraps: a flake that really does
+/// define a dev shell, which is the one case the answer could have come from
+/// asking. So an unwrapped command here is an answer that was never asked for
+/// — there is no `nix` on that machine to ask, and a session should not pay a
+/// process to find out.
+#[test]
+fn a_windows_session_is_never_put_under_a_dev_shell() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("flake.nix"), DEV_SHELL).unwrap();
+
+    assert_eq!(
+        under_dev_shell(Platform::Windows, dir.path(), &["claude".to_owned()]),
         vec!["claude".to_owned()],
     );
 }
