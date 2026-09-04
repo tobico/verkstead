@@ -26,6 +26,6 @@ that output before the rendering is written.
 
 ## Stages
 
-- [ ] 01: The ConPTY terminal and unsandboxed sessions — [brief](01-conpty-terminal.md) *(in progress: `windows-sessions/01-conpty-terminal`)*
+- [x] 01: The ConPTY terminal and unsandboxed sessions — [brief](01-conpty-terminal.md)
 - [ ] 02: The named pipe — [brief](02-named-pipe.md)
 - [ ] 03: The AppContainer — [brief](03-appcontainer.md)
