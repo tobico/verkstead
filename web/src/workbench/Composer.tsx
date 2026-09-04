@@ -551,7 +551,7 @@ function sendingOn(what: {
       setLanding((held) => [...held, { key, name: file.name }]);
 
       void attachFile(what.conversation().id, file)
-        .then((outcome) => {
+        .then(async (outcome) => {
           if (typeof outcome === "string") {
             setRefusals((said) => [
               ...said,
@@ -563,7 +563,12 @@ function sendingOn(what: {
           // What came back is the record it made, and the pill is drawn from
           // the Conversation — so the read is both how the pill arrives and
           // how it arrives under the name the server renamed it to.
-          void queries.invalidateQueries({ queryKey: ["conversation"] });
+          //
+          // Waited on, because the dimmed pill comes off the row in the
+          // `finally` below and the pill that replaces it is the one this read
+          // brings back: firing the read and carrying straight on would be the
+          // file blinking out of the row and back into it.
+          await queries.invalidateQueries({ queryKey: ["conversation"] });
         })
         .catch((error: unknown) => {
           setRefusals((said) => [

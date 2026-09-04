@@ -262,6 +262,88 @@ describe("the files on a draft", () => {
     );
   });
 
+  /// And it stays up until the record that replaces it is on the row. The
+  /// dimmed pill is what the file is drawn as until the Conversation is read
+  /// again, so a row that dropped it the moment the upload landed would be the
+  /// file blinking out and back in — with nothing to say which of the two pills
+  /// the human is looking at.
+  it("keeps the pill on the row from the upload landing to the record arriving", async () => {
+    const notes: AttachmentView = {
+      id: 9,
+      name: "notes.md",
+      bytes: 4,
+      origin: "Brief",
+    };
+
+    // The read the upload asks for, held: the whole of what this is about is
+    // the window between the file landing and the row being told about it.
+    const waiting: Array<(record: ConversationView) => void> = [];
+    let uploaded = false;
+    let read: "before" | "held" | "after" = "before";
+
+    const answering = (record: ConversationView) =>
+      new Response(JSON.stringify(record), {
+        headers: { "content-type": "application/json" },
+      });
+
+    const withNotes: ConversationView = {
+      ...OPEN,
+      attachments: [...OPEN.attachments, notes],
+    };
+
+    theWorkbench(
+      whenever(`/api/ui/conversations/${OPEN.id}`, () => {
+        if (!uploaded) return Promise.resolve(answering(OPEN));
+        if (read === "after") return Promise.resolve(answering(withNotes));
+
+        read = "held";
+        return new Promise<Response>((settle) =>
+          waiting.push((record) => settle(answering(record))),
+        );
+      }),
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/attachments/notes.md`,
+        () => {
+          uploaded = true;
+          return json({ Attached: { attachment: notes } })();
+        },
+        "POST",
+      ),
+    );
+
+    const pane = await openComposer();
+    expect(names(pane)).toEqual(ATTACHED.map((one) => one.name));
+
+    choose(pane, new File(["note"], "notes.md"));
+
+    // The upload has landed and the read it asked for is held: the file is
+    // still on the row, and still drawn as one on its way up.
+    await waitFor(() => expect(read).toBe("held"));
+    expect(names(pane)).toEqual([
+      ...ATTACHED.map((one) => one.name),
+      "notes.md",
+    ]);
+    expect(pane.querySelector(`.${pill.attachment}.${pill.landing}`)).toBeTruthy();
+
+    read = "after";
+    for (const settle of waiting.splice(0)) settle(withNotes);
+
+    // And once the record is back the same file is on the row as a record,
+    // with a × of its own.
+    await waitFor(() =>
+      expect(
+        pane.querySelector(`.${pill.attachment}.${pill.landing}`),
+      ).toBeNull(),
+    );
+    expect(names(pane)).toEqual([
+      ...ATTACHED.map((one) => one.name),
+      "notes.md",
+    ]);
+    expect(
+      screen.getByRole("button", { name: "Remove notes.md" }),
+    ).toBeTruthy();
+  });
+
   /// A refused upload is said on the composer, named for the file it was
   /// about — a choice is several files, and one sentence for the lot would not
   /// say which of them the human has to do something about.
