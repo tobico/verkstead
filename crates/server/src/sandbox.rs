@@ -104,6 +104,7 @@ mod surface;
 // arms are built and called wherever the tests are.
 pub(crate) mod outliving;
 
+use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -866,12 +867,77 @@ fn across_volumes(platform: Platform, home: &Path, account: &store::Account) -> 
 /// Compared rather than shown, so nothing here needs a spelling of its own: it
 /// is bytes, upper-cased, and the only question ever asked of two of them is
 /// whether they are the same.
+///
+/// **Asked of the plain name**, whichever of the two spellings came in — see
+/// [`plainly`], which is what makes the two answers comparable at all.
 fn volume(path: &Path) -> Option<Vec<u8>> {
-    asked(path).or_else(|| written(path))
+    let path = plainly(path);
+
+    asked(&path).or_else(|| written(&path))
+}
+
+/// `path` without the prefix that says only *hand the rest of this to the
+/// filesystem unchanged*, which is a spelling of the same path rather than
+/// another path.
+///
+/// **Every path this codebase stored by resolving it carries one.** Rust's
+/// `canonicalize` writes `\\?\` on this platform and a Profile's account is
+/// admitted through one — see [`crate::watched::WatchedPaths::admit`] — where a
+/// session's own profile, built by joining names together, has none. And
+/// [`asked`] answers in whichever namespace it was asked in: `\\?\C:\` for the
+/// account and `C:\` for the profile, which compared as bytes are two volumes.
+/// That is one drive refusing every session on the machine, so the prefix comes
+/// off before either half of the question is asked.
+///
+/// `\\?\UNC\server\share` is the verbatim spelling of `\\server\share`, so what
+/// replaces that prefix is the two separators a UNC name starts with rather
+/// than nothing.
+///
+/// By hand rather than through [`Path::components`], for the reason [`written`]
+/// is: this is a Windows path wherever it is being read, and the prefixes a
+/// server compiled for Linux knows about are not these. Putting the pieces back
+/// is what an `OsStr`'s own encoding documents as allowed — it is
+/// self-synchronising, so a split on an ASCII byte lands on a boundary.
+fn plainly(path: &Path) -> Cow<'_, Path> {
+    let name = path.as_os_str().as_encoded_bytes();
+
+    let [one, two, b'?' | b'.', three, rest @ ..] = name else {
+        return Cow::Borrowed(path);
+    };
+
+    if !a_separator(*one) || !a_separator(*two) || !a_separator(*three) {
+        return Cow::Borrowed(path);
+    }
+
+    let plain = match rest {
+        [u, n, c, four, share @ ..]
+            if u.eq_ignore_ascii_case(&b'U')
+                && n.eq_ignore_ascii_case(&b'N')
+                && c.eq_ignore_ascii_case(&b'C')
+                && a_separator(*four) =>
+        {
+            let mut whole = vec![b'\\', b'\\'];
+            whole.extend_from_slice(share);
+            whole
+        }
+        _ => rest.to_vec(),
+    };
+
+    // Safety: `plain` is that name's own bytes, cut at ASCII separators and put
+    // back with two more of them in front.
+    Cow::Owned(PathBuf::from(unsafe {
+        OsString::from_encoded_bytes_unchecked(plain)
+    }))
 }
 
 /// What Windows says the volume of `path` is: the mount point it is under, or
 /// `None` where the call could not answer.
+///
+/// **Spelled as [`written`] spells one**, because the two answer for each other
+/// — one path of a pair can be one this call reaches and the other one it does
+/// not — and a mount point comes back with a separator on its end where the
+/// name itself carries none. `C:\` and `C:` are one drive, so one of them is
+/// what both of these say.
 #[cfg(windows)]
 fn asked(path: &Path) -> Option<Vec<u8>> {
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
@@ -900,11 +966,17 @@ fn asked(path: &Path) -> Option<Vec<u8>> {
 
     let end = under.iter().position(|word| *word == 0)?;
 
-    Some(
-        OsString::from_wide(&under[..end])
-            .as_encoded_bytes()
-            .to_ascii_uppercase(),
-    )
+    let mut mount = OsString::from_wide(&under[..end])
+        .as_encoded_bytes()
+        .to_ascii_uppercase();
+
+    while mount.last().is_some_and(|byte| a_separator(*byte)) {
+        mount.pop();
+    }
+
+    // Which a mount point never is, and a name with nothing left of it is not
+    // an answer to compare another one against.
+    (!mount.is_empty()).then_some(mount)
 }
 
 /// And what a machine that is not Windows can be asked, which is nothing: the
@@ -2866,6 +2938,47 @@ mod tests {
             None,
             "a POSIX name says nothing about a Windows volume, and every path \
              on the machine running this test is one"
+        );
+    }
+
+    /// And the spelling `canonicalize` writes is the plain name it is a
+    /// spelling of.
+    ///
+    /// Which is the whole of what refused every session on Windows: a Profile's
+    /// account is admitted through a `canonicalize` and carries `\\?\`, a
+    /// session's own profile is names joined together and carries none, and the
+    /// machine answers *which volume* in whichever namespace it was asked in.
+    /// So `\\?\C:\` and `C:\` came back for one drive and the two compared as
+    /// two volumes. Asked of the prefix here rather than of the volume, because
+    /// [`asked`] is the arm the machine running this test has not got.
+    #[test]
+    fn a_verbatim_name_is_the_plain_name_it_is_a_spelling_of() {
+        let plain = |name: &str| plainly(Path::new(name)).display().to_string();
+
+        assert_eq!(
+            plain(r"\\?\C:\Users\someone\.claude.json"),
+            r"C:\Users\someone\.claude.json",
+        );
+        assert_eq!(
+            plain(r"\\.\D:\accounts\someone"),
+            r"D:\accounts\someone",
+            "either of the two prefixes that say the same thing"
+        );
+        assert_eq!(
+            plain(r"\\?\UNC\workshop\accounts\someone"),
+            r"\\workshop\accounts\someone",
+            "and a verbatim UNC name is the UNC name, two separators and all"
+        );
+
+        assert_eq!(
+            plain(r"C:\Users\someone"),
+            r"C:\Users\someone",
+            "a name carrying no such prefix is itself"
+        );
+        assert_eq!(
+            plain("/home/someone/.claude"),
+            "/home/someone/.claude",
+            "and so is every path on the machine running this test"
         );
     }
 

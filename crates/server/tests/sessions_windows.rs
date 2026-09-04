@@ -256,9 +256,9 @@ impl Grilling {
 
             if Instant::now() >= deadline {
                 panic!(
-                    "the session never got there. It printed: {:?}. Where it \
-                     printed nothing at all there was no session: the server's \
-                     log above says which refusal it was",
+                    "the session never got there. It printed: {:?}. A Timeline with no \
+                     session on it at all is one that was refused, and the \
+                     server's log above says which refusal that was",
                     self.said_by_each(&view).await,
                 );
             }
@@ -348,9 +348,9 @@ impl Grilling {
                 let view = self.view().await;
 
                 panic!(
-                    "the session never wrote {name}. It printed: {}. Where it \
-                     printed nothing at all there was no session: the server's \
-                     log above says which refusal it was",
+                    "the session never wrote {name}. It printed: {}. A Timeline \
+                     with no session on it at all is one that was refused, and \
+                     the server's log above says which refusal that was",
                     self.said_by_each(&view).await,
                 );
             }
