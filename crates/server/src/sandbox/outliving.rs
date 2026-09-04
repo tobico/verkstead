@@ -1,12 +1,12 @@
 //! What a Mac has where Linux has `--die-with-parent`, and what Windows has
-//! instead of either: a keeper beside every sandbox with a process group for it
-//! to end, and a Job Object holding what it cannot.
+//! where neither is on offer: a keeper beside every sandbox with a process
+//! group for it to end, and a Job Object holding what it started.
 //!
-//! One question, three answers, and this module is where the two Verkstead has
-//! to give itself live. What is being promised is the same on all three:
-//! **nothing Verkstead started outlives the server that started it** — see
-//! [`keep`] for the Mac's, [`held`] for the Windows one, and [`job`] for what
-//! that is made of.
+//! One promise, three ways of keeping it, and this module is where the two
+//! Verkstead has to keep for itself live. The promise is the same on all
+//! three: **nothing Verkstead started outlives the server that started it** —
+//! see [`keep`] for the Mac's, [`held`] for the Windows one, and [`job`] for
+//! what that is made of.
 //!
 //! On Linux a sandbox outlives nothing because bubblewrap says so. Every
 //! session and the compile server are started `--die-with-parent` — see the

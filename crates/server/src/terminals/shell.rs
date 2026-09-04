@@ -289,8 +289,9 @@ fn login_shell() -> Option<String> {
     }
 }
 
-/// And where there is no passwd database to ask — which is Windows, where there
-/// is no pseudo-terminal to open a shell on either.
+/// And where there is no passwd database to ask — which is Windows, whose
+/// accounts keep no login shell against them at all. What a terminal opens on
+/// there is [`installed`]'s answer rather than this one's.
 #[cfg(not(unix))]
 fn login_shell() -> Option<String> {
     None

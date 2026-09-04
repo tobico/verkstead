@@ -284,9 +284,11 @@ pub fn nothing_says_where_to_cache(platform: Platform) -> &'static str {
 /// machine that has never run a Unix shell has no `HOME` at all: refusing to
 /// start for the want of one was what kept the server off Windows entirely.
 ///
-/// **Resolved on Windows rather than skipped**, on a platform that runs no
-/// sessions today: the sessions are a later stage's, and both this and the
-/// Build Cache are what one will want when it arrives.
+/// **Resolved on Windows as everywhere else.** It was resolved there before
+/// that platform ran a session at all, against the stage that would bring them
+/// — and that stage has landed: a Windows session is given a profile of its own
+/// under the Data Directory rather than this one, and this is the account's own
+/// directory the server itself reads.
 ///
 /// **Taken as it was said**, which is the one reading here that judges nothing:
 /// every directory above is somewhere Verkstead *puts* something, and a
