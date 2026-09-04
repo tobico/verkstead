@@ -333,7 +333,18 @@ fn said<'a>(surface: &'a Surface, name: &str) -> Option<&'a OsStr> {
 /// Unix that nothing on this platform can start.
 ///
 /// `None` where nothing answers, which is the caller's to word.
-fn found(program: &OsStr, path: Option<&OsStr>, pathext: Option<&OsStr>) -> Option<PathBuf> {
+///
+/// **The rules `where.exe` applies, without a process.** Which is why this is
+/// reachable from outside this module: a Conversation Terminal on Windows has
+/// to find the shell it opens on, and asking that question a second way would
+/// be a second answer to *where a program on this machine is* — see
+/// [`crate::terminals::shell`], which hands it the server's own `PATH` where
+/// this hands it the description's.
+pub(crate) fn found(
+    program: &OsStr,
+    path: Option<&OsStr>,
+    pathext: Option<&OsStr>,
+) -> Option<PathBuf> {
     let extensions = pathext.unwrap_or_else(|| OsStr::new(EXTENSIONS));
 
     if a_place(program) {

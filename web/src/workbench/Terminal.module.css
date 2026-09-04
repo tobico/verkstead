@@ -84,3 +84,16 @@
 .tabActions > [role="menu"] {
   width: 9rem;
 }
+
+/* And what the shells in this pane are shells *in*, where that is nothing — the
+   unsandboxed note, drawn above the tabs' grids. See `sandboxing.tsx`.
+
+   The pane is a column and the grid under this takes the rest of it, so the
+   note is one of the pane's own `flex: none` children (`Panes.module.css` says
+   which) and needs only the room that separates it from the terminal it is
+   about. The size is the one every aside beside a terminal is drawn at, which
+   is the session pane's own. */
+.unsandboxed {
+  margin: 0 0 0.6rem;
+  font-size: 0.85rem;
+}

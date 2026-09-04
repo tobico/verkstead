@@ -82,8 +82,14 @@ mod seatbelt;
 // started in, the vector run — with no wrapper in front of it, so there is
 // nothing there for a `cfg` to be about. The one call it makes that one
 // platform has to itself is beside it, in a module with an arm for each.
+//
+// Reachable from the rest of the crate rather than from here alone, for one
+// thing in it: how a Windows machine resolves the name of a program is also
+// what the terminals module has to ask to find the shell it opens on — see
+// [`open::found`] and [`crate::terminals::shell`], its one caller outside this
+// module.
 mod junction;
-mod open;
+pub(crate) mod open;
 // And the three ends of what a renderer is: the description going in, the
 // process coming out, and what is left to see to once that process has gone.
 // The last of those is nothing on the two platforms whose links follow their

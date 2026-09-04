@@ -215,9 +215,9 @@ import truncatedCss from "../src/Truncated.module.css?raw";
 // jsdom lays nothing out for, and the pane names everything else is found by.
 import shell from "../src/Panes.module.css";
 import shellCss from "../src/Panes.module.css?raw";
-// And the one sentence a Verkstead with no Sandbox says about a session,
-// wherever it says it.
-import { UNSANDBOXED } from "../src/workbench/sandboxing";
+// And the two sentences a Verkstead with no Sandbox says — one about a session,
+// wherever it says it, and one about a shell of the human's own.
+import { UNSANDBOXED, UNSANDBOXED_SHELL } from "../src/workbench/sandboxing";
 import { ABBREVIATED, CLAMPED_LINES, SWIPE } from "../src/workbench/Timeline";
 import {
   COMPANION_BRANCH_REFUSAL,
@@ -15893,6 +15893,49 @@ describe("a Verkstead with no sandbox", () => {
     await drawn(container, `.${shell.detailsPane} .${attachedPane.screen}`);
 
     expect(container.querySelector(`.${outputPane.unsandboxed}`)).toBeNull();
+  });
+
+  /// And on the Conversation Terminal's own pane, which is the third place: a
+  /// shell in the same nothing, opened from the Timeline's header by somebody
+  /// who may have seen neither of the other two.
+  ///
+  /// In the words of the shell in front of them rather than of the agent — a
+  /// human about to type into this one is not reading about a session.
+  it("says so on the terminal pane, about the shell in it", async () => {
+    withTerminals(
+      [1],
+      whenever(
+        `/api/ui/conversations/${GRILLING.id}`,
+        json({ ...GRILLING, ...UNSANDBOXED_VIEW }),
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+
+    const note = await drawn(
+      container,
+      `.${shell.detailsPane} .${terminalPane.unsandboxed}`,
+    );
+    const grid = await drawn(
+      container,
+      `.${shell.detailsPane} .${attachedPane.screen}`,
+    );
+
+    expect(note.textContent).toBe(UNSANDBOXED_SHELL);
+    expect(
+      note.compareDocumentPosition(grid) & Node.DOCUMENT_POSITION_FOLLOWING,
+      "above the grid, which scrolls under it",
+    ).toBeTruthy();
+  });
+
+  /// And nothing at all on that pane where the sandbox is there, which is every
+  /// terminal on a Linux machine and a Mac.
+  it("says nothing on the terminal pane where the sandbox is there", async () => {
+    withTerminals([1]);
+    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+
+    await drawn(container, `.${shell.detailsPane} .${attachedPane.screen}`);
+
+    expect(container.querySelector(`.${terminalPane.unsandboxed}`)).toBeNull();
   });
 });
 
