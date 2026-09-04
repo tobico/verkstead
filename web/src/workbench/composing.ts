@@ -259,7 +259,9 @@ export type Created =
 /// Conversation by then, so there is nothing else they could need. They go
 /// after every field and before the kickoff: what is attached freezes with the
 /// Brief, and a file arriving after the grilling started would be refused for
-/// being late rather than for anything the human did.
+/// being late rather than for anything the human did. **Except where a roadmap
+/// is loaded**, which sends none of them: the box is locked to a card, and what
+/// is held is given back when the card is cleared.
 ///
 /// **A page loaded with a roadmap creates the other kind of Conversation**, and
 /// most of the replay is not asked of it: the Brief is the stage's, the branch
@@ -362,10 +364,18 @@ export async function create(
   // Conversation, and one the server would not take is one more refusal to
   // carry — which is what stops the kickoff, exactly as a refused branch name
   // does.
-  for (const rejected of await files.flush(id)) {
-    refused.push(
-      `${rejected.name} could not be attached: ${ATTACH_REFUSAL[rejected.refused]}`,
-    );
+  //
+  // None of them on a page that loaded a roadmap, for the reason the paperclip
+  // is not offered on one: the box is locked to a card, so nothing was being
+  // written for a file to be handed over with — and a file picked before the
+  // roadmap was loaded is one picked for a box the roadmap has since taken
+  // over. What is held stays held, and clearing the roadmap gives it back.
+  if (held === null) {
+    for (const rejected of await files.flush(id)) {
+      refused.push(
+        `${rejected.name} could not be attached: ${ATTACH_REFUSAL[rejected.refused]}`,
+      );
+    }
   }
 
   if (work && refused.length === 0) {

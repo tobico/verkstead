@@ -82,6 +82,29 @@ function order(fetching: ReturnType<typeof serving>, path: string): number {
   );
 }
 
+/// Where one file goes up, the name in the path exactly as the composer sends
+/// it.
+const upload = (name: string) =>
+  `/api/ui/conversations/${OPEN.id}/attachments/${name}`;
+
+/// The hidden picker the paperclip reaches, and files chosen through it —
+/// which is what a browser does when somebody picks them.
+function choose(container: ParentNode, ...files: File[]): void {
+  const picker = container.querySelector<HTMLInputElement>(
+    'input[type="file"]',
+  )!;
+
+  Object.defineProperty(picker, "files", { configurable: true, value: files });
+  fireEvent.change(picker);
+}
+
+/// The names on the pills the page is drawing.
+function pills(container: ParentNode): string[] {
+  return [...container.querySelectorAll(`.${pill.attachmentName}`)].map(
+    (name) => name.textContent!.trim(),
+  );
+}
+
 /// What one Repo remembers, as the endpoint writes it: a pairing per role, off
 /// the fixture's own profiles so the rows a test names are rows the picker
 /// really offers.
@@ -902,6 +925,62 @@ describe("adopting a roadmap from the compose page", () => {
     expect(container.querySelector(`.${pill.attachments}`)).toBeNull();
   });
 
+  /// And a file picked *before* the roadmap was loaded goes with the box it was
+  /// picked for: the row is not drawn over a locked box either. Held rather
+  /// than dropped, the way everything else a roadmap stands over is held —
+  /// clearing the card gives the file back with the brief.
+  it("puts a file picked beforehand away with the box, and gives it back when the roadmap is cleared", async () => {
+    adopting();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    choose(container, new File(["note"], "notes.md"));
+    await waitFor(() => expect(pills(container)).toEqual(["notes.md"]));
+
+    await loadRoadmap(container, 0);
+    expect(pills(container), "the row goes with the box").toEqual([]);
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: `Clear ${ABANDONED[0]!.roadmaps[0]!.name}`,
+      }),
+    );
+
+    await composing(container);
+    await waitFor(() =>
+      expect(pills(container), "and comes back with it").toEqual(["notes.md"]),
+    );
+  });
+
+  /// And nothing it is holding goes up with an adoption. The paperclip is not
+  /// offered over a loaded roadmap, so a file that went up with one would be a
+  /// file the page never offered to take — on a Conversation whose Brief
+  /// arrives frozen, with no × left to take it off again.
+  it("sends no held file with the adoption", async () => {
+    const fetching = adopting(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/review-pairing`,
+        json("Chosen"),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    choose(container, new File(["note"], "notes.md"));
+    await waitFor(() => expect(pills(container)).toEqual(["notes.md"]));
+
+    await loadRoadmap(container, 2);
+    await rolesAnswered();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/adopt`)).toBe(1),
+    );
+    expect(writes(fetching, upload("notes.md"))).toBe(0);
+  });
+
   it("clears back to the brief this device was holding", async () => {
     // A device holding both, which is what the state is shaped to hold: the
     // brief that was written, and the roadmap standing over it.
@@ -1067,33 +1146,10 @@ describe("the files a compose page holds", () => {
     leaveRefusals(0, []);
   });
 
-  /// Where one file goes up, the name in the path exactly as the composer sends
-  /// it.
-  const upload = (name: string) =>
-    `/api/ui/conversations/${OPEN.id}/attachments/${name}`;
-
   /// What the server says when it takes one: the record it made, which is what
   /// the composer of the draft this page lands on draws its pill from.
   const attached = (id: number, name: string) =>
     json({ Attached: { attachment: { id, name, bytes: 4, origin: "Brief" } } });
-
-  /// The hidden picker the paperclip reaches, and files chosen through it —
-  /// which is what a browser does when somebody picks them.
-  function choose(container: ParentNode, ...files: File[]): void {
-    const picker = container.querySelector<HTMLInputElement>(
-      'input[type="file"]',
-    )!;
-
-    Object.defineProperty(picker, "files", { configurable: true, value: files });
-    fireEvent.change(picker);
-  }
-
-  /// The names on the pills the page is drawing.
-  function pills(container: ParentNode): string[] {
-    return [
-      ...container.querySelectorAll(`.${pill.attachmentName}`),
-    ].map((name) => name.textContent!.trim());
-  }
 
   /// What went up to `path`, bodies and all — the count is not the question
   /// here, the body being the file itself rather than a JSON field.

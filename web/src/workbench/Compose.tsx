@@ -483,8 +483,16 @@ function Compose(props: {
               before there is a Conversation and a file on one are the same
               thing to look at. The × drops the held file rather than making a
               request: there is nothing on the server yet to take anything
-              off. */}
-          <attach.Pills class={styles.attachments} />
+              off.
+
+              The row goes with the box while a roadmap is loaded, because the
+              box is locked to a card then and the files were picked for what it
+              is standing over. Held rather than dropped, the way everything
+              else a roadmap covers is held: clearing it gives them back, and
+              the press sends none of them meanwhile — see `composing.ts`. */}
+          <Show when={adopting() === null}>
+            <attach.Pills class={styles.attachments} />
+          </Show>
 
           <section class={setup.options} aria-label="Setup">
             {/* The repository first, because everything under it is a fact
