@@ -52,8 +52,12 @@ use crate::store;
 use crate::terminal::Terminal;
 use crate::transcript::Tail;
 
-/// How much of a session's output to take off the pseudo-terminal at once.
-const CHUNK: usize = 8 * 1024;
+/// How much of what is running on a pseudo-terminal to take off it at once.
+///
+/// A session's, and a Terminal's too — see [`crate::terminals`], which reads
+/// its shell's output the same way and has no reason to read it in different
+/// mouthfuls.
+pub(crate) const CHUNK: usize = 8 * 1024;
 
 /// How often what a session has printed reaches the store and the open pages.
 ///
@@ -256,6 +260,74 @@ impl Agents {
     /// it may only show — see [`crate::paths`].
     pub fn binds(&self) -> &SandboxConfig {
         &self.config
+    }
+
+    /// The Sandbox a Conversation's work runs in, under the account `profile`
+    /// names, with `argv` as it will be run inside it.
+    ///
+    /// Every sandboxed thing Verkstead starts in a Conversation comes through
+    /// here: a session's agent, and the human's own shell in a Terminal
+    /// ([ADR 0013](../../../docs/adr/0013-conversation-terminals.md)). What one
+    /// gets is what the other gets — the Worktree as the working directory, the
+    /// git directory, the handoff directory, the files the human attached, the
+    /// build cache, the Sandbox Configuration binds, the token, the git author
+    /// and a `VERKSTEAD_SERVER` scoped to this Conversation — and one builder is
+    /// what keeps that true as the surface moves.
+    ///
+    /// `argv` comes back wrapped in `nix develop --command` where the worktree's
+    /// flake provides a dev shell, which is part of the same answer: what a
+    /// session is run under is what a shell in the same worktree should be run
+    /// under.
+    ///
+    /// **This blocks.** Git is asked where the worktree's object database is,
+    /// the settings files are read, the handoff directory is made, and the
+    /// dev-shell question is a `nix eval` or two — so callers hand it to a
+    /// blocking thread.
+    ///
+    /// `None` where there is nothing to build one for: a Conversation with no
+    /// Worktree, a checkout git will not own, a companion in the same state, a
+    /// handoff directory that could not be made, or a server with no image of
+    /// its own to equip a sandbox with.
+    pub(crate) fn sandboxed(
+        &self,
+        conversation: &store::Conversation,
+        profile: &store::Profile,
+        argv: &[String],
+    ) -> Option<(Sandbox, Vec<String>)> {
+        // Read here rather than held from startup: this is the moment a
+        // session's credentials and identity are decided, and it is already on
+        // a blocking thread because git is asked about the worktree below.
+        let secrets = self.settings.secrets();
+        let config = self.settings.config();
+
+        // And the one sccache server this machine compiles through, up before
+        // whatever will reach for it — see [`BuildCache::compiling`]. Here
+        // rather than at startup and only for a Repo that builds Rust, because
+        // a machine that never builds Rust never needs one; and every time
+        // rather than once, because the switch, the size and whether the server
+        // is still alive are all read at this moment.
+        if build_cache::builds_rust(&conversation.repo.path) {
+            self.cache.compiling(config.rust_build_cache());
+        }
+
+        let sandbox = Sandbox::for_conversation(
+            conversation,
+            profile,
+            &self.homes,
+            &self.reachable,
+            &self.skills,
+            self.verkstead.as_ref()?,
+            &self.handoffs,
+            &self.attachments,
+            &secrets,
+            &config,
+            &self.cache,
+            self.config.binds_for(conversation),
+        )?;
+
+        let worktree = conversation.worktree.clone()?;
+
+        Some((sandbox, under_dev_shell(&worktree, argv)))
     }
 
     /// What a session under `pairing` on `prompt`, named `session`, working in
@@ -1277,6 +1349,19 @@ impl Sessions {
         self.agents.as_deref().map(|agents| &agents.skills)
     }
 
+    /// How this server runs anything inside a Conversation's Sandbox, or `None`
+    /// where it runs nothing at all.
+    ///
+    /// Here because a session is not the only thing that goes in one: a
+    /// Terminal is the human's own shell in the same Sandbox, built by the same
+    /// [`Agents::sandboxed`] — see [`crate::terminals`]. Held by the sessions
+    /// register rather than beside it because this is what was resolved at
+    /// startup and handed in, and two copies of it would be two answers about
+    /// one machine.
+    pub(crate) fn agents(&self) -> Option<Arc<Agents>> {
+        self.agents.clone()
+    }
+
     /// One that cannot: nothing is launched, and everything else about starting
     /// a grilling holds.
     ///
@@ -1631,14 +1716,14 @@ impl Sessions {
         // them it was is in the startup log — see [`Executable::probed`] — and
         // saying it again per session would be repeating at every refusal what
         // does not change between them.
-        let Some(verkstead) = agents.verkstead.clone() else {
+        if agents.verkstead.is_none() {
             tracing::error!(
                 conversation_id = conversation.id,
                 "Verkstead has no image of its own to equip a session with — the startup log \
                  says which of the two it is — so this session was not started"
             );
             return Ok(None);
-        };
+        }
 
         // Decided here rather than read back off the agent afterwards, which is
         // the whole of why the log it writes can be found at all — see
@@ -1685,54 +1770,11 @@ impl Sessions {
         // dev-shell question is a `nix eval` or two. Both block, and both are
         // decided before anything is spawned.
         let built = tokio::task::spawn_blocking({
+            let agents = agents.clone();
             let conversation = conversation.clone();
             let profile = pairing.profile.clone();
-            let homes = agents.homes.clone();
-            let reachable = agents.reachable.clone();
-            let skills = agents.skills.clone();
-            let handoffs = agents.handoffs.clone();
-            let attachments = agents.attachments.clone();
-            let settings = agents.settings.clone();
-            let extra = agents.config.binds_for(&conversation);
-            let cache = agents.cache.clone();
 
-            move || {
-                // Read here rather than held from startup: this is the moment a
-                // session's credentials and identity are decided, and it is
-                // already on a blocking thread because git is asked about the
-                // worktree below.
-                let secrets = settings.secrets();
-                let config = settings.config();
-
-                // And the one sccache server this machine compiles through, up
-                // before the session that will reach for it — see
-                // [`BuildCache::compiling`]. Here rather than at startup and
-                // only for a Repo that builds Rust, because a machine that
-                // never builds Rust never needs one; and every time rather than
-                // once, because the switch, the size and whether the server is
-                // still alive are all read at this moment.
-                if build_cache::builds_rust(&conversation.repo.path) {
-                    cache.compiling(config.rust_build_cache());
-                }
-
-                let sandbox = Sandbox::for_conversation(
-                    &conversation,
-                    &profile,
-                    &homes,
-                    &reachable,
-                    &skills,
-                    &verkstead,
-                    &handoffs,
-                    &attachments,
-                    &secrets,
-                    &config,
-                    &cache,
-                    extra,
-                )?;
-                let worktree = conversation.worktree.clone()?;
-
-                Some((sandbox, under_dev_shell(&worktree, &argv)))
-            }
+            move || agents.sandboxed(&conversation, &profile, &argv)
         })
         .await?;
 

@@ -3618,6 +3618,29 @@ at: string,
 list: TaskListEvent | null, };
 
 /**
+ * And what became of asking for another one.
+ *
+ * Named refusals like every other press in the workbench, because each of them
+ * is a different sentence to put in front of the human — and because a terminal
+ * that could not be opened is one the pane has to say something about rather
+ * than one that quietly never appears.
+ */
+export type TerminalOpened = { "Opened": { number: number, } } | "NoSuchConversation" | "NoWorktree" | "NoProfile" | "NotOnWindowsYet" | "Refused";
+
+/**
+ * The terminals a Conversation has running, as the pane that draws them reads
+ * them back.
+ *
+ * The numbers alone. A terminal is a shell in a Sandbox and nothing else — no
+ * record, no Event, nothing in a Share (ADR 0013) — so there is nothing about
+ * one to send but which of the Conversation's it is: what is *on* each of them
+ * arrives down a socket of its own.
+ *
+ * Oldest first, which is the order they were opened in.
+ */
+export type TerminalsView = { live: Array<number>, };
+
+/**
  * One entry in a Timeline.
  *
  * A tagged kind rather than a struct with a nullable field per kind: what the

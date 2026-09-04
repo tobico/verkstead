@@ -21,9 +21,9 @@
 //!
 //! There are two shapes of it and one set of chrome. [`Menu`] is the ordinary
 //! one: a button, and what it drops under itself. [`ContextMenu`] is the same
-//! card opened by a right-click and put where the pointer was — no trigger, no
-//! anchor, and nowhere to give the focus back to. Every other thing a menu is,
-//! the two of them share.
+//! card opened by a right-click or a long press and put where the hand asked for
+//! it — no trigger, no anchor, and nowhere to give the focus back to. Every
+//! other thing a menu is, the two of them share.
 //!
 //! And one shape of what comes down rather than one: what a menu drops is a
 //! list of rows, and what a **panel** drops is a card of ordinary controls —
@@ -349,9 +349,11 @@ export function Nested(props: {
 /// everything else a menu is — the wash over the page, the card it comes down
 /// as, the way out that needs no aim — and none of it is written twice.
 ///
-/// A pointer affordance and only that. A touch device has no right-click, and a
-/// long press there already means something else, so nothing here is reachable
-/// from one.
+/// Both hands, where the caller has both to give. A phone has no right-click and
+/// fires this same `contextmenu` from a long press, so which gestures reach one
+/// of these is the caller's answer rather than this component's: the terminal
+/// pane's tabs take either, and the sidebar's cards take the pointer's alone
+/// because a long press on a card is already how it is picked up to be dragged.
 ///
 /// Whether it is open is the caller's, because *which* of its rows was
 /// right-clicked is the caller's: one of these per row would be a component

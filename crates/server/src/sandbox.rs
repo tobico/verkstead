@@ -509,7 +509,36 @@ const APPLE_PATH: &str = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/u
 /// NixOS's and a Mac's alike — Apple's is what reads `/private/var/select/sh`
 /// on its way up, which is why that path is in [`APPLE_SYSTEM`] — so the answer
 /// that was right for one machine is right for the other.
-const SHELL: &str = "/bin/sh";
+///
+/// What every sandbox says unless its maker says otherwise — see
+/// [`Sandbox::shelled`], which is a Conversation's own terminal naming the shell
+/// it is about to run instead.
+pub(crate) const SHELL: &str = "/bin/sh";
+
+/// What NixOS's own shell initialisation reads to decide whether it has already
+/// run, said inside a sandbox that runs a shell.
+///
+/// **Every shell on a NixOS box rebuilds the environment as it starts, login
+/// shell or not.** `/etc/bashrc`, `/etc/zshenv` and fish's own preinit each
+/// source `/etc/set-environment` unless this variable is set, and that file
+/// exports a `PATH` built out of the *host's* profiles — the system profile,
+/// the user's `~/.nix-profile`, their flatpak exports. So a terminal that said
+/// nothing would come up with the sandbox's `PATH` replaced a moment after the
+/// shell started, and the invariant that the running server's own `verkstead`
+/// is the first one found would hold for every session and for no terminal:
+/// a `verkstead ask` typed into one would run whatever the machine had
+/// installed. Starting the shell without `-l` is not enough, which is the thing
+/// worth knowing here — a login shell is not what provokes it.
+///
+/// So a sandbox that runs a shell says the environment has been set, which is
+/// true and is the whole of what the variable claims: it was set here, by the
+/// description this sandbox is, and it is deliberately not the host's.
+///
+/// Somebody else's spelling, read off the `set-environment` a NixOS 25.11 box
+/// generates, and named here for the reason opencode's are: moving it costs one
+/// edit. Off NixOS it is a variable nothing reads, which costs a sandbox
+/// nothing.
+const NIXOS_ENVIRONMENT_DONE: &str = "__NIXOS_SET_ENVIRONMENT_DONE";
 
 /// Where a session writes a temporary file.
 ///
@@ -1462,6 +1491,15 @@ pub struct Sandbox {
     /// one is read here.
     binds: Vec<Bind>,
 
+    /// The shell this sandbox was built to run, where it was built to run one.
+    ///
+    /// `None` is a session: it runs an agent, and `SHELL` is there for whatever
+    /// that agent shells out with, so [`SHELL`] is the answer. `Some` is a
+    /// Conversation's own terminal, where the shell *is* the command — so
+    /// `SHELL` names it, and the machine is told its own environment has already
+    /// been said. See [`Sandbox::shelled`].
+    shell: Option<String>,
+
     /// The shared Rust build cache this session gets, or `None` where the human
     /// switched it off or this server has none to give.
     ///
@@ -1555,8 +1593,22 @@ impl Sandbox {
             git_author: config.git_author().clone(),
             server: reachable.asking_from(conversation.id),
             binds,
+            shell: None,
             build_cache: cache.shared(config.rust_build_cache()),
         })
+    }
+
+    /// The same sandbox, built to run `shell`: `SHELL` names it inside, where a
+    /// session's says [`SHELL`], and the machine's own shell initialisation is
+    /// told it has nothing to do — see [`NIXOS_ENVIRONMENT_DONE`].
+    ///
+    /// Which shell is said by the caller rather than worked out here, because
+    /// which one a human gets is the terminals' business and not the sandbox's —
+    /// see [`crate::terminals`], the one caller, which runs that shell as the
+    /// command as well as naming it here.
+    pub fn shelled(mut self, shell: &str) -> Sandbox {
+        self.shell = Some(shell.to_owned());
+        self
     }
 
     /// Where a session finds the sccache it compiles through, which is beside
@@ -1760,8 +1812,9 @@ impl Sandbox {
             // the environment is cleared, so a tool that shells out reaches for
             // whatever this holds — and with nothing in it, it would fall back
             // to whatever login shell the passwd file gives the user the server
-            // happens to run as.
-            .set("SHELL", SHELL)
+            // happens to run as. A terminal says the shell the human is actually
+            // typing into — see [`Sandbox::shelled`].
+            .set("SHELL", self.shell.as_deref().unwrap_or(SHELL))
             // And what kind of terminal a session is on, which is a fact about
             // the pseudo-terminal Verkstead opened for it rather than about the
             // sandbox — see [`crate::terminal`]. Said because nothing else
@@ -1779,6 +1832,14 @@ impl Sandbox {
             // so nothing has to be plumbed through to say which agent is being
             // launched.
             .set(AGENT_TYPE, self.account.agent_type().word());
+
+        // And where the command *is* a shell, that this machine's own
+        // environment has already been said — see [`NIXOS_ENVIRONMENT_DONE`],
+        // which is what stops the shell rebuilding the `PATH` above out of the
+        // host's profile the moment it starts.
+        if self.shell.is_some() {
+            surface.set(NIXOS_ENVIRONMENT_DONE, "1");
+        }
 
         // The two an OpenCode session is told about itself: where its store
         // goes, because opencode names the file after the release channel the

@@ -69,6 +69,14 @@
             module = self.nixosModules.verkstead;
             package = self.packages.${pkgs.stdenv.hostPlatform.system}.verkstead-source;
           };
+          # And the one option of the module's whose whole effect is a line in
+          # passwd — the shell a Conversation's Terminal comes up in — which is
+          # an evaluation's question rather than a boot's.
+          module-shell = pkgs.callPackage ./nix/module-shell.nix {
+            module = self.nixosModules.verkstead;
+            nixosSystem = nixpkgs.lib.nixosSystem;
+            system = pkgs.stdenv.hostPlatform.system;
+          };
         }
       );
 

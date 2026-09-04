@@ -68,6 +68,8 @@ import type {
   Submitted,
   Subscribed,
   Subscription,
+  TerminalOpened,
+  TerminalsView,
   TranscriptView,
   UpdateNotice,
 } from "./types";
@@ -411,25 +413,73 @@ export function loadScreen(id: number, event: number): Promise<Screen> {
   return get<Screen>(`/api/ui/conversations/${id}/screen/${event}`);
 }
 
-/// And where to watch a session that is still running: the one socket in the
-/// app, and the one place the viewer is sent something rather than fetching it.
+/// And where to watch a session that is still running: a socket rather than a
+/// fetch, which is the one shape in the app where the viewer is sent something
+/// rather than asking for it — this and a conversation terminal below.
 ///
 /// A repaint on connect and what the session prints after it, with the size of
 /// the window it is being watched in — and whatever is typed into it — going
 /// back the other way. Everything else here stays on SSE and a refetch — a
 /// terminal being drawn is the one thing neither of those is any good for.
-///
-/// Built off the page's own origin, so the socket goes wherever the page came
-/// from: the dev server proxying `/api`, or the one binary serving both.
 export function screenSocket(id: number, event: number): string {
-  const at = new URL(
-    `/api/ui/conversations/${id}/screen/${event}/attach`,
-    window.location.href,
-  );
+  return socketAt(`/api/ui/conversations/${id}/screen/${event}/attach`);
+}
+
+/// Where one of our sockets stands, whichever of them it is — the Screen's, and
+/// a conversation terminal's below.
+///
+/// Built off the page's own origin, so it goes wherever the page came from: the
+/// dev server proxying `/api`, or the one binary serving both.
+function socketAt(path: string): string {
+  const at = new URL(path, window.location.href);
 
   at.protocol = at.protocol === "https:" ? "wss:" : "ws:";
 
   return at.href;
+}
+
+/// Which of a conversation's terminals are live: a human's shell inside its
+/// sandbox, in the same machinery a session's Screen is watched through
+/// (ADR 0013).
+///
+/// The numbers alone, which is the whole of what there is to say about one from
+/// out here — a terminal is memory on the server rather than a record, so what
+/// is *on* each of them arrives down the socket below.
+export function listTerminals(id: number): Promise<TerminalsView> {
+  return get<TerminalsView>(`/api/ui/conversations/${id}/terminals`);
+}
+
+/// And opening another, which answers the number it will answer to.
+///
+/// A request rather than a path, and named refusals rather than a status: the
+/// shell is started in the conversation's sandbox, and every way that can be
+/// refused is a sentence the pane has to say.
+export function openTerminal(id: number): Promise<TerminalOpened> {
+  return post<TerminalOpened>(`/api/ui/conversations/${id}/terminals`);
+}
+
+/// And where to watch one, which is the Screen's own socket pointed at a shell:
+/// a repaint on connect, what it prints after that, and the window size and
+/// whatever is typed going back the other way.
+export function terminalSocket(id: number, number: number): string {
+  return socketAt(`/api/ui/conversations/${id}/terminals/${number}/attach`);
+}
+
+/// And closing one, which is the **Close** row on its tab's menu: the shell is
+/// hung up and then killed where it lingers, and the terminal comes off the
+/// server's register.
+///
+/// Taking the thing away rather than posting about it — the one delete in the
+/// app, because a terminal is something the server is holding rather than a
+/// record it keeps. Nothing to read back: what the tab hears is its own socket
+/// closing, which is what it hears from a shell that exited by itself.
+export async function closeTerminal(id: number, number: number): Promise<void> {
+  await refused(
+    await fetch(`/api/ui/conversations/${id}/terminals/${number}`, {
+      method: "DELETE",
+      headers: { accept: "application/json" },
+    }),
+  );
 }
 
 /// One commit, rendered: what it said about itself, and its diff.

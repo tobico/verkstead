@@ -2002,6 +2002,60 @@ pub struct Size {
     pub rows: u16,
 }
 
+/// The terminals a Conversation has running, as the pane that draws them reads
+/// them back.
+///
+/// The numbers alone. A terminal is a shell in a Sandbox and nothing else — no
+/// record, no Event, nothing in a Share (ADR 0013) — so there is nothing about
+/// one to send but which of the Conversation's it is: what is *on* each of them
+/// arrives down a socket of its own.
+///
+/// Oldest first, which is the order they were opened in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct TerminalsView {
+    pub live: Vec<i64>,
+}
+
+/// And what became of asking for another one.
+///
+/// Named refusals like every other press in the workbench, because each of them
+/// is a different sentence to put in front of the human — and because a terminal
+/// that could not be opened is one the pane has to say something about rather
+/// than one that quietly never appears.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum TerminalOpened {
+    /// A shell is running in the Conversation's Sandbox, and this is the number
+    /// it answers to for as long as the server holds it.
+    Opened {
+        number: i64,
+    },
+
+    NoSuchConversation,
+
+    /// There is no Worktree to open one in, which is a Draft and a Conversation
+    /// that has been closed. The button is drawn disabled on both; this is that
+    /// same rule asked again on arrival, the way every named refusal here is.
+    NoWorktree,
+
+    /// No Agent Profile is settled for the work, so there is no account to run
+    /// the shell under — a terminal has no role of its own and runs under the
+    /// implementation Profile's, or the grilling one's where the implementation
+    /// role has none.
+    NoProfile,
+
+    /// This Verkstead has no pseudo-terminal to open one on — see
+    /// [`SessionsHere::NotOnWindowsYet`], which is the same fact refusing a
+    /// session.
+    NotOnWindowsYet,
+
+    /// It would not start: no Sandbox could be built for the Conversation, or
+    /// the shell inside it would not run. The reason is in the server's log —
+    /// this is the one refusal with nothing for the human to correct.
+    Refused,
+}
+
 /// A move as an Event. Nothing to render — see [`MovedEvent`] — but built here
 /// beside the Brief so that one place knows how a Timeline is made.
 pub fn moved_event(id: i64, at: String, state: Lifecycle) -> TimelineEvent {

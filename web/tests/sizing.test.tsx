@@ -29,7 +29,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The terminal's own scroller, which is the one thing here still written beside
 // the Screen rather than beside the pane it fills.
-import screenCss from "../src/workbench/Screen.module.css?raw";
+import attachedCss from "../src/workbench/Attached.module.css?raw";
 // The frame itself, and its stylesheet both ways: the hashed names to query the
 // page by, and the source to read the rules that jsdom lays nothing out for.
 import { Panes } from "../src/Panes";
@@ -692,7 +692,7 @@ describe("the rules the widths are read by", () => {
     );
 
     // And the terminal inside it, which is a scroller of its own.
-    expect(screenCss).toMatch(
+    expect(attachedCss).toMatch(
       /\.screen \.terminalHost \{[^}]*overscroll-behavior: contain;/,
     );
   });

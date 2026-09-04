@@ -148,6 +148,14 @@ mod tasks;
 /// surface it runs on rather than an implementation detail of an endpoint, and
 /// what proves a terminal is a terminal is a process running on one saying so.
 pub mod terminal;
+/// The terminals a Conversation holds of its own: a human's shell inside its
+/// Sandbox, in the Screen's own machinery pointed at a shell.
+///
+/// Public for the reason the sandbox is: which shell a human gets at their own
+/// machine is the product's answer rather than an endpoint's, and what proves
+/// one is a shell really running inside a Sandbox — a test standing where the
+/// orchestrator does, asking the machine the same question it asks.
+pub mod terminals;
 mod transcript;
 /// What Verkstead says to a running session: the keystrokes the rescue and the
 /// nudge both go in as.
@@ -227,6 +235,12 @@ pub(crate) struct AppState {
     settlements: Settlements,
     waits: Waits,
     sessions: sessions::Sessions,
+
+    /// And the terminals each Conversation is holding of its own — see
+    /// [`terminals`]. A register beside the sessions rather than a bend in it:
+    /// a Conversation has one session and may have any number of terminals, and
+    /// what runs on one is the human rather than an agent.
+    terminals: terminals::Terminals,
 
     /// The watcher each Conversation's latest pick armed — see [`followers`].
     /// Beside the sessions rather than inside them, because a watcher is a task
@@ -651,6 +665,7 @@ fn routed(
         settlements: Settlements::new(SETTLEMENT_BACKLOG),
         waits: Waits::new(),
         sessions,
+        terminals: terminals::Terminals::new(),
         followers: followers::Followers::new(),
         drivers: drivers::Drivers::new(),
         updates,

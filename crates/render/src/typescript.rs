@@ -29,7 +29,8 @@ use crate::{
     RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, SetReading, SettingsEdit,
     SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation,
     ShowingArchived, Shown, Started, SteerOpened, SteerSubmission, Submitted, Subscribed,
-    Subscription, TranscriptView, Unsubscribe, UpdateNotice, Watching,
+    Subscription, TerminalOpened, TerminalsView, TranscriptView, Unsubscribe, UpdateNotice,
+    Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -186,6 +187,14 @@ fn the_viewers_types_are_written_from_these() {
     Shown::export_all(&config).unwrap();
     ShowingArchived::export_all(&config).unwrap();
     Watching::export_all(&config).unwrap();
+
+    // And the terminals a Conversation holds of its own: which of them are
+    // live, and what became of asking for another (ADR 0013). A shell in the
+    // Conversation's Sandbox is not a record, so the numbers are the whole of
+    // what there is to send — what is *on* one arrives down the socket above,
+    // in the same two shapes a Screen is watched in.
+    TerminalsView::export_all(&config).unwrap();
+    TerminalOpened::export_all(&config).unwrap();
 
     // And what a session committed: the summary drawn out, and the diff, both of
     // which are this payload's alone — the Timeline's own card is the subject

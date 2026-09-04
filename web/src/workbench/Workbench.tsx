@@ -27,10 +27,10 @@
 //! What is open is the URL's rather than this page's, because it is what the
 //! third pane is *about*: the pane is that one thing's full self and nothing
 //! else, so with nothing open it is bare paper. Nearly always that is an Event;
-//! the backlog, the roadmap and the Share pane are the exceptions — the two
-//! lists are read off the worktree rather than recorded, and sharing belongs to
-//! the Conversation rather than to any moment on it — and each names itself by a
-//! word instead of an id. Every one of them has a path of its own under the
+//! the backlog, the roadmap, the Share pane and the Terminal are the exceptions
+//! — the two lists are read off the worktree rather than recorded, and sharing
+//! and a shell in the Sandbox belong to the Conversation rather than to any
+//! moment on it — and each names itself by a word instead of an id. Every one of them has a path of its own under the
 //! Conversation — see `openings.ts` — so a details pane survives being navigated
 //! away from and back, and can be linked to.
 //!
@@ -106,6 +106,7 @@ import { Output } from "./Output";
 import { PullRequest } from "./PullRequest";
 import { Roadmap } from "./Roadmap";
 import { Share } from "./Share";
+import { Terminal } from "./Terminal";
 import { Timeline } from "./Timeline";
 import { pressed } from "./eager";
 import {
@@ -650,11 +651,12 @@ function DetailsPane(props: {
   /// timeline, because that is where it is drawn: it is the one event that
   /// stays in view rather than scrolling past, and it opens all the same.
   ///
-  /// The backlog, the roadmap and the Share pane are none of these and are not
-  /// looked for here at all: none of the three has an Event — the two lists are
-  /// read off the worktree every time the Conversation is, and sharing belongs
-  /// to the Conversation rather than to any moment on it — so the pane draws
-  /// them from the selection itself, see the `Switch` below.
+  /// The backlog, the roadmap, the Share pane and the Terminal are none of these
+  /// and are not looked for here at all: none of the four has an Event — the two
+  /// lists are read off the worktree every time the Conversation is, and sharing
+  /// and a shell in the Sandbox belong to the Conversation rather than to any
+  /// moment on it — so the pane draws them from the selection itself, see the
+  /// `Switch` below.
   const opened = (conversation: ConversationView): Opened | undefined => {
     const id = props.event;
 
@@ -706,14 +708,15 @@ function DetailsPane(props: {
     <Show when={props.conversation.data}>
       {(conversation) => (
         <Switch>
-          {/* The backlog, the roadmap and the Share pane, which are the three
-              things this pane draws that are not Events: the two lists are read
-              off the worktree every time the Conversation is, and sharing
-              belongs to the Conversation rather than to anything on its record.
-              So there is nothing on the record to name any of them by, and each
-              is named by a word instead. Ahead of the Events because they are
-              not among them — [`opened`] looks for an id, and none of the three
-              selections is one. */}
+          {/* The backlog, the roadmap, the Share pane and the Terminal, which
+              are the four things this pane draws that are not Events: the two
+              lists are read off the worktree every time the Conversation is,
+              and sharing and a shell in the Sandbox belong to the Conversation
+              rather than to anything on its record. So there is nothing on the
+              record to name any of them by, and each is named by a word
+              instead. Ahead of the Events because they are not among them —
+              [`opened`] looks for an id, and none of the four selections is
+              one. */}
           <Match when={props.event === "backlog"}>
             <Backlog
               conversation={conversation()}
@@ -724,6 +727,15 @@ function DetailsPane(props: {
               rather than by anything on the record. */}
           <Match when={props.event === "share"}>
             <Share
+              conversation={conversation()}
+              back={props.back.go}
+            />
+          </Match>
+          {/* And the terminals it holds of its own, opened by the icon beside
+              that one — a shell in the Conversation's Sandbox, which is no
+              part of the record either (ADR 0013). */}
+          <Match when={props.event === "terminal"}>
+            <Terminal
               conversation={conversation()}
               back={props.back.go}
             />
