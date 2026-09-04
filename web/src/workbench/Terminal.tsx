@@ -76,6 +76,7 @@
 //! means to take the work on presses **Stop** first.
 
 import { faPlus } from "@fortawesome/free-solid-svg-icons";
+import { useQueryClient } from "@tanstack/solid-query";
 import {
   For,
   Match,
@@ -84,6 +85,7 @@ import {
   createEffect,
   createMemo,
   createSignal,
+  onCleanup,
   type JSX,
 } from "solid-js";
 
@@ -164,11 +166,32 @@ export function Terminal(props: {
   /// of those are answered where they happen — an exit down the tab's own
   /// socket. Frozen for that reason — a terminal is no part of the record, so no
   /// Nudge is ever about one.
+  ///
+  /// **And kept no longer than the pane it was read for.** Frozen means frozen:
+  /// an answer still in the cache is never asked for again, on a mount or on a
+  /// focus. So a pane coming back to a cached one would be reading the register
+  /// as it stood when this pane last closed — and where it had opened the shell
+  /// itself, that is the empty list it started from, so it would open a second
+  /// beside the first and leave the first running with no tab over it and no
+  /// way to close it. Dropped with the pane instead, which is what makes "read
+  /// when the pane opens" true of every opening rather than of the first.
+  ///
+  /// Said twice, because `gcTime` is a timer: it is zero, so nothing is kept
+  /// past the pane, and the answer is dropped outright as the pane goes so that
+  /// a pane reopened before that timer has run — which is a press that swaps one
+  /// details pane for another, both in the one tick — finds nothing to come
+  /// back to either.
+  const held = useQueryClient();
+  const holding = () => ["terminals", props.conversation.id];
+
   const terminals = useReading(() => ({
-    queryKey: ["terminals", props.conversation.id],
+    queryKey: holding(),
     queryFn: () => listTerminals(props.conversation.id),
     freshness: "static",
+    gcTime: 0,
   }));
+
+  onCleanup(() => held.removeQueries({ queryKey: holding(), exact: true }));
 
   /// Every tab there is, in the order they were opened: what was live when the
   /// pane loaded, and what it has opened since.

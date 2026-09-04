@@ -15899,6 +15899,70 @@ describe("a conversation's terminal", () => {
     );
   });
 
+  /// And it asks which are live every time it opens, not only the first time.
+  ///
+  /// The reading is frozen, which means an answer still in the cache is never
+  /// asked for again — so a pane that came back to one would be reading the
+  /// register as it stood when it last closed. Where the pane had opened the
+  /// shell itself that is the empty list it started from, and it would open a
+  /// second beside the first, leaving the first running with no tab over it and
+  /// no way to close it.
+  it("asks which are live again every time the pane opens", async () => {
+    // What the server is holding, which is nothing until the pane opens one.
+    let live: number[] = [];
+
+    const fetching = withTerminals(
+      [],
+      // Answered afresh on every ask rather than fixed at mount, which is the
+      // whole of what this is about.
+      whenever(TERMINALS_OF_IT, () => json({ live } satisfies TerminalsView)()),
+      whenever(
+        TERMINALS_OF_IT,
+        json({ Opened: { number: 1 } } satisfies TerminalOpened),
+        "POST",
+      ),
+    );
+
+    const { container, history } = mount(
+      `/conversations/${GRILLING.id}/terminal`,
+    );
+
+    (await attached()).says(PAINTED);
+    await drawn(
+      container,
+      `.${shell.detailsPane} .${attachedPane.screen} .xterm-rows`,
+    );
+
+    live = [1];
+
+    // Away to another of the Conversation's details panes, which takes this one
+    // down — the walk any other pane of the same Conversation is.
+    history.set({ value: `/conversations/${GRILLING.id}/backlog` });
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${shell.detailsPane} .${attachedPane.screen}`),
+      ).toBeNull(),
+    );
+
+    // And back into it, which reads the register again and comes back to the
+    // shell that is already running rather than opening a second beside it.
+    history.set({ value: `/conversations/${GRILLING.id}/terminal` });
+
+    await waitFor(() =>
+      expect(
+        Attached.opened.filter((one) => one.url.endsWith(TERMINAL_ATTACH)),
+      ).toHaveLength(2),
+    );
+
+    expect(
+      fetching.mock.calls.filter(
+        ([path, init]) =>
+          String(path) === TERMINALS_OF_IT && init?.method === "POST",
+      ),
+    ).toHaveLength(1);
+  });
+
   /// The terminal fills the pane: the reading measure comes off, and the pane
   /// ends where the window does rather than scrolling on down the page.
   it("fills the pane, with no reading measure and nothing to scroll", async () => {
