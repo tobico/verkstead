@@ -17104,6 +17104,39 @@ impl Watcher {
             .expect("the socket to take a resize");
     }
 
+    /// Follow the socket until the server closes it, which is what a shell
+    /// ending looks like from a browser: the terminal comes off the register the
+    /// moment it exits, and there is nothing left to feed the Screen every
+    /// watcher is on.
+    ///
+    /// Whatever it says on the way is fed to the grid like anything else — the
+    /// last thing a shell prints is printed on its way out, and a close is not a
+    /// reason to stop reading what came before it.
+    async fn until_closed(&mut self) {
+        let deadline = Instant::now() + *PATIENCE;
+
+        loop {
+            let waiting = deadline.saturating_duration_since(Instant::now());
+
+            let said = tokio::time::timeout(waiting, self.socket.next())
+                .await
+                .expect("the socket to close when the shell ended");
+
+            match said {
+                // The stream is over, either at the close frame or at the end of
+                // it.
+                None | Some(Ok(Message::Close(_))) | Some(Err(_)) => return,
+                Some(Ok(Message::Text(said))) => match read(&said) {
+                    Shown::Painted(painted) => self.paint(&painted),
+                    Shown::Printed(printed) => {
+                        self.vt.feed_str(&printed);
+                    }
+                },
+                Some(Ok(_)) => {}
+            }
+        }
+    }
+
     /// The grid it is showing, row by row, with the blank rows at the bottom
     /// left off.
     fn showing(&self) -> Vec<String> {
@@ -25735,5 +25768,89 @@ async fn opening_a_terminal_leaves_nothing_on_the_timeline() {
         fixture.view().await.timeline,
         before,
         "opening a terminal and typing in it should leave the Timeline exactly as it was",
+    );
+}
+
+/// And a shell that exits takes its terminal with it: off the register, and
+/// every watcher's socket closed under them.
+///
+/// Which is the whole of what the pane's tab rules stand on. A terminal is
+/// memory only, so there is nothing to poll and nothing to read back: the way a
+/// tab hears that its shell has ended is its own socket closing, exactly as a
+/// session ending closes its Screen's (ADR 0007). Asked of two watchers, because
+/// the claim is about every one of them rather than about the one that happened
+/// to be typing.
+#[tokio::test]
+async fn a_terminal_whose_shell_exits_leaves_the_register_and_closes_its_watchers() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| view.worktree.as_ref().map(|worktree| worktree.path.clone()))
+        .await;
+
+    let at = fixture.listening().await;
+
+    let opened: TerminalOpened = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+        &serde_json::json!({}),
+    )
+    .await;
+
+    let TerminalOpened::Opened { number } = opened else {
+        panic!("expected a terminal to open, and the server said: {opened:?}");
+    };
+
+    let mut one = Watcher::terminal(at, fixture.id, number).await;
+    let mut two = Watcher::terminal(at, fixture.id, number).await;
+
+    // Wide enough for the line to land on one row, a wrapped one being one no
+    // `contains` finds — and it is asked for at all so that the shell is known
+    // to be up and answering before it is told to go.
+    one.resize(200, 40).await;
+    one.types("printf 'in the shell\\n'\r").await;
+    one.until(|grid| grid.contains("in the shell")).await;
+
+    // The human typing `exit`, which is the first of the four things that end a
+    // terminal and the only one the shell itself does.
+    one.types("exit\r").await;
+
+    one.until_closed().await;
+    two.until_closed().await;
+
+    // Off the register by the time those closed, so a pane reading the list back
+    // comes back to a Conversation with no terminals rather than to a number
+    // nothing will answer for.
+    let live: TerminalsView = get(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+    )
+    .await;
+
+    assert!(
+        live.live.is_empty(),
+        "a shell that exited should have taken its terminal off the register, \
+         and the server is still listing: {:?}",
+        live.live,
+    );
+
+    // And attaching afresh is refused rather than opened and left silent: there
+    // is nothing to relay, and no read-only grid to fall back to either, a
+    // terminal being memory only.
+    let refused = tokio_tungstenite::connect_async(format!(
+        "ws://{at}/api/ui/conversations/{}/terminals/{number}/attach",
+        fixture.id,
+    ))
+    .await;
+
+    assert!(
+        refused.is_err(),
+        "attaching to a terminal whose shell has ended should be refused",
     );
 }

@@ -51,7 +51,14 @@
 
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
-import { Show, createEffect, createSignal, onCleanup, type JSX } from "solid-js";
+import {
+  Match,
+  Switch,
+  createEffect,
+  createSignal,
+  onCleanup,
+  type JSX,
+} from "solid-js";
 
 import "@xterm/xterm/css/xterm.css";
 
@@ -78,9 +85,11 @@ export type Wording = {
 /// A terminal the server is holding, watched over `at` for as long as this is
 /// drawn.
 ///
-/// Always live and always typed into: a socket is a thing at the other end, and
-/// one that had ended would have nothing to relay. What is read-only is
-/// [`Standing`] below, which is a grid nothing will move again.
+/// Live while there is something at the far end of the socket, and read-only
+/// once there is not: a caller that keeps such a window past its shell says so
+/// with `over`, and the grid the shell left stands there taking no typing.
+/// [`Standing`] below is the other read-only grid — one that was fetched rather
+/// than watched, and was never live at all.
 export function Attached(props: {
   at: string;
   say: Wording;
@@ -101,6 +110,28 @@ export function Attached(props: {
   /// repaint, so a caller reaching in for one would be reaching for something
   /// that may not have arrived yet.
   showing?: boolean;
+
+  /// The far end has gone, and this is the line to stand under the grid saying
+  /// so — the shell ended, or its open was refused.
+  ///
+  /// The grid stays exactly where it stopped and goes read-only with it: a
+  /// terminal that silently swallows typing reads as broken rather than as
+  /// over, which is the difference [`Standing`] below is drawn under too.
+  ///
+  /// Only a caller that keeps such a window says anything here. A Screen's does
+  /// not: a session that has ended is drawn from its Capture by the pane above
+  /// it rather than left attached to nothing.
+  over?: string;
+
+  /// And what to call when the socket closes with this window still drawn,
+  /// which is what a shell ending looks like from here: the server takes the
+  /// terminal off its register and every watcher's socket closes with it.
+  ///
+  /// This says what happened rather than doing anything about it, because what
+  /// follows from it is the caller's. A shell that ran for an hour and one that
+  /// never started are the same closed socket, and only the pane knows which it
+  /// asked for and when — see `Terminal.tsx`, where the five seconds are.
+  ended?: () => void;
 }): JSX.Element {
   /// Where the terminal is mounted, the terminal itself, and the addon that
   /// measures how much of a grid fits in the pane.
@@ -174,6 +205,11 @@ export function Attached(props: {
   createEffect(() => {
     const socket = new WebSocket(props.at);
 
+    /// Whether this window is the one closing the socket, in which case its
+    /// closing is nothing to report: a socket closed on the way out is this
+    /// element going away rather than the far end of it.
+    let leaving = false;
+
     // Where this pane's keystrokes and mouse reports go for as long as this
     // socket is the one watching.
     putIn = (said) => {
@@ -203,6 +239,16 @@ export function Attached(props: {
     // A socket that would not open, or that closed while there was still
     // something at the other end to watch.
     socket.addEventListener("error", () => setLost(true));
+
+    // And one the server closed under this window, which is the far end gone:
+    // a shell that exited, or a number that was never live to begin with.
+    socket.addEventListener("close", () => {
+      if (leaving) {
+        return;
+      }
+
+      props.ended?.();
+    });
 
     /// How big this watcher has said its pane is. Nothing yet, until it has
     /// been measured — see [`measure`].
@@ -264,11 +310,24 @@ export function Attached(props: {
     }
 
     onCleanup(() => {
+      leaving = true;
       watching.disconnect();
       socket.close();
       putIn = undefined;
       measuring = undefined;
     });
+  });
+
+  // Over: the grid is where the shell got to rather than something to type
+  // into, and it says so by not taking the typing — the same difference
+  // [`opened`] draws for a grid that was fetched rather than watched.
+  createEffect(() => {
+    if (props.over === undefined || !terminal) {
+      return;
+    }
+
+    terminal.options.disableStdin = true;
+    terminal.options.cursorBlink = false;
   });
 
   // Turned to: the pane is this window's now, so it measures it and takes the
@@ -298,16 +357,20 @@ export function Attached(props: {
       hidden={props.showing === false}
     >
       <div class={styles.terminalHost} ref={host} />
-      <Show
-        when={lost()}
-        fallback={
-          <Show when={!shown() ? props.say.waiting : props.say.watching}>
-            {(said) => <Note class={styles.note}>{said()}</Note>}
-          </Show>
-        }
-      >
-        <ErrorLine>{props.say.lost}</ErrorLine>
-      </Show>
+      <Switch>
+        {/* What is over is over, whichever way the socket went — a shell that
+            exited closed it cleanly and one that never started failed it, and
+            the caller has already said which of those this was. */}
+        <Match when={props.over}>
+          {(said) => <ErrorLine>{said()}</ErrorLine>}
+        </Match>
+        <Match when={lost()}>
+          <ErrorLine>{props.say.lost}</ErrorLine>
+        </Match>
+        <Match when={!shown() ? props.say.waiting : props.say.watching}>
+          {(said) => <Note class={styles.note}>{said()}</Note>}
+        </Match>
+      </Switch>
     </div>
   );
 }

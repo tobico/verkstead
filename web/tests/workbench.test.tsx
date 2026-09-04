@@ -159,7 +159,13 @@ import prPane from "../src/workbench/PullRequest.module.css";
 import sharePane from "../src/workbench/Share.module.css";
 // And a terminal of the human's own inside the conversation's sandbox, which
 // is the other details pane nothing on the record opens.
-import { TERMINAL_REFUSAL } from "../src/workbench/Terminal";
+import {
+  // Aliased: `AT_ONCE` above this is the force-stop endpoint, which is a
+  // different sense of the words and was here first.
+  AT_ONCE as ENDED_WITHIN,
+  ENDED_AT_ONCE,
+  TERMINAL_REFUSAL,
+} from "../src/workbench/Terminal";
 // And the tab bar over its several shells, which is the pane's own module.
 import terminalPane from "../src/workbench/Terminal.module.css";
 // The mark a pull request's checks are said in, both ways: the hashed names to
@@ -5025,6 +5031,14 @@ class Attached {
   /// What the server says down it.
   says(shown: Shown): void {
     this.fire("message", { data: JSON.stringify(shown) } as never);
+  }
+
+  /// And the server closing it, which is what a shell ending looks like from
+  /// the page: the terminal comes off the register the moment it exits, and
+  /// every watcher's socket closes with it.
+  ends(): void {
+    this.readyState = 3;
+    this.fire("close", new Event("close"));
   }
 
   private fire(kind: string, event: unknown): void {
@@ -16174,5 +16188,237 @@ describe("the terminal pane's tabs", () => {
         windows(container)[0]!.contains(document.activeElement),
       ).toBe(true),
     );
+  });
+
+  /// What the server answers each open with, in order — the last of them for
+  /// every open after that, the way `serving` answers everything else.
+  ///
+  /// A number per open rather than one for all of them, because the numbers are
+  /// what a tab is called and the server never reuses one: a pane that opened
+  /// two shells and was told the same number twice would be drawing one tab over
+  /// two sockets.
+  function opens(...numbers: number[]) {
+    let taken = 0;
+
+    return () => {
+      const number = numbers[Math.min(taken++, numbers.length - 1)]!;
+
+      return json({ Opened: { number } } satisfies TerminalOpened)();
+    };
+  }
+
+  /// How many shells this pane has asked the server for.
+  function asked(fetching: ReturnType<typeof serving>): number {
+    return fetching.mock.calls.filter(
+      ([path, init]) =>
+        String(path) === TERMINALS_OF_IT && init?.method === "POST",
+    ).length;
+  }
+
+  /// The sentence a tab is standing under, where it is standing rather than
+  /// running.
+  function standing(container: ParentNode): string | null | undefined {
+    return container.querySelector(`.${shell.detailsPane} .${notices.error}`)
+      ?.textContent;
+  }
+
+  describe("and a shell that ends", () => {
+    /// How far ahead of the real one the pane's clock is running.
+    ///
+    /// The five seconds are measured on `Date.now`, and five real ones in a test
+    /// are five nobody gets back. Moved rather than frozen, because every other
+    /// clock on the page reads the same one and a page whose time stood still is
+    /// not the page being asked about.
+    let ahead = 0;
+    let clock: ReturnType<typeof vi.spyOn> | undefined;
+
+    beforeEach(() => {
+      ahead = 0;
+
+      const real = Date.now.bind(Date);
+      clock = vi.spyOn(Date, "now").mockImplementation(() => real() + ahead);
+    });
+
+    afterEach(() => {
+      clock?.mockRestore();
+    });
+
+    /// A shell that ends is a socket that closes: the server takes the terminal
+    /// off its register the moment it exits, and every watcher hears that. The
+    /// tab goes with it, and the pane never stands empty, so another opens where
+    /// it was the last.
+    it("takes the tab away and opens another where it was the last", async () => {
+      const fetching = withTerminals(
+        [1],
+        whenever(TERMINALS_OF_IT, opens(2), "POST"),
+      );
+      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+
+      const first = await attachedTo(1);
+      first.says(PAINTED);
+      await waitFor(() => expect(tabs(container)).toHaveLength(1));
+
+      // `exit` typed into the only shell there was.
+      first.ends();
+
+      const second = await attachedTo(2);
+      expect(second.url.startsWith("ws://")).toBe(true);
+
+      await waitFor(() =>
+        expect(tabs(container).map((tab) => tab.textContent)).toEqual([
+          "Terminal 2",
+        ]),
+      );
+
+      expect(asked(fetching)).toBe(1);
+      expect(standing(container)).toBeUndefined();
+    });
+
+    /// And where it was one of several, that tab goes and the others stand:
+    /// nothing opens, because the pane is not empty.
+    it("leaves the other tabs standing where it was one of several", async () => {
+      const fetching = withTerminals([1, 2, 3]);
+      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+
+      const second = await attachedTo(2);
+      await waitFor(() => expect(tabs(container)).toHaveLength(3));
+
+      second.ends();
+
+      await waitFor(() =>
+        expect(tabs(container).map((tab) => tab.textContent)).toEqual([
+          "Terminal 1",
+          "Terminal 3",
+        ]),
+      );
+
+      expect(asked(fetching)).toBe(0);
+      expect(second.closed).toBe(true);
+    });
+
+    /// A shell of the pane's own that ran and then ended goes the same way — the
+    /// five seconds are a guard against one that never started, not a rule about
+    /// which shells are allowed to end.
+    it("takes away one it opened itself, once it has run for longer than that", async () => {
+      const fetching = withTerminals(
+        [],
+        whenever(TERMINALS_OF_IT, opens(1, 2), "POST"),
+      );
+      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+
+      const first = await attachedTo(1);
+      first.says(PAINTED);
+      await waitFor(() => expect(tabs(container)).toHaveLength(1));
+
+      ahead = ENDED_WITHIN;
+      first.ends();
+
+      await attachedTo(2);
+      await waitFor(() =>
+        expect(tabs(container).map((tab) => tab.textContent)).toEqual([
+          "Terminal 2",
+        ]),
+      );
+
+      expect(asked(fetching)).toBe(2);
+    });
+
+    /// And one that ended the moment it was asked for is a shell that could not
+    /// start: its tab stays, read-only, saying so under whatever it managed to
+    /// print — and nothing opens another, because a Sandbox that will not have it
+    /// asked again on the strength of its own refusal would spawn for ever.
+    it("keeps a tab whose shell ended at once, and opens nothing after it", async () => {
+      const fetching = withTerminals(
+        [],
+        whenever(TERMINALS_OF_IT, opens(1, 2), "POST"),
+      );
+      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+
+      const first = await attachedTo(1);
+      first.says(PAINTED);
+
+      const grid = await drawn(
+        container,
+        `.${shell.detailsPane} .${attachedPane.screen} .xterm-rows`,
+      );
+      await waitFor(() =>
+        expect(grid.textContent).toContain("Reading the brief"),
+      );
+
+      first.ends();
+
+      await waitFor(() => expect(standing(container)).toBe(ENDED_AT_ONCE));
+
+      // The tab is where it was, with the grid the shell left on it.
+      expect(tabs(container).map((tab) => tab.textContent)).toEqual([
+        "Terminal 1",
+      ]);
+      expect(grid.textContent).toContain("Reading the brief");
+
+      // Read-only: what is typed into it reaches nothing, there being nothing at
+      // the other end to reach.
+      const said = first.sent.length;
+
+      fireEvent.keyDown(
+        await drawn<HTMLTextAreaElement>(
+          container,
+          `.${shell.detailsPane} .${attachedPane.screen} .xterm-helper-textarea`,
+        ),
+        { key: "Enter", keyCode: 13, which: 13 },
+      );
+
+      expect(first.sent).toHaveLength(said);
+
+      // And nothing asked for another.
+      expect(asked(fetching)).toBe(1);
+      expect(Attached.opened).toHaveLength(1);
+
+      // Plus is a press, and it replaces the tab that was only there to say why.
+      fireEvent.click(
+        await drawn(
+          container,
+          `.${shell.detailsPane} .${button.iconButton}[aria-label="New terminal"]`,
+        ),
+      );
+
+      await attachedTo(2);
+      await waitFor(() =>
+        expect(tabs(container).map((tab) => tab.textContent)).toEqual([
+          "Terminal 2",
+        ]),
+      );
+      expect(standing(container)).toBeUndefined();
+    });
+
+    /// A Sandbox that would not start at all never got as far as a number, so
+    /// its tab is called by the bare word — and it says what the server said,
+    /// which is the same guard by the other route.
+    it("stands a tab on a refusal, and opens nothing after that either", async () => {
+      const fetching = withTerminals(
+        [],
+        whenever(TERMINALS_OF_IT, json("Refused" satisfies TerminalOpened), "POST"),
+      );
+      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+
+      await waitFor(() =>
+        expect(standing(container)).toBe(TERMINAL_REFUSAL.Refused),
+      );
+
+      expect(tabs(container).map((tab) => tab.textContent)).toEqual(["Terminal"]);
+      expect(Attached.opened).toHaveLength(0);
+      expect(asked(fetching)).toBe(1);
+
+      // And plus asks again, which is the one thing that does: the refusal it is
+      // answered with replaces the one standing rather than piling up beside it.
+      fireEvent.click(
+        await drawn(
+          container,
+          `.${shell.detailsPane} .${button.iconButton}[aria-label="New terminal"]`,
+        ),
+      );
+
+      await waitFor(() => expect(asked(fetching)).toBe(2));
+      expect(tabs(container).map((tab) => tab.textContent)).toEqual(["Terminal"]);
+    });
   });
 });

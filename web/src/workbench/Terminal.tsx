@@ -22,11 +22,11 @@
 //! rather than scrolling it.
 //!
 //! **Several of them, one per tab.** The bar in the pane's header holds a tab
-//! per terminal, in the order the server issued their numbers, and a plus at the
-//! end opens another. It is the Output pane's Transcript/Screen switch built
-//! again — pressed-or-not buttons in a group rather than a tablist, which is the
-//! house's answer to this shape — and each tab is called *Terminal N* by the
-//! number the server gave it, which is why those numbers are never reused.
+//! per terminal, in the order they were opened, and a plus at the end opens
+//! another. It is the Output pane's Transcript/Screen switch built again —
+//! pressed-or-not buttons in a group rather than a tablist, which is the house's
+//! answer to this shape — and each tab is called *Terminal N* by the number the
+//! server gave it, which is why those numbers are never reused.
 //!
 //! Every tab keeps its socket open and its grid mounted whether or not it is the
 //! one showing, so a shell that printed while somebody was reading another tab
@@ -39,6 +39,16 @@
 //! are live and draws a tab for each, and opens one only where there is none —
 //! so a reload, a second device or a tab closed by accident comes back to what
 //! was already there, still running and showing what it last showed.
+//!
+//! **And the pane never stands empty.** A shell that exits closes its socket,
+//! which is how this side hears about it: the tab goes, and where it was the
+//! last one another opens. The whole of the guard on that is time — a shell that
+//! ended within [`AT_ONCE`] of being asked for, or that the server refused to
+//! open at all, is one that could not start rather than one that ran, so its tab
+//! *stays* saying why and nothing opens until plus is pressed, which replaces
+//! it. Without it a Sandbox that will not start would be an endless spawn loop.
+//! The clock is this pane's own, started when it asked: the server opens nothing
+//! of its own accord and knows nothing about tabs.
 //!
 //! Nothing here is a record: no Capture, no Event on the Timeline, nothing in a
 //! Share. And nothing here holds the run off — typing into a terminal is the
@@ -95,6 +105,28 @@ export const TERMINAL_REFUSAL: Record<
   Refused: "The shell would not start. The server's log says why.",
 };
 
+/// How soon after being asked for a shell has to end for its tab to stay.
+///
+/// The line between a shell that ran and a shell that could not start, and there
+/// is no better one to draw: what comes back from the server is a terminal that
+/// opened, and a shell that dies on its first line dies after the answer. Five
+/// seconds is long enough that nothing a human did in the terminal is inside it
+/// — a `exit` typed by hand takes longer than that to type — and short enough
+/// that a pane sitting behind a broken Sandbox says so at once.
+///
+/// Measured from when *this pane* asked, because this pane is the only thing
+/// that knows: the server opens nothing of its own accord and holds no clock.
+export const AT_ONCE = 5_000;
+
+/// What a tab says when its shell ended inside that.
+///
+/// The grid it left stands under it, read-only, because whatever the shell
+/// managed to print on its way out is the only thing here that says why — and
+/// the press that would try again is named, since nothing is going to try on its
+/// own.
+export const ENDED_AT_ONCE =
+  "The shell ended as soon as it started. Press plus to open another.";
+
 export function Terminal(props: {
   conversation: ConversationView;
   back: () => void;
@@ -103,36 +135,54 @@ export function Terminal(props: {
   ///
   /// Read when the pane opens rather than followed: the register is the
   /// server's and moves only when a shell exits or this pane opens one, and both
-  /// of those are answered where they happen. Frozen for that reason — a
-  /// terminal is no part of the record, so no Nudge is ever about one.
+  /// of those are answered where they happen — an exit down the tab's own
+  /// socket. Frozen for that reason — a terminal is no part of the record, so no
+  /// Nudge is ever about one.
   const terminals = useReading(() => ({
     queryKey: ["terminals", props.conversation.id],
     queryFn: () => listTerminals(props.conversation.id),
     freshness: "static",
   }));
 
-  /// The ones this pane has opened, in the order it opened them.
-  const [added, setAdded] = createSignal<number[]>([]);
+  /// Every tab there is, in the order they were opened: what was live when the
+  /// pane loaded, and what it has opened since.
+  ///
+  /// The server issues its numbers in order and never reuses one, so the list it
+  /// answers with is already in that order and everything opened here goes on
+  /// the end. A tab standing on a shell that never started is one of these too,
+  /// under a key of its own — see [`stand`].
+  const [tabs, setTabs] = createSignal<number[]>([]);
 
-  /// And what an open was refused with, where one was refused.
-  const [turned, setTurned] = createSignal<string | undefined>();
+  /// And what each tab that is standing rather than running says: the shell
+  /// ended at once, or the refusal the server answered the open with.
+  ///
+  /// A tab is in here or it is not, and that is the whole of the difference
+  /// between the two kinds: one with an entry keeps its grid and takes no
+  /// typing, and one without is a shell somebody is working in.
+  const [over, setOver] = createSignal<Record<number, string>>({});
 
   /// Which tab the human turned to, where they have turned to one.
   const [chosen, setChosen] = createSignal<number | undefined>();
 
-  /// Every tab there is: what was live when the pane loaded and what it has
-  /// opened since.
-  ///
-  /// By number, which is the order they were opened in — the server issues them
-  /// in order and never reuses one, so sorting them is reading the register's
-  /// own order back. And the two sources are a set rather than a sum: a list
-  /// read again would answer with the ones this pane opened, and a tab drawn
-  /// twice is two sockets onto one shell.
-  const tabs = createMemo(() =>
-    [...new Set([...(terminals.data?.live ?? []), ...added()])].sort(
-      (one, another) => one - another,
-    ),
-  );
+  /// Whether the list has been read, which is what says the pane knows how many
+  /// terminals there are. Before it, an empty tab bar is a pane that has not
+  /// looked yet rather than a Conversation with no shells.
+  const [read, setRead] = createSignal(false);
+
+  /// When this pane asked for each terminal it opened, which is what
+  /// [`AT_ONCE`] is measured from. Nothing for the ones that were already live:
+  /// this pane never asked for those, so a shell of theirs that ends is one that
+  /// ran.
+  const askedAt = new Map<number, number>();
+
+  /// Whether an open is in flight, so that nothing asks for a second while the
+  /// pane is empty and waiting on the first.
+  let opening = false;
+
+  /// The key the next tab standing on a refusal gets. Below every number the
+  /// server issues, counting the other way, because a refused open was never
+  /// given one — there is no shell for it to name.
+  let refusals = 0;
 
   /// The one showing: the tab turned to, or the first while nobody has turned
   /// to one — and the first again once the one turned to is gone, which is what
@@ -146,43 +196,125 @@ export function Terminal(props: {
       : open[0];
   });
 
-  /// Open another, and show it. What plus does, and what the pane does for
-  /// itself where there is nothing live to come back to.
-  const open = (): Promise<void> =>
-    openTerminal(props.conversation.id)
-      .then((outcome) => {
-        if (typeof outcome === "string") {
-          setTurned(TERMINAL_REFUSAL[outcome]);
-          return;
-        }
+  /// What a tab is called. The number the server issued it, and the bare word
+  /// for one standing on an open that was refused — the server never got as far
+  /// as a number for that one, and a made-up one would be a name for a shell
+  /// that is not there.
+  const called = (tab: number): string =>
+    tab > 0 ? `Terminal ${tab}` : "Terminal";
 
-        setTurned(undefined);
-        setAdded((was) => [...was, outcome.Opened.number]);
-        setChosen(outcome.Opened.number);
-      })
-      .catch((error: Error) => {
-        setTurned(error.message);
-      });
+  /// Take away whatever is only standing there to say why, which is what plus
+  /// replacing one means: a tab that is a sentence about a shell that never
+  /// started is not something to keep beside a shell that has.
+  const replace = (): void => {
+    const standing = Object.keys(over()).map(Number);
 
-  /// Open one where none is live. The pane never stands empty, so this is the
-  /// pane's own doing rather than a press.
-  ///
-  /// Asked once per Conversation, which is what `asked` holds: a refusal leaves
-  /// the list exactly as it was, and an effect that asked again on the strength
-  /// of it would be a refused Sandbox spawning for ever. Plus is a press and is
-  /// under no such rule — somebody who asks again meant to.
-  let asked: number | undefined;
-
-  createEffect(() => {
-    if (
-      terminals.data === undefined ||
-      tabs().length > 0 ||
-      asked === props.conversation.id
-    ) {
+    if (standing.length === 0) {
       return;
     }
 
-    asked = props.conversation.id;
+    setOver({});
+    setTabs((was) => was.filter((one) => !standing.includes(one)));
+  };
+
+  /// A tab that says why there is no shell in it, and stops the pane opening
+  /// another until somebody presses plus.
+  const stand = (why: string): void => {
+    replace();
+
+    refusals -= 1;
+    const tab = refusals;
+
+    setTabs((was) => [...was, tab]);
+    setOver((was) => ({ ...was, [tab]: why }));
+    setChosen(tab);
+  };
+
+  /// Open another, and show it. What plus does, and what the pane does for
+  /// itself where there is nothing live to come back to.
+  const open = (): Promise<void> => {
+    if (opening) {
+      return Promise.resolve();
+    }
+
+    opening = true;
+
+    return openTerminal(props.conversation.id)
+      .then((outcome) => {
+        if (typeof outcome === "string") {
+          stand(TERMINAL_REFUSAL[outcome]);
+          return;
+        }
+
+        const { number } = outcome.Opened;
+
+        replace();
+        askedAt.set(number, Date.now());
+        setTabs((was) => [...was, number]);
+        setChosen(number);
+      })
+      // A request that never landed is a shell that did not start, and it is
+      // read as one: the pane says so in a tab and waits to be asked again,
+      // rather than asking again itself against a server that is not there.
+      .catch((error: Error) => stand(error.message))
+      .finally(() => {
+        opening = false;
+      });
+  };
+
+  /// One tab's socket closed, which is its shell gone: the server takes a
+  /// terminal off its register the moment its shell exits, and every watcher's
+  /// socket closes with it.
+  ///
+  /// What follows is the whole of the ending rule. A shell that ran goes, and
+  /// the pane opens another where it was the last; one that ended inside
+  /// [`AT_ONCE`] of being asked for could not start, so its tab stays saying so
+  /// and nothing opens on its own after it.
+  const ended = (tab: number): void => {
+    const asked = askedAt.get(tab);
+
+    if (asked === undefined || Date.now() - asked >= AT_ONCE) {
+      askedAt.delete(tab);
+      setTabs((was) => was.filter((one) => one !== tab));
+      return;
+    }
+
+    setOver((was) => ({ ...was, [tab]: ENDED_AT_ONCE }));
+  };
+
+  /// The tabs the pane loads with: one for each terminal the server is already
+  /// holding.
+  ///
+  /// Once, for this Conversation. The list is a reading of the register at the
+  /// moment the pane opened, and everything that happens to it after that
+  /// happens here — a second seeding would put back a tab whose shell has since
+  /// ended.
+  let seeded: number | undefined;
+
+  createEffect(() => {
+    const live = terminals.data?.live;
+
+    if (live === undefined || seeded === props.conversation.id) {
+      return;
+    }
+
+    seeded = props.conversation.id;
+    setTabs(live);
+    setRead(true);
+  });
+
+  /// And the pane never standing empty: nothing live is a terminal opened,
+  /// whether that is a Conversation that had none or the last of its shells
+  /// having just exited.
+  ///
+  /// A tab standing on a shell that could not start counts as a tab, which is
+  /// what stops this asking again over a Sandbox that will not have it — see
+  /// [`AT_ONCE`]. Plus is a press and is under no such rule: somebody who asks
+  /// again meant to.
+  createEffect(() => {
+    if (!read() || tabs().length > 0 || opening) {
+      return;
+    }
 
     void open();
   });
@@ -202,14 +334,14 @@ export function Terminal(props: {
             aria-label="This conversation's terminals"
           >
             <For each={tabs()}>
-              {(number) => (
+              {(tab) => (
                 <button
                   type="button"
                   class={styles.tab}
-                  aria-pressed={showing() === number}
-                  onClick={() => setChosen(number)}
+                  aria-pressed={showing() === tab}
+                  onClick={() => setChosen(tab)}
                 >
-                  Terminal {number}
+                  {called(tab)}
                 </button>
               )}
             </For>
@@ -228,12 +360,7 @@ export function Terminal(props: {
         </PaneHead>
       </PaneSticky>
 
-      {/* A refusal above the tabs rather than in place of them: the pane may
-          have shells running in it, and an open that was turned down says
-          nothing about them. */}
-      <Show when={turned()}>{(why) => <ErrorLine>{why()}</ErrorLine>}</Show>
-
-      <Switch>
+      <Switch fallback={<Empty>Opening a terminal…</Empty>}>
         <Match when={terminals.isError}>
           <ErrorLine>
             Could not read this conversation's terminals:{" "}
@@ -242,21 +369,29 @@ export function Terminal(props: {
         </Match>
         <Match when={tabs().length > 0}>
           <For each={tabs()}>
-            {(number) => (
-              <Attached
-                at={terminalSocket(props.conversation.id, number)}
-                class={shell.paneWide}
-                showing={showing() === number}
-                say={{
-                  waiting: "Starting a shell in this conversation's worktree…",
-                  lost: "The connection to this terminal was lost.",
-                }}
-              />
-            )}
+            {(tab) =>
+              tab > 0 ? (
+                <Attached
+                  at={terminalSocket(props.conversation.id, tab)}
+                  class={shell.paneWide}
+                  showing={showing() === tab}
+                  over={over()[tab]}
+                  ended={() => ended(tab)}
+                  say={{
+                    waiting: "Starting a shell in this conversation's worktree…",
+                    lost: "The connection to this terminal was lost.",
+                  }}
+                />
+              ) : (
+                // A tab the server never opened a shell for has no grid to
+                // stand under the sentence, and nothing to attach to: the
+                // refusal is the whole of it.
+                <Show when={showing() === tab}>
+                  <ErrorLine>{over()[tab]}</ErrorLine>
+                </Show>
+              )
+            }
           </For>
-        </Match>
-        <Match when={turned() === undefined}>
-          <Empty>Opening a terminal…</Empty>
         </Match>
       </Switch>
     </>
