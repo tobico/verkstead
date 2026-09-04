@@ -474,6 +474,47 @@ Brief is otherwise the Pairings alone. What a control cannot do it does not
 draw.
 _Avoid_: description, prompt, spec, issue body
 
+**Attachment**:
+A file the human put on a Conversation for its sessions to read: dropped onto
+the composer's box or picked through the paperclip beside its presses, drawn as
+a pill under the Brief text with a remove press on it, and copied into a
+directory of the Conversation's own under the Data Directory —
+`attachments/<id>/`, beside the handoff directories. Every session of the
+Conversation gets that directory **read-only** at `/verkstead/attachments`
+(the Conversation's own subdirectory, where `/verkstead` is the Data Directory
+itself), and its prompt ends with a neutral `# Attached files` listing of each
+file's path and size, in the tone of the companions listing: what is there and
+where, and nothing about what to do with it, because the Brief says what a
+file is for. The copy is the record, and an agent that wants to work on one
+copies it into the Worktree.
+
+**What a file is attached to is its origin.** The Brief is the one origin
+there is, and an Answer to a Question Set is the one planned next — a second
+value on the same record rather than a second kind of thing, the upload being
+the Conversation's and not the Brief's. Attachments freeze with the Brief:
+attached and removed while the round drafts, fixed once the work starts, and
+the frozen Brief pane draws them as a read-only row under the text. A Share
+carries the names and sizes and never the bytes. A same-named file is not
+replaced: the newcomer is renamed `name-2.ext`, and both stay. One flat
+directory per Conversation, 32 MiB a file, any kind of file, folders skipped.
+
+**On the compose page they are held in the page until the press**, because
+nothing exists on the server until Start or Save as draft: the files ride with
+the composition, are uploaded once the Conversation is made as one more field
+of the replay, and a reload before the press keeps the text and loses the
+files. A refused upload is a refusal said on the draft's composer like any
+other. Not offered while a roadmap is loaded, the box being locked to a card.
+
+**Kept through Close and Trim, and gone at Deleted.** A Steer can bring a Closed
+Conversation back, and a file cannot be made again the way a Worktree can; a
+Trimmed record has to read whole, and the files are the human's input rather
+than a session's bulk. The Cleanup's delete removes the directory with the rows,
+and a startup sweep removes any directory under the attachments root that no
+Conversation in the record names — every candidate read out of that one
+directory, and nothing else ever a candidate.
+_Avoid_: upload, asset, resource, file (the thing attached is a file; the
+attaching is what this names)
+
 **Timeline**:
 A Conversation's ordered record of what has happened to it, and the middle pane
 of the workbench. Everything Verkstead and its agents do lands here as an
