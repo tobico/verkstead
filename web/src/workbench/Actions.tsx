@@ -800,17 +800,33 @@ export function CardActions(props: {
   const acts = actions();
   acts.closes(() => props.close());
 
-  const conversation = useReading(() => ({
-    // The key the Conversation pane reads under, so the open one is already in
-    // hand and any other is in hand for the pane that opens it next.
-    queryKey: ["conversation", String(props.pointed?.id ?? "")],
-    queryFn: () => loadConversation(String(props.pointed!.id)),
-    enabled: props.pointed !== null,
+  const conversation = useReading(() => {
+    /// Which card this is a read of, taken here rather than asked for inside
+    /// the fetch below.
+    ///
+    /// It is the Conversation pane's own cache entry, so whatever this observer
+    /// last said a fetch of it is stands on that entry after this menu has gone
+    /// — and a fetch that asked the prop again would be asking one that has
+    /// since moved. Which is exactly what a press here does: the menu shuts,
+    /// `pointed` goes to `null`, and the re-read every press ends with lands on
+    /// this function. Asked live it threw where the id should have been, and
+    /// what the human was shown was that failure drawn over the Conversation
+    /// they were reading. Read off the key instead, the fetch is what the key
+    /// says it is, whoever asks for it and whenever.
+    const of = props.pointed === null ? "" : String(props.pointed.id);
 
-    // Merged, as the pane's own read of this is: a Nudge landing while the menu
-    // is open should not rebuild the row the human is about to press.
-    freshness: { reconcile: "id" } as const,
-  }));
+    return {
+      // The key the Conversation pane reads under, so the open one is already
+      // in hand and any other is in hand for the pane that opens it next.
+      queryKey: ["conversation", of],
+      queryFn: () => loadConversation(of),
+      enabled: of !== "",
+
+      // Merged, as the pane's own read of this is: a Nudge landing while the
+      // menu is open should not rebuild the row the human is about to press.
+      freshness: { reconcile: "id" } as const,
+    };
+  });
 
   return (
     <>

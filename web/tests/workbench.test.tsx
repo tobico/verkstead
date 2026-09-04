@@ -1811,6 +1811,50 @@ describe("what a right-click on a card offers", () => {
     ).toBe(0);
   });
 
+  /// And the card of the Conversation that is open is a card like any other,
+  /// which is where this menu's read of one used to cost the human the page.
+  ///
+  /// It reads under the Conversation pane's own key, so the two share one cache
+  /// entry — and what this menu last said a fetch of that entry is stands on it
+  /// after the menu has gone. Every press here ends by reading the world again;
+  /// a fetch that asked which card was pointed at found that the press had shut
+  /// the menu and there was none, and what the human got back was the failure
+  /// drawn over the very Conversation they were reading. See `Actions.tsx`.
+  ///
+  /// The grilling one, because it has a Timeline: a record of one Event draws no
+  /// middle pane at all, so the failure had nowhere to be drawn — the same bug,
+  /// invisible.
+  it("leaves the open conversation readable after a press on its own card", async () => {
+    const closes = `/api/ui/conversations/${GRILLING.id}/close`;
+    const reading = `/api/ui/conversations/${GRILLING.id}`;
+    const fetching = theSidebarOver(
+      whenever(closes, json("Closed" satisfies ConversationClosed), "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    rightClick(await grillingCard(container));
+    const menu = await opened(container);
+    await drawn(menu, `.${actions.close}`);
+
+    // What this menu's own read of the Conversation has cost so far, so that
+    // what is counted below is the read the press asks for.
+    const read = askedFor(fetching, reading);
+
+    fireEvent.click(menu.querySelector<HTMLElement>(`.${actions.close}`)!);
+    await waitFor(() => expect(sent(fetching, closes)).toEqual({}));
+
+    // The read every press ends with, and the Timeline still drawn when it
+    // lands. Both in the one wait, because with the fetch asking the pointer
+    // again there is no read to count at all: it threw where the id should have
+    // been, and the error line stood in the Timeline's place.
+    await waitFor(() => {
+      expect(screen.queryByText(/Could not read this conversation/)).toBeNull();
+      expect(askedFor(fetching, reading)).toBeGreaterThan(read);
+    });
+
+    await drawn(container, `.${shell.middlePane} .${timeline.timeline}`);
+  });
+
   /// Where the pointer was, because that is the whole of what a context menu
   /// knows about where it belongs.
   it("comes down where the pointer was", async () => {
