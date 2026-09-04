@@ -79,8 +79,10 @@ mod bwrap;
 mod seatbelt;
 // And the third, built everywhere and gated by nothing. What it renders is the
 // process the description describes — the environment said, the directory
-// started in, the vector run — with no wrapper in front of it and no call any
-// one platform has to itself, so there is nothing here for a `cfg` to be about.
+// started in, the vector run — with no wrapper in front of it, so there is
+// nothing there for a `cfg` to be about. The one call it makes that one
+// platform has to itself is beside it, in a module with an arm for each.
+mod junction;
 mod open;
 // And the two ends of what a renderer is: the description going in, and the
 // process coming out.
@@ -498,19 +500,55 @@ fn separator(platform: Platform) -> &'static str {
 /// What is not on the machine is skipped rather than said: a rule about a
 /// path that does not exist is a rule about nothing, and on Linux a bind of
 /// one is a sandbox that will not start.
-pub(crate) fn on_the_machine(chdir: PathBuf) -> Surface {
+///
+/// The one thing in it that is `platform`'s rather than the machine's is where
+/// a temporary file goes. `/tmp` is a path both Unixes have and Windows has
+/// not, and nothing there reaches for one: what a Windows program reads is
+/// `TEMP`, which points inside the session's own profile — so that one is said
+/// with the rest of the profile rather than here. See [`temporary_inside`].
+pub(crate) fn on_the_machine(platform: Platform, chdir: PathBuf) -> Surface {
     let mut surface = Surface::starting_in(chdir);
 
     for path in SYSTEM.iter().map(Path::new).filter(|path| path.exists()) {
         surface.own(path, Reach::ReadOnly);
     }
 
-    surface
-        .made(Access::ProcessTable)
-        .made(Access::Devices)
-        .made(Access::Temporary(PathBuf::from(TMP)));
+    surface.made(Access::ProcessTable).made(Access::Devices);
+
+    match platform {
+        Platform::Linux | Platform::MacOs => {
+            surface.made(Access::Temporary(PathBuf::from(TMP)));
+        }
+        Platform::Windows => {}
+    }
 
     surface
+}
+
+/// A directory that is really there and really empty.
+///
+/// What [`Access::Empty`] comes to on the two platforms that have to make one
+/// rather than mount one — see [`seatbelt`] and [`open`], which are both of
+/// them. Emptied rather than left where something is already in it: a HOME is
+/// one Conversation's and every session of it is given the same one, so what a
+/// session finds there should be what *it* was given rather than what the last
+/// one left — which is what the other platform's tmpfs does for nothing.
+///
+/// Nothing under it is followed on the way out. A junction and a symbolic link
+/// are both names for somewhere else and both are removed as the names they
+/// are, which is what keeps emptying a profile from emptying the account joined
+/// into it.
+///
+/// The path is Verkstead's own and nothing else is ever passed here: see
+/// [`Homes`], which is the only thing that says where one goes.
+pub(crate) fn emptied(path: &Path) -> std::io::Result<()> {
+    match std::fs::remove_dir_all(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+
+    std::fs::create_dir_all(path)
 }
 
 /// And `surface` as the process that runs it, by whichever mechanism
@@ -643,6 +681,23 @@ const ROAMING: &str = "Roaming";
 const LOCAL: &str = "Local";
 const TEMPORARY: &str = "Temp";
 
+/// And where a Windows session writes a temporary file: that last one, inside
+/// the profile the session was given.
+///
+/// **Inside rather than the machine's own**, which is the one place this
+/// platform's answer parts company with the Mac's: a Mac session writes into
+/// the `/tmp` everybody on the box shares, and there is nothing about a Windows
+/// profile that has to be shared — `TEMP` is already a variable, so pointing it
+/// inside costs nothing and what a session throws away is thrown away with the
+/// profile.
+///
+/// Said in two places off this one function: it is what [`windows_names`] sets
+/// the variable to, and what the description says a session is given somewhere
+/// to write — see [`Access::Temporary`], which is what really makes it.
+fn temporary_inside(home: &Path) -> PathBuf {
+    home.join(APP_DATA).join(LOCAL).join(TEMPORARY)
+}
+
 /// Everything a Windows session is told beyond what every session is told: the
 /// profile it keeps its own things under, and the machine it is on.
 ///
@@ -651,15 +706,16 @@ const TEMPORARY: &str = "Temp";
 /// halves of where a program keeps its settings, and `TEMP` and `TMP` for
 /// somewhere to write a file it will throw away. All five are pointed inside
 /// the HOME this sandbox was given, so that all five follow it — which is what
-/// makes a fresh profile fresh once there is one, and until then is the
-/// directory the machine would have given anyway. `HOME` is said beside them
-/// and not for Windows' sake: `git` and every agent that grew up on a Unix read
-/// it, and a session's is the one this sandbox chose.
+/// makes the fresh profile fresh: what a session caches, what a tool writes
+/// down and what either of them throws away are under a directory of this
+/// Conversation's own, and none of it in the human's. `HOME` is said beside
+/// them and not for Windows' sake: `git` and every agent that grew up on a Unix
+/// read it, and a session's is the one this sandbox chose.
 ///
 /// And then [`MACHINE_NAMES`], which are the machine's own to say.
 fn windows_names(home: &Path) -> Vec<(&'static str, OsString)> {
     let local = home.join(APP_DATA).join(LOCAL);
-    let temporary = local.join(TEMPORARY);
+    let temporary = temporary_inside(home);
 
     let mut named = vec![
         ("USERPROFILE", home.as_os_str().to_owned()),
@@ -679,6 +735,220 @@ fn windows_names(home: &Path) -> Vec<(&'static str, OsString)> {
     );
 
     named
+}
+
+/// Where each shape of account is joined into a session's HOME: what the
+/// Profile names on the host, and what it is called inside.
+///
+/// **One place says what an account is made of**, because two things ask: the
+/// description a session is rendered from — see [`Sandbox::surface`] — and
+/// whether the account can be joined in at all on the platform whose links are
+/// hard ones — see [`across_volumes`]. A second reading of the four shapes
+/// would be a backend arriving with an account of its own and only one of them
+/// learning about it.
+///
+/// Claude's pair is a directory and a file; the three after it are directories,
+/// one of them twice over. Which is exactly the distinction the Windows arm
+/// turns on: a directory is joined in by a junction and a file by a hard link,
+/// and only the second of those cares what volume anything is on.
+fn account_inside(account: &store::Account, home: &Path) -> Vec<(PathBuf, PathBuf)> {
+    match account {
+        store::Account::Claude {
+            claude_dir,
+            config_file,
+        } => vec![
+            (claude_dir.clone(), home.join(CLAUDE_DIR_INSIDE_HOME)),
+            (config_file.clone(), home.join(CLAUDE_CONFIG_INSIDE_HOME)),
+        ],
+        store::Account::Codex { home: account } => {
+            vec![(account.clone(), home.join(CODEX_INSIDE_HOME))]
+        }
+        store::Account::Grok { home: account } => {
+            vec![(account.clone(), home.join(GROK_INSIDE_HOME))]
+        }
+        // Two rather than one, and the same relative path on both sides of
+        // each: an OpenCode Profile's home is an opencode home, and the XDG
+        // defaults resolve inside the fresh HOME — see
+        // [`OPENCODE_CONFIG_INSIDE_HOME`].
+        store::Account::OpenCode { home: account } => {
+            [OPENCODE_CONFIG_INSIDE_HOME, OPENCODE_DATA_INSIDE_HOME]
+                .into_iter()
+                .map(|inside| (account.join(inside), home.join(inside)))
+                .collect()
+        }
+    }
+}
+
+/// Whichever of `account`'s own paths cannot be joined into a profile at
+/// `home`, and `None` where every one of them can.
+///
+/// **The whole of this is a Windows question**, and it is a hard link's. On the
+/// two Unixes a path is mounted or symlinked into the fresh home and neither
+/// cares what filesystem the other end is on; on Windows a file symlink wants a
+/// privilege a per-user install has not got, so the link is a hard one — and a
+/// hard link is two names for one file, which is a thing only one volume can
+/// hold. See ADR-0014.
+///
+/// **The account is the end that can differ.** The profile is made under the
+/// Data Directory and so is wherever that is; an account is wherever the Agent
+/// Profile points inside a Watched Path, which on a machine with a second drive
+/// may well be that drive. So this asks the account's paths against the
+/// profile's, and what comes back is the first that could not be joined in —
+/// which is a session refused before it starts rather than one started into a
+/// profile with no account in it. See [`Sandbox::for_conversation`], which is
+/// where it is refused and where both paths are said.
+///
+/// Directories are left out, and that is the rule rather than an omission: a
+/// junction is a path rather than a file, it crosses volumes, and it needs no
+/// privilege. A name with nothing at it yet is taken as a file, that being the
+/// one shape of account path that may not be there — an agent that has not
+/// written its config out yet.
+fn across_volumes(platform: Platform, home: &Path, account: &store::Account) -> Option<PathBuf> {
+    if platform != Platform::Windows {
+        return None;
+    }
+
+    let ours = volume(home);
+
+    account_inside(account, home)
+        .into_iter()
+        .map(|(host, _)| host)
+        .filter(|host| !host.is_dir())
+        .find(|host| volume(host) != ours)
+}
+
+/// Which volume `path` is on: the machine's own answer where there is a machine
+/// to ask, and what the name itself says where there is not.
+///
+/// Asked rather than read wherever it can be, because the two are not the same
+/// question on this platform: a volume mounted into a directory rather than
+/// given a letter of its own is under some drive letter and is another volume,
+/// which is exactly the case a rule about hard links exists for. [`written`] is
+/// what stands where the call cannot answer — a name for a volume that is not
+/// mounted, and every machine that is not this one, which is where the tests
+/// ask.
+///
+/// Compared rather than shown, so nothing here needs a spelling of its own: it
+/// is bytes, upper-cased, and the only question ever asked of two of them is
+/// whether they are the same.
+fn volume(path: &Path) -> Option<Vec<u8>> {
+    asked(path).or_else(|| written(path))
+}
+
+/// What Windows says the volume of `path` is: the mount point it is under, or
+/// `None` where the call could not answer.
+#[cfg(windows)]
+fn asked(path: &Path) -> Option<Vec<u8>> {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+
+    // The documented size for this, and the one every ordinary answer fits in:
+    // a mount point is a drive letter or the directory a volume was mounted
+    // into. A path that overflows it is one [`written`] answers instead.
+    const MOUNT_POINT: usize = 260;
+
+    let name: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let mut under = [0u16; MOUNT_POINT];
+
+    // Safety: the name is NUL-terminated, and what is passed as the buffer's
+    // length is the buffer's length.
+    let answered = unsafe {
+        windows_sys::Win32::Storage::FileSystem::GetVolumePathNameW(
+            name.as_ptr(),
+            under.as_mut_ptr(),
+            under.len() as u32,
+        )
+    };
+
+    if answered == 0 {
+        return None;
+    }
+
+    let end = under.iter().position(|word| *word == 0)?;
+
+    Some(
+        OsString::from_wide(&under[..end])
+            .as_encoded_bytes()
+            .to_ascii_uppercase(),
+    )
+}
+
+/// And what a machine that is not Windows can be asked, which is nothing: the
+/// name itself is the whole of the answer there.
+#[cfg(not(windows))]
+fn asked(_: &Path) -> Option<Vec<u8>> {
+    None
+}
+
+/// What `path` itself says about the volume it is on: the drive letter it
+/// begins with, or the share of a UNC name.
+///
+/// Read by hand rather than through [`Path::components`], whose idea of a
+/// prefix is the one the *server* was compiled with: this is a Windows path
+/// wherever it is being read, and a test on a Linux machine asking whether two
+/// of them are on one volume is asking about names written with drive letters.
+///
+/// The share rather than the server, because two shares on one server are two
+/// volumes. Upper-cased, `c:` and `C:` being one drive. `None` for a name with
+/// neither — a relative path, or a POSIX one, which is what every path on the
+/// machines that ask this in a test is.
+fn written(path: &Path) -> Option<Vec<u8>> {
+    let name = path.as_os_str().as_encoded_bytes();
+
+    // The two prefixes that say only that what follows goes to the filesystem
+    // unchanged, so what they are in front of is what says which volume.
+    let name = match name {
+        [one, two, b'?' | b'.', three, rest @ ..]
+            if a_separator(*one) && a_separator(*two) && a_separator(*three) =>
+        {
+            rest
+        }
+        _ => name,
+    };
+
+    match name {
+        // What a UNC name is left as once that prefix has been taken off it,
+        // which is the server and the share behind one more word.
+        [u, n, c, four, share @ ..]
+            if u.eq_ignore_ascii_case(&b'U')
+                && n.eq_ignore_ascii_case(&b'N')
+                && c.eq_ignore_ascii_case(&b'C')
+                && a_separator(*four) =>
+        {
+            named(share)
+        }
+        // And the same name written by hand, which is two separators and then
+        // the two of them.
+        [one, two, share @ ..] if a_separator(*one) && a_separator(*two) => named(share),
+        [letter, b':', ..] if letter.is_ascii_alphabetic() => {
+            Some(vec![letter.to_ascii_uppercase(), b':'])
+        }
+        _ => None,
+    }
+}
+
+/// The server and share at the front of a UNC name, as the one value they are.
+///
+/// `None` where there is no share after the server, which is a name for a
+/// machine rather than for somewhere on one.
+fn named(share: &[u8]) -> Option<Vec<u8>> {
+    let mut pieces = share
+        .split(|byte| a_separator(*byte))
+        .filter(|piece| !piece.is_empty());
+
+    let server = pieces.next()?;
+    let share = pieces.next()?;
+
+    let mut whole = vec![b'\\', b'\\'];
+    whole.extend_from_slice(server);
+    whole.push(b'\\');
+    whole.extend_from_slice(share);
+
+    Some(whole.to_ascii_uppercase())
+}
+
+/// Whether `byte` is one of the two characters Windows separates a path with.
+fn a_separator(byte: u8) -> bool {
+    byte == b'\\' || byte == b'/'
 }
 
 /// What NixOS's own shell initialisation reads to decide whether it has already
@@ -742,6 +1012,19 @@ const GITHUB: &str = "https://github.com";
 /// policy rather than the absence — everything outside this session's own is
 /// denied — and what keeps one Conversation out of another's is that they are
 /// different directories.
+///
+/// **And Windows is the Mac's answer**, arrived at from the other end: nothing
+/// is mounted there either, so a session's profile has to be a directory that
+/// really is one — Verkstead's own, under the Data Directory, one per
+/// Conversation and made fresh as each session starts. It is the profile
+/// `USERPROFILE` names as well as the `HOME` a tool that grew up on a Unix
+/// reads, and the two halves of a Windows profile and the temporary directory
+/// are inside it — see [`windows_names`] — so what npm caches, what a tool
+/// writes down and what a session throws away all land there rather than in
+/// the human's own. What keeps one Conversation out of another's is again
+/// that they are different directories; what keeps a session out of the rest
+/// of the machine is nothing yet, which is what the unsandboxed note says in
+/// words.
 ///
 /// One is emptied as each of that Conversation's sessions starts rather than
 /// removed when the Conversation ends. What a session left in it is nothing
@@ -822,8 +1105,8 @@ impl Homes {
     /// on the machine would be sharing. See [`handoffs::inside`].
     fn for_conversation(&self, conversation_id: i64) -> Home {
         let path = match self.platform {
-            Platform::MacOs => self.root.join(conversation_id.to_string()),
-            Platform::Linux | Platform::Windows => self.servers.clone(),
+            Platform::MacOs | Platform::Windows => self.root.join(conversation_id.to_string()),
+            Platform::Linux => self.servers.clone(),
         };
 
         Home {
@@ -1715,7 +1998,10 @@ impl Sandbox {
     /// answer: a bind with nothing behind it is a sandbox that will not start.
     /// A companion whose checkout git will not own is that answer too: it was
     /// made at grill start and the session was told about it, so a sandbox
-    /// missing it is not a smaller sandbox but a wrong one.
+    /// missing it is not a smaller sandbox but a wrong one. And on the platform
+    /// that joins an account in by hard link, an account on another volume from
+    /// the Data Directory is the same answer for the same reason — see
+    /// [`across_volumes`].
     ///
     /// Git is asked here and the filesystem is written to, so this blocks.
     ///
@@ -1749,6 +2035,27 @@ impl Sandbox {
         let worktree = conversation.worktree.clone()?;
         let git_dir = crate::worktrees::common_git_dir(&worktree)?;
         let handoff_dir = handoffs.directory(conversation.id)?;
+        let home = homes.for_conversation(conversation.id);
+
+        // And whether the account can be joined into that profile at all, which
+        // is a question one platform asks — see [`across_volumes`]. Refused
+        // here rather than found out as the session is rendered: a hard link
+        // that will not be made is a session started into a profile with no
+        // account in it, logged out with nothing saying why.
+        if let Some(elsewhere) = across_volumes(homes.platform(), home.path(), &profile.account) {
+            tracing::error!(
+                conversation_id = conversation.id,
+                account = %elsewhere.display(),
+                profile = %home.path().display(),
+                "the Profile's account is on a different volume from the profile a session is \
+                 given, and a file is joined into that profile by a hard link, which one volume \
+                 is the whole of what it needs — so this session was not started. Move the \
+                 account onto the Data Directory's volume, or the Data Directory onto the \
+                 account's"
+            );
+
+            return None;
+        }
 
         let mut binds = companion_binds(conversation)?;
         binds.extend(extra);
@@ -1771,7 +2078,7 @@ impl Sandbox {
             skills: skills.clone(),
             verkstead: verkstead.clone(),
             handoff_dir,
-            home: homes.for_conversation(conversation.id),
+            home,
             github_token: secrets.github_token().map(str::to_owned),
             git_author: config.git_author().clone(),
             server: reachable.asking_from(conversation.id),
@@ -1827,12 +2134,21 @@ impl Sandbox {
         // The floor every sandbox of Verkstead's stands on — see
         // [`on_the_machine`], which is where the compile server outside every
         // session gets the same one.
-        let mut surface = on_the_machine(self.worktree.clone());
+        let mut surface = on_the_machine(self.platform, self.worktree.clone());
 
         // HOME before anything that goes inside it: the directory has to be
         // there for the account to land in, and everything else about it stays
         // absent.
         surface.made(Access::Empty(self.home.path().to_owned()));
+
+        // And where a temporary file goes on the platform whose one is inside
+        // the profile rather than shared with the machine — after the profile,
+        // because it is under it and what emptied that would take this with it.
+        // See [`temporary_inside`], and [`on_the_machine`] for the two
+        // platforms that say this before ever reaching here.
+        if self.platform == Platform::Windows {
+            surface.made(Access::Temporary(temporary_inside(self.home.path())));
+        }
 
         surface
             .own(&self.worktree, Reach::ReadWrite)
@@ -1841,51 +2157,11 @@ impl Sandbox {
         // And the account, in the shape its agent type keeps one: what goes
         // where is that type's own business, and a backend arriving with an
         // account of its own lands here rather than in whatever the pair
-        // happened to mean.
-        match &self.account {
-            store::Account::Claude {
-                claude_dir,
-                config_file,
-            } => {
-                surface
-                    .elsewhere(
-                        claude_dir,
-                        self.home.path().join(CLAUDE_DIR_INSIDE_HOME),
-                        Reach::ReadWrite,
-                    )
-                    .elsewhere(
-                        config_file,
-                        self.home.path().join(CLAUDE_CONFIG_INSIDE_HOME),
-                        Reach::ReadWrite,
-                    );
-            }
-            store::Account::Codex { home } => {
-                surface.elsewhere(
-                    home,
-                    self.home.path().join(CODEX_INSIDE_HOME),
-                    Reach::ReadWrite,
-                );
-            }
-            store::Account::Grok { home } => {
-                surface.elsewhere(
-                    home,
-                    self.home.path().join(GROK_INSIDE_HOME),
-                    Reach::ReadWrite,
-                );
-            }
-            // Two rather than one, and the same relative path on both sides of
-            // each: an OpenCode Profile's home is an opencode home, and the XDG
-            // defaults resolve inside the fresh HOME — see
-            // [`OPENCODE_CONFIG_INSIDE_HOME`].
-            store::Account::OpenCode { home } => {
-                for inside in [OPENCODE_CONFIG_INSIDE_HOME, OPENCODE_DATA_INSIDE_HOME] {
-                    surface.elsewhere(
-                        home.join(inside),
-                        self.home.path().join(inside),
-                        Reach::ReadWrite,
-                    );
-                }
-            }
+        // happened to mean. Which shape that is, is [`account_inside`]'s — the
+        // one place the four are written down, because the platform that joins
+        // an account in by hand has to know the same thing.
+        for (host, inside) in account_inside(&self.account, self.home.path()) {
+            surface.elsewhere(host, inside, Reach::ReadWrite);
         }
 
         // After the temporary filesystem and the empty HOME alike, because on
@@ -2413,6 +2689,117 @@ mod tests {
         );
     }
 
+    /// What a Windows path says about the volume it is on, which is what a hard
+    /// link into a session's profile turns on.
+    ///
+    /// Read here rather than asked of the machine, which is the half of
+    /// [`volume`] a test anywhere can ask: the machine's own answer is only
+    /// ever the same answer said more exactly.
+    #[test]
+    fn a_windows_path_says_which_volume_it_is_on_whoever_is_reading_it() {
+        let read = |name: &str| {
+            written(Path::new(name)).map(|volume| String::from_utf8(volume).expect("ascii"))
+        };
+
+        assert_eq!(read(r"C:\Users\someone\.claude"), Some("C:".to_owned()));
+        assert_eq!(
+            read(r"c:/users/someone/.claude.json"),
+            Some("C:".to_owned()),
+            "one drive however it is written: the case is nothing and either \
+             separator is the separator"
+        );
+        assert_eq!(
+            read(r"\\?\D:\accounts\.claude"),
+            Some("D:".to_owned()),
+            "and the spelling that says only that what follows goes to the \
+             filesystem unchanged"
+        );
+
+        assert_ne!(
+            read(r"C:\data"),
+            read(r"D:\accounts"),
+            "two drives are two volumes, which is what refuses a session"
+        );
+
+        assert_eq!(
+            read(r"\\workshop\accounts\someone\.claude"),
+            Some(r"\\WORKSHOP\ACCOUNTS".to_owned()),
+            "a UNC name is on the share rather than on the server"
+        );
+        assert_eq!(
+            read(r"\\?\UNC\workshop\accounts\someone\.claude"),
+            read(r"\\workshop\accounts\someone\.claude"),
+            "however that name is spelled"
+        );
+        assert_ne!(
+            read(r"\\workshop\accounts"),
+            read(r"\\workshop\backups"),
+            "and two shares on one server are two volumes"
+        );
+
+        assert_eq!(
+            read("/home/someone/.claude"),
+            None,
+            "a POSIX name says nothing about a Windows volume, and every path \
+             on the machine running this test is one"
+        );
+    }
+
+    /// And what that comes to for a Profile: an account this platform cannot
+    /// hard-link into a session's profile, and one it can.
+    #[test]
+    fn an_account_with_a_file_on_another_volume_is_one_that_cannot_be_joined_in() {
+        // A directory that is really one, because that is the question this
+        // asks of each of an account's paths: a directory is joined in by a
+        // junction and everything else by a hard link.
+        let account = tempfile::tempdir().unwrap();
+
+        let claude = |config: &str| store::Account::Claude {
+            claude_dir: account.path().to_owned(),
+            config_file: PathBuf::from(config),
+        };
+
+        let profile = Path::new(r"C:\ProgramData\Verkstead\homes\7");
+        let elsewhere = r"D:\accounts\someone\.claude.json";
+
+        assert_eq!(
+            across_volumes(Platform::Windows, profile, &claude(elsewhere)),
+            Some(PathBuf::from(elsewhere)),
+            "the file half is what a hard link is asked for, and it is on \
+             another drive"
+        );
+
+        assert_eq!(
+            across_volumes(
+                Platform::Windows,
+                profile,
+                &claude(r"C:\Users\someone\.claude.json")
+            ),
+            None,
+            "and one volume is the whole of what it needed"
+        );
+
+        assert_eq!(
+            across_volumes(
+                Platform::Windows,
+                profile,
+                &store::Account::Codex {
+                    home: account.path().to_owned(),
+                }
+            ),
+            None,
+            "an account that is one directory is joined in by a junction, which \
+             crosses volumes and asks nothing of either"
+        );
+
+        assert_eq!(
+            across_volumes(Platform::Linux, Path::new("/home/verkstead"), &claude(elsewhere)),
+            None,
+            "and the two platforms that mount or symlink a path in ask this of \
+             nobody"
+        );
+    }
+
     /// A Conversation's HOME is the server's own where a mount can be made
     /// empty over it, and a real directory of Verkstead's own where none can.
     #[test]
@@ -2427,13 +2814,20 @@ mod tests {
             "a tmpfs over the server's own home is what makes it empty"
         );
 
-        let mac = Homes::on(Platform::MacOs, servers, data);
-        assert_eq!(mac.for_conversation(7).path(), Path::new("/data/homes/7"));
-        assert_ne!(
-            mac.for_conversation(8).path(),
-            mac.for_conversation(7).path(),
-            "and one Conversation's HOME is not another's"
-        );
+        for platform in [Platform::MacOs, Platform::Windows] {
+            let homes = Homes::on(platform, servers.clone(), data);
+
+            assert_eq!(
+                homes.for_conversation(7).path(),
+                Path::new("/data/homes/7"),
+                "{platform:?} has nothing to mount, so the directory is really made"
+            );
+            assert_ne!(
+                homes.for_conversation(8).path(),
+                homes.for_conversation(7).path(),
+                "and one Conversation's HOME is not another's"
+            );
+        }
     }
 
     /// And its handoff directory comes with it, which is what keeps two
@@ -2455,16 +2849,20 @@ mod tests {
             "a tmpfs makes that one path a directory per session already"
         );
 
-        let mac = Homes::on(Platform::MacOs, servers, data);
-        assert_eq!(
-            mac.for_conversation(7).handoffs(),
-            Path::new("/data/homes/7/verkstead"),
-        );
-        assert_ne!(
-            mac.for_conversation(8).handoffs(),
-            mac.for_conversation(7).handoffs(),
-            "and the Conversation beside it is writing somewhere else entirely"
-        );
+        for platform in [Platform::MacOs, Platform::Windows] {
+            let homes = Homes::on(platform, servers.clone(), data);
+
+            assert_eq!(
+                homes.for_conversation(7).handoffs(),
+                Path::new("/data/homes/7/verkstead"),
+                "{platform:?} reaches it under the HOME it was given"
+            );
+            assert_ne!(
+                homes.for_conversation(8).handoffs(),
+                homes.for_conversation(7).handoffs(),
+                "and the Conversation beside it is writing somewhere else entirely"
+            );
+        }
     }
 
     /// A packaged binary is a wrapper and a dotted file beside it, and a

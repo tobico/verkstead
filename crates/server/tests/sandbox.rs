@@ -277,9 +277,17 @@ fi
     /// rendering is reached from a machine that is not the one it is for — see
     /// [`the_open_rendering_hands_a_session_the_environment_it_was_described_with`].
     fn sandbox_on(&self, platform: Platform) -> Sandbox {
+        self.sandbox_on_under(&self.profile, platform)
+            .expect("a grilling Conversation has a worktree to build a sandbox around")
+    }
+
+    /// The same, around a Profile that is not the fixture's own — and handing
+    /// back what it really answered, which is how the one Conversation that
+    /// cannot have a sandbox at all is asked about.
+    fn sandbox_on_under(&self, profile: &store::Profile, platform: Platform) -> Option<Sandbox> {
         Sandbox::for_conversation(
             &self.conversation,
-            &self.profile,
+            profile,
             &Homes::on(platform, self.home.path().to_owned(), self.state.path()),
             &Reachable::at(LISTENING),
             &self.skills,
@@ -290,7 +298,26 @@ fi
             &BuildCache::none(),
             vec![],
         )
-        .expect("a grilling Conversation has a worktree to build a sandbox around")
+    }
+
+    /// Where this Conversation's own Windows profile is: under the Data
+    /// Directory, named for the Conversation, and made fresh as each of its
+    /// sessions is rendered — see [`verkstead_server::sandbox::Homes`].
+    fn windows_profile(&self) -> PathBuf {
+        self.state
+            .path()
+            .join("homes")
+            .join(self.conversation.id.to_string())
+    }
+
+    /// What the fixture's own Claude Profile names: the directory half of the
+    /// account, and the file half.
+    fn claude_dir(&self) -> PathBuf {
+        self.watched.path().join("account/.claude")
+    }
+
+    fn claude_config(&self) -> PathBuf {
+        self.watched.path().join("account/.claude.json")
     }
 
     /// Write `secrets.yaml` as the settings page would, so that the sandboxes
@@ -1107,9 +1134,9 @@ async fn the_open_rendering_hands_a_session_the_environment_it_was_described_wit
 
     assert_eq!(
         reported["HOME"],
-        fixture.home_path().display().to_string(),
-        "and the one name both platforms read is the sandbox's rather than the \
-         server's"
+        fixture.windows_profile().display().to_string(),
+        "and the one name both platforms read is the profile Verkstead made for \
+         this Conversation rather than the server's own"
     );
     assert_eq!(
         reported["PATH"],
@@ -1125,7 +1152,7 @@ async fn the_open_rendering_hands_a_session_the_environment_it_was_described_wit
     // program looks for the account's own things — see the sandbox module.
     let profile = Path::new(&reported["USERPROFILE"]);
 
-    assert_eq!(profile, fixture.home_path());
+    assert_eq!(profile, fixture.windows_profile());
     assert_eq!(
         Path::new(&reported["APPDATA"]),
         profile.join("AppData").join("Roaming")
@@ -1141,6 +1168,218 @@ async fn the_open_rendering_hands_a_session_the_environment_it_was_described_wit
          TEMP is {}",
         reported["TEMP"]
     );
+}
+
+/// The profile that rendering makes, and the Profile's account joined into it.
+///
+/// **Asked of the description rather than of a session**, for the reason the
+/// environment above is asked that way: what this rendering makes, it makes on
+/// whichever machine renders it. There is no boundary on that platform, so
+/// every path here is a host path and every one of them can be read from
+/// outside — which is the whole of what a session inside would find. The one
+/// word that differs is the mechanism: a directory is joined in by a junction
+/// there and by a symbolic link on the machine running this, and it is the
+/// `windows-2025` job that reads the first of those back.
+///
+/// Claude's pair, which is the one shape of account that is a directory *and* a
+/// file — so this is the junction and the hard link in one test.
+#[tokio::test]
+async fn a_windows_session_finds_the_profiles_account_inside_a_profile_of_its_own() {
+    let fixture = grilling().await;
+
+    made(&fixture.sandbox_on(Platform::Windows));
+
+    let profile = fixture.windows_profile();
+
+    assert_eq!(
+        std::fs::read_to_string(profile.join(".claude/settings.json")).unwrap(),
+        "{}\n",
+        "what the account holds should be readable at the name Claude looks for \
+         it under"
+    );
+
+    // And the other direction, which is the half that says this is the account
+    // rather than a copy of it: a session logging in writes a file, and the
+    // human's own account is where it has to land.
+    std::fs::write(profile.join(".claude/written-inside.json"), "inside\n").unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_dir().join("written-inside.json")).unwrap(),
+        "inside\n",
+        "a file a session writes into its account should be on the account"
+    );
+
+    // The file half, written the way a program writes one in place — which is
+    // the case a hard link answers whole. (What becomes of the other case, a
+    // file replaced by a rename, is the next task's.)
+    std::fs::write(profile.join(".claude.json"), "{\"logged-in\": true}\n").unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_config()).unwrap(),
+        "{\"logged-in\": true}\n",
+        "the account's config file and the one inside the profile should be one \
+         file, which is what a hard link is"
+    );
+}
+
+/// And the same rule over an account that is one directory, which is what the
+/// three agent types after Claude keep one as.
+///
+/// Asked because the rule is written over the account rather than over Claude's
+/// pair: a Codex or opencode session started into a profile with nothing joined
+/// into it would be logged out, with nothing saying why.
+#[tokio::test]
+async fn an_account_that_is_one_directory_is_joined_into_the_profile_too() {
+    let fixture = grilling().await;
+    let codex = fixture.codex_profile().await;
+
+    made(
+        &fixture
+            .sandbox_on_under(&codex, Platform::Windows)
+            .expect("a grilling Conversation has a worktree to build a sandbox around"),
+    );
+
+    let inside = fixture.windows_profile().join(".codex");
+
+    assert_eq!(
+        std::fs::read_to_string(inside.join("config.toml")).unwrap(),
+        "# the account's own\n",
+        "what the Profile named should be what a session finds under the name \
+         codex keeps an account at"
+    );
+
+    std::fs::write(inside.join("auth.json"), "{}\n").unwrap();
+
+    assert!(
+        fixture
+            .watched
+            .path()
+            .join("codex-account/.codex/auth.json")
+            .exists(),
+        "and a file written inside should be on the account"
+    );
+}
+
+/// Somewhere to write a temporary file, which on this platform is inside the
+/// profile rather than shared with everybody on the machine.
+#[tokio::test]
+async fn what_a_windows_session_throws_away_is_thrown_away_under_its_own_profile() {
+    let fixture = grilling().await;
+
+    made(&fixture.sandbox_on(Platform::Windows));
+
+    let temporary = fixture
+        .windows_profile()
+        .join("AppData")
+        .join("Local")
+        .join("Temp");
+
+    assert!(
+        temporary.is_dir(),
+        "TEMP names {}, so it has to be a directory that is really there",
+        temporary.display()
+    );
+}
+
+/// The profile is one Conversation's and is made fresh for each of its
+/// sessions: what one left there is not what the next one finds.
+///
+/// And the account is not, which is the other half of the same claim and the
+/// one worth being sure of. The account is joined in by a name, and emptying
+/// the profile takes the name rather than what is behind it — anything else
+/// would be Verkstead deleting the human's own login.
+#[tokio::test]
+async fn each_session_gets_the_profile_fresh_and_the_account_untouched() {
+    let fixture = grilling().await;
+
+    made(&fixture.sandbox_on(Platform::Windows));
+
+    let profile = fixture.windows_profile();
+    std::fs::write(profile.join("what-the-last-session-left"), "state\n").unwrap();
+
+    made(&fixture.sandbox_on(Platform::Windows));
+
+    assert!(
+        !profile.join("what-the-last-session-left").exists(),
+        "a session should start in a profile holding nothing of the session \
+         before it"
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_dir().join("settings.json")).unwrap(),
+        "{}\n",
+        "and the account should be joined in again, whole"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_config()).unwrap(),
+        "{}\n",
+        "the file half included"
+    );
+    assert!(
+        fixture
+            .claude_dir()
+            .join("skills/the-accounts-own/SKILL.md")
+            .exists(),
+        "and nothing inside it touched: what a rendering makes it makes in the \
+         profile, and there is no boundary on this platform to make anything in \
+         the account"
+    );
+}
+
+/// An account on another volume from the Data Directory is a session that is
+/// not started.
+///
+/// A hard link is two names for one file, and one volume is the whole of what
+/// it needs. What is refused is the sandbox — which is how every other thing a
+/// session cannot be given is refused — rather than found out as the link fails
+/// and a session starts logged out with nothing saying why.
+#[tokio::test]
+async fn an_account_on_another_volume_is_a_session_that_is_not_started() {
+    let fixture = grilling().await;
+
+    let elsewhere = store::create_profile(
+        &fixture.pool,
+        &store::ProfileFacts {
+            name: "on-the-other-drive".to_owned(),
+            // The directory half where the fixture's own is, so that what is
+            // being refused is the one path a hard link is asked for rather
+            // than the whole account being somewhere odd.
+            account: store::Account::Claude {
+                claude_dir: fixture.claude_dir(),
+                config_file: PathBuf::from(r"Z:\accounts\work\.claude.json"),
+            },
+            models: vec!["claude-opus-5".to_owned()],
+        },
+    )
+    .await
+    .unwrap()
+    .expect("nothing is called that yet");
+
+    assert!(
+        fixture
+            .sandbox_on_under(&elsewhere, Platform::Windows)
+            .is_none(),
+        "there is no way to join that account into a profile under the Data \
+         Directory, so there is no sandbox to run a session in"
+    );
+
+    assert!(
+        fixture
+            .sandbox_on_under(&fixture.profile, Platform::Windows)
+            .is_some(),
+        "and an account on the Data Directory's own volume is a session that \
+         runs, which is what says the refusal above is about the volume"
+    );
+}
+
+/// Render `sandbox` and throw the rendering away, which is what makes
+/// everything the description says is made.
+///
+/// The rendering itself is what the tests above it read; these are about what
+/// is on the disk by the time there is one — see the open rendering's
+/// `realise`, which the seatbelt rendering does the same thing in.
+fn made(sandbox: &Sandbox) {
+    let _ = sandbox.command(&["the-agent"]);
 }
 
 /// GitHub auth is said rather than found: the token the human configured, in

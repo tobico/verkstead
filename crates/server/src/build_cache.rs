@@ -513,7 +513,7 @@ fn compile_server(dir: &Path, sccache: &Path, data_dir: &Path, size: &str) -> Co
     // Started in its own HOME, which is a directory of Verkstead's own holding
     // nothing: a compile server has no checkout of its own to stand in, and
     // every path it is handed is absolute.
-    let mut surface = sandbox::on_the_machine(home.clone());
+    let mut surface = sandbox::on_the_machine(Platform::HERE, home.clone());
 
     surface
         .made(Access::Empty(home.clone()))

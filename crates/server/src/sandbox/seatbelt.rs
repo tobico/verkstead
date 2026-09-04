@@ -259,7 +259,7 @@ fn policy(surface: &Surface) -> String {
 fn realise(surface: &Surface) {
     for access in surface.reaches() {
         let made = match access {
-            Access::Empty(path) => emptied(path),
+            Access::Empty(path) => super::emptied(path),
             Access::Elsewhere { host, inside, .. } => linked(host, inside),
             _ => Ok(()),
         };
@@ -272,24 +272,6 @@ fn realise(surface: &Surface) {
             );
         }
     }
-}
-
-/// A directory that is really there and really empty.
-///
-/// Emptied rather than left where something is already in it: a HOME is one
-/// Conversation's and every session of it is given the same one, so what a
-/// session finds there should be what *it* was given rather than what the last
-/// one left — which is what the other platform's tmpfs does for nothing. The
-/// path is Verkstead's own and nothing else is ever passed here: see
-/// [`super::Homes`], which is the only thing that says where one goes.
-fn emptied(path: &Path) -> std::io::Result<()> {
-    match std::fs::remove_dir_all(path) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
-    }
-
-    std::fs::create_dir_all(path)
 }
 
 /// And a path a session finds somewhere else: a link at `inside` to `host`.

@@ -16,16 +16,32 @@
 //! session on this platform a session at all rather than a shell inheriting the
 //! server's world.
 //!
-//! **What it does not do is what the description's other half is for.** A path
-//! a session was to find somewhere else — [`super::Access::Elsewhere`] — is nothing
-//! this can make: there are no mounts here and no links written yet. Every one
-//! of those that matters is a path whose two sides are already one directory,
-//! which is what the Windows arms of [`super::own_directory`],
-//! [`crate::skills::Skills::inside`], [`crate::handoffs::inside`] and
-//! [`super::Executable`] are for — see [`super::Surface::elsewhere`], which
-//! collapses a bind of a path onto itself. What is left is the Profile's
-//! account and the handoff directory, and the stage after this one is what
-//! joins those in.
+//! **What a mount would have made, this makes** — the same move the seatbelt
+//! rendering makes and for the same reason. There are no mounts on this
+//! platform, so [`super::Access::Empty`] is a directory really made and really
+//! emptied, and [`super::Access::Elsewhere`] is a path really joined into it:
+//! **a directory junction for a directory and a hard link for a file**. A
+//! junction needs no privilege; a file symbolic link needs one a per-user
+//! install has not got, which is the whole reason the link is a hard one. See
+//! [`realise`], and ADR-0014 for what a hard link costs when something replaces
+//! the file it is one of the names of.
+//!
+//! Most of the description asks for none of that. Every path whose two sides
+//! are already one directory collapses before it gets here — which is what the
+//! Windows arms of [`super::own_directory`], [`crate::skills::Skills::inside`],
+//! [`crate::handoffs::inside`] and [`super::Executable`] are for, and what
+//! [`super::Surface::elsewhere`] does with a bind of a path onto itself. What
+//! is left to join in is the Profile's account and the Conversation's handoff
+//! directory.
+//!
+//! **And one thing it deliberately does not make.**
+//! [`super::Access::Nothing`] is the account's own skills hidden, which the
+//! other two platforms answer with an empty directory over them and a refusal
+//! of the path. There is neither here, and the answer that looks nearest is
+//! worse than none: that path is *inside* the account, which by now is a
+//! junction, so a directory made at it would be a directory made in the human's
+//! own account. So it is left as the account keeps it, and said in the log. The
+//! boundary that refuses it is the stage after this one's.
 //!
 //! **Finding the program is this rendering's own work.** The two Unix
 //! renderings hand a vector to a wrapper and the wrapper's own `execvp` finds
@@ -100,7 +116,7 @@ const CALL: &str = "call";
 
 /// `surface` as the process it describes, run as it stands.
 pub(crate) fn command(surface: &Surface) -> Rendering {
-    said_of_what_is_not_made(surface);
+    realise(surface);
 
     let named = surface.argv().split_first();
 
@@ -149,28 +165,114 @@ pub(crate) fn command(surface: &Surface) -> Rendering {
     open
 }
 
-/// Say what this rendering cannot make, where somebody debugging a session on
-/// this platform would look for it.
+/// Everything the description says is *made* rather than reached, really made,
+/// before a word of the rendering is written.
 ///
-/// A path a session was described as finding somewhere else is nothing here:
-/// there are no mounts, and nothing is linked yet. Every one that matters is
-/// already the same directory on both sides, which the description itself
-/// collapses — see this module's own documentation — and what is left is the
-/// Profile's account and the Conversation's handoff directory, which the stage
-/// after this one joins in. So this is a record of the gap rather than a
-/// failure: a session starts either way, and a session that could not find its
-/// account has this to read.
-fn said_of_what_is_not_made(surface: &Surface) {
+/// The seatbelt rendering's move, in this platform's own vocabulary — see
+/// [`super::seatbelt`]. A description says a session's profile is an empty
+/// directory and that its account is inside it, and on a platform with no
+/// mounts the only way either is true is for this to make it so.
+///
+/// Nothing here refuses a session. What could not be made is logged as itself
+/// and the session starts anyway: a profile with no account in it is a session
+/// that is logged out, which is worth reading about in the log, and the one
+/// failure that can be foreseen — an account on another volume — is refused
+/// before a rendering is asked for at all. See [`super::across_volumes`].
+fn realise(surface: &Surface) {
     for access in surface.reaches() {
-        if let Access::Elsewhere { host, inside, .. } = access {
-            tracing::debug!(
-                host = %host.display(),
-                inside = %inside.display(),
-                "nothing on this platform puts a path somewhere it is not, so a \
-                 session will not find this one where it was told to",
+        let made = match access {
+            // The profile itself, and then whatever goes inside it: the order
+            // is the description's, and emptying comes first in it — see
+            // [`Surface`].
+            Access::Empty(path) => super::emptied(path),
+
+            // Somewhere to write a temporary file, which on this platform is a
+            // directory inside that profile rather than one the machine shares
+            // — made rather than emptied, the profile above it having been
+            // emptied a moment ago.
+            Access::Temporary(path) => std::fs::create_dir_all(path),
+
+            Access::Elsewhere { host, inside, .. } => joined(host, inside),
+
+            // And the one thing left unmade on purpose — see this module's own
+            // documentation, which says why the nearest answer would be worse
+            // than none.
+            Access::Nothing { inside, .. } => {
+                tracing::debug!(
+                    inside = %inside.display(),
+                    "there is no boundary on this platform yet, so what a session was to \
+                     find nothing at is whatever the account keeps there",
+                );
+
+                Ok(())
+            }
+
+            // And what needs nothing made for it: a path of the host's is
+            // already where the description says it is, and the process table
+            // and the devices are the machine's own.
+            Access::Own { .. } | Access::ProcessTable | Access::Devices => Ok(()),
+        };
+
+        if let Err(error) = made {
+            tracing::error!(
+                error = ?error,
+                access = ?access,
+                "what a session was to find could not be made, so it will not find it"
             );
         }
     }
+}
+
+/// A path of the host's, joined into the profile at `inside`.
+///
+/// **A directory junction for a directory and a hard link for a file.** A
+/// junction is a reparse point rather than a file and needs no privilege; a
+/// file symbolic link needs `SeCreateSymbolicLinkPrivilege`, which a per-user
+/// install has not got and a machine not in developer mode will not give. A
+/// hard link is what is left, and it is two names for one file — which is why a
+/// file's two ends have to be on one volume, and why a session that ends is
+/// asked whether the file it wrote is still one of them (ADR-0014).
+///
+/// Whatever is at `inside` already goes first, for the reason the Mac's link
+/// does: it is the link a session before this one was given, and a link left
+/// pointing somewhere else is worse than no link at all.
+fn joined(host: &Path, inside: &Path) -> std::io::Result<()> {
+    if let Some(holding) = inside.parent() {
+        std::fs::create_dir_all(holding)?;
+    }
+
+    cleared(inside)?;
+
+    if host.is_dir() {
+        return super::junction::at(host, inside);
+    }
+
+    std::fs::hard_link(host, inside)
+}
+
+/// Whatever is at `inside` taken away, as what it is rather than by following
+/// it.
+///
+/// **A junction is a directory to the filesystem and a name to a reader**, and
+/// what is behind this one is the human's own account: removing it is
+/// `remove_dir`, and anything that walked into it would be walking into the
+/// account. [`std::fs::FileType::is_symlink`] is what says a name is one on
+/// this platform — a junction is a reparse point and reads as one — and the two
+/// calls after it are the two shapes such a name can have.
+fn cleared(inside: &Path) -> std::io::Result<()> {
+    let Ok(there) = std::fs::symlink_metadata(inside) else {
+        return Ok(());
+    };
+
+    if there.is_symlink() {
+        return std::fs::remove_dir(inside).or_else(|_| std::fs::remove_file(inside));
+    }
+
+    if there.is_dir() {
+        return std::fs::remove_dir_all(inside);
+    }
+
+    std::fs::remove_file(inside)
 }
 
 /// What `surface` says `name` is, or nothing where it says nothing.

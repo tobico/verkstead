@@ -21,7 +21,7 @@ Roadmap stage: [01: The ConPTY terminal and unsandboxed sessions](docs/roadmaps/
 
 - [x] 01: The ConPTY, and a child inside a Job — [details](01-conpty-and-job.md)
 - [x] 02: The open rendering — [details](02-open-rendering.md)
-- [ ] 03: The fresh profile — [details](03-fresh-profile.md)
+- [x] 03: The fresh profile — [details](03-fresh-profile.md)
 - [ ] 04: A replaced link is written back — [details](04-written-back.md)
 - [ ] 05: The prompt goes to a file — [details](05-prompt-file.md)
 - [ ] 06: Sessions turn on, with the note — [details](06-sessions-turn-on.md)

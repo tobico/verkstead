@@ -130,9 +130,13 @@ rustix = { version = "1", features = ["fs", "process", "pty", "termios"] }
 [target.'cfg(windows)'.dependencies]
 # One feature per header, which is how the tables above are cut up.
 # `Win32_System_Console` is the pseudoconsole itself, `Win32_System_Pipes` and
-# `Win32_Storage_FileSystem` the two pipes it is spoken to through,
-# `Win32_System_Threading` the `CreateProcessW` and its attribute list, and
-# `Win32_System_JobObjects` what a session's whole process tree is held by.
+# `Win32_Storage_FileSystem` the two pipes it is spoken to through — and the
+# volume a path is on, which is what says whether the Profile's account can be
+# hard-linked into a session's profile — `Win32_System_Threading` the
+# `CreateProcessW` and its attribute list, and `Win32_System_JobObjects` what a
+# session's whole process tree is held by. `Win32_System_IO` and
+# `Win32_System_Ioctl` are the one control code Verkstead sends: the reparse
+# point that makes a directory junction, which is how the account is joined in.
 # `Win32_Security` is in it because every call that takes a security descriptor
 # is declared behind it — each of these passes none.
 windows-sys = { version = "0.61", features = [
@@ -140,6 +144,8 @@ windows-sys = { version = "0.61", features = [
   "Win32_Security",
   "Win32_Storage_FileSystem",
   "Win32_System_Console",
+  "Win32_System_IO",
+  "Win32_System_Ioctl",
   "Win32_System_JobObjects",
   "Win32_System_Pipes",
   "Win32_System_Threading",
