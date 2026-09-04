@@ -6,7 +6,7 @@
 //! URL is lost the moment the page is navigated away from and back, and a link
 //! to a pane is a link to nothing.
 //!
-//! Four shapes under a Conversation, because there are four kinds of thing the
+//! Five shapes under a Conversation, because there are five kinds of thing the
 //! pane draws:
 //!
 //! - `events/:id` — a Timeline Event with a full self.
@@ -14,6 +14,8 @@
 //! - `roadmaps/:name` — a roadmap, by the directory name that is its identity.
 //! - `share` — sharing the Conversation, there being one of that per
 //!   Conversation as well.
+//! - `terminal` — the Conversation's own terminals, which is one pane however
+//!   many shells are open in it (ADR 0013).
 //!
 //! The `events/` segment is what keeps the ids and the word-named panes apart.
 //! A bare `:event` segment would have read the same as `backlog` the moment
@@ -42,15 +44,22 @@ import type { TimelineEvent } from "../api/types";
 /// one per conversation; a roadmap carries its own name after it, a worktree
 /// being allowed any number of those.
 ///
-/// And a word for the Share pane, which no card opens at all: it is the icon
-/// button on the Timeline's header that opens it, and there is one share of a
-/// Conversation the way there is one backlog of it.
+/// And a word for the two panes no card opens at all: the Share, and the
+/// Conversation's own Terminal. Each is opened by an icon on the Timeline's
+/// header, and there is one of each per Conversation the way there is one
+/// backlog of it — a Conversation may have several shells open, and they are
+/// tabs of the one pane rather than panes of their own.
 ///
 /// One channel for all of them, so that opening any closes the rest — a details
 /// pane shows one thing. A string rather than an object for the same reason:
 /// what is open is compared against what a card would open, and two of the same
 /// selection have to be the same value.
-export type Opening = number | "backlog" | "share" | `roadmap:${string}`;
+export type Opening =
+  | number
+  | "backlog"
+  | "share"
+  | "terminal"
+  | `roadmap:${string}`;
 
 /// What opens the named roadmap, by the directory name that is its identity.
 export function opensRoadmap(name: string): Opening {
@@ -77,7 +86,7 @@ export function pathTo(
 ): string {
   const under = pathOf(conversation);
 
-  if (opening === "backlog" || opening === "share") {
+  if (opening === "backlog" || opening === "share" || opening === "terminal") {
     return `${under}/${opening}`;
   }
 
@@ -110,7 +119,10 @@ export function openingAt(pathname: string): Opening | null {
     return null;
   }
 
-  if ((what === "backlog" || what === "share") && which === undefined) {
+  if (
+    (what === "backlog" || what === "share" || what === "terminal") &&
+    which === undefined
+  ) {
     return what;
   }
 

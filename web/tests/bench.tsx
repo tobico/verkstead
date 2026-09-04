@@ -136,6 +136,7 @@ export function mount(at = "/") {
             <Route path="/events/:event" />
             <Route path="/backlog" />
             <Route path="/share" />
+            <Route path="/terminal" />
             <Route path="/roadmaps/:name" />
           </Route>
           {/* And the compose page beside them, exactly as `App.tsx` has it: a

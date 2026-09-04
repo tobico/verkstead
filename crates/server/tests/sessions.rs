@@ -35,6 +35,12 @@
 //! the keyboard goes back — so they drive whole backlogs, with the stub waiting
 //! at a gate the test opens when it wants the step to land.
 //!
+//! And the Conversation's own terminals are at the very end, for the reason the
+//! watching is: a Terminal is not a session — it is a shell of the human's in the
+//! same Sandbox (ADR 0013) — but what makes one is a real Sandbox around a real
+//! pseudo-terminal in a Conversation with a real Worktree, and this is the file
+//! that has one. Nothing stands in for the shell there: the shell is the thing.
+//!
 //! **On the platforms a session runs on.** The sandbox is bwrap and the
 //! terminal is a real pseudo-terminal, and a Windows Verkstead has neither: it
 //! runs no session at all, and says so above the spawn rather than under it.
@@ -65,7 +71,7 @@ use verkstead_render::{
     ConversationSteered, ConversationStopped, ConversationView, GrillingStarted, Lifecycle,
     NoticeEvent, PickedView, PinnedEvent, ProfileSaved, PullRequestEvent, Registered, Resolved,
     Resumed, Shown, Size, StageListReached, Started, SteerOpened, Submitted, TaskListEvent,
-    TaskListReached, TimelineEvent, TranscriptView, Turn, Watching,
+    TaskListReached, TerminalOpened, TerminalsView, TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_schema::{Direction, Nudge};
 use verkstead_server::build_cache::BuildCache;
@@ -16969,11 +16975,26 @@ impl Watcher {
     /// Attach to a session's Screen the way the workbench does, and take the
     /// repaint it opens with.
     async fn attach(at: SocketAddr, conversation: i64, event: i64) -> Watcher {
-        let (socket, _) = tokio_tungstenite::connect_async(format!(
+        Watcher::watching(format!(
             "ws://{at}/api/ui/conversations/{conversation}/screen/{event}/attach"
         ))
         .await
-        .expect("the session's Screen to be attachable");
+    }
+
+    /// And to one of the Conversation's own terminals, which is the same socket
+    /// pointed at a shell rather than at a session (ADR 0013).
+    async fn terminal(at: SocketAddr, conversation: i64, number: i64) -> Watcher {
+        Watcher::watching(format!(
+            "ws://{at}/api/ui/conversations/{conversation}/terminals/{number}/attach"
+        ))
+        .await
+    }
+
+    /// Either of them: dial the socket and take the repaint it opens with.
+    async fn watching(url: String) -> Watcher {
+        let (socket, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .unwrap_or_else(|error| panic!("{url} to be attachable: {error}"));
 
         let mut watcher = Watcher {
             socket,
@@ -25500,5 +25521,136 @@ async fn a_blocking_ask_from_an_ungrilled_session_waits_on_the_human() {
             .await,
         Submitted::Accepted,
         "and the human answers it the way they answer any other",
+    );
+}
+
+/// A Conversation's own terminal, end to end: a shell running in its Sandbox,
+/// with its Worktree as the working directory, and what is typed into it
+/// answered.
+///
+/// The Screen's own machinery pointed at a shell rather than an agent
+/// (ADR 0013), which is why it is asked here and asked this way: a real Sandbox,
+/// a real pseudo-terminal, a real socket, and the assertion read off the grid the
+/// way every Screen assertion in this file is. What runs is `/bin/sh` — a
+/// terminal has no stub to stand in for it, because the shell *is* the thing.
+#[tokio::test]
+async fn a_terminal_runs_a_shell_in_the_conversations_worktree() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    // The Worktree the grilling made, which is where the shell should be
+    // standing — and the same path inside the Sandbox, the bind being at the
+    // path the directory is really at.
+    let worktree = fixture
+        .until(|view| view.worktree.as_ref().map(|worktree| worktree.path.clone()))
+        .await;
+
+    let at = fixture.listening().await;
+
+    let opened: TerminalOpened = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+        &serde_json::json!({}),
+    )
+    .await;
+
+    let TerminalOpened::Opened { number } = opened else {
+        panic!("expected a terminal to open, and the server said: {opened:?}");
+    };
+
+    // And it is on the list of live ones, which is what the pane asks for when
+    // it loads and what a reload comes back to.
+    let live: TerminalsView = get(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+    )
+    .await;
+
+    assert_eq!(live.live, vec![number]);
+
+    let mut watcher = Watcher::terminal(at, fixture.id, number).await;
+
+    // Wide enough that the Worktree's own path — a temporary directory with
+    // several segments under it — lands on one row rather than wrapping over
+    // the edge of the grid, a wrapped line being one no `contains` finds.
+    watcher.resize(200, 40).await;
+    watcher.types("pwd\r").await;
+
+    let showing = watcher.until(|grid| grid.contains(&worktree)).await;
+
+    assert!(
+        showing.iter().any(|row| row.contains(&worktree)),
+        "the shell should be standing in the Worktree at {worktree:?}, \
+         and its terminal is showing: {showing:?}",
+    );
+
+    // And a reload comes back to the same shell, still running and showing what
+    // it last showed — the server holds it, so a browser that went away and
+    // came back is repainted with where it got to rather than given a new one.
+    drop(watcher);
+
+    let again = Watcher::terminal(at, fixture.id, number).await;
+    let repainted = again.showing();
+
+    assert!(
+        repainted.iter().any(|row| row.contains(&worktree)),
+        "a watcher that reattaches should be repainted with what the terminal is \
+         still showing, and it is showing: {repainted:?}",
+    );
+}
+
+/// And opening one leaves nothing behind: a terminal is memory only — no
+/// Capture, no Event on the Timeline, nothing in the store at all.
+///
+/// The whole of what *not a record* means in code. A session's bytes are kept
+/// because they are the record of what an agent did; a human's shell is the
+/// human doing something, and the Timeline records what happened to the
+/// Conversation rather than what its human typed.
+#[tokio::test]
+async fn opening_a_terminal_leaves_nothing_on_the_timeline() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    // Once the session has said something, so the record is not still growing
+    // under the comparison below.
+    let event = fixture.running().await;
+    fixture.printed(event, "reading the brief").await;
+
+    let before = fixture.view().await.timeline;
+
+    let opened: TerminalOpened = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+        &serde_json::json!({}),
+    )
+    .await;
+
+    let TerminalOpened::Opened { number } = opened else {
+        panic!("expected a terminal to open, and the server said: {opened:?}");
+    };
+
+    let at = fixture.listening().await;
+    let mut watcher = Watcher::terminal(at, fixture.id, number).await;
+
+    watcher.types("printf 'in the terminal\\n'\r").await;
+    watcher.until(|grid| grid.contains("in the terminal")).await;
+
+    // A window in which an Event would have landed, had anything written one.
+    pause(Duration::from_millis(500)).await;
+
+    assert_eq!(
+        fixture.view().await.timeline,
+        before,
+        "opening a terminal and typing in it should leave the Timeline exactly as it was",
     );
 }

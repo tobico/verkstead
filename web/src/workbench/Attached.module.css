@@ -1,5 +1,6 @@
-/* The Screen: the grid a session is showing, drawn as a terminal. See
-   `Screen.tsx`.
+/* The window onto a terminal the server is holding, drawn as a terminal — a
+   session's Screen and a Conversation's own Terminal alike. See
+   `Attached.tsx`.
 
    The terminal itself is xterm's, and so is every class inside `.terminalHost`
    — `.xterm-rows`, `.xterm-screen`, the helper textarea. Its stylesheet is a
@@ -8,19 +9,19 @@
    exception the renderer's `tok-*` family is. Anything of ours that has to
    reach into that DOM does it through `:global`.
 
-   What is *not* here is what a pane does with a Screen in it — the one pane in
-   the workbench that ends where the window does. What that sets it sets on the
-   pane, and the pane is the frame's, so it is in `Panes.module.css`; the
-   element below wears that file's `paneScreen` name, which is how the frame
-   knows which pane to do it to. */
+   What is *not* here is what a pane does with one in it — the panes in the
+   workbench that end where the window does. What that sets it sets on the pane,
+   and the pane is the frame's, so it is in `Panes.module.css`; the element
+   below wears that file's `paneScreen` name, which is how the frame knows which
+   pane to do it to. */
 
-/* The one thing this pane ever holds that is sized by the pane rather than by
+/* The one thing such a pane ever holds that is sized by the pane rather than by
    what is in it. A column down the pane's whole height: the terminal takes the
-   room left under the header and the switcher, and the note or the Hold bar
-   under it keeps its own. What makes the pane a column to fill is the frame's,
-   in `Panes.module.css`.
+   room left under whatever stands above it, and the note under it keeps its
+   own. What makes the pane a column to fill is the frame's, in
+   `Panes.module.css`.
 
-   The grid a session left behind cannot be redrawn at all — it is fixed at the
+   A grid nothing will move again cannot be redrawn at all — it is fixed at the
    size it was printed for — so it is shown at its own size and scrolls in the
    card it sits on: sideways on a phone, as it always did, and downwards where
    the pane is the shorter of the two. */
@@ -45,7 +46,7 @@
   border-radius: 0.6rem;
 }
 
-/* A live one is redrawn at whatever size this pane has, so there is nothing here
+/* One with a socket at the far end is redrawn at whatever size this pane has, so there is nothing here
    to scroll to — and a scrollbar would be worse than useless: it takes a strip
    off the pane, the strip changes what fits, and what fits is what goes up the
    socket. Two watchers would trade sizes until one of them closed, with the
@@ -54,7 +55,7 @@
   overflow: hidden;
 }
 
-.screen .readOnly {
+.screen .note {
   flex: none;
   margin: 0.5rem 0 0;
   font-size: 0.85rem;

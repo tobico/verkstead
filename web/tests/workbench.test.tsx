@@ -52,6 +52,8 @@ import type {
   SteerOpened,
   Submitted,
   TaskListEvent,
+  TerminalOpened,
+  TerminalsView,
   TimelineEvent,
   TranscriptView,
   Turn,
@@ -155,6 +157,9 @@ import prPane from "../src/workbench/PullRequest.module.css";
 // Sharing the Conversation, which is a details pane of its own: the published
 // share it draws, and the presses that came out of the actions menu.
 import sharePane from "../src/workbench/Share.module.css";
+// And a terminal of the human's own inside the conversation's sandbox, which
+// is the other details pane nothing on the record opens.
+import { TERMINAL_REFUSAL } from "../src/workbench/Terminal";
 // The mark a pull request's checks are said in, both ways: the hashed names to
 // query the card by, and the words the icon is read aloud in. The three shapes
 // themselves come straight from Font Awesome, so that a test naming one and the
@@ -175,8 +180,8 @@ import { CONFLICTED, IN_WORDS } from "../src/workbench/Merging";
 import conflictMark from "../src/workbench/Merging.module.css";
 // The Screen, both ways: it is the one pane with a height of its own, and the
 // rules that give it one are what jsdom cannot lay out.
-import screenPane from "../src/workbench/Screen.module.css";
-import screenCss from "../src/workbench/Screen.module.css?raw";
+import attachedPane from "../src/workbench/Attached.module.css";
+import attachedCss from "../src/workbench/Attached.module.css?raw";
 // What a Conversation is called where nobody has named its branch, which the
 // sidebar and the pane header are both drawn with.
 import { AUTOMATIC, DRAFT, titled } from "../src/workbench/naming";
@@ -6087,7 +6092,7 @@ describe("a session's output on the timeline", () => {
     );
 
     expect(showing.textContent).toBe("Transcript");
-    expect(container.querySelector(`.${shell.detailsPane} .${screenPane.screen}`)).toBeNull();
+    expect(container.querySelector(`.${shell.detailsPane} .${attachedPane.screen}`)).toBeNull();
     expect(askedFor(fetching, SCREEN_OF_IT)).toBe(0);
   });
 
@@ -6104,7 +6109,7 @@ describe("a session's output on the timeline", () => {
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
     fireEvent.click(await drawn(container, `.${shell.detailsPane} .${outputPane.screenTab}`));
 
-    const grid = await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .xterm-rows`);
+    const grid = await drawn(container, `.${shell.detailsPane} .${attachedPane.screen} .xterm-rows`);
 
     await waitFor(() =>
       expect(grid.textContent).toContain(
@@ -6130,12 +6135,12 @@ describe("a session's output on the timeline", () => {
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
     fireEvent.click(await drawn(container, `.${shell.detailsPane} .${outputPane.screenTab}`));
 
-    const said = await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .${screenPane.readOnly}`);
+    const said = await drawn(container, `.${shell.detailsPane} .${attachedPane.screen} .${attachedPane.note}`);
     expect(said.textContent).toContain("Read-only");
 
     const typing = await drawn<HTMLTextAreaElement>(
       container,
-      `.${shell.detailsPane} .${screenPane.screen} textarea`,
+      `.${shell.detailsPane} .${attachedPane.screen} textarea`,
     );
     expect(typing.readOnly).toBe(true);
   });
@@ -6159,7 +6164,7 @@ describe("a session's output on the timeline", () => {
     const first = askedFor(fetching, TRANSCRIPT_OF_IT);
 
     fireEvent.click(await drawn(container, `.${shell.detailsPane} .${outputPane.screenTab}`));
-    await drawn(container, `.${shell.detailsPane} .${screenPane.screen}`);
+    await drawn(container, `.${shell.detailsPane} .${attachedPane.screen}`);
 
     fireEvent.click(await drawn(container, `.${shell.detailsPane} .${outputPane.transcriptTab}`));
 
@@ -6182,7 +6187,7 @@ describe("a session's output on the timeline", () => {
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
     fireEvent.click(await drawn(container, `.${shell.detailsPane} .${outputPane.screenTab}`));
 
-    const said = await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .${screenPane.readOnly}`);
+    const said = await drawn(container, `.${shell.detailsPane} .${attachedPane.screen} .${attachedPane.note}`);
     expect(said.textContent).toContain("Waiting");
 
     (await attached()).says(PAINTED);
@@ -7071,7 +7076,7 @@ describe("watching a live session's screen", () => {
 
     socket.says(PAINTED);
 
-    const grid = await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .xterm-rows`);
+    const grid = await drawn(container, `.${shell.detailsPane} .${attachedPane.screen} .xterm-rows`);
 
     await waitFor(() =>
       expect(grid.textContent).toContain(
@@ -7087,7 +7092,7 @@ describe("watching a live session's screen", () => {
 
     // Watching, and saying what typing into it does and does not do: typing
     // works in the session, and the press that holds the run off is Stop.
-    const said = await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .${screenPane.readOnly}`);
+    const said = await drawn(container, `.${shell.detailsPane} .${attachedPane.screen} .${attachedPane.note}`);
     expect(said.textContent).toContain("Watching");
     expect(said.textContent).toContain("press Stop first");
 
@@ -7163,7 +7168,7 @@ describe("watching a live session's screen", () => {
         "  flex: none;\n" +
         "}",
     );
-    expect(screenCss).toContain(
+    expect(attachedCss).toContain(
       ".screen {\n" +
         "  display: flex;\n" +
         "  flex: 1;\n" +
@@ -7173,7 +7178,7 @@ describe("watching a live session's screen", () => {
 
     // And the grid a session left behind, which nothing can resize: at its own
     // size, scrolling in the card it sits on rather than scrolling the pane.
-    expect(screenCss).toContain(
+    expect(attachedCss).toContain(
       ".screen .terminalHost {\n" +
         "  flex: 1;\n" +
         "  min-height: 0;\n" +
@@ -7193,10 +7198,10 @@ describe("watching a live session's screen", () => {
 
     socket.says(PAINTED);
 
-    const screen = await drawn(container, `.${shell.detailsPane} .${screenPane.screen}`);
-    expect(screen.classList).toContain(screenPane.live!);
+    const screen = await drawn(container, `.${shell.detailsPane} .${attachedPane.screen}`);
+    expect(screen.classList).toContain(attachedPane.live!);
 
-    expect(screenCss).toContain(
+    expect(attachedCss).toContain(
       ".screen.live .terminalHost {\n  overflow: hidden;\n}",
     );
   });
@@ -7214,8 +7219,8 @@ describe("watching a live session's screen", () => {
 
     socket.says(PAINTED);
 
-    const screen = await drawn(container, `.${shell.detailsPane} .${screenPane.screen}`);
-    expect(screen.classList).toContain(screenPane.live!);
+    const screen = await drawn(container, `.${shell.detailsPane} .${attachedPane.screen}`);
+    expect(screen.classList).toContain(attachedPane.live!);
 
     // And nothing asks for the state class by the word alone, here or anywhere
     // else: one standing on its own matches every element that carries it. The
@@ -7223,7 +7228,7 @@ describe("watching a live session's screen", () => {
     // said before the disc said it instead — and this is what kept the two
     // apart while both existed.
     expect(timelineCss).not.toMatch(/(^|\n)\.live[\s,{]/);
-    expect(screenCss).not.toMatch(/(^|\n)\.live[\s,{]/);
+    expect(attachedCss).not.toMatch(/(^|\n)\.live[\s,{]/);
   });
 
   /// And the grid of a session that has ended does not carry it: nothing will
@@ -7238,8 +7243,8 @@ describe("watching a live session's screen", () => {
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
     fireEvent.click(await drawn(container, `.${shell.detailsPane} .${outputPane.screenTab}`));
 
-    const screen = await drawn(container, `.${shell.detailsPane} .${screenPane.screen}`);
-    expect(screen.classList).not.toContain(screenPane.live!);
+    const screen = await drawn(container, `.${shell.detailsPane} .${attachedPane.screen}`);
+    expect(screen.classList).not.toContain(attachedPane.live!);
   });
 
   /// The height belongs to the Screen and not to the pane: switching back to the
@@ -7250,12 +7255,12 @@ describe("watching a live session's screen", () => {
     const { container, socket } = await watched();
 
     socket.says(PAINTED);
-    await drawn(container, `.${shell.detailsPane} .${screenPane.screen}`);
+    await drawn(container, `.${shell.detailsPane} .${attachedPane.screen}`);
 
     fireEvent.click(await drawn(container, `.${shell.detailsPane} .${outputPane.transcriptTab}`));
 
     await waitFor(() =>
-      expect(container.querySelector(`.${shell.detailsPane} .${screenPane.screen}`)).toBeNull(),
+      expect(container.querySelector(`.${shell.detailsPane} .${attachedPane.screen}`)).toBeNull(),
     );
   });
 
@@ -7267,7 +7272,7 @@ describe("watching a live session's screen", () => {
     const { container, socket } = await watched();
 
     socket.says(PAINTED);
-    await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .xterm-rows`);
+    await drawn(container, `.${shell.detailsPane} .${attachedPane.screen} .xterm-rows`);
 
     fireEvent.click(await drawn(container, `.${shell.detailsPane} .${outputPane.transcriptTab}`));
 
@@ -7287,7 +7292,7 @@ describe("watching a live session's screen", () => {
     fireEvent.click(await drawn(container, `.${timeline.agentOutput}`));
     fireEvent.click(await drawn(container, `.${shell.detailsPane} .${outputPane.screenTab}`));
 
-    await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .xterm-rows`);
+    await drawn(container, `.${shell.detailsPane} .${attachedPane.screen} .xterm-rows`);
 
     expect(Attached.opened).toHaveLength(0);
     expect(askedFor(fetching, SCREEN_OF_IT)).toBeGreaterThan(0);
@@ -7301,7 +7306,7 @@ describe("putting something into a live session's screen", () => {
   async function typeInto(container: ParentNode, key: string, code: number) {
     const typing = await drawn<HTMLTextAreaElement>(
       container,
-      `.${shell.detailsPane} .${screenPane.screen} .xterm-helper-textarea`,
+      `.${shell.detailsPane} .${attachedPane.screen} .xterm-helper-textarea`,
     );
 
     fireEvent.keyDown(typing, { key, keyCode: code, which: code });
@@ -7333,7 +7338,7 @@ describe("putting something into a live session's screen", () => {
     const socket = await attached();
     socket.says(PAINTED);
 
-    await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .xterm-rows`);
+    await drawn(container, `.${shell.detailsPane} .${attachedPane.screen} .xterm-rows`);
 
     return { container, socket };
   }
@@ -7354,7 +7359,7 @@ describe("putting something into a live session's screen", () => {
     const socket = await attached();
     socket.says(PAINTED);
 
-    const grid = await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .xterm-rows`);
+    const grid = await drawn(container, `.${shell.detailsPane} .${attachedPane.screen} .xterm-rows`);
     const before = grid.textContent;
 
     await typeInto(container, "Enter", 13);
@@ -7371,7 +7376,7 @@ describe("putting something into a live session's screen", () => {
 
     const typing = await drawn<HTMLTextAreaElement>(
       container,
-      `.${shell.detailsPane} .${screenPane.screen} .xterm-helper-textarea`,
+      `.${shell.detailsPane} .${attachedPane.screen} .xterm-helper-textarea`,
     );
 
     fireEvent.paste(typing, {
@@ -7389,7 +7394,7 @@ describe("putting something into a live session's screen", () => {
   it("sends what the mouse did up the same socket", async () => {
     const { container, socket } = await watching();
 
-    const grid = await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .xterm-screen`);
+    const grid = await drawn(container, `.${shell.detailsPane} .${attachedPane.screen} .xterm-screen`);
 
     fireEvent.wheel(grid, { deltaY: 120 });
 
@@ -7404,7 +7409,7 @@ describe("putting something into a live session's screen", () => {
 
     await typeInto(container, "Enter", 13);
 
-    const note = await drawn(container, `.${shell.detailsPane} .${screenPane.screen} .${screenPane.readOnly}`);
+    const note = await drawn(container, `.${shell.detailsPane} .${attachedPane.screen} .${attachedPane.note}`);
     expect(note.textContent).toContain("press Stop first");
 
     expect(container.querySelector('[class*="handBack"]')).toBeNull();
@@ -15716,5 +15721,234 @@ describe("a Verkstead that runs no sessions", () => {
     );
 
     await waitFor(() => screen.getByText(NO_SESSIONS));
+  });
+});
+
+/// Where the conversation's own terminals are listed, opened and watched — a
+/// shell of the human's inside its sandbox, which is the Screen's machinery
+/// pointed at a shell rather than an agent (ADR 0013).
+const TERMINALS_OF_IT = `/api/ui/conversations/${GRILLING.id}/terminals`;
+
+/// And where the first of them is watched.
+const TERMINAL_ATTACH = `${TERMINALS_OF_IT}/1/attach`;
+
+/// The terminal icon on the Timeline's header, which is the whole of the way
+/// into the pane: no card opens it, a terminal belonging to the conversation
+/// rather than to any moment on its record.
+function terminalIcon(container: ParentNode): HTMLButtonElement | null {
+  return container.querySelector<HTMLButtonElement>(
+    `.${shell.middlePane} .${button.iconButton}[aria-label^="Terminal"]`,
+  );
+}
+
+/// The workbench with a conversation holding one live terminal, the socket
+/// stubbed, and whatever else the test wants answered.
+function withTerminals(
+  live: number[],
+  ...answers: Parameters<typeof serving>
+): ReturnType<typeof serving> {
+  Attached.opened = [];
+  vi.stubGlobal("WebSocket", Attached);
+
+  return theGrillingStanding(
+    {},
+    whenever(TERMINALS_OF_IT, json({ live } satisfies TerminalsView)),
+    ...answers,
+  );
+}
+
+describe("the way into the terminal pane", () => {
+  /// Drawn as Share beside it is, and for the same reason: another thing
+  /// standing in a pane that is selected and opened into the pane beside it.
+  it("stands on the timeline's header as an icon button", async () => {
+    withTerminals([1]);
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const icon = await drawn(
+      container,
+      `.${shell.middlePane} .${button.iconButton}[aria-label="Terminal"]`,
+    );
+
+    expect(icon.getAttribute("aria-label")).toBe("Terminal");
+    expect(icon.querySelector("svg")).toBeTruthy();
+    expect((icon as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  /// And it reads as open while its pane is what the details are showing, in
+  /// the same fill the open card in the sidebar takes.
+  it("reads as open while the pane it opened is showing", async () => {
+    withTerminals([1]);
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const icon = await drawn(
+      container,
+      `.${shell.middlePane} .${button.iconButton}[aria-label="Terminal"]`,
+    );
+    expect(icon.getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(icon);
+
+    await waitFor(() =>
+      expect(terminalIcon(container)!.getAttribute("aria-pressed")).toBe("true"),
+    );
+    expect(terminalIcon(container)!.className).toContain(button.open);
+  });
+
+  /// A conversation with no worktree has nowhere to open a shell, so the icon
+  /// is off — and says why, because a shape that has gone grey says nothing
+  /// when it is read aloud.
+  it("is disabled, saying why, where there is no worktree", async () => {
+    withTerminals([], whenever(
+      `/api/ui/conversations/${GRILLING.id}`,
+      json({ ...GRILLING, worktree: null }),
+    ));
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const icon = await drawn<HTMLButtonElement>(
+      container,
+      `.${shell.middlePane} .${button.iconButton}[aria-label^="Terminal"]`,
+    );
+
+    expect(icon.disabled).toBe(true);
+    expect(icon.getAttribute("aria-label")).toBe(
+      "Terminal — there is no worktree yet",
+    );
+  });
+
+  /// And it can be linked to, like every other details pane: what is open is in
+  /// the URL, so a cold load of this path opens on it.
+  it("stands at a path of its own", async () => {
+    withTerminals([1]);
+    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+
+    await drawn(container, `.${shell.detailsPane} .${attachedPane.screen}`);
+    expect(terminalIcon(container)!.getAttribute("aria-pressed")).toBe("true");
+  });
+});
+
+describe("a conversation's terminal", () => {
+  /// The server holds the shell, so the pane is the way back to it rather than
+  /// where it lives: a reload attaches to what is already running instead of
+  /// starting a second shell beside it.
+  it("attaches to the terminal that is already live", async () => {
+    const fetching = withTerminals([1]);
+    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+
+    const socket = await attached();
+
+    expect(socket.url.startsWith("ws://")).toBe(true);
+    expect(socket.url.endsWith(TERMINAL_ATTACH)).toBe(true);
+
+    // And nothing was opened: the list had one, which is what the pane came
+    // back to.
+    expect(
+      fetching.mock.calls.filter(
+        ([path, init]) =>
+          String(path) === TERMINALS_OF_IT && init?.method === "POST",
+      ),
+    ).toHaveLength(0);
+
+    socket.says(PAINTED);
+
+    const grid = await drawn(
+      container,
+      `.${shell.detailsPane} .${attachedPane.screen} .xterm-rows`,
+    );
+
+    await waitFor(() =>
+      expect(grid.textContent).toContain("Reading the brief"),
+    );
+  });
+
+  /// And where none is live it opens one, because the pane never stands empty.
+  it("opens one where none is live, and attaches to that", async () => {
+    withTerminals(
+      [],
+      whenever(
+        TERMINALS_OF_IT,
+        json({ Opened: { number: 1 } } satisfies TerminalOpened),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+
+    const socket = await attached();
+    expect(socket.url.endsWith(TERMINAL_ATTACH)).toBe(true);
+
+    socket.says(PAINTED);
+    await drawn(
+      container,
+      `.${shell.detailsPane} .${attachedPane.screen} .xterm-rows`,
+    );
+  });
+
+  /// The terminal fills the pane: the reading measure comes off, and the pane
+  /// ends where the window does rather than scrolling on down the page.
+  it("fills the pane, with no reading measure and nothing to scroll", async () => {
+    withTerminals([1]);
+    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+
+    const socket = await attached();
+    socket.says(PAINTED);
+
+    const grid = await drawn(
+      container,
+      `.${shell.detailsPane} .${attachedPane.screen}`,
+    );
+
+    // The two names the frame reads: the height rule every terminal pane takes,
+    // and the width rule this one takes on top of it.
+    expect(grid.classList).toContain(shell.paneScreen!);
+    expect(grid.classList).toContain(shell.paneWide!);
+
+    expect(shellCss).toContain(
+      ".panes > .detailsPane:has(.paneWide) {\n  padding-inline: 1.25rem;\n}",
+    );
+
+    // And it is a live one, so it is clipped rather than scrolled — see the
+    // Screen's own reasoning about what a scrollbar costs a socket.
+    expect(grid.classList).toContain(attachedPane.live!);
+  });
+
+  /// A shell that would not start is a sentence rather than a black rectangle,
+  /// and nothing asks again: a refused sandbox asked again on the strength of
+  /// its own refusal would spawn for ever.
+  it("says why where the shell would not start, and does not ask again", async () => {
+    const fetching = withTerminals(
+      [],
+      whenever(
+        TERMINALS_OF_IT,
+        json("Refused" satisfies TerminalOpened),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+
+    const said = await drawn(
+      container,
+      `.${shell.detailsPane} .${notices.error}`,
+    );
+    expect(said.textContent).toBe(TERMINAL_REFUSAL.Refused);
+
+    await waitFor(() =>
+      expect(
+        fetching.mock.calls.filter(
+          ([path, init]) =>
+            String(path) === TERMINALS_OF_IT && init?.method === "POST",
+        ),
+      ).toHaveLength(1),
+    );
+
+    expect(Attached.opened).toHaveLength(0);
+  });
+
+  /// And every other refusal has a sentence of its own, because each is a
+  /// different thing to go and do about it.
+  it("has a sentence for every way the server refuses one", () => {
+    expect(Object.values(TERMINAL_REFUSAL).every((said) => said !== "")).toBe(
+      true,
+    );
+    expect(TERMINAL_REFUSAL.NoWorktree).toContain("worktree");
+    expect(TERMINAL_REFUSAL.NoProfile).toContain("profile");
   });
 });

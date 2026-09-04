@@ -380,27 +380,45 @@ pub(crate) async fn attach(
     // resize: a session ends while it is being watched, and the register is what
     // knows. A `Live` held across the socket would be a session that had gone
     // still answering for one.
-    watcher.on_upgrade(move |socket| watch(socket, state, id, event))
+    watcher.on_upgrade(move |socket| {
+        follow(
+            socket,
+            move || state.sessions.screen(id, event),
+            format!("conversation {id} session #{event}"),
+        )
+    })
 }
 
-/// Follow one session's Screen down one socket until either end has finished
-/// with it.
+/// Follow one live Screen down one socket until either end has finished with it.
 ///
-/// The repaint goes first, so a watcher joining an hour in sees the session
-/// rather than the rest of it, and everything the session prints follows. What
-/// comes back up is the watcher's window size, which is the Screen's size from
-/// then on for everybody.
-async fn watch(mut socket: WebSocket, state: AppState, conversation_id: i64, event_id: i64) {
-    let Some(live) = state.sessions.screen(conversation_id, event_id) else {
+/// The repaint goes first, so a watcher joining an hour in sees the terminal
+/// rather than the rest of it, and everything printed after follows. What comes
+/// back up is the watcher's window size, which is the Screen's size from then on
+/// for everybody, and whatever was typed.
+///
+/// **How the Screen is found again is the caller's**, and it is asked afresh for
+/// every message rather than held: what is on the other end may have ended since
+/// the last thing this watcher said, and a keystroke has nowhere to go once it
+/// has. A session's is looked up in the sessions register and a Terminal's in the
+/// terminals one — see [`crate::terminals`] — and there is nothing else between
+/// the two: what runs on a terminal is a shell rather than an agent, and that is
+/// the whole of the difference at this layer (ADR 0013).
+///
+/// `whose` says which one, for the two lines this logs.
+pub(crate) async fn follow(
+    mut socket: WebSocket,
+    looking: impl Fn() -> Option<Live>,
+    whose: String,
+) {
+    let Some(live) = looking() else {
         return;
     };
 
     let (painted, mut shown) = live.watched();
 
-    // Nothing of the session is held past this line. What keeps the stream alive
-    // is the relay's own copy, so the moment the session is over every watcher
-    // hears the channel close rather than waiting on a Screen nothing will feed
-    // again.
+    // Nothing of it is held past this line. What keeps the stream alive is the
+    // relay's own copy, so the moment it is over every watcher hears the channel
+    // close rather than waiting on a Screen nothing will feed again.
     drop(live);
 
     if say(&mut socket, painted).await.is_err() {
@@ -416,23 +434,22 @@ async fn watch(mut socket: WebSocket, state: AppState, conversation_id: i64, eve
                     }
                 }
                 // Too far behind to be caught up, so put right instead — see
-                // [`WATCHER_BACKLOG`]. A session that ended in the meantime has
+                // [`WATCHER_BACKLOG`]. One that ended in the meantime has
                 // nothing to repaint from, and this watcher is about to hear so.
                 Err(broadcast::error::RecvError::Lagged(missed)) => {
                     tracing::warn!(
-                        conversation_id,
-                        event_id,
+                        screen = %whose,
                         missed,
                         "a watcher fell behind a Screen, so it is being repainted",
                     );
 
-                    if let Some(live) = state.sessions.screen(conversation_id, event_id)
+                    if let Some(live) = looking()
                         && say(&mut socket, live.painted()).await.is_err()
                     {
                         return;
                     }
                 }
-                // The session is over: every sender has gone with it.
+                // It is over: every sender has gone with it.
                 Err(broadcast::error::RecvError::Closed) => return,
             },
 
@@ -440,18 +457,13 @@ async fn watch(mut socket: WebSocket, state: AppState, conversation_id: i64, eve
                 Some(Ok(Message::Text(said))) => {
                     let Ok(watching) = serde_json::from_str::<Watching>(&said) else {
                         tracing::warn!(
-                            conversation_id,
-                            event_id,
+                            screen = %whose,
                             "a watcher said something a Screen does not take",
                         );
                         continue;
                     };
 
-                    // Looked up again for each of them rather than held, for the
-                    // reason [`attach`] gives: the session may have ended since
-                    // the last thing this watcher said, and a keystroke has
-                    // nowhere to go once it has.
-                    let Some(live) = state.sessions.screen(conversation_id, event_id) else {
+                    let Some(live) = looking() else {
                         continue;
                     };
 
@@ -469,9 +481,9 @@ async fn watch(mut socket: WebSocket, state: AppState, conversation_id: i64, eve
                 // ways.
                 Some(Ok(_)) => {}
                 // The watcher has gone, or the connection has. Either way there
-                // is nothing here to keep, and the session goes on exactly as it
-                // was: watching one committed Verkstead to nothing, so there is
-                // nothing to undo.
+                // is nothing here to keep, and what it was watching goes on
+                // exactly as it was: watching one committed Verkstead to
+                // nothing, so there is nothing to undo.
                 Some(Err(_)) | None => return,
             },
         }
