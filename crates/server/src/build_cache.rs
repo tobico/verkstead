@@ -541,7 +541,13 @@ fn compile_server(dir: &Path, sccache: &Path, data_dir: &Path, size: &str) -> Co
         .set("SCCACHE_IDLE_TIMEOUT", "0")
         .running(&[&inside]);
 
-    let mut compiling = Command::from(&sandbox::rendered(Platform::HERE, &surface));
+    // And nothing to close after it, which is the one caller of a rendering
+    // that has none: what a closing sees to is a file a session replaced rather
+    // than wrote in place — see [`crate::sandbox::Closing`] — and the one file
+    // this joins in is the sccache it is running, read-only. A compile server
+    // outlives every session anyway, so there is no ending here to hang one on.
+    let (rendering, _) = sandbox::rendered(Platform::HERE, &surface);
+    let mut compiling = Command::from(&rendering);
 
     // In a process group of its own where the platform needs one, which is what
     // a keeper ends when the server has gone — see

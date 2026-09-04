@@ -163,7 +163,7 @@ impl Grilling {
 
     /// The same inside a sandbox of the caller's choosing.
     fn inside_sandbox(&self, sandbox: &Sandbox, argv: &[&str]) -> String {
-        let output = Command::from(&sandbox.command(argv))
+        let output = Command::from(&sandbox.command(argv).0)
             .stdin(Stdio::null())
             .output()
             .expect("bwrap should be on the PATH: the dev shell declares bubblewrap");
@@ -415,7 +415,7 @@ fn a_session_reads_the_guide_for_the_backend_it_is_running() {
 fn a_set_carrying_a_proposal_goes_through_from_inside_a_sandbox() {
     let fixture = grilling();
 
-    let mut asking = Command::from(&fixture.sandbox().command(&["verkstead", "ask"]))
+    let mut asking = Command::from(&fixture.sandbox().command(&["verkstead", "ask"]).0)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

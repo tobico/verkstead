@@ -80,7 +80,7 @@ use verkstead_render::TerminalOpened;
 use crate::AppState;
 use crate::capture::Reading;
 use crate::platform::Platform;
-use crate::sandbox::outliving;
+use crate::sandbox::{Closing, outliving};
 use crate::screen::Live;
 use crate::sessions::CHUNK;
 use crate::store;
@@ -391,7 +391,16 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
         }
     };
 
-    let child = match terminal.spawn(&sandbox.command(&argv)) {
+    // And what is left to see to once this shell has gone, which a terminal
+    // holds for the reason a session holds one: it runs in the same profile
+    // under the same account, so a file it replaced rather than wrote in place
+    // is a file the account should end up with. See [`Closing`], and
+    // [`crate::sessions`], where the same value is held by the relay. Named for
+    // what it is rather than for its type, `closing` in this module already
+    // being the word down that a terminal is to end.
+    let (command, afterwards) = sandbox.command(&argv);
+
+    let child = match terminal.spawn(&command) {
         Ok(child) => child,
         Err(error) => {
             tracing::error!(
@@ -437,6 +446,7 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
         number,
         terminal,
         child,
+        afterwards,
         screen,
         closed,
         over,
@@ -464,11 +474,16 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
 /// is the word back, and it is the holding of it rather than anything said down
 /// it: whoever is waiting hears when this returns, which is after the shell has
 /// been reaped.
+///
+/// **And `afterwards` is what the rendering left to see to**, held here for the
+/// same reason the terminal is: it is asked once the shell has gone, and the
+/// shell is what it is about — a file it replaced rather than wrote in place,
+/// in the profile it shared with the Conversation's sessions. See [`Closing`].
 #[expect(
     clippy::too_many_arguments,
     reason = "\
-    one terminal's whole self: what it runs on, what runs on it, what it draws \
-    on, and a word each way about its ending"
+    one terminal's whole self: what it runs on, what runs on it, what it leaves \
+    to see to, what it draws on, and a word each way about its ending"
 )]
 async fn follow(
     terminals: Terminals,
@@ -476,6 +491,7 @@ async fn follow(
     number: i64,
     terminal: Arc<Terminal>,
     mut child: Child,
+    afterwards: Closing,
     screen: Live,
     mut closing: oneshot::Receiver<()>,
     over: oneshot::Sender<()>,
@@ -556,6 +572,21 @@ async fn follow(
             conversation_id,
             number,
             "a terminal's shell could not be reaped"
+        );
+    }
+
+    // And the profile that shell was in, seen to the way a session's is: a file
+    // it replaced rather than wrote in place goes back over the account's own,
+    // and the link is made fresh — see [`Closing`]. After the shell has been
+    // reaped, because until then there is something that may still be writing
+    // it. Off the runtime, being a file copy at worst; nothing at all on either
+    // Unix.
+    if let Err(error) = tokio::task::spawn_blocking(move || afterwards.close()).await {
+        tracing::error!(
+            error = ?error,
+            conversation_id,
+            number,
+            "seeing to what a terminal wrote to its account ended badly"
         );
     }
 

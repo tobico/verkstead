@@ -84,8 +84,12 @@ mod seatbelt;
 // platform has to itself is beside it, in a module with an arm for each.
 mod junction;
 mod open;
-// And the two ends of what a renderer is: the description going in, and the
-// process coming out.
+// And the three ends of what a renderer is: the description going in, the
+// process coming out, and what is left to see to once that process has gone.
+// The last of those is nothing on the two platforms whose links follow their
+// own target, which is why it is a value here rather than a `cfg` — see
+// [`closing`].
+mod closing;
 mod rendering;
 mod surface;
 
@@ -107,7 +111,9 @@ pub(crate) use surface::{Access, Reach, Surface};
 
 // And what a renderer hands back, which is not this module's alone either: it
 // is what a session is started from, on whichever of the two arms of
-// [`crate::terminal`] this machine has.
+// [`crate::terminal`] this machine has — and beside it what is left to see to
+// once that session has gone, which is held by whoever is holding the session.
+pub use closing::Closing;
 pub use rendering::Rendering;
 
 use crate::build_cache::{self, BuildCache};
@@ -566,12 +572,12 @@ pub(crate) fn emptied(path: &Path) -> std::io::Result<()> {
 /// it — see the modules at the top of this file — and the last arm is what a
 /// build with none for the platform it was handed has to say. Nothing outside a
 /// test passes anything but [`Platform::HERE`], whose arm is always here.
-pub(crate) fn rendered(platform: Platform, surface: &Surface) -> Rendering {
+pub(crate) fn rendered(platform: Platform, surface: &Surface) -> (Rendering, Closing) {
     match platform {
         #[cfg(any(not(any(target_os = "macos", target_os = "windows")), test))]
-        Platform::Linux => bwrap::command(surface),
+        Platform::Linux => (bwrap::command(surface), Closing::nothing()),
         #[cfg(any(target_os = "macos", all(test, unix)))]
-        Platform::MacOs => seatbelt::command(surface),
+        Platform::MacOs => (seatbelt::command(surface), Closing::nothing()),
         Platform::Windows => open::command(surface),
         #[allow(unreachable_patterns)]
         elsewhere => {
@@ -2113,12 +2119,21 @@ impl Sandbox {
     }
 
     /// `argv` as it will be run inside the sandbox, by whichever mechanism this
-    /// machine has one.
+    /// machine has one — and what is left to see to once it has gone.
     ///
     /// The command is not put through a shell: what runs inside is an argument
     /// vector the orchestrator built, and a shell between it and the sandbox
     /// would be one more thing to quote for.
-    pub fn command<S: AsRef<OsStr>>(&self, argv: &[S]) -> Rendering {
+    ///
+    /// **The second half is held for as long as the first one runs**, and asked
+    /// to close when it has gone: a rendering that joined the account into a
+    /// session's profile by hard link is one whose ending has something left to
+    /// do about a file the session replaced rather than wrote. Whoever started
+    /// the process is who holds it — a session's relay and a Conversation
+    /// Terminal's follow loop, the two things that know when what they started
+    /// is over. Nothing at all on the two platforms whose links follow their own
+    /// target; see [`Closing`].
+    pub fn command<S: AsRef<OsStr>>(&self, argv: &[S]) -> (Rendering, Closing) {
         rendered(self.platform, &self.surface(argv))
     }
 
@@ -2609,6 +2624,54 @@ mod tests {
         }
     }
 
+    /// What each of the three renderings leaves to be seen to once what it
+    /// started has gone — see [`Closing`].
+    ///
+    /// The one that joins a file into a session's profile by hard link leaves
+    /// that file, because a link stops being one file the moment something
+    /// renames over it; the two whose links follow their own target leave
+    /// nothing at all. Asked of all three here because this is the one place a
+    /// Mac's rendering can be asked from a machine that is not one.
+    #[test]
+    fn only_the_rendering_that_links_a_file_by_hand_leaves_anything_to_close() {
+        let account = tempfile::tempdir().unwrap();
+        let profile = tempfile::tempdir().unwrap();
+
+        let host = account.path().join("config.json");
+        let inside = profile.path().join("config.json");
+
+        std::fs::write(&host, "the account's own\n").unwrap();
+
+        let described = || {
+            let mut surface = Surface::starting_in(profile.path().to_owned());
+
+            surface.elsewhere(&host, &inside, Reach::ReadWrite);
+            surface.running(&["the-agent"]);
+
+            surface
+        };
+
+        for platform in [Platform::Linux, Platform::MacOs] {
+            let (_, closing) = rendered(platform, &described());
+
+            assert_eq!(
+                closing.linked().count(),
+                0,
+                "a bind and a symbolic link both follow whatever happens at the \
+                 far end of them, so {platform:?} has nothing left to do"
+            );
+        }
+
+        let (_, closing) = rendered(Platform::Windows, &described());
+
+        assert_eq!(
+            closing.linked().collect::<Vec<_>>(),
+            [inside.as_path()],
+            "and the file joined in by hard link is what a session's ending is \
+             asked about"
+        );
+    }
+
     /// And what a session finds it under is a directory a mount can make, or
     /// the Data Directory where none can — see [`own_directory`].
     #[test]
@@ -2793,7 +2856,11 @@ mod tests {
         );
 
         assert_eq!(
-            across_volumes(Platform::Linux, Path::new("/home/verkstead"), &claude(elsewhere)),
+            across_volumes(
+                Platform::Linux,
+                Path::new("/home/verkstead"),
+                &claude(elsewhere)
+            ),
             None,
             "and the two platforms that mount or symlink a path in ask this of \
              nobody"

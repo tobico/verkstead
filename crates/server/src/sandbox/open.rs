@@ -23,8 +23,9 @@
 //! **a directory junction for a directory and a hard link for a file**. A
 //! junction needs no privilege; a file symbolic link needs one a per-user
 //! install has not got, which is the whole reason the link is a hard one. See
-//! [`realise`], and ADR-0014 for what a hard link costs when something replaces
-//! the file it is one of the names of.
+//! [`realise`], and [`super::closing`] for what a hard link costs when
+//! something replaces the file it is one of the names of — which is why this
+//! hands back the files it linked along with the process it rendered.
 //!
 //! Most of the description asks for none of that. Every path whose two sides
 //! are already one directory collapses before it gets here — which is what the
@@ -56,6 +57,7 @@
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
+use super::closing::Closing;
 use super::rendering::Rendering;
 use super::surface::{Access, Surface};
 
@@ -114,9 +116,15 @@ const AUTORUN_OFF: &str = "/d";
 const COMMAND: &str = "/c";
 const CALL: &str = "call";
 
-/// `surface` as the process it describes, run as it stands.
-pub(crate) fn command(surface: &Surface) -> Rendering {
-    realise(surface);
+/// `surface` as the process it describes, run as it stands — and what is left
+/// to see to once it has gone.
+///
+/// The second of those is the hard links this rendering makes: a link is one
+/// file only while everything writes in place, so a session's ending is asked
+/// whether what it wrote is still the account's own. See [`super::closing`],
+/// which is where the whole of that is.
+pub(crate) fn command(surface: &Surface) -> (Rendering, Closing) {
+    let linked = realise(surface);
 
     let named = surface.argv().split_first();
 
@@ -162,7 +170,7 @@ pub(crate) fn command(surface: &Surface) -> Rendering {
 
     open.starting_in(surface.chdir());
 
-    open
+    (open, Closing::of_links(linked))
 }
 
 /// Everything the description says is *made* rather than reached, really made,
@@ -178,7 +186,16 @@ pub(crate) fn command(surface: &Surface) -> Rendering {
 /// that is logged out, which is worth reading about in the log, and the one
 /// failure that can be foreseen — an account on another volume — is refused
 /// before a rendering is asked for at all. See [`super::across_volumes`].
-fn realise(surface: &Surface) {
+///
+/// What comes back is the files it joined in by hard link, which is the one
+/// thing a session's ending has anything left to do about — see
+/// [`super::closing`]. A link that could not be made is in the list with the
+/// rest, and deliberately: the ordinary reason one fails is that the account
+/// has no such file yet, and a session that logs in and writes one is a session
+/// whose file the account should end up with.
+fn realise(surface: &Surface) -> Vec<(PathBuf, PathBuf)> {
+    let mut linked = Vec::new();
+
     for access in surface.reaches() {
         let made = match access {
             // The profile itself, and then whatever goes inside it: the order
@@ -192,7 +209,18 @@ fn realise(surface: &Surface) {
             // emptied a moment ago.
             Access::Temporary(path) => std::fs::create_dir_all(path),
 
-            Access::Elsewhere { host, inside, .. } => joined(host, inside),
+            // A directory is a junction and a file is a hard link, and only the
+            // second of those is a thing a session can stop sharing with the
+            // account — see [`joined`], which is where that is decided, and
+            // which takes a name with nothing at it for a file as everything
+            // else here does.
+            Access::Elsewhere { host, inside, .. } => {
+                if !host.is_dir() {
+                    linked.push((host.clone(), inside.clone()));
+                }
+
+                joined(host, inside)
+            }
 
             // And the one thing left unmade on purpose — see this module's own
             // documentation, which says why the nearest answer would be worse
@@ -221,6 +249,8 @@ fn realise(surface: &Surface) {
             );
         }
     }
+
+    linked
 }
 
 /// A path of the host's, joined into the profile at `inside`.
@@ -231,12 +261,14 @@ fn realise(surface: &Surface) {
 /// install has not got and a machine not in developer mode will not give. A
 /// hard link is what is left, and it is two names for one file — which is why a
 /// file's two ends have to be on one volume, and why a session that ends is
-/// asked whether the file it wrote is still one of them (ADR-0014).
+/// asked whether the file it wrote is still one of them (ADR-0014). That asking
+/// is [`super::closing`]'s, and this is also where the link is made again once
+/// it has written one back.
 ///
 /// Whatever is at `inside` already goes first, for the reason the Mac's link
 /// does: it is the link a session before this one was given, and a link left
 /// pointing somewhere else is worse than no link at all.
-fn joined(host: &Path, inside: &Path) -> std::io::Result<()> {
+pub(super) fn joined(host: &Path, inside: &Path) -> std::io::Result<()> {
     if let Some(holding) = inside.parent() {
         std::fs::create_dir_all(holding)?;
     }
@@ -421,7 +453,7 @@ mod tests {
         let bin = tempfile::tempdir().unwrap();
         let claude = program(bin.path(), "claude.EXE");
 
-        let open = command(&described(bin.path(), &["claude", "--print"]));
+        let (open, _) = command(&described(bin.path(), &["claude", "--print"]));
 
         assert_eq!(
             open.program(),
@@ -446,7 +478,7 @@ mod tests {
         program(bin.path(), "claude");
         let claude = program(bin.path(), "claude.CMD");
 
-        let open = command(&described(bin.path(), &["claude", "--print"]));
+        let (open, _) = command(&described(bin.path(), &["claude", "--print"]));
 
         assert_eq!(
             open.program(),
@@ -480,7 +512,7 @@ mod tests {
         surface.running(&[bin.path().join("claude")]);
 
         assert_eq!(
-            command(&surface).program(),
+            command(&surface).0.program(),
             claude.as_os_str(),
             "nothing on the `PATH` was asked, the name having said where it is"
         );
@@ -492,7 +524,7 @@ mod tests {
     fn a_name_nothing_answers_to_is_left_as_it_was_written() {
         let bin = tempfile::tempdir().unwrap();
 
-        let open = command(&described(bin.path(), &["claude"]));
+        let (open, _) = command(&described(bin.path(), &["claude"]));
 
         assert_eq!(open.program(), OsStr::new("claude"));
     }
@@ -507,7 +539,7 @@ mod tests {
         let mut surface = described(bin.path(), &["claude"]);
         surface.set("VERKSTEAD_SERVER", "http://127.0.0.1:8422/conversations/7");
 
-        let open = command(&surface);
+        let (open, _) = command(&surface);
 
         assert!(
             open.env()
@@ -599,7 +631,7 @@ mod tests {
     /// Run what `surface` describes and hand back what it printed.
     #[cfg(windows)]
     fn ran(surface: &Surface) -> String {
-        let output = std::process::Command::from(&command(surface))
+        let output = std::process::Command::from(&command(surface).0)
             .output()
             .expect("the rendering to be startable");
 

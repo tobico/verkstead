@@ -33,7 +33,7 @@ use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::platform::Platform;
 use verkstead_server::sandbox::{
-    Bind, Executable, Homes, Reachable, Sandbox, SandboxConfig, under_dev_shell,
+    Bind, Closing, Executable, Homes, Reachable, Sandbox, SandboxConfig, under_dev_shell,
 };
 use verkstead_server::settings::{RustBuildCache, Settings};
 use verkstead_server::skills::Skills;
@@ -769,7 +769,7 @@ file() {
 fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
     let whole = format!("{PROBE}\n{script}\n");
 
-    let output = Command::from(&sandbox.command(&[SH, "-c", &whole]))
+    let output = Command::from(&sandbox.command(&[SH, "-c", &whole]).0)
         .stdin(Stdio::null())
         .output()
         .expect("bwrap should be on the PATH: the dev shell declares bubblewrap");
@@ -794,7 +794,7 @@ fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
 /// being asked here is what the *first* thing started inside gets, and a shell
 /// between it and the rendering is a shell that says something of its own.
 fn environment(sandbox: &Sandbox) -> BTreeMap<String, String> {
-    let output = Command::from(&sandbox.command(&[on_the_host("env")]))
+    let output = Command::from(&sandbox.command(&[on_the_host("env")]).0)
         .stdin(Stdio::null())
         .output()
         .expect("the rendering to be startable");
@@ -1210,8 +1210,9 @@ async fn a_windows_session_finds_the_profiles_account_inside_a_profile_of_its_ow
     );
 
     // The file half, written the way a program writes one in place — which is
-    // the case a hard link answers whole. (What becomes of the other case, a
-    // file replaced by a rename, is the next task's.)
+    // the case a hard link answers whole. The other case, a file replaced by a
+    // rename, is answered as the session ends — see
+    // [`a_file_a_session_replaced_is_written_back_to_the_account_as_the_session_ends`].
     std::fs::write(profile.join(".claude.json"), "{\"logged-in\": true}\n").unwrap();
 
     assert_eq!(
@@ -1326,6 +1327,86 @@ async fn each_session_gets_the_profile_fresh_and_the_account_untouched() {
     );
 }
 
+/// A file the session replaced rather than wrote in place is on the account
+/// once the session has ended, and the session after it finds one file again.
+///
+/// **The case a hard link cannot answer by itself.** An agent that saves its
+/// config by writing a temporary file and renaming it over the top leaves the
+/// session writing to a file of its own, with the account's copy seeing none of
+/// it — so the ending the rendering handed back is asked, and what the session
+/// wrote goes back over the account (ADR-0014).
+///
+/// Asked of the description on whichever machine is running this, as everything
+/// else about that rendering is: a file is joined into the profile by a hard
+/// link on either kind of machine, and what a rename over one costs is the same
+/// fact about the filesystem either way.
+#[tokio::test]
+async fn a_file_a_session_replaced_is_written_back_to_the_account_as_the_session_ends() {
+    let fixture = grilling().await;
+
+    let afterwards = made(&fixture.sandbox_on(Platform::Windows));
+    let inside = fixture.windows_profile().join(".claude.json");
+
+    let written = fixture.windows_profile().join(".claude.json.tmp");
+    std::fs::write(&written, "{\"logged-in\": true}\n").unwrap();
+    std::fs::rename(&written, &inside).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_config()).unwrap(),
+        "{}\n",
+        "which is the whole of the problem: the two names have stopped being one \
+         file, and the account has seen none of what the session wrote"
+    );
+
+    afterwards.close();
+
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_config()).unwrap(),
+        "{\"logged-in\": true}\n",
+        "so as the session ends what it wrote is written back over the account's own"
+    );
+
+    // And the session after it finds one file rather than two: the link is made
+    // fresh, so a change written in place inside is on the account without
+    // anything being copied anywhere.
+    made(&fixture.sandbox_on(Platform::Windows));
+
+    std::fs::write(&inside, "{\"logged-in\": true, \"in\": \"place\"}\n").unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_config()).unwrap(),
+        "{\"logged-in\": true, \"in\": \"place\"}\n",
+        "the session after a write-back is writing the account itself again"
+    );
+}
+
+/// And what each rendering leaves to be seen to, which is nothing at all on the
+/// platform whose links follow their own target.
+///
+/// A Conversation Terminal holds one of these as a session does — it is a shell
+/// in the same profile under the same account — and on Linux what either of
+/// them holds is empty. The Mac's is asked of the rendering itself, in the
+/// server's own tests, because a Mac sandbox is not one this machine can build.
+#[tokio::test]
+async fn a_rendering_whose_links_follow_their_target_leaves_nothing_to_close() {
+    let fixture = grilling().await;
+
+    assert_eq!(
+        made(&fixture.sandbox_on(Platform::Linux)).linked().count(),
+        0,
+        "a bind is a name that follows whatever happens at the far end of it, so \
+         a session that ends leaves nothing to see to"
+    );
+
+    assert!(
+        made(&fixture.sandbox_on(Platform::Windows))
+            .linked()
+            .any(|inside| inside == fixture.windows_profile().join(".claude.json")),
+        "and the platform that joins a file in by hard link leaves the file it \
+         joined in"
+    );
+}
+
 /// An account on another volume from the Data Directory is a session that is
 /// not started.
 ///
@@ -1372,14 +1453,16 @@ async fn an_account_on_another_volume_is_a_session_that_is_not_started() {
     );
 }
 
-/// Render `sandbox` and throw the rendering away, which is what makes
-/// everything the description says is made.
+/// Render `sandbox`, throw the rendering away and keep what its ending is left
+/// to see to — which is what makes everything the description says is made.
 ///
 /// The rendering itself is what the tests above it read; these are about what
 /// is on the disk by the time there is one — see the open rendering's
-/// `realise`, which the seatbelt rendering does the same thing in.
-fn made(sandbox: &Sandbox) {
-    let _ = sandbox.command(&["the-agent"]);
+/// `realise`, which the seatbelt rendering does the same thing in. What comes
+/// back is what a session's relay holds until the process has gone, and the two
+/// tests about a session's ending are the only ones that ask it anything.
+fn made(sandbox: &Sandbox) -> Closing {
+    sandbox.command(&["the-agent"]).1
 }
 
 /// GitHub auth is said rather than found: the token the human configured, in

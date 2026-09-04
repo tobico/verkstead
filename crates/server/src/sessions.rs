@@ -1794,7 +1794,16 @@ impl Sessions {
         // `argv` inside the sandbox with nothing between the two, and the three
         // streams left to the terminal — which is the whole of what says a
         // session runs on one.
-        let child = match terminal.spawn(&sandbox.command(&argv)) {
+        //
+        // And beside it what is left to see to once this session has gone: on
+        // the platform that joins the account into a session's profile by hard
+        // link, a file the session replaced rather than wrote in place. Held by
+        // the relay from here, which is the thing that knows when the session is
+        // over. See [`crate::sandbox::Closing`], which is nothing at all on
+        // either Unix.
+        let (command, afterwards) = sandbox.command(&argv);
+
+        let child = match terminal.spawn(&command) {
             Ok(child) => child,
             Err(error) => {
                 tracing::error!(
@@ -1958,6 +1967,25 @@ impl Sessions {
                     // relay returns there is not, however long the sweep and
                     // the bookkeeping under it take.
                     gone.store(true, Ordering::Release);
+
+                    // And the profile the session was given, seen to now that
+                    // the process that had it has been reaped: a file it
+                    // replaced rather than wrote in place goes back over the
+                    // account's own, and the link is made fresh — see
+                    // [`crate::sandbox::Closing`]. Before whoever is driving
+                    // hears that the session is over, because the next thing
+                    // that happens after that word is the next session being
+                    // launched into the same profile. Off the runtime, being a
+                    // file copy at worst; nothing at all on either Unix.
+                    if let Err(error) =
+                        tokio::task::spawn_blocking(move || afterwards.close()).await
+                    {
+                        tracing::error!(
+                            error = ?error,
+                            conversation_id,
+                            "seeing to what a session wrote to its account ended badly"
+                        );
+                    }
 
                     // The session is over, so the branches are finished moving.
                     // Waited on rather than only asked to stop, because what

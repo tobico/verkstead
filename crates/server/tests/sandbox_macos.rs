@@ -681,7 +681,7 @@ file() {
 /// them is about.
 fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
     let whole = format!("{PROBE}\n{script}\n");
-    let rendering = sandbox.command(&[SH, "-c", &whole]);
+    let (rendering, _) = sandbox.command(&[SH, "-c", &whole]);
 
     let output = Command::from(&rendering)
         .stdin(Stdio::null())
