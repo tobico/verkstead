@@ -113,10 +113,6 @@ testers.runNixOSTest {
         file "$HOME/.config/gh/hosts.yml" gh
         say home "$(ls -A "$HOME" | sort | tr '\n' ' ')"
 
-        # The shared Rust build cache, which on a module install is under
-        # `/var/cache` rather than in the home above — so what a session's cargo
-        # and sccache write goes somewhere the unit made and kept, and the
-        # listing of HOME stays the two files it has always been.
         # The files the human attached to the Conversation, beside the skills in
         # the directory of Verkstead's own — read-only, because the copy is the
         # record. The listing is what says nothing else of the machine came in
@@ -125,6 +121,10 @@ testers.runNixOSTest {
         file /verkstead/attachments/${attached} attached
         say verkstead-holds "$(ls -A /verkstead | sort | tr '\n' ' ')"
 
+        # The shared Rust build cache, which on a module install is under
+        # `/var/cache` rather than in the home above — so what a session's cargo
+        # and sccache write goes somewhere the unit made and kept, and the
+        # listing of HOME stays the two files it has always been.
         dir ${cacheDir} build-cache
         say cargo-home "''${CARGO_HOME-unset}"
         say wrapper "''${RUSTC_WRAPPER-unset}"

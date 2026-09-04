@@ -184,25 +184,26 @@ _Avoid_: state directory, work dir, scratch space, cache
 **Sandbox**:
 What a session runs inside: its Conversation's Worktree, the Repo's git
 directory and the Conversation's handoff directory writable, the Agent
-Profile's pair at `~/.claude` and `~/.claude.json`, the system, the Skills, the
-Conversation's **Attachments** and the Verkstead executable read-only in a
-directory of Verkstead's own, and nothing else of the machine at all — not even
-the checkout the Worktree was made from. Nothing at all stands where the account's own skills would be found:
-they are hidden rather than merged with, and where the mechanism has no mount
-to hide one with it refuses the path instead. Each Companion Repo the
-Conversation was configured with is inside as well: its Worktree and the git
-directory behind it, both at that companion's own mode, so a read-only one is
-read-only through both. The **Build Cache** is inside as well, writable, with
-the `sccache` it compiles through read-only beside the executable — that one is
-a client, and what it reaches is the **Compile Server** in a Sandbox of
-Verkstead's own. The filesystem is the boundary and the network is not:
-inside, it is the host's own, whole and unfiltered, because what stops a
-session doing harm is that there is nothing within reach to harm. The
-`verkstead` a session asks with is the running server's own image, first on the
-`PATH` inside, so the CLI a session asks with and the server it asks are one
-build and cannot disagree about a schema — with the libraries that image was
-packed with, where it was packed with any, reached through a launcher of
-Verkstead's own so that nothing else the session runs loads out of them.
+Profile's pair at `~/.claude` and `~/.claude.json`, the system, the Skills,
+the Conversation's **Attachments** and the Verkstead executable read-only in a
+directory of Verkstead's own, and nothing else of the machine at all — not
+even the checkout the Worktree was made from. Nothing at all stands where the
+account's own skills would be found: they are hidden rather than merged with,
+and where the mechanism has no mount to hide one with it refuses the path
+instead. Each Companion Repo the Conversation was configured with is inside as
+well: its Worktree and the git directory behind it, both at that companion's
+own mode, so a read-only one is read-only through both. The **Build Cache** is
+inside as well, writable, with the `sccache` it compiles through read-only
+beside the executable — that one is a client, and what it reaches is the
+**Compile Server** in a Sandbox of Verkstead's own. The filesystem is the
+boundary and the network is not: inside, it is the host's own, whole and
+unfiltered, because what stops a session doing harm is that there is nothing
+within reach to harm. The `verkstead` a session asks with is the running
+server's own image, first on the `PATH` inside, so the CLI a session asks with
+and the server it asks are one build and cannot disagree about a schema — with
+the libraries that image was packed with, where it was packed with any,
+reached through a launcher of Verkstead's own so that nothing else the session
+runs loads out of them.
 _Avoid_: container, jail, isolation, environment
 
 **Sandbox Configuration**:
