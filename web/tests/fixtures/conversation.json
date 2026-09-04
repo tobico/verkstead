@@ -1,6 +1,20 @@
 {
   "adopting": null,
   "archived": false,
+  "attachments": [
+    {
+      "bytes": 48112,
+      "id": 1,
+      "name": "burst-2026-08-02.csv",
+      "origin": "Brief"
+    },
+    {
+      "bytes": 1284907,
+      "id": 2,
+      "name": "the-queue-backed-up-for-twenty-minutes.png",
+      "origin": "Brief"
+    }
+  ],
   "base_commit": "release-1.4",
   "blocked_on": null,
   "branch": "rate-limiting",

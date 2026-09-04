@@ -52,16 +52,28 @@
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Show, createSignal, type JSX } from "solid-js";
 
-import { saveBrief, startGrilling } from "../api/client";
+import { faPaperclip } from "@fortawesome/free-solid-svg-icons";
+
+import {
+  attachFile,
+  removeAttachment,
+  saveBrief,
+  startGrilling,
+} from "../api/client";
 import type {
+  Attached,
+  AttachmentRemoved,
+  AttachmentView,
   BriefEvent,
   BriefSaved,
   ConversationView,
   GrillingStarted,
 } from "../api/types";
 import app from "../App.module.css";
+import { IconButton } from "../IconButton";
 import { PaneSticky } from "../Panes";
 import shell from "../Panes.module.css";
+import { Truncated } from "../Truncated";
 import { Empty, ErrorLine } from "../notices";
 import { Adoption } from "./Adoption";
 import styles from "./Composer.module.css";
@@ -110,6 +122,11 @@ export function Composer(props: {
   /// frame in the first place.
   back: { to: string; go: () => void };
 }): JSX.Element {
+  // The files this device is sending, made once here and read in the two places
+  // an attachment is drawn: the paperclip under the box makes the uploads, and
+  // the row of pills inside it shows the ones that have not landed yet.
+  const sending = attaching(() => props.conversation);
+
   return (
     <>
       <PaneSticky>
@@ -130,6 +147,15 @@ export function Composer(props: {
         <div class={styles.box}>
           <Written conversation={props.conversation} brief={props.brief} />
 
+          {/* And the files handed over with it, as a row of pills between the
+              text and the setup row — inside the box, because they are part of
+              what is being written rather than something under it. */}
+          <Attachments
+            conversation={props.conversation}
+            attaching={sending}
+            frozen={props.brief.frozen}
+          />
+
           <Setup conversation={props.conversation} />
         </div>
 
@@ -147,12 +173,25 @@ export function Composer(props: {
           {(said) => <ErrorLine class={styles.failure}>{said}</ErrorLine>}
         </For>
 
+        {/* And what could not be attached, said where every other refusal on
+            this pane is said — under the box, and beside the paperclip that
+            made the press. One line per file, because a choice is several
+            files and each of them was refused for its own reason. */}
+        <For each={sending.refusals()}>
+          {(said) => <ErrorLine class={styles.failure}>{said}</ErrorLine>}
+        </For>
+
         {/* And the press the whole pane is arranged for. Only one of the two is
             ever drawn — each is for a different kind of draft — so they read as
             the one thing there is to do from here. */}
         <Show
           when={props.conversation.adopting}
-          fallback={<StartGrilling conversation={props.conversation} />}
+          fallback={
+            <StartGrilling
+              conversation={props.conversation}
+              attaching={sending}
+            />
+          }
         >
           {(adopting) => (
             <Adoption conversation={props.conversation} adopting={adopting()} />
@@ -322,8 +361,14 @@ const MISSING = "This needs a brief, and every role picked and working.";
 /// **Except on a Verkstead with no session to start**, where there is no button
 /// at all and the state stands in its place: not being ready is something to go
 /// and fix, and this is not — see `sessions.tsx`. The press is refused by name
-/// regardless, which is what `grillRefusal` is filled in for.
-function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
+/// regardless, which is what `grillRefusal` is filled in for. The paperclip
+/// goes with it, being the near edge of a row whose far edge is that press:
+/// where there is nothing to start, the pane says so rather than offering the
+/// half of the row that is left.
+function StartGrilling(props: {
+  conversation: ConversationView;
+  attaching: Attaching;
+}): JSX.Element {
   const queries = useQueryClient();
 
   const [refused, setRefused] = createSignal<GrillingStarted | null>(null);
@@ -354,20 +399,26 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
         when={!noSessions(props.conversation)}
         fallback={<NoSessions class={styles.noSessions} />}
       >
-        <button
-          type="button"
-          class={styles.start}
-          classList={{ [styles.inert!]: !ready() }}
-          // Only ever `disabled` for a press already in flight. Not being ready
-          // is the other thing entirely: the button is still hoverable, which is
-          // what carries the explanation.
-          disabled={start.isPending}
-          aria-disabled={!ready()}
-          title={ready() ? undefined : MISSING}
-          onClick={() => ready() && start.mutate()}
-        >
-          {start.isPending ? "Starting…" : "Start work"}
-        </button>
+        {/* The paperclip at the near edge and the start at the far one, in
+            the row the compose page's two presses stand in — pushed apart by
+            the paperclip's own margin, the way the roadmap dropdown is. */}
+        <div class={styles.presses}>
+          <Attach attaching={props.attaching} />
+          <button
+            type="button"
+            class={styles.start}
+            classList={{ [styles.inert!]: !ready() }}
+            // Only ever `disabled` for a press already in flight. Not being
+            // ready is the other thing entirely: the button is still hoverable,
+            // which is what carries the explanation.
+            disabled={start.isPending}
+            aria-disabled={!ready()}
+            title={ready() ? undefined : MISSING}
+            onClick={() => ready() && start.mutate()}
+          >
+            {start.isPending ? "Starting…" : "Start work"}
+          </button>
+        </div>
 
         <Show when={refused()}>
           {(outcome) => (
@@ -383,5 +434,259 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
         </Show>
       </Show>
     </div>
+  );
+}
+
+/// What could not be attached, one sentence per way of being refused.
+///
+/// Every one of them is something different to go and do, which is why the
+/// server names them apart rather than saying that the file could not be
+/// attached.
+export const ATTACH_REFUSAL: Record<
+  Exclude<Attached, { Attached: unknown }>,
+  string
+> = {
+  NoSuchConversation: "This conversation is gone.",
+  NotDrafting: "The work has started, so its files are settled.",
+  TooLarge: "That file is larger than 32 MB.",
+  NotAName:
+    "That name cannot be a file here: no folders, and nothing starting with a dot.",
+};
+
+/// And taking one off again.
+export const ATTACHMENT_REMOVAL_REFUSAL: Record<AttachmentRemoved, string> = {
+  Removed: "",
+  NoSuchConversation: "This conversation is gone.",
+  NotDrafting: "The work has started, so its files are settled.",
+};
+
+/// One file this device is still sending.
+///
+/// Its own key rather than its name, because two files chosen together may
+/// share one — and what the key is for is taking the right pill away when the
+/// right request lands.
+type Landing = { key: number; name: string };
+
+/// The uploading, held once for the pane and read in two places: the paperclip
+/// under the box makes them, and the pills inside it draw the ones that have
+/// not landed yet.
+type Attaching = {
+  /// The files this device is sending, in the order they were chosen.
+  landing: () => Array<Landing>;
+
+  /// What could not be attached, one line per file that was refused.
+  refusals: () => Array<string>;
+
+  /// Send every file that was chosen, each on a request of its own.
+  send: (files: Array<File>) => void;
+};
+
+/// The whole of that, made once by the composer.
+///
+/// Not a mutation, which is what every other press on this pane is. A choice is
+/// several files at once and each of them is its own request with its own
+/// answer — a mutation is one observer with one `isPending` and one `error`,
+/// and three uploads through it would be two answers thrown away. So the state
+/// is held here, per file, and the query it invalidates is the same one every
+/// mutation on this pane invalidates.
+function attaching(conversation: () => ConversationView): Attaching {
+  const queries = useQueryClient();
+
+  const [landing, setLanding] = createSignal<Array<Landing>>([]);
+  const [refusals, setRefusals] = createSignal<Array<string>>([]);
+
+  let keys = 0;
+
+  const send = (files: Array<File>) => {
+    // A fresh choice clears what the last one had to say: the lines are about
+    // files the human has moved on from, and leaving them under a row that has
+    // changed would be the pane explaining something that is no longer there.
+    setRefusals([]);
+
+    for (const file of files) {
+      const key = (keys += 1);
+      setLanding((held) => [...held, { key, name: file.name }]);
+
+      void attachFile(conversation().id, file)
+        .then((outcome) => {
+          if (typeof outcome === "string") {
+            setRefusals((said) => [
+              ...said,
+              `${file.name}: ${ATTACH_REFUSAL[outcome]}`,
+            ]);
+            return;
+          }
+
+          // What came back is the record it made, and the pill is drawn from
+          // the Conversation — so the read is both how the pill arrives and
+          // how it arrives under the name the server renamed it to.
+          void queries.invalidateQueries({ queryKey: ["conversation"] });
+        })
+        .catch((error: unknown) => {
+          setRefusals((said) => [
+            ...said,
+            `${file.name} could not be attached: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          ]);
+        })
+        .finally(() =>
+          setLanding((held) => held.filter((one) => one.key !== key)),
+        );
+    }
+  };
+
+  return { landing, refusals, send };
+}
+
+/// The paperclip, at the near edge of the row the start press is at the far
+/// edge of.
+///
+/// A button over the browser's own file picker rather than the picker itself:
+/// an `<input type="file">` draws a control of the platform's choosing with a
+/// word beside it, and what belongs in that row is an icon. So the input is
+/// there and hidden, and the button is what reaches it.
+///
+/// Several files at once, each uploaded on its own request. A folder cannot be
+/// chosen through a picker at all — that is what a drop can hand over, and
+/// where one is skipped.
+function Attach(props: { attaching: Attaching }): JSX.Element {
+  let picker!: HTMLInputElement;
+
+  return (
+    <>
+      <IconButton
+        of={faPaperclip}
+        label="Attach a file"
+        open={false}
+        press={() => picker.click()}
+        class={styles.attach}
+      />
+      <input
+        ref={picker}
+        class={styles.picker}
+        type="file"
+        multiple
+        onChange={(ev) => {
+          props.attaching.send(Array.from(ev.currentTarget.files ?? []));
+          // Emptied on the way out, so that choosing the same file again is a
+          // change: an input still holding what was chosen last fires nothing.
+          ev.currentTarget.value = "";
+        }}
+      />
+    </>
+  );
+}
+
+/// The files on the Conversation, as a row of pills between the Brief text and
+/// the setup row inside the box.
+///
+/// Nothing at all where there are none and none on their way, rather than an
+/// empty row with a heading over it — which is most drafts, the way most
+/// conversations have no companions.
+///
+/// The ones this device is still sending are drawn at the end and dimmed: the
+/// file is chosen and the record is not back yet, and a row that showed nothing
+/// until it was would be a press with no answer.
+function Attachments(props: {
+  conversation: ConversationView;
+  attaching: Attaching;
+
+  /// Whether the Brief this row belongs to has frozen, which is what takes the
+  /// remove presses off: attachments freeze with the Brief, and a control that
+  /// cannot do anything is not drawn.
+  frozen: boolean;
+}): JSX.Element {
+  // One line for the whole row rather than one per pill: a pill is a name on a
+  // line and there is nowhere inside one to say a sentence, and two failed
+  // removals are the same sentence twice.
+  const [refused, setRefused] = createSignal<string | null>(null);
+
+  return (
+    <Show
+      when={
+        props.conversation.attachments.length ||
+        props.attaching.landing().length
+      }
+    >
+      <ul class={styles.attachments} aria-label="Attached files">
+        <For each={props.conversation.attachments}>
+          {(attachment) => (
+            <Attachment
+              conversation={props.conversation}
+              attachment={attachment}
+              frozen={props.frozen}
+              refuse={setRefused}
+            />
+          )}
+        </For>
+        <For each={props.attaching.landing()}>
+          {(one) => (
+            <li class={`${styles.attachment} ${styles.landing}`}>
+              <Truncated text={one.name} class={styles.attachmentName} />
+            </li>
+          )}
+        </For>
+      </ul>
+
+      <Show when={refused()}>
+        {(said) => <ErrorLine class={styles.failure}>{said()}</ErrorLine>}
+      </Show>
+    </Show>
+  );
+}
+
+/// One of them: the name, cut to a line, and the × that takes it away.
+///
+/// Cut at the front, which is how every other name in the app is cut — see
+/// [`Truncated`](../Truncated.tsx). On a file name that is the half worth
+/// keeping too: the extension is what says what the thing is, and the whole
+/// name is under the pointer either way.
+function Attachment(props: {
+  conversation: ConversationView;
+  attachment: AttachmentView;
+  frozen: boolean;
+  refuse: (said: string | null) => void;
+}): JSX.Element {
+  const queries = useQueryClient();
+
+  const forget = useMutation(() => ({
+    mutationFn: () =>
+      removeAttachment(props.conversation.id, props.attachment.id),
+    onSuccess: (outcome: AttachmentRemoved) => {
+      props.refuse(
+        outcome === "Removed" ? null : ATTACHMENT_REMOVAL_REFUSAL[outcome],
+      );
+
+      // Either way: what came back is about a conversation this pane read a
+      // moment ago, so reading it again is both the correction and — where the
+      // pill is simply gone — the whole of what there was to do.
+      void queries.invalidateQueries({ queryKey: ["conversation"] });
+    },
+    onError: (error: Error) =>
+      props.refuse(
+        `${props.attachment.name} could not be removed: ${error.message}`,
+      ),
+  }));
+
+  return (
+    <li class={styles.attachment}>
+      <Truncated text={props.attachment.name} class={styles.attachmentName} />
+
+      {/* A mark rather than a word, the way a companion row's is, and named for
+          this file: the row is a line of names and the × on its own says
+          nothing about which one it takes. */}
+      <Show when={!props.frozen}>
+        <button
+          type="button"
+          class={styles.forget}
+          aria-label={`Remove ${props.attachment.name}`}
+          disabled={forget.isPending}
+          onClick={() => forget.mutate()}
+        >
+          ×
+        </button>
+      </Show>
+    </li>
   );
 }

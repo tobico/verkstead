@@ -1936,6 +1936,23 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap();
 
+    // And two files put on it, which is what the row of pills under the Brief
+    // is drawn from. Put in through the store for the reason everything else
+    // here is: what is being written is the shape of a row, and going in the
+    // front way would mean bytes on a disk this fixture has no use for.
+    //
+    // Two of them because the row has to read as a row, and one of each shape
+    // the pill draws: a short name, and one long enough that the viewer has to
+    // truncate it.
+    for (name, bytes) in [
+        ("burst-2026-08-02.csv", 48_112_i64),
+        ("the-queue-backed-up-for-twenty-minutes.png", 1_284_907_i64),
+    ] {
+        store::attach(&pool, drafting, store::Origin::Brief, name, bytes)
+            .await
+            .unwrap();
+    }
+
     // And the other Repo added to work alongside it, which is what a companion
     // row on the setup card is drawn from — with the defaults an added one
     // carries, because that is the shape every companion starts in.

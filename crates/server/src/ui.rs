@@ -21,7 +21,7 @@
 //! differently.
 
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::StatusCode;
 use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
 use axum::response::{IntoResponse, Response as HttpResponse};
@@ -29,19 +29,19 @@ use axum::routing::{get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
-    Adopted, Author, BaseBranchChoice, BranchRename, BriefEdit, BrowseScope, BuildCacheView,
-    CheckRollup, CleanupStepView, CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded,
-    CompanionBranchRenamed, CompanionMode, CompanionModeChoice, CompanionModeChosen,
-    CompanionRemoved, CompanionView, ConflictResolutionEdit, ConversationArchived,
-    ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
-    ConversationUnarchived, ConversationView, Cursor, GrillingStarted, IgnoreRule,
-    IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion,
-    NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
-    RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
-    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
-    SharedCommit, SharedConversation, ShowingArchived, Standing, SteerOpened, SteerSubmission,
-    Submitted, Subscribed, Subscription, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet,
-    Unsubscribe, UpdateNotice, Verified,
+    Adopted, Attached, AttachmentRemoved, Author, BaseBranchChoice, BranchRename, BriefEdit,
+    BrowseScope, BuildCacheView, CheckRollup, CleanupStepView, CleanupView, CommentedOn,
+    CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
+    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, CompanionView,
+    ConflictResolutionEdit, ConversationArchived, ConversationClosed, ConversationEntry,
+    ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView, Cursor,
+    GrillingStarted, IgnoreRule, IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut,
+    NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice, ProfileEdit, ProfileEntry,
+    PushKey, Registration, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
+    RuleField, RuleRefused, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowingArchived, Standing,
+    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TimelineEvent, TokenEdit,
+    TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -184,6 +184,33 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             get(pull_request),
         )
         .route("/api/ui/conversations/{id}/brief", post(save_brief))
+        // And the files the human handed the work, which are the Brief's
+        // companions in every sense: attached and taken off while the round
+        // drafts, and frozen with it.
+        //
+        // Under the Conversation rather than under the Brief on purpose — what
+        // a file is attached to is its origin, and an Answer's upload later is
+        // this same route with another one. One request per file, the raw bytes
+        // as the body and the name in the path: there is one file and one name,
+        // and a multipart envelope around them would be a parser to carry for
+        // nothing.
+        //
+        // With a body limit of its own over the router's default, the way the
+        // Question Set route raises its own — a byte over the cap, so that the
+        // smallest refused file is refused by name where the composer can say
+        // why, and everything larger is refused before it is read into memory.
+        .route(
+            "/api/ui/conversations/{id}/attachments/{name}",
+            post(attach).layer(DefaultBodyLimit::max(crate::attachments::MAX_BYTES + 1)),
+        )
+        // And taking one off, by the row's own id rather than by its name: two
+        // files on one Conversation may share a name, and neither of them is a
+        // key. Named in the path rather than in the verb, as a companion's
+        // removal beside it is.
+        .route(
+            "/api/ui/conversations/{id}/attachments/{attachment}/remove",
+            post(detach),
+        )
         // And which Repo the work is in at all, which is the first thing the
         // Repo panel asks and the one the branch and the base below it are
         // facts about. Refused from the moment there is a checkout, like both
@@ -1441,6 +1468,21 @@ pub(crate) async fn conversation_view(
         }
     };
 
+    // And the files the human put on it, which the composer draws as a row of
+    // pills under the Brief. Read the way the archive mark is: rows beside the
+    // Conversation rather than columns on it.
+    //
+    // A read that fails reads as *none attached*, which is the way round that
+    // draws a page with something missing rather than no page at all: the rows
+    // are untouched, and the next read of the Conversation shows them again.
+    let attached = match crate::conversations::attached(&state.pool, id).await {
+        Ok(attached) => attached,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading the files attached to a Conversation failed");
+            Vec::new()
+        }
+    };
+
     // One clock for the whole Timeline: every Set on it is aged against the same
     // moment, so two rows written a millisecond apart cannot come back reading as
     // if they were read at different times.
@@ -1493,6 +1535,7 @@ pub(crate) async fn conversation_view(
         archived,
         trimmed,
         shared,
+        attachments: attached,
         // The same reading the Events above are drawn against, said as a fact
         // about the Conversation: the Timeline offers Force stop exactly where
         // something is running, and one Event of a session's is not the question
@@ -2713,6 +2756,59 @@ async fn save_brief(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "saving a Brief failed");
             unavailable("the Brief could not be saved")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/attachments/{name}` — put a file on a
+/// Conversation for its sessions to read.
+///
+/// The raw bytes as the body and the file's name as the last path segment,
+/// which is what makes it one request per file with nothing to parse. A name
+/// carrying a separator arrives here percent-encoded and is decoded back into
+/// one, which is exactly the shape [`Attached::NotAName`] is for: the check is
+/// made against the name as it would be written, rather than against the path
+/// as it was typed.
+async fn attach(
+    State(state): State<AppState>,
+    Path((id, name)): Path<(String, String)>,
+    body: axum::body::Bytes,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(Attached::NoSuchConversation).into_response();
+    };
+
+    match crate::conversations::attach(&state, id, &name, &body).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, name = %name, "attaching a file failed");
+            unavailable("the file could not be attached")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/attachments/{attachment}/remove` — and take
+/// one off again, file and row together.
+async fn detach(
+    State(state): State<AppState>,
+    Path((id, attachment)): Path<(String, String)>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(AttachmentRemoved::NoSuchConversation).into_response();
+    };
+
+    // An id that is not a number names no attachment, which is a file that is
+    // not there — and that is what the press asked for. See
+    // [`AttachmentRemoved`], which has no *no such attachment* for this reason.
+    let Ok(attachment) = attachment.parse::<i64>() else {
+        return Json(AttachmentRemoved::Removed).into_response();
+    };
+
+    match crate::conversations::detach(&state, id, attachment).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, attachment, "removing an attached file failed");
+            unavailable("the file could not be removed")
         }
     }
 }

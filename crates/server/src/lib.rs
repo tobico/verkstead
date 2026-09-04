@@ -13,6 +13,13 @@ use axum::routing::{get, post};
 use sqlx::SqlitePool;
 use verkstead_store::{Settlements, Waits};
 
+/// The files the human put on a Conversation for its sessions to read: where
+/// the bytes are kept, and what a file is called once they are there.
+///
+/// Public for the reason [`handoffs`] is — a Conversation's directory is part
+/// of the surface its sessions run on rather than an implementation detail of
+/// an endpoint.
+pub mod attachments;
 mod browsing;
 
 /// The shared Rust build cache every sandbox is given: where it is, and whether

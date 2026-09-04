@@ -257,14 +257,17 @@
   display: block;
 }
 
-/* And the compose page's presses, which are the same one with another beside
-   it: a Conversation can be created without being started, and that is the
-   quieter of the two. A row, so the pair sits against the far edge the start
-   alone sits against — inside `.startGrilling`, which is where what they have
-   to say still goes. */
+/* The row of presses under the box, on both pages: the start on its own here,
+   and the start with Save as draft beside it on the compose page — a
+   Conversation can be created without being started, and that is the quieter of
+   the two. A row, so the presses sit against the far edge the start alone sat
+   against and whatever stands at the near edge — the paperclip here, the
+   roadmap dropdown there — is pushed to it by a margin of its own. Inside
+   `.startGrilling`, which is where what they have to say still goes. */
 .presses {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
   gap: 0.6rem;
 }
@@ -312,4 +315,96 @@
   .clear:hover {
     color: var(--ink);
   }
+}
+
+/* The files handed over with the brief, as a row of pills between the text and
+   the setup row inside the box. A list, because that is what it is — and one
+   with no bullets and no indent, the pills being their own shape rather than
+   prose, exactly as the companion rows are.
+
+   A row that wraps rather than one that scrolls: a name is a thing to read, and
+   a file pushed off the side of the box is a file the human cannot see they
+   attached. */
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.5rem 0 0;
+  padding: 0 0.6rem;
+  list-style: none;
+}
+
+/* One of them: the name and the × on one line, in the paper and the edge a
+   companion row is drawn in — it is the same act, a thing put on the work and
+   taken off again — at the size a pill is rather than a card.
+
+   Capped so that one long name cannot take the whole row: what is over the cap
+   is cut by `Truncated`, and the whole name is under the pointer. */
+.attachment {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  max-width: 14rem;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.85rem;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 1rem;
+}
+
+.attachmentName {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  min-width: 0;
+}
+
+/* One on its way up, drawn dimmed until the record comes back: the file has
+   been chosen and there is nothing to press on it yet. No × either — what it
+   would take away is not there to take. */
+.attachment.landing {
+  opacity: 0.55;
+}
+
+/* The × that takes one off, drawn as a companion row's own is and for the same
+   reason: quiet until it is reached for, because taking a file off is not what
+   the pill is there to invite. */
+.forget {
+  flex: 0 0 auto;
+  padding: 0 0.2rem;
+  font: inherit;
+  line-height: 1;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+  border-radius: 0.3rem;
+  cursor: pointer;
+}
+
+.forget:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* The × reached from the keyboard, which no pointer's rule covers. */
+.forget:focus-visible {
+  color: var(--ink);
+}
+
+@media (hover: hover) {
+  .forget:not(:disabled):hover {
+    color: var(--accent);
+  }
+}
+
+/* The paperclip, at the near edge of the row the start press is at the far edge
+   of — pushed there by its own margin, the way the roadmap dropdown on the
+   compose page is pushed there by its. */
+.attach {
+  margin-right: auto;
+}
+
+/* And the browser's own picker behind it, which is a control of the platform's
+   choosing with a word beside it: what belongs in that row is the icon, so the
+   input is here and never drawn, and the button is what reaches it. */
+.picker {
+  display: none;
 }

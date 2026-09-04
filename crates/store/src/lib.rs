@@ -29,6 +29,7 @@ use tokio::sync::broadcast;
 use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError};
 
 mod archives;
+mod attachments;
 mod captures;
 mod cleanup;
 mod commits;
@@ -57,6 +58,7 @@ pub use archives::{
     Archiving, Unarchiving, archive_conversation, archived, show_archived, showing_archived,
     unarchive_conversation,
 };
+pub use attachments::{Attachment, Origin, attach, attachment, attachments, detach};
 pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
 pub use cleanup::{
     Deletion, Trimming, deletable, delete_conversation, deleted_tables, reclaim, trim_conversation,
@@ -750,6 +752,12 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // well: a link to a file is not something that happened to the work either.
     // See [`shares`].
     shares::apply_schema(pool).await?;
+
+    // And the files the human put on each of them, which hang off the
+    // Conversations for that reason again — and are the one sidecar there may be
+    // several of, a Conversation taking as many files as the human has to hand.
+    // See [`attachments`].
+    attachments::apply_schema(pool).await?;
 
     // And last of all, whatever a database written by an older Verkstead
     // still needs done to it. After every table above, because what a rewrite
