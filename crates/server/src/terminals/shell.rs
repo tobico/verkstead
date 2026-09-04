@@ -18,11 +18,17 @@
 //! every Sandbox is certain to have a shell at — because a terminal that opened
 //! on nothing would be worse than one that opened on a plain shell.
 //!
-//! **Whichever is chosen is reachable inside.** `/nix`, `/usr`, `/bin` and
-//! `/run/current-system` are bound into every Sandbox on every platform — see
-//! [`crate::sandbox::SYSTEM`] — so a shell out of the store, out of the system
-//! profile or out of `/usr/bin` is at the same path inside as it is out here,
-//! which is what makes the passwd answer usable as it stands.
+//! **Whichever is chosen is reachable inside**, which is asked rather than
+//! assumed. A Sandbox binds the machine's own directories in by a list of its
+//! own — see [`crate::sandbox::SYSTEM`] — and a shell out of the store, out of
+//! the system profile or out of `/usr/bin` is at the same path inside as it is
+//! out here, which is most of the shells any machine hands out. A shell
+//! anywhere else is not: `/opt/somebody/bin` and a home-manager
+//! `~/.nix-profile/bin/fish` are both on the machine and both nowhere inside,
+//! so a terminal started on one would open and die on its first line, over and
+//! over, with nothing to say why. So the roots are what the path is asked
+//! about, and one outside them falls back like every other unusable answer —
+//! see [`reachable`].
 //!
 //! **The rules are a function and the lookup is not**, so that what is tested is
 //! the answer to each kind of passwd entry rather than the account the suite
@@ -69,7 +75,8 @@ pub fn of_the_server() -> String {
 /// account that would provoke it.
 ///
 /// Absolute, because a bare word is a `PATH` lookup and what the sandbox is
-/// handed is a command rather than a shell line; there, because a path naming
+/// handed is a command rather than a shell line; [`reachable`], because a path
+/// no Sandbox binds is one nothing inside can run; there, because a path naming
 /// nothing is a terminal that would not start; and not one of [`REFUSED`],
 /// because those are an account saying there is no shell to give.
 fn usable(passwd: Option<&str>, there: impl Fn(&Path) -> bool) -> String {
@@ -84,11 +91,27 @@ fn usable(passwd: Option<&str>, there: impl Fn(&Path) -> bool) -> String {
         .and_then(|name| name.to_str())
         .unwrap_or_default();
 
-    if !path.is_absolute() || REFUSED.contains(&named) || !there(path) {
+    if !path.is_absolute() || REFUSED.contains(&named) || !reachable(path) || !there(path) {
         return FALLBACK.to_owned();
     }
 
     shell.to_owned()
+}
+
+/// Whether a Sandbox has that path in it, which is a different question from
+/// whether the machine does.
+///
+/// Under one of the directories every Sandbox binds the machine in by — see
+/// [`crate::sandbox::SYSTEM`], which is where the answer really lives, and which
+/// is a different list on a Mac than on Linux. Bound at the path they are really
+/// at, so a shell under one of them is the same path inside as out.
+///
+/// Whole components rather than letters: `/opt/homebrew-something` is not under
+/// `/opt/homebrew`, and a check on the spelling would say it was.
+fn reachable(shell: &Path) -> bool {
+    crate::sandbox::SYSTEM
+        .iter()
+        .any(|root| shell.starts_with(root))
 }
 
 /// The login shell the passwd database gives the user this server runs as, or
@@ -200,7 +223,29 @@ mod tests {
     /// started on one would open on nothing at all.
     #[test]
     fn a_shell_that_is_not_there_falls_back() {
-        assert_eq!(usable(Some("/opt/somebody/bin/eshell"), nowhere), FALLBACK);
+        assert_eq!(
+            usable(Some("/nix/store/nothing/bin/eshell"), nowhere),
+            FALLBACK
+        );
+    }
+
+    /// And so does one that is on the machine but nowhere inside a Sandbox,
+    /// which is the same failure by the other route: the shell would be run and
+    /// would not be found, so the terminal would open and die on its first line
+    /// with nothing to say why.
+    #[test]
+    fn a_shell_no_sandbox_binds_falls_back() {
+        for outside in [
+            "/opt/somebody/bin/eshell",
+            "/home/you/.nix-profile/bin/fish",
+            "/srv/shells/bash",
+        ] {
+            assert_eq!(
+                usable(Some(outside), on_the_machine),
+                FALLBACK,
+                "{outside} is on the machine and nowhere inside a Sandbox",
+            );
+        }
     }
 
     /// So does a system user's own, which is the account saying it is not for
