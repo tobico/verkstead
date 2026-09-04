@@ -79,7 +79,7 @@ base: string, };
  * watching says itself on a Timeline instead — see the server's `continuing`
  * module, which starts the same stage by the other route.
  */
-export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NotOnWindowsYet" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | "RoadmapComplete" | "NoBrief" | "StageInFlight" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
+export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | "RoadmapComplete" | "NoBrief" | "StageInFlight" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
 /**
  * The Repo's registered name.
  */
@@ -1067,7 +1067,7 @@ unseen: boolean, };
  * to be wrong about is the *target* — a state whose work cannot be set going
  * from what the record holds.
  */
-export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NotOnWindowsYet" | "NoInstruction" | "NoFollowUpBrief" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused" | "NoSuchCompanionRepo" | { "Companion": { 
+export type ConversationSteered = "Steered" | "NoSuchConversation" | "NoPullRequest" | "NoInstruction" | "NoFollowUpBrief" | "EmptyBrief" | "NoPairing" | "NoSuchProfile" | "NoSuchModel" | "NoBaseCommit" | "WorktreeRefused" | "NoSuchCompanionRepo" | { "Companion": { 
 /**
  * The Repo's registered name.
  */
@@ -1199,14 +1199,25 @@ ready_to_grill: boolean,
  */
 compiles_uncached: boolean, 
 /**
- * Whether this Verkstead runs sessions at all — see [`SessionsHere`].
+ * Whether a session on this Conversation runs outside a Sandbox — with the
+ * human's own account's reach rather than inside the boundary the product
+ * promises.
+ *
+ * True on a Windows build and nowhere else, and only until the Sandbox
+ * lands there: the pseudo-terminal came first, so a Windows session runs
+ * the agent as an ordinary process in the meantime. Said rather than
+ * hidden, because what is different about it is the one thing a human
+ * would want to know before pressing anything.
  *
  * A fact about the build rather than about this Conversation, and the same
  * answer on every Conversation one server sends. Carried here for the
  * reason [`ConversationView::compiles_uncached`] is: it is read where the
- * work is started from, and nothing else on this payload says it.
+ * work is started from, and nothing else on this payload says it. One
+ * value, drawn in three places — above the press that starts the work,
+ * beside the session's own terminal, and on a Conversation Terminal's
+ * pane, a shell in the same nothing.
  */
-sessions: SessionsHere, 
+unsandboxed: boolean, 
 /**
  * Whether there is driving to start again: the Conversation is in a state
  * something ought to be driving, and nothing is.
@@ -1570,7 +1581,7 @@ export type EntryKind = "Directory" | "File" | "Repository";
  * the Repo they are about. Nothing gates the button on a companion: the
  * configuration is always complete, so refusal at the start is the whole story.
  */
-export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NotOnWindowsYet" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "EmptyBrief" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
+export type GrillingStarted = "Started" | "NoSuchConversation" | "NotDrafting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "EmptyBrief" | "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
 /**
  * What the companion Repo is called, which is what the human picked it
  * by and what they will go and look at.
@@ -2472,7 +2483,7 @@ at: string, };
  * resolution session would work in, which a Conversation left Done for weeks is
  * the likeliest of any to have lost.
  */
-export type Resolved = "Resolving" | "NoSuchConversation" | "NotDone" | "NotOnWindowsYet" | "NothingConflicts" | "NowhereToWork" | "WorktreeRefused";
+export type Resolved = "Resolving" | "NoSuchConversation" | "NotDone" | "NothingConflicts" | "NowhereToWork" | "WorktreeRefused";
 
 /**
  * The submitted collection of Answers and Unanswered markers for one Question
@@ -2539,7 +2550,7 @@ nothing_else?: boolean, };
  * A recompute that quietly found nothing to launch is exactly the failure this
  * whole feature is replacing.
  */
-export type Resumed = "Resumed" | "NoSuchConversation" | "NotDriven" | "NotOnWindowsYet" | "AlreadyDriven" | "NowhereToWork" | "WorktreeRefused" | "NoDirection" | "NothingToWork" | "NoGrillingPairing" | "NoImplementationPairing" | "NoFollowUpBrief";
+export type Resumed = "Resumed" | "NoSuchConversation" | "NotDriven" | "AlreadyDriven" | "NowhereToWork" | "WorktreeRefused" | "NoDirection" | "NothingToWork" | "NoGrillingPairing" | "NoImplementationPairing" | "NoFollowUpBrief";
 
 /**
  * The roadmap opened: every stage brief of it, rendered.
@@ -2633,22 +2644,6 @@ why: string, };
  * different width.
  */
 export type Screen = { repaint: string, columns: number, rows: number, };
-
-/**
- * Whether this Verkstead runs sessions at all, and where it does not, what to
- * say about it.
- *
- * One fact about the build, said once and read everywhere a session would
- * start: the pane draws it where the press would have been, and every way into
- * a session refuses by it — see [`GrillingStarted::NotOnWindowsYet`], which is
- * the same refusal under five names because there are five ways in.
- *
- * **A value rather than a `cfg`**, as the platform directories and the sandbox
- * surface are: the arm a machine will never run is still an arm its tests call,
- * so what a Windows build answers is testable on the Linux runner and the
- * viewer's half is testable without a Windows machine anywhere.
- */
-export type SessionsHere = "Run" | "NotOnWindowsYet";
 
 /**
  * One stored Question Set as the browser receives it: the document where this
@@ -3541,7 +3536,7 @@ list: TaskListEvent | null, };
  * that could not be opened is one the pane has to say something about rather
  * than one that quietly never appears.
  */
-export type TerminalOpened = { "Opened": { number: number, } } | "NoSuchConversation" | "NoWorktree" | "NoProfile" | "NotOnWindowsYet" | "Refused";
+export type TerminalOpened = { "Opened": { number: number, } } | "NoSuchConversation" | "NoWorktree" | "NoProfile" | "Refused";
 
 /**
  * The terminals a Conversation has running, as the pane that draws them reads

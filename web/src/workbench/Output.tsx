@@ -71,6 +71,7 @@ import { Mark } from "./Mark";
 import styles from "./Output.module.css";
 import { PaneHead } from "./PaneHead";
 import { Screen } from "./Screen";
+import { Unsandboxed } from "./sandboxing";
 import type {
   AgentOutputEvent,
   Bookkeeping,
@@ -336,6 +337,17 @@ export function Output(props: {
         when={showing() === "transcript"}
         fallback={
           <Show when={!trimmed()} fallback={<Trimmed />}>
+            {/* And what the terminal under it is a terminal *in*, where that is
+                nothing: a session on a build with no Sandbox runs with the
+                human's own account's reach, and this is the second of the three
+                places that says so. Above the grid rather than under it,
+                because the grid scrolls and this must not scroll away. See
+                `sandboxing.tsx`. */}
+            <Unsandboxed
+              conversation={props.conversation}
+              class={styles.unsandboxed}
+            />
+
             <Screen conversation={props.conversation} output={props.output} />
           </Show>
         }

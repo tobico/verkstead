@@ -68,7 +68,7 @@ import styles from "./Composer.module.css";
 import { refusedOnCreate } from "./composing";
 import { PaneHead } from "./PaneHead";
 import { DRAFT, chosen } from "./naming";
-import { NoSessions, noSessions } from "./sessions";
+import { Unsandboxed } from "./sandboxing";
 import { Setup, SetupNotes } from "./Setup";
 import { keeping } from "./settling";
 import { BRIEF_REFUSAL, grillRefusal } from "./Timeline";
@@ -319,10 +319,10 @@ const MISSING = "This needs a brief, and every role picked and working.";
 /// The server checks every one of the conditions again regardless — the page's
 /// copy is only as fresh as its last read.
 ///
-/// **Except on a Verkstead with no session to start**, where there is no button
-/// at all and the state stands in its place: not being ready is something to go
-/// and fix, and this is not — see `sessions.tsx`. The press is refused by name
-/// regardless, which is what `grillRefusal` is filled in for.
+/// **And what the session will be like, above it**, on a Verkstead whose
+/// sessions have no Sandbox around them: the last thing read before the work is
+/// started, which is where a fact about what the work can reach belongs. It
+/// gates nothing — see `sandboxing.tsx`.
 function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
   const queries = useQueryClient();
 
@@ -350,37 +350,37 @@ function StartGrilling(props: { conversation: ConversationView }): JSX.Element {
 
   return (
     <div class={styles.startGrilling}>
-      <Show
-        when={!noSessions(props.conversation)}
-        fallback={<NoSessions class={styles.noSessions} />}
-      >
-        <button
-          type="button"
-          class={styles.start}
-          classList={{ [styles.inert!]: !ready() }}
-          // Only ever `disabled` for a press already in flight. Not being ready
-          // is the other thing entirely: the button is still hoverable, which is
-          // what carries the explanation.
-          disabled={start.isPending}
-          aria-disabled={!ready()}
-          title={ready() ? undefined : MISSING}
-          onClick={() => ready() && start.mutate()}
-        >
-          {start.isPending ? "Starting…" : "Start work"}
-        </button>
+      {/* Above the press rather than under it: what a session can reach is
+          something to know before starting one. */}
+      <Unsandboxed
+        conversation={props.conversation}
+        class={styles.unsandboxed}
+      />
 
-        <Show when={refused()}>
-          {(outcome) => (
-            <ErrorLine class={styles.failure}>
-              {grillRefusal(outcome())}
-            </ErrorLine>
-          )}
-        </Show>
-        <Show when={start.isError}>
-          <ErrorLine class={styles.failure}>
-            The work could not be started: {start.error?.message}
-          </ErrorLine>
-        </Show>
+      <button
+        type="button"
+        class={styles.start}
+        classList={{ [styles.inert!]: !ready() }}
+        // Only ever `disabled` for a press already in flight. Not being ready
+        // is the other thing entirely: the button is still hoverable, which is
+        // what carries the explanation.
+        disabled={start.isPending}
+        aria-disabled={!ready()}
+        title={ready() ? undefined : MISSING}
+        onClick={() => ready() && start.mutate()}
+      >
+        {start.isPending ? "Starting…" : "Start work"}
+      </button>
+
+      <Show when={refused()}>
+        {(outcome) => (
+          <ErrorLine class={styles.failure}>{grillRefusal(outcome())}</ErrorLine>
+        )}
+      </Show>
+      <Show when={start.isError}>
+        <ErrorLine class={styles.failure}>
+          The work could not be started: {start.error?.message}
+        </ErrorLine>
       </Show>
     </div>
   );

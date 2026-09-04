@@ -104,7 +104,6 @@
       }
     }
   },
-  "sessions": "Run",
   "shared": null,
   "state": "Implementing",
   "stop_asked": false,
@@ -186,6 +185,7 @@
     }
   ],
   "trimmed": false,
+  "unsandboxed": false,
   "waiting": true,
   "waiting_on_checks": false,
   "working": false,

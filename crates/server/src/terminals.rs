@@ -311,13 +311,6 @@ impl Terminals {
 /// there is none — see [`TerminalOpened`], whose refusals are the ones a
 /// session's start refuses by, asked about a shell.
 pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Result<TerminalOpened> {
-    // A build that runs no sessions runs no terminals either, and it says so in
-    // front of everything else — the same rule, asked in the same place, that
-    // refuses a session there.
-    if state.sessions.here().absent() {
-        return Ok(TerminalOpened::NotOnWindowsYet);
-    }
-
     let Some(agents) = state.sessions.agents() else {
         tracing::warn!(
             conversation_id,

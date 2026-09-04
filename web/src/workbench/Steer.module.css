@@ -266,14 +266,6 @@
   border-top: 1px solid var(--edge);
 }
 
-/* Why the submit under it is shut, on a Verkstead that runs no sessions: above
-   the buttons and against them, so the line and the button it explains read as
-   one thing. */
-.noSessions {
-  margin: 0 0 0.75rem;
-  font-size: 0.9rem;
-}
-
 .steerButtons {
   display: flex;
   gap: 0.5rem;

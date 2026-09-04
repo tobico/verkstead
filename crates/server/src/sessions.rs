@@ -32,7 +32,6 @@ use anyhow::Result;
 use sqlx::SqlitePool;
 use tokio::sync::{oneshot, watch};
 use tokio::task::JoinHandle;
-use verkstead_render::SessionsHere;
 use verkstead_schema::Nudge;
 
 use crate::build_cache::{self, BuildCache};
@@ -751,10 +750,10 @@ pub(crate) struct Sessions {
     /// grilling makes the worktree either way.
     agents: Option<Arc<Agents>>,
 
-    /// And whether a session has anywhere to run on this platform at all, which
-    /// is the other half of the same question and the one that is not about this
-    /// router — see [`Sessions::here`].
-    here: SessionsHere,
+    /// And whether a session this platform runs stands outside a Sandbox, which
+    /// is a fact about the build rather than about this router — see
+    /// [`Sessions::unsandboxed`].
+    unsandboxed: bool,
 
     running: Arc<Mutex<HashMap<i64, Running>>>,
 
@@ -1315,22 +1314,30 @@ struct Running {
     agent_type: store::AgentType,
 }
 
-/// Whether a Verkstead built for `platform` runs sessions at all.
+/// Whether a session a Verkstead built for `platform` runs stands outside a
+/// Sandbox.
 ///
 /// The one place the fact is decided, and the whole of the decision: the two
-/// Unixes run sessions and a Windows Verkstead does not start one yet. What
-/// stood in the way of one was a terminal and a Sandbox, and the terminal is
-/// there now — see [`crate::terminal`], whose Windows arm is a pseudoconsole.
+/// Unixes have a Sandbox each — bubblewrap and seatbelt — and a Windows one has
+/// none yet, so its agent runs as an ordinary process with the human's own
+/// account's reach. Sessions themselves run everywhere: what stood in the way
+/// of a Windows one was a pseudo-terminal, and [`crate::terminal`]'s Windows
+/// arm is a pseudoconsole.
+///
+/// **Not a refusal.** A session that runs unsandboxed is a session, and what
+/// this decides is one sentence on the Conversation view rather than a press
+/// that will not go — see [`verkstead_render::ConversationView::unsandboxed`],
+/// which is where it is read.
 ///
 /// A function of the platform rather than a `cfg!`, for the reason
 /// [`Platform`] is a value: the arm this machine will never run is still an arm
 /// its tests call. What a running server answers is [`Platform::HERE`]'s answer,
 /// and it is [`Sessions::under`] that asks — everything above reads it off the
 /// registry rather than off the target it was compiled for.
-pub(crate) fn run_on(platform: Platform) -> SessionsHere {
+pub(crate) fn unsandboxed_on(platform: Platform) -> bool {
     match platform {
-        Platform::Linux | Platform::MacOs => SessionsHere::Run,
-        Platform::Windows => SessionsHere::NotOnWindowsYet,
+        Platform::Linux | Platform::MacOs => false,
+        Platform::Windows => true,
     }
 }
 
@@ -1338,12 +1345,12 @@ impl Sessions {
     /// A server that can run sessions, under `agents`.
     ///
     /// Which is what the served router is built with, so this is where the
-    /// platform's own answer is read: a Windows one runs none, whatever agents
-    /// it was handed — see [`run_on`].
+    /// platform's own answer is read: a Windows one runs its sessions outside a
+    /// Sandbox, whatever agents it was handed — see [`unsandboxed_on`].
     pub(crate) fn under(agents: Agents) -> Sessions {
         Sessions {
             agents: Some(Arc::new(agents)),
-            here: run_on(Platform::HERE),
+            unsandboxed: unsandboxed_on(Platform::HERE),
             running: Arc::new(Mutex::new(HashMap::new())),
             launching: Arc::new(Mutex::new(HashMap::new())),
             turns: Arc::new(Mutex::new(HashMap::new())),
@@ -1378,52 +1385,47 @@ impl Sessions {
     /// One that cannot: nothing is launched, and everything else about starting
     /// a grilling holds.
     ///
-    /// It answers [`SessionsHere::Run`] whatever machine it was built for, which
-    /// is the one place the platform's own answer is not read. Only a test
-    /// stands one of these up, and what a test stands it up for is what a press
-    /// leaves behind — the branch, the worktree, the record — rather than what
-    /// platform it is running on. Read here, the same suite run on Windows
-    /// would be one where every press is refused before it makes anything, and
-    /// nothing it is about would ever be asked of git.
+    /// It answers sandboxed whatever machine it was built for, which is the one
+    /// place the platform's own answer is not read. Only a test stands one of
+    /// these up, and what a test stands it up for is what a press leaves behind
+    /// — the branch, the worktree, the record — rather than what platform it is
+    /// running on.
     ///
-    /// What a Windows build answers is asked of
-    /// [`Sessions::without_sessions`] instead, on whichever machine is running
-    /// the tests.
+    /// What a Windows build answers is asked of [`Sessions::unsandboxed_here`]
+    /// instead, on whichever machine is running the tests.
     pub(crate) fn none() -> Sessions {
         Sessions {
             agents: None,
-            here: SessionsHere::Run,
+            unsandboxed: false,
             running: Arc::new(Mutex::new(HashMap::new())),
             launching: Arc::new(Mutex::new(HashMap::new())),
             turns: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    /// And one on a platform that has no session to run — which today is
-    /// Windows, and which is the whole of what it says.
+    /// And one whose sessions run outside a Sandbox — which today is a Windows
+    /// build, and which is the whole of what it says.
     ///
     /// The arm a Linux machine will never be, stood up so that its tests can
-    /// call it: what every way into a session answers where there is none to
-    /// start is a rule rather than a platform, and it is asked wherever the
-    /// suite runs. See [`crate::router_running_no_sessions`].
-    pub(crate) fn without_sessions() -> Sessions {
+    /// call it: what the Conversation view says about a session that has no
+    /// Sandbox around it is a rule rather than a platform, and it is asked
+    /// wherever the suite runs. See [`crate::router_running_unsandboxed`].
+    pub(crate) fn unsandboxed_here() -> Sessions {
         Sessions {
-            here: SessionsHere::NotOnWindowsYet,
+            unsandboxed: true,
             ..Sessions::none()
         }
     }
 
-    /// Whether a session started here would have anywhere to run at all — the
-    /// question every way into one asks before it makes anything, and what the
-    /// pane draws where a session would start.
+    /// Whether a session started here runs outside a Sandbox — what the panes a
+    /// session is started from and watched on say in a line, and nothing else.
     ///
     /// Not [`Sessions::runs_sessions`], which is a fact about this router:
-    /// whether it was given agents. This one is a fact about the build, and the
-    /// two are refused differently — a router with no agents makes the branch
-    /// and the worktree and launches nothing into them, and a build with no
-    /// sessions refuses in front of all of it and says so.
-    pub(crate) fn here(&self) -> SessionsHere {
-        self.here
+    /// whether it was given agents. This one is a fact about the build, and it
+    /// gates nothing at all — a session runs either way, and the difference is
+    /// what reach it has.
+    pub(crate) fn unsandboxed(&self) -> bool {
+        self.unsandboxed
     }
 
     /// Wait for this Conversation's Worktree, and take it.
@@ -3216,38 +3218,32 @@ exit 1
         }
     }
 
-    /// Which platforms run a session, said as the value it is: two do, and the
-    /// one that has no pseudo-terminal to open does not — yet.
+    /// Every platform runs a session, and the one with no Sandbox of its own
+    /// runs it outside one — which is Windows, until the Sandbox stage lands.
     ///
     /// Every arm asked on whichever machine is running this, which is the whole
     /// reason it is a function of the platform rather than a `cfg!`: what a
     /// Windows build answers is a thing the Linux runner can check.
     #[test]
-    fn the_platform_without_a_terminal_runs_no_sessions() {
-        assert_eq!(run_on(Platform::Linux), SessionsHere::Run);
-        assert_eq!(run_on(Platform::MacOs), SessionsHere::Run);
-        assert_eq!(run_on(Platform::Windows), SessionsHere::NotOnWindowsYet);
-
+    fn the_platform_without_a_sandbox_runs_sessions_outside_one() {
         assert!(
-            run_on(Platform::Windows).absent(),
-            "which is the question every way into a session asks",
+            unsandboxed_on(Platform::Windows),
+            "Windows has a terminal now and no Sandbox yet",
         );
-        assert!(!run_on(Platform::Linux).absent());
+        assert!(!unsandboxed_on(Platform::Linux));
+        assert!(!unsandboxed_on(Platform::MacOs));
     }
 
     /// And what a registry says about it: the served router's own is the
-    /// platform's answer, and a test's is the one that leaves a press making
-    /// what it makes.
+    /// platform's answer, and a test's is a build with a Sandbox unless it is
+    /// stood up as the one without.
     #[test]
-    fn a_registry_says_whether_there_is_a_session_to_start() {
-        assert_eq!(Sessions::none().here(), SessionsHere::Run);
-        assert_eq!(
-            Sessions::without_sessions().here(),
-            SessionsHere::NotOnWindowsYet,
-        );
+    fn a_registry_says_whether_a_session_here_is_sandboxed() {
+        assert!(!Sessions::none().unsandboxed());
+        assert!(Sessions::unsandboxed_here().unsandboxed());
         assert!(
-            !Sessions::without_sessions().runs_sessions(),
-            "and a build with no sessions has no agents either way",
+            !Sessions::unsandboxed_here().runs_sessions(),
+            "and a registry stood up for that question has no agents either way",
         );
     }
 }

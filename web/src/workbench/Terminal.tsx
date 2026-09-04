@@ -103,7 +103,6 @@ import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { Attached } from "./Attached";
 import { PaneHead } from "./PaneHead";
-import { NO_SESSIONS } from "./sessions";
 import styles from "./Terminal.module.css";
 import shell from "../Panes.module.css";
 
@@ -126,10 +125,6 @@ export const TERMINAL_REFUSAL: Record<
   NoWorktree: "This conversation has no worktree to open a terminal in.",
   NoProfile:
     "This conversation has no agent profile settled, so there is no account to run a shell under.",
-  // The one refusal here that is about this Verkstead rather than about this
-  // conversation, and every press that starts a session meets it too — see
-  // `sessions.tsx`, which is where the sentence is.
-  NotOnWindowsYet: NO_SESSIONS,
   Refused: "The shell would not start. The server's log says why.",
 };
 

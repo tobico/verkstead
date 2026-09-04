@@ -473,17 +473,6 @@ async fn refusal(
     conversation: &Conversation,
     submission: &SteerSubmission,
 ) -> anyhow::Result<Option<ConversationSteered>> {
-    // A target something runs in, on a build that runs no sessions: four of the
-    // five, Done being the one nothing is launched into. First, because it is
-    // the one refusal here that is about the machine rather than about this
-    // Conversation — and in front of everything the steer makes, as a grill
-    // start's own is. See [`crate::sessions::run_on`], and [`roles`], which is
-    // what says a target runs something: what a session would run under is
-    // exactly what a target with no roles has none of.
-    if state.sessions.here().absent() && !roles(submission.target).is_empty() {
-        return Ok(Some(ConversationSteered::NotOnWindowsYet));
-    }
-
     // A wrapping Conversation is defined by the pull request under it, so a steer
     // into Wrapping is a move onto one that is already there — and a follow-up is
     // the human taking something up about work that is already pushed, so it

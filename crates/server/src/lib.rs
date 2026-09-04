@@ -500,20 +500,20 @@ pub fn router_watching(pool: SqlitePool, watched: WatchedPaths, data_dir: PathBu
     )
 }
 
-/// The same again, answering as a build with no session to run does — which
-/// today is a Windows one.
+/// The same again, answering as a build whose sessions run outside a Sandbox
+/// does — which today is a Windows one.
 ///
 /// The arm the machine running these tests will never be, stood up so that they
-/// can ask it: every way into a session refuses in front of everything it would
-/// otherwise make, and the Conversation the viewer is handed says so where the
-/// press would have been. A rule about the build rather than about the
-/// platform's filesystem, so it is asked wherever the suite runs — see
-/// [`sessions::run_on`], which is where a real server's own answer comes from.
+/// can ask it: nothing is refused, and every Conversation the viewer is handed
+/// says the session it would start has the human's own account's reach. A rule
+/// about the build rather than about the platform's filesystem, so it is asked
+/// wherever the suite runs — see [`sessions::unsandboxed_on`], which is where a
+/// real server's own answer comes from.
 ///
 /// Watching `watched` and keeping what it makes in `data_dir`, as
-/// [`router_watching`] does: what these tests press is a Conversation with a
-/// Repo behind it, and the refusals are about what the press did *not* make.
-pub fn router_running_no_sessions(
+/// [`router_watching`] does: what these tests read is a Conversation with a
+/// Repo behind it.
+pub fn router_running_unsandboxed(
     pool: SqlitePool,
     watched: WatchedPaths,
     data_dir: PathBuf,
@@ -524,7 +524,7 @@ pub fn router_running_no_sessions(
         watched,
         nothing_bound(),
         data_dir,
-        sessions::Sessions::without_sessions(),
+        sessions::Sessions::unsandboxed_here(),
         Gh::on_path(),
     )
 }
