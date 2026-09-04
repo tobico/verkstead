@@ -21,6 +21,6 @@ and replays them after the Conversation is made. The `CONTEXT.md`
 - [x] 01: Attach a file to a draft — [details](01-attach-to-a-draft.md)
 - [x] 02: Into the sandbox and the prompt — [details](02-sandbox-and-prompt.md)
 - [x] 03: The compose page — [details](03-compose-page.md)
-- [ ] 04: Drag and drop — [details](04-drag-and-drop.md)
+- [x] 04: Drag and drop — [details](04-drag-and-drop.md)
 - [ ] 05: After the freeze — [details](05-after-the-freeze.md)
 - [ ] 06: Lifetime — [details](06-lifetime.md)

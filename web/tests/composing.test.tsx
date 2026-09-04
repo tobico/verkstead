@@ -7,11 +7,11 @@
 //! device holding a draft nobody has created, and the create that replays it
 //! through the endpoints a Conversation is configured with.
 //!
-//! The files are that half twice over. The pill they are drawn as and the
-//! paperclip they are picked through are the composer's own and are asked about
-//! in `attaching.test.tsx`; that they are held in the page until a press, and
-//! go up with the replay when one is made, is this page's own doing and is
-//! asked about here.
+//! The files are that half twice over. The pill they are drawn as, the paperclip
+//! they are picked through and the drop the box takes are one piece the composer
+//! draws too, and are asked about in `attaching.test.tsx`; that this page draws
+//! that piece as well, holds what it is given until a press, and sends it up with
+//! the replay when one is made, is this page's own doing and is asked about here.
 
 import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -23,6 +23,7 @@ import type {
   RepoPairingsView,
 } from "../src/api/types";
 import menu from "../src/Menu.module.css";
+import pill from "../src/Attaching.module.css";
 import composer from "../src/workbench/Composer.module.css";
 import sidebar from "../src/workbench/Conversations.module.css";
 import setup from "../src/workbench/Setup.module.css";
@@ -38,6 +39,7 @@ import {
   type Composed,
 } from "../src/workbench/composing";
 import { OPEN, PROFILES, REPOS, drawn, mount, theWorkbench } from "./bench";
+import { carrying, drag, dropOn } from "./dragging";
 import { offered, pick, picker, showing } from "./pickers";
 import { json, serving, whenever } from "./serving";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
@@ -878,8 +880,9 @@ describe("adopting a roadmap from the compose page", () => {
   /// written is lost by taking one up.
   /// The box is locked to a card while a roadmap is loaded, so there is nothing
   /// being written for a file to be handed over with — and a control that has
-  /// nothing to do is not drawn.
-  it("offers no paperclip while a roadmap is loaded", async () => {
+  /// nothing to do is not drawn. The drop goes with it: the paperclip and the
+  /// box are two ways into the one piece, and neither is offered here.
+  it("offers no paperclip and takes no drop while a roadmap is loaded", async () => {
     adopting();
     const { container } = mount("/compose");
 
@@ -891,6 +894,12 @@ describe("adopting a roadmap from the compose page", () => {
     expect(
       screen.queryByRole("button", { name: "Attach a file" }),
     ).toBeNull();
+
+    const box = container.querySelector(`.${composer.box}`)!;
+    dropOn(box, carrying({ files: [new File(["note"], "notes.md")] }));
+
+    expect(box.classList.contains(composer.over!)).toBe(false);
+    expect(container.querySelector(`.${pill.attachments}`)).toBeNull();
   });
 
   it("clears back to the brief this device was holding", async () => {
@@ -1082,7 +1091,7 @@ describe("the files a compose page holds", () => {
   /// The names on the pills the page is drawing.
   function pills(container: ParentNode): string[] {
     return [
-      ...container.querySelectorAll(`.${composer.attachmentName}`),
+      ...container.querySelectorAll(`.${pill.attachmentName}`),
     ].map((name) => name.textContent!.trim());
   }
 
@@ -1226,13 +1235,65 @@ describe("the files a compose page holds", () => {
     await waitFor(() => expect(box.value).toBe("Make the widget"));
     expect(pills(again.container)).toEqual([]);
     expect(
-      again.container.querySelector(`.${composer.attachments}`),
+      again.container.querySelector(`.${pill.attachments}`),
     ).toBeNull();
   });
 
   /// A refused upload is one more refusal for the draft the page lands on,
   /// which is the shape a refused field already takes: the rest of the replay
   /// stands, and the kickoff is what a refusal stops.
+  /// The other way one is put on: dropped anywhere on the box rather than picked
+  /// through the paperclip, which is the same piece doing the same thing — held
+  /// in the page either way, there being nothing on the server to send them to.
+  it("holds every file dropped on the box", async () => {
+    const fetching = creating();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const box = container.querySelector(`.${composer.box}`)!;
+
+    dropOn(
+      box,
+      carrying({
+        files: [new File(["note"], "notes.md"), new File(["x"], "shot.png")],
+      }),
+    );
+
+    await waitFor(() =>
+      expect(pills(container)).toEqual(["notes.md", "shot.png"]),
+    );
+
+    // Still nothing on the wire: a drop is a choice, and the press is what
+    // sends what has been chosen.
+    expect(writes(fetching, "/api/ui/conversations")).toBe(0);
+  });
+
+  /// Highlighted while the drag is over it and not otherwise, exactly as the
+  /// composer's own box is — and a folder in the drop is skipped without a
+  /// word.
+  it("highlights the box, and skips a folder dropped with the files", async () => {
+    creating();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const box = container.querySelector(`.${composer.box}`)!;
+    const carried = carrying({
+      files: [new File(["note"], "notes.md")],
+      folders: ["screenshots"],
+    });
+
+    drag(box, "dragenter", carried);
+    await waitFor(() =>
+      expect(box.classList.contains(composer.over!)).toBe(true),
+    );
+
+    drag(box, "dragover", carried);
+    drag(box, "drop", carried);
+
+    await waitFor(() => expect(pills(container)).toEqual(["notes.md"]));
+    expect(box.classList.contains(composer.over!)).toBe(false);
+  });
+
   it("says on the new draft what could not be attached", async () => {
     const fetching = creating(
       whenever(upload("huge.bin"), json("TooLarge"), "POST"),

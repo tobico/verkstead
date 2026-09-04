@@ -42,6 +42,12 @@
 //! nothing a reader holding a file has any part in, and a pane that ended on a
 //! press would be asking them for one.
 //!
+//! The files handed over with the Brief are drawn inside the box as a row of
+//! pills, and put on it either through the paperclip beside the press or by
+//! dropping them anywhere on the box — one piece doing both, drawn here and on
+//! the compose page alike (see [`Attaching`](../Attaching.tsx)), with only what
+//! becomes of a chosen file different between them.
+//!
 //! Nothing on this pane has a Save. The Brief keeps itself on a pause in the
 //! typing and on the way out of the field, every setup field sends its own
 //! change as it is made, and what a save cannot do is said in words where it
@@ -51,8 +57,6 @@
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Show, createSignal, type JSX } from "solid-js";
-
-import { faPaperclip } from "@fortawesome/free-solid-svg-icons";
 
 import {
   attachFile,
@@ -70,10 +74,9 @@ import type {
   GrillingStarted,
 } from "../api/types";
 import app from "../App.module.css";
-import { IconButton } from "../IconButton";
+import { attaching, type Attaching, type Shown } from "../Attaching";
 import { PaneSticky } from "../Panes";
 import shell from "../Panes.module.css";
-import { Truncated } from "../Truncated";
 import { Empty, ErrorLine } from "../notices";
 import { Adoption } from "./Adoption";
 import styles from "./Composer.module.css";
@@ -122,10 +125,23 @@ export function Composer(props: {
   /// frame in the first place.
   back: { to: string; go: () => void };
 }): JSX.Element {
-  // The files this device is sending, made once here and read in the two places
-  // an attachment is drawn: the paperclip under the box makes the uploads, and
-  // the row of pills inside it shows the ones that have not landed yet.
-  const sending = attaching(() => props.conversation);
+  // The files on this Conversation: the record's own and the ones this device
+  // is still sending, and the requests either of them makes.
+  const sending = sendingOn({
+    conversation: () => props.conversation,
+    // Attachments freeze with the Brief, so a frozen round draws the row as a
+    // record: no × on a pill, no paperclip, and no drop taken over the box.
+    frozen: () => props.brief.frozen,
+  });
+
+  // And the one piece the whole of the attaching UI is drawn through, here and
+  // on the compose page alike — the pills inside the box, the paperclip in the
+  // row of presses, and the drop the box itself takes. See `Attaching.tsx`.
+  const files = attaching({
+    shown: sending.shown,
+    add: sending.send,
+    offered: () => !props.brief.frozen,
+  });
 
   return (
     <>
@@ -143,18 +159,30 @@ export function Composer(props: {
       <div class={`${styles.composer} ${shell.paneComposer}`}>
         {/* The box, which is the whole of what there is to fill in: the Brief
             inside it, and the setup as a row of dropdowns along the inside of
-            its bottom edge. */}
-        <div class={styles.box}>
+            its bottom edge.
+
+            And the whole of it is what a file is dropped onto — text, pills and
+            setup row alike — because what the human is dropping onto is the
+            thing they are writing. It highlights while a drag carrying files is
+            over it. */}
+        <div
+          class={styles.box}
+          classList={{ [styles.over!]: files.over() }}
+          {...files.dropping}
+        >
           <Written conversation={props.conversation} brief={props.brief} />
 
           {/* And the files handed over with it, as a row of pills between the
               text and the setup row — inside the box, because they are part of
               what is being written rather than something under it. */}
-          <Attachments
-            conversation={props.conversation}
-            attaching={sending}
-            frozen={props.brief.frozen}
-          />
+          <files.Pills />
+
+          {/* What could not be taken off, under the row it happened in: one
+              line for the whole of it rather than one per pill, a pill being a
+              name on a line with nowhere in it to say a sentence. */}
+          <Show when={sending.refusedRemoval()}>
+            {(said) => <ErrorLine class={styles.failure}>{said()}</ErrorLine>}
+          </Show>
 
           <Setup conversation={props.conversation} />
         </div>
@@ -187,10 +215,7 @@ export function Composer(props: {
         <Show
           when={props.conversation.adopting}
           fallback={
-            <StartGrilling
-              conversation={props.conversation}
-              attaching={sending}
-            />
+            <StartGrilling conversation={props.conversation} files={files} />
           }
         >
           {(adopting) => (
@@ -367,7 +392,7 @@ const MISSING = "This needs a brief, and every role picked and working.";
 /// half of the row that is left.
 function StartGrilling(props: {
   conversation: ConversationView;
-  attaching: Attaching;
+  files: Attaching;
 }): JSX.Element {
   const queries = useQueryClient();
 
@@ -403,7 +428,7 @@ function StartGrilling(props: {
             the row the compose page's two presses stand in — pushed apart by
             the paperclip's own margin, the way the roadmap dropdown is. */}
         <div class={styles.presses}>
-          <Attach send={(files) => props.attaching.send(files)} />
+          <props.files.Clip class={styles.attach} />
           <button
             type="button"
             class={styles.start}
@@ -463,19 +488,25 @@ export const ATTACHMENT_REMOVAL_REFUSAL: Record<AttachmentRemoved, string> = {
 /// One file this device is still sending.
 ///
 /// Its own key rather than its name, because two files chosen together may
-/// share one — and what the key is for is taking the right pill away when the
-/// right request lands.
+/// share one — and what the key is for is taking the right one out of the row
+/// when the right request lands.
 type Landing = { key: number; name: string };
 
-/// The uploading, held once for the pane and read in two places: the paperclip
-/// under the box makes them, and the pills inside it draw the ones that have
-/// not landed yet.
-type Attaching = {
-  /// The files this device is sending, in the order they were chosen.
-  landing: () => Array<Landing>;
+/// What a draft's composer does about its files, held once for the pane: the
+/// row of pills it hands the attaching piece, the requests a choice and a ×
+/// make, and what came back refused from either of them.
+type Sending = {
+  /// The row: the files on the record, and the ones on their way up after them.
+  shown: () => Array<Shown>;
 
   /// What could not be attached, one line per file that was refused.
   refusals: () => Array<string>;
+
+  /// And what could not be taken off again — one line for the whole row rather
+  /// than one per pill: a pill is a name on a line and there is nowhere inside
+  /// one to say a sentence, and two failed removals are the same sentence
+  /// twice.
+  refusedRemoval: () => string | null;
 
   /// Send every file that was chosen, each on a request of its own.
   send: (files: Array<File>) => void;
@@ -489,11 +520,23 @@ type Attaching = {
 /// and three uploads through it would be two answers thrown away. So the state
 /// is held here, per file, and the query it invalidates is the same one every
 /// mutation on this pane invalidates.
-function attaching(conversation: () => ConversationView): Attaching {
+function sendingOn(what: {
+  conversation: () => ConversationView;
+
+  /// Whether the round's Brief has frozen, which is what takes the × off every
+  /// pill: attachments freeze with the Brief, and a control that could only be
+  /// refused is not drawn.
+  frozen: () => boolean;
+}): Sending {
   const queries = useQueryClient();
 
   const [landing, setLanding] = createSignal<Array<Landing>>([]);
   const [refusals, setRefusals] = createSignal<Array<string>>([]);
+  const [refusedRemoval, setRefusedRemoval] = createSignal<string | null>(null);
+
+  // Which of the record's files have a removal in flight, by id: the one thing
+  // a × can be truly disabled for is a press already made.
+  const [removing, setRemoving] = createSignal<Array<number>>([]);
 
   let keys = 0;
 
@@ -507,7 +550,7 @@ function attaching(conversation: () => ConversationView): Attaching {
       const key = (keys += 1);
       setLanding((held) => [...held, { key, name: file.name }]);
 
-      void attachFile(conversation().id, file)
+      void attachFile(what.conversation().id, file)
         .then((outcome) => {
           if (typeof outcome === "string") {
             setRefusals((said) => [
@@ -536,195 +579,48 @@ function attaching(conversation: () => ConversationView): Attaching {
     }
   };
 
-  return { landing, refusals, send };
-}
+  /// And taking one off the record, which is the × on a pill.
+  ///
+  /// Held here beside the sending for the same reason: the row is a list of
+  /// files and each × is its own request, so what is in flight is per file
+  /// rather than one `isPending` for the row.
+  const forget = (attachment: AttachmentView) => {
+    setRemoving((was) => [...was, attachment.id]);
 
-/// The paperclip, at the near edge of the row the start press is at the far
-/// edge of.
-///
-/// A button over the browser's own file picker rather than the picker itself:
-/// an `<input type="file">` draws a control of the platform's choosing with a
-/// word beside it, and what belongs in that row is an icon. So the input is
-/// there and hidden, and the button is what reaches it.
-///
-/// Several files at once. What becomes of them is the page's own business — a
-/// draft sends each on a request of its own, and the compose page holds them
-/// until there is a Conversation to send them to — so what this hands over is
-/// the choice and nothing else. A folder cannot be chosen through a picker at
-/// all; that is what a drop can hand over, and where one is skipped.
-export function Attach(props: {
-  send: (files: Array<File>) => void;
-}): JSX.Element {
-  let picker!: HTMLInputElement;
+    void removeAttachment(what.conversation().id, attachment.id)
+      .then((outcome: AttachmentRemoved) => {
+        setRefusedRemoval(
+          outcome === "Removed" ? null : ATTACHMENT_REMOVAL_REFUSAL[outcome],
+        );
 
-  return (
-    <>
-      <IconButton
-        of={faPaperclip}
-        label="Attach a file"
-        open={false}
-        press={() => picker.click()}
-        class={styles.attach}
-      />
-      <input
-        ref={picker}
-        class={styles.picker}
-        type="file"
-        multiple
-        onChange={(ev) => {
-          props.send(Array.from(ev.currentTarget.files ?? []));
-          // Emptied on the way out, so that choosing the same file again is a
-          // change: an input still holding what was chosen last fires nothing.
-          ev.currentTarget.value = "";
-        }}
-      />
-    </>
-  );
-}
-
-/// The files on the Conversation, as a row of pills between the Brief text and
-/// the setup row inside the box.
-///
-/// Nothing at all where there are none and none on their way, rather than an
-/// empty row with a heading over it — which is most drafts, the way most
-/// conversations have no companions.
-///
-/// The ones this device is still sending are drawn at the end and dimmed: the
-/// file is chosen and the record is not back yet, and a row that showed nothing
-/// until it was would be a press with no answer.
-function Attachments(props: {
-  conversation: ConversationView;
-  attaching: Attaching;
-
-  /// Whether the Brief this row belongs to has frozen, which is what takes the
-  /// remove presses off: attachments freeze with the Brief, and a control that
-  /// cannot do anything is not drawn.
-  frozen: boolean;
-}): JSX.Element {
-  // One line for the whole row rather than one per pill: a pill is a name on a
-  // line and there is nowhere inside one to say a sentence, and two failed
-  // removals are the same sentence twice.
-  const [refused, setRefused] = createSignal<string | null>(null);
-
-  return (
-    <Show
-      when={
-        props.conversation.attachments.length ||
-        props.attaching.landing().length
-      }
-    >
-      <ul class={styles.attachments} aria-label="Attached files">
-        <For each={props.conversation.attachments}>
-          {(attachment) => (
-            <Attachment
-              conversation={props.conversation}
-              attachment={attachment}
-              frozen={props.frozen}
-              refuse={setRefused}
-            />
-          )}
-        </For>
-        <For each={props.attaching.landing()}>
-          {(one) => <Pill name={one.name} landing />}
-        </For>
-      </ul>
-
-      <Show when={refused()}>
-        {(said) => <ErrorLine class={styles.failure}>{said()}</ErrorLine>}
-      </Show>
-    </Show>
-  );
-}
-
-/// One of the files on the record: the pill, and the request its × makes.
-function Attachment(props: {
-  conversation: ConversationView;
-  attachment: AttachmentView;
-  frozen: boolean;
-  refuse: (said: string | null) => void;
-}): JSX.Element {
-  const queries = useQueryClient();
-
-  const forget = useMutation(() => ({
-    mutationFn: () =>
-      removeAttachment(props.conversation.id, props.attachment.id),
-    onSuccess: (outcome: AttachmentRemoved) => {
-      props.refuse(
-        outcome === "Removed" ? null : ATTACHMENT_REMOVAL_REFUSAL[outcome],
+        // Either way: what came back is about a conversation this pane read a
+        // moment ago, so reading it again is both the correction and — where
+        // the pill is simply gone — the whole of what there was to do.
+        void queries.invalidateQueries({ queryKey: ["conversation"] });
+      })
+      .catch((error: unknown) =>
+        setRefusedRemoval(
+          `${attachment.name} could not be removed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        ),
+      )
+      .finally(() =>
+        setRemoving((was) => was.filter((id) => id !== attachment.id)),
       );
+  };
 
-      // Either way: what came back is about a conversation this pane read a
-      // moment ago, so reading it again is both the correction and — where the
-      // pill is simply gone — the whole of what there was to do.
-      void queries.invalidateQueries({ queryKey: ["conversation"] });
-    },
-    onError: (error: Error) =>
-      props.refuse(
-        `${props.attachment.name} could not be removed: ${error.message}`,
-      ),
-  }));
+  /// The row itself: what the record holds, and what this device is still
+  /// sending drawn dimmed at the end of it — a file chosen with no pill until
+  /// the record came back would be a press with no answer.
+  const shown = (): Array<Shown> => [
+    ...what.conversation().attachments.map((attachment) => ({
+      name: attachment.name,
+      remove: what.frozen() ? undefined : () => forget(attachment),
+      removing: removing().includes(attachment.id),
+    })),
+    ...landing().map((one) => ({ name: one.name, landing: true })),
+  ];
 
-  return (
-    <Pill
-      name={props.attachment.name}
-      // Nothing to press once the Brief has frozen: the files freeze with it,
-      // and a × that could only be refused is not drawn.
-      remove={props.frozen ? undefined : () => forget.mutate()}
-      removing={forget.isPending}
-    />
-  );
-}
-
-/// One file drawn as a pill: its name cut to a line, and the × that takes it
-/// away where there is one to draw.
-///
-/// The same pill wherever a file is shown beside a Brief — on a draft, where it
-/// is a row of the record and the × is a request, and on the compose page,
-/// where it is a file this device is holding and the × is a change of mind. A
-/// file waiting to be sent and a file that has landed look alike because they
-/// are the same thing to the human, and what is different about them is only
-/// what the × does.
-///
-/// Cut at the front, which is how every other name in the app is cut — see
-/// [`Truncated`](../Truncated.tsx). On a file name that is the half worth
-/// keeping too: the extension is what says what the thing is, and the whole
-/// name is under the pointer either way.
-export function Pill(props: {
-  name: string;
-
-  /// Drawn dimmed where the file is on its way up and the record is not back:
-  /// the press has been made and there is nothing to press on it yet.
-  landing?: boolean;
-
-  /// Taking it away, where that is something that can be done at all — nothing
-  /// on one still landing, and nothing past the freeze.
-  remove?: () => void;
-
-  /// And whether the removal is already in flight, which is the one thing a
-  /// press on the × can be truly disabled for.
-  removing?: boolean;
-}): JSX.Element {
-  return (
-    <li
-      class={styles.attachment}
-      classList={{ [styles.landing!]: props.landing }}
-    >
-      <Truncated text={props.name} class={styles.attachmentName} />
-
-      {/* A mark rather than a word, the way a companion row's is, and named for
-          this file: the row is a line of names and the × on its own says
-          nothing about which one it takes. */}
-      <Show when={props.remove !== undefined}>
-        <button
-          type="button"
-          class={styles.forget}
-          aria-label={`Remove ${props.name}`}
-          disabled={props.removing}
-          onClick={() => props.remove?.()}
-        >
-          ×
-        </button>
-      </Show>
-    </li>
-  );
+  return { shown, refusals, refusedRemoval, send };
 }

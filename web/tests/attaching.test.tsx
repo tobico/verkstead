@@ -1,6 +1,10 @@
 //! The files the human puts on a draft: the paperclip that picks one, the row
 //! of pills the composer draws them as, and the × that takes one off again.
 //!
+//! And the drop that does the same thing without a picker: the whole box is
+//! the target, it highlights while a drag carrying files is over it, and a
+//! folder dragged along with them is skipped without a word.
+//!
 //! Over the golden fixtures like every other component test here, which is what
 //! makes the pills a drawing of what the server really says: the drafting
 //! Conversation in `conversation.json` carries two attached files, so what these
@@ -10,6 +14,7 @@ import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AttachmentView, ConversationView } from "../src/api/types";
+import pill from "../src/Attaching.module.css";
 import composer from "../src/workbench/Composer.module.css";
 import shell from "../src/Panes.module.css";
 import {
@@ -17,6 +22,7 @@ import {
   ATTACH_REFUSAL,
 } from "../src/workbench/Composer";
 import { OPEN, drawn, mount, theWorkbench } from "./bench";
+import { carrying, carryingNothing, drag, dropOn } from "./dragging";
 import { json, serving, whenever } from "./serving";
 import adopting from "./fixtures/conversation-adopting.json" with { type: "json" };
 
@@ -38,13 +44,13 @@ async function openComposer(at: ConversationView = OPEN): Promise<HTMLElement> {
 
 /// Every pill the row is drawing, in the order it has them.
 function pills(pane: ParentNode): HTMLElement[] {
-  return [...pane.querySelectorAll<HTMLElement>(`.${composer.attachment}`)];
+  return [...pane.querySelectorAll<HTMLElement>(`.${pill.attachment}`)];
 }
 
 /// The names on them.
 function names(pane: ParentNode): string[] {
-  return pills(pane).map((pill) =>
-    pill.querySelector(`.${composer.attachmentName}`)!.textContent!.trim(),
+  return pills(pane).map((one) =>
+    one.querySelector(`.${pill.attachmentName}`)!.textContent!.trim(),
   );
 }
 
@@ -58,6 +64,19 @@ function choose(pane: ParentNode, ...files: File[]): void {
   });
 
   fireEvent.change(picker);
+}
+
+/// Every upload the page made, whatever it was of: an attach is the one POST
+/// under `/attachments/`, so a page that attached nothing has none of them.
+function attaches(
+  fetching: ReturnType<typeof serving>,
+): Array<RequestInit | undefined> {
+  return fetching.mock.calls
+    .filter(
+      ([asked, init]) =>
+        String(asked).includes("/attachments/") && init?.method === "POST",
+    )
+    .map(([, init]) => init);
 }
 
 /// What the page put on the wire as a POST to `path`.
@@ -103,7 +122,7 @@ describe("the files on a draft", () => {
 
     const pane = await openComposer();
     const box = pane.querySelector(`.${composer.box}`)!;
-    const row = box.querySelector(`.${composer.attachments}`)!;
+    const row = box.querySelector(`.${pill.attachments}`)!;
 
     expect(row).toBeTruthy();
     expect(
@@ -212,7 +231,7 @@ describe("the files on a draft", () => {
 
     const landing = await drawn(
       pane,
-      `.${composer.attachment}.${composer.landing}`,
+      `.${pill.attachment}.${pill.landing}`,
     );
     expect(landing.textContent).toContain("notes.md");
     expect(landing.querySelector("button")).toBeNull();
@@ -221,7 +240,7 @@ describe("the files on a draft", () => {
 
     await waitFor(() =>
       expect(
-        pane.querySelector(`.${composer.attachment}.${composer.landing}`),
+        pane.querySelector(`.${pill.attachment}.${pill.landing}`),
       ).toBeNull(),
     );
   });
@@ -349,12 +368,168 @@ describe("the files on a draft", () => {
       ATTACHED.map((attachment) => attachment.name),
     );
     expect(
-      pane.querySelector(`.${composer.attachment} button`),
+      pane.querySelector(`.${pill.attachment} button`),
       "and none of them has a × on it any more",
     ).toBeNull();
     expect(
       screen.queryByRole("button", { name: "Attach a file" }),
       "and there is nothing to attach with",
     ).toBeNull();
+  });
+});
+
+/// The other way a file is put on a draft: dropped anywhere on the box rather
+/// than picked through the paperclip. The same attaching either way — what is
+/// asked here is the box being the target, the highlight while a drag is over
+/// it, and the folders a drop may carry.
+describe("dropping files on a draft's composer", () => {
+  /// The box, which is the whole of what a file is dropped onto: the text, the
+  /// pills and the setup row alike.
+  async function theBox(at: ConversationView = OPEN): Promise<HTMLElement> {
+    const pane = await openComposer(at);
+    return pane.querySelector<HTMLElement>(`.${composer.box}`)!;
+  }
+
+  /// What the server says when it takes one.
+  const attached = (id: number, name: string) =>
+    json({ Attached: { attachment: { id, name, bytes: 4, origin: "Brief" } } });
+
+  /// Where one file goes up.
+  const upload = (name: string) =>
+    `/api/ui/conversations/${OPEN.id}/attachments/${name}`;
+
+  it("attaches every file dropped on it", async () => {
+    const fetching = theWorkbench(
+      whenever(upload("notes.md"), attached(9, "notes.md"), "POST"),
+      whenever(upload("shot.png"), attached(10, "shot.png"), "POST"),
+    );
+
+    const box = await theBox();
+
+    dropOn(
+      box,
+      carrying({
+        files: [new File(["note"], "notes.md"), new File(["png"], "shot.png")],
+      }),
+    );
+
+    await waitFor(() => {
+      expect(writes(fetching, upload("notes.md"))).toHaveLength(1);
+      expect(writes(fetching, upload("shot.png"))).toHaveLength(1);
+    });
+  });
+
+  /// Drawn while the drag is over the box and not otherwise — and through every
+  /// child of it, which is why the box counts the drag in and out rather than
+  /// holding a flag: `dragenter` fires again for each element crossed, and a
+  /// flag would go out the moment the drag moved from the text onto a pill.
+  it("highlights the box while files are dragged over it", async () => {
+    theWorkbench();
+
+    const box = await theBox();
+    const carried = carrying({ files: [new File(["note"], "notes.md")] });
+
+    expect(box.classList.contains(composer.over!)).toBe(false);
+
+    drag(box, "dragenter", carried);
+    await waitFor(() =>
+      expect(box.classList.contains(composer.over!)).toBe(true),
+    );
+
+    drag(box.querySelector("textarea")!, "dragenter", carried);
+    drag(box.querySelector("textarea")!, "dragleave", carried);
+    expect(
+      box.classList.contains(composer.over!),
+      "and still over it, the drag having only crossed into a child",
+    ).toBe(true);
+
+    drag(box, "dragleave", carried);
+    await waitFor(() =>
+      expect(box.classList.contains(composer.over!)).toBe(false),
+    );
+  });
+
+  /// And gone the moment the files are let go, rather than left on a box that
+  /// is no longer under anything.
+  it("takes the highlight off on the drop", async () => {
+    theWorkbench(whenever(upload("notes.md"), attached(9, "notes.md"), "POST"));
+
+    const box = await theBox();
+
+    dropOn(box, carrying({ files: [new File(["note"], "notes.md")] }));
+
+    await waitFor(() =>
+      expect(box.classList.contains(composer.over!)).toBe(false),
+    );
+  });
+
+  /// A drag carrying a selection of text or a link is not a drop this box
+  /// takes: nothing is drawn, and the browser is left to do whatever it does
+  /// with one.
+  it("draws nothing for a drag carrying no files", async () => {
+    const fetching = theWorkbench();
+
+    const box = await theBox();
+    const carried = carryingNothing();
+
+    drag(box, "dragenter", carried);
+    const over = drag(box, "dragover", carried);
+
+    expect(box.classList.contains(composer.over!)).toBe(false);
+    expect(over.defaultPrevented, "and the drop is not taken").toBe(false);
+    expect(attaches(fetching)).toHaveLength(0);
+  });
+
+  /// A folder in the drop is skipped without a word: the files beside it are
+  /// attached, and what could not be is not a mistake to report.
+  it("attaches the files in a drop and skips the folder beside them", async () => {
+    const fetching = theWorkbench(
+      whenever(upload("notes.md"), attached(9, "notes.md"), "POST"),
+    );
+
+    const box = await theBox();
+
+    dropOn(
+      box,
+      carrying({
+        files: [new File(["note"], "notes.md")],
+        folders: ["screenshots"],
+      }),
+    );
+
+    await waitFor(() =>
+      expect(writes(fetching, upload("notes.md"))).toHaveLength(1),
+    );
+
+    expect(
+      writes(fetching, upload("screenshots")),
+      "and nothing went up for the folder",
+    ).toHaveLength(0);
+    expect(box.textContent, "and nothing was said about it").not.toContain(
+      "screenshots",
+    );
+  });
+
+  /// Once the Brief has frozen the files are settled with it, so the box takes
+  /// no drop either — the paperclip and the × are already gone.
+  it("takes no drop once the brief has frozen", async () => {
+    const frozen: ConversationView = { ...ADOPTING, attachments: ATTACHED };
+
+    const fetching = serving(
+      whenever("/api/ui/conversations", json([])),
+      whenever("/api/ui/conversations/archived", json({ showing: false })),
+      whenever("/api/ui/repos", json([])),
+      whenever("/api/ui/profiles", json([])),
+      whenever("/api/ui/abandoned-roadmaps", json([])),
+      whenever(`/api/ui/conversations/${frozen.id}`, json(frozen)),
+      json([]),
+    );
+
+    const box = await theBox(frozen);
+
+    dropOn(box, carrying({ files: [new File(["note"], "notes.md")] }));
+
+    expect(box.classList.contains(composer.over!)).toBe(false);
+    expect(attaches(fetching)).toHaveLength(0);
   });
 });
