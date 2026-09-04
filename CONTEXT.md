@@ -496,7 +496,7 @@ attached and removed while the round drafts, fixed once the work starts, and
 the frozen Brief pane draws them as a read-only row under the text. A Share
 carries the names and sizes and never the bytes. A same-named file is not
 replaced: the newcomer is renamed `name-2.ext`, and both stay. One flat
-directory per Conversation, 32 MiB a file, any kind of file, folders skipped.
+directory per Conversation, 32 MB a file, any kind of file, folders skipped.
 
 **On the compose page they are held in the page until the press**, because
 nothing exists on the server until Start or Save as draft: the files ride with

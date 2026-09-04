@@ -42,7 +42,13 @@ use crate::store;
 /// rather than a paragraph — and finite, because the body is read into memory
 /// to be written out. The route carries this as its own body limit over the
 /// router's default, the way the Question Set route raises its own.
-pub const MAX_BYTES: usize = 32 * 1024 * 1024;
+///
+/// **Decimal**, so that the cap is the number the composer names in its
+/// refusal and the number a pill would have said of the file that was
+/// refused — see `sized` in `crate::skills`, which is what every size in this
+/// product is said in. A binary cap and a decimal sentence would be a human
+/// told *larger than 32 MB* about a 33 MB file that was taken.
+pub const MAX_BYTES: usize = 32 * 1000 * 1000;
 
 /// Where a Conversation's attached files are read inside its sandbox, on the
 /// platform whose sandbox can mount one there.
@@ -561,6 +567,16 @@ fn sweeping(root: &Path, found: &[PathBuf], kept: &[i64]) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The cap is a round number in the words this product says sizes in, which
+    /// is the whole of what lets the composer's refusal name it: *larger than
+    /// 32 MB* is true of everything this refuses and of nothing it takes. A
+    /// binary cap under that sentence would be a 33 MB file quietly attached
+    /// after the human was told it would not be.
+    #[test]
+    fn the_cap_is_the_number_the_refusal_names() {
+        assert_eq!(crate::skills::sized(MAX_BYTES as i64), "32.0 MB");
+    }
 
     #[test]
     fn a_conversations_directory_is_under_the_root() {

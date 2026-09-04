@@ -944,7 +944,7 @@ fn attached_to(origin: store::Origin) -> &'static str {
 /// for is a session deciding whether to open something and what it will find
 /// when it does, rather than accounting. Decimal units, the way a file manager
 /// says it and the way the human who attached the file was told its size.
-fn sized(bytes: i64) -> String {
+pub(crate) fn sized(bytes: i64) -> String {
     let bytes = bytes.max(0);
 
     for (unit, scale) in [

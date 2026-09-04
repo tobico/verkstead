@@ -599,7 +599,7 @@ pub(crate) async fn attach(state: &AppState, id: i64, name: &str, body: &[u8]) -
 
     let directories = Attachments::under(&state.data_dir);
 
-    // Blocking work, off the runtime's threads: a 32 MiB write is not something
+    // Blocking work, off the runtime's threads: a 32 MB write is not something
     // to do in the middle of an async task other requests are waiting behind.
     let kept = {
         let name = name.to_owned();
