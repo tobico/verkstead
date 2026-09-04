@@ -6,8 +6,8 @@ call sites and one honest refusal where a session would start; this roadmap is
 the stage that port's brief named as future work. The decisions and their why
 are in [ADR-0014](../../adr/0014-windows-sessions.md), which is the sibling of
 [ADR-0012](../../adr/0012-desktop-tray-binary.md)'s macOS amendment one
-platform over; the terms are in [CONTEXT.md](../../../CONTEXT.md), whose
-Sandbox entry now names the three renderings.
+platform over; the terms are in [CONTEXT.md](../../../CONTEXT.md), which each
+stage updates as its piece lands.
 
 Two things stand between a Windows Verkstead and a session — the
 pseudo-terminal and the Sandbox — and they land separately, in that order.

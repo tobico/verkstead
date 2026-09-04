@@ -56,7 +56,11 @@ All from [ADR-0014](../../adr/0014-windows-sessions.md).
 - **The note goes.** The server-decided value from stage 01 says sandboxed;
   the composer and session pane draw nothing; `adoption.md`'s Windows section
   says what a session can and cannot get to, the way the Mac's does, with the
-  entries left on real directories written down where a reader will look.
+  entries left on real directories written down where a reader will look. And
+  **CONTEXT.md's Sandbox term** loses stage 01's unsandboxed sentence and names
+  the third rendering beside bubblewrap's and the seatbelt's — the term says
+  what the product is, so the AppContainer goes into it here rather than while
+  it is still being built.
 - **The AppContainer suite** runs for real on the `windows-2025` job: the same
   questions `tests/sandbox_macos.rs` asks of `sandbox-exec`, asked of the
   container by attempting — a file written where the Surface says read-write,
@@ -89,8 +93,10 @@ All from [ADR-0014](../../adr/0014-windows-sessions.md).
    its own, or off with `CARGO_HOME` alone. Accepts: a Rust repo's session
    builds; `RUSTC_WRAPPER` is set or absent per the decision.
 7. **The note goes, and the docs say what is true** — the view's value, the
-   viewer, README, adoption. Accepts: vitest no longer draws the note on a
-   sandboxed Windows view; adoption's Windows section reads beside the Mac's.
+   viewer, README, adoption, CONTEXT.md. Accepts: vitest no longer draws the
+   note on a sandboxed Windows view; adoption's Windows section reads beside
+   the Mac's; CONTEXT.md's Sandbox term names three renderings and no interim
+   state.
 
 ## Re-verify at start
 

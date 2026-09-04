@@ -203,14 +203,6 @@ session doing harm is that there is nothing within reach to harm. The
 build and cannot disagree about a schema — with the libraries that image was
 packed with, where it was packed with any, reached through a launcher of
 Verkstead's own so that nothing else the session runs loads out of them.
-**That surface is one description rendered once per platform**: bubblewrap's
-flags on Linux, where the rest of the machine is simply not there; a seatbelt
-policy on a Mac and an AppContainer on Windows, where the machine is there and
-refused ([ADR-0012](docs/adr/0012-desktop-tray-binary.md) as amended,
-[ADR-0014](docs/adr/0014-windows-sessions.md)). Until the Windows rendering
-lands, a Windows session runs with no Sandbox at all and the workbench says so
-wherever one starts — a state the ADR chose over holding sessions back, and one
-that goes the day the rendering arrives.
 _Avoid_: container, jail, isolation, environment
 
 **Sandbox Configuration**:

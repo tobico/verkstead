@@ -76,8 +76,11 @@ is not repeated here beyond what a task needs.
   `cfg(unix)`.
 - **Docs**: the README's "Windows has everything but those", `adoption.md`'s
   Windows section, `design/verkstead.md`'s note and `development.md` say what
-  is now true, including that a session runs unsandboxed until stage 03.
-  ADR-0014 and the CONTEXT.md Sandbox term already say it.
+  is now true, including that a session runs unsandboxed until stage 03. And
+  **CONTEXT.md's Sandbox term**, which says nothing about Windows today and
+  gains the unsandboxed state here — the term is written as what the product
+  is, so it moves when the stage moves it rather than ahead of it; stage 03
+  takes the same sentence back out. ADR-0014 already says the why.
 
 ## Proposed tasks (provisional)
 
@@ -113,9 +116,10 @@ is not repeated here beyond what a task needs.
    the PowerShell stand-in, on the `windows-2025` job. Accepts: the job runs
    it green; a session's Capture holds what the stand-in printed; the sccache
    Compile Server starts as a plain process when sccache is on the runner.
-8. **Docs** — README, adoption, design, development. Accepts: nothing left in
-   the docs says Windows runs no sessions; the unsandboxed state is written
-   where a Windows reader will find it.
+8. **Docs** — README, adoption, design, development, CONTEXT.md. Accepts:
+   nothing left in the docs says Windows runs no sessions; the unsandboxed
+   state is written where a Windows reader will find it; CONTEXT.md's Sandbox
+   term says what a Windows session gets today.
 
 ## Re-verify at start
 
