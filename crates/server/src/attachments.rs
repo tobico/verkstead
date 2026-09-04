@@ -25,6 +25,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
+use crate::platform::Platform;
+
 /// How large one attached file may be.
 ///
 /// Generous, because what the human has to hand is a screenshot or an export
@@ -32,6 +34,65 @@ use anyhow::{Context, Result};
 /// to be written out. The route carries this as its own body limit over the
 /// router's default, the way the Question Set route raises its own.
 pub const MAX_BYTES: usize = 32 * 1024 * 1024;
+
+/// Where a Conversation's attached files are read inside its sandbox, on the
+/// platform whose sandbox can mount one there.
+///
+/// Beside the skills, in the directory of Verkstead's own — see
+/// [`crate::sandbox::own_directory`]. What is under that directory is what
+/// Verkstead put there rather than whatever the machine happened to have, and
+/// the path is nobody's: nothing the human attached lands where a backend goes
+/// looking for something of its own.
+pub(crate) const INSIDE: &str = "/verkstead/attachments";
+
+/// Where a session whose Conversation's files are at `directory` reads them.
+///
+/// [`INSIDE`] where a bind makes that path, and the directory's own real path
+/// where none can. On a Mac `/verkstead` is the Data Directory itself, so there
+/// is no bind to put one Conversation's directory at a name every Conversation
+/// would otherwise share: what the policy reaches is that Conversation's own
+/// subdirectory of the attachments root and no other, and what the prompt names
+/// is where the files really are.
+///
+/// The skills' own arrangement, one level deeper — see
+/// [`crate::skills::Skills::inside`]. Theirs is one directory for the whole
+/// installation, so one path serves every session; this is one per
+/// Conversation, so the path a session is told is that Conversation's.
+///
+/// A `Platform` rather than a `cfg`, for the reason [`Platform`] is a value at
+/// all: the arm this machine will never run is still an arm a test on it can
+/// ask for, and this one decides a path a session is told about in prose.
+pub(crate) fn inside(platform: Platform, directory: &Path) -> PathBuf {
+    match platform {
+        Platform::MacOs => directory.to_owned(),
+        Platform::Linux | Platform::Windows => PathBuf::from(INSIDE),
+    }
+}
+
+/// One Conversation's attached files as its sandbox is given them: the
+/// directory on the host, and where the session inside reads it.
+///
+/// Both of them, because the two are the same path on only one platform — see
+/// [`inside`]. Which way a session may reach it is not carried here at all: it
+/// is read-only whatever is in it, the copy being the record, and an agent that
+/// wants to work on a file copies it into the Worktree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Bound {
+    host: PathBuf,
+    inside: PathBuf,
+}
+
+impl Bound {
+    /// The directory on the host, which is what the bind reaches for.
+    pub(crate) fn host(&self) -> &Path {
+        &self.host
+    }
+
+    /// And where a session finds it.
+    pub(crate) fn inside(&self) -> &Path {
+        &self.inside
+    }
+}
 
 /// The directories a Conversation's attached files are kept in.
 ///
@@ -62,6 +123,38 @@ impl Attachments {
     /// moment there is something to put in it.
     pub(crate) fn directory(&self, conversation_id: i64) -> PathBuf {
         self.root.join(conversation_id.to_string())
+    }
+
+    /// What a Conversation's sandbox binds, or `None` where there is nothing to
+    /// bind — no bind, and nothing at that path inside.
+    ///
+    /// Asked of the directory rather than of the record, because what a bind
+    /// needs is a directory: a source that is not there would be a session
+    /// refusing to start with the reason buried in bwrap's complaint. And asked
+    /// for something *in* it rather than for the directory alone, because one
+    /// holding nothing is the Conversation whose files were all removed again —
+    /// the directory is left where it is — and a path an agent is told about and
+    /// finds empty is worse than a path that is not there.
+    pub(crate) fn bound(&self, platform: Platform, conversation_id: i64) -> Option<Bound> {
+        let host = self.directory(conversation_id);
+
+        // A directory that is not there and one holding nothing are the same
+        // answer here, which is what makes this one reading rather than two.
+        std::fs::read_dir(&host).ok()?.next()?.ok()?;
+
+        Some(Bound {
+            inside: inside(platform, &host),
+            host,
+        })
+    }
+
+    /// And where a session reads them, asked without asking whether there is
+    /// anything there: what the prompt's listing names each file under.
+    ///
+    /// One answer for the bind and the listing both, so that a session cannot be
+    /// told about a path other than the one it was given.
+    pub(crate) fn inside(&self, platform: Platform, conversation_id: i64) -> PathBuf {
+        inside(platform, &self.directory(conversation_id))
     }
 
     /// Put a file in a Conversation's directory, answering with the name it
@@ -269,6 +362,63 @@ mod tests {
             attachments.keep(8, "notes.md", b"theirs").unwrap(),
             "notes.md",
             "the name is free in a directory of its own",
+        );
+    }
+
+    /// Where a bind can make one path serve every Conversation it is that path,
+    /// and where none can it is the directory the files are really in — which is
+    /// what keeps one Conversation's listing out of another's on the platform
+    /// that has nothing to mount.
+    #[test]
+    fn what_a_session_is_told_is_the_one_directory_it_was_given() {
+        let attachments = Attachments::under(Path::new("/data"));
+
+        assert_eq!(
+            attachments.inside(Platform::Linux, 7),
+            Path::new(INSIDE),
+            "beside the skills, in the directory of Verkstead's own",
+        );
+
+        assert_eq!(
+            attachments.inside(Platform::MacOs, 7),
+            Path::new("/data/attachments/7"),
+            "and where nothing can be mounted, the real directory",
+        );
+        assert_ne!(
+            attachments.inside(Platform::MacOs, 7),
+            attachments.inside(Platform::MacOs, 8),
+            "which is a different one per Conversation, as the bind's is",
+        );
+    }
+
+    /// A Conversation with nothing attached gets no bind: there would be nothing
+    /// at the path, and a listing of nothing is worse than no path at all.
+    #[test]
+    fn there_is_nothing_to_bind_until_something_is_attached() {
+        let state = tempfile::tempdir().unwrap();
+        let attachments = Attachments::under(state.path());
+
+        assert_eq!(
+            attachments.bound(Platform::Linux, 7),
+            None,
+            "nothing has ever been attached, so there is no directory either",
+        );
+
+        attachments.keep(7, "notes.md", b"first").unwrap();
+
+        let bound = attachments
+            .bound(Platform::Linux, 7)
+            .expect("a Conversation with a file attached is bound");
+
+        assert_eq!(bound.host(), state.path().join("attachments/7"));
+        assert_eq!(bound.inside(), Path::new(INSIDE));
+
+        attachments.drop_file(7, "notes.md").unwrap();
+
+        assert_eq!(
+            attachments.bound(Platform::Linux, 7),
+            None,
+            "and the directory the removal left behind is not something to bind",
         );
     }
 

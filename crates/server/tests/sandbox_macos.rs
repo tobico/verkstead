@@ -57,6 +57,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::platform::Platform;
@@ -131,6 +132,11 @@ struct Grilling {
     skills: Skills,
     verkstead: Executable,
     handoffs: Handoffs,
+
+    /// And where the files the human attached to it are, which is a root under
+    /// that directory again — one directory per Conversation, and read-only
+    /// inside every session the Conversation has.
+    attachments: Attachments,
     settings: Settings,
 }
 
@@ -174,6 +180,7 @@ impl Grilling {
             &self.skills,
             &self.verkstead,
             &self.handoffs,
+            &self.attachments,
             &self.settings.secrets(),
             &self.settings.config(),
             cache,
@@ -256,6 +263,7 @@ if [ "${{SCCACHE_START_SERVER-}}" = "1" ]; then
         dir {worktrees} worktrees
         dir {cache} cache
         dir {handoffs} handoffs
+        dir {attachments} attachments
         file {database} database
         file {config} config
         file {secrets} secrets
@@ -269,6 +277,7 @@ fi
             worktrees = quoted(&self.worktrees_dir()),
             cache = quoted(&self.cache_dir()),
             handoffs = quoted(&self.state.path().join("handoffs")),
+            attachments = quoted(&self.state.path().join("attachments")),
             database = quoted(&self.state.path().join("verkstead.db")),
             config = quoted(&settings.config_path()),
             secrets = quoted(&settings.secrets_path()),
@@ -279,6 +288,30 @@ fi
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         path
+    }
+
+    /// Put a file in the Conversation's attachments directory, the way an upload
+    /// does — see the Linux suite's own, which is the same fixture for the same
+    /// reason: what is being probed is the reach, and a route and a row are the
+    /// attaching tests' half.
+    fn attach(&self, name: &str, body: &[u8]) -> PathBuf {
+        let directory = self.attachments_dir();
+
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join(name), body).unwrap();
+
+        directory
+    }
+
+    /// Where that directory is, which on this platform is also the path a
+    /// session reads it at: there is no bind to put it anywhere else, so the
+    /// policy reaches the Conversation's own subdirectory of the attachments
+    /// root and the prompt names that.
+    fn attachments_dir(&self) -> PathBuf {
+        self.state
+            .path()
+            .join("attachments")
+            .join(self.conversation.id.to_string())
     }
 
     /// The companion of that name, as the Conversation now carries it — where
@@ -567,6 +600,7 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
 
     let skills = Skills::installed(state.path()).expect("this binary carries skills");
     let handoffs = Handoffs::under(state.path());
+    let attachments = Attachments::under(state.path());
     let settings = Settings::in_data_dir(state.path());
 
     // Not under `bin/`, which is where this platform links what a session finds
@@ -591,6 +625,7 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
         skills,
         verkstead,
         handoffs,
+        attachments,
         settings,
     }
 }
@@ -1461,6 +1496,88 @@ async fn what_a_session_writes_in_its_handoff_directory_is_there_when_it_has_gon
     );
 }
 
+/// The other half of the Conversation's own directory outside the worktree: the
+/// files the human attached, at the path the prompt names them at — which here
+/// is where they really are, there being no mount to put them anywhere else.
+///
+/// **Read-only**, and read-only through a policy rather than through a mount:
+/// what a Mac can say about the directory is that it may be read and not
+/// written, which is what `read` is.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn the_attached_files_are_read_at_the_path_the_prompt_names_and_written_nowhere() {
+    let fixture = grilling().await;
+    let directory = fixture.attach("wireframe.png", b"PNG");
+
+    let sandbox = fixture.sandbox();
+
+    let reported = probe(
+        &sandbox,
+        &format!(
+            r#"
+            dir {directory} attachments
+            file {file} attached
+            "#,
+            directory = quoted(&directory),
+            file = quoted(&directory.join("wireframe.png")),
+        ),
+    );
+
+    assert_eq!(
+        reported["attachments"], "read",
+        "a session reads what was attached and cannot add anything beside it"
+    );
+    assert_eq!(
+        reported["attached"], "read",
+        "nor write over the file the human handed over"
+    );
+}
+
+/// And a Conversation nothing was attached to reaches nothing there: the policy
+/// says the directory it was given and no other, and it was given none.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn a_conversation_with_nothing_attached_reaches_nothing_there() {
+    let fixture = grilling().await;
+
+    // Really on disk, so that its being out of reach inside is the policy rather
+    // than a directory nobody made: what a Conversation with nothing attached
+    // has is a root beside its own that is somebody else's.
+    let anothers = fixture.state.path().join("attachments/999");
+    std::fs::create_dir_all(&anothers).unwrap();
+    std::fs::write(anothers.join("theirs.md"), "not this Conversation's\n").unwrap();
+
+    let sandbox = fixture.sandbox();
+
+    let reported = probe(
+        &sandbox,
+        &format!(
+            r#"
+            dir {mine} mine
+            dir {anothers} anothers
+            "#,
+            mine = quoted(&fixture.attachments_dir()),
+            anothers = quoted(&anothers),
+        ),
+    );
+
+    assert_eq!(
+        reported["mine"], "absent",
+        "nothing was attached, so there is no directory to reach"
+    );
+    assert_eq!(
+        reported["anothers"], "refused",
+        "and the attachments root is not what a session is given — one \
+         Conversation's directory is, and this is not one"
+    );
+}
+
 /// And the skills say that path rather than the mount, so a session told where
 /// to write its handoff is told somewhere it can write.
 ///
@@ -1952,6 +2069,7 @@ async fn the_compile_server_holds_the_worktrees_and_none_of_the_data_directory()
     fixture.configure_github_token("github_token: ghp_thetoken\n");
     std::fs::write(fixture.state.path().join("verkstead.db"), "the database\n").unwrap();
     std::fs::create_dir_all(fixture.state.path().join("handoffs")).unwrap();
+    fixture.attach("wireframe.png", b"PNG");
 
     let cache = fixture.cache(true);
     cache.compiling(&RustBuildCache::default());
@@ -1983,6 +2101,11 @@ async fn the_compile_server_holds_the_worktrees_and_none_of_the_data_directory()
         reported["handoffs"], "refused",
         "and nothing else of the Data Directory either — the Worktrees are the \
          whole of what it is shown"
+    );
+    assert_eq!(
+        reported["attachments"], "refused",
+        "the files the human attached are a session's to read, and the compile \
+         server is not a session"
     );
 
     assert_eq!(

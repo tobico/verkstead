@@ -60,14 +60,16 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tower::ServiceExt;
 use verkstead_render::{
-    Adopted, AgentOutputEvent, BriefSaved, Capture, CommitEvent, CommitPane, CompanionAdded,
-    CompanionMode, CompanionModeChosen, CompanionView, ConflictResolution, ConversationClosed,
-    ConversationSteered, ConversationStopped, ConversationView, GrillingStarted, Lifecycle,
-    NoticeEvent, PickedView, PinnedEvent, ProfileSaved, PullRequestEvent, Registered, Resolved,
-    Resumed, Shown, Size, StageListReached, Started, SteerOpened, Submitted, TaskListEvent,
-    TaskListReached, TimelineEvent, TranscriptView, Turn, Watching,
+    Adopted, AgentOutputEvent, Attached, BriefSaved, Capture, CommitEvent, CommitPane,
+    CompanionAdded, CompanionMode, CompanionModeChosen, CompanionView, ConflictResolution,
+    ConversationClosed, ConversationSteered, ConversationStopped, ConversationView,
+    GrillingStarted, Lifecycle, NoticeEvent, PickedView, PinnedEvent, ProfileSaved,
+    PullRequestEvent, Registered, Resolved, Resumed, Shown, Size, StageListReached, Started,
+    SteerOpened, Submitted, TaskListEvent, TaskListReached, TimelineEvent, TranscriptView, Turn,
+    Watching,
 };
 use verkstead_schema::{Direction, Nudge};
+use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::platform::Platform;
@@ -427,6 +429,7 @@ impl Grilling {
                 Skills::installed(self.state.path()).expect("this binary carries skills"),
                 equipped(self.state.path()),
                 Handoffs::under(self.state.path()),
+                Attachments::under(self.state.path()),
                 Settings::in_data_dir(self.state.path()),
             )
             .at_pace(*BRISKLY),
@@ -1711,6 +1714,14 @@ fn gh_stub(script: &str) -> Gh {
     ])
 }
 
+/// What a fixture that puts no file on the Conversation hands
+/// [`grilling_however_started`] — which is all of them but one, a file being
+/// the one thing these are otherwise not about.
+///
+/// Named rather than written as another `&[]`, because the companions beside it
+/// are one too and two empty slices in a row say nothing about which is which.
+const NOTHING_ATTACHED: &[(&str, &str)] = &[];
+
 /// Stand a workbench up with `stub` where claude goes, and press *start
 /// grilling*.
 async fn grilling(stub: &str) -> Grilling {
@@ -1730,6 +1741,7 @@ async fn grilling_on_codex(stub: &str) -> Grilling {
         PULL_REQUEST,
         *BRISKLY,
         &[],
+        NOTHING_ATTACHED,
         Pickers::GrillingOnCodex,
         Origin::None,
         None,
@@ -1747,6 +1759,7 @@ async fn grilling_spilling_on_codex(spill: tempfile::TempDir, stub: &str, gh: &s
         gh,
         *BRISKLY,
         &[],
+        NOTHING_ATTACHED,
         Pickers::EverythingOnCodex,
         Origin::None,
         None,
@@ -1774,6 +1787,7 @@ async fn grilling_drawing(stub: &str, signature: &str) -> Grilling {
         PULL_REQUEST,
         *BRISKLY,
         &[],
+        NOTHING_ATTACHED,
         Pickers::EverythingOnCodex,
         Origin::None,
         Some(signature),
@@ -1796,6 +1810,7 @@ async fn grilling_at_work(stub: &str) -> Grilling {
         PULL_REQUEST,
         *BRISKLY,
         &[],
+        NOTHING_ATTACHED,
         Pickers::EverythingOnCodex,
         Origin::None,
         None,
@@ -1817,6 +1832,7 @@ async fn grilling_on_grok(stub: &str) -> Grilling {
         PULL_REQUEST,
         *BRISKLY,
         &[],
+        NOTHING_ATTACHED,
         Pickers::EverythingOnGrok,
         Origin::None,
         None,
@@ -1839,6 +1855,7 @@ async fn grilling_on_opencode(stub: &str) -> Grilling {
         PULL_REQUEST,
         *BRISKLY,
         &[],
+        NOTHING_ATTACHED,
         Pickers::EverythingOnOpenCode,
         Origin::None,
         None,
@@ -1857,6 +1874,7 @@ async fn grilling_spilling_on_opencode(spill: tempfile::TempDir, stub: &str) -> 
         PULL_REQUEST,
         *BRISKLY,
         &[],
+        NOTHING_ATTACHED,
         Pickers::EverythingOnOpenCode,
         Origin::None,
         None,
@@ -1911,6 +1929,23 @@ async fn grilling_alongside(stub: &str, companion: &str) -> Grilling {
         PULL_REQUEST,
         *BRISKLY,
         &[(companion, CompanionMode::ReadOnly)],
+    )
+    .await
+}
+
+/// And the same with a file attached to the Conversation before the press,
+/// which is the only time one can be put on: attachments freeze with the Brief.
+async fn grilling_with_a_file_attached(stub: &str, name: &str, contents: &str) -> Grilling {
+    grilling_however_started(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        &[(name, contents)],
+        Pickers::UnderEveryPairing,
+        Origin::None,
+        None,
     )
     .await
 }
@@ -1996,6 +2031,7 @@ async fn grilling_unreviewed(spill: tempfile::TempDir, stub: &str, gh: &str) -> 
         gh,
         *BRISKLY,
         &[],
+        NOTHING_ATTACHED,
         Pickers::Unreviewed,
         Origin::None,
         None,
@@ -2013,6 +2049,7 @@ async fn building_ungrilled(spill: tempfile::TempDir, stub: &str, gh: &str) -> G
         gh,
         *BRISKLY,
         &[],
+        NOTHING_ATTACHED,
         Pickers::Ungrilled,
         Origin::None,
         None,
@@ -2088,6 +2125,7 @@ async fn grilling_at_pace(
         gh,
         pace,
         companions,
+        NOTHING_ATTACHED,
         Pickers::UnderEveryPairing,
         Origin::None,
         None,
@@ -2108,6 +2146,7 @@ async fn grilling_pushing(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gri
         gh,
         *BRISKLY,
         &[],
+        NOTHING_ATTACHED,
         Pickers::UnderEveryPairing,
         Origin::Cloned,
         None,
@@ -2138,6 +2177,7 @@ async fn grilling_however_started(
     gh: &str,
     pace: Pace,
     companions: &[(&str, CompanionMode)],
+    attaching: &[(&str, &str)],
     pickers: Pickers,
     origin: Origin,
     signature: Option<&str>,
@@ -2224,6 +2264,25 @@ async fn grilling_however_started(
     )
     .await;
     assert_eq!(saved, BriefSaved::Saved);
+
+    // And whatever the human attached alongside it, off the same route the
+    // paperclip presses: the raw bytes as the body and the name in the path.
+    // Before the press for the companions' reason — attachments freeze with the
+    // Brief, so a draft is the only time one can be put on.
+    for (name, contents) in attaching {
+        let attached: Attached = upload(
+            app,
+            &format!("/api/ui/conversations/{id}/attachments/{name}"),
+            contents,
+        )
+        .await;
+
+        let Attached::Attached { attachment } = attached else {
+            panic!("expected {name} to be attached, got {attached:?}");
+        };
+
+        assert_eq!(attachment.name, *name);
+    }
 
     let grilling: GrillingStarted = post(
         app,
@@ -2595,6 +2654,7 @@ async fn bench_at_pace(
         Skills::installed(state.path()).expect("this binary carries skills"),
         equipped(state.path()),
         Handoffs::under(state.path()),
+        Attachments::under(state.path()),
         Settings::in_data_dir(state.path()),
     )
     .at_pace(pace);
@@ -2887,6 +2947,23 @@ async fn post<T: DeserializeOwned>(app: &Router, path: &str, body: &serde_json::
     read(&body)
 }
 
+/// A file put on a Conversation: the raw bytes as the body, and no content type
+/// at all — which is what the composer sends and what the route reads.
+async fn upload<T: DeserializeOwned>(app: &Router, path: &str, body: &str) -> T {
+    let (status, body) = fetch(
+        app,
+        Request::builder()
+            .method("POST")
+            .uri(path)
+            .body(Body::from(body.to_owned()))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "POST {path} failed: {body}");
+    read(&body)
+}
+
 async fn fetch(app: &Router, request: Request<Body>) -> (StatusCode, String) {
     let response = app.clone().oneshot(request).await.unwrap();
     let status = response.status();
@@ -2938,6 +3015,42 @@ async fn a_grilling_session_is_told_about_the_companion_repos_too() {
     assert!(
         said.contains(&format!("detached at `{at}`, read-only.")),
         "and what it holds and whether it may be written to: {said:?}"
+    );
+}
+
+/// And what a Conversation with a file attached tells its grilling session: the
+/// same prompt, with the file named under it at the path its sandbox puts it at.
+///
+/// The grilling session for the companions listing's reason — it is the one
+/// whose prompt is built nowhere near the rest, so a section that reaches this
+/// one reaches the wrap-up's own by the same line.
+#[tokio::test]
+async fn a_grilling_session_is_told_about_the_attached_files_too() {
+    let fixture =
+        grilling_with_a_file_attached(r#"printf 'prompt=%s' "$2""#, "rates.csv", "a,b\n1,2\n")
+            .await;
+
+    let event = fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
+        .await;
+
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains(BRIEF),
+        "the Brief is still what the grilling starts from: {said:?}"
+    );
+    assert!(
+        said.contains("# Attached files"),
+        "and the file is named under it: {said:?}"
+    );
+    assert!(
+        said.contains("Attached to the Brief:"),
+        "under what it was attached to: {said:?}"
+    );
+    assert!(
+        said.contains("- `/verkstead/attachments/rates.csv`, 8 bytes."),
+        "at the path the sandbox puts it at, with its size: {said:?}"
     );
 }
 
@@ -4835,6 +4948,7 @@ async fn a_capture_survives_the_server_restarting() {
             Skills::installed(fixture.state.path()).expect("this binary carries skills"),
             equipped(fixture.state.path()),
             Handoffs::under(fixture.state.path()),
+            Attachments::under(fixture.state.path()),
             Settings::in_data_dir(fixture.state.path()),
         ),
         gh_stub(PULL_REQUEST),
@@ -6988,6 +7102,7 @@ async fn a_restarted_server_watches_the_checks_it_was_left_wrapping_up() {
             Skills::installed(fixture.state.path()).expect("this binary carries skills"),
             equipped(fixture.state.path()),
             Handoffs::under(fixture.state.path()),
+            Attachments::under(fixture.state.path()),
             Settings::in_data_dir(fixture.state.path()),
         )
         .at_pace(*BRISKLY),

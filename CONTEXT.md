@@ -184,10 +184,10 @@ _Avoid_: state directory, work dir, scratch space, cache
 **Sandbox**:
 What a session runs inside: its Conversation's Worktree, the Repo's git
 directory and the Conversation's handoff directory writable, the Agent
-Profile's pair at `~/.claude` and `~/.claude.json`, the system, the Skills and
-the Verkstead executable read-only in a directory of Verkstead's own, and
-nothing else of the machine at all — not even the checkout the Worktree was
-made from. Nothing at all stands where the account's own skills would be found:
+Profile's pair at `~/.claude` and `~/.claude.json`, the system, the Skills, the
+Conversation's **Attachments** and the Verkstead executable read-only in a
+directory of Verkstead's own, and nothing else of the machine at all — not even
+the checkout the Worktree was made from. Nothing at all stands where the account's own skills would be found:
 they are hidden rather than merged with, and where the mechanism has no mount
 to hide one with it refuses the path instead. Each Companion Repo the
 Conversation was configured with is inside as well: its Worktree and the git

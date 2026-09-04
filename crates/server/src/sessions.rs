@@ -36,6 +36,7 @@ use tokio::task::JoinHandle;
 use verkstead_render::SessionsHere;
 use verkstead_schema::Nudge;
 
+use crate::attachments::Attachments;
 use crate::build_cache::{self, BuildCache};
 use crate::capture::{Reading, Told};
 use crate::handoffs::Handoffs;
@@ -119,6 +120,13 @@ pub struct Agents {
     verkstead: Option<Executable>,
 
     handoffs: Handoffs,
+
+    /// And where the files the human attached to a Conversation are kept, which
+    /// is a root under the same directory again — one directory per
+    /// Conversation, read-only inside every one of its sandboxes and listed at
+    /// the end of every one of its prompts. See [`crate::attachments`].
+    attachments: Attachments,
+
     settings: Settings,
 
     /// Something to run where a Profile's own binary goes, or `None` to run the
@@ -178,6 +186,7 @@ impl Agents {
         skills: Skills,
         verkstead: Option<Executable>,
         handoffs: Handoffs,
+        attachments: Attachments,
         settings: Settings,
     ) -> Agents {
         Agents {
@@ -188,6 +197,7 @@ impl Agents {
             skills,
             verkstead,
             handoffs,
+            attachments,
             settings,
             agent: None,
             signature: None,
@@ -207,12 +217,21 @@ impl Agents {
         skills: Skills,
         verkstead: Option<Executable>,
         handoffs: Handoffs,
+        attachments: Attachments,
         settings: Settings,
     ) -> Agents {
         Agents {
             agent: Some(agent),
             ..Agents::new(
-                homes, reachable, config, cache, skills, verkstead, handoffs, settings,
+                homes,
+                reachable,
+                config,
+                cache,
+                skills,
+                verkstead,
+                handoffs,
+                attachments,
+                settings,
             )
         }
     }
@@ -1633,6 +1652,17 @@ impl Sessions {
         // so a prompt builder added later cannot forget it.
         let prompt = skills::alongside(prompt, &conversation.branch, &conversation.companions);
 
+        // And the files the human attached to it, listed under that again —
+        // here for the listing above's reason, and naming each file at the path
+        // the bind below puts it at. Both sides ask
+        // [`crate::attachments::Attachments`] the same question, so a session
+        // cannot be told about a directory other than the one it was given.
+        let prompt = skills::attached(
+            &prompt,
+            &store::attachments(pool, conversation.id).await?,
+            &agents.attachments.inside(Platform::HERE, conversation.id),
+        );
+
         // And, where the branch is still on the name Verkstead invented for it,
         // the instruction to pick a better one. Here for the reason the listing
         // above is here — it is not any one prompt's, and the three starts that
@@ -1661,6 +1691,7 @@ impl Sessions {
             let reachable = agents.reachable.clone();
             let skills = agents.skills.clone();
             let handoffs = agents.handoffs.clone();
+            let attachments = agents.attachments.clone();
             let settings = agents.settings.clone();
             let extra = agents.config.binds_for(&conversation);
             let cache = agents.cache.clone();
@@ -1692,6 +1723,7 @@ impl Sessions {
                     &skills,
                     &verkstead,
                     &handoffs,
+                    &attachments,
                     &secrets,
                     &config,
                     &cache,
@@ -2570,6 +2602,7 @@ mod tests {
             // here runs it.
             Executable::of_the_server(state),
             Handoffs::under(state),
+            Attachments::under(state),
             Settings::in_data_dir(state),
         )
     }

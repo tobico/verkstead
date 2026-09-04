@@ -884,6 +884,12 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
     // session starts.
     let handoffs = handoffs::Handoffs::under(&data_dir);
 
+    // And where the files the human attaches to a Conversation are kept, which
+    // is a root under the same directory again: each Conversation's own is made
+    // as its first file lands in it, and read-only inside every session it has
+    // after that — see [`attachments`].
+    let attachments = attachments::Attachments::under(&data_dir);
+
     // And where the credentials are read from, which is the same directory
     // again — both the ones a session runs with and the one the server's own
     // `gh` authenticates as. Nothing is read here: the files are read as each
@@ -936,6 +942,7 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
                 skills,
                 verkstead,
                 handoffs,
+                attachments,
                 settings.clone(),
             ),
             // Whatever `gh` this machine has, authenticating as the configured

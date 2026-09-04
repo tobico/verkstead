@@ -27,6 +27,7 @@ use std::time::{Duration, Instant};
 
 use support::repo_with_a_commit;
 use verkstead_schema::{Direction, QuestionSet, Response};
+use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::platform::Platform;
@@ -119,6 +120,7 @@ impl Grilling {
             )
             .expect("cargo builds this crate's binary for its own tests"),
             &Handoffs::under(self.state.path()),
+            &Attachments::under(self.state.path()),
             &settings.secrets(),
             &settings.config(),
             // What this asks is whether the bundled CLI reaches its server, so
