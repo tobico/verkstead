@@ -767,7 +767,27 @@ badge, no Event, and nothing held off. Somebody who means to take the work on by
 hand presses **Stop** first, and the Conversation being **Stopped** is what
 holds the run off while they do; a session typed into while a run is still
 driving it is ended and advanced by the ordinary rules.
-_Avoid_: terminal, console, attach view, pane
+_Avoid_: terminal (that is the human's own shell — see **Terminal**), console,
+attach view, pane
+
+**Terminal**:
+A shell of the human's own inside a Conversation's Sandbox, with the Worktree as
+its working directory: the server user's login shell, `/bin/sh` where there is
+no usable one, inside the worktree's dev shell, under the implementation
+Profile's account with everything a session gets. Opened from the **Terminal
+icon on the Timeline's header** into a details pane of its own at `/terminal`,
+where each one is a tab: one opens when the pane loads with none live, plus opens
+another, a tab goes when its shell ends, and the pane never stands empty — the
+last tab going opens a fresh one, unless the shell ended within moments of
+starting or could not start at all, in which case the tab stays saying why until
+plus is pressed. Close is on the tab's menu, a right-click or a long press.
+The same server-held pseudo-terminal, virtual terminal and xterm window as a
+Screen, and the same rule about the human: typing into one holds nothing off and
+records nothing. **Not a record**: memory only, no Capture, no Event, nothing in
+a Share, and gone with the server. Lives until its shell exits, it is closed, the
+Conversation closes or the server stops, and comes back as a tab whenever the
+pane is reopened in between. See ADR-0013.
+_Avoid_: shell (what runs in it), console, Screen (a session's), tty
 
 **Idle**:
 A running session that has stopped — not gone, but sitting there with its turn
