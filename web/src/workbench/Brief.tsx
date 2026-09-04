@@ -14,6 +14,11 @@
 //! ask what this piece of work *is* — and a Conversation with no companions gets
 //! the summary all the same.
 //!
+//! The files handed over with the Brief are under it, as the row of pills the
+//! composer drew them as — with no × on one, and each saying how large it is.
+//! They freeze with the Brief, so past drafting the row is a record of what the
+//! sessions were given rather than a list still being arranged.
+//!
 //! Read-only throughout. The composer is still the only place any of this is
 //! changed, so there is not a control on this pane: what it says of a
 //! Conversation past drafting is what nobody can change any more.
@@ -30,6 +35,7 @@
 import { For, Show, type JSX } from "solid-js";
 
 import { listProfiles } from "../api/client";
+import { Attachments } from "../Attaching";
 import type {
   BriefEvent,
   CompanionMode,
@@ -112,6 +118,22 @@ export function Brief(props: {
       >
         <div class={`${styles.brief} markdown`} innerHTML={props.brief.html} />
       </Show>
+
+      {/* And the files handed over with it, under the text the way they stood
+          under it on the composer — the same pills, with nothing left to press
+          on one: attachments freeze with the Brief, so what this draws is a
+          record of what the sessions were given. Each says how large it is,
+          which is what the composer's row left out and a record owes its
+          reader.
+
+          Above the Configuration because that is what they are part of: what
+          the work was set up with, and the half of it that came out of the
+          Brief rather than out of the dropdowns. A Conversation with nothing
+          attached draws no row at all. */}
+      <Attachments
+        files={props.conversation.attachments}
+        class={styles.attachments}
+      />
 
       <Configuration
         conversation={props.conversation}

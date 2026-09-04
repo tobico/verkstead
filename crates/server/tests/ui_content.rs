@@ -1995,6 +1995,20 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     )
     .await
     .unwrap();
+    // And a file put on it before the work started, which is what the Brief
+    // pane draws its row from: the drafting Conversation above shows the row a
+    // composer draws, and this one shows the same files once nothing can be
+    // done to them.
+    store::attach(
+        &pool,
+        grilling,
+        store::Origin::Brief,
+        "delivery-failures.csv",
+        20_418,
+    )
+    .await
+    .unwrap();
+
     store::start_grilling(
         &pool,
         grilling,
@@ -2161,6 +2175,18 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     )
     .await
     .unwrap();
+
+    // And two files handed over with its Brief. This is the Conversation the
+    // share below is taken of, so these rows are what says a share carries the
+    // names and the sizes of what was attached and never a byte of any of it.
+    for (name, bytes) in [
+        ("window-resets.json", 3_902_i64),
+        ("the-run-that-stalled.log", 512_774_i64),
+    ] {
+        store::attach(&pool, directing, store::Origin::Brief, name, bytes)
+            .await
+            .unwrap();
+    }
 
     store::start_grilling(
         &pool,

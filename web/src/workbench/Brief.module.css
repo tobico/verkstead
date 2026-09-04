@@ -8,6 +8,15 @@
   max-width: var(--measure);
 }
 
+/* The files handed over with the Brief, under the document and above what the
+   Conversation was configured with. At the pane's own edge rather than inset
+   the way the composer's row is: there is no box here for them to line up
+   inside, and what they stand under is the document itself. */
+.attachments {
+  margin: 1rem 0 0;
+  padding: 0;
+}
+
 /* Ruled off from the Brief above it, the way the setup card is ruled off from
    the Brief it stands under: the document is what the pane is titled for, and
    this is what follows it. */

@@ -5,6 +5,11 @@
 //! the target, it highlights while a drag carrying files is over it, and a
 //! folder dragged along with them is skipped without a word.
 //!
+//! And what becomes of the row once the Brief has frozen: it moves off the
+//! composer, which is gone, onto the Brief's own pane — the same pills, with
+//! each of them saying how large its file is and none of them offering
+//! anything to press.
+//!
 //! Over the golden fixtures like every other component test here, which is what
 //! makes the pills a drawing of what the server really says: the drafting
 //! Conversation in `conversation.json` carries two attached files, so what these
@@ -13,8 +18,14 @@
 import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { AttachmentView, ConversationView } from "../src/api/types";
+import type {
+  AttachmentView,
+  BriefEvent,
+  ConversationView,
+} from "../src/api/types";
+import { sized } from "../src/Attaching";
 import pill from "../src/Attaching.module.css";
+import briefPane from "../src/workbench/Brief.module.css";
 import composer from "../src/workbench/Composer.module.css";
 import shell from "../src/Panes.module.css";
 import {
@@ -25,6 +36,7 @@ import { OPEN, drawn, mount, theWorkbench } from "./bench";
 import { carrying, carryingNothing, drag, dropOn } from "./dragging";
 import { json, serving, whenever } from "./serving";
 import adopting from "./fixtures/conversation-adopting.json" with { type: "json" };
+import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 
 /// The adopting draft, whose Brief arrives frozen: the one composer in the
 /// fixtures where the files are settled rather than the human's.
@@ -32,6 +44,11 @@ const ADOPTING = adopting as ConversationView;
 
 /// The two files the drafting fixture is holding.
 const ATTACHED: AttachmentView[] = OPEN.attachments;
+
+/// A Conversation whose work has started, which is where the row is read as a
+/// record: its Brief froze when the grilling did, and the file on it froze with
+/// it.
+const FROZEN = grilling as ConversationView;
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -531,5 +548,121 @@ describe("dropping files on a draft's composer", () => {
 
     expect(box.classList.contains(composer.over!)).toBe(false);
     expect(attaches(fetching)).toHaveLength(0);
+  });
+});
+
+/// And where the same files are read once the work has started: the composer is
+/// gone with the drafting, so the row stands on the Brief's own pane, under the
+/// document and above what the Conversation was configured with.
+///
+/// Over the golden fixture like the composer's own tests, the grilling
+/// Conversation carrying a file that was put on it before the work started.
+describe("the files on a frozen brief", () => {
+  /// The Brief on a record, which is what the pane is opened at.
+  function briefOn(at: ConversationView): BriefEvent {
+    const found = at.timeline.find(
+      (event): event is { Brief: BriefEvent } => "Brief" in event,
+    );
+
+    if (!found) throw new Error("the fixture should carry a Brief");
+    return found.Brief;
+  }
+
+  /// The Brief pane, opened at its own path — which is what a cold load of it
+  /// is, and what saves these from walking a Timeline they are not about.
+  async function openBrief(at: ConversationView): Promise<HTMLElement> {
+    serving(
+      whenever("/api/ui/conversations", json([])),
+      whenever("/api/ui/conversations/archived", json({ showing: false })),
+      whenever("/api/ui/repos", json([])),
+      whenever("/api/ui/profiles", json([])),
+      whenever("/api/ui/abandoned-roadmaps", json([])),
+      whenever(`/api/ui/conversations/${at.id}`, json(at)),
+      json([]),
+    );
+
+    const { container } = mount(
+      `/conversations/${at.id}/events/${briefOn(at).id}`,
+    );
+
+    return drawn(container, `.${shell.detailsPane}`);
+  }
+
+  /// What each pill on the pane reads: the name, and after it how large the
+  /// file is. The size is the one thing this row says that the composer's did
+  /// not — a record is the whole account of what the sessions were handed.
+  it("lists what was attached, each with its size", async () => {
+    expect(FROZEN.attachments.length).toBeGreaterThan(0);
+
+    const pane = await openBrief(FROZEN);
+    const row = await drawn(pane, `.${pill.attachments}`);
+
+    expect(names(row)).toEqual(
+      FROZEN.attachments.map((attachment) => attachment.name),
+    );
+    expect(
+      [...row.querySelectorAll(`.${pill.attachmentSize}`)].map(
+        (size) => size.textContent,
+      ),
+    ).toEqual(FROZEN.attachments.map((attachment) => sized(attachment.bytes)));
+
+    // Named for whoever is not looking at it, the way the composer's row is.
+    expect(screen.getByRole("list", { name: "Attached files" })).toBeTruthy();
+  });
+
+  /// Nothing to press on it, on a pane that has no control anywhere: the files
+  /// froze with the Brief, and the composer that could have changed either of
+  /// them is gone.
+  it("offers no way of changing any of it", async () => {
+    const pane = await openBrief(FROZEN);
+    const row = await drawn(pane, `.${pill.attachments}`);
+
+    expect(row.querySelector("button")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Attach a file" })).toBeNull();
+  });
+
+  /// Under the Brief and above the Configuration: the files are part of what
+  /// the work was set up with, and the half of it that came out of the Brief
+  /// rather than out of the dropdowns.
+  it("stands between the brief and the configuration", async () => {
+    const pane = await openBrief(FROZEN);
+    await drawn(pane, `.${briefPane.configuration}`);
+
+    const where = (selector: string) =>
+      [...pane.children].findIndex((part) =>
+        part.matches(`${selector}, :has(${selector})`),
+      );
+
+    const document = where(`.${briefPane.brief}`);
+    const row = where(`.${pill.attachments}`);
+
+    expect(document).toBeGreaterThan(-1);
+    expect(row).toBeGreaterThan(document);
+    expect(where(`.${briefPane.configuration}`)).toBeGreaterThan(row);
+  });
+
+  /// And no row at all on a Conversation nobody attached anything to, which is
+  /// most of them: an empty row under the Brief would read as something having
+  /// gone missing.
+  it("draws no row at all where nothing was attached", async () => {
+    const pane = await openBrief({ ...FROZEN, attachments: [] });
+    await drawn(pane, `.${briefPane.configuration}`);
+
+    expect(pane.querySelector(`.${pill.attachments}`)).toBeNull();
+    expect(screen.queryByRole("list", { name: "Attached files" })).toBeNull();
+  });
+
+  /// A size is said in whichever unit keeps it to a few digits, in the words
+  /// the session's own prompt says it in — the same list the server's own
+  /// `sized` is asked, because the two are one wording said in two languages.
+  /// See `crates/server/src/skills.rs`.
+  it("says a size in the unit that reads, the way the prompt does", () => {
+    expect(sized(0)).toBe("0 bytes");
+    expect(sized(1)).toBe("1 byte");
+    expect(sized(999)).toBe("999 bytes");
+    expect(sized(4_096)).toBe("4.1 kB");
+    expect(sized(1_240_000)).toBe("1.2 MB");
+    expect(sized(32 * 1024 * 1024)).toBe("33.6 MB");
+    expect(sized(2_500_000_000)).toBe("2.5 GB");
   });
 });

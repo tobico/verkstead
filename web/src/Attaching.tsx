@@ -37,6 +37,12 @@
 //! **Folders are skipped without a word.** A drop is whatever the human had
 //! hold of, and one of them being a directory is not a mistake to report: the
 //! files in it are attached, and it is not. A picker cannot offer one at all.
+//!
+//! And the same row once nothing can be put on it any more — [`Attachments`],
+//! which is what a frozen Brief is read under. The pills are these pills,
+//! because they are the same files; what is different is that there is no ×
+//! on one and that each of them says how large it is, a record being read
+//! rather than a list being arranged.
 
 import { For, Show, createSignal, type JSX } from "solid-js";
 
@@ -56,6 +62,17 @@ export type Shown = {
   /// nothing here is keyed on it: whoever hands the list over keeps its own
   /// hold of which file is which.
   name: string;
+
+  /// How large the file is, in words — see [`sized`].
+  ///
+  /// Said on a row that is a record and left off one that is a list being
+  /// arranged: while the human is still choosing, what they want to know is
+  /// which files are on the Brief, and a file they have this minute picked off
+  /// their own disk is not a file they need told the size of. Once it is
+  /// settled the row is the whole account of what was handed over, and how
+  /// large a thing is is part of that account — it is what the session's own
+  /// prompt says about each of them.
+  size?: string;
 
   /// Drawn dimmed where the file is on its way up and the record is not back:
   /// the press has been made and there is nothing to press on it yet.
@@ -82,7 +99,9 @@ export type Dropping = {
 export type Attaching = {
   /// The row of pills, inside the box under the text. Nothing at all where
   /// there are none, rather than an empty row with a heading over it.
-  Pills: () => JSX.Element;
+  ///
+  /// The class is where it stands, which is the caller's — see [`Row`].
+  Pills: (props: { class?: string }) => JSX.Element;
 
   /// The paperclip, wherever the caller's row of presses wants it — the class
   /// is what says where, this being no business of the button's.
@@ -157,12 +176,8 @@ export function attaching(what: {
     },
   };
 
-  const Pills = () => (
-    <Show when={what.shown().length}>
-      <ul class={styles.attachments} aria-label="Attached files">
-        <For each={what.shown()}>{(one) => <Pill file={one} />}</For>
-      </ul>
-    </Show>
+  const Pills = (props: { class?: string }) => (
+    <Row files={what.shown()} class={props.class} />
   );
 
   const Clip = (props: { class?: string }) => (
@@ -175,6 +190,81 @@ export function attaching(what: {
     over: () => offered() && depth() > 0,
     dropping,
   };
+}
+
+/// The same row where nothing can be put on it any more: what was handed over,
+/// as the frozen Brief pane and a share read it.
+///
+/// The files rather than a [`Shown`] apiece, because there is nothing here for
+/// the caller to decide — a record has no × on it and no file on its way up, and
+/// the size is said off the record's own number. Which is the whole difference
+/// between this and the row a draft draws: the same pills, with the controls
+/// gone and the account of each file filled in.
+///
+/// Nothing at all where there are none, the way the other row draws none: a
+/// Conversation nobody attached anything to is most of them, and a heading over
+/// an empty row would read as something having gone missing.
+export function Attachments(props: {
+  /// What is on the record, in the order it was attached in.
+  files: Array<{ name: string; bytes: number }>;
+
+  /// Where the row stands, which is the caller's — see [`Row`].
+  class?: string;
+}): JSX.Element {
+  return (
+    <Row
+      files={props.files.map((file) => ({
+        name: file.name,
+        size: sized(file.bytes),
+      }))}
+      class={props.class}
+    />
+  );
+}
+
+/// The row itself, which both of them are.
+///
+/// Where it *stands* is the caller's and the class is how they say so: the
+/// composer puts it inside its box at the inset the text is written at, the
+/// compose page does the same, and the Brief pane puts it under the document at
+/// the pane's own edge. What is the same wherever it is drawn is the row and the
+/// pills in it, which is what this is.
+function Row(props: { files: Array<Shown>; class?: string }): JSX.Element {
+  return (
+    <Show when={props.files.length}>
+      <ul
+        class={
+          props.class === undefined
+            ? styles.attachments
+            : `${styles.attachments} ${props.class}`
+        }
+        aria-label="Attached files"
+      >
+        <For each={props.files}>{(one) => <Pill file={one} />}</For>
+      </ul>
+    </Show>
+  );
+}
+
+/// How large a file is said to be on a row that says so.
+///
+/// The words the session's own prompt uses, said the same way here — see
+/// `sized` in `crates/server/src/skills.rs`, which this is the viewer's half
+/// of. Rounded, and in whichever unit keeps it to a few digits: what the number
+/// is for is knowing what was handed over rather than accounting. Decimal
+/// units, the way a file manager says it.
+export function sized(bytes: number): string {
+  const size = Math.max(0, bytes);
+
+  for (const [unit, scale] of [
+    ["GB", 1e9],
+    ["MB", 1e6],
+    ["kB", 1e3],
+  ] as const) {
+    if (size >= scale) return `${(size / scale).toFixed(1)} ${unit}`;
+  }
+
+  return size === 1 ? "1 byte" : `${size} bytes`;
 }
 
 /// The files in a drop, the folders in it left behind.
@@ -241,8 +331,8 @@ function Attach(props: {
   );
 }
 
-/// One file drawn as a pill: its name cut to a line, and the × that takes it
-/// away where there is one to draw.
+/// One file drawn as a pill: its name cut to a line, how large it is where the
+/// row says so, and the × that takes it away where there is one to draw.
 ///
 /// Cut at the front, which is how every other name in the app is cut — see
 /// [`Truncated`](./Truncated.tsx). On a file name that is the half worth
@@ -255,6 +345,13 @@ function Pill(props: { file: Shown }): JSX.Element {
       classList={{ [styles.landing!]: props.file.landing }}
     >
       <Truncated text={props.file.name} class={styles.attachmentName} />
+
+      {/* And how large it is, where the row is a record. After the name and
+          understated, because it is what the name is qualified by rather than a
+          second thing on the pill. */}
+      <Show when={props.file.size}>
+        {(size) => <span class={styles.attachmentSize}>{size()}</span>}
+      </Show>
 
       {/* A mark rather than a word, the way a companion row's is, and named for
           this file: the row is a line of names and the × on its own says

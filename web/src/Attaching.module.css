@@ -14,13 +14,19 @@
 
    A row that wraps rather than one that scrolls: a name is a thing to read, and
    a file pushed off the side of the box is a file the human cannot see they
-   attached. */
+   attached.
+
+   Where it stands is the caller's, and so are the two properties that say so:
+   a row inside the composer's box is inset to the text it is under, and the
+   same row on the Brief pane stands at the pane's own edge. Whoever puts one
+   somewhere sets its margin *and* its padding, the second of them because this
+   is a `<ul>` and a list left alone comes with an indent of its own. Neither is
+   said here, so that a caller's class does not have to out-rank this one to be
+   read. */
 .attachments {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
-  margin: 0.5rem 0 0;
-  padding: 0 0.6rem;
   list-style: none;
 }
 
@@ -45,6 +51,15 @@
 .attachmentName {
   font-family: ui-monospace, SFMono-Regular, monospace;
   min-width: 0;
+}
+
+/* How large the file is, where the row is a record rather than a list being
+   arranged. Understated and never cut: it is a handful of characters, and it
+   is what the name is qualified by rather than a second name beside it. */
+.attachmentSize {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
 }
 
 /* One on its way up, drawn dimmed until the record comes back: the file has

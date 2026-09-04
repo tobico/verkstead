@@ -175,7 +175,7 @@ export function Composer(props: {
           {/* And the files handed over with it, as a row of pills between the
               text and the setup row — inside the box, because they are part of
               what is being written rather than something under it. */}
-          <files.Pills />
+          <files.Pills class={styles.attachments} />
 
           {/* What could not be taken off, under the row it happened in: one
               line for the whole of it rather than one per pill, a pill being a

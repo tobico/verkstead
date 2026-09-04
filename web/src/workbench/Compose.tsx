@@ -484,7 +484,7 @@ function Compose(props: {
               thing to look at. The × drops the held file rather than making a
               request: there is nothing on the server yet to take anything
               off. */}
-          <attach.Pills />
+          <attach.Pills class={styles.attachments} />
 
           <section class={setup.options} aria-label="Setup">
             {/* The repository first, because everything under it is a fact

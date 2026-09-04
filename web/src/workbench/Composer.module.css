@@ -99,6 +99,17 @@
   }
 }
 
+/* Where the row of attached files stands, on this pane and on the compose page
+   that shares this module: inside the box, under the text and at the inset the
+   text is written at, so the pills line up with the sentence above them. The
+   list's own indent comes off here for the same reason the margin is set here —
+   see `Attaching.module.css`, which draws the row the same wherever it is put
+   and leaves both to whoever puts it. */
+.attachments {
+  margin: 0.5rem 0 0;
+  padding: 0 0.6rem;
+}
+
 /* The Brief where it is a document rather than a field — an adopting
    Conversation's, which is the stage's own. At the padding the field beside it
    is read at, so the box reads the same whichever it is holding. */

@@ -382,10 +382,17 @@ name: string,
 /**
  * How large it is, in bytes.
  *
- * Not drawn on the pill, which says which files are there and nothing
- * else. Carried because the listing at the end of a session's prompt says
- * it, and because a share carries these rows somewhere there is no file to
- * measure.
+ * Left off the composer's pill, which says which files are there and
+ * nothing else while the human is still choosing them, and said on the row
+ * the frozen Brief pane draws: that one is the whole account of what the
+ * sessions were handed, and how large a thing is is part of an account.
+ * The listing at the end of a session's prompt says it in the same words —
+ * see `sized` in `crates/server/src/skills.rs` and its half in
+ * `web/src/Attaching.tsx`.
+ *
+ * Which is also what a share is carrying: these rows travel into the file
+ * and the bytes they measure never do, so the number is the only thing its
+ * reader will ever know about how big the file was.
  */
 bytes: number, 
 /**

@@ -32,6 +32,10 @@ import type {
   SharedConversation,
   TimelineEvent,
 } from "../src/api/types";
+// The pills a Brief's attached files are drawn as, and how each one's size is
+// worded — the same piece the workbench draws them with.
+import { sized } from "../src/Attaching";
+import pill from "../src/Attaching.module.css";
 import { drawDiagrams } from "../src/set/diagrams";
 import { Share } from "../src/share/Share";
 // What the summary under a Brief says of a branch nobody has named.
@@ -256,6 +260,59 @@ describe("a shared conversation", () => {
     expect(
       details.textContent?.includes("Pausing when an account runs out of window"),
     ).toBe(true);
+  });
+
+  /// And the files that were handed over with it, on the Brief pane exactly as
+  /// the workbench draws them: the names and the sizes, and nothing to press.
+  ///
+  /// The bytes are what never travel. A share is emailed about and attached to
+  /// pull requests, so what it carries of an attachment is the record of one —
+  /// which is all the file has ever held, the attachments directory not being
+  /// read on the way out at all. See `crates/server/tests/sharing.rs`, which is
+  /// where that is proved of a Conversation with real files on its disk.
+  it("draws the files that were handed over, and carries none of them", async () => {
+    const brief = SHARED.conversation.timeline.find(
+      (event): event is Extract<TimelineEvent, { Brief: unknown }> =>
+        "Brief" in event,
+    );
+    expect(brief).toBeTruthy();
+
+    const attached = SHARED.conversation.attachments;
+    expect(attached.length).toBeGreaterThan(0);
+
+    render(() => <Share shared={holding([brief!])} />);
+
+    const details = await screen.findByLabelText("Details");
+    const row = await waitFor(() =>
+      details.querySelector(`.${pill.attachments}`)!,
+    );
+    expect(row).toBeTruthy();
+
+    expect(
+      [...row.querySelectorAll(`.${pill.attachmentName}`)].map(
+        (name) => name.textContent,
+      ),
+    ).toEqual(attached.map((attachment) => attachment.name));
+    expect(
+      [...row.querySelectorAll(`.${pill.attachmentSize}`)].map(
+        (size) => size.textContent,
+      ),
+    ).toEqual(attached.map((attachment) => sized(attachment.bytes)));
+
+    // Nothing to press on any of them: the record is what a share is, and the
+    // files froze with the Brief long before it was taken.
+    expect(row.querySelector("button")).toBeNull();
+
+    // And the file itself carries a record of each and not a byte of any: the
+    // id it is known by, the name it stands under and how large it was.
+    for (const attachment of attached) {
+      expect(Object.keys(attachment).sort()).toEqual([
+        "bytes",
+        "id",
+        "name",
+        "origin",
+      ]);
+    }
   });
 
   /// A share of work nobody has named yet says what will become of the branch
