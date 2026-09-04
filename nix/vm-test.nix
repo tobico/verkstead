@@ -164,6 +164,15 @@ testers.runNixOSTest {
             exit 1
         fi
 
+        # And the sccache a session compiles through, resolved off this unit's
+        # own path rather than named by store path: that the module put one
+        # within the service's reach is half of what the cache lines below ask,
+        # and a path written here would be the test agreeing with itself again.
+        if ! sccache=$(command -v sccache); then
+            echo "no sccache on the unit's path" >&2
+            exit 1
+        fi
+
         exec bwrap \
             --die-with-parent \
             --unshare-all --share-net --hostname verkstead \
@@ -177,9 +186,15 @@ testers.runNixOSTest {
             --bind ${grillingRepo}/.git ${grillingRepo}/.git \
             --bind ${account}/.claude "$HOME/.claude" \
             --bind ${account}/.claude.json "$HOME/.claude.json" \
+            --bind ${cacheDir} ${cacheDir} \
+            --ro-bind "$sccache" /verkstead/bin/sccache \
             --chdir "$worktree" \
             --setenv HOME "$HOME" \
             --setenv PATH /run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/usr/bin:/bin \
+            --setenv CARGO_HOME ${cacheDir}/cargo \
+            --setenv RUSTC_WRAPPER /verkstead/bin/sccache \
+            --setenv SCCACHE_DIR ${cacheDir}/sccache \
+            --setenv SCCACHE_CACHE_SIZE 30G \
             ${report} "$worktree"
       '';
     in
@@ -259,8 +274,10 @@ testers.runNixOSTest {
       environment.etc = {
         "verkstead-vm-test/set.yaml".text = ''
           # A Question Set as an agent sends it. `project`, `branch` and `diff`
-          # are absent on purpose: the CLI derives them from the working
-          # directory and overwrites whatever a Set claims.
+          # are absent on purpose: the CLI derives the first two from the
+          # working directory, the server composes the third off the Worktree
+          # the Set was asked from, and whatever a Set claims of any of them is
+          # overwritten.
 
           title: Does the module hold up in a VM?
 
@@ -601,14 +618,14 @@ testers.runNixOSTest {
     # test standing in for a session has to be given the same thing.
     #
     # Against a registered Repo, which is the only kind there is; the directory
-    # the CLI derives `project`, `branch` and the Diff from is the agent's own
-    # working directory below, and deliberately not this one.
+    # the CLI derives `project` and `branch` from is the agent's own working
+    # directory below, and deliberately not this one.
     repos = json.loads(machine.succeed("curl -sf http://127.0.0.1:8422/api/ui/repos"))
     started = json.loads(post("/api/ui/conversations", {"repo_id": repos[0]["id"]}))
     ASKING_FROM = started["Started"]["id"]
 
     # The repository an agent always asks from, and which the CLI reads
-    # `project`, `branch` and the Diff out of by shelling out to git.
+    # `project` and `branch` out of by shelling out to git.
     machine.succeed(f"git -c init.defaultBranch={BRANCH} init -q {REPO}")
     machine.succeed(f"echo committed > {REPO}/tracked.txt")
     machine.succeed(f"git -C {REPO} add -A")
@@ -616,8 +633,6 @@ testers.runNixOSTest {
         f"git -C {REPO} -c user.name=Verkstead -c user.email=vm@verkstead.invalid"
         " -c commit.gpgsign=false commit -q -m init"
     )
-    # Left uncommitted, so the Set carries a Diff as well.
-    machine.succeed(f"echo uncommitted > {REPO}/tracked.txt")
 
     with subtest("an agent's Set is answered through the API and printed by the CLI"):
         ask("first")
@@ -637,10 +652,15 @@ testers.runNixOSTest {
         # the Set claimed, comes with the Set itself: the Timeline carries the
         # table of what was asked, and the document is what the pane showing it
         # fetches.
+        #
+        # The Diff is not among them, and nothing here asks for one: it is the
+        # server's to compose now, off the Worktree of the Conversation the Set
+        # was asked from — and this Conversation is a Draft, which has none.
+        # `crates/server/tests/sets.rs` is where that composition is proved,
+        # over a Conversation that has been checked out.
         detail = machine.succeed(f"curl -sf http://127.0.0.1:8422/api/ui/sets/{first}")
         assert "vm-project" in detail, "the CLI did not derive the project"
         assert BRANCH in detail, "the CLI did not derive the branch"
-        assert "uncommitted" in detail, "the CLI did not derive the Diff"
 
         answer(first, "first-response.json")
         printed = collect("first")
@@ -710,12 +730,19 @@ testers.runNixOSTest {
         # Profile and picked again with it, and the two have to agree.
         model = "claude-opus-5"
 
+        # The account goes in the shape its own agent type keeps one, with the
+        # type beside it: a Claude Profile is the pair bound over `~/.claude`
+        # and `~/.claude.json`, where every other type this knows about is one
+        # home. Flat on the wire, which is what `ProfileAccount` is.
         saved = post(
             "/api/ui/profiles",
             {
                 "name": "vm",
-                "claude_dir": "${account}/.claude",
-                "config_file": "${account}/.claude.json",
+                "account": {
+                    "agent_type": "Claude",
+                    "claude_dir": "${account}/.claude",
+                    "config_file": "${account}/.claude.json",
+                },
                 "models": [model],
             },
         )
@@ -734,18 +761,28 @@ testers.runNixOSTest {
         started = json.loads(post("/api/ui/conversations", {"repo_id": repo_id}))
         conversation = started["Started"]["id"]
 
-        # Every precondition `start_grilling` checks, in the order it checks
-        # them — a Brief, and both Pairings picked. A Pairing is a Profile and
-        # one of its models together: there is no default model anywhere, so
-        # neither half is left to be assumed.
+        # Every precondition `start_grilling` checks — a Brief, and all three
+        # roles settled. A Pairing is a Profile and one of its models together:
+        # there is no default model anywhere, so neither half is left to be
+        # assumed.
         post(
             f"/api/ui/conversations/{conversation}/brief",
             {"markdown": "Whether the packaged unit can host a sandbox."},
         )
-        for which in ["grilling-pairing", "implementation-pairing"]:
+
+        # The two roles that can be picked away — the grilling and the review —
+        # are chosen inside a wrapper naming the Pairing, because the absence of
+        # one there is the picker's own "no grilling" row rather than a choice
+        # nobody has made yet. The implementation has no such row: something has
+        # to build the work.
+        pairing = {"profile_id": profile_id, "model": model}
+        for which, choice in [
+            ("grilling-pairing", {"pairing": pairing}),
+            ("implementation-pairing", pairing),
+            ("review-pairing", {"pairing": pairing}),
+        ]:
             chosen = post(
-                f"/api/ui/conversations/{conversation}/{which}",
-                {"profile_id": profile_id, "model": model},
+                f"/api/ui/conversations/{conversation}/{which}", choice
             )
             assert chosen == '"Chosen"', f"the {which} was answered {chosen}"
 

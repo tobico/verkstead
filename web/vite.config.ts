@@ -64,5 +64,16 @@ export default defineConfig(({ mode }) => ({
     css: true,
     environment: "jsdom",
     setupFiles: ["./tests/setup.ts"],
+
+    // A budget on the machine rather than on the code. Five seconds is
+    // vitest's own number and a quiet machine's: the heaviest tests here —
+    // the ones that mount the whole workbench and then walk it — take under
+    // a second on one. Under `nix flake check` the suite runs beside the
+    // Rust build and the VM test on a two-core runner, and there those same
+    // tests have gone past five seconds and failed on the clock rather than
+    // on anything they asserted. So the budget is one a starved runner can
+    // still meet, and short enough that a test which has genuinely hung is
+    // ended rather than waited on.
+    testTimeout: 30_000,
   },
 }));
