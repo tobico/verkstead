@@ -61,3 +61,13 @@
   font-size: 0.85rem;
   color: var(--ink-soft);
 }
+
+/* And one that is not the window showing — a Conversation's Terminal draws one
+   of these per tab and shows one of them. Said here rather than left to the
+   browser: `hidden` is `display: none` in the browser's own sheet, and the
+   `display: flex` above is a page rule, which beats it. Hidden rather than
+   unmounted, because the whole point of keeping it is that its shell goes on
+   printing into a grid that is there when somebody turns back to it. */
+.screen[hidden] {
+  display: none;
+}

@@ -39,6 +39,13 @@
 //! repaint has landed the pane says it is waiting for one — which is the
 //! difference between one that is slow to arrive and one that is not coming.
 //!
+//! **Several of these may stand over one pane**, which is what a Conversation's
+//! Terminal does with its tabs: every one of them keeps its socket and its grid,
+//! and only the one showing is drawn. Which is why `showing` is handed in rather
+//! than read off this element — the window showing is the only one that measures
+//! the pane, and two of them measuring one pane would be the oscillation the
+//! de-dupe below guards against, with a hidden window's nothing always winning.
+//!
 //! The grid and nothing above it: no scrollback here either, matching the server
 //! that decided the repaint.
 
@@ -82,6 +89,18 @@ export function Attached(props: {
   /// `paneWide` where the terminal is the whole point of the pane. Styled by
   /// whoever passes it, never here.
   class?: string;
+
+  /// Whether this is the window showing, where the caller draws more than one
+  /// over the one pane. Absent where it draws one, a Screen being the whole of
+  /// its half of the switch above it.
+  ///
+  /// Three things follow from it, and all three are about a window nobody can
+  /// see: it is hidden rather than laid out, it does not measure the pane — see
+  /// the note at the top — and it does not take the typing. Which is why the
+  /// focus is here rather than in the caller: the terminal is made by its first
+  /// repaint, so a caller reaching in for one would be reaching for something
+  /// that may not have arrived yet.
+  showing?: boolean;
 }): JSX.Element {
   /// Where the terminal is mounted, the terminal itself, and the addon that
   /// measures how much of a grid fits in the pane.
@@ -97,6 +116,11 @@ export function Attached(props: {
   /// would be one more copy of itself every time somebody resized a window.
   let putIn: ((said: Watching) => void) | undefined;
 
+  /// And how this window says how big it is, for the moment it becomes the one
+  /// showing. Set by whatever is watching, for the reason [`putIn`] is: a size
+  /// goes up the socket that is open now.
+  let measuring: (() => void) | undefined;
+
   /// What went wrong, where something did. The socket's own failures: one that
   /// closes while there is still something at the other end is a thing to say in
   /// words.
@@ -104,6 +128,15 @@ export function Attached(props: {
 
   /// Whether a grid has been painted here yet — see the note at the top.
   const [shown, setShown] = createSignal(false);
+
+  /// The typing, where this is the window showing. Nothing where the caller
+  /// said nothing about showing: a Screen being opened is no reason to take the
+  /// focus off whatever had it, and one window over a pane is nobody's tab.
+  const taking = () => {
+    if (props.showing === true) {
+      terminal?.focus();
+    }
+  };
 
   /// Paint a whole grid, making the terminal if there is not one yet.
   const paint = (painted: Painted) => {
@@ -123,6 +156,13 @@ export function Attached(props: {
       // those bytes are what goes up. And what the mouse does, which comes out
       // of the same callback and goes up as the same kind of thing.
       terminal.onData((input) => putIn?.({ PutIn: input }));
+
+      // And the typing, where this is the window showing. Here as well as in
+      // the effect below, because the two are the two ways a window comes to be
+      // the one showing: turned to, which the effect answers, and opened
+      // already showing — a tab plus has just added — where there is nothing to
+      // focus until this repaint has made it.
+      taking();
     } else {
       terminal.resize(painted.columns, painted.rows);
     }
@@ -181,7 +221,12 @@ export function Attached(props: {
     /// at the wrong size and ask for its own back, forever. The latest window
     /// wins by nobody re-asserting an older one.
     const measure = () => {
-      if (!terminal || !fit || socket.readyState !== WebSocket.OPEN) {
+      if (
+        props.showing === false ||
+        !terminal ||
+        !fit ||
+        socket.readyState !== WebSocket.OPEN
+      ) {
         return;
       }
 
@@ -202,6 +247,8 @@ export function Attached(props: {
       socket.send(JSON.stringify(resized));
     };
 
+    measuring = measure;
+
     // Measured once the socket is up — the pane is drawn by then, and the size
     // it opens at is as much a resize as any later one — and again whenever the
     // pane changes shape under it.
@@ -220,7 +267,21 @@ export function Attached(props: {
       watching.disconnect();
       socket.close();
       putIn = undefined;
+      measuring = undefined;
     });
+  });
+
+  // Turned to: the pane is this window's now, so it measures it and takes the
+  // typing. Nothing at all where the caller said nothing about showing — one
+  // window over a pane measures off its socket and its observer as it always
+  // did.
+  createEffect(() => {
+    if (props.showing !== true) {
+      return;
+    }
+
+    measuring?.();
+    taking();
   });
 
   // A terminal holds a parser, a buffer and its own listeners, none of which go
@@ -234,6 +295,7 @@ export function Attached(props: {
       class={[styles.screen, styles.live, shell.paneScreen, props.class]
         .filter(Boolean)
         .join(" ")}
+      hidden={props.showing === false}
     >
       <div class={styles.terminalHost} ref={host} />
       <Show

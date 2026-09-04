@@ -160,6 +160,8 @@ import sharePane from "../src/workbench/Share.module.css";
 // And a terminal of the human's own inside the conversation's sandbox, which
 // is the other details pane nothing on the record opens.
 import { TERMINAL_REFUSAL } from "../src/workbench/Terminal";
+// And the tab bar over its several shells, which is the pane's own module.
+import terminalPane from "../src/workbench/Terminal.module.css";
 // The mark a pull request's checks are said in, both ways: the hashed names to
 // query the card by, and the words the icon is read aloud in. The three shapes
 // themselves come straight from Font Awesome, so that a test naming one and the
@@ -15950,5 +15952,227 @@ describe("a conversation's terminal", () => {
     );
     expect(TERMINAL_REFUSAL.NoWorktree).toContain("worktree");
     expect(TERMINAL_REFUSAL.NoProfile).toContain("profile");
+  });
+});
+
+describe("the terminal pane's tabs", () => {
+  /// The socket onto one of a conversation's terminals, found by the number in
+  /// its path rather than by the order they opened: what is worth asserting is
+  /// which shell a window is watching.
+  function attachedTo(number: number): Promise<Attached> {
+    return waitFor(() => {
+      const socket = Attached.opened.find((one) =>
+        one.url.endsWith(`${TERMINALS_OF_IT}/${number}/attach`),
+      );
+
+      if (!socket) {
+        throw new Error(`nothing has attached to terminal ${number}`);
+      }
+
+      return socket;
+    });
+  }
+
+  /// The tabs the pane is drawing, in the order it drew them.
+  function tabs(container: ParentNode): HTMLButtonElement[] {
+    return [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        `.${shell.detailsPane} .${terminalPane.tab}`,
+      ),
+    ];
+  }
+
+  /// And the windows under them, in the same order.
+  function windows(container: ParentNode): HTMLElement[] {
+    return [
+      ...container.querySelectorAll<HTMLElement>(
+        `.${shell.detailsPane} .${attachedPane.screen}`,
+      ),
+    ];
+  }
+
+  /// What a window has said up its socket about how big it is.
+  function sizes(socket: Attached): unknown[] {
+    return socket.sent
+      .map((wrote) => JSON.parse(wrote) as Record<string, unknown>)
+      .filter((wrote) => "Resized" in wrote)
+      .map((wrote) => wrote.Resized);
+  }
+
+  /// Every terminal the server has is a tab, in the order they were opened and
+  /// called by the number it issued — which is why those numbers are never
+  /// reused. A reload comes back to all of them rather than to the first.
+  it("draws a tab for every terminal that is live, in the order opened", async () => {
+    withTerminals([1, 2, 3]);
+    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+
+    await waitFor(() => expect(tabs(container)).toHaveLength(3));
+
+    expect(tabs(container).map((tab) => tab.textContent)).toEqual([
+      "Terminal 1",
+      "Terminal 2",
+      "Terminal 3",
+    ]);
+
+    // The first is the one showing, and the other two are drawn and hidden:
+    // every tab keeps its socket and its grid, so a shell that printed while
+    // somebody was reading another has printed it by the time they turn back.
+    expect(tabs(container).map((tab) => tab.getAttribute("aria-pressed"))).toEqual(
+      ["true", "false", "false"],
+    );
+
+    await waitFor(() => expect(Attached.opened).toHaveLength(3));
+    expect(windows(container).map((window) => window.hidden)).toEqual([
+      false,
+      true,
+      true,
+    ]);
+
+    // And what hidden means, jsdom laying out nothing to read it off: the
+    // browser's own `display: none` loses to the rule that makes one of these a
+    // column, so the sheet says it again.
+    expect(attachedCss).toContain(".screen[hidden] {\n  display: none;\n}");
+  });
+
+  /// Plus opens another and shows it. The one that was showing goes on running:
+  /// its socket is not closed and its grid is still there behind the new one.
+  it("opens another terminal on plus and shows it", async () => {
+    withTerminals(
+      [1],
+      whenever(
+        TERMINALS_OF_IT,
+        json({ Opened: { number: 2 } } satisfies TerminalOpened),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+
+    const first = await attachedTo(1);
+    first.says(PAINTED);
+
+    fireEvent.click(
+      await drawn(
+        container,
+        `.${shell.detailsPane} .${button.iconButton}[aria-label="New terminal"]`,
+      ),
+    );
+
+    const second = await attachedTo(2);
+    expect(second.url.startsWith("ws://")).toBe(true);
+
+    await waitFor(() =>
+      expect(tabs(container).map((tab) => tab.getAttribute("aria-pressed"))).toEqual(
+        ["false", "true"],
+      ),
+    );
+
+    expect(tabs(container).map((tab) => tab.textContent)).toEqual([
+      "Terminal 1",
+      "Terminal 2",
+    ]);
+
+    // Nothing was disturbed about the first: it is still watching, and its
+    // window is still drawn.
+    expect(first.closed).toBe(false);
+    expect(windows(container).map((window) => window.hidden)).toEqual([
+      true,
+      false,
+    ]);
+  });
+
+  /// One pane, one size. Only the tab showing measures it — two windows
+  /// measuring one pane would trade sizes for as long as both were open, and a
+  /// hidden one measures nothing at all, so its nothing would win.
+  it("says a size for the tab showing and none for the hidden ones", async () => {
+    withTerminals([1, 2]);
+    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+
+    const first = await attachedTo(1);
+    const second = await attachedTo(2);
+
+    // Both are painted, so both have a terminal to measure: what keeps the
+    // hidden one quiet is that it is hidden rather than that it is empty.
+    first.says(PAINTED);
+    second.says(PAINTED);
+
+    await waitFor(() => expect(sizes(first)).toHaveLength(1));
+    expect(sizes(first)[0]).toEqual({ columns: FITS.cols, rows: FITS.rows });
+    expect(sizes(second)).toHaveLength(0);
+
+    // And what the hidden one printed while nobody was reading it, which is
+    // there in its grid rather than lost.
+    second.says({ Printed: "the second shell said this" });
+
+    fireEvent.click(tabs(container)[1]!);
+
+    await waitFor(() => expect(sizes(second)).toHaveLength(1));
+    expect(sizes(second)[0]).toEqual({ columns: FITS.cols, rows: FITS.rows });
+
+    // The one that was showing says nothing more: the size it asked for stands
+    // until the pane changes shape under it.
+    expect(sizes(first)).toHaveLength(1);
+
+    const shown = windows(container)[1]!;
+    expect(shown.hidden).toBe(false);
+
+    await waitFor(() =>
+      expect(shown.querySelector(".xterm-rows")?.textContent).toContain(
+        "the second shell said this",
+      ),
+    );
+  });
+
+  /// And the typing goes where the human just looked: a tab turned to is a tab
+  /// somebody is about to type in, and a shell they have to click on first is
+  /// one press of theirs wasted.
+  it("puts the typing in the tab that is shown", async () => {
+    withTerminals(
+      [1],
+      whenever(
+        TERMINALS_OF_IT,
+        json({ Opened: { number: 2 } } satisfies TerminalOpened),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+
+    const first = await attachedTo(1);
+    first.says(PAINTED);
+
+    // The one the pane opened on, which xterm takes the typing into through the
+    // hidden textarea it keeps the focus in.
+    await waitFor(() =>
+      expect(
+        windows(container)[0]!.contains(document.activeElement),
+      ).toBe(true),
+    );
+
+    // And the one plus adds, where there is nothing to focus until its first
+    // repaint has made the terminal.
+    fireEvent.click(
+      await drawn(
+        container,
+        `.${shell.detailsPane} .${button.iconButton}[aria-label="New terminal"]`,
+      ),
+    );
+
+    const second = await attachedTo(2);
+    second.says(PAINTED);
+
+    await waitFor(() =>
+      expect(
+        windows(container)[1]!.contains(document.activeElement),
+      ).toBe(true),
+    );
+
+    // Then back to the first, which has a terminal already and takes the typing
+    // the moment it is turned to.
+    fireEvent.click(tabs(container)[0]!);
+
+    await waitFor(() =>
+      expect(
+        windows(container)[0]!.contains(document.activeElement),
+      ).toBe(true),
+    );
   });
 });

@@ -1,4 +1,4 @@
-//! A Conversation's own terminal, opened: a shell of the human's inside its
+//! A Conversation's own terminals, opened: shells of the human's inside its
 //! Sandbox, with its Worktree as the working directory.
 //!
 //! For the moment the agent's work is done and somebody wants to try it, make a
@@ -21,21 +21,35 @@
 //! the pane ends where the window does, so the terminal is sized to the pane
 //! rather than scrolling it.
 //!
-//! **The server holds the shell, so this pane is the way back to it rather than
-//! where it lives.** On load it asks which of the Conversation's terminals are
-//! live and attaches to the first, and opens one only where none is — so a
-//! reload, a second device or a tab closed by accident comes back to the shell
-//! that was already there, still running and showing what it last showed. The
-//! tab bar over several of them is a later task; here there is one terminal and
-//! no bar.
+//! **Several of them, one per tab.** The bar in the pane's header holds a tab
+//! per terminal, in the order the server issued their numbers, and a plus at the
+//! end opens another. It is the Output pane's Transcript/Screen switch built
+//! again — pressed-or-not buttons in a group rather than a tablist, which is the
+//! house's answer to this shape — and each tab is called *Terminal N* by the
+//! number the server gave it, which is why those numbers are never reused.
+//!
+//! Every tab keeps its socket open and its grid mounted whether or not it is the
+//! one showing, so a shell that printed while somebody was reading another tab
+//! has printed it by the time they turn back. Only the tab showing measures the
+//! pane and says so up its socket — see [`./Attached`], where the hiding, the
+//! measuring and the focus all are.
+//!
+//! **The server holds the shells, so this pane is the way back to them rather
+//! than where they live.** On load it asks which of the Conversation's terminals
+//! are live and draws a tab for each, and opens one only where there is none —
+//! so a reload, a second device or a tab closed by accident comes back to what
+//! was already there, still running and showing what it last showed.
 //!
 //! Nothing here is a record: no Capture, no Event on the Timeline, nothing in a
 //! Share. And nothing here holds the run off — typing into a terminal is the
 //! human doing something, exactly as typing into a Screen is, and somebody who
 //! means to take the work on presses **Stop** first.
 
+import { faPlus } from "@fortawesome/free-solid-svg-icons";
 import {
+  For,
   Match,
+  Show,
   Switch,
   createEffect,
   createMemo,
@@ -43,6 +57,7 @@ import {
   type JSX,
 } from "solid-js";
 
+import { IconButton } from "../IconButton";
 import { PaneSticky } from "../Panes";
 import { listTerminals, openTerminal, terminalSocket } from "../api/client";
 import type { ConversationView, TerminalOpened } from "../api/types";
@@ -51,6 +66,7 @@ import { Empty, ErrorLine } from "../notices";
 import { Attached } from "./Attached";
 import { PaneHead } from "./PaneHead";
 import { NO_SESSIONS } from "./sessions";
+import styles from "./Terminal.module.css";
 import shell from "../Panes.module.css";
 
 /// Each way of being refused a terminal, in the words of what to go and do
@@ -95,37 +111,45 @@ export function Terminal(props: {
     freshness: "static",
   }));
 
-  /// The one this pane opened, where it opened one.
-  const [opened, setOpened] = createSignal<number | undefined>();
+  /// The ones this pane has opened, in the order it opened them.
+  const [added, setAdded] = createSignal<number[]>([]);
 
-  /// And what the open was refused with, where it was refused.
+  /// And what an open was refused with, where one was refused.
   const [turned, setTurned] = createSignal<string | undefined>();
 
-  /// What to attach to: the first terminal already live, or the one opened for
-  /// this pane.
+  /// Which tab the human turned to, where they have turned to one.
+  const [chosen, setChosen] = createSignal<number | undefined>();
+
+  /// Every tab there is: what was live when the pane loaded and what it has
+  /// opened since.
   ///
-  /// The live one first, which is the whole point of asking: a reload comes back
-  /// to the shell it left rather than starting a second one beside it.
-  const attached = createMemo(() => terminals.data?.live[0] ?? opened());
+  /// By number, which is the order they were opened in — the server issues them
+  /// in order and never reuses one, so sorting them is reading the register's
+  /// own order back. And the two sources are a set rather than a sum: a list
+  /// read again would answer with the ones this pane opened, and a tab drawn
+  /// twice is two sockets onto one shell.
+  const tabs = createMemo(() =>
+    [...new Set([...(terminals.data?.live ?? []), ...added()])].sort(
+      (one, another) => one - another,
+    ),
+  );
 
-  /// Open one where none is live. The pane never stands empty, so this is the
-  /// pane's own doing rather than a press.
-  ///
-  /// Asked once per Conversation, which is what `asked` holds: a refusal leaves
-  /// the list exactly as it was, and an effect that asked again on the strength
-  /// of it would be a refused Sandbox spawning for ever.
-  let asked: number | undefined;
+  /// The one showing: the tab turned to, or the first while nobody has turned
+  /// to one — and the first again once the one turned to is gone, which is what
+  /// keeps the pane showing a terminal rather than a gap where one was.
+  const showing = createMemo(() => {
+    const open = tabs();
+    const turnedTo = chosen();
 
-  createEffect(() => {
-    const live = terminals.data?.live;
+    return turnedTo !== undefined && open.includes(turnedTo)
+      ? turnedTo
+      : open[0];
+  });
 
-    if (live === undefined || live.length > 0 || asked === props.conversation.id) {
-      return;
-    }
-
-    asked = props.conversation.id;
-
-    void openTerminal(props.conversation.id)
+  /// Open another, and show it. What plus does, and what the pane does for
+  /// itself where there is nothing live to come back to.
+  const open = (): Promise<void> =>
+    openTerminal(props.conversation.id)
       .then((outcome) => {
         if (typeof outcome === "string") {
           setTurned(TERMINAL_REFUSAL[outcome]);
@@ -133,16 +157,81 @@ export function Terminal(props: {
         }
 
         setTurned(undefined);
-        setOpened(outcome.Opened.number);
+        setAdded((was) => [...was, outcome.Opened.number]);
+        setChosen(outcome.Opened.number);
       })
-      .catch((error: Error) => setTurned(error.message));
+      .catch((error: Error) => {
+        setTurned(error.message);
+      });
+
+  /// Open one where none is live. The pane never stands empty, so this is the
+  /// pane's own doing rather than a press.
+  ///
+  /// Asked once per Conversation, which is what `asked` holds: a refusal leaves
+  /// the list exactly as it was, and an effect that asked again on the strength
+  /// of it would be a refused Sandbox spawning for ever. Plus is a press and is
+  /// under no such rule — somebody who asks again meant to.
+  let asked: number | undefined;
+
+  createEffect(() => {
+    if (
+      terminals.data === undefined ||
+      tabs().length > 0 ||
+      asked === props.conversation.id
+    ) {
+      return;
+    }
+
+    asked = props.conversation.id;
+
+    void open();
   });
 
   return (
     <>
       <PaneSticky>
-        <PaneHead back={{ to: "Timeline", go: props.back }} title="Terminal" />
+        <PaneHead back={{ to: "Timeline", go: props.back }} title="Terminal">
+          {/* The tabs beside the title, where a pane's own controls go, and the
+              way to another at the end of them. Buttons that say which they are
+              rather than tabs: they are all always there, `aria-pressed` is the
+              one word that says which is showing, and what each one does is
+              show a grid that is already drawn. */}
+          <div
+            class={styles.tabs}
+            role="group"
+            aria-label="This conversation's terminals"
+          >
+            <For each={tabs()}>
+              {(number) => (
+                <button
+                  type="button"
+                  class={styles.tab}
+                  aria-pressed={showing() === number}
+                  onClick={() => setChosen(number)}
+                >
+                  Terminal {number}
+                </button>
+              )}
+            </For>
+
+            <IconButton
+              of={faPlus}
+              label="New terminal"
+              class={styles.plus}
+              // Nothing of this one is open: it opens a shell rather than a
+              // pane, and there is no state of the page it is the way back
+              // into.
+              open={false}
+              press={() => void open()}
+            />
+          </div>
+        </PaneHead>
       </PaneSticky>
+
+      {/* A refusal above the tabs rather than in place of them: the pane may
+          have shells running in it, and an open that was turned down says
+          nothing about them. */}
+      <Show when={turned()}>{(why) => <ErrorLine>{why()}</ErrorLine>}</Show>
 
       <Switch>
         <Match when={terminals.isError}>
@@ -151,20 +240,22 @@ export function Terminal(props: {
             {terminals.error?.message}
           </ErrorLine>
         </Match>
-        <Match when={turned()}>{(why) => <ErrorLine>{why()}</ErrorLine>}</Match>
-        <Match when={attached()}>
-          {(number) => (
-            <Attached
-              at={terminalSocket(props.conversation.id, number())}
-              class={shell.paneWide}
-              say={{
-                waiting: "Starting a shell in this conversation's worktree…",
-                lost: "The connection to this terminal was lost.",
-              }}
-            />
-          )}
+        <Match when={tabs().length > 0}>
+          <For each={tabs()}>
+            {(number) => (
+              <Attached
+                at={terminalSocket(props.conversation.id, number)}
+                class={shell.paneWide}
+                showing={showing() === number}
+                say={{
+                  waiting: "Starting a shell in this conversation's worktree…",
+                  lost: "The connection to this terminal was lost.",
+                }}
+              />
+            )}
+          </For>
         </Match>
-        <Match when={true}>
+        <Match when={turned() === undefined}>
           <Empty>Opening a terminal…</Empty>
         </Match>
       </Switch>

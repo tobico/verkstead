@@ -1,0 +1,63 @@
+/* A Conversation's own terminals, one per tab — see `Terminal.tsx`.
+
+   The bar is the Output pane's Transcript/Screen switch again: a group of
+   pressed-or-not buttons in a bordered strip, standing in the pane's header
+   beside the title. What it does not copy is the mark that travels under the
+   pressed one — that one slides between two labels that are always both there,
+   and these come and go as shells are opened and end, so a mark that had to
+   find its way to an element that may have just appeared would be machinery
+   bought for nothing. The fill is on the pressed tab instead, which is what a
+   switch of more than two says everywhere else. */
+.tabs {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 0.25rem;
+  max-width: 100%;
+  margin: 0;
+  padding: 0.2rem;
+  overflow-x: auto;
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+/* One terminal. Named rather than taken as the strip's buttons, because the
+   plus at the end is a button of the strip too and is not one of these. */
+.tab {
+  flex: none;
+  padding: 0.35rem 0.7rem;
+  font: inherit;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.tab[aria-pressed="true"] {
+  color: var(--paper);
+  background: var(--accent);
+}
+
+@media (hover: hover) {
+  .tab:not([aria-pressed="true"]):hover {
+    color: var(--ink);
+  }
+}
+
+/* And the way to another one, at the end of the strip. The icon button the app
+   draws everywhere something is added, sized down to the strip it stands in:
+   its own padding is a header's, and this is a row of small labels.
+
+   Named under the strip, as the switch this is built from names its two labels:
+   what is being said is smaller than what `IconButton.module.css` says about
+   every one of these, and a rule of one class against a rule of one class is
+   settled by which sheet the bundler happened to put second. */
+.tabs .plus {
+  flex: none;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.85rem;
+}
