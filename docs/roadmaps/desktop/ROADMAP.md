@@ -29,7 +29,10 @@ packaging assets that 04 and 05 both build on. After that 04 and 05 run in
 either order and there is no string between them: the "sessions need Linux" UI
 state was to have landed in whichever ran first and been reused by the other,
 and 04 ran and ported the Sandbox instead — so nothing of that state exists,
-Windows is the only platform without sessions, and building it is 05's alone.
+Windows was then the only platform without sessions, and building it was 05's
+alone. (The state it built is gone again: the
+[windows sessions roadmap](../windows-sessions/ROADMAP.md)'s first stage gave
+that platform sessions, and took the refusal out with them.)
 
 ## Stages
 
