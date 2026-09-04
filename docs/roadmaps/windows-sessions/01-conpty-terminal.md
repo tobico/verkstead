@@ -42,8 +42,16 @@ is not repeated here beyond what a task needs.
   point at it, the Profile's account joined in — **every directory in it by a
   directory junction and every file by a hard link**, over whichever of the
   four account shapes the Profile names rather than over Claude's pair alone;
-  `APPDATA`, `LOCALAPPDATA` and `TEMP` point inside it. Data Directory and
-  profile on different volumes refuse the session with a line saying why.
+  `APPDATA`, `LOCALAPPDATA` and `TEMP` point inside it. Data Directory and the
+  **account's own directory** on different volumes refuse the session with a
+  line saying why — the profile is under the Data Directory, so the account is
+  the end of the link that can be elsewhere.
+- **A linked file that was replaced is written back** (Q5a). A hard link stops
+  being one file the moment something saves over it by rename rather than in
+  place, and an agent's config is exactly that kind of file. So as the session
+  ends, a linked file that is no longer the account's own goes back over it and
+  the link is made fresh for the next session — see ADR-0014, which says why
+  the outcome is what is decided rather than the mechanism.
 - **The prompt goes to a file** (Q6): always on Windows, never elsewhere.
   Written to the Conversation's handoff directory; the agent is started on one
   line naming it. The stand-in agent in the Windows suite reads it from there.
@@ -102,8 +110,10 @@ is not repeated here beyond what a task needs.
    refuses across volumes. Accepts: inside the session the Profile's account
    is the real one, asked of a Claude Profile *and* of a type whose account is
    one directory, so the rule is proved over the account rather than over
-   Claude's pair; a file written to `%TEMP%` lands under the fresh profile; a
-   Data Directory on another volume is refused with the line.
+   Claude's pair; a file written to `%TEMP%` lands under the fresh profile; an
+   account on another volume from the Data Directory is refused with the line;
+   a linked file replaced by a rename inside the session is back on the account
+   once the session has ended, and the next session's link is made fresh.
 4. **The prompt file** — on Windows the prompt is written to the handoff
    directory and the agent started on one line naming it. Accepts: the
    stand-in agent reads the Brief from the file; Linux argv unchanged.

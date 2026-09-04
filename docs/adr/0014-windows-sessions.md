@@ -81,13 +81,30 @@ written for Claude's pair would start a Codex or opencode session into a
 profile with no account in it at all: logged out, and nothing saying why. So
 every **directory** in the account is joined in by a **directory junction**,
 which needs no privilege, and every **file** by a hard link, which needs the
-Data Directory and the profile to be on one volume — a machine where they are
-not refuses the session with a line saying so. `APPDATA`,
-`LOCALAPPDATA` and `TEMP` point into the fresh profile too, so npm's caches,
-tool state and temporary files stay out of the real one. Built in the first
-stage rather than the second because it is what the container's grants are
-made against, and because a session that wrote into the real profile
+Data Directory and **the account's own directory** to be on one volume. The
+account rather than the fresh profile: the profile is made under the Data
+Directory and so is never the end that can differ, where an account is wherever
+the Agent Profile points inside a Watched Path, which may well be another
+drive. A machine where the two are apart refuses the session with a line saying
+so. `APPDATA`, `LOCALAPPDATA` and `TEMP` point into the fresh profile too, so
+npm's caches, tool state and temporary files stay out of the real one. Built in
+the first stage rather than the second because it is what the container's
+grants are made against, and because a session that wrote into the real profile
 unsandboxed would be leaving state behind that no later stage could take back.
+
+**A hard link is one file only while everything writes in place.** A Mac
+symlinks the account into its fresh home and a symlink follows whatever happens
+to the target; a file symlink on Windows needs a privilege a per-user install
+has not got, which is the whole reason the link is a hard one. So an agent that
+saves its config by writing a temporary file and renaming it over the top
+leaves the session writing to a file of its own, with the account's copy seeing
+none of it and nothing saying so. What is decided is the outcome rather than
+the mechanism: **nothing a session wrote to its account is lost.** As the
+session ends, a linked file that is no longer the account's own is written back
+over it, and the link is made fresh for the session after. The ordinary case is
+one file and costs nothing; the replacing case costs a copy rather than the
+session's work. Directories are not in it — a junction is a path rather than a
+file, and nothing replaces one.
 
 ## The Sandbox is an AppContainer
 
