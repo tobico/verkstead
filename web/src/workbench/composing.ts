@@ -20,6 +20,13 @@
 //! with the rest of the work in it — and the refusals travel to that draft
 //! rather than dying with the page that made it, see [`refusedOnCreate`].
 //!
+//! **The files are not held the same way**, because a `File` is a handle the
+//! browser gave this page rather than text a device can write down: they are
+//! held in the page (`src/holding.ts`), a reload loses them, and the replay
+//! sends them once the Conversation exists — before the work is kicked off,
+//! because the Brief freezes when it starts and a file arriving after that
+//! would be refused.
+//!
 //! **A roadmap loaded into the page is held the same way and creates the other
 //! kind of Conversation.** Picking one out of the Adopt dropdown writes it into
 //! what this device is holding and nothing else — see [`Adopting`] — so it
@@ -48,8 +55,10 @@ import {
 } from "../api/client";
 import type { CompanionMode } from "../api/types";
 import { forget, read, write } from "../device";
+import type { Holding } from "../holding";
 import * as pairing from "../pairing";
 import { adoptRefusal } from "./Adoption";
+import { ATTACH_REFUSAL } from "./Composer";
 import {
   BASE_REFUSAL,
   BRANCH_REFUSAL,
@@ -245,6 +254,13 @@ export type Created =
 /// draft is what they can look at and fix; every other refusal on the way is
 /// still worth carrying, so the list is what decides rather than the first one.
 ///
+/// **The files this page is holding go up in the same replay**, one request
+/// apiece through the route a draft's own paperclip uses — there is a
+/// Conversation by then, so there is nothing else they could need. They go
+/// after every field and before the kickoff: what is attached freezes with the
+/// Brief, and a file arriving after the grilling started would be refused for
+/// being late rather than for anything the human did.
+///
 /// **A page loaded with a roadmap creates the other kind of Conversation**, and
 /// most of the replay is not asked of it: the Brief is the stage's, the branch
 /// is the stage's slug and the base was fixed by the row that loaded it, so what
@@ -254,6 +270,7 @@ export type Created =
 export async function create(
   state: Composed,
   work: boolean,
+  files: Holding,
 ): Promise<Created> {
   const held = state.adopting;
   if (held === null && state.repo === null) {
@@ -338,6 +355,16 @@ export async function create(
     said(
       outcome === "Chosen",
       `The review profile could not be chosen: ${CHOICE_REFUSAL[outcome]}`,
+    );
+  }
+
+  // And the files, last of the fields: each is one more thing put on the
+  // Conversation, and one the server would not take is one more refusal to
+  // carry — which is what stops the kickoff, exactly as a refused branch name
+  // does.
+  for (const rejected of await files.flush(id)) {
+    refused.push(
+      `${rejected.name} could not be attached: ${ATTACH_REFUSAL[rejected.refused]}`,
     );
   }
 

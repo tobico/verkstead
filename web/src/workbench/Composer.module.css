@@ -272,6 +272,27 @@
   gap: 0.6rem;
 }
 
+/* What stands at the near edge of that row on the compose page, which is two
+   things rather than one: the paperclip and the roadmap dropdown. Grouped, so
+   that one margin pushes the pair of them away from the presses — two controls
+   each claiming the free space for itself would put one of them in the middle
+   of the row.
+
+   The pair keep their own gap and give up their own margins: what pushes them
+   over is this. */
+.near {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-right: auto;
+}
+
+.near .attach,
+.near .adopt {
+  margin-right: 0;
+}
+
 /* The secondary one: the shape of the start beside it and the paint of an
    outline, because creating without starting is the smaller of the two acts and
    a page of buttons all painted as the primary one says nothing about which of
@@ -396,8 +417,8 @@
 }
 
 /* The paperclip, at the near edge of the row the start press is at the far edge
-   of — pushed there by its own margin, the way the roadmap dropdown on the
-   compose page is pushed there by its. */
+   of — pushed there by its own margin here, and by the group's on the compose
+   page, where it has the roadmap dropdown beside it. See `.near`. */
 .attach {
   margin-right: auto;
 }

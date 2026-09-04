@@ -403,7 +403,7 @@ function StartGrilling(props: {
             the row the compose page's two presses stand in — pushed apart by
             the paperclip's own margin, the way the roadmap dropdown is. */}
         <div class={styles.presses}>
-          <Attach attaching={props.attaching} />
+          <Attach send={(files) => props.attaching.send(files)} />
           <button
             type="button"
             class={styles.start}
@@ -547,10 +547,14 @@ function attaching(conversation: () => ConversationView): Attaching {
 /// word beside it, and what belongs in that row is an icon. So the input is
 /// there and hidden, and the button is what reaches it.
 ///
-/// Several files at once, each uploaded on its own request. A folder cannot be
-/// chosen through a picker at all — that is what a drop can hand over, and
-/// where one is skipped.
-function Attach(props: { attaching: Attaching }): JSX.Element {
+/// Several files at once. What becomes of them is the page's own business — a
+/// draft sends each on a request of its own, and the compose page holds them
+/// until there is a Conversation to send them to — so what this hands over is
+/// the choice and nothing else. A folder cannot be chosen through a picker at
+/// all; that is what a drop can hand over, and where one is skipped.
+export function Attach(props: {
+  send: (files: Array<File>) => void;
+}): JSX.Element {
   let picker!: HTMLInputElement;
 
   return (
@@ -568,7 +572,7 @@ function Attach(props: { attaching: Attaching }): JSX.Element {
         type="file"
         multiple
         onChange={(ev) => {
-          props.attaching.send(Array.from(ev.currentTarget.files ?? []));
+          props.send(Array.from(ev.currentTarget.files ?? []));
           // Emptied on the way out, so that choosing the same file again is a
           // change: an input still holding what was chosen last fires nothing.
           ev.currentTarget.value = "";
@@ -621,11 +625,7 @@ function Attachments(props: {
           )}
         </For>
         <For each={props.attaching.landing()}>
-          {(one) => (
-            <li class={`${styles.attachment} ${styles.landing}`}>
-              <Truncated text={one.name} class={styles.attachmentName} />
-            </li>
-          )}
+          {(one) => <Pill name={one.name} landing />}
         </For>
       </ul>
 
@@ -636,12 +636,7 @@ function Attachments(props: {
   );
 }
 
-/// One of them: the name, cut to a line, and the × that takes it away.
-///
-/// Cut at the front, which is how every other name in the app is cut — see
-/// [`Truncated`](../Truncated.tsx). On a file name that is the half worth
-/// keeping too: the extension is what says what the thing is, and the whole
-/// name is under the pointer either way.
+/// One of the files on the record: the pill, and the request its × makes.
 function Attachment(props: {
   conversation: ConversationView;
   attachment: AttachmentView;
@@ -670,19 +665,62 @@ function Attachment(props: {
   }));
 
   return (
-    <li class={styles.attachment}>
-      <Truncated text={props.attachment.name} class={styles.attachmentName} />
+    <Pill
+      name={props.attachment.name}
+      // Nothing to press once the Brief has frozen: the files freeze with it,
+      // and a × that could only be refused is not drawn.
+      remove={props.frozen ? undefined : () => forget.mutate()}
+      removing={forget.isPending}
+    />
+  );
+}
+
+/// One file drawn as a pill: its name cut to a line, and the × that takes it
+/// away where there is one to draw.
+///
+/// The same pill wherever a file is shown beside a Brief — on a draft, where it
+/// is a row of the record and the × is a request, and on the compose page,
+/// where it is a file this device is holding and the × is a change of mind. A
+/// file waiting to be sent and a file that has landed look alike because they
+/// are the same thing to the human, and what is different about them is only
+/// what the × does.
+///
+/// Cut at the front, which is how every other name in the app is cut — see
+/// [`Truncated`](../Truncated.tsx). On a file name that is the half worth
+/// keeping too: the extension is what says what the thing is, and the whole
+/// name is under the pointer either way.
+export function Pill(props: {
+  name: string;
+
+  /// Drawn dimmed where the file is on its way up and the record is not back:
+  /// the press has been made and there is nothing to press on it yet.
+  landing?: boolean;
+
+  /// Taking it away, where that is something that can be done at all — nothing
+  /// on one still landing, and nothing past the freeze.
+  remove?: () => void;
+
+  /// And whether the removal is already in flight, which is the one thing a
+  /// press on the × can be truly disabled for.
+  removing?: boolean;
+}): JSX.Element {
+  return (
+    <li
+      class={styles.attachment}
+      classList={{ [styles.landing!]: props.landing }}
+    >
+      <Truncated text={props.name} class={styles.attachmentName} />
 
       {/* A mark rather than a word, the way a companion row's is, and named for
           this file: the row is a line of names and the × on its own says
           nothing about which one it takes. */}
-      <Show when={!props.frozen}>
+      <Show when={props.remove !== undefined}>
         <button
           type="button"
           class={styles.forget}
-          aria-label={`Remove ${props.attachment.name}`}
-          disabled={forget.isPending}
-          onClick={() => forget.mutate()}
+          aria-label={`Remove ${props.name}`}
+          disabled={props.removing}
+          onClick={() => props.remove?.()}
         >
           ×
         </button>
