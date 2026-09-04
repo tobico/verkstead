@@ -802,6 +802,33 @@ fn the_same_file(one: &Path, another: &Path) {
     );
 }
 
+/// A file a session writes somewhere other than its evidence directory, waited
+/// for the way [`Grilling::written`] waits for one there.
+///
+/// Waited for rather than looked at, for the reason everything else in this
+/// file is: a stand-in that has written the line before it is a stand-in the
+/// test has caught up with, not one that has finished. The evidence directory
+/// is polled a name at a time, so the last name read says nothing about the
+/// line after it — and on a runner with two cores and a dozen sessions on them,
+/// the gap between one line and the next is as long as the scheduler makes it.
+async fn landed(path: &Path, why: &str) {
+    let deadline = Instant::now() + PATIENCE;
+
+    loop {
+        if path.is_file() {
+            return;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "{why} — {} is not there",
+            path.display()
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
+}
+
 /// The whole of what pressing the button does here: the Profile's agent, on the
 /// Profile's model, running in the Conversation's worktree, sent into the
 /// bundled grilling skill and primed with the Brief.
@@ -1178,11 +1205,12 @@ async fn a_session_runs_in_a_profile_of_the_conversations_own() {
         );
     }
 
-    assert!(
-        temporary.join("thrown-away.txt").is_file(),
+    landed(
+        &temporary.join("thrown-away.txt"),
         "what a session writes to its temporary directory lands under the \
          profile it was given, which is what makes it thrown away with it",
-    );
+    )
+    .await;
 
     assert_eq!(
         fixture.written("marker").await,
@@ -1407,9 +1435,18 @@ async fn a_session_is_told_where_the_sccache_it_compiles_through_is() {
         Path::new(&sccache),
     );
 
-    the_same_file(
-        Path::new(&fixture.written("cargo-home").await),
-        &cache.path().join("cargo"),
+    // Spelled rather than resolved, which is the one comparison here that has
+    // to be: `CARGO_HOME` is a directory the first `cargo` to run under it
+    // makes, and nothing in this test runs one — so what is being asked is that
+    // the server composed the name out of the cache directory it was handed,
+    // and a name is all there is to compare. The line above is the other way
+    // round: an sccache found on the `PATH` is a real file spelled however
+    // `where.exe` spells it.
+    assert_eq!(
+        fixture.written("cargo-home").await,
+        cache.path().join("cargo").display().to_string(),
+        "a session's cargo downloads go under the shared cache the server was \
+         given, which is what makes them shared",
     );
 }
 

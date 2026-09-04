@@ -71,7 +71,8 @@ use windows_sys::Win32::System::Threading::{
     CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, DeleteProcThreadAttributeList,
     EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList,
     LPPROC_THREAD_ATTRIBUTE_LIST, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION,
-    ResumeThread, STARTUPINFOEXW, TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
+    ResumeThread, STARTF_USESTDHANDLES, STARTUPINFOEXW, TerminateProcess,
+    UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
 use super::{COLUMNS, ROWS};
@@ -200,6 +201,22 @@ impl Terminal {
         let mut startup: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
         startup.StartupInfo.cb = u32::try_from(size_of::<STARTUPINFOEXW>()).unwrap_or(u32::MAX);
         startup.lpAttributeList = attributes.list();
+
+        // Three standard handles said to be nothing, which is what puts the
+        // session on the console it was given rather than on whatever the
+        // server was started with.
+        //
+        // **A server's own output is redirected**, always: a service writes to
+        // a log file and a `cargo test` writes down a pipe. A child of one is
+        // handed those same three handles unless its parent says otherwise —
+        // even one attached to a pseudoconsole, which then sets the console's
+        // title, draws nothing on it, reads end-of-file where a watcher typed,
+        // and asks how wide the window is only to be told it has none. So the
+        // flag is set with the handles left zero, which says *these three, and
+        // they are nothing*: the console the process comes up on is what fills
+        // them in, and what a session prints reaches the pipe this terminal
+        // reads.
+        startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
 
         let mut line = command_line(rendering);
         let environment = environment(rendering);
