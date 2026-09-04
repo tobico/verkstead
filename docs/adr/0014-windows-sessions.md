@@ -71,10 +71,18 @@ A session on Linux starts in an empty `HOME` with only the account mounted
 in; on a Mac the same, in a directory made fresh under the Data Directory. A
 Windows session gets the same shape from the first stage, container or no
 container: a directory of its own under the Data Directory that `USERPROFILE`
-and `HOME` point at, with the account's `.claude` joined in by a **directory
-junction**, which needs no privilege, and its `.claude.json` by a hard link,
-which needs the Data Directory and the profile to be on one volume — a machine
-where they are not refuses the session with a line saying so. `APPDATA`,
+and `HOME` point at, with the Profile's account joined into it.
+
+**The rule is over the account rather than over one backend.** Four agent types
+keep an account four ways — Claude's pair at `.claude` and `.claude.json`,
+Codex's `.codex`, Grok's `.grok`, opencode's config and data directories — and
+the Surface already binds whichever of them the Profile names, so a rule
+written for Claude's pair would start a Codex or opencode session into a
+profile with no account in it at all: logged out, and nothing saying why. So
+every **directory** in the account is joined in by a **directory junction**,
+which needs no privilege, and every **file** by a hard link, which needs the
+Data Directory and the profile to be on one volume — a machine where they are
+not refuses the session with a line saying so. `APPDATA`,
 `LOCALAPPDATA` and `TEMP` point into the fresh profile too, so npm's caches,
 tool state and temporary files stay out of the real one. Built in the first
 stage rather than the second because it is what the container's grants are
