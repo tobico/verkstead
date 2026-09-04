@@ -82,6 +82,26 @@
 //! page can truthfully draw ahead of the server — so they keep the pending
 //! label on the row and the refusal over the page.
 //!
+//! **And two of the four take the page with them.** Archive and Close and
+//! archive put the Conversation off the conversations list, and a human who
+//! pressed one of them on the Conversation they were reading was left reading
+//! it still — on a page nothing in the list points at any more, with the switch
+//! at the foot of the sidebar as the only way back to where they had been. So
+//! the page goes where the eye already is: to the Conversation **above** the one
+//! that has gone, and to the compose page where there was none above it, that
+//! being the one thing there is to do from the top of the list. See [`leaving`].
+//!
+//! It replaces rather than pushes. The human pressed a row rather than
+//! navigating, and a Back that landed on the Conversation they had just put away
+//! would hand it straight back.
+//!
+//! And it happens only where the row really goes. With *Show archived* on, an
+//! archived Conversation keeps its row and the human keeps their page: the
+//! switch is what says they want to go on seeing these. Nor does a press on
+//! some other card move anything — the sidebar's menu is very often about a
+//! Conversation no pane is showing, and nothing about the page it is over has
+//! changed.
+//!
 //! Two menus and one set of rows. The pane's is about the Conversation that is
 //! open, and the sidebar's right-click is about the card under the pointer,
 //! which is very often a different one — but *what there is to do about a
@@ -95,6 +115,7 @@
 //! dragged — so on a phone this menu simply is not there, and the status button
 //! on the Conversation is the way to all of it.
 
+import { useNavigate, useParams } from "@solidjs/router";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
   Match,
@@ -112,8 +133,10 @@ import {
   closeAndArchiveConversation,
   closeConversation,
   forceStopConversation,
+  listConversations,
   loadConversation,
   resume,
+  showingArchived,
   steerConversation,
   stopConversation,
   unarchiveConversation,
@@ -130,7 +153,8 @@ import type {
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import styles from "./Actions.module.css";
-import { eagerly, pressed, rowFor } from "./eager";
+import { eagerly, pressed, pressedRows, rowFor } from "./eager";
+import { pathOf } from "./openings";
 import { NO_SESSIONS, noSessions } from "./sessions";
 import { Steer } from "./Steer";
 
@@ -365,6 +389,72 @@ function actions(): {
   modal: () => JSX.Element;
 } {
   const queries = useQueryClient();
+  const navigate = useNavigate();
+  /// Which Conversation the page is about, which is what says whether a press
+  /// here is about the page at all. Off the URL rather than handed in: these
+  /// rows are drawn beside every page the sidebar stands on.
+  const opened = useParams();
+
+  /// The sidebar's own list, read under the key the sidebar reads it under — so
+  /// this is the answer already in hand rather than a second fetch of it.
+  ///
+  /// What it is for is [`leaving`]: the row above the one a press is about is a
+  /// fact about the list the human is looking at, and the list is the one thing
+  /// on the screen throughout — the sidebar stands beside every Conversation
+  /// and beside the settings.
+  const conversations = useReading(() => ({
+    queryKey: ["conversations"],
+    queryFn: listConversations,
+
+    // Merged as the sidebar's is: the list is re-read constantly, and this is
+    // the same cache entry.
+    freshness: { reconcile: "id" } as const,
+  }));
+
+  /// And whether the ones put away are drawn among them, read the same way
+  /// under the key the switch at the foot of the pane reads it under.
+  ///
+  /// The same rule the sidebar filters its own list by, asked for the same
+  /// reason: it is what decides whether an archive takes a row off the list at
+  /// all, and so whether there is any page for the human to be left on.
+  const archived = useReading(() => ({
+    queryKey: ["conversations", "archived"],
+    queryFn: showingArchived,
+    freshness: { reconcile: "id" } as const,
+  }));
+
+  /// A press has put this Conversation off the conversations list, so the page
+  /// goes if the page was about it.
+  ///
+  /// Where it goes is where the eye already is: the row **above** the one that
+  /// has gone, and the compose page where there was none above it — the top of
+  /// the list having nothing over it but the one thing there is to do from
+  /// there. The list as the human is looking at it, presses and all, rather
+  /// than as the server last sent it: a row taken off a moment ago by another
+  /// press of theirs is not somewhere to send them back to.
+  ///
+  /// Nothing at all in the two cases where nothing has moved under anybody: a
+  /// press on some other card, which is most of what the sidebar's menu is for,
+  /// and an archive made while the archived ones are shown — that row stays in
+  /// the list, and going on reading it is what the switch is for.
+  ///
+  /// Called before the press writes what it says, because what it reads is the
+  /// list with this Conversation still on it. See `eager.ts`.
+  const leaving = (conversation: ConversationView): void => {
+    if (String(conversation.id) !== opened.id) return;
+    if (archived.data ?? false) return;
+
+    const rows = pressedRows(conversations.data ?? [], false);
+    const at = rows.findIndex((row) => row.id === conversation.id);
+    const above = at > 0 ? rows[at - 1] : undefined;
+
+    // Replacing rather than pushing: the human pressed a row rather than
+    // navigating, and a Back that landed on the Conversation they have just put
+    // away would hand it straight back.
+    navigate(above === undefined ? "/compose" : pathOf(above.id), {
+      replace: true,
+    });
+  };
 
   /// What the click found, once it has answered, and `null` while the modal is
   /// shut. Held out here rather than in the menu's rows, because the menu's rows
@@ -503,6 +593,11 @@ function actions(): {
   ) => {
     shut();
 
+    // The archiving half takes the row off the list, so it takes the page with
+    // it — before the press says so, the list this reads being the one the row
+    // is still on. See [`leaving`].
+    if (away) leaving(conversation);
+
     eagerly({
       conversation: conversation.id,
       // The archive is the half the two rows differ by, and it is said here
@@ -527,6 +622,7 @@ function actions(): {
   /// a press and it has happened.
   const archiving = (conversation: ConversationView) => {
     shut();
+    leaving(conversation);
 
     eagerly({
       conversation: conversation.id,

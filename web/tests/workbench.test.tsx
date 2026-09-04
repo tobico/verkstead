@@ -1969,6 +1969,152 @@ describe("what a right-click on a card offers", () => {
   });
 });
 
+/// Where the page goes when a press puts the Conversation it is about off the
+/// conversations list.
+///
+/// Archive and Close and archive take the row away, and a human who pressed one
+/// of them on what they were reading was left on a page nothing in the list
+/// points at any more — with the switch at the foot of the sidebar as the only
+/// way back to where they had been. So the page goes where the eye already is:
+/// the row above the one that has gone, and the compose page where there was
+/// none above it. See `Actions.tsx`.
+describe("a press that takes the open conversation off the list", () => {
+  /// The grilling conversation open, which is the third row of the fixture
+  /// sidebar: there is a row above it to be sent to, and rows below it that are
+  /// not it.
+  function theOpenGrilling(...answers: Parameters<typeof serving>) {
+    return theWorkbench(
+      whenever(`/api/ui/conversations/${GRILLING.id}`, json(GRILLING)),
+      // And the one the page is sent to, which it reads the moment it lands.
+      whenever(`/api/ui/conversations/${BUILDING.id}`, json(BUILDING)),
+      whenever(
+        `/api/ui/conversations/${GRILLING.id}/close-and-archive`,
+        json("Closed" satisfies ConversationClosed),
+        "POST",
+      ),
+      whenever(
+        `/api/ui/conversations/${GRILLING.id}/archive`,
+        json("Archived" satisfies ConversationArchived),
+        "POST",
+      ),
+      ...answers,
+    );
+  }
+
+  /// The row above the grilling one in the fixture sidebar, which is where a
+  /// press on it should leave the page.
+  const ABOVE = `/conversations/${BUILDING.id}`;
+
+  /// The card of the row a Conversation is drawn as, by its id.
+  async function cardOf(
+    container: ParentNode,
+    id: number,
+  ): Promise<HTMLElement> {
+    const rows = await cards(container);
+    const row = rows.find((card) => card.dataset.id === String(id));
+    expect(row, `the fixture sidebar should hold conversation ${id}`)
+      .toBeTruthy();
+    return row!.querySelector<HTMLElement>(`.${sidebar.open}`)!;
+  }
+
+  /// And what a right-click on one drops, the sidebar's menu being the other
+  /// place these same rows are drawn.
+  async function cardMenu(container: ParentNode): Promise<HTMLElement> {
+    return drawn(
+      container,
+      `.${shell.conversationsPane} .${actions.conversationActions} > .${dropdown.drop}`,
+    );
+  }
+
+  it("goes to the conversation above the one it put away", async () => {
+    theOpenGrilling();
+    const { container, history } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${actions.closeAndArchive}`));
+
+    await waitFor(() => expect(history.get().startsWith(ABOVE)).toBe(true));
+  });
+
+  /// The same from the row that only archives, which is what a Conversation
+  /// already closed is offered in place of the two closes.
+  it("goes there from the archive row as well", async () => {
+    theOpenGrilling(
+      whenever(
+        `/api/ui/conversations/${GRILLING.id}`,
+        json({ ...GRILLING, state: "Closed" } satisfies ConversationView),
+      ),
+    );
+    const { container, history } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${actions.archive}`));
+
+    await waitFor(() => expect(history.get().startsWith(ABOVE)).toBe(true));
+  });
+
+  /// The top of the list has nothing over it but the one thing there is to do
+  /// from there, which is start something.
+  it("goes to the compose page where there was nothing above it", async () => {
+    const archives = `/api/ui/conversations/${STOPPED.id}/close-and-archive`;
+    theWorkbench(
+      whenever(`/api/ui/conversations/${STOPPED.id}`, json(STOPPED)),
+      whenever(archives, json("Closed" satisfies ConversationClosed), "POST"),
+    );
+    const { container, history } = mount(`/conversations/${STOPPED.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${actions.closeAndArchive}`));
+
+    await waitFor(() => expect(history.get()).toBe("/compose"));
+  });
+
+  /// And with the archived ones shown the row does not go anywhere, so neither
+  /// does the human: reading on is what the switch is for.
+  it("stays where it is while the archived ones are shown", async () => {
+    const archives = `/api/ui/conversations/${GRILLING.id}/close-and-archive`;
+    const fetching = theOpenGrilling(
+      whenever(
+        "/api/ui/conversations/archived",
+        json({ showing: true } satisfies ShowingArchived),
+      ),
+    );
+    const { container, history } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(await drawn(container, `.${actions.closeAndArchive}`));
+
+    await waitFor(() => expect(sent(fetching, archives)).toEqual({}));
+    expect(history.get().startsWith(`/conversations/${GRILLING.id}`)).toBe(
+      true,
+    );
+  });
+
+  /// The sidebar's menu is very often about a Conversation no pane is showing,
+  /// and nothing about the page it is over has changed.
+  it("leaves the page alone when the card pressed was not the one open", async () => {
+    const archives = `/api/ui/conversations/${GRILLING.id}/close-and-archive`;
+    const fetching = theOpenGrilling();
+    const { container, history } = mount(`/conversations/${OPEN.id}`);
+
+    // Where the landing left it, which is what the press must not move: taken
+    // after the walk to the end of the record rather than before it.
+    await openComposer(container);
+    const was = history.get();
+
+    fireEvent.contextMenu(await cardOf(container, GRILLING.id), {
+      clientX: 120,
+      clientY: 200,
+    });
+    fireEvent.click(
+      await drawn(await cardMenu(container), `.${actions.closeAndArchive}`),
+    );
+
+    await waitFor(() => expect(sent(fetching, archives)).toEqual({}));
+    expect(history.get()).toBe(was);
+  });
+});
+
 /// The page a conversation started from that notice opens on: the roadmap and
 /// its stage named, the two profiles and the base commit to fix, and one press.
 describe("the adoption page", () => {
