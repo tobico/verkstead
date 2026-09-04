@@ -40,8 +40,18 @@
 /* Under the pointer, the same fill the open one takes: the open button is
    already there and does not move under the hand. */
 @media (hover: hover) {
-  .iconButton:not(.open):hover {
+  .iconButton:not(.open):not(:disabled):hover {
     color: var(--ink);
     background: var(--card);
   }
+}
+
+/* And one with nothing behind it to press into, which is the same dimming the
+   ⋯ takes when there is nothing in its menu — see `.trigger:disabled` in
+   `Menu.module.css`. Why it is off is in its label rather than in its paint:
+   the icon says nothing when it is read aloud, and a shape that has gone grey
+   says no more. */
+.iconButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
 }

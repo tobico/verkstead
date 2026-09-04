@@ -45,6 +45,12 @@ export function IconButton(props: {
   /// the open one is the way it was opened, made again.
   press: () => void;
 
+  /// Whether there is nothing behind it to press into. The caller's, like
+  /// `open`, and the caller says why in the `label`: an icon that does nothing
+  /// when it is pressed says nothing about why, and the label is the whole of
+  /// what a screen reader has of one either way.
+  disabled?: boolean;
+
   /// A class of the caller's, for where it stands in the row it was drawn
   /// into. Styled by whoever passes it, never here.
   class?: string;
@@ -61,6 +67,7 @@ export function IconButton(props: {
         .join(" ")}
       aria-label={props.label}
       aria-pressed={props.open}
+      disabled={props.disabled}
       onClick={() => props.press()}
     >
       <Icon of={props.of} />

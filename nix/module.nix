@@ -120,6 +120,32 @@ in
       '';
     };
 
+    shell = lib.mkOption {
+      type = lib.types.shellPackage;
+      default = pkgs.bash;
+      defaultText = lib.literalExpression "pkgs.bash";
+      example = lib.literalExpression "pkgs.fish";
+      description = ''
+        The login shell the `verkstead` service user gets, and so the shell a
+        Conversation's **Terminal** comes up in.
+
+        A terminal runs the shell the server's own user has in passwd, and a
+        system user is given `nologin` unless something says otherwise — so
+        without this every terminal on a packaged install would fall back to
+        `/bin/sh`. Switching it is one line: `shell = pkgs.fish;`, or zsh, or
+        whatever you type in yourself.
+
+        It is the only place the terminal's shell is configured. Verkstead has
+        no setting of its own for it: the shell a machine's user gets is said in
+        the machine's own user configuration, and a second place to say it would
+        be a place for the two to disagree.
+
+        Nothing else about the service uses it. The unit's own `ExecStart` is
+        the binary rather than a shell, so this changes what a human types into
+        and nothing about what the server runs.
+      '';
+    };
+
     watchedPaths = lib.mkOption {
       type = lib.types.listOf lib.types.path;
       example = lib.literalExpression ''[ "/home/you/src" ]'';
@@ -241,6 +267,12 @@ in
       isSystemUser = true;
       group = "verkstead";
       description = "Verkstead server";
+
+      # What a Conversation's Terminal comes up in: the server reads its own
+      # user's login shell out of passwd, and this is what puts one there — a
+      # system user's would otherwise be `nologin`, which a terminal cannot run
+      # and falls back to `/bin/sh` from. See the `shell` option.
+      shell = cfg.shell;
     };
     users.groups.verkstead = { };
 

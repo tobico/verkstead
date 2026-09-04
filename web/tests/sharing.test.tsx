@@ -159,6 +159,14 @@ describe("a shared conversation", () => {
     expect(screen.queryByText("Start work")).toBeNull();
     expect(screen.queryByText("Resume")).toBeNull();
 
+    // And neither of the two icons on the Timeline's own header: one offers a
+    // reader a publish of somebody else's conversation, and the other a shell
+    // in a sandbox on somebody else's machine.
+    expect(screen.queryByRole("button", { name: "Share" })).toBeNull();
+    expect(
+      container.querySelector('button[aria-label^="Terminal"]'),
+    ).toBeNull();
+
     // And nothing anywhere on the page that is a row of a menu or a field to
     // fill in: a shared brief is the document it froze as, whatever state the
     // record says the conversation is in.

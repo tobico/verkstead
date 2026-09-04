@@ -70,6 +70,7 @@ export function App(): JSX.Element {
           <Route path="/events/:event" />
           <Route path="/backlog" />
           <Route path="/share" />
+          <Route path="/terminal" />
           <Route path="/roadmaps/:name" />
         </Route>
         {/* And the composer before there is anything for it to be about: the

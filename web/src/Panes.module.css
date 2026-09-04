@@ -20,16 +20,16 @@
    such pane at all then, and the two frames that happen in are said at the end
    of this file.
 
-   Five of the names here are worn by things this file does not draw:
+   Six of the names here are worn by things this file does not draw:
    `paneChrome` by whatever sticks to the top of a pane, `paneFoot` by whatever
    sticks to its bottom, `paneBack` by the way out of one, `paneScreen` by a
-   terminal that takes a pane's whole height, and `paneComposer` by the one
-   thing a pane holds that stands in the middle of it rather than at the top.
-   The rules that read them are about what a *pane* does, and a pane is the
-   frame's; so the frame writes the names and the components that have to be
-   recognised by it wear them — `PaneHead.tsx`, `Timeline.tsx`,
-   `Conversations.tsx`, `Screen.tsx` and the two composers each import this
-   module for the ones they need. */
+   terminal that takes a pane's whole height, `paneWide` by one that takes its
+   whole width as well, and `paneComposer` by the one thing a pane holds that
+   stands in the middle of it rather than at the top. The rules that read them
+   are about what a *pane* does, and a pane is the frame's; so the frame writes
+   the names and the components that have to be recognised by it wear them —
+   `PaneHead.tsx`, `Timeline.tsx`, `Conversations.tsx`, `Attached.tsx` and the
+   two composers each import this module for the ones they need. */
 
 /* The frame — and the box that everything standing in it is positioned against,
    which is the half of clipping that is easy to leave off.
@@ -490,6 +490,25 @@
 
 .panes > .detailsPane:has(.paneScreen) > :not(.paneScreen) {
   flex: none;
+}
+
+/* And the pane whose terminal is the whole point of it — the Conversation's own
+   Terminal — takes the pane's width as well as its height: the 60rem reading
+   measure comes off, exactly as it comes off for the composer above, and for
+   the same reason. The measure is what makes prose readable across a pane
+   dragged two feet wide; a terminal is not prose, and every column it is given
+   is a column the shell inside it gets to use.
+
+   The header goes back to the pane's own edge with it, which is the other half
+   of what the composer's rule does: a header a column's width in from the edge
+   of a pane whose content runs edge to edge is a header hanging in space.
+
+   A session's Screen keeps the measure. That pane is a reading pane with a
+   terminal in it — the Transcript is the other half of the switch above it —
+   and what it is showing is a session that was printed for a comfortable
+   width. */
+.panes > .detailsPane:has(.paneWide) {
+  padding-inline: 1.25rem;
 }
 
 /* And that it is a column at all, said twice, because the pane is shown by two

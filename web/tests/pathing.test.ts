@@ -53,6 +53,7 @@ const PATHS: Array<[Opening, string]> = [
   [7, "/conversations/3/events/7"],
   ["backlog", "/conversations/3/backlog"],
   ["share", "/conversations/3/share"],
+  ["terminal", "/conversations/3/terminal"],
   [opensRoadmap("mvp"), "/conversations/3/roadmaps/mvp"],
   [opensRoadmap("companion-repos"), "/conversations/3/roadmaps/companion-repos"],
 ];
@@ -115,6 +116,7 @@ describe("what a path says is open", () => {
     expect(openingAt("/conversations/3/events")).toBeNull();
     expect(openingAt("/conversations/3/backlog/nowhere")).toBeNull();
     expect(openingAt("/conversations/3/share/nowhere")).toBeNull();
+    expect(openingAt("/conversations/3/terminal/1")).toBeNull();
     expect(openingAt("/conversations/3/events/1e3")).toBeNull();
     expect(openingAt("/conversations/3/roadmaps/mvp/1")).toBeNull();
   });

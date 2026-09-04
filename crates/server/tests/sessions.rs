@@ -35,6 +35,12 @@
 //! the keyboard goes back — so they drive whole backlogs, with the stub waiting
 //! at a gate the test opens when it wants the step to land.
 //!
+//! And the Conversation's own terminals are at the very end, for the reason the
+//! watching is: a Terminal is not a session — it is a shell of the human's in the
+//! same Sandbox (ADR 0013) — but what makes one is a real Sandbox around a real
+//! pseudo-terminal in a Conversation with a real Worktree, and this is the file
+//! that has one. Nothing stands in for the shell there: the shell is the thing.
+//!
 //! **On the platforms a session runs on.** The sandbox is bwrap and the
 //! terminal is a real pseudo-terminal, and a Windows Verkstead has neither: it
 //! runs no session at all, and says so above the spawn rather than under it.
@@ -65,7 +71,7 @@ use verkstead_render::{
     ConversationSteered, ConversationStopped, ConversationView, GrillingStarted, Lifecycle,
     NoticeEvent, PickedView, PinnedEvent, ProfileSaved, PullRequestEvent, Registered, Resolved,
     Resumed, Shown, Size, StageListReached, Started, SteerOpened, Submitted, TaskListEvent,
-    TaskListReached, TimelineEvent, TranscriptView, Turn, Watching,
+    TaskListReached, TerminalOpened, TerminalsView, TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_schema::{Direction, Nudge};
 use verkstead_server::build_cache::BuildCache;
@@ -2885,6 +2891,26 @@ async fn post<T: DeserializeOwned>(app: &Router, path: &str, body: &serde_json::
 
     assert_eq!(status, StatusCode::OK, "POST {path} failed: {body}");
     read(&body)
+}
+
+/// And the one thing in the API that is asked for by taking it away: closing a
+/// Conversation's terminal, which answers with nothing to read.
+async fn delete(app: &Router, path: &str) {
+    let (status, body) = fetch(
+        app,
+        Request::builder()
+            .method("DELETE")
+            .uri(path)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(
+        status,
+        StatusCode::NO_CONTENT,
+        "DELETE {path} failed: {body}"
+    );
 }
 
 async fn fetch(app: &Router, request: Request<Body>) -> (StatusCode, String) {
@@ -16969,11 +16995,26 @@ impl Watcher {
     /// Attach to a session's Screen the way the workbench does, and take the
     /// repaint it opens with.
     async fn attach(at: SocketAddr, conversation: i64, event: i64) -> Watcher {
-        let (socket, _) = tokio_tungstenite::connect_async(format!(
+        Watcher::watching(format!(
             "ws://{at}/api/ui/conversations/{conversation}/screen/{event}/attach"
         ))
         .await
-        .expect("the session's Screen to be attachable");
+    }
+
+    /// And to one of the Conversation's own terminals, which is the same socket
+    /// pointed at a shell rather than at a session (ADR 0013).
+    async fn terminal(at: SocketAddr, conversation: i64, number: i64) -> Watcher {
+        Watcher::watching(format!(
+            "ws://{at}/api/ui/conversations/{conversation}/terminals/{number}/attach"
+        ))
+        .await
+    }
+
+    /// Either of them: dial the socket and take the repaint it opens with.
+    async fn watching(url: String) -> Watcher {
+        let (socket, _) = tokio_tungstenite::connect_async(&url)
+            .await
+            .unwrap_or_else(|error| panic!("{url} to be attachable: {error}"));
 
         let mut watcher = Watcher {
             socket,
@@ -17081,6 +17122,39 @@ impl Watcher {
             .send(Message::Text(said.into()))
             .await
             .expect("the socket to take a resize");
+    }
+
+    /// Follow the socket until the server closes it, which is what a shell
+    /// ending looks like from a browser: the terminal comes off the register the
+    /// moment it exits, and there is nothing left to feed the Screen every
+    /// watcher is on.
+    ///
+    /// Whatever it says on the way is fed to the grid like anything else — the
+    /// last thing a shell prints is printed on its way out, and a close is not a
+    /// reason to stop reading what came before it.
+    async fn until_closed(&mut self) {
+        let deadline = Instant::now() + *PATIENCE;
+
+        loop {
+            let waiting = deadline.saturating_duration_since(Instant::now());
+
+            let said = tokio::time::timeout(waiting, self.socket.next())
+                .await
+                .expect("the socket to close when the shell ended");
+
+            match said {
+                // The stream is over, either at the close frame or at the end of
+                // it.
+                None | Some(Ok(Message::Close(_))) | Some(Err(_)) => return,
+                Some(Ok(Message::Text(said))) => match read(&said) {
+                    Shown::Painted(painted) => self.paint(&painted),
+                    Shown::Printed(printed) => {
+                        self.vt.feed_str(&printed);
+                    }
+                },
+                Some(Ok(_)) => {}
+            }
+        }
     }
 
     /// The grid it is showing, row by row, with the blank rows at the bottom
@@ -25500,5 +25574,559 @@ async fn a_blocking_ask_from_an_ungrilled_session_waits_on_the_human() {
             .await,
         Submitted::Accepted,
         "and the human answers it the way they answer any other",
+    );
+}
+
+/// A Conversation's own terminal, end to end: a shell running in its Sandbox,
+/// with its Worktree as the working directory, and what is typed into it
+/// answered.
+///
+/// The Screen's own machinery pointed at a shell rather than an agent
+/// (ADR 0013), which is why it is asked here and asked this way: a real Sandbox,
+/// a real pseudo-terminal, a real socket, and the assertion read off the grid the
+/// way every Screen assertion in this file is. What runs is `/bin/sh` — a
+/// terminal has no stub to stand in for it, because the shell *is* the thing.
+#[tokio::test]
+async fn a_terminal_runs_a_shell_in_the_conversations_worktree() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    // The Worktree the grilling made, which is where the shell should be
+    // standing — and the same path inside the Sandbox, the bind being at the
+    // path the directory is really at.
+    let worktree = fixture
+        .until(|view| view.worktree.as_ref().map(|worktree| worktree.path.clone()))
+        .await;
+
+    let at = fixture.listening().await;
+
+    let opened: TerminalOpened = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+        &serde_json::json!({}),
+    )
+    .await;
+
+    let TerminalOpened::Opened { number } = opened else {
+        panic!("expected a terminal to open, and the server said: {opened:?}");
+    };
+
+    // And it is on the list of live ones, which is what the pane asks for when
+    // it loads and what a reload comes back to.
+    let live: TerminalsView = get(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+    )
+    .await;
+
+    assert_eq!(live.live, vec![number]);
+
+    let mut watcher = Watcher::terminal(at, fixture.id, number).await;
+
+    // Wide enough that the Worktree's own path — a temporary directory with
+    // several segments under it — lands on one row rather than wrapping over
+    // the edge of the grid, a wrapped line being one no `contains` finds.
+    watcher.resize(200, 40).await;
+    watcher.types("pwd\r").await;
+
+    let showing = watcher.until(|grid| grid.contains(&worktree)).await;
+
+    assert!(
+        showing.iter().any(|row| row.contains(&worktree)),
+        "the shell should be standing in the Worktree at {worktree:?}, \
+         and its terminal is showing: {showing:?}",
+    );
+
+    // And a reload comes back to the same shell, still running and showing what
+    // it last showed — the server holds it, so a browser that went away and
+    // came back is repainted with where it got to rather than given a new one.
+    drop(watcher);
+
+    let again = Watcher::terminal(at, fixture.id, number).await;
+    let repainted = again.showing();
+
+    assert!(
+        repainted.iter().any(|row| row.contains(&worktree)),
+        "a watcher that reattaches should be repainted with what the terminal is \
+         still showing, and it is showing: {repainted:?}",
+    );
+}
+
+/// And the shell it comes up in is the server user's own, with `SHELL` naming it
+/// inside and the running server's own `verkstead` still the first one found.
+///
+/// Which shell that is, is the machine's answer rather than this test's: the
+/// rules for reading a passwd entry are asked of each kind of entry as values,
+/// in the server's own unit tests, and what is asked here is the half no unit
+/// test can — that whatever this machine named really comes up on a
+/// pseudo-terminal inside a Sandbox, and that entering it left the environment
+/// the Sandbox handed it as it was. A login shell would not have: it reads the
+/// system's profile, which on NixOS rebuilds `PATH`, and a `verkstead` found
+/// somewhere other than the one bound in is the two halves of an ask being two
+/// different builds.
+#[tokio::test]
+async fn a_terminal_comes_up_in_the_server_users_own_shell() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    // What the server chose, asked of this machine the way the server asks it —
+    // so that a suite run under one account and a suite run under another are
+    // both asking whether the terminal came up in *that* account's shell.
+    let chosen = verkstead_server::terminals::shell::of_the_server();
+
+    // And where a session's `verkstead` is inside, which is where a terminal's
+    // has to be too: the directory the binds make on Linux, and the Data
+    // Directory itself on a Mac, where nothing can be made at the root.
+    let ours = verkstead_server::sandbox::own_directory(Platform::HERE, fixture.state.path())
+        .join("bin")
+        .join("verkstead");
+
+    fixture
+        .until(|view| view.worktree.as_ref().map(|worktree| worktree.path.clone()))
+        .await;
+
+    let at = fixture.listening().await;
+
+    let opened: TerminalOpened = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+        &serde_json::json!({}),
+    )
+    .await;
+
+    let TerminalOpened::Opened { number } = opened else {
+        panic!("expected a terminal to open, and the server said: {opened:?}");
+    };
+
+    let mut watcher = Watcher::terminal(at, fixture.id, number).await;
+
+    // Wide enough for a store path and its answer to land on one row — a
+    // wrapped line being one no `contains` finds.
+    watcher.resize(200, 40).await;
+
+    watcher.types("printf 'shell=%s\\n' \"$SHELL\"\r").await;
+
+    let said = format!("shell={chosen}");
+    let showing = watcher.until(|grid| grid.contains(&said)).await;
+
+    assert!(
+        showing.iter().any(|row| row.contains(&said)),
+        "`SHELL` inside should name the shell the terminal is running, which on \
+         this machine is {chosen:?}, and it is showing: {showing:?}",
+    );
+
+    // Asked of a lookup rather than of the variable, for the reason the sandbox's
+    // own test asks it that way: what settles which binary is first on `PATH` is
+    // something inside looking one up.
+    watcher.types("command -v verkstead\r").await;
+
+    let found = ours.display().to_string();
+    let showing = watcher.until(|grid| grid.contains(&found)).await;
+
+    assert!(
+        showing.iter().any(|row| row.contains(&found)),
+        "a bare `verkstead` in a terminal should be the one the server bound in at \
+         {found:?}, and it is showing: {showing:?}",
+    );
+}
+
+/// And opening one leaves nothing behind: a terminal is memory only — no
+/// Capture, no Event on the Timeline, nothing in the store at all.
+///
+/// The whole of what *not a record* means in code. A session's bytes are kept
+/// because they are the record of what an agent did; a human's shell is the
+/// human doing something, and the Timeline records what happened to the
+/// Conversation rather than what its human typed.
+#[tokio::test]
+async fn opening_a_terminal_leaves_nothing_on_the_timeline() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    // Once the session has said something, so the record is not still growing
+    // under the comparison below.
+    let event = fixture.running().await;
+    fixture.printed(event, "reading the brief").await;
+
+    let before = fixture.view().await.timeline;
+
+    let opened: TerminalOpened = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+        &serde_json::json!({}),
+    )
+    .await;
+
+    let TerminalOpened::Opened { number } = opened else {
+        panic!("expected a terminal to open, and the server said: {opened:?}");
+    };
+
+    let at = fixture.listening().await;
+    let mut watcher = Watcher::terminal(at, fixture.id, number).await;
+
+    watcher.types("printf 'in the terminal\\n'\r").await;
+    watcher.until(|grid| grid.contains("in the terminal")).await;
+
+    // A window in which an Event would have landed, had anything written one.
+    pause(Duration::from_millis(500)).await;
+
+    assert_eq!(
+        fixture.view().await.timeline,
+        before,
+        "opening a terminal and typing in it should leave the Timeline exactly as it was",
+    );
+}
+
+/// And a shell that exits takes its terminal with it: off the register, and
+/// every watcher's socket closed under them.
+///
+/// Which is the whole of what the pane's tab rules stand on. A terminal is
+/// memory only, so there is nothing to poll and nothing to read back: the way a
+/// tab hears that its shell has ended is its own socket closing, exactly as a
+/// session ending closes its Screen's (ADR 0007). Asked of two watchers, because
+/// the claim is about every one of them rather than about the one that happened
+/// to be typing.
+#[tokio::test]
+async fn a_terminal_whose_shell_exits_leaves_the_register_and_closes_its_watchers() {
+    let fixture = grilling(
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+    )
+    .await;
+
+    fixture
+        .until(|view| view.worktree.as_ref().map(|worktree| worktree.path.clone()))
+        .await;
+
+    let at = fixture.listening().await;
+
+    let opened: TerminalOpened = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+        &serde_json::json!({}),
+    )
+    .await;
+
+    let TerminalOpened::Opened { number } = opened else {
+        panic!("expected a terminal to open, and the server said: {opened:?}");
+    };
+
+    let mut one = Watcher::terminal(at, fixture.id, number).await;
+    let mut two = Watcher::terminal(at, fixture.id, number).await;
+
+    // Wide enough for the line to land on one row, a wrapped one being one no
+    // `contains` finds — and it is asked for at all so that the shell is known
+    // to be up and answering before it is told to go.
+    one.resize(200, 40).await;
+    one.types("printf 'in the shell\\n'\r").await;
+    one.until(|grid| grid.contains("in the shell")).await;
+
+    // The human typing `exit`, which is the first of the four things that end a
+    // terminal and the only one the shell itself does.
+    one.types("exit\r").await;
+
+    one.until_closed().await;
+    two.until_closed().await;
+
+    // Off the register by the time those closed, so a pane reading the list back
+    // comes back to a Conversation with no terminals rather than to a number
+    // nothing will answer for.
+    let live: TerminalsView = get(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+    )
+    .await;
+
+    assert!(
+        live.live.is_empty(),
+        "a shell that exited should have taken its terminal off the register, \
+         and the server is still listing: {:?}",
+        live.live,
+    );
+
+    // And attaching afresh is refused rather than opened and left silent: there
+    // is nothing to relay, and no read-only grid to fall back to either, a
+    // terminal being memory only.
+    let refused = tokio_tungstenite::connect_async(format!(
+        "ws://{at}/api/ui/conversations/{}/terminals/{number}/attach",
+        fixture.id,
+    ))
+    .await;
+
+    assert!(
+        refused.is_err(),
+        "attaching to a terminal whose shell has ended should be refused",
+    );
+}
+
+/// Something a shell can be told to do that goes on being visible from outside
+/// the Sandbox for as long as it is running: a tick a moment into a file the
+/// Sandbox Configuration binds in, which outlives the Worktree and the terminal
+/// both.
+///
+/// Through `sh -c` rather than in the terminal's own words. Which shell a
+/// terminal comes up in is this machine's answer — bash, zsh, fish, whatever the
+/// account has — and a loop written in one of those is a test that passes on
+/// the machine it was written on. `sh -c '…'` is one word and a quoted argument
+/// in every one of them.
+fn ticking_away(ticks: &Path) -> String {
+    format!(
+        "sh -c 'while :; do printf tick >> {ticks}; sleep 0.05; done'\r",
+        ticks = quoted(ticks),
+    )
+}
+
+/// Wait until it has ticked at least once, so that what is asserted after the
+/// shell is ended is something that was really happening.
+async fn until_ticking(ticks: &Path) -> u64 {
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        if let Ok(written) = std::fs::metadata(ticks)
+            && written.len() > 0
+        {
+            return written.len();
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the terminal's shell never got as far as ticking, so nothing here \
+             would prove anything",
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
+}
+
+/// How much it has written by now, for the comparison that says it has stopped.
+fn ticked(ticks: &Path) -> Option<u64> {
+    std::fs::metadata(ticks).map(|it| it.len()).ok()
+}
+
+/// Closing a terminal ends its shell and takes it off the register — which is
+/// what the **Close** row on a tab's menu asks for, arriving as a delete.
+///
+/// Ended rather than let go of: the whole point of the row is that the shell
+/// stops, so what is asserted is a thing the shell was doing and has stopped
+/// doing. The register and the sockets are the other half, and they are the same
+/// two the shell's own `exit` moves: a tab hears one thing about a terminal
+/// ending, whichever end asked for it.
+#[tokio::test]
+async fn closing_a_terminal_ends_its_shell_and_takes_it_off_the_register() {
+    let spill = tempfile::tempdir().unwrap();
+    let ticks = spill.path().join("ticks");
+
+    let fixture = grilling_spilling(
+        spill,
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+        PULL_REQUEST,
+    )
+    .await;
+
+    fixture
+        .until(|view| view.worktree.as_ref().map(|worktree| worktree.path.clone()))
+        .await;
+
+    let at = fixture.listening().await;
+
+    let opened: TerminalOpened = post(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+        &serde_json::json!({}),
+    )
+    .await;
+
+    let TerminalOpened::Opened { number } = opened else {
+        panic!("expected a terminal to open, and the server said: {opened:?}");
+    };
+
+    let mut one = Watcher::terminal(at, fixture.id, number).await;
+    let mut two = Watcher::terminal(at, fixture.id, number).await;
+
+    // Wide enough for the line to land on one row, a wrapped one being one no
+    // shell reads back the way it was typed.
+    one.resize(200, 40).await;
+    one.types(&ticking_away(&ticks)).await;
+
+    until_ticking(&ticks).await;
+
+    delete(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals/{number}", fixture.id),
+    )
+    .await;
+
+    // The delete answers once the shell has been reaped, so what it had written
+    // by the time it came back is the last of it.
+    let when_closed = ticked(&ticks);
+
+    // Long enough for many more ticks, had anything still been ticking.
+    pause(Duration::from_millis(500)).await;
+
+    assert_eq!(
+        ticked(&ticks),
+        when_closed,
+        "the shell was still running after the close said it had ended",
+    );
+
+    // And every watcher hears it, exactly as they hear a shell that exited by
+    // itself: the socket closing is the one thing a tab is told about a terminal
+    // ending.
+    one.until_closed().await;
+    two.until_closed().await;
+
+    let live: TerminalsView = get(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+    )
+    .await;
+
+    assert!(
+        live.live.is_empty(),
+        "a terminal that was closed should be off the register, and the server \
+         is still listing: {:?}",
+        live.live,
+    );
+
+    // And attaching afresh is refused, there being nothing to relay: the same
+    // answer a number whose shell exited gets, a terminal being memory only.
+    let refused = tokio_tungstenite::connect_async(format!(
+        "ws://{at}/api/ui/conversations/{}/terminals/{number}/attach",
+        fixture.id,
+    ))
+    .await;
+
+    assert!(
+        refused.is_err(),
+        "attaching to a terminal that was closed should be refused",
+    );
+
+    // Closing it again is a close that has already happened rather than a
+    // refusal: the row is on a menu somebody may press twice, and a second press
+    // is not news.
+    delete(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals/{number}", fixture.id),
+    )
+    .await;
+}
+
+/// And closing the Conversation ends every terminal it was holding, before the
+/// Worktree they were standing in is taken away.
+///
+/// The ordering the session's own ending is there for, asked of the other thing
+/// that runs in a Sandbox: a shell writing files into a directory git is
+/// removing is the one way a close could leave a mess neither end knows about.
+#[tokio::test]
+async fn closing_a_conversation_ends_its_terminals_before_the_worktree_goes() {
+    let spill = tempfile::tempdir().unwrap();
+    let first = spill.path().join("first");
+    let second = spill.path().join("second");
+
+    let fixture = grilling_spilling(
+        spill,
+        r#"
+        printf 'reading the brief\r\n'
+        while :; do sleep 0.05; done
+        "#,
+        PULL_REQUEST,
+    )
+    .await;
+
+    let worktree = PathBuf::from(
+        fixture
+            .until(|view| view.worktree.as_ref().map(|worktree| worktree.path.clone()))
+            .await,
+    );
+
+    let at = fixture.listening().await;
+
+    // Two of them, because the claim is about every terminal a Conversation is
+    // holding rather than about the one that happened to be open.
+    let mut ticking = Vec::new();
+
+    for ticks in [&first, &second] {
+        let opened: TerminalOpened = post(
+            &fixture.app,
+            &format!("/api/ui/conversations/{}/terminals", fixture.id),
+            &serde_json::json!({}),
+        )
+        .await;
+
+        let TerminalOpened::Opened { number } = opened else {
+            panic!("expected a terminal to open, and the server said: {opened:?}");
+        };
+
+        let mut watcher = Watcher::terminal(at, fixture.id, number).await;
+
+        watcher.resize(200, 40).await;
+        watcher.types(&ticking_away(ticks)).await;
+
+        ticking.push(watcher);
+    }
+
+    until_ticking(&first).await;
+    until_ticking(&second).await;
+
+    // The session is left to get as far as printing before the close, for the
+    // reason every close in this file waits for it: a sandbox signalled while it
+    // is still setting its namespace up can leave what it was starting behind.
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+
+    let when_closed = [ticked(&first), ticked(&second)];
+
+    // Long enough for many more ticks, had either shell still been running.
+    pause(Duration::from_millis(500)).await;
+
+    assert_eq!(
+        [ticked(&first), ticked(&second)],
+        when_closed,
+        "a terminal was still running after the Conversation had closed",
+    );
+
+    for watcher in ticking.iter_mut() {
+        watcher.until_closed().await;
+    }
+
+    let live: TerminalsView = get(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+    )
+    .await;
+
+    assert!(
+        live.live.is_empty(),
+        "a closed Conversation holds no terminals, and the server is still \
+         listing: {:?}",
+        live.live,
+    );
+
+    assert!(
+        !worktree.exists(),
+        "the worktree should be gone once the Conversation is closed, with \
+         nothing of its own left standing in it",
     );
 }

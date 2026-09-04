@@ -1533,6 +1533,44 @@ async fn an_image_packed_with_libraries_is_reached_through_a_launcher() {
     );
 }
 
+/// What `SHELL` says inside: `/bin/sh` for a session, and for a Conversation's
+/// own terminal the shell the human is actually typing into.
+///
+/// A session has no shell of its own — it runs an agent, and the variable is
+/// there for whatever the agent shells out with — so the certain path is the
+/// right answer for one. A terminal *is* a shell, and one whose `SHELL` named
+/// something else would be a terminal where every tool that starts a shell
+/// started a different one from the one at the keyboard.
+#[tokio::test]
+async fn the_shell_a_sandbox_names_is_the_one_it_was_built_to_run() {
+    let fixture = grilling().await;
+
+    let session = probe(&fixture.sandbox(vec![]), r#"say shell "${SHELL-unset}""#);
+
+    assert_eq!(
+        session["shell"], "/bin/sh",
+        "a session's is the one path every platform is certain to have a shell at"
+    );
+
+    // Somewhere a shell really is on this machine, which is the shape a passwd
+    // entry names — the choosing of one is `terminals::shell`'s own business and
+    // is asked there.
+    let chosen = on_the_host("bash");
+
+    let terminal = probe(
+        &fixture
+            .sandbox(vec![])
+            .shelled(&chosen.display().to_string()),
+        r#"say shell "${SHELL-unset}""#,
+    );
+
+    assert_eq!(
+        terminal["shell"],
+        chosen.display().to_string(),
+        "and a terminal's is the shell it was built to run"
+    );
+}
+
 #[tokio::test]
 async fn no_other_checkout_on_the_machine_is_reachable() {
     let fixture = grilling().await;

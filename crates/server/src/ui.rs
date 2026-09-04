@@ -25,7 +25,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
 use axum::response::{IntoResponse, Response as HttpResponse};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
@@ -40,8 +40,8 @@ use verkstead_render::{
     RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
     SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
     SharedCommit, SharedConversation, ShowingArchived, Standing, SteerOpened, SteerSubmission,
-    Submitted, Subscribed, Subscription, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet,
-    Unsubscribe, UpdateNotice, Verified,
+    Submitted, Subscribed, Subscription, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved,
+    UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -158,6 +158,32 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route(
             "/api/ui/conversations/{id}/screen/{event}/attach",
             get(crate::screen::attach),
+        )
+        // And the terminals the Conversation holds of its own: a human's shell
+        // inside its Sandbox, which is the Screen's own machinery pointed at a
+        // shell rather than an agent (ADR 0013) — see [`crate::terminals`].
+        //
+        // Four under the one path because there are four things to do with one:
+        // ask which are live, open another, watch one, and close one. Under the
+        // Conversation and named by a number this server issued, there being
+        // any number of them per Conversation and no Event to name one by — a
+        // terminal is memory only and leaves nothing on the record.
+        //
+        // And the close is a `DELETE` on the terminal itself, which is the one
+        // in the workbench: a terminal is a thing this server is holding rather
+        // than a record it keeps, so ending one is the thing going rather than
+        // something written about it.
+        .route(
+            "/api/ui/conversations/{id}/terminals",
+            get(terminals).post(open_terminal),
+        )
+        .route(
+            "/api/ui/conversations/{id}/terminals/{number}",
+            delete(crate::terminals::close),
+        )
+        .route(
+            "/api/ui/conversations/{id}/terminals/{number}/attach",
+            get(crate::terminals::attach),
         )
         // And one commit — its summary and its diff — fetched the same way and
         // for the same reason; see [`commit_pane`].
@@ -2513,6 +2539,51 @@ async fn commit_pane(
     Json(rendered).into_response()
 }
 
+/// `GET /api/ui/conversations/{id}/terminals` — which of the Conversation's
+/// terminals are live.
+///
+/// Their numbers and nothing else: a terminal is a shell in a Sandbox rather
+/// than a record, so there is nothing about one to hand over but which of the
+/// Conversation's it is — see [`crate::terminals`]. What is *on* each of them
+/// arrives down its own socket.
+///
+/// A Conversation this server has never opened one for has none, which is the
+/// same empty answer as one whose shells have all exited: the register is memory
+/// only, so there is nothing here to be a 404 about.
+async fn terminals(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    // Read as permissively as every other id here: one that names no number
+    // names no Conversation, and no Conversation is holding no terminals.
+    let live = match id.parse::<i64>() {
+        Ok(id) => state.terminals.live(id),
+        Err(_) => Vec::new(),
+    };
+
+    Json(verkstead_render::TerminalsView { live }).into_response()
+}
+
+/// `POST /api/ui/conversations/{id}/terminals` — open another one.
+///
+/// A shell started in the Conversation's Sandbox, with its Worktree as the
+/// working directory, answered with the number it will answer to for as long as
+/// this server holds it.
+///
+/// Answered once the shell is running rather than once it has printed anything:
+/// what the browser is waiting for is a number to attach to, and what the shell
+/// says comes down the socket.
+async fn open_terminal(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(TerminalOpened::NoSuchConversation).into_response();
+    };
+
+    match crate::terminals::open(&state, id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "opening a terminal failed");
+            unavailable("the terminal could not be opened")
+        }
+    }
+}
+
 /// `GET /api/ui/conversations/{id}/backlog` — every task document the
 /// Conversation's Worktree holds, rendered.
 ///
@@ -4066,6 +4137,19 @@ pub(crate) fn no_such_screen() -> HttpResponse {
     refused(
         StatusCode::NOT_FOUND,
         ApiError::new("there is no such Screen on that Conversation"),
+    )
+}
+
+/// And no such terminal, which is a number that is not live: its shell has
+/// exited, or this server never issued it.
+///
+/// Refused as a Screen's socket is, and without the fetch a Screen falls back on:
+/// a terminal is memory only, so a number nothing is holding has no last grid to
+/// show either.
+pub(crate) fn no_such_terminal() -> HttpResponse {
+    refused(
+        StatusCode::NOT_FOUND,
+        ApiError::new("there is no such terminal on that Conversation"),
     )
 }
 

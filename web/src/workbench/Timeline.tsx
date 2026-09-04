@@ -86,7 +86,7 @@
 //! chooser drawn on the Set itself — so both happen on the page the Set is
 //! answered on and land here as the answered Set.
 
-import { faShare } from "@fortawesome/free-solid-svg-icons";
+import { faShare, faTerminal } from "@fortawesome/free-solid-svg-icons";
 import {
   For,
   Match,
@@ -492,6 +492,33 @@ export function Timeline(props: {
                 open={props.selected === "share"}
                 press={() => {
                   props.select("share");
+                  props.details();
+                }}
+              />
+            </Show>
+
+            {/* And a terminal of the human's own inside the Conversation's
+                Sandbox, which is a pane of its own beside that one — see
+                `Terminal.tsx`. Drawn exactly as Share is and for the same
+                reason: another thing standing in a pane that is selected and
+                opened into the pane beside it.
+
+                Disabled where there is no Worktree to open a shell in — a
+                Draft, and a Conversation that has been closed — with the label
+                saying so, because an icon that does nothing when it is pressed
+                says nothing about why. */}
+            <Show when={!props.readOnly}>
+              <IconButton
+                of={faTerminal}
+                label={
+                  props.conversation.worktree === null
+                    ? "Terminal — there is no worktree yet"
+                    : "Terminal"
+                }
+                disabled={props.conversation.worktree === null}
+                open={props.selected === "terminal"}
+                press={() => {
+                  props.select("terminal");
                   props.details();
                 }}
               />
