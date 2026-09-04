@@ -676,6 +676,12 @@ fn routed(
     // nothing else is ever going to look at it. See [`worktrees::at_startup`].
     worktrees::at_startup(&state);
 
+    // And the attachments root swept the same way, for the same reason one step
+    // along: the Cleanup's delete is the one thing that takes a Conversation's
+    // files, and a delete that could not have the directory deleted the rows
+    // anyway. See [`attachments::at_startup`].
+    attachments::at_startup(&state);
+
     // Before anything is served, because it is about what was already happening
     // rather than about anything a request will start: every Conversation the
     // last server was driving is one nothing is driving now, and nobody but this

@@ -427,3 +427,62 @@ async fn an_upload_to_no_conversation_says_so() {
         AttachmentRemoved::NoSuchConversation,
     );
 }
+
+/// And a directory under the attachments root that no Conversation names is
+/// gone after a server start, while one a live Conversation names is not.
+///
+/// The backstop under the Cleanup's delete, which is the one thing that removes
+/// a directory: a delete that could not have it logged the path and deleted the
+/// rows anyway, and a database restored from before a file was attached names
+/// none of what the machine still has. Nothing else is ever going to look at
+/// either.
+///
+/// A second server over the same store and the same Data Directory, which is
+/// what a restart is — the sweep runs as the router is built.
+#[tokio::test]
+async fn a_stray_directory_is_swept_at_a_server_start_and_a_live_ones_is_not() {
+    let (watched, dir, app, pool, id) = drafting().await;
+
+    kept(attach(&app, id, "notes.md", b"the human's own").await);
+
+    // What a delete that could not finish leaves: a directory named for a
+    // Conversation the record no longer has.
+    let stray = dir.path().join("attachments").join("4242");
+    std::fs::create_dir_all(&stray).unwrap();
+    std::fs::write(stray.join("forgotten.md"), "nobody's\n").unwrap();
+
+    let restarted = router_watching(
+        pool.clone(),
+        WatchedPaths::resolve(&[watched.path().to_owned()]).unwrap(),
+        dir.path().to_owned(),
+    );
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+
+    while stray.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the sweep never took {}",
+            stray.display(),
+        );
+
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+
+    assert_eq!(
+        on_disk(&dir, id),
+        vec!["notes.md".to_owned()],
+        "and the one a Conversation in the record names is where it was",
+    );
+
+    // Read through the second server rather than the first, so that what says
+    // the file survived is the server that swept beside it.
+    assert_eq!(
+        attached(&restarted, id)
+            .await
+            .into_iter()
+            .map(|file| file.name)
+            .collect::<Vec<_>>(),
+        vec!["notes.md".to_owned()],
+    );
+}

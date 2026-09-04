@@ -1845,6 +1845,29 @@ pub async fn recorded_worktrees(pool: &SqlitePool) -> Result<Vec<PathBuf>> {
         .collect())
 }
 
+/// Every Conversation the record still has, by id.
+///
+/// The keep-set the attachments sweep decides by, and it is the whole of that
+/// rule: a directory under the attachments root is named by the id of the
+/// Conversation whose files are in it, and the one thing that ever takes a
+/// Conversation out of the record is the Cleanup's delete — which takes the
+/// directory with it. So *there is a row here* and *those files are somebody's*
+/// are one statement, whatever state the Conversation is in: a Closed one keeps
+/// its files for the Steer that brings it back, and a Trimmed one keeps them
+/// because they are the human's own input rather than a session's output.
+///
+/// Every id there is rather than a page of them, for [`recorded_worktrees`]'s
+/// reason: what asks is deciding what to delete, and a keep-set that stopped
+/// short would name a live Conversation's files as an orphan.
+pub async fn recorded_conversations(pool: &SqlitePool) -> Result<Vec<i64>> {
+    let rows: Vec<(i64,)> = sqlx::query_as("SELECT id FROM conversations")
+        .fetch_all(pool)
+        .await
+        .context("listing the Conversations the record still has")?;
+
+    Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
 /// One of a Conversation's Pairings: the Profile its column names, and the
 /// model paired with it where one was.
 ///

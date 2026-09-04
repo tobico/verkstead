@@ -10,9 +10,19 @@
 //! was. See [`crate::store::trim_conversation`], where that boundary is drawn.
 //!
 //! **And a delete takes the whole of it**, which is the one thing in Verkstead
-//! that forgets: every row the Conversation owns, and nothing outside the store
-//! — see [`crate::store::delete_conversation`]. It is **off** until somebody
-//! turns it on, and that is what makes it a feature rather than a hazard.
+//! that forgets: every row the Conversation owns — see
+//! [`crate::store::delete_conversation`] — and the files the human attached to
+//! it, which are the one thing a Conversation owns outside the store. This is
+//! the only point either of those goes: closing keeps the files for the Steer
+//! that might bring a Closed Conversation back, and a trim keeps them because
+//! they are the human's own input rather than a session's output. It is **off**
+//! until somebody turns it on, and that is what makes it a feature rather than
+//! a hazard.
+//!
+//! **And what a delete still never touches is what was never Verkstead's**: the
+//! branch the work is on, which belongs to the repository and which closing
+//! already chose to keep, and a published Share, which is a file somebody put
+//! somewhere deliberately.
 //!
 //! **One clock each, and both start at the archiving.** Not at the close, and
 //! not at the last thing that happened: archiving is the human saying they are
@@ -69,6 +79,7 @@ use std::time::Duration;
 use verkstead_schema::Nudge;
 
 use crate::AppState;
+use crate::attachments::Attachments;
 use crate::store;
 
 /// How long a Conversation is archived before its bulk is taken, where nobody
@@ -180,6 +191,13 @@ async fn sweep(state: &AppState) {
 /// the archiving* is a rule about the record rather than about what has happened
 /// since somebody found the settings page.
 ///
+/// **The one place this touches disk**, which is where the rest of the sweep's
+/// care about the record turns into care about a directory: the files the human
+/// attached are the Conversation's and nobody else's, so they go with the rows
+/// naming them. A directory that will not go is logged and the delete stands —
+/// there is no Conversation left for it to be half of, and the startup sweep is
+/// what comes back for it. See [`crate::attachments`].
+///
 /// Answers whether it took anything, which is what says there is space to give
 /// back — see [`sweep`].
 async fn deleting(state: &AppState, cleanup: &crate::settings::Cleanup) -> bool {
@@ -204,6 +222,19 @@ async fn deleting(state: &AppState, cleanup: &crate::settings::Cleanup) -> bool 
         match store::delete_conversation(&state.pool, conversation_id).await {
             Ok(store::Deletion::Deleted) => {
                 deleted = true;
+
+                // And the files the human put on it, which are the one thing a
+                // Conversation owns outside the store: the rows naming them
+                // have just gone, so the bytes go with them — see
+                // [`Attachments::remove`], where a directory that will not go is
+                // a line in the log rather than a delete that stopped.
+                let attachments = Attachments::under(&state.data_dir);
+
+                if let Err(error) =
+                    tokio::task::spawn_blocking(move || attachments.remove(conversation_id)).await
+                {
+                    tracing::error!(error = ?error, conversation_id, "removing a deleted Conversation's attached files failed");
+                }
 
                 // The list itself moved, which is the Nudge for a Conversation
                 // that left it: every page open on the sidebar is drawing a row

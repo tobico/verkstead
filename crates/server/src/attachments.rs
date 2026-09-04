@@ -19,6 +19,14 @@
 //! empty — and a name already taken is not overwritten: the newcomer counts up
 //! over its own extension-less stem, `notes-2.md` and then `notes-3.md`, with
 //! no spaces or brackets in it. Both files stay, and both are records.
+//!
+//! **And they outlive everything but the delete.** Closing a Conversation takes
+//! its Worktree and its handoff directory and leaves this one alone — a Steer
+//! can bring a Closed Conversation back to life, and a file cannot be made
+//! again the way a checkout can — and a Trim leaves it for a reason of its own:
+//! what a Trim takes is the bulk a session produced, and these are the human's
+//! own input. The Cleanup's delete is the one thing that removes a directory,
+//! and [`sweeping`] at startup is the backstop under it.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -26,6 +34,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use crate::platform::Platform;
+use crate::store;
 
 /// How large one attached file may be.
 ///
@@ -226,6 +235,38 @@ impl Attachments {
                 .with_context(|| format!("removing the attached file at {}", path.display())),
         }
     }
+
+    /// Give a Conversation's whole directory back, with everything in it.
+    ///
+    /// The Cleanup's delete and nothing else — see [`crate::cleanup`], the one
+    /// point Verkstead forgets a Conversation for good. Closing leaves the
+    /// directory exactly where it is: a Steer can bring a Closed Conversation
+    /// back to life, and a file cannot be made again the way a Worktree can.
+    ///
+    /// Nothing to refuse with, which is [`crate::handoffs::Handoffs::remove`]'s
+    /// shape and is a decision rather than a copy of it: what this follows is a
+    /// delete that has already emptied the record, so a directory that will not
+    /// go is a line in the log rather than a Conversation half-forgotten. What
+    /// is left behind is taken at the next start — see [`sweeping`], the
+    /// backstop written for exactly this.
+    ///
+    /// A directory that was never made is nothing to remove, and that is most
+    /// Conversations: one nothing was ever attached to has no directory at all.
+    pub(crate) fn remove(&self, conversation_id: i64) {
+        let path = self.directory(conversation_id);
+
+        match std::fs::remove_dir_all(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => tracing::error!(
+                error = ?error,
+                conversation_id,
+                path = %path.display(),
+                "a Conversation's attachments directory could not be removed, so it was \
+                 deleted around it"
+            ),
+        }
+    }
 }
 
 /// Whether a name is one a file may be attached under: a plain base name, and
@@ -277,6 +318,244 @@ fn counted(name: &str, counting: u32) -> String {
         ),
         _ => format!("{name}-{counting}"),
     }
+}
+
+/// Sweep the attachments root once, as the server comes up.
+///
+/// Where the orphans come from is two places, and neither leaves anything that
+/// would ever come back for the directory on its own. The Cleanup's delete is
+/// the one thing that removes one, and a delete that could not have it logged
+/// the path and deleted the rows anyway — see [`Attachments::remove`]. And a
+/// database restored from before a file was attached names none of what the
+/// machine still has. Nothing else is ever going to look at either.
+///
+/// Started rather than waited on, [`crate::worktrees::at_startup`]'s shape: the
+/// directories this is deciding about are ones nothing is racing it for, the
+/// keep-set being read after the listing rather than before it.
+pub(crate) fn at_startup(state: &crate::AppState) {
+    let pool = state.pool.clone();
+    let data = state.data_dir.clone();
+
+    tokio::spawn(async move { swept(&pool, &data).await });
+}
+
+/// The same sweep off what it needs rather than off the whole of the server:
+/// the store to ask, and the Data Directory the root is under.
+///
+/// **The directory is read first and the record after it**, which is the other
+/// way round from [`crate::worktrees::swept`] and is the whole of why this one
+/// needs no lock. A file is only ever attached to a Conversation that is
+/// already in the record, so a directory the listing found belongs to a row
+/// that was written before the listing ran — and a directory made after it is
+/// not a candidate at all, this pass having already decided what it is working
+/// over. The worktrees' sweep is the other way because a checkout is made
+/// before the record names it, and it holds a lock across that window instead.
+///
+/// **And nothing is deleted on a reading that failed.** A store error read as
+/// an empty keep-set would be every Conversation there is, so the error ends
+/// the pass and the orphans wait for the next start — the sweeps' rule all the
+/// way through: the unrecoverable mistake is deleting what somebody still has,
+/// and an orphan left behind is swept again.
+async fn swept(pool: &sqlx::SqlitePool, data: &Path) {
+    // A router with no Data Directory has nowhere to have put a file, and the
+    // empty path would resolve to the working directory — which is somebody
+    // else's. See [`crate::nowhere`].
+    if data.as_os_str().is_empty() {
+        return;
+    }
+
+    let root = Attachments::under(data).root;
+
+    // Off the runtime's threads, as the deletions below are: a directory
+    // listing blocks, however little there is in it.
+    let listing = root.clone();
+
+    let found = match tokio::task::spawn_blocking(move || candidates(&listing)).await {
+        Ok(found) => found,
+        Err(error) => {
+            tracing::error!(error = ?error, "listing the attachments directories failed");
+            return;
+        }
+    };
+
+    // Nothing there, or nothing readable. Either way there is no keep-set worth
+    // asking the store for.
+    let Some(found) = found else {
+        return;
+    };
+
+    if found.is_empty() {
+        return;
+    }
+
+    let kept = match store::recorded_conversations(pool).await {
+        Ok(kept) => kept,
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                "reading which Conversations the record still has failed, so no attached files are being swept",
+            );
+            return;
+        }
+    };
+
+    if let Err(error) = tokio::task::spawn_blocking(move || sweeping(&root, &found, &kept)).await {
+        tracing::error!(error = ?error, "sweeping the orphaned attachments failed");
+    }
+}
+
+/// What is under the attachments root, as immediate children of it — or `None`
+/// where there is nothing to sweep because the directory could not be read.
+///
+/// **Every candidate comes out of reading this one directory**, and nothing
+/// else is ever a candidate: no path here is built from a record, from a
+/// request or from anything but this listing, which is what makes the boundary
+/// below checkable at all.
+///
+/// A root that is not there is a Verkstead nothing has ever been attached to —
+/// most of them, and not worth a word in the log.
+fn candidates(root: &Path) -> Option<Vec<PathBuf>> {
+    let entries = match std::fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                path = %root.display(),
+                "the attachments directory could not be read, so nothing is being swept",
+            );
+            return None;
+        }
+    };
+
+    let mut found = Vec::new();
+
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                tracing::error!(error = ?error, path = %root.display(), "an entry of the attachments directory could not be read, so it is being left alone");
+                continue;
+            }
+        };
+
+        let path = entry.path();
+
+        // What `read_dir` hands back is an entry of this directory, said out
+        // loud rather than trusted: what follows deletes, and a candidate that
+        // is not a child of the directory that was listed is one no check here
+        // describes.
+        if path.parent() != Some(root) {
+            tracing::error!(path = %path.display(), "an attachments entry is not a child of the attachments directory, so it is being left alone");
+            continue;
+        }
+
+        found.push(path);
+    }
+
+    Some(found)
+}
+
+/// And the deciding: everything `found` holds that no Conversation in `kept`
+/// names, taken away. Hands back what it deleted.
+///
+/// **A directory is kept exactly when a Conversation of that id is in the
+/// record**, which is [`Attachments::directory`]'s naming read backwards and is
+/// the whole of the rule — whatever state the Conversation is in. A Closed one
+/// keeps its files for the Steer that brings it back and a Trimmed one keeps
+/// them because they are the human's own input; only the Cleanup's delete takes
+/// a Conversation out of the record at all. Everything else under this
+/// directory is orphaned by definition: it is Verkstead's own Data Directory,
+/// made for exactly one thing.
+///
+/// Every reading an entry is put through asks one question — *is this certainly
+/// an orphan under this directory?* — and anything short of a yes leaves the
+/// entry where it is. A reading that failed is one of those.
+fn sweeping(root: &Path, found: &[PathBuf], kept: &[i64]) -> Vec<PathBuf> {
+    let mut swept = Vec::new();
+
+    // Resolved once, and it is the whole of the boundary: every deletion below
+    // is checked against this rather than against the path it was joined from,
+    // so a link anywhere above cannot move it. A root that will not resolve is
+    // one that is not there, and there is nothing in it to sweep.
+    let Ok(resolved_root) = root.canonicalize() else {
+        return swept;
+    };
+
+    // The names Verkstead would have given those Conversations' directories,
+    // made the one way they are ever made — see [`Attachments::directory`], so
+    // that the keep-set and the naming cannot drift apart.
+    let names: Vec<String> = kept.iter().map(i64::to_string).collect();
+
+    for path in found {
+        if path
+            .file_name()
+            .is_some_and(|name| names.iter().any(|kept| name == kept.as_str()))
+        {
+            continue;
+        }
+
+        // A link is deleted as a link and never followed. `remove_dir_all` on
+        // one walks what is on the other end, which is by definition somewhere
+        // else — and somewhere else is the one place nothing here may touch.
+        let linked = match path.symlink_metadata() {
+            Ok(metadata) => metadata.is_symlink(),
+            Err(error) => {
+                tracing::error!(error = ?error, path = %path.display(), "an attachments entry could not be read, so it is being left alone");
+                continue;
+            }
+        };
+
+        if linked {
+            match std::fs::remove_file(path) {
+                Ok(()) => {
+                    tracing::info!(path = %path.display(), "a link in the attachments directory that no Conversation names was removed");
+                    swept.push(path.clone());
+                }
+                Err(error) => {
+                    tracing::error!(error = ?error, path = %path.display(), "a link in the attachments directory could not be removed");
+                }
+            }
+
+            continue;
+        }
+
+        // And where it actually is, which is what the boundary is checked
+        // against. Nothing that will not resolve is deleted: a reading that
+        // failed is not a reading that says *outside*.
+        let resolved = match path.canonicalize() {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                tracing::error!(error = ?error, path = %path.display(), "an attachments entry could not be resolved, so it is being left alone");
+                continue;
+            }
+        };
+
+        if resolved.parent() != Some(resolved_root.as_path()) {
+            tracing::error!(path = %path.display(), resolved = %resolved.display(), "an attachments entry resolves outside the attachments directory, so it is being left alone");
+            continue;
+        }
+
+        // A stray file under here is as unrecorded as a stray directory and goes
+        // the same way; what it must not do is fail a `remove_dir_all` and be
+        // reported as a directory that would not go.
+        let taken = match path.is_dir() {
+            true => std::fs::remove_dir_all(path),
+            false => std::fs::remove_file(path),
+        };
+
+        match taken {
+            Ok(()) => {
+                tracing::info!(path = %path.display(), "attached files that no Conversation names were deleted");
+                swept.push(path.clone());
+            }
+            Err(error) => {
+                tracing::error!(error = ?error, path = %path.display(), "orphaned attached files could not be deleted");
+            }
+        }
+    }
+
+    swept
 }
 
 #[cfg(test)]
@@ -435,6 +714,159 @@ mod tests {
         // Removed twice, which is a removal that ran again over a row that had
         // already gone: nothing to do, and no reason to say so.
         attachments.drop_file(7, "notes.md").unwrap();
+    }
+
+    #[test]
+    fn a_whole_directory_is_given_back_at_a_delete() {
+        let state = tempfile::tempdir().unwrap();
+        let attachments = Attachments::under(state.path());
+
+        attachments.keep(7, "notes.md", b"first").unwrap();
+        attachments.keep(7, "wireframe.png", b"second").unwrap();
+
+        attachments.remove(7);
+
+        assert!(
+            !state.path().join("attachments/7").exists(),
+            "the delete takes the directory and everything in it",
+        );
+        assert!(
+            state.path().join("attachments").exists(),
+            "and leaves the root every other Conversation's is under",
+        );
+
+        // A Conversation nothing was ever attached to has no directory at all,
+        // and that is most of them: nothing to remove and nothing to say.
+        attachments.remove(9);
+    }
+
+    /// The whole of the sweep's rule in one run: the directory a Conversation
+    /// in the record names stays, and the one no Conversation names goes.
+    #[test]
+    fn a_directory_a_conversation_names_survives_a_sweep_and_one_it_does_not_goes() {
+        let state = tempfile::tempdir().unwrap();
+        let attachments = Attachments::under(state.path());
+        let root = state.path().join("attachments");
+
+        attachments
+            .keep(7, "notes.md", b"a live Conversation's")
+            .unwrap();
+        attachments.keep(9, "notes.md", b"a deleted one's").unwrap();
+
+        let found = candidates(&root).expect("the root is there to read");
+        let swept = sweeping(&root, &found, &[7]);
+
+        assert_eq!(swept, vec![root.join("9")]);
+        assert!(
+            root.join("7/notes.md").exists(),
+            "the record still has Conversation 7",
+        );
+        assert!(
+            !root.join("9").exists(),
+            "and nothing in the record names Conversation 9",
+        );
+    }
+
+    /// Everything else under the root goes as well. It is Verkstead's own Data
+    /// Directory, made for exactly one thing: a directory named after no
+    /// Conversation at all and a file that was never anything are both something
+    /// nobody named.
+    #[test]
+    fn what_was_never_a_conversations_directory_is_swept_too() {
+        let state = tempfile::tempdir().unwrap();
+        let root = state.path().join("attachments");
+
+        std::fs::create_dir_all(root.join("a-directory/deeper")).unwrap();
+        std::fs::write(root.join("a-directory/deeper/notes.md"), "left\n").unwrap();
+        std::fs::write(root.join("a-file"), "left\n").unwrap();
+
+        let found = candidates(&root).expect("the root is there to read");
+        let mut swept = sweeping(&root, &found, &[7]);
+        swept.sort();
+
+        assert_eq!(swept, vec![root.join("a-directory"), root.join("a-file")]);
+    }
+
+    /// A link is deleted as a link and never followed. What is on the other end
+    /// is by definition outside the one directory this may delete inside, so
+    /// walking it would be the whole of the mistake this is written against.
+    ///
+    /// On the platforms where a test may make a link at all — Windows wants a
+    /// privilege for one, and the sweep's own reasoning is the same there.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_under_the_attachments_root_goes_as_a_link() {
+        let state = tempfile::tempdir().unwrap();
+        let root = state.path().join("attachments");
+
+        std::fs::create_dir_all(&root).unwrap();
+
+        let elsewhere = state.path().join("somebody-elses");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::write(elsewhere.join("their-work.md"), "not Verkstead's\n").unwrap();
+
+        let link = root.join("9");
+        std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+
+        let found = candidates(&root).expect("the root is there to read");
+        let swept = sweeping(&root, &found, &[]);
+
+        assert_eq!(swept, vec![link.clone()]);
+        assert!(
+            link.symlink_metadata().is_err(),
+            "the link itself is what was removed",
+        );
+        assert!(
+            elsewhere.join("their-work.md").exists(),
+            "and what it pointed at is untouched",
+        );
+    }
+
+    /// A root nothing has ever been attached under is nothing to sweep, which is
+    /// most installations and is not worth a word.
+    #[test]
+    fn a_root_that_is_not_there_sweeps_nothing() {
+        let state = tempfile::tempdir().unwrap();
+
+        assert_eq!(candidates(&state.path().join("attachments")), None);
+    }
+
+    /// A store that will not answer deletes nothing. An error read as an empty
+    /// keep-set would be every Conversation there is, which is the one mistake
+    /// here that cannot be undone by sweeping again.
+    #[tokio::test]
+    async fn a_keep_set_that_could_not_be_read_sweeps_nothing() {
+        let state = tempfile::tempdir().unwrap();
+        let attachments = Attachments::under(state.path());
+
+        attachments.keep(9, "notes.md", b"nobody's").unwrap();
+
+        let pool = store::open_database(&state.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        // The store taken out from under it: any way of failing would do, and
+        // this is the one a test can arrange without touching the schema.
+        pool.close().await;
+
+        swept(&pool, state.path()).await;
+
+        assert!(
+            state.path().join("attachments/9/notes.md").exists(),
+            "a reading that failed is not a reading that says delete",
+        );
+    }
+
+    /// And a server with no Data Directory sweeps nothing. The empty path would
+    /// resolve to the working directory, which is somebody else's.
+    #[tokio::test]
+    async fn a_server_with_no_data_directory_sweeps_nothing() {
+        let state = tempfile::tempdir().unwrap();
+        let pool = store::open_database(&state.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        swept(&pool, Path::new("")).await;
     }
 
     #[test]

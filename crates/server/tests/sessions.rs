@@ -3054,6 +3054,72 @@ async fn a_grilling_session_is_told_about_the_attached_files_too() {
     );
 }
 
+/// And the files outlive a Close: a Conversation steered back out of Closed
+/// runs a session told about the same files, at the same path.
+///
+/// The one thing a Conversation owns that closing keeps. Its Worktree and its
+/// handoff directory are given back at the press — they are somewhere it was
+/// given to work — while a file the human put on it cannot be made again the way
+/// a checkout can, and a Steer is what brings a Closed Conversation back.
+///
+/// What the second session is told is the whole proof. The listing and the bind
+/// ask [`verkstead_server::attachments::Attachments`] the same question of the
+/// same directory — see the sandbox suite, where what a session may read of one
+/// is probed inside a real boundary — so a prompt naming the file after a close
+/// is a directory the bind still has.
+#[tokio::test]
+async fn a_conversation_steered_out_of_closed_still_has_the_files_attached_to_it() {
+    let fixture = grilling_with_a_file_attached(
+        r#"printf 'prompt=%s\n' "$2"; sleep 300"#,
+        "rates.csv",
+        "a,b\n1,2\n",
+    )
+    .await;
+
+    let grilled = fixture.printed_after(0).await;
+
+    assert!(
+        grilled.contains("- `/verkstead/attachments/rates.csv`, 8 bytes."),
+        "the grilling session is told about the file: {grilled:?}"
+    );
+
+    let attached = fixture
+        .state
+        .path()
+        .join("attachments")
+        .join(fixture.id.to_string())
+        .join("rates.csv");
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+
+    assert!(
+        attached.exists(),
+        "closing gives the Worktree back and leaves the files exactly where they are",
+    );
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        fixture
+            .steer_instructed("read the rates off the file")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    let said = fixture.printed_after(1).await;
+
+    assert!(
+        said.contains("# Attached files"),
+        "and the session the steer starts is told about them again: {said:?}"
+    );
+    assert!(
+        said.contains("- `/verkstead/attachments/rates.csv`, 8 bytes."),
+        "at the path its own sandbox puts them at: {said:?}"
+    );
+}
+
 /// The whole of what pressing the button now does: the Profile's agent, on the
 /// Profile's model, running in the Conversation's worktree, sent into the
 /// bundled grilling skill and primed with the Brief.
@@ -12289,6 +12355,13 @@ async fn the_cleanup_deletes_what_was_archived_long_enough_ago() {
     // And archived just now, which is not.
     let fresh = archived_printing(&pool, repo, "usage-limits").await;
 
+    // And a file on each of them, in the directory of its own the uploads write
+    // into: the one thing a Conversation owns outside the store, and the one
+    // thing besides the rows a delete takes. Written here rather than uploaded,
+    // these two never having drafted a Brief to attach anything to.
+    let old_files = attachments_of(&bench, old.id, "rates.csv");
+    let fresh_files = attachments_of(&bench, fresh.id, "quotas.csv");
+
     // And one back on the sidebar, which has no clock running on it at all.
     let living = archived_printing(&pool, repo, "burst-allowance").await;
     aged(
@@ -12340,6 +12413,15 @@ async fn the_cleanup_deletes_what_was_archived_long_enough_ago() {
         "and one back on the sidebar has no clock running on it at all",
     );
 
+    assert!(
+        !old_files.exists(),
+        "and the files the human attached to what was deleted went with the rows",
+    );
+    assert!(
+        fresh_files.join("quotas.csv").exists(),
+        "while the one that is still there still has its own",
+    );
+
     let (status, body) = fetch(
         &bench.app,
         Request::builder()
@@ -12361,6 +12443,20 @@ async fn the_cleanup_deletes_what_was_archived_long_enough_ago() {
     );
 
     pool.close().await;
+}
+
+/// One Conversation's attachments directory, with a file in it — the layout the
+/// uploads write, made by hand for a fixture that never drafted a Brief.
+///
+/// Hands back the directory rather than the file: what a delete gives back is
+/// the whole of it.
+fn attachments_of(bench: &Bench, id: i64, name: &str) -> PathBuf {
+    let directory = bench.state.path().join("attachments").join(id.to_string());
+
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(directory.join(name), "a,b\n1,2\n").unwrap();
+
+    directory
 }
 
 /// Whether the store still has a Conversation of that id at all.
