@@ -170,3 +170,10 @@ tokio = { workspace = true, features = ["test-util"] }
 # and the server are speaking one protocol rather than two.
 tokio-tungstenite = "0.29"
 tower = { version = "0.5", features = ["util"] }
+# The server's own log, in front of whoever is reading a failed test. What
+# refuses a session — a sandbox that would not build, a console that would not
+# open, a program that was not found — is written to `tracing` and answered to
+# its caller as a bare refusal, so a suite with no subscriber is a suite whose
+# every such failure reads *it printed nothing*. `env-filter` so that what is
+# printed is this crate's own account rather than sqlx's every statement.
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

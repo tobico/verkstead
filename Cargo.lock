@@ -3778,6 +3778,7 @@ dependencies = [
  "tokio-tungstenite",
  "tower",
  "tracing",
+ "tracing-subscriber",
  "verkstead-render",
  "verkstead-schema",
  "verkstead-store",

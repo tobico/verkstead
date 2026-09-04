@@ -139,6 +139,35 @@ $named = [regex]::Match($line, '`([^`]+)`').Groups[1].Value
 $prompt = if ($named) { Get-Content -Raw -LiteralPath $named } else { '' }
 "#;
 
+/// The server's own log, printed under whichever test was reading when it gave
+/// up.
+///
+/// **A session that never starts says so nowhere else.** Everything that
+/// refuses one answers its caller with a bare `None` or a `Refused` and writes
+/// the reason to `tracing` — a sandbox that could not be built, a console that
+/// could not be opened, a program the description's `PATH` had nothing at — so
+/// a suite with no subscriber is a suite where every one of those failures
+/// reads *the session printed nothing*, which is the one thing about them that
+/// is the same.
+///
+/// `with_test_writer` so that libtest keeps each line with the test that was
+/// running on that thread and prints it only for the ones that failed; work the
+/// server does on a blocking thread lands on the run's own output instead,
+/// which is the same account a little further from the failure. And the filter
+/// narrows it to this crate: at `debug` the whole of what a session's start
+/// decided, with everything else left at `warn` so that sqlx's every statement
+/// is not what a reader has to scroll through.
+static LOGGING: LazyLock<()> = LazyLock::new(|| {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::new(SAID))
+        .with_test_writer()
+        .with_target(false)
+        .try_init();
+});
+
+/// What of it is worth printing — see [`LOGGING`].
+const SAID: &str = "warn,verkstead_server=debug";
+
 /// How many of these fixtures may be standing at once.
 ///
 /// Each one is a real server, a real repository on disk and a real session on a
@@ -227,7 +256,9 @@ impl Grilling {
 
             if Instant::now() >= deadline {
                 panic!(
-                    "the session never got there. It printed: {:?}",
+                    "the session never got there. It printed: {:?}. Where it \
+                     printed nothing at all there was no session: the server's \
+                     log above says which refusal it was",
                     self.said_by_each(&view).await,
                 );
             }
@@ -317,7 +348,9 @@ impl Grilling {
                 let view = self.view().await;
 
                 panic!(
-                    "the session never wrote {name}. It printed: {}",
+                    "the session never wrote {name}. It printed: {}. Where it \
+                     printed nothing at all there was no session: the server's \
+                     log above says which refusal it was",
                     self.said_by_each(&view).await,
                 );
             }
@@ -386,7 +419,10 @@ impl Grilling {
         .await;
 
         let TerminalOpened::Opened { number } = opened else {
-            panic!("expected a terminal to open, and the server said: {opened:?}");
+            panic!(
+                "expected a terminal to open, and the server said: {opened:?} \
+                 — the log above says which refusal that was"
+            );
         };
 
         number
@@ -408,6 +444,10 @@ async fn grilling(script: &str) -> Grilling {
 /// `RUSTC_WRAPPER` in every session's environment, and every other test in this
 /// file is about a session that builds nothing.
 async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
+    // Before the server exists, because what is worth reading is what it says
+    // as it starts a session — see [`LOGGING`].
+    LazyLock::force(&LOGGING);
+
     // Before anything is built, so that a bench queued behind the suite's
     // ceiling costs nothing while it waits — see [`ROOM`].
     let room = ROOM
@@ -1295,6 +1335,10 @@ async fn a_terminal_runs_powershell_in_the_conversations_worktree() {
 /// machine without one has nothing here to prove.
 #[tokio::test]
 async fn the_shared_compile_server_comes_up_as_a_plain_process() {
+    // The one test here that builds no fixture, and the compile server has as
+    // much to say for itself as a session does — see [`LOGGING`].
+    LazyLock::force(&LOGGING);
+
     let state = tempfile::tempdir().unwrap();
     let cache = tempfile::tempdir().unwrap();
 
