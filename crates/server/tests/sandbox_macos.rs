@@ -567,7 +567,8 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
         .unwrap()
         .expect("the Conversation is there");
 
-    let skills = Skills::installed(state.path()).expect("this binary carries skills");
+    let skills =
+        Skills::installed(Platform::HERE, state.path()).expect("this binary carries skills");
     let handoffs = Handoffs::under(state.path());
     let settings = Settings::in_data_dir(state.path());
 
@@ -579,7 +580,8 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
     std::fs::create_dir_all(image.parent().unwrap()).unwrap();
     std::fs::write(&image, SAYS_WHICH_BUILD).unwrap();
     std::fs::set_permissions(&image, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let verkstead = Executable::at(image, state.path()).expect("the executable was just written");
+    let verkstead = Executable::at(Platform::HERE, image, state.path())
+        .expect("the executable was just written");
 
     Grilling {
         watched,

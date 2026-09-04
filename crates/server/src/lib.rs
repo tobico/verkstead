@@ -852,7 +852,7 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
     // And the skills written out into it, before anything can ask for a session:
     // they are what a grilling session is pointed at, and this binary's are what
     // every sandbox gets, whatever an earlier one left there.
-    let skills = skills::Skills::installed(&data_dir)
+    let skills = skills::Skills::installed(platform::Platform::HERE, &data_dir)
         .context("installing the skills every sandbox is given")?;
 
     // And the shared build cache, which is resolved for the reason the binds

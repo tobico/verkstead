@@ -2678,19 +2678,22 @@ mod tests {
 
     /// A server's own: the binary is the Profile's agent type's, with nothing
     /// standing where it goes.
+    ///
+    /// **Told which platform it is on rather than reading the runner's.** What
+    /// nearly every test below asks about is the line a backend takes, and one
+    /// of the three platforms does not put the prompt on that line at all — see
+    /// [`Agents::argv`]. Read off the machine, the same assertions would be
+    /// about two different lines depending on which runner ran them; the arm
+    /// that writes the prompt down is asked for by name, by [`on`].
     fn real(state: &std::path::Path) -> Agents {
         Agents::new(
-            Homes::on(
-                crate::platform::Platform::HERE,
-                PathBuf::from("/home/verkstead"),
-                state,
-            ),
+            Homes::on(Platform::Linux, PathBuf::from("/home/verkstead"), state),
             Reachable::at("127.0.0.1:8422".parse().unwrap()),
             SandboxConfig::default(),
             // What the argv is built from is not the sandbox, so this asks for
             // no cache at all rather than making one somewhere.
             BuildCache::none(),
-            Skills::installed(state).expect("this binary carries skills"),
+            Skills::installed(Platform::Linux, state).expect("this binary carries skills"),
             // A test harness is its own executable, and what a sandbox does with
             // one is bind it: any file that is really there will do where nothing
             // here runs it.

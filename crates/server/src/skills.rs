@@ -171,7 +171,17 @@ impl Skills {
     /// grilling skill is a session that has been told to read a file that is not
     /// there, and a server that starts anyway would be one whose every
     /// Conversation fails at the far end of the button.
-    pub fn installed(data_dir: &Path) -> Result<Skills> {
+    ///
+    /// **`platform` rather than [`Platform::HERE`]**, for the reason every
+    /// other answer about where a session finds a directory of Verkstead's own
+    /// is a value — see [`crate::sandbox::own_directory`]. The two paths
+    /// written into these files are that answer, so a Skills built for one
+    /// machine and then rendered into a description for another names paths
+    /// that machine has not got, and the rendering joins them in at a name off
+    /// its own profile entirely. Everything outside a test passes
+    /// [`Platform::HERE`]; a test passes the platform it is about to render
+    /// for.
+    pub fn installed(platform: Platform, data_dir: &Path) -> Result<Skills> {
         let path = data_dir.join(DIRECTORY);
 
         // Where a session will read them, which is what the files themselves
@@ -179,14 +189,14 @@ impl Skills {
         // names it by the path it is at, and on a platform where that is not
         // the mount the sentence has to name the other place instead.
         let inside = crate::sandbox::under(
-            &crate::sandbox::own_directory(Platform::HERE, data_dir),
+            &crate::sandbox::own_directory(platform, data_dir),
             DIRECTORY,
         );
 
         // And how the same files name the handoff directory, which is the other
         // path they send a session to — see [`said_at`] for why that one is
         // said through a variable rather than spelled out.
-        let handoffs = handoffs::said(Platform::HERE);
+        let handoffs = handoffs::said(platform);
 
         match std::fs::remove_dir_all(&path) {
             Ok(()) => {}
@@ -1042,7 +1052,8 @@ mod tests {
     #[test]
     fn what_a_prompt_names_is_where_the_skills_were_installed() {
         let dir = tempfile::tempdir().unwrap();
-        let skills = Skills::installed(dir.path()).expect("this binary carries skills");
+        let skills =
+            Skills::installed(Platform::HERE, dir.path()).expect("this binary carries skills");
 
         assert!(
             grilling(&skills, "# Rate limiting\n").contains(&skills.named(GRILLING)),
@@ -3553,11 +3564,18 @@ mod tests {
     }
 
     /// Installing is what puts them where a sandbox can bind them.
+    ///
+    /// Asked of the platform whose two paths are the ones the bundled text is
+    /// written with, rather than of whichever machine is running this: what is
+    /// being checked is that a skill arrives whole, and on either of the other
+    /// two the same file arrives with those paths rewritten — see [`said_at`],
+    /// which is what [`Skills::installed`] takes a platform for.
     #[test]
     fn the_skills_are_written_out_under_the_data_directory() {
         let state = tempfile::tempdir().unwrap();
 
-        let skills = Skills::installed(state.path()).expect("this binary carries skills");
+        let skills =
+            Skills::installed(Platform::Linux, state.path()).expect("this binary carries skills");
 
         assert_eq!(skills.path(), state.path().join("skills"));
         assert_eq!(
@@ -3574,7 +3592,8 @@ mod tests {
     fn an_empty_directory_is_installed_for_the_accounts_own_to_be_hidden_behind() {
         let state = tempfile::tempdir().unwrap();
 
-        let skills = Skills::installed(state.path()).expect("this binary carries skills");
+        let skills =
+            Skills::installed(Platform::HERE, state.path()).expect("this binary carries skills");
 
         assert_eq!(skills.nothing(), state.path().join("nothing"));
         assert_eq!(
@@ -3594,7 +3613,7 @@ mod tests {
         std::fs::create_dir_all(&stale).unwrap();
         std::fs::write(stale.join("SKILL.md"), "# gone\n").unwrap();
 
-        Skills::installed(state.path()).expect("this binary carries skills");
+        Skills::installed(Platform::HERE, state.path()).expect("this binary carries skills");
 
         assert!(
             !stale.exists(),

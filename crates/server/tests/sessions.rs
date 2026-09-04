@@ -431,7 +431,8 @@ impl Grilling {
                 // No shared build cache: what these tests are about runs a stub
                 // where claude goes and builds nothing at all.
                 BuildCache::none(),
-                Skills::installed(self.state.path()).expect("this binary carries skills"),
+                Skills::installed(Platform::HERE, self.state.path())
+                    .expect("this binary carries skills"),
                 equipped(self.state.path()),
                 Handoffs::under(self.state.path()),
                 Settings::in_data_dir(self.state.path()),
@@ -2599,7 +2600,7 @@ async fn bench_at_pace(
         Reachable::at(LISTENING),
         SandboxConfig::resolve(&[spill.path().display().to_string()]).unwrap(),
         BuildCache::none(),
-        Skills::installed(state.path()).expect("this binary carries skills"),
+        Skills::installed(Platform::HERE, state.path()).expect("this binary carries skills"),
         equipped(state.path()),
         Handoffs::under(state.path()),
         Settings::in_data_dir(state.path()),
@@ -4859,7 +4860,8 @@ async fn a_capture_survives_the_server_restarting() {
             Reachable::at(LISTENING),
             SandboxConfig::default(),
             BuildCache::none(),
-            Skills::installed(fixture.state.path()).expect("this binary carries skills"),
+            Skills::installed(Platform::HERE, fixture.state.path())
+                .expect("this binary carries skills"),
             equipped(fixture.state.path()),
             Handoffs::under(fixture.state.path()),
             Settings::in_data_dir(fixture.state.path()),
@@ -7012,7 +7014,8 @@ async fn a_restarted_server_watches_the_checks_it_was_left_wrapping_up() {
             Reachable::at(LISTENING),
             SandboxConfig::default(),
             BuildCache::none(),
-            Skills::installed(fixture.state.path()).expect("this binary carries skills"),
+            Skills::installed(Platform::HERE, fixture.state.path())
+                .expect("this binary carries skills"),
             equipped(fixture.state.path()),
             Handoffs::under(fixture.state.path()),
             Settings::in_data_dir(fixture.state.path()),

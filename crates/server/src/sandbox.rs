@@ -1291,7 +1291,7 @@ impl Executable {
             }
         };
 
-        let Some(image) = Executable::at(running.clone(), data_dir) else {
+        let Some(image) = Executable::at(Platform::HERE, running.clone(), data_dir) else {
             tracing::error!(
                 verkstead = %running.display(),
                 "Verkstead's own image is not a file any more — a binary replaced under a \
@@ -1366,14 +1366,22 @@ impl Executable {
     /// given, and the directory holding it is what leads its `PATH` — which is
     /// the same invariant said of a different directory: what a session asks
     /// with is the build that is serving it.
-    pub fn at(path: PathBuf, data_dir: &Path) -> Option<Executable> {
+    ///
+    /// **`platform` rather than [`Platform::HERE`]**, for the reason
+    /// [`own_directory`] and [`Homes::for_conversation`] take one: the arm this
+    /// machine will never run is still an arm a test builds a description on,
+    /// and the three answers above are three different paths. An Executable
+    /// built for one platform and rendered into another's description names a
+    /// path that platform has not got — and the rendering that joins a path in
+    /// by hand would then be clearing and linking a name off the *host's* root
+    /// rather than one inside the session's own profile. Everything outside a
+    /// test passes [`Platform::HERE`].
+    pub fn at(platform: Platform, path: PathBuf, data_dir: &Path) -> Option<Executable> {
         let path = unwrapped(&path);
 
-        let inside = match Platform::HERE {
+        let inside = match platform {
             Platform::Windows => path.clone(),
-            Platform::Linux | Platform::MacOs => {
-                under(&own_bin(Platform::HERE, data_dir), VERKSTEAD)
-            }
+            Platform::Linux | Platform::MacOs => under(&own_bin(platform, data_dir), VERKSTEAD),
         };
 
         path.is_file().then_some(Executable {
@@ -2624,7 +2632,7 @@ mod tests {
     fn executable(bin: &Path, name: &str, data_dir: &Path) -> Option<Executable> {
         std::fs::write(bin.join(name), "an ELF\n").unwrap();
 
-        Executable::at(bin.join(name), data_dir)
+        Executable::at(Platform::HERE, bin.join(name), data_dir)
     }
 
     /// The bind puts the executable in one directory and `PATH` sends a session
@@ -2971,8 +2979,12 @@ mod tests {
         std::fs::write(bin.path().join("verkstead"), "#!/bin/sh\n").unwrap();
         std::fs::write(bin.path().join(".verkstead-wrapped"), "an ELF\n").unwrap();
 
-        let executable = Executable::at(bin.path().join(".verkstead-wrapped"), bin.path())
-            .expect("the file is there to be equipped with");
+        let executable = Executable::at(
+            Platform::HERE,
+            bin.path().join(".verkstead-wrapped"),
+            bin.path(),
+        )
+        .expect("the file is there to be equipped with");
 
         assert_eq!(
             executable.path(),
@@ -2989,7 +3001,8 @@ mod tests {
         let path = bin.path().join("verkstead");
         std::fs::write(&path, "an ELF\n").unwrap();
 
-        let executable = Executable::at(path.clone(), bin.path()).expect("the file is there");
+        let executable =
+            Executable::at(Platform::HERE, path.clone(), bin.path()).expect("the file is there");
 
         assert_eq!(executable.path(), path);
     }
@@ -3001,7 +3014,7 @@ mod tests {
     fn an_executable_that_is_not_there_equips_nobody() {
         let bin = tempfile::tempdir().unwrap();
 
-        assert!(Executable::at(bin.path().join("verkstead"), bin.path()).is_none());
+        assert!(Executable::at(Platform::HERE, bin.path().join("verkstead"), bin.path()).is_none());
     }
 
     /// An image that runs `script` as the whole of whatever verb it is given.
@@ -3019,7 +3032,7 @@ mod tests {
         std::fs::write(&path, format!("#!/bin/sh\n{script}\n")).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        Executable::at(path, dir).expect("the file was just written")
+        Executable::at(Platform::HERE, path, dir).expect("the file was just written")
     }
 
     /// The probe is a run of the image, and the verb is the one that reaches

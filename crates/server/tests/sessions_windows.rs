@@ -445,7 +445,8 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
         .chain(["-File".to_owned(), stand_in.display().to_string()])
         .collect();
 
-    let skills = Skills::installed(state.path()).expect("this binary carries skills");
+    let skills =
+        Skills::installed(Platform::HERE, state.path()).expect("this binary carries skills");
     let skills_inside = skills.inside().to_owned();
 
     let build_cache = match cache {

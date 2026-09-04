@@ -284,14 +284,28 @@ fi
     /// The same, around a Profile that is not the fixture's own — and handing
     /// back what it really answered, which is how the one Conversation that
     /// cannot have a sandbox at all is asked about.
+    ///
+    /// **The Skills and the executable are built for `platform` too**, rather
+    /// than reused off the fixture. Where a session finds either of them is
+    /// that platform's answer — see `Skills::installed` and `Executable::at` —
+    /// and the fixture's own were built for the machine this is running on. A
+    /// description mixing the two is one where the rendering that joins a path
+    /// in by hand is asked to clear and link a name off the *host's* root,
+    /// which is neither what a Windows session would find nor a thing to do to
+    /// the machine running the suite.
     fn sandbox_on_under(&self, profile: &store::Profile, platform: Platform) -> Option<Sandbox> {
         Sandbox::for_conversation(
             &self.conversation,
             profile,
             &Homes::on(platform, self.home.path().to_owned(), self.state.path()),
             &Reachable::at(LISTENING),
-            &self.skills,
-            &self.verkstead,
+            &Skills::installed(platform, self.state.path()).expect("this binary carries skills"),
+            &Executable::at(
+                platform,
+                self.verkstead.path().to_owned(),
+                self.state.path(),
+            )
+            .expect("the fixture's image is still there"),
             &self.handoffs,
             &self.settings.secrets(),
             &self.settings.config(),
@@ -649,7 +663,8 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
         .unwrap()
         .expect("the Conversation is there");
 
-    let skills = Skills::installed(state.path()).expect("this binary carries skills");
+    let skills =
+        Skills::installed(Platform::HERE, state.path()).expect("this binary carries skills");
     let handoffs = Handoffs::under(state.path());
     let settings = Settings::in_data_dir(state.path());
 
@@ -663,7 +678,8 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
     std::fs::create_dir_all(image.parent().unwrap()).unwrap();
     std::fs::write(&image, SAYS_WHICH_BUILD).unwrap();
     std::fs::set_permissions(&image, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let verkstead = Executable::at(image, state.path()).expect("the executable was just written");
+    let verkstead = Executable::at(Platform::HERE, image, state.path())
+        .expect("the executable was just written");
 
     Grilling {
         watched,
@@ -1138,10 +1154,15 @@ async fn the_open_rendering_hands_a_session_the_environment_it_was_described_wit
         "and the one name both platforms read is the profile Verkstead made for \
          this Conversation rather than the server's own"
     );
+    // Which leads with where the running image really is, this being the
+    // platform that binds nothing and links nothing: what a session asks with
+    // is the build serving it, said as the path that build is at rather than as
+    // a name a mount would have made. See `Executable::at`.
     assert_eq!(
         reported["PATH"],
         format!(
-            "/verkstead/bin;{}",
+            "{};{}",
+            fixture.state.path().join("image").display(),
             std::env::var("PATH").expect("this machine has a PATH")
         ),
         "Verkstead's own directory leads, and what follows it is where the human \
@@ -1398,12 +1419,28 @@ async fn a_rendering_whose_links_follow_their_target_leaves_nothing_to_close() {
          a session that ends leaves nothing to see to"
     );
 
+    let linked: Vec<PathBuf> = made(&fixture.sandbox_on(Platform::Windows))
+        .linked()
+        .map(Path::to_owned)
+        .collect();
+
     assert!(
-        made(&fixture.sandbox_on(Platform::Windows))
-            .linked()
-            .any(|inside| inside == fixture.windows_profile().join(".claude.json")),
+        linked.contains(&fixture.windows_profile().join(".claude.json")),
         "and the platform that joins a file in by hard link leaves the file it \
-         joined in"
+         joined in: {linked:?}"
+    );
+
+    // And nothing else anywhere. A name outside the profile is a rendering
+    // about to clear and link somewhere on the *host* — which on the machine
+    // running this is its own `/verkstead`, and is what asking every one of
+    // these for the platform it renders for is there to stop. See
+    // `sandbox_on_under`.
+    assert!(
+        linked
+            .iter()
+            .all(|inside| inside.starts_with(fixture.windows_profile())),
+        "everything a Windows rendering joins in by hand is inside the profile \
+         it is building: {linked:?}"
     );
 }
 
@@ -1964,7 +2001,7 @@ async fn an_image_packed_with_libraries_is_reached_through_a_launcher() {
     .unwrap();
     std::fs::set_permissions(&image, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-    fixture.verkstead = Executable::at(image, fixture.state.path())
+    fixture.verkstead = Executable::at(Platform::HERE, image, fixture.state.path())
         .expect("the image was just written")
         .bundling(fixture.state.path(), Some(&appdir));
 

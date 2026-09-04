@@ -108,12 +108,14 @@ impl Grilling {
                 self.state.path(),
             ),
             &Reachable::at(self.listening),
-            &Skills::installed(self.state.path()).expect("this binary carries skills"),
+            &Skills::installed(Platform::HERE, self.state.path())
+                .expect("this binary carries skills"),
             // What a real server hands over is its own image. A test harness's
             // own image is the test harness — so this names the binary cargo
             // built from this crate, which is the same thing a `verkstead serve`
             // would be running.
             &Executable::at(
+                Platform::HERE,
                 PathBuf::from(env!("CARGO_BIN_EXE_verkstead")),
                 self.state.path(),
             )
