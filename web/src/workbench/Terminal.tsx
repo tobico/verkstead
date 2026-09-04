@@ -40,6 +40,14 @@
 //! so a reload, a second device or a tab closed by accident comes back to what
 //! was already there, still running and showing what it last showed.
 //!
+//! **And a tab is closed on purpose or not at all.** Close is a row on the
+//! tab's own context menu — a right-click under a pointer, a long press under a
+//! finger — rather than a × on the tab, because a × beside a label this small is
+//! a thing to hit by accident and what it would end is a shell somebody is
+//! working in. The row asks the server to end that shell, and the tab then goes
+//! the way every ended shell's tab goes: its socket closes, and where it was the
+//! last one another opens.
+//!
 //! **And the pane never stands empty.** A shell that exits closes its socket,
 //! which is how this side hears about it: the tab goes, and where it was the
 //! last one another opens. The whole of the guard on that is time — a shell that
@@ -68,8 +76,14 @@ import {
 } from "solid-js";
 
 import { IconButton } from "../IconButton";
+import { ContextMenu } from "../Menu";
 import { PaneSticky } from "../Panes";
-import { listTerminals, openTerminal, terminalSocket } from "../api/client";
+import {
+  closeTerminal,
+  listTerminals,
+  openTerminal,
+  terminalSocket,
+} from "../api/client";
 import type { ConversationView, TerminalOpened } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
@@ -163,6 +177,18 @@ export function Terminal(props: {
 
   /// Which tab the human turned to, where they have turned to one.
   const [chosen, setChosen] = createSignal<number | undefined>();
+
+  /// The tab whose menu is open and where the hand asked for it, or `null` while
+  /// no menu is down.
+  ///
+  /// Which tab it is about is kept here rather than in a menu per tab, for the
+  /// reason the sidebar's is: one menu is open at a time, and one of these per
+  /// tab would be a component held open by a pane that only ever wants one.
+  const [pointed, setPointed] = createSignal<{
+    tab: number;
+    x: number;
+    y: number;
+  } | null>(null);
 
   /// Whether the list has been read, which is what says the pane knows how many
   /// terminals there are. Before it, an empty tab bar is a pane that has not
@@ -282,6 +308,49 @@ export function Terminal(props: {
     setOver((was) => ({ ...was, [tab]: ENDED_AT_ONCE }));
   };
 
+  /// What there is to do about a tab, asked for with a right-click or a long
+  /// press: the browser's own menu is not what either is asking for, so that
+  /// goes.
+  ///
+  /// Both hands, unlike the sidebar's cards — a long press on one of those is
+  /// already how a card is picked up to be dragged, and a tab has no second
+  /// gesture to protect.
+  const ask = (event: MouseEvent, tab: number): void => {
+    event.preventDefault();
+    setPointed({ tab, x: event.clientX, y: event.clientY });
+  };
+
+  /// Close one, which is the whole of what that menu holds.
+  ///
+  /// The shell is ended at the server and the tab goes when its socket closes,
+  /// which is how a tab hears about every shell that ends — one rule, whichever
+  /// end asked for it. What this takes off first is the pane's clock: a shell
+  /// somebody closed is a shell that ran, however long it ran for, and left in
+  /// place the five seconds would read a tab closed straight after it opened as
+  /// a shell that could not start.
+  ///
+  /// A tab that is only standing there to say why has no shell to end and no
+  /// socket to hear it on, so it simply goes. Nothing is drawn about a request
+  /// that failed: the shell is the server's, and a tab still there is what says
+  /// it is still running.
+  const close = (tab: number): void => {
+    setPointed(null);
+
+    if (tab < 0 || over()[tab] !== undefined) {
+      setOver((was) => {
+        const rest = { ...was };
+        delete rest[tab];
+        return rest;
+      });
+      setTabs((was) => was.filter((one) => one !== tab));
+      return;
+    }
+
+    askedAt.delete(tab);
+
+    void closeTerminal(props.conversation.id, tab);
+  };
+
   /// The tabs the pane loads with: one for each terminal the server is already
   /// holding.
   ///
@@ -340,6 +409,7 @@ export function Terminal(props: {
                   class={styles.tab}
                   aria-pressed={showing() === tab}
                   onClick={() => setChosen(tab)}
+                  onContextMenu={(event) => ask(event, tab)}
                 >
                   {called(tab)}
                 </button>
@@ -359,6 +429,27 @@ export function Terminal(props: {
           </div>
         </PaneHead>
       </PaneSticky>
+
+      {/* What there is to do about a tab, where the hand asked for it. One row,
+          because closing is the one thing a tab has that pressing it does not
+          already do — and on a menu rather than on the tab because a shell
+          somebody is working in is not a thing to end by a misplaced press. */}
+      <ContextMenu
+        class={styles.tabActions!}
+        name="Terminal actions"
+        at={pointed()}
+        close={() => setPointed(null)}
+      >
+        {() => (
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => close(pointed()!.tab)}
+          >
+            Close
+          </button>
+        )}
+      </ContextMenu>
 
       <Switch fallback={<Empty>Opening a terminal…</Empty>}>
         <Match when={terminals.isError}>

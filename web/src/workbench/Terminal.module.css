@@ -35,6 +35,12 @@
   border: 0;
   border-radius: 0.4rem;
   cursor: pointer;
+
+  /* A long press on a tab is how its menu is asked for on a phone, and a long
+     press on a word is how text is selected. A tab is a label to press rather
+     than one to copy out of here, so the selection goes — which is what the
+     sidebar's cards say about the same gesture. */
+  user-select: none;
 }
 
 .tab[aria-pressed="true"] {
@@ -60,4 +66,12 @@
   flex: none;
   padding: 0.35rem 0.5rem;
   font-size: 0.85rem;
+}
+
+/* What a right-click or a long press on a tab drops: one row, **Close**. The
+   card, where it hangs and the two ways out of it are `Menu.module.css`'s, as
+   every other menu's are — what is here is how wide it comes down, which is the
+   one thing a menu of one short word decides for itself. */
+.tabActions > [role="menu"] {
+  width: 9rem;
 }

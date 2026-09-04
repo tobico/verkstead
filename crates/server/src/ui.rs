@@ -25,7 +25,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
 use axum::response::{IntoResponse, Response as HttpResponse};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use verkstead_render::{
@@ -163,14 +163,23 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // inside its Sandbox, which is the Screen's own machinery pointed at a
         // shell rather than an agent (ADR 0013) — see [`crate::terminals`].
         //
-        // Three under the one path because there are three things to do with
-        // one: ask which are live, open another, and watch one. Under the
+        // Four under the one path because there are four things to do with one:
+        // ask which are live, open another, watch one, and close one. Under the
         // Conversation and named by a number this server issued, there being
         // any number of them per Conversation and no Event to name one by — a
         // terminal is memory only and leaves nothing on the record.
+        //
+        // And the close is a `DELETE` on the terminal itself, which is the one
+        // in the workbench: a terminal is a thing this server is holding rather
+        // than a record it keeps, so ending one is the thing going rather than
+        // something written about it.
         .route(
             "/api/ui/conversations/{id}/terminals",
             get(terminals).post(open_terminal),
+        )
+        .route(
+            "/api/ui/conversations/{id}/terminals/{number}",
+            delete(crate::terminals::close),
         )
         .route(
             "/api/ui/conversations/{id}/terminals/{number}/attach",

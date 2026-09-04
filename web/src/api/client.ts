@@ -463,6 +463,23 @@ export function terminalSocket(id: number, number: number): string {
   return socketAt(`/api/ui/conversations/${id}/terminals/${number}/attach`);
 }
 
+/// And closing one, which is the **Close** row on its tab's menu: the shell is
+/// hung up and then killed where it lingers, and the terminal comes off the
+/// server's register.
+///
+/// Taking the thing away rather than posting about it — the one delete in the
+/// app, because a terminal is something the server is holding rather than a
+/// record it keeps. Nothing to read back: what the tab hears is its own socket
+/// closing, which is what it hears from a shell that exited by itself.
+export async function closeTerminal(id: number, number: number): Promise<void> {
+  await refused(
+    await fetch(`/api/ui/conversations/${id}/terminals/${number}`, {
+      method: "DELETE",
+      headers: { accept: "application/json" },
+    }),
+  );
+}
+
 /// One commit, rendered: what it said about itself, and its diff.
 ///
 /// Fetched by the pane that shows it for the Capture's reason. The diff is read

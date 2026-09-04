@@ -22,5 +22,5 @@ beside this plan.
 - [x] 02: The login shell — [details](02-login-shell.md)
 - [x] 03: Tabs — [details](03-tabs.md)
 - [x] 04: Tabs ending — [details](04-tabs-ending.md)
-- [ ] 05: Closing — [details](05-closing.md)
+- [x] 05: Closing — [details](05-closing.md)
 - [ ] 06: Titles — [details](06-titles.md)

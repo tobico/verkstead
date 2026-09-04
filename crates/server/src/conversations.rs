@@ -1896,6 +1896,13 @@ async fn ending(state: &AppState, id: i64) -> Result<ConversationClosed> {
 
     state.sessions.end(id).await;
 
+    // And the Conversation's own terminals beside it, for the same reason and in
+    // the same place: a human's shell standing in the Worktree git is about to
+    // take away is the session's mess by the other hand. Each is hung up and
+    // then killed where it lingers, and this waits for the last of them — see
+    // [`crate::terminals`].
+    state.terminals.end_every(id).await;
+
     if let Some(path) = conversation.worktree.clone() {
         let repo = conversation.repo.clone();
         let left = path.clone();

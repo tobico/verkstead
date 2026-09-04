@@ -16421,4 +16421,192 @@ describe("the terminal pane's tabs", () => {
       expect(tabs(container).map((tab) => tab.textContent)).toEqual(["Terminal"]);
     });
   });
+
+  /// Closing a tab, which is the one thing a tab offers that pressing it does
+  /// not already do — and it is on a menu rather than on the tab, because what a
+  /// stray press would end is a shell somebody is working in.
+  describe("and closing one", () => {
+    /// Where a tab's own menu comes down, painted by the pane and dropped by the
+    /// one menu component the app has.
+    function menu(container: ParentNode): HTMLElement | null {
+      return container.querySelector<HTMLElement>(
+        `.${terminalPane.tabActions} > .${dropdown.drop}`,
+      );
+    }
+
+    /// The same, waited for.
+    function opened(container: ParentNode): Promise<HTMLElement> {
+      return drawn(
+        container,
+        `.${terminalPane.tabActions} > .${dropdown.drop}`,
+      );
+    }
+
+    /// What the server answers a close with: nothing at all, which is what a
+    /// terminal ending has to say for itself.
+    function closes(number: number) {
+      return whenever(
+        `${TERMINALS_OF_IT}/${number}`,
+        () => Promise.resolve(new Response(null, { status: 204 })),
+        "DELETE",
+      );
+    }
+
+    /// How many closes went out for one terminal.
+    function closed(
+      fetching: ReturnType<typeof serving>,
+      number: number,
+    ): number {
+      return fetching.mock.calls.filter(
+        ([path, init]) =>
+          String(path) === `${TERMINALS_OF_IT}/${number}` &&
+          init?.method === "DELETE",
+      ).length;
+    }
+
+    /// A right-click on a tab drops the menu, and Close ends that shell: the
+    /// request goes out, and the tab goes when the socket under it closes —
+    /// which is the one thing a tab is ever told about a terminal ending,
+    /// whichever end asked for it.
+    it("closes the shell a tab stands on, and the tab goes with it", async () => {
+      const fetching = withTerminals(
+        [1, 2],
+        closes(1),
+        whenever(TERMINALS_OF_IT, opens(3), "POST"),
+      );
+      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+
+      const first = await attachedTo(1);
+      await waitFor(() => expect(tabs(container)).toHaveLength(2));
+
+      expect(menu(container)).toBeNull();
+
+      // The browser's own menu is not what a right-click on a tab is asking
+      // for, so it is taken off the press.
+      expect(
+        fireEvent.contextMenu(tabs(container)[0]!, {
+          clientX: 120,
+          clientY: 40,
+        }),
+      ).toBe(false);
+
+      const rows = [...(await opened(container)).querySelectorAll("button")];
+      expect(rows.map((row) => row.textContent)).toEqual(["Close"]);
+
+      fireEvent.click(rows[0]!);
+
+      await waitFor(() => expect(closed(fetching, 1)).toBe(1));
+
+      // The menu goes with the press, and the tab is still there: the shell is
+      // the server's, and what says it has ended is its socket closing.
+      expect(menu(container)).toBeNull();
+      expect(tabs(container)).toHaveLength(2);
+
+      first.ends();
+
+      await waitFor(() =>
+        expect(tabs(container).map((tab) => tab.textContent)).toEqual([
+          "Terminal 2",
+        ]),
+      );
+
+      // And nothing was opened behind it: the pane still has a tab, so it is
+      // not standing empty.
+      expect(asked(fetching)).toBe(0);
+    });
+
+    /// The same menu from a finger, which is the whole of what a touch device
+    /// has: a long press fires this same event, and a tab has no second gesture
+    /// to protect — unlike a sidebar card, whose long press already picks it up
+    /// to be dragged.
+    it("opens the same menu on a long press", async () => {
+      withTerminals([1], closes(1));
+      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+
+      await waitFor(() => expect(tabs(container)).toHaveLength(1));
+
+      const tab = tabs(container)[0]!;
+
+      fireEvent.pointerDown(tab, {
+        button: 0,
+        pointerId: 1,
+        pointerType: "touch",
+        clientX: 40,
+        clientY: 40,
+      });
+
+      // The long press itself, as a phone reports it: the same `contextmenu` a
+      // right-click makes, with nothing on it to say which hand it came from.
+      expect(
+        fireEvent.contextMenu(tab, { clientX: 40, clientY: 40 }),
+      ).toBe(false);
+
+      const rows = [...(await opened(container)).querySelectorAll("button")];
+      expect(rows.map((row) => row.textContent)).toEqual(["Close"]);
+    });
+
+    /// And closing one the pane opened moments ago takes its tab away rather
+    /// than standing it: the five seconds are a guard against a shell that could
+    /// not start, and a shell somebody closed is one that ran.
+    it("takes the tab away where the shell was closed just after it opened", async () => {
+      const fetching = withTerminals(
+        [],
+        closes(1),
+        whenever(TERMINALS_OF_IT, opens(1, 2), "POST"),
+      );
+      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+
+      const first = await attachedTo(1);
+      first.says(PAINTED);
+      await waitFor(() => expect(tabs(container)).toHaveLength(1));
+
+      fireEvent.contextMenu(tabs(container)[0]!, { clientX: 40, clientY: 40 });
+      fireEvent.click((await opened(container)).querySelector("button")!);
+
+      await waitFor(() => expect(closed(fetching, 1)).toBe(1));
+
+      first.ends();
+
+      // The tab goes, and another opens where it was the last: the pane never
+      // stands empty, and nothing here is a shell that could not start.
+      await attachedTo(2);
+      await waitFor(() =>
+        expect(tabs(container).map((tab) => tab.textContent)).toEqual([
+          "Terminal 2",
+        ]),
+      );
+
+      expect(standing(container)).toBeUndefined();
+    });
+
+    /// A tab that is only standing there to say why has no shell to end and no
+    /// socket to hear it on, so Close simply takes it away — and the pane opens
+    /// another, because a press is somebody asking again.
+    it("takes away a tab that is standing on a refusal", async () => {
+      const fetching = withTerminals(
+        [],
+        whenever(
+          TERMINALS_OF_IT,
+          json("Refused" satisfies TerminalOpened),
+          "POST",
+        ),
+      );
+      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+
+      await waitFor(() =>
+        expect(standing(container)).toBe(TERMINAL_REFUSAL.Refused),
+      );
+
+      fireEvent.contextMenu(tabs(container)[0]!, { clientX: 40, clientY: 40 });
+      fireEvent.click((await opened(container)).querySelector("button")!);
+
+      // Nothing was asked of the server about it: there was never a shell, and
+      // no number to name one by.
+      expect(
+        fetching.mock.calls.filter(([, init]) => init?.method === "DELETE"),
+      ).toHaveLength(0);
+
+      await waitFor(() => expect(asked(fetching)).toBe(2));
+    });
+  });
 });
