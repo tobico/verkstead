@@ -29,6 +29,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::platform::Platform;
@@ -108,6 +109,11 @@ struct Grilling {
     /// And where the handoff documents go, which is a root under the same
     /// directory — one directory per Conversation, made as its sandbox is built.
     handoffs: Handoffs,
+
+    /// And where the files the human attached to it are, which is a root under
+    /// that directory again — one directory per Conversation, and read-only
+    /// inside every session the Conversation has.
+    attachments: Attachments,
 
     /// The settings files, in that directory again. Nothing is in them until a
     /// test says so — see [`Grilling::configure_github_token`] and
@@ -191,6 +197,7 @@ if [ "${{SCCACHE_START_SERVER-}}" = "1" ]; then
         dir {worktrees} worktrees
         dir {cache} cache
         dir {handoffs} handoffs
+        dir {attachments} attachments
         file {database} database
         file {config} config
         file {secrets} secrets
@@ -204,6 +211,7 @@ fi
             worktrees = quoted(&self.worktrees_dir()),
             cache = quoted(&self.cache_dir()),
             handoffs = quoted(&self.state.path().join("handoffs")),
+            attachments = quoted(&self.state.path().join("attachments")),
             database = quoted(&self.state.path().join("verkstead.db")),
             config = quoted(&settings.config_path()),
             secrets = quoted(&settings.secrets_path()),
@@ -214,6 +222,25 @@ fi
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         path
+    }
+
+    /// Put a file in the Conversation's attachments directory, the way an
+    /// upload does.
+    ///
+    /// Written rather than uploaded, because what is being probed is the bind: a
+    /// route, a body limit and a row about the file are the attaching tests'
+    /// half, and what a sandbox reaches for is a directory with something in it.
+    /// Where that directory is, is [`verkstead_server::attachments`]'s own and
+    /// its own tests' to hold.
+    fn attach(&self, name: &str, body: &[u8]) {
+        let directory = self
+            .state
+            .path()
+            .join("attachments")
+            .join(self.conversation.id.to_string());
+
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join(name), body).unwrap();
     }
 
     /// The companion of that name, as the Conversation now carries it — where
@@ -262,6 +289,7 @@ fi
             &self.skills,
             &self.verkstead,
             &self.handoffs,
+            &self.attachments,
             // Read here rather than at startup, which is where the server reads
             // them too: a sandbox carries the token and the author that were
             // configured when it was built.
@@ -604,6 +632,7 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
 
     let skills = Skills::installed(state.path()).expect("this binary carries skills");
     let handoffs = Handoffs::under(state.path());
+    let attachments = Attachments::under(state.path());
     let settings = Settings::in_data_dir(state.path());
 
     // The executable a session is equipped with, somewhere no session can reach
@@ -630,6 +659,7 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
         skills,
         verkstead,
         handoffs,
+        attachments,
         settings,
     }
 }
@@ -812,6 +842,59 @@ async fn what_a_session_writes_in_its_handoff_directory_is_there_when_it_has_gon
         Some("# What we settled\n"),
         "nothing written inside reached {}",
         outside.display()
+    );
+}
+
+/// The other half of the Conversation's own directory outside the worktree: the
+/// files the human attached, at the path the prompt names them at.
+///
+/// **Read-only**, which `dir` reporting `read` is the whole of: the listing
+/// worked and a file could not be created beside what is there. The copy is the
+/// record, and an agent that wants to work on a file copies it into the
+/// Worktree.
+#[tokio::test]
+async fn the_attached_files_are_read_at_the_path_the_prompt_names_and_written_nowhere() {
+    let fixture = grilling().await;
+    fixture.attach("wireframe.png", b"PNG");
+
+    let sandbox = fixture.sandbox(vec![]);
+
+    let reported = probe(
+        &sandbox,
+        // The path is written out rather than asked of the server, for the
+        // reason the handoff directory's is above: what a session opens is a
+        // path it read in its prompt, and a test that composed the same path
+        // twice would agree with itself about it.
+        r#"
+        dir /verkstead/attachments attachments
+        file /verkstead/attachments/wireframe.png attached
+        "#,
+    );
+
+    assert_eq!(
+        reported["attachments"], "read",
+        "a session reads what was attached and cannot add anything beside it"
+    );
+    assert_eq!(
+        reported["attached"], "read",
+        "nor write over the file the human handed over"
+    );
+}
+
+/// And a Conversation nothing was attached to has no such directory at all: a
+/// path an agent is told about and finds empty is worse than one that is not
+/// there.
+#[tokio::test]
+async fn a_conversation_with_nothing_attached_has_nothing_at_that_path() {
+    let fixture = grilling().await;
+    let sandbox = fixture.sandbox(vec![]);
+
+    let reported = probe(&sandbox, "dir /verkstead/attachments attachments\n");
+
+    assert_eq!(
+        reported["attachments"], "absent",
+        "no bind is made, so the directory of Verkstead's own holds only `bin` and \
+         the skills"
     );
 }
 
@@ -2307,11 +2390,12 @@ async fn a_build_cache_switched_off_is_no_bind_and_no_variables() {
 async fn the_compile_server_holds_the_worktrees_and_none_of_the_data_directory() {
     let fixture = grilling().await;
 
-    // The three things it must not reach, really on disk so that their absence
+    // The four things it must not reach, really on disk so that their absence
     // inside is the bind rather than the fixture.
     fixture.configure("git_author:\n  name: Tobias Cohen\n");
     fixture.configure_github_token("github_token: ghp_thetoken\n");
     std::fs::write(fixture.state.path().join("verkstead.db"), "the database\n").unwrap();
+    fixture.attach("wireframe.png", b"PNG");
 
     let cache = fixture.cache(true);
     cache.compiling(&RustBuildCache::default());
@@ -2343,6 +2427,11 @@ async fn the_compile_server_holds_the_worktrees_and_none_of_the_data_directory()
         reported["handoffs"], "absent",
         "and nothing else of the Data Directory either — the Worktrees are the \
          whole of the bind"
+    );
+    assert_eq!(
+        reported["attachments"], "absent",
+        "the files the human attached are a session's to read, and the compile \
+         server is not a session"
     );
 
     assert_eq!(

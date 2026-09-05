@@ -152,6 +152,11 @@ const CONVERSATION_KEYED: &[&str] = &[
     // share: the file itself was put somewhere on purpose and stays there.
     "shares",
     "share_comments",
+    // And the files the human put on it, whose bytes go with the directory the
+    // delete gives back — see the server's own `attachments`. Unlike a share,
+    // those were only ever this Conversation's, so nothing is left standing
+    // once the record naming them is gone.
+    "attachments",
     // And where it sat, what it was doing, and how it was set up to do it.
     "placements",
     "unseen_conversations",

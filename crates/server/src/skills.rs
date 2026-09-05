@@ -868,6 +868,101 @@ pub(crate) fn alongside(prompt: &str, branch: &str, companions: &[store::Compani
     )
 }
 
+/// The same prompt again, with the files the human attached to the Conversation
+/// listed under it.
+///
+/// One listing, on **every** session prompt of the Conversation — the grilling
+/// one and the wrap-up's own included — because a file is attached to the
+/// Conversation rather than to a round of it, and the directory is inside every
+/// one of its sandboxes. Appended where every session is launched from rather
+/// than written into each prompt builder, for the reason the companions listing
+/// is: so that a builder added later cannot forget it.
+///
+/// Neutral, and deliberately: each file is named by the path a session opens it
+/// at and how large it is, and nothing here says what to do with any of it. The
+/// Brief is what says what a file is for, and the agent reads it — a prompt that
+/// told a session to go and use a file would be Verkstead deciding the work from
+/// an upload button.
+///
+/// **Grouped under what each file was attached to**, which is its origin — the
+/// Brief now, and an Answer to a Question Set next. Walked in the record's own
+/// order rather than sorted into groups, because that order is the order they
+/// were attached in and an origin's files therefore arrive together: what a
+/// second origin needs here is one more arm on [`attached_to`].
+///
+/// `inside` is where the Conversation's directory is reached from inside the
+/// sandbox, which is not the same path on both platforms — see
+/// [`crate::attachments::inside`]. A Conversation with nothing attached is the
+/// prompt unchanged, which is most of them: a heading over an empty list would
+/// tell a session that something had been handed over.
+pub(crate) fn attached(prompt: &str, files: &[store::Attachment], inside: &Path) -> String {
+    if files.is_empty() {
+        return prompt.to_owned();
+    }
+
+    let mut listed = String::new();
+    let mut under = None;
+
+    for file in files {
+        if under != Some(file.origin) {
+            if under.is_some() {
+                listed.push('\n');
+            }
+
+            listed.push_str(&format!("{}\n\n", attached_to(file.origin)));
+            under = Some(file.origin);
+        }
+
+        listed.push_str(&format!(
+            "- `{}`, {}.\n",
+            crate::sandbox::under(inside, &file.name).display(),
+            sized(file.bytes),
+        ));
+    }
+
+    format!(
+        "{}\n\n# Attached files\n\nThe human attached files to this Conversation, in a \
+         directory this session can read and not write.\n\n{listed}",
+        prompt.trim_end(),
+    )
+}
+
+/// What an origin is called where its files are listed under it.
+///
+/// One line rather than a heading of its own: there is one origin today and two
+/// planned, and a section made of sub-sections would be a shape built for a list
+/// that is a handful of lines long.
+fn attached_to(origin: store::Origin) -> &'static str {
+    match origin {
+        store::Origin::Brief => "Attached to the Brief:",
+    }
+}
+
+/// How large a file is said to be in that listing.
+///
+/// Rounded, and in whichever unit keeps it to a few digits: what the number is
+/// for is a session deciding whether to open something and what it will find
+/// when it does, rather than accounting. Decimal units, the way a file manager
+/// says it and the way the human who attached the file was told its size.
+pub(crate) fn sized(bytes: i64) -> String {
+    let bytes = bytes.max(0);
+
+    for (unit, scale) in [
+        ("GB", 1_000_000_000.0),
+        ("MB", 1_000_000.0),
+        ("kB", 1_000.0),
+    ] {
+        if bytes as f64 >= scale {
+            return format!("{:.1} {unit}", bytes as f64 / scale);
+        }
+    }
+
+    match bytes {
+        1 => "1 byte".to_owned(),
+        bytes => format!("{bytes} bytes"),
+    }
+}
+
 /// And the same prompt once more, with the one instruction the first session of
 /// a Conversation nobody has named gets: pick the branch a name.
 ///
@@ -3363,6 +3458,126 @@ mod tests {
         let prompt = next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
 
         assert_eq!(alongside(&prompt, "rate-limiting", &[]), prompt);
+    }
+
+    /// A file the human attached, made by hand: the store is where one comes
+    /// from, and what the listing is written against is the shape rather than
+    /// the query.
+    fn attachment(name: &str, bytes: i64) -> store::Attachment {
+        store::Attachment {
+            id: 7,
+            origin: store::Origin::Brief,
+            name: name.to_owned(),
+            bytes,
+            added_at: "2026-09-04T09:15:00.000Z".to_owned(),
+        }
+    }
+
+    /// Where the Conversation's directory is inside, on the platform the suite
+    /// runs prompts against — see [`mounted`], which stands the skills at the
+    /// path a bind makes for the same reason.
+    fn attachments_inside() -> PathBuf {
+        PathBuf::from(crate::attachments::INSIDE)
+    }
+
+    /// What a session is told about the attached files: where each one is and
+    /// how large it is, under one heading, grouped under what it was attached
+    /// to, and under whatever the prompt already said.
+    #[test]
+    fn every_attached_file_is_named_at_the_path_a_session_opens_it_at() {
+        let prompt = attached(
+            &next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None),
+            &[
+                attachment("wireframe.png", 1_240_000),
+                attachment("rates.csv", 4_096),
+            ],
+            &attachments_inside(),
+        );
+
+        assert!(
+            prompt.contains("# The Brief this started from"),
+            "the work is still what the session is being told about: {prompt:?}"
+        );
+        assert_eq!(
+            prompt.matches("# Attached files").count(),
+            1,
+            "one listing, whatever the prompt was built by: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("Attached to the Brief:"),
+            "grouped under what each of them was attached to: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("- `/verkstead/attachments/wireframe.png`, 1.2 MB."),
+            "a file is named at the path the sandbox puts it at: {prompt:?}"
+        );
+        assert!(
+            prompt.contains("- `/verkstead/attachments/rates.csv`, 4.1 kB."),
+            "and its size beside it: {prompt:?}"
+        );
+    }
+
+    /// The section is on every session prompt of the Conversation, whichever
+    /// builder made it: a file is attached to the Conversation rather than to a
+    /// round of it, and the directory is inside every one of its sandboxes.
+    #[test]
+    fn the_listing_is_on_a_grillings_prompt_and_a_wrap_ups_alike() {
+        for built in [
+            grilling(&mounted(), "# Rate limiting\n"),
+            reviewing(&mounted(), "# Rate limiting\n", None, None, None),
+        ] {
+            let prompt = attached(
+                &built,
+                &[attachment("rates.csv", 4_096)],
+                &attachments_inside(),
+            );
+
+            assert!(
+                prompt.contains("- `/verkstead/attachments/rates.csv`, 4.1 kB."),
+                "the file is listed whatever the session is for: {prompt:?}"
+            );
+        }
+    }
+
+    /// And it says what is there and nothing about what to do with it. What a
+    /// file is for, is the Brief's to say — a prompt that told a session to go
+    /// and use one would be Verkstead deciding the work off an upload button.
+    #[test]
+    fn the_attachments_listing_tells_a_session_nothing_about_what_to_do_with_them() {
+        let prompt = attached(
+            "",
+            &[attachment("wireframe.png", 1_240_000)],
+            &attachments_inside(),
+        );
+
+        for instructed in ["you should", "use it", "make sure", "read the", "open it"] {
+            assert!(
+                !prompt.to_lowercase().contains(instructed),
+                "the listing is neutral, and {instructed:?} is not: {prompt:?}"
+            );
+        }
+    }
+
+    /// Which is most Conversations: a heading over an empty list would tell a
+    /// session that something had been handed over.
+    #[test]
+    fn a_conversation_with_nothing_attached_is_started_on_the_prompt_as_it_stands() {
+        let prompt = next_task(&mounted(), "# Rate limiting\n\nThe API has none.\n", None);
+
+        assert_eq!(attached(&prompt, &[], &attachments_inside()), prompt);
+    }
+
+    /// A size is said in whichever unit keeps it to a few digits, because what
+    /// it is for is a session knowing what it will find rather than accounting.
+    #[test]
+    fn a_files_size_is_said_in_the_unit_that_reads() {
+        assert_eq!(sized(0), "0 bytes");
+        assert_eq!(sized(1), "1 byte");
+        assert_eq!(sized(999), "999 bytes");
+        assert_eq!(sized(4_096), "4.1 kB");
+        assert_eq!(sized(1_240_000), "1.2 MB");
+        assert_eq!(sized(32 * 1024 * 1024), "33.6 MB");
+        assert_eq!(sized(2_500_000_000), "2.5 GB");
     }
 
     /// The workbench shows a commit's message body beside its diff, and nothing

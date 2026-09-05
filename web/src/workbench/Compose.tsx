@@ -40,6 +40,15 @@
 //! this, and the frame widens exactly as it does there — see `Workbench.tsx`,
 //! where the same two panes are handed to the same frame.
 //!
+//! **The files are the one thing on it that is not held on the device.** The
+//! paperclip at the near edge of the row the presses are at the far edge of
+//! picks them — as does a drop anywhere on the box, which is the same piece
+//! doing the same thing (see `src/Attaching.tsx`) — they are drawn as the same
+//! pills a draft draws them as, and they stay in the page until a press — a `File` being a handle the browser gave
+//! this page rather than text, so a reload keeps what was typed and loses what
+//! was picked. The press uploads them through the route a draft's own paperclip
+//! uses, as one more field of the replay. See `src/holding.ts`.
+//!
 //! The one thing it reads that a saved composer has no need of is the repo's own
 //! memory of what it was last grilled with. A draft has that applied to it when
 //! it is created; this page has no draft yet, so it asks for the same answer and
@@ -70,6 +79,7 @@ import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Show, createEffect, createSignal, type JSX } from "solid-js";
 
 import app from "../App.module.css";
+import { attaching } from "../Attaching";
 import { Icon } from "../Icon";
 import { Menu } from "../Menu";
 import { PaneSticky, Panes } from "../Panes";
@@ -82,6 +92,7 @@ import {
 } from "../api/client";
 import type { RepoEntry } from "../api/types";
 import { useReading } from "../freshness";
+import { holding } from "../holding";
 import { ErrorLine, Note } from "../notices";
 import * as pairing from "../pairing";
 import { Conversations } from "./Conversations";
@@ -160,6 +171,11 @@ function Compose(props: {
   // What is being composed, off this device to begin with: a page opened on a
   // draft somebody left is that draft rather than a blank one.
   const [state, setState] = createSignal<Composed>(stored());
+
+  // The files picked here, which are not part of what is written back: a
+  // `File` cannot be stored and read again, so they live for as long as this
+  // page does and the press is what sends them.
+  const files = holding();
 
   // And written back whenever it moves. Every keystroke, which is what makes
   // this survive a reload — there is nowhere else it is being kept, and a page
@@ -311,7 +327,7 @@ function Compose(props: {
   const [gone, setGone] = createSignal(false);
 
   const make = useMutation(() => ({
-    mutationFn: (work: boolean) => create(state(), work),
+    mutationFn: (work: boolean) => create(state(), work, files),
     onSuccess: (outcome) => {
       if (outcome === "NoSuchRepo") {
         // Picked out of a list this page read a moment ago: the Repo was there
@@ -336,6 +352,26 @@ function Compose(props: {
       navigate(pathOf(outcome.conversation));
     },
   }));
+
+  // And the one piece the attaching UI is drawn through, here and on the
+  // composer of a draft alike: the pills inside the box, the paperclip in the
+  // row of presses, and the drop the box itself takes. What is different here
+  // is only what becomes of a chosen file — it is held in the page rather than
+  // sent — which is the one thing the piece is handed. See `Attaching.tsx`.
+  const attach = attaching({
+    shown: () =>
+      files.held().map((one) => ({
+        name: one.file.name,
+        remove: () => files.drop(one.key),
+        // The one thing a × here can be refused for: the press has been made
+        // and the files are on their way up.
+        removing: make.isPending,
+      })),
+    add: files.add,
+    // Not offered while a roadmap is loaded: the box is locked to a card then,
+    // and there is nothing being written for a file to be handed over with.
+    offered: () => adopting() === null,
+  });
 
   /// A roadmap loaded into what is being composed, which creates nothing: the
   /// row that was pressed is written into the compose state, and the press under
@@ -411,7 +447,13 @@ function Compose(props: {
       </PaneSticky>
 
       <div class={`${styles.composer} ${shell.paneComposer}`}>
-        <div class={styles.box}>
+        {/* The box, and the whole of it a drop target — the same box the
+            composer beside this one draws, taking a drop the same way. */}
+        <div
+          class={styles.box}
+          classList={{ [styles.over!]: attach.over() }}
+          {...attach.dropping}
+        >
           {/* The field, or the roadmap that has been loaded in place of it: an
               adopted stage's brief is the repository's own and arrives with the
               adoption, so there is nothing here to write and the box says which
@@ -434,6 +476,22 @@ function Compose(props: {
             }
           >
             {(held) => <Loaded roadmap={held()} clear={() => unload()} />}
+          </Show>
+
+          {/* And the files that will go up with it, drawn exactly as a draft's
+              are — the same row through the same piece, because a file picked
+              before there is a Conversation and a file on one are the same
+              thing to look at. The × drops the held file rather than making a
+              request: there is nothing on the server yet to take anything
+              off.
+
+              The row goes with the box while a roadmap is loaded, because the
+              box is locked to a card then and the files were picked for what it
+              is standing over. Held rather than dropped, the way everything
+              else a roadmap covers is held: clearing it gives them back, and
+              the press sends none of them meanwhile — see `composing.ts`. */}
+          <Show when={adopting() === null}>
+            <attach.Pills class={styles.attachments} />
           </Show>
 
           <section class={setup.options} aria-label="Setup">
@@ -602,22 +660,36 @@ function Compose(props: {
             is what the page is arranged for. */}
         <div class={styles.startGrilling}>
           <div class={styles.presses}>
-            {/* The other way work gets into the pipeline, at the near edge of
-                the row and so plainly not one of the two presses: a roadmap
-                somebody staged before Verkstead was driving anything, taken up
-                as it stands. Drawn only when there is one to take up and the box
-                is empty — what it loads stands in place of what would have been
-                written there, and a dropdown offering to replace a half-written
-                brief would be offering to lose it. */}
-            <Show
-              when={
-                roadmaps().length &&
-                state().brief.trim() === "" &&
-                adopting() === null
-              }
-            >
-              <AdoptRoadmap roadmaps={roadmaps()} load={load} />
-            </Show>
+            {/* What stands at the near edge of the row the two presses are at
+                the far edge of, and so is plainly not one of them: the
+                paperclip, and the way work gets into the pipeline without being
+                written. Grouped, because one margin has to push both of them
+                over — see `.near`. */}
+            <div class={styles.near}>
+              {/* The paperclip, left of Save as draft — and not offered at all
+                  while a roadmap is loaded: the box is locked to a card then,
+                  and there is nothing being written for a file to be handed
+                  over with. */}
+              <Show when={adopting() === null}>
+                <attach.Clip />
+              </Show>
+
+              {/* And the roadmap somebody staged before Verkstead was driving
+                  anything, taken up as it stands. Drawn only when there is one
+                  to take up and the box is empty — what it loads stands in place
+                  of what would have been written there, and a dropdown offering
+                  to replace a half-written brief would be offering to lose
+                  it. */}
+              <Show
+                when={
+                  roadmaps().length &&
+                  state().brief.trim() === "" &&
+                  adopting() === null
+                }
+              >
+                <AdoptRoadmap roadmaps={roadmaps()} load={load} />
+              </Show>
+            </div>
 
             <button
               type="button"

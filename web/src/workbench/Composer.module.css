@@ -54,6 +54,17 @@
   border-color: var(--accent);
 }
 
+/* And the box under a drag carrying files, which is the same border with a wash
+   of the accent behind it: what is about to happen is that these files go into
+   this box, so the box is the whole of what is drawn about it. The wash rather
+   than a dashed outline inside the edge, which would be a second border around
+   a box that already has one — and rather than a word, the pills that appear
+   being what says the drop worked. See `Attaching.tsx` for when it is drawn. */
+.box.over {
+  background: color-mix(in srgb, var(--accent) 8%, var(--card));
+  border-color: var(--accent);
+}
+
 /* The field, drawn as the box rather than as a field inside it: no paper of its
    own and no border, and the border kept at its width so the copy that gives
    the field its height goes on measuring the same line breaks — see `.grow` in
@@ -86,6 +97,17 @@
   .box textarea:hover {
     border-color: transparent;
   }
+}
+
+/* Where the row of attached files stands, on this pane and on the compose page
+   that shares this module: inside the box, under the text and at the inset the
+   text is written at, so the pills line up with the sentence above them. The
+   list's own indent comes off here for the same reason the margin is set here —
+   see `Attaching.module.css`, which draws the row the same wherever it is put
+   and leaves both to whoever puts it. */
+.attachments {
+  margin: 0.5rem 0 0;
+  padding: 0 0.6rem;
 }
 
 /* The Brief where it is a document rather than a field — an adopting
@@ -257,16 +279,40 @@
   display: block;
 }
 
-/* And the compose page's presses, which are the same one with another beside
-   it: a Conversation can be created without being started, and that is the
-   quieter of the two. A row, so the pair sits against the far edge the start
-   alone sits against — inside `.startGrilling`, which is where what they have
-   to say still goes. */
+/* The row of presses under the box, on both pages: the start on its own here,
+   and the start with Save as draft beside it on the compose page — a
+   Conversation can be created without being started, and that is the quieter of
+   the two. A row, so the presses sit against the far edge the start alone sat
+   against and whatever stands at the near edge — the paperclip here, the
+   roadmap dropdown there — is pushed to it by a margin of its own. Inside
+   `.startGrilling`, which is where what they have to say still goes. */
 .presses {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
   gap: 0.6rem;
+}
+
+/* What stands at the near edge of that row on the compose page, which is two
+   things rather than one: the paperclip and the roadmap dropdown. Grouped, so
+   that one margin pushes the pair of them away from the presses — two controls
+   each claiming the free space for itself would put one of them in the middle
+   of the row.
+
+   The pair keep their own gap and give up their own margins: what pushes them
+   over is this. */
+.near {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-right: auto;
+}
+
+.near .attach,
+.near .adopt {
+  margin-right: 0;
 }
 
 /* The secondary one: the shape of the start beside it and the paint of an
@@ -312,4 +358,14 @@
   .clear:hover {
     color: var(--ink);
   }
+}
+
+/* Where the paperclip stands: at the near edge of the row the start press is at
+   the far edge of — pushed there by this margin here, and by the group's on the
+   compose page, where it has the roadmap dropdown beside it. See `.near`.
+
+   Only where it stands. What it looks like, and the row of pills it puts files
+   into, are the attaching piece's own — see `Attaching.module.css`. */
+.attach {
+  margin-right: auto;
 }

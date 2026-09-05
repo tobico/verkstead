@@ -34,7 +34,7 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{SharedConversation, TimelineEvent};
 use verkstead_schema::QuestionSet;
-use verkstead_server::{open_database, router, store};
+use verkstead_server::{WatchedPaths, open_database, router, router_watching, store};
 // The `gh` half, which the six tests that reach GitHub want — see
 // [`app_asking_github`] for what keeps them, and these, off Windows.
 #[cfg(unix)]
@@ -163,6 +163,29 @@ async fn get<T: DeserializeOwned>(app: &Router, path: &str) -> T {
 
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     serde_json::from_slice(&bytes).unwrap()
+}
+
+/// The same, as the bytes that came back: for the assertion that is about what
+/// is *not* in the payload, which a parsed record could not make.
+async fn raw(app: &Router, path: &str) -> String {
+    let response = app
+        .clone()
+        .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK, "GET {path}");
+
+    String::from_utf8(
+        response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec(),
+    )
+    .unwrap()
 }
 
 async fn share(app: &Router, id: i64) -> SharedConversation {
@@ -619,6 +642,115 @@ async fn a_share_says_nothing_about_the_machine_it_was_taken_on() {
     // calls the work's repository and a companion's card is labelled by.
     assert_eq!(conversation.repo.name, "verkstead");
     assert_eq!(companions[0].repo.name, "askance");
+}
+
+/// What was handed over with the Brief travels with the record: each file's
+/// name and how large it was, and never a byte of any of it.
+///
+/// Asked over a Conversation with real files on the disk, because that is the
+/// only way to say the second half. The record has nowhere to put a file's
+/// contents, so what is being proved is that nothing goes and fetches them
+/// either: a share is composed out of the record alone, and the attachments
+/// directory is not read on the way out at all.
+///
+/// Which is what makes a share of work with a 30 MiB screenshot on it the same
+/// size as a share of work with none — and what keeps the human's own files off
+/// a gist.
+#[tokio::test]
+async fn a_share_carries_the_files_names_and_never_their_bytes() {
+    let watched = tempfile::tempdir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+    let app = router_watching(
+        pool.clone(),
+        WatchedPaths::resolve(&[watched.path().to_owned()]).unwrap(),
+        dir.path().to_owned(),
+    );
+
+    let repo = store::register_repo(
+        &pool,
+        &repository(watched.path().join("verkstead")),
+        "verkstead",
+        "main",
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .id;
+
+    let id = store::start_conversation(&pool, repo, "sharing")
+        .await
+        .unwrap()
+        .unwrap();
+    store::save_brief(
+        &pool,
+        id,
+        "# Sharing
+
+With a file to read.
+",
+    )
+    .await
+    .unwrap();
+
+    // Attached the way the composer attaches one: the bytes as the body and the
+    // name in the path. What is in them is a sentence nothing else here says,
+    // so finding it anywhere in the payload is finding the file itself.
+    let secret = "the-shape-of-the-window-nobody-should-be-emailed";
+
+    for (name, contents) in [
+        ("window-resets.json", format!("a note: {secret}")),
+        ("stall.log", format!("stalled: {secret}\n")),
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/ui/conversations/{id}/attachments/{name}"))
+                    .header("content-type", "application/octet-stream")
+                    .body(Body::from(contents.clone()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK, "attaching {name}");
+    }
+
+    // On the disk, which is what the share is not going to read.
+    let kept = dir.path().join("attachments").join(id.to_string());
+    assert!(
+        kept.join("window-resets.json").is_file(),
+        "the file should have landed in {}",
+        kept.display(),
+    );
+
+    let conversation = share(&app, id).await.conversation;
+
+    // The record of each, in the order they were attached in.
+    let carried: Vec<(&str, i64)> = conversation
+        .attachments
+        .iter()
+        .map(|attachment| (attachment.name.as_str(), attachment.bytes))
+        .collect();
+
+    assert_eq!(
+        carried,
+        vec![("window-resets.json", 56), ("stall.log", 58),],
+    );
+
+    // And not a byte of what is in them, anywhere in the file a colleague
+    // opens.
+    let payload = raw(&app, &format!("/api/ui/conversations/{id}/share.json")).await;
+
+    assert!(
+        !payload.contains(secret),
+        "a share carried the contents of an attached file",
+    );
 }
 
 #[tokio::test]

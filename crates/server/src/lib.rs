@@ -13,6 +13,13 @@ use axum::routing::{get, post};
 use sqlx::SqlitePool;
 use verkstead_store::{Settlements, Waits};
 
+/// The files the human put on a Conversation for its sessions to read: where
+/// the bytes are kept, and what a file is called once they are there.
+///
+/// Public for the reason [`handoffs`] is — a Conversation's directory is part
+/// of the surface its sessions run on rather than an implementation detail of
+/// an endpoint.
+pub mod attachments;
 mod browsing;
 
 /// The shared Rust build cache every sandbox is given: where it is, and whether
@@ -684,6 +691,12 @@ fn routed(
     // nothing else is ever going to look at it. See [`worktrees::at_startup`].
     worktrees::at_startup(&state);
 
+    // And the attachments root swept the same way, for the same reason one step
+    // along: the Cleanup's delete is the one thing that takes a Conversation's
+    // files, and a delete that could not have the directory deleted the rows
+    // anyway. See [`attachments::at_startup`].
+    attachments::at_startup(&state);
+
     // Before anything is served, because it is about what was already happening
     // rather than about anything a request will start: every Conversation the
     // last server was driving is one nothing is driving now, and nobody but this
@@ -892,6 +905,12 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
     // session starts.
     let handoffs = handoffs::Handoffs::under(&data_dir);
 
+    // And where the files the human attaches to a Conversation are kept, which
+    // is a root under the same directory again: each Conversation's own is made
+    // as its first file lands in it, and read-only inside every session it has
+    // after that — see [`attachments`].
+    let attachments = attachments::Attachments::under(&data_dir);
+
     // And where the credentials are read from, which is the same directory
     // again — both the ones a session runs with and the one the server's own
     // `gh` authenticates as. Nothing is read here: the files are read as each
@@ -944,6 +963,7 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
                 skills,
                 verkstead,
                 handoffs,
+                attachments,
                 settings.clone(),
             ),
             // Whatever `gh` this machine has, authenticating as the configured

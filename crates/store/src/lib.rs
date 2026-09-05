@@ -29,6 +29,7 @@ use tokio::sync::broadcast;
 use verkstead_schema::{QuestionSet, Response, ResponseAccepted, ValidationError};
 
 mod archives;
+mod attachments;
 mod captures;
 mod cleanup;
 mod commits;
@@ -57,6 +58,7 @@ pub use archives::{
     Archiving, Unarchiving, archive_conversation, archived, show_archived, showing_archived,
     unarchive_conversation,
 };
+pub use attachments::{Attachment, Origin, attach, attachment, attachments, detach};
 pub use captures::{Summary, append_capture, capture, start_capture, summarise_capture};
 pub use cleanup::{
     Deletion, Trimming, deletable, delete_conversation, deleted_tables, reclaim, trim_conversation,
@@ -76,12 +78,12 @@ pub use conversations::{
     adopting, ask, asked_from, closable, close_conversation, conversation_branch, conversations,
     follow_branch, follow_up_over, implement_again, last_batch_proposal, last_proposal,
     load_conversation, note, open_set, opened_at, pick_direction, record_backlog, record_handoff,
-    record_roadmap, recorded_worktrees, reinvent_branch, rename_branch, resolve_conflicts,
-    save_brief, set_asked_from, set_base_commit, set_grilling_pairing, set_implementation_pairing,
-    set_review_pairing, set_state, settle_naming, skip_grilling, skip_review, stacks_on,
-    start_adoption, start_building, start_conversation, start_grilling, start_implementing,
-    start_stage, start_unnamed_conversation, state, steer_conversation, switch_repo, timeline,
-    unanswered_set_since, waiting, work_on_repo,
+    record_roadmap, recorded_conversations, recorded_worktrees, reinvent_branch, rename_branch,
+    resolve_conflicts, save_brief, set_asked_from, set_base_commit, set_grilling_pairing,
+    set_implementation_pairing, set_review_pairing, set_state, settle_naming, skip_grilling,
+    skip_review, stacks_on, start_adoption, start_building, start_conversation, start_grilling,
+    start_implementing, start_stage, start_unnamed_conversation, state, steer_conversation,
+    switch_repo, timeline, unanswered_set_since, waiting, work_on_repo,
 };
 pub use deferrals::{Ask, Unfolded, asked_as, record_folded, stored_on_timeline, unfolded};
 pub use endings::{ended_on, nothing_else};
@@ -750,6 +752,12 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // well: a link to a file is not something that happened to the work either.
     // See [`shares`].
     shares::apply_schema(pool).await?;
+
+    // And the files the human put on each of them, which hang off the
+    // Conversations for that reason again — and are the one sidecar there may be
+    // several of, a Conversation taking as many files as the human has to hand.
+    // See [`attachments`].
+    attachments::apply_schema(pool).await?;
 
     // And last of all, whatever a database written by an older Verkstead
     // still needs done to it. After every table above, because what a rewrite

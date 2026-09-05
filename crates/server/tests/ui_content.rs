@@ -1936,6 +1936,23 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await
         .unwrap();
 
+    // And two files put on it, which is what the row of pills under the Brief
+    // is drawn from. Put in through the store for the reason everything else
+    // here is: what is being written is the shape of a row, and going in the
+    // front way would mean bytes on a disk this fixture has no use for.
+    //
+    // Two of them because the row has to read as a row, and one of each shape
+    // the pill draws: a short name, and one long enough that the viewer has to
+    // truncate it.
+    for (name, bytes) in [
+        ("burst-2026-08-02.csv", 48_112_i64),
+        ("the-queue-backed-up-for-twenty-minutes.png", 1_284_907_i64),
+    ] {
+        store::attach(&pool, drafting, store::Origin::Brief, name, bytes)
+            .await
+            .unwrap();
+    }
+
     // And the other Repo added to work alongside it, which is what a companion
     // row on the setup card is drawn from — with the defaults an added one
     // carries, because that is the shape every companion starts in.
@@ -1978,6 +1995,20 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     )
     .await
     .unwrap();
+    // And a file put on it before the work started, which is what the Brief
+    // pane draws its row from: the drafting Conversation above shows the row a
+    // composer draws, and this one shows the same files once nothing can be
+    // done to them.
+    store::attach(
+        &pool,
+        grilling,
+        store::Origin::Brief,
+        "delivery-failures.csv",
+        20_418,
+    )
+    .await
+    .unwrap();
+
     store::start_grilling(
         &pool,
         grilling,
@@ -2144,6 +2175,18 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     )
     .await
     .unwrap();
+
+    // And two files handed over with its Brief. This is the Conversation the
+    // share below is taken of, so these rows are what says a share carries the
+    // names and the sizes of what was attached and never a byte of any of it.
+    for (name, bytes) in [
+        ("window-resets.json", 3_902_i64),
+        ("the-run-that-stalled.log", 512_774_i64),
+    ] {
+        store::attach(&pool, directing, store::Origin::Brief, name, bytes)
+            .await
+            .unwrap();
+    }
 
     store::start_grilling(
         &pool,

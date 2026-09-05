@@ -6,6 +6,12 @@
 //! the first of them. What is asked here is the half that is different: the
 //! device holding a draft nobody has created, and the create that replays it
 //! through the endpoints a Conversation is configured with.
+//!
+//! The files are that half twice over. The pill they are drawn as, the paperclip
+//! they are picked through and the drop the box takes are one piece the composer
+//! draws too, and are asked about in `attaching.test.tsx`; that this page draws
+//! that piece as well, holds what it is given until a press, and sends it up with
+//! the replay when one is made, is this page's own doing and is asked about here.
 
 import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -17,10 +23,12 @@ import type {
   RepoPairingsView,
 } from "../src/api/types";
 import menu from "../src/Menu.module.css";
+import pill from "../src/Attaching.module.css";
 import composer from "../src/workbench/Composer.module.css";
 import sidebar from "../src/workbench/Conversations.module.css";
 import setup from "../src/workbench/Setup.module.css";
 import { ADOPT_REFUSAL } from "../src/workbench/Adoption";
+import { ATTACH_REFUSAL } from "../src/workbench/Composer";
 import { BRANCH_REFUSAL } from "../src/workbench/Setup";
 import {
   COMPOSING,
@@ -31,6 +39,7 @@ import {
   type Composed,
 } from "../src/workbench/composing";
 import { OPEN, PROFILES, REPOS, drawn, mount, theWorkbench } from "./bench";
+import { carrying, drag, dropOn } from "./dragging";
 import { offered, pick, picker, showing } from "./pickers";
 import { json, serving, whenever } from "./serving";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
@@ -59,6 +68,41 @@ function writes(fetching: ReturnType<typeof serving>, path: string): number {
   return fetching.mock.calls.filter(
     ([asked, init]) => String(asked) === path && init?.method === "POST",
   ).length;
+}
+
+/// Where among everything the page put on the wire its first POST to `path`
+/// came, or `-1` where it never wrote there at all.
+///
+/// The one reading that says what happened *before* what: a file has to be on
+/// the Conversation before the work starts, the Brief freezing when it does and
+/// a file arriving after that being refused for being late.
+function order(fetching: ReturnType<typeof serving>, path: string): number {
+  return fetching.mock.calls.findIndex(
+    ([asked, init]) => String(asked) === path && init?.method === "POST",
+  );
+}
+
+/// Where one file goes up, the name in the path exactly as the composer sends
+/// it.
+const upload = (name: string) =>
+  `/api/ui/conversations/${OPEN.id}/attachments/${name}`;
+
+/// The hidden picker the paperclip reaches, and files chosen through it —
+/// which is what a browser does when somebody picks them.
+function choose(container: ParentNode, ...files: File[]): void {
+  const picker = container.querySelector<HTMLInputElement>(
+    'input[type="file"]',
+  )!;
+
+  Object.defineProperty(picker, "files", { configurable: true, value: files });
+  fireEvent.change(picker);
+}
+
+/// The names on the pills the page is drawing.
+function pills(container: ParentNode): string[] {
+  return [...container.querySelectorAll(`.${pill.attachmentName}`)].map(
+    (name) => name.textContent!.trim(),
+  );
 }
 
 /// What one Repo remembers, as the endpoint writes it: a pairing per role, off
@@ -857,6 +901,86 @@ describe("adopting a roadmap from the compose page", () => {
   /// And put down again, which gives the box back what was in it: a roadmap is
   /// loaded *over* the brief rather than in place of it, so nothing that was
   /// written is lost by taking one up.
+  /// The box is locked to a card while a roadmap is loaded, so there is nothing
+  /// being written for a file to be handed over with — and a control that has
+  /// nothing to do is not drawn. The drop goes with it: the paperclip and the
+  /// box are two ways into the one piece, and neither is offered here.
+  it("offers no paperclip and takes no drop while a roadmap is loaded", async () => {
+    adopting();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    expect(screen.getByRole("button", { name: "Attach a file" })).toBeTruthy();
+
+    await loadRoadmap(container, 0);
+
+    expect(
+      screen.queryByRole("button", { name: "Attach a file" }),
+    ).toBeNull();
+
+    const box = container.querySelector(`.${composer.box}`)!;
+    dropOn(box, carrying({ files: [new File(["note"], "notes.md")] }));
+
+    expect(box.classList.contains(composer.over!)).toBe(false);
+    expect(container.querySelector(`.${pill.attachments}`)).toBeNull();
+  });
+
+  /// And a file picked *before* the roadmap was loaded goes with the box it was
+  /// picked for: the row is not drawn over a locked box either. Held rather
+  /// than dropped, the way everything else a roadmap stands over is held —
+  /// clearing the card gives the file back with the brief.
+  it("puts a file picked beforehand away with the box, and gives it back when the roadmap is cleared", async () => {
+    adopting();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    choose(container, new File(["note"], "notes.md"));
+    await waitFor(() => expect(pills(container)).toEqual(["notes.md"]));
+
+    await loadRoadmap(container, 0);
+    expect(pills(container), "the row goes with the box").toEqual([]);
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: `Clear ${ABANDONED[0]!.roadmaps[0]!.name}`,
+      }),
+    );
+
+    await composing(container);
+    await waitFor(() =>
+      expect(pills(container), "and comes back with it").toEqual(["notes.md"]),
+    );
+  });
+
+  /// And nothing it is holding goes up with an adoption. The paperclip is not
+  /// offered over a loaded roadmap, so a file that went up with one would be a
+  /// file the page never offered to take — on a Conversation whose Brief
+  /// arrives frozen, with no × left to take it off again.
+  it("sends no held file with the adoption", async () => {
+    const fetching = adopting(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/review-pairing`,
+        json("Chosen"),
+        "POST",
+      ),
+    );
+    const { container } = mount("/compose");
+
+    await composing(container);
+    choose(container, new File(["note"], "notes.md"));
+    await waitFor(() => expect(pills(container)).toEqual(["notes.md"]));
+
+    await loadRoadmap(container, 2);
+    await rolesAnswered();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/adopt`)).toBe(1),
+    );
+    expect(writes(fetching, upload("notes.md"))).toBe(0);
+  });
+
   it("clears back to the brief this device was holding", async () => {
     // A device holding both, which is what the state is shaped to hold: the
     // brief that was written, and the roadmap standing over it.
@@ -1009,6 +1133,249 @@ describe("adopting a roadmap from the compose page", () => {
         ),
       ).toBeTruthy(),
     );
+  });
+});
+
+/// The files handed over with what is being composed: picked before there is
+/// anything to attach them to, held in the page until a press, and sent through
+/// the route a draft's own paperclip sends them through once there is a
+/// Conversation.
+describe("the files a compose page holds", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    leaveRefusals(0, []);
+  });
+
+  /// What the server says when it takes one: the record it made, which is what
+  /// the composer of the draft this page lands on draws its pill from.
+  const attached = (id: number, name: string) =>
+    json({ Attached: { attachment: { id, name, bytes: 4, origin: "Brief" } } });
+
+  /// What went up to `path`, bodies and all — the count is not the question
+  /// here, the body being the file itself rather than a JSON field.
+  function bodies(
+    fetching: ReturnType<typeof serving>,
+    path: string,
+  ): Array<RequestInit | undefined> {
+    return fetching.mock.calls
+      .filter(([asked, init]) => String(asked) === path && init?.method === "POST")
+      .map(([, init]) => init);
+  }
+
+  it("draws a pill per chosen file, and sends nothing until a press", async () => {
+    const fetching = creating();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    choose(container, new File(["note"], "notes.md"), new File(["x"], "shot.png"));
+
+    await waitFor(() => expect(pills(container)).toEqual(["notes.md", "shot.png"]));
+
+    // There is no Conversation to attach anything to, so nothing has been
+    // attached: the press is still the first thing that reaches the server.
+    expect(writes(fetching, "/api/ui/conversations")).toBe(0);
+    expect(bodies(fetching, upload("notes.md"))).toHaveLength(0);
+  });
+
+  /// At the near edge of the row the two presses are at the far edge of, which
+  /// is where it stands on the composer beside this one as well.
+  it("stands the paperclip left of Save as draft", async () => {
+    creating();
+    const { container } = mount("/compose");
+
+    await composing(container);
+
+    const row = container.querySelector(`.${composer.presses}`)!;
+    const clip = screen.getByRole("button", { name: "Attach a file" });
+    const draft = screen.getByRole("button", { name: "Save as draft" });
+
+    expect(row.contains(clip)).toBe(true);
+    expect(
+      clip.compareDocumentPosition(draft) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  /// The × takes the held file out of the page. Nothing is asked of the server,
+  /// there being nothing on it to take anything off.
+  it("drops a held file from its own ×", async () => {
+    const fetching = creating();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    choose(container, new File(["note"], "notes.md"), new File(["x"], "shot.png"));
+    await waitFor(() => expect(pills(container)).toHaveLength(2));
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove notes.md" }));
+
+    await waitFor(() => expect(pills(container)).toEqual(["shot.png"]));
+    expect(fetching.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(
+      0,
+    );
+  });
+
+  it("sends what it holds when the draft is saved, and lands in the draft", async () => {
+    const file = new File(["note"], "notes.md");
+    const fetching = creating(
+      whenever(upload("notes.md"), attached(9, "notes.md"), "POST"),
+    );
+    const { container, history } = mount("/compose");
+
+    fireEvent.input(await composing(container), {
+      target: { value: "Make the widget" },
+    });
+    await pickRepo(container, REPOS[1]!.id);
+    choose(container, file);
+    await waitFor(() => expect(pills(container)).toEqual(["notes.md"]));
+
+    fireEvent.click(screen.getByRole("button", { name: "Save as draft" }));
+
+    // The file itself as the body, through the route the composer's own
+    // paperclip uses — one more field of the replay.
+    await waitFor(() => expect(bodies(fetching, upload("notes.md"))).toHaveLength(1));
+    expect(bodies(fetching, upload("notes.md"))[0]!.body).toBe(file);
+
+    // And the page lands in the Conversation it made, holding nothing at all.
+    await waitFor(() =>
+      expect(history.get().startsWith(`/conversations/${OPEN.id}`)).toBe(true),
+    );
+    expect(localStorage.getItem(COMPOSING)).toBeNull();
+  });
+
+  /// Every file up before the work starts, because the Brief freezes when it
+  /// does: one arriving after would be refused for having been late rather than
+  /// for anything the human did.
+  it("finishes the uploads before it starts the work", async () => {
+    const fetching = creating(
+      whenever(upload("notes.md"), attached(9, "notes.md"), "POST"),
+    );
+    const { container } = mount("/compose");
+
+    fireEvent.input(await composing(container), {
+      target: { value: "Make the widget" },
+    });
+    await pickRepo(container, REPOS[1]!.id);
+    await rolesAnswered();
+    choose(container, new File(["note"], "notes.md"));
+    await waitFor(() => expect(pills(container)).toEqual(["notes.md"]));
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(1),
+    );
+    expect(order(fetching, upload("notes.md"))).toBeGreaterThan(-1);
+    expect(order(fetching, upload("notes.md"))).toBeLessThan(
+      order(fetching, `/api/ui/conversations/${OPEN.id}/grill`),
+    );
+  });
+
+  /// A `File` is a handle the browser gave the page rather than text a device
+  /// can write down, so a reload keeps what was typed and loses what was picked
+  /// — and says nothing about it, there being nothing to be done from here.
+  it("keeps the brief through a reload and holds no file", async () => {
+    creating();
+    const first = mount("/compose");
+
+    fireEvent.input(await composing(first.container), {
+      target: { value: "Make the widget" },
+    });
+    choose(first.container, new File(["note"], "notes.md"));
+    await waitFor(() => expect(pills(first.container)).toEqual(["notes.md"]));
+
+    await waitFor(() => expect(localStorage.getItem(COMPOSING)).toBeTruthy());
+    first.unmount();
+
+    const again = mount("/compose");
+    const box = await composing(again.container);
+
+    await waitFor(() => expect(box.value).toBe("Make the widget"));
+    expect(pills(again.container)).toEqual([]);
+    expect(
+      again.container.querySelector(`.${pill.attachments}`),
+    ).toBeNull();
+  });
+
+  /// A refused upload is one more refusal for the draft the page lands on,
+  /// which is the shape a refused field already takes: the rest of the replay
+  /// stands, and the kickoff is what a refusal stops.
+  /// The other way one is put on: dropped anywhere on the box rather than picked
+  /// through the paperclip, which is the same piece doing the same thing — held
+  /// in the page either way, there being nothing on the server to send them to.
+  it("holds every file dropped on the box", async () => {
+    const fetching = creating();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const box = container.querySelector(`.${composer.box}`)!;
+
+    dropOn(
+      box,
+      carrying({
+        files: [new File(["note"], "notes.md"), new File(["x"], "shot.png")],
+      }),
+    );
+
+    await waitFor(() =>
+      expect(pills(container)).toEqual(["notes.md", "shot.png"]),
+    );
+
+    // Still nothing on the wire: a drop is a choice, and the press is what
+    // sends what has been chosen.
+    expect(writes(fetching, "/api/ui/conversations")).toBe(0);
+  });
+
+  /// Highlighted while the drag is over it and not otherwise, exactly as the
+  /// composer's own box is — and a folder in the drop is skipped without a
+  /// word.
+  it("highlights the box, and skips a folder dropped with the files", async () => {
+    creating();
+    const { container } = mount("/compose");
+
+    await composing(container);
+    const box = container.querySelector(`.${composer.box}`)!;
+    const carried = carrying({
+      files: [new File(["note"], "notes.md")],
+      folders: ["screenshots"],
+    });
+
+    drag(box, "dragenter", carried);
+    await waitFor(() =>
+      expect(box.classList.contains(composer.over!)).toBe(true),
+    );
+
+    drag(box, "dragover", carried);
+    drag(box, "drop", carried);
+
+    await waitFor(() => expect(pills(container)).toEqual(["notes.md"]));
+    expect(box.classList.contains(composer.over!)).toBe(false);
+  });
+
+  it("says on the new draft what could not be attached", async () => {
+    const fetching = creating(
+      whenever(upload("huge.bin"), json("TooLarge"), "POST"),
+    );
+    const { container } = mount("/compose");
+
+    fireEvent.input(await composing(container), {
+      target: { value: "Make the widget" },
+    });
+    await pickRepo(container, REPOS[1]!.id);
+    await rolesAnswered();
+    choose(container, new File(["x"], "huge.bin"));
+    await waitFor(() => expect(pills(container)).toEqual(["huge.bin"]));
+
+    fireEvent.click(screen.getByRole("button", { name: "Start work" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          `huge.bin could not be attached: ${ATTACH_REFUSAL.TooLarge}`,
+        ),
+      ).toBeTruthy(),
+    );
+
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/brief`)).toBe(1);
+    expect(writes(fetching, `/api/ui/conversations/${OPEN.id}/grill`)).toBe(0);
   });
 });
 

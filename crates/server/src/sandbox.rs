@@ -20,9 +20,10 @@
 //! - **read-write** — the Conversation's worktree, the Repo's common `.git`
 //!   directory, and the Profile's pair at `~/.claude` and `~/.claude.json`
 //! - **read-only** — `/nix` and the system paths, the bundled skills in a
-//!   directory of Verkstead's own — see [`own_directory`] — nothing at all
-//!   where the account's own skills would be found, and the executable serving
-//!   all this, as `verkstead`
+//!   directory of Verkstead's own — see [`own_directory`] — the files the human
+//!   attached to the Conversation beside them, nothing at all where the
+//!   account's own skills would be found, and the executable serving all this,
+//!   as `verkstead`
 //! - **tmpfs** — `/tmp`, and everything else in HOME simply absent
 //! - **by mode** — each companion repo the Conversation was configured with,
 //!   its worktree and its git directory together, read-only or read-write as
@@ -92,6 +93,7 @@ use std::process::{Command, Stdio};
 // for the part of it the two share.
 pub(crate) use surface::{Access, Reach, Surface};
 
+use crate::attachments::{self, Attachments};
 use crate::build_cache::{self, BuildCache};
 use crate::handoffs::{self, Handoffs};
 use crate::platform::Platform;
@@ -1443,6 +1445,18 @@ pub struct Sandbox {
     /// the surface is.
     handoff_dir: PathBuf,
 
+    /// And the Conversation's attached files, **read-only** at
+    /// [`attachments::INSIDE`] — or `None` where nothing has been attached to
+    /// it, which is a bind that is not made and nothing at that path.
+    ///
+    /// Beside the handoff directory because it is the other half of one thing:
+    /// both are the Conversation's own directory outside the worktree, and what
+    /// separates them is the direction. The handoff is what a session writes for
+    /// Verkstead; this is what the human wrote for the session. Read-only is the
+    /// decision — the copy is the record, and an agent that wants to work on a
+    /// file copies it into the Worktree.
+    attachments: Option<attachments::Bound>,
+
     home: Home,
 
     /// What `gh` inside authenticates as, or `None` where nothing is configured.
@@ -1537,6 +1551,7 @@ impl Sandbox {
         skills: &Skills,
         verkstead: &Executable,
         handoffs: &Handoffs,
+        attachments: &Attachments,
         secrets: &Secrets,
         config: &Config,
         cache: &BuildCache,
@@ -1567,6 +1582,12 @@ impl Sandbox {
             skills: skills.clone(),
             verkstead: verkstead.clone(),
             handoff_dir,
+            // Resolved here rather than handed in, for the reason the handoff
+            // directory above is: which directory is this Conversation's is its
+            // id, and no caller is in a position to decide otherwise. A
+            // Conversation with nothing attached resolves to `None`, which is a
+            // bind that is not made — see [`Attachments::bound`].
+            attachments: attachments.bound(Platform::HERE, conversation.id),
             home: homes.for_conversation(conversation.id),
             github_token: secrets.github_token().map(str::to_owned),
             git_author: config.git_author().clone(),
@@ -1702,6 +1723,21 @@ impl Sandbox {
         // and the two sides of this are the same directory — see
         // [`skills::Skills::inside`].
         surface.elsewhere(self.skills.path(), self.skills.inside(), Reach::ReadOnly);
+
+        // And the files the human attached to this Conversation, beside them in
+        // that same directory — read-only, because the copy is the record and an
+        // agent that wants to work on a file copies it into the Worktree.
+        //
+        // After the temporary filesystem and the empty HOME for the handoff
+        // directory's reason, and after the skills because both are in the one
+        // directory of Verkstead's own: neither covers the other, and the two
+        // read as one thing where a reader looks for them. A Conversation with
+        // nothing attached says nothing here at all, so there is no such path
+        // inside — see [`crate::attachments`], which is where the whole of that
+        // is.
+        if let Some(attached) = &self.attachments {
+            surface.elsewhere(attached.host(), attached.inside(), Reach::ReadOnly);
+        }
 
         // And nothing at all where the account's own skills would otherwise be
         // found: after the Profile's directory and inside it, because what is

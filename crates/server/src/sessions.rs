@@ -36,6 +36,7 @@ use tokio::task::JoinHandle;
 use verkstead_render::SessionsHere;
 use verkstead_schema::Nudge;
 
+use crate::attachments::Attachments;
 use crate::build_cache::{self, BuildCache};
 use crate::capture::{Reading, Told};
 use crate::handoffs::Handoffs;
@@ -123,6 +124,13 @@ pub struct Agents {
     verkstead: Option<Executable>,
 
     handoffs: Handoffs,
+
+    /// And where the files the human attached to a Conversation are kept, which
+    /// is a root under the same directory again — one directory per
+    /// Conversation, read-only inside every one of its sandboxes and listed at
+    /// the end of every one of its prompts. See [`crate::attachments`].
+    attachments: Attachments,
+
     settings: Settings,
 
     /// Something to run where a Profile's own binary goes, or `None` to run the
@@ -182,6 +190,7 @@ impl Agents {
         skills: Skills,
         verkstead: Option<Executable>,
         handoffs: Handoffs,
+        attachments: Attachments,
         settings: Settings,
     ) -> Agents {
         Agents {
@@ -192,6 +201,7 @@ impl Agents {
             skills,
             verkstead,
             handoffs,
+            attachments,
             settings,
             agent: None,
             signature: None,
@@ -211,12 +221,21 @@ impl Agents {
         skills: Skills,
         verkstead: Option<Executable>,
         handoffs: Handoffs,
+        attachments: Attachments,
         settings: Settings,
     ) -> Agents {
         Agents {
             agent: Some(agent),
             ..Agents::new(
-                homes, reachable, config, cache, skills, verkstead, handoffs, settings,
+                homes,
+                reachable,
+                config,
+                cache,
+                skills,
+                verkstead,
+                handoffs,
+                attachments,
+                settings,
             )
         }
     }
@@ -250,10 +269,10 @@ impl Agents {
     /// here: a session's agent, and the human's own shell in a Terminal
     /// ([ADR 0013](../../../docs/adr/0013-conversation-terminals.md)). What one
     /// gets is what the other gets — the Worktree as the working directory, the
-    /// git directory, the handoff directory, the build cache, the Sandbox
-    /// Configuration binds, the token, the git author and a `VERKSTEAD_SERVER`
-    /// scoped to this Conversation — and one builder is what keeps that true as
-    /// the surface moves.
+    /// git directory, the handoff directory, the files the human attached, the
+    /// build cache, the Sandbox Configuration binds, the token, the git author
+    /// and a `VERKSTEAD_SERVER` scoped to this Conversation — and one builder is
+    /// what keeps that true as the surface moves.
     ///
     /// `argv` comes back wrapped in `nix develop --command` where the worktree's
     /// flake provides a dev shell, which is part of the same answer: what a
@@ -299,6 +318,7 @@ impl Agents {
             &self.skills,
             self.verkstead.as_ref()?,
             &self.handoffs,
+            &self.attachments,
             &secrets,
             &config,
             &self.cache,
@@ -1717,6 +1737,17 @@ impl Sessions {
         // so a prompt builder added later cannot forget it.
         let prompt = skills::alongside(prompt, &conversation.branch, &conversation.companions);
 
+        // And the files the human attached to it, listed under that again —
+        // here for the listing above's reason, and naming each file at the path
+        // the bind below puts it at. Both sides ask
+        // [`crate::attachments::Attachments`] the same question, so a session
+        // cannot be told about a directory other than the one it was given.
+        let prompt = skills::attached(
+            &prompt,
+            &store::attachments(pool, conversation.id).await?,
+            &agents.attachments.inside(Platform::HERE, conversation.id),
+        );
+
         // And, where the branch is still on the name Verkstead invented for it,
         // the instruction to pick a better one. Here for the reason the listing
         // above is here — it is not any one prompt's, and the three starts that
@@ -2613,6 +2644,7 @@ mod tests {
             // here runs it.
             Executable::of_the_server(state),
             Handoffs::under(state),
+            Attachments::under(state),
             Settings::in_data_dir(state),
         )
     }

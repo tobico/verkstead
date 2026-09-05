@@ -184,25 +184,26 @@ _Avoid_: state directory, work dir, scratch space, cache
 **Sandbox**:
 What a session runs inside: its Conversation's Worktree, the Repo's git
 directory and the Conversation's handoff directory writable, the Agent
-Profile's pair at `~/.claude` and `~/.claude.json`, the system, the Skills and
-the Verkstead executable read-only in a directory of Verkstead's own, and
-nothing else of the machine at all — not even the checkout the Worktree was
-made from. Nothing at all stands where the account's own skills would be found:
-they are hidden rather than merged with, and where the mechanism has no mount
-to hide one with it refuses the path instead. Each Companion Repo the
-Conversation was configured with is inside as well: its Worktree and the git
-directory behind it, both at that companion's own mode, so a read-only one is
-read-only through both. The **Build Cache** is inside as well, writable, with
-the `sccache` it compiles through read-only beside the executable — that one is
-a client, and what it reaches is the **Compile Server** in a Sandbox of
-Verkstead's own. The filesystem is the boundary and the network is not:
-inside, it is the host's own, whole and unfiltered, because what stops a
-session doing harm is that there is nothing within reach to harm. The
-`verkstead` a session asks with is the running server's own image, first on the
-`PATH` inside, so the CLI a session asks with and the server it asks are one
-build and cannot disagree about a schema — with the libraries that image was
-packed with, where it was packed with any, reached through a launcher of
-Verkstead's own so that nothing else the session runs loads out of them.
+Profile's pair at `~/.claude` and `~/.claude.json`, the system, the Skills,
+the Conversation's **Attachments** and the Verkstead executable read-only in a
+directory of Verkstead's own, and nothing else of the machine at all — not
+even the checkout the Worktree was made from. Nothing at all stands where the
+account's own skills would be found: they are hidden rather than merged with,
+and where the mechanism has no mount to hide one with it refuses the path
+instead. Each Companion Repo the Conversation was configured with is inside as
+well: its Worktree and the git directory behind it, both at that companion's
+own mode, so a read-only one is read-only through both. The **Build Cache** is
+inside as well, writable, with the `sccache` it compiles through read-only
+beside the executable — that one is a client, and what it reaches is the
+**Compile Server** in a Sandbox of Verkstead's own. The filesystem is the
+boundary and the network is not: inside, it is the host's own, whole and
+unfiltered, because what stops a session doing harm is that there is nothing
+within reach to harm. The `verkstead` a session asks with is the running
+server's own image, first on the `PATH` inside, so the CLI a session asks with
+and the server it asks are one build and cannot disagree about a schema — with
+the libraries that image was packed with, where it was packed with any,
+reached through a launcher of Verkstead's own so that nothing else the session
+runs loads out of them.
 _Avoid_: container, jail, isolation, environment
 
 **Sandbox Configuration**:
@@ -473,6 +474,47 @@ saying it for itself by reading disabled. What the row offers under the new
 Brief is otherwise the Pairings alone. What a control cannot do it does not
 draw.
 _Avoid_: description, prompt, spec, issue body
+
+**Attachment**:
+A file the human put on a Conversation for its sessions to read: dropped onto
+the composer's box or picked through the paperclip beside its presses, drawn as
+a pill under the Brief text with a remove press on it, and copied into a
+directory of the Conversation's own under the Data Directory —
+`attachments/<id>/`, beside the handoff directories. Every session of the
+Conversation gets that directory **read-only** at `/verkstead/attachments`
+(the Conversation's own subdirectory, where `/verkstead` is the Data Directory
+itself), and its prompt ends with a neutral `# Attached files` listing of each
+file's path and size, in the tone of the companions listing: what is there and
+where, and nothing about what to do with it, because the Brief says what a
+file is for. The copy is the record, and an agent that wants to work on one
+copies it into the Worktree.
+
+**What a file is attached to is its origin.** The Brief is the one origin
+there is, and an Answer to a Question Set is the one planned next — a second
+value on the same record rather than a second kind of thing, the upload being
+the Conversation's and not the Brief's. Attachments freeze with the Brief:
+attached and removed while the round drafts, fixed once the work starts, and
+the frozen Brief pane draws them as a read-only row under the text. A Share
+carries the names and sizes and never the bytes. A same-named file is not
+replaced: the newcomer is renamed `name-2.ext`, and both stay. One flat
+directory per Conversation, 32 MB a file, any kind of file, folders skipped.
+
+**On the compose page they are held in the page until the press**, because
+nothing exists on the server until Start or Save as draft: the files ride with
+the composition, are uploaded once the Conversation is made as one more field
+of the replay, and a reload before the press keeps the text and loses the
+files. A refused upload is a refusal said on the draft's composer like any
+other. Not offered while a roadmap is loaded, the box being locked to a card.
+
+**Kept through Close and Trim, and gone at Deleted.** A Steer can bring a Closed
+Conversation back, and a file cannot be made again the way a Worktree can; a
+Trimmed record has to read whole, and the files are the human's input rather
+than a session's bulk. The Cleanup's delete removes the directory with the rows,
+and a startup sweep removes any directory under the attachments root that no
+Conversation in the record names — every candidate read out of that one
+directory, and nothing else ever a candidate.
+_Avoid_: upload, asset, resource, file (the thing attached is a file; the
+attaching is what this names)
 
 **Timeline**:
 A Conversation's ordered record of what has happened to it, and the middle pane

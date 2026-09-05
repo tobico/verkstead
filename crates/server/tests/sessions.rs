@@ -66,14 +66,16 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tower::ServiceExt;
 use verkstead_render::{
-    Adopted, AgentOutputEvent, BriefSaved, Capture, CommitEvent, CommitPane, CompanionAdded,
-    CompanionMode, CompanionModeChosen, CompanionView, ConflictResolution, ConversationClosed,
-    ConversationSteered, ConversationStopped, ConversationView, GrillingStarted, Lifecycle,
-    NoticeEvent, PickedView, PinnedEvent, ProfileSaved, PullRequestEvent, Registered, Resolved,
-    Resumed, Shown, Size, StageListReached, Started, SteerOpened, Submitted, TaskListEvent,
-    TaskListReached, TerminalOpened, TerminalsView, TimelineEvent, TranscriptView, Turn, Watching,
+    Adopted, AgentOutputEvent, Attached, BriefSaved, Capture, CommitEvent, CommitPane,
+    CompanionAdded, CompanionMode, CompanionModeChosen, CompanionView, ConflictResolution,
+    ConversationClosed, ConversationSteered, ConversationStopped, ConversationView,
+    GrillingStarted, Lifecycle, NoticeEvent, PickedView, PinnedEvent, ProfileSaved,
+    PullRequestEvent, Registered, Resolved, Resumed, Shown, Size, StageListReached, Started,
+    SteerOpened, Submitted, TaskListEvent, TaskListReached, TerminalOpened, TerminalsView,
+    TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_schema::{Direction, Nudge};
+use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::platform::Platform;
@@ -433,6 +435,7 @@ impl Grilling {
                 Skills::installed(self.state.path()).expect("this binary carries skills"),
                 equipped(self.state.path()),
                 Handoffs::under(self.state.path()),
+                Attachments::under(self.state.path()),
                 Settings::in_data_dir(self.state.path()),
             )
             .at_pace(*BRISKLY),
@@ -1717,6 +1720,14 @@ fn gh_stub(script: &str) -> Gh {
     ])
 }
 
+/// What a fixture that puts no file on the Conversation hands
+/// [`grilling_however_started`] — which is all of them but one, a file being
+/// the one thing these are otherwise not about.
+///
+/// Named rather than written as another `&[]`, because the companions beside it
+/// are one too and two empty slices in a row say nothing about which is which.
+const NOTHING_ATTACHED: &[(&str, &str)] = &[];
+
 /// Stand a workbench up with `stub` where claude goes, and press *start
 /// grilling*.
 async fn grilling(stub: &str) -> Grilling {
@@ -1736,6 +1747,7 @@ async fn grilling_on_codex(stub: &str) -> Grilling {
         PULL_REQUEST,
         *BRISKLY,
         &[],
+        NOTHING_ATTACHED,
         Pickers::GrillingOnCodex,
         Origin::None,
         None,
@@ -1753,6 +1765,7 @@ async fn grilling_spilling_on_codex(spill: tempfile::TempDir, stub: &str, gh: &s
         gh,
         *BRISKLY,
         &[],
+        NOTHING_ATTACHED,
         Pickers::EverythingOnCodex,
         Origin::None,
         None,
@@ -1780,6 +1793,7 @@ async fn grilling_drawing(stub: &str, signature: &str) -> Grilling {
         PULL_REQUEST,
         *BRISKLY,
         &[],
+        NOTHING_ATTACHED,
         Pickers::EverythingOnCodex,
         Origin::None,
         Some(signature),
@@ -1802,6 +1816,7 @@ async fn grilling_at_work(stub: &str) -> Grilling {
         PULL_REQUEST,
         *BRISKLY,
         &[],
+        NOTHING_ATTACHED,
         Pickers::EverythingOnCodex,
         Origin::None,
         None,
@@ -1823,6 +1838,7 @@ async fn grilling_on_grok(stub: &str) -> Grilling {
         PULL_REQUEST,
         *BRISKLY,
         &[],
+        NOTHING_ATTACHED,
         Pickers::EverythingOnGrok,
         Origin::None,
         None,
@@ -1845,6 +1861,7 @@ async fn grilling_on_opencode(stub: &str) -> Grilling {
         PULL_REQUEST,
         *BRISKLY,
         &[],
+        NOTHING_ATTACHED,
         Pickers::EverythingOnOpenCode,
         Origin::None,
         None,
@@ -1863,6 +1880,7 @@ async fn grilling_spilling_on_opencode(spill: tempfile::TempDir, stub: &str) -> 
         PULL_REQUEST,
         *BRISKLY,
         &[],
+        NOTHING_ATTACHED,
         Pickers::EverythingOnOpenCode,
         Origin::None,
         None,
@@ -1917,6 +1935,23 @@ async fn grilling_alongside(stub: &str, companion: &str) -> Grilling {
         PULL_REQUEST,
         *BRISKLY,
         &[(companion, CompanionMode::ReadOnly)],
+    )
+    .await
+}
+
+/// And the same with a file attached to the Conversation before the press,
+/// which is the only time one can be put on: attachments freeze with the Brief.
+async fn grilling_with_a_file_attached(stub: &str, name: &str, contents: &str) -> Grilling {
+    grilling_however_started(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        &[(name, contents)],
+        Pickers::UnderEveryPairing,
+        Origin::None,
+        None,
     )
     .await
 }
@@ -2002,6 +2037,7 @@ async fn grilling_unreviewed(spill: tempfile::TempDir, stub: &str, gh: &str) -> 
         gh,
         *BRISKLY,
         &[],
+        NOTHING_ATTACHED,
         Pickers::Unreviewed,
         Origin::None,
         None,
@@ -2019,6 +2055,7 @@ async fn building_ungrilled(spill: tempfile::TempDir, stub: &str, gh: &str) -> G
         gh,
         *BRISKLY,
         &[],
+        NOTHING_ATTACHED,
         Pickers::Ungrilled,
         Origin::None,
         None,
@@ -2094,6 +2131,7 @@ async fn grilling_at_pace(
         gh,
         pace,
         companions,
+        NOTHING_ATTACHED,
         Pickers::UnderEveryPairing,
         Origin::None,
         None,
@@ -2114,6 +2152,7 @@ async fn grilling_pushing(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gri
         gh,
         *BRISKLY,
         &[],
+        NOTHING_ATTACHED,
         Pickers::UnderEveryPairing,
         Origin::Cloned,
         None,
@@ -2144,6 +2183,7 @@ async fn grilling_however_started(
     gh: &str,
     pace: Pace,
     companions: &[(&str, CompanionMode)],
+    attaching: &[(&str, &str)],
     pickers: Pickers,
     origin: Origin,
     signature: Option<&str>,
@@ -2230,6 +2270,25 @@ async fn grilling_however_started(
     )
     .await;
     assert_eq!(saved, BriefSaved::Saved);
+
+    // And whatever the human attached alongside it, off the same route the
+    // paperclip presses: the raw bytes as the body and the name in the path.
+    // Before the press for the companions' reason — attachments freeze with the
+    // Brief, so a draft is the only time one can be put on.
+    for (name, contents) in attaching {
+        let attached: Attached = upload(
+            app,
+            &format!("/api/ui/conversations/{id}/attachments/{name}"),
+            contents,
+        )
+        .await;
+
+        let Attached::Attached { attachment } = attached else {
+            panic!("expected {name} to be attached, got {attached:?}");
+        };
+
+        assert_eq!(attachment.name, *name);
+    }
 
     let grilling: GrillingStarted = post(
         app,
@@ -2601,6 +2660,7 @@ async fn bench_at_pace(
         Skills::installed(state.path()).expect("this binary carries skills"),
         equipped(state.path()),
         Handoffs::under(state.path()),
+        Attachments::under(state.path()),
         Settings::in_data_dir(state.path()),
     )
     .at_pace(pace);
@@ -2893,6 +2953,23 @@ async fn post<T: DeserializeOwned>(app: &Router, path: &str, body: &serde_json::
     read(&body)
 }
 
+/// A file put on a Conversation: the raw bytes as the body, and no content type
+/// at all — which is what the composer sends and what the route reads.
+async fn upload<T: DeserializeOwned>(app: &Router, path: &str, body: &str) -> T {
+    let (status, body) = fetch(
+        app,
+        Request::builder()
+            .method("POST")
+            .uri(path)
+            .body(Body::from(body.to_owned()))
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "POST {path} failed: {body}");
+    read(&body)
+}
+
 /// And the one thing in the API that is asked for by taking it away: closing a
 /// Conversation's terminal, which answers with nothing to read.
 async fn delete(app: &Router, path: &str) {
@@ -2964,6 +3041,108 @@ async fn a_grilling_session_is_told_about_the_companion_repos_too() {
     assert!(
         said.contains(&format!("detached at `{at}`, read-only.")),
         "and what it holds and whether it may be written to: {said:?}"
+    );
+}
+
+/// And what a Conversation with a file attached tells its grilling session: the
+/// same prompt, with the file named under it at the path its sandbox puts it at.
+///
+/// The grilling session for the companions listing's reason — it is the one
+/// whose prompt is built nowhere near the rest, so a section that reaches this
+/// one reaches the wrap-up's own by the same line.
+#[tokio::test]
+async fn a_grilling_session_is_told_about_the_attached_files_too() {
+    let fixture =
+        grilling_with_a_file_attached(r#"printf 'prompt=%s' "$2""#, "rates.csv", "a,b\n1,2\n")
+            .await;
+
+    let event = fixture
+        .until(|view| output(view).filter(|output| !output.running).map(|o| o.id))
+        .await;
+
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+
+    assert!(
+        said.contains(BRIEF),
+        "the Brief is still what the grilling starts from: {said:?}"
+    );
+    assert!(
+        said.contains("# Attached files"),
+        "and the file is named under it: {said:?}"
+    );
+    assert!(
+        said.contains("Attached to the Brief:"),
+        "under what it was attached to: {said:?}"
+    );
+    assert!(
+        said.contains("- `/verkstead/attachments/rates.csv`, 8 bytes."),
+        "at the path the sandbox puts it at, with its size: {said:?}"
+    );
+}
+
+/// And the files outlive a Close: a Conversation steered back out of Closed
+/// runs a session told about the same files, at the same path.
+///
+/// The one thing a Conversation owns that closing keeps. Its Worktree and its
+/// handoff directory are given back at the press — they are somewhere it was
+/// given to work — while a file the human put on it cannot be made again the way
+/// a checkout can, and a Steer is what brings a Closed Conversation back.
+///
+/// What the second session is told is the whole proof. The listing and the bind
+/// ask [`verkstead_server::attachments::Attachments`] the same question of the
+/// same directory — see the sandbox suite, where what a session may read of one
+/// is probed inside a real boundary — so a prompt naming the file after a close
+/// is a directory the bind still has.
+#[tokio::test]
+async fn a_conversation_steered_out_of_closed_still_has_the_files_attached_to_it() {
+    let fixture = grilling_with_a_file_attached(
+        r#"printf 'prompt=%s\n' "$2"; sleep 300"#,
+        "rates.csv",
+        "a,b\n1,2\n",
+    )
+    .await;
+
+    let grilled = fixture.printed_after(0).await;
+
+    assert!(
+        grilled.contains("- `/verkstead/attachments/rates.csv`, 8 bytes."),
+        "the grilling session is told about the file: {grilled:?}"
+    );
+
+    let attached = fixture
+        .state
+        .path()
+        .join("attachments")
+        .join(fixture.id.to_string())
+        .join("rates.csv");
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+
+    assert!(
+        attached.exists(),
+        "closing gives the Worktree back and leaves the files exactly where they are",
+    );
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        fixture
+            .steer_instructed("read the rates off the file")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    let said = fixture.printed_after(1).await;
+
+    assert!(
+        said.contains("# Attached files"),
+        "and the session the steer starts is told about them again: {said:?}"
+    );
+    assert!(
+        said.contains("- `/verkstead/attachments/rates.csv`, 8 bytes."),
+        "at the path its own sandbox puts them at: {said:?}"
     );
 }
 
@@ -4861,6 +5040,7 @@ async fn a_capture_survives_the_server_restarting() {
             Skills::installed(fixture.state.path()).expect("this binary carries skills"),
             equipped(fixture.state.path()),
             Handoffs::under(fixture.state.path()),
+            Attachments::under(fixture.state.path()),
             Settings::in_data_dir(fixture.state.path()),
         ),
         gh_stub(PULL_REQUEST),
@@ -7014,6 +7194,7 @@ async fn a_restarted_server_watches_the_checks_it_was_left_wrapping_up() {
             Skills::installed(fixture.state.path()).expect("this binary carries skills"),
             equipped(fixture.state.path()),
             Handoffs::under(fixture.state.path()),
+            Attachments::under(fixture.state.path()),
             Settings::in_data_dir(fixture.state.path()),
         )
         .at_pace(*BRISKLY),
@@ -12200,6 +12381,13 @@ async fn the_cleanup_deletes_what_was_archived_long_enough_ago() {
     // And archived just now, which is not.
     let fresh = archived_printing(&pool, repo, "usage-limits").await;
 
+    // And a file on each of them, in the directory of its own the uploads write
+    // into: the one thing a Conversation owns outside the store, and the one
+    // thing besides the rows a delete takes. Written here rather than uploaded,
+    // these two never having drafted a Brief to attach anything to.
+    let old_files = attachments_of(&bench, old.id, "rates.csv");
+    let fresh_files = attachments_of(&bench, fresh.id, "quotas.csv");
+
     // And one back on the sidebar, which has no clock running on it at all.
     let living = archived_printing(&pool, repo, "burst-allowance").await;
     aged(
@@ -12251,6 +12439,15 @@ async fn the_cleanup_deletes_what_was_archived_long_enough_ago() {
         "and one back on the sidebar has no clock running on it at all",
     );
 
+    assert!(
+        !old_files.exists(),
+        "and the files the human attached to what was deleted went with the rows",
+    );
+    assert!(
+        fresh_files.join("quotas.csv").exists(),
+        "while the one that is still there still has its own",
+    );
+
     let (status, body) = fetch(
         &bench.app,
         Request::builder()
@@ -12272,6 +12469,20 @@ async fn the_cleanup_deletes_what_was_archived_long_enough_ago() {
     );
 
     pool.close().await;
+}
+
+/// One Conversation's attachments directory, with a file in it — the layout the
+/// uploads write, made by hand for a fixture that never drafted a Brief.
+///
+/// Hands back the directory rather than the file: what a delete gives back is
+/// the whole of it.
+fn attachments_of(bench: &Bench, id: i64, name: &str) -> PathBuf {
+    let directory = bench.state.path().join("attachments").join(id.to_string());
+
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(directory.join(name), "a,b\n1,2\n").unwrap();
+
+    directory
 }
 
 /// Whether the store still has a Conversation of that id at all.

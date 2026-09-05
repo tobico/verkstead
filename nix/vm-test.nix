@@ -38,6 +38,12 @@ let
   # cargo and sccache write into. The module's own, said again here for the same
   # reason the home is: the probe looks for it by path.
   cacheDir = "/var/cache/verkstead";
+
+  # And the file the test attaches to the Conversation before its work starts,
+  # which the probe then looks for inside. Named once for the probe's reason: the
+  # test uploads it and the probe opens it, and two spellings would be a probe
+  # reporting `absent` about a file that was really there.
+  attached = "wireframe.png";
 in
 
 testers.runNixOSTest {
@@ -107,6 +113,14 @@ testers.runNixOSTest {
         file "$HOME/.config/gh/hosts.yml" gh
         say home "$(ls -A "$HOME" | sort | tr '\n' ' ')"
 
+        # The files the human attached to the Conversation, beside the skills in
+        # the directory of Verkstead's own — read-only, because the copy is the
+        # record. The listing is what says nothing else of the machine came in
+        # under that name.
+        dir /verkstead/attachments attachments
+        file /verkstead/attachments/${attached} attached
+        say verkstead-holds "$(ls -A /verkstead | sort | tr '\n' ' ')"
+
         # The shared Rust build cache, which on a module install is under
         # `/var/cache` rather than in the home above — so what a session's cargo
         # and sccache write goes somewhere the unit made and kept, and the
@@ -173,6 +187,15 @@ testers.runNixOSTest {
             exit 1
         fi
 
+        # And the Conversation's attached files, found the way the worktree is:
+        # the test put one there through the running service, so which directory
+        # it landed in is the server's to decide.
+        attachments=$(echo /var/lib/verkstead/attachments/*)
+        if [ ! -d "$attachments" ]; then
+            echo "no attachments directory under the data directory" >&2
+            exit 1
+        fi
+
         exec bwrap \
             --die-with-parent \
             --unshare-all --share-net --hostname verkstead \
@@ -188,6 +211,7 @@ testers.runNixOSTest {
             --bind ${account}/.claude.json "$HOME/.claude.json" \
             --bind ${cacheDir} ${cacheDir} \
             --ro-bind "$sccache" /verkstead/bin/sccache \
+            --ro-bind "$attachments" /verkstead/attachments \
             --chdir "$worktree" \
             --setenv HOME "$HOME" \
             --setenv PATH /run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/usr/bin:/bin \
@@ -770,6 +794,22 @@ testers.runNixOSTest {
             {"markdown": "Whether the packaged unit can host a sandbox."},
         )
 
+        # And a file alongside it, while the Brief is still the human's to
+        # change: the raw bytes as the body and the name in the path, which is
+        # what the composer's paperclip sends. What the sandbox does with it is
+        # the probe's below; what this says is that the service can write into
+        # its own data directory under the unit's hardening.
+        uploaded = json.loads(
+            machine.succeed(
+                "curl -sf -X POST --data-binary 'PNG'"
+                f" http://127.0.0.1:8422/api/ui/conversations/{conversation}"
+                "/attachments/${attached}"
+            )
+        )
+        assert uploaded["Attached"]["attachment"]["name"] == "${attached}", (
+            f"the file was answered {uploaded}"
+        )
+
         # The two roles that can be picked away — the grilling and the review —
         # are chosen inside a wrapper naming the Pairing, because the absence of
         # one there is the picker's own "no grilling" row rather than a choice
@@ -880,6 +920,21 @@ testers.runNixOSTest {
         )
         assert reported["home"] == ".claude .claude.json", (
             f"everything else in the service's home is absent inside: {reported['home']!r}"
+        )
+
+        # The files the human attached, read-only: `read` on a directory is a
+        # listing that worked and a file that could not be created in it, which
+        # is the whole of what read-only means from inside.
+        assert reported["attachments"] == "read", (
+            "an agent reads what was attached and cannot add to it: "
+            f"{reported['attachments']!r}"
+        )
+        assert reported["attached"] == "read", (
+            f"and cannot write the file itself either: {reported['attached']!r}"
+        )
+        assert reported["verkstead-holds"] == "attachments bin", (
+            "and the directory of Verkstead's own holds what Verkstead put there "
+            f"and nothing the machine had under that name: {reported['verkstead-holds']!r}"
         )
 
         # The shared build cache, which is the whole of what the module has to

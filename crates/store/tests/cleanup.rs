@@ -24,9 +24,9 @@ use std::path::{Path, PathBuf};
 use sqlx::SqlitePool;
 use verkstead_schema::{QuestionSet, Response};
 use verkstead_store::{
-    Account, Adding, Ask, Commit, CompanionWorktree, Decision, Deletion, Merging, Pairing,
+    Account, Adding, Ask, Commit, CompanionWorktree, Decision, Deletion, Merging, Origin, Pairing,
     ProfileFacts, PullRequest, Rollup, Settlements, Standing, Summary, Trimming, WaitingOn,
-    add_companion, append_capture, append_transcript, archive_conversation, ask, capture,
+    add_companion, append_capture, append_transcript, archive_conversation, ask, attach, capture,
     close_conversation, create_profile, deletable, delete_conversation, deleted_tables,
     load_conversation, load_response, lock_set, nothing_else, open_database, pick_direction,
     place_conversations, reclaim, record_addressed_comments, record_backlog, record_check_rollup,
@@ -655,6 +655,12 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
         .await
         .unwrap();
     record_share_comment(pool, id).await.unwrap();
+
+    // And a file the human put on it, which is the one sidecar there may be
+    // several of.
+    attach(pool, id, Origin::Brief, "burst.csv", 48_112)
+        .await
+        .unwrap();
     place_conversations(pool, &[id]).await.unwrap();
     stamp_unseen(pool, id).await.unwrap();
 

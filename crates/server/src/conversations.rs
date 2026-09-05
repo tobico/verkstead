@@ -20,14 +20,15 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use sqlx::SqlitePool;
 use verkstead_render::{
-    Adopted, BaseRecorded, BranchRenamed, BriefSaved, CompanionAdded, CompanionBaseRecorded,
-    CompanionBranchRenamed, CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved,
-    ConversationClosed, GrillingStarted, PairingView, PickedView, RepoPairingsView, RepoSwitched,
-    Started, Worktree,
+    Adopted, Attached, AttachmentOrigin, AttachmentRemoved, AttachmentView, BaseRecorded,
+    BranchRenamed, BriefSaved, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
+    CompanionMode, CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationClosed,
+    GrillingStarted, PairingView, PickedView, RepoPairingsView, RepoSwitched, Started, Worktree,
 };
 use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
+use crate::attachments::{self, Attachments};
 use crate::handoffs::Handoffs;
 use crate::repos::git;
 use crate::skills;
@@ -561,6 +562,138 @@ pub(crate) async fn save_brief(pool: &SqlitePool, id: i64, markdown: &str) -> Re
         store::Edited::Saved => BriefSaved::Saved,
         store::Edited::NoSuchConversation => BriefSaved::NoSuchConversation,
         store::Edited::NotDrafting => BriefSaved::NotDrafting,
+    })
+}
+
+/// Put a file on a Conversation for its sessions to read.
+///
+/// Two writes in one order that matters: the bytes into the Conversation's own
+/// directory, and then the row that says they are there. A file on disk with no
+/// row is a stray the Cleanup takes with the directory; a row naming a file
+/// nobody wrote is a pill that opens nothing and a listing an agent cannot
+/// follow.
+///
+/// The name comes back as it stands on disk rather than as it was sent: a name
+/// already taken is counted up rather than overwritten — see
+/// [`crate::attachments::Attachments::keep`] — and the composer draws what the
+/// record says.
+///
+/// Refused off the state the Brief is refused off, which is the same freeze:
+/// attachments are attached and removed while the round drafts, and fixed once
+/// the work starts.
+pub(crate) async fn attach(state: &AppState, id: i64, name: &str, body: &[u8]) -> Result<Attached> {
+    if body.len() > attachments::MAX_BYTES {
+        return Ok(Attached::TooLarge);
+    }
+
+    if !attachments::plain(name) {
+        return Ok(Attached::NotAName);
+    }
+
+    if let Some(refusal) = not_drafting(&state.pool, id).await? {
+        return Ok(match refusal {
+            Frozen::NoSuchConversation => Attached::NoSuchConversation,
+            Frozen::NotDrafting => Attached::NotDrafting,
+        });
+    }
+
+    let directories = Attachments::under(&state.data_dir);
+
+    // Blocking work, off the runtime's threads: a 32 MB write is not something
+    // to do in the middle of an async task other requests are waiting behind.
+    let kept = {
+        let name = name.to_owned();
+        let body = body.to_vec();
+        tokio::task::spawn_blocking(move || directories.keep(id, &name, &body)).await??
+    };
+
+    let attachment = store::attach(
+        &state.pool,
+        id,
+        store::Origin::Brief,
+        &kept,
+        body.len() as i64,
+    )
+    .await?;
+
+    Ok(Attached::Attached {
+        attachment: view(attachment),
+    })
+}
+
+/// And take one off again, file and row together.
+///
+/// The row is read first for the name — it is the only thing that says which
+/// file in the directory this is — and written last, for [`attach`]'s reason
+/// the other way round: a row taken away before the file would leave a file
+/// nothing names.
+///
+/// An attachment that is not there is [`AttachmentRemoved::Removed`] rather
+/// than a refusal, the way a companion's removal is: what the press asked for
+/// is that it be gone.
+pub(crate) async fn detach(
+    state: &AppState,
+    id: i64,
+    attachment: i64,
+) -> Result<AttachmentRemoved> {
+    if let Some(refusal) = not_drafting(&state.pool, id).await? {
+        return Ok(match refusal {
+            Frozen::NoSuchConversation => AttachmentRemoved::NoSuchConversation,
+            Frozen::NotDrafting => AttachmentRemoved::NotDrafting,
+        });
+    }
+
+    let Some(found) = store::attachment(&state.pool, id, attachment).await? else {
+        return Ok(AttachmentRemoved::Removed);
+    };
+
+    let directories = Attachments::under(&state.data_dir);
+    tokio::task::spawn_blocking(move || directories.drop_file(id, &found.name)).await??;
+
+    store::detach(&state.pool, id, attachment).await?;
+
+    Ok(AttachmentRemoved::Removed)
+}
+
+/// Every file attached to a Conversation, in the shape the workbench draws them.
+pub(crate) async fn attached(pool: &SqlitePool, id: i64) -> Result<Vec<AttachmentView>> {
+    Ok(store::attachments(pool, id)
+        .await?
+        .into_iter()
+        .map(view)
+        .collect())
+}
+
+/// One row as the wire carries it.
+fn view(attachment: store::Attachment) -> AttachmentView {
+    AttachmentView {
+        id: attachment.id,
+        name: attachment.name,
+        bytes: attachment.bytes,
+        origin: match attachment.origin {
+            store::Origin::Brief => AttachmentOrigin::Brief,
+        },
+    }
+}
+
+/// Why a Conversation's files are not the human's to change, or `None` where
+/// they are.
+///
+/// The Brief's own guard, asked of the state alone: a Conversation past drafting
+/// has a frozen Brief, and what freezes with it freezes at the same moment.
+/// Read before the writes rather than guarded inside them, for the reason the
+/// store's own reading is — there is one human at the workbench, and what would
+/// be raced here is their own two tabs.
+enum Frozen {
+    NoSuchConversation,
+    NotDrafting,
+}
+
+async fn not_drafting(pool: &SqlitePool, id: i64) -> Result<Option<Frozen>> {
+    Ok(match store::state(pool, id).await? {
+        None => Some(Frozen::NoSuchConversation),
+        Some(store::Lifecycle::Draft) => None,
+        Some(_) => Some(Frozen::NotDrafting),
     })
 }
 

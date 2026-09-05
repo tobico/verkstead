@@ -21,15 +21,16 @@ The shell runs **inside the Conversation's Sandbox** — the one
 `Sandbox::for_conversation` builds for the implementation pairing's Profile,
 the grilling pairing's where the implementation role has none — with a
 session's whole environment: the Worktree as the working directory, the git
-directory, the handoff directory, the build cache, the Sandbox Configuration
-binds, the GitHub token, the git author and a `VERKSTEAD_SERVER` scoped to the
-Conversation, wrapped in the worktree's nix dev shell where its flake has one.
-A terminal has no role of its own, and the implementation Profile is the
-account the work is done under, so `claude`, `gh` and `git` behave in a
-terminal as they do for the agent. Running it outside the Sandbox was never on
-the table: the filesystem boundary is what makes a shell in a Conversation
-safe to offer at all, and a terminal that could reach the checkout the
-Worktree was made from would be the one thing in Verkstead that could.
+directory, the handoff directory, the files the human attached, the build
+cache, the Sandbox Configuration binds, the GitHub token, the git author and a
+`VERKSTEAD_SERVER` scoped to the Conversation, wrapped in the worktree's nix
+dev shell where its flake has one. A terminal has no role of its own, and the
+implementation Profile is the account the work is done under, so `claude`, `gh`
+and `git` behave in a terminal as they do for the agent. Running it outside the
+Sandbox was never on the table: the filesystem boundary is what makes a shell
+in a Conversation safe to offer at all, and a terminal that could reach the
+checkout the Worktree was made from would be the one thing in Verkstead that
+could.
 
 It runs the **server user's login shell** from passwd, `/bin/sh` where that is
 missing, not inside the Sandbox, or a system user's `nologin`. No setting: the

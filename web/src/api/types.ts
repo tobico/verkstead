@@ -332,6 +332,75 @@ text_html: string,
 columns: Array<string>, options: Array<OptionView>, };
 
 /**
+ * What became of attaching a file to a Conversation.
+ *
+ * Every refusal is a sentence the composer has to put in front of the human —
+ * a file too large, a Brief that froze while they were choosing, a name that
+ * is not a name — so each of them is named rather than reported as a status.
+ * Only a server that could not write the file at all answers with one.
+ */
+export type Attached = { "Attached": { attachment: AttachmentView, } } | "NoSuchConversation" | "NotDrafting" | "TooLarge" | "NotAName";
+
+/**
+ * What a file was attached to.
+ *
+ * Drawn nowhere yet, and on the wire all the same: the pills under a Brief are
+ * the Brief's own files, and the page can only know that by being told. The
+ * second value is an Answer to a Question Set, which is the same upload made
+ * from a different page.
+ */
+export type AttachmentOrigin = "Brief";
+
+/**
+ * And of taking one off again.
+ *
+ * No *no such attachment*, for [`CompanionRemoved`]'s reason: a file that is
+ * not there is the state the press asked for.
+ */
+export type AttachmentRemoved = "Removed" | "NoSuchConversation" | "NotDrafting";
+
+/**
+ * One file the human attached to a Conversation, as the composer draws it: the
+ * name it is under, how large it is, and what it was attached to.
+ *
+ * The id is what a removal names it by, rather than the name: two files on one
+ * Conversation may share one — the renaming makes that hard rather than
+ * impossible — and neither the name nor the size is a key.
+ *
+ * Never the bytes. What is on the wire here is a record of a file, and the
+ * file itself is in the Conversation's own directory where its sessions read
+ * it — which is also what lets a share carry every one of these and none of
+ * what they are about.
+ */
+export type AttachmentView = { id: number, 
+/**
+ * The file's name as it stands on disk, which is what an agent will find
+ * listed in its prompt — the name the browser sent, or what the renaming
+ * of a name already taken made of it.
+ */
+name: string, 
+/**
+ * How large it is, in bytes.
+ *
+ * Left off the composer's pill, which says which files are there and
+ * nothing else while the human is still choosing them, and said on the row
+ * the frozen Brief pane draws: that one is the whole account of what the
+ * sessions were handed, and how large a thing is is part of an account.
+ * The listing at the end of a session's prompt says it in the same words —
+ * see `sized` in `crates/server/src/skills.rs` and its half in
+ * `web/src/Attaching.tsx`.
+ *
+ * Which is also what a share is carrying: these rows travel into the file
+ * and the bytes they measure never do, so the number is the only thing its
+ * reader will ever know about how big the file was.
+ */
+bytes: number, 
+/**
+ * What it was attached to. One value today — see [`AttachmentOrigin`].
+ */
+origin: AttachmentOrigin, };
+
+/**
  * Who a session's commits are by.
  *
  * Two strings rather than two optionals, empty where nothing is configured:
@@ -1483,7 +1552,22 @@ pinned: Array<PinnedEvent>,
  * send somebody *now* — see the store's `shares`, which says what becomes
  * of the link it replaced.
  */
-shared: ShareView | null, };
+shared: ShareView | null, 
+/**
+ * The files the human put on this Conversation for its sessions to read,
+ * oldest first — which is the order they were attached in, and the order
+ * the pills are drawn in.
+ *
+ * Empty is the ordinary Conversation. Beside the companions because it is
+ * the same kind of fact — what the work is being handed — and settled in
+ * the same place and at the same moment: the composer while the Brief
+ * drafts, frozen when the work starts.
+ *
+ * Names and sizes and never the bytes, so a share carries the list of what
+ * was handed over and none of the files themselves — see
+ * [`AttachmentView`].
+ */
+attachments: Array<AttachmentView>, };
 
 /**
  * The Diff as the browser receives it: the HTML the server rendered, and the

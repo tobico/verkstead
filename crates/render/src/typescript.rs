@@ -17,19 +17,20 @@
 use ts_rs::TS;
 
 use crate::{
-    AbandonedRepo, Adopted, BacklogPane, BaseBranchChoice, BaseRecorded, BranchRename,
-    BranchRenamed, BriefEdit, BriefSaved, BrowseScope, Capture, CommitPane, CompanionAdded,
-    CompanionBaseRecorded, CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen,
-    CompanionRemoved, ConflictResolutionEdit, ConversationArchived, ConversationClosed,
-    ConversationEntry, ConversationSteered, ConversationStopped, ConversationUnarchived,
-    ConversationView, DirectoryListing, GrillingStarted, Locked, NewAdoption, NewCompanion,
-    NewConversation, NewOrder, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
-    ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RepoChoice,
-    RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed,
-    RoadmapPane, RoleChoice, Screen, SetReading, SettingsEdit, SettingsSaved, SettingsView,
-    ShareCommented, SharePublished, SharedConversation, ShowingArchived, Shown, Started,
-    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TerminalOpened,
-    TerminalsView, TranscriptView, Unsubscribe, UpdateNotice, Watching,
+    AbandonedRepo, Adopted, Attached, AttachmentRemoved, BacklogPane, BaseBranchChoice,
+    BaseRecorded, BranchRename, BranchRenamed, BriefEdit, BriefSaved, BrowseScope, Capture,
+    CommitPane, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionModeChoice,
+    CompanionModeChosen, CompanionRemoved, ConflictResolutionEdit, ConversationArchived,
+    ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
+    ConversationUnarchived, ConversationView, DirectoryListing, GrillingStarted, Locked,
+    NewAdoption, NewCompanion, NewConversation, NewOrder, ProfileChoice, ProfileChosen,
+    ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails, PushKey,
+    Registered, Registration, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched,
+    RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, SetReading, SettingsEdit,
+    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation,
+    ShowingArchived, Shown, Started, SteerOpened, SteerSubmission, Submitted, Subscribed,
+    Subscription, TerminalOpened, TerminalsView, TranscriptView, Unsubscribe, UpdateNotice,
+    Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -133,6 +134,13 @@ fn the_viewers_types_are_written_from_these() {
     CompanionModeChosen::export_all(&config).unwrap();
     CompanionBaseRecorded::export_all(&config).unwrap();
     CompanionBranchRenamed::export_all(&config).unwrap();
+
+    // And the files the human handed it, which are attached and taken off on the
+    // same box. What one *is* comes back inside the view above — and inside the
+    // attaching's own outcome, which is the one press here that answers with the
+    // record it just made rather than with a word.
+    Attached::export_all(&config).unwrap();
+    AttachmentRemoved::export_all(&config).unwrap();
 
     // And the two actions that make and unmake what a Conversation works in.
     // Neither takes a request shape — which Conversation is in the path, and

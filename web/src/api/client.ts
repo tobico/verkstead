@@ -9,6 +9,8 @@ import type {
   AbandonedRepo,
   Adopted,
   ApiError,
+  Attached,
+  AttachmentRemoved,
   BacklogPane,
   Locked,
   BaseRecorded,
@@ -541,6 +543,49 @@ export function loadPullRequest(
 /// record is the server's from the moment it exists.
 export function startConversation(repoId: number): Promise<Started> {
   return post<Started>("/api/ui/conversations", { repo_id: repoId });
+}
+
+/// Put a file on a Conversation for its sessions to read.
+///
+/// One request per file, the raw bytes as the body and the name in the path —
+/// there is one file and one name, so a multipart envelope around them would be
+/// a parser on both sides for nothing. The name goes over encoded, which is
+/// what carries a name with a separator in it to the server to be refused
+/// rather than turning the request into a path that matches no route.
+///
+/// A body the server would not even read comes back as `TooLarge` like one it
+/// read and refused: the route's own limit answers a 413, and the composer has
+/// one sentence to say either way — see `Attached::TooLarge`, which is the same
+/// refusal named.
+export async function attachFile(id: number, file: File): Promise<Attached> {
+  const response = await fetch(
+    `/api/ui/conversations/${id}/attachments/${encodeURIComponent(file.name)}`,
+    {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/octet-stream",
+      },
+      body: file,
+    },
+  );
+
+  if (response.status === 413) {
+    return "TooLarge";
+  }
+
+  return taken<Attached>(response);
+}
+
+/// And take one off again, by the row's own id: two files on one Conversation
+/// may share a name, and neither of them is a key.
+export function removeAttachment(
+  id: number,
+  attachment: number,
+): Promise<AttachmentRemoved> {
+  return post<AttachmentRemoved>(
+    `/api/ui/conversations/${id}/attachments/${attachment}/remove`,
+  );
 }
 
 /// Save what the human has written into a Brief.
