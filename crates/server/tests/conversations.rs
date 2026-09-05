@@ -3794,19 +3794,33 @@ async fn a_close_the_browser_left_part_way_through_still_finishes() {
 
     // And it finishes all the same: the record says so, and the worktree it
     // gave back on the way is gone.
+    //
+    // Both asked of the same loop rather than the second asserted the moment the
+    // first is true. A close writes the record and *then* sweeps — the sweep is
+    // what reclaims a worktree git refused to remove, and it has to run after
+    // the record because the rows this close deletes are what make its own
+    // directories orphans. So `Closed` is not yet the promise that the directory
+    // has gone, and a test that read it as one would be asserting an ordering
+    // the close does not give. What it does give is that both are true once it
+    // has finished, and that is what is waited for.
+    let mut closed = false;
+
     for _ in 0..200 {
-        if opened(&app, id).await.state == Lifecycle::Closed {
-            assert!(
-                !path.exists(),
-                "the worktree should have gone with the close"
-            );
+        closed = opened(&app, id).await.state == Lifecycle::Closed;
+
+        if closed && !path.exists() {
             return;
         }
 
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }
 
-    panic!("the close nobody was left waiting for never finished");
+    assert!(
+        closed,
+        "the close nobody was left waiting for never finished"
+    );
+
+    panic!("the close finished and the worktree should have gone with it");
 }
 
 /// A close sweeps the whole worktrees directory, not just its own: whatever an
