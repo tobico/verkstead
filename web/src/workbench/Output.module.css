@@ -316,3 +316,11 @@
     color: color-mix(in srgb, var(--stopped) 88%, var(--ink));
   }
 }
+
+/* And what the session in that terminal could reach, on a build with no Sandbox
+   to run it in: above the grid, in the size the pane's other asides are, and
+   with the room under it that separates it from the terminal it is about. */
+.unsandboxed {
+  margin: 0 0 0.6rem;
+  font-size: 0.85rem;
+}

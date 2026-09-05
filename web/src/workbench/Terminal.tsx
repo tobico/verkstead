@@ -103,7 +103,7 @@ import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { Attached } from "./Attached";
 import { PaneHead } from "./PaneHead";
-import { NO_SESSIONS } from "./sessions";
+import { UNSANDBOXED_SHELL, Unsandboxed } from "./sandboxing";
 import styles from "./Terminal.module.css";
 import shell from "../Panes.module.css";
 
@@ -126,10 +126,6 @@ export const TERMINAL_REFUSAL: Record<
   NoWorktree: "This conversation has no worktree to open a terminal in.",
   NoProfile:
     "This conversation has no agent profile settled, so there is no account to run a shell under.",
-  // The one refusal here that is about this Verkstead rather than about this
-  // conversation, and every press that starts a session meets it too — see
-  // `sessions.tsx`, which is where the sentence is.
-  NotOnWindowsYet: NO_SESSIONS,
   Refused: "The shell would not start. The server's log says why.",
 };
 
@@ -499,6 +495,22 @@ export function Terminal(props: {
           </div>
         </PaneHead>
       </PaneSticky>
+
+      {/* And what the shell in this pane is a shell *in*, where that is
+          nothing: a Conversation Terminal is a shell inside the Conversation's
+          Sandbox, and on a build that has none it runs with the human's own
+          account's reach. The third of the three places that fact is read, and
+          the one about the shell rather than about the agent — somebody who
+          opened this from the Timeline's header has seen neither of the others.
+
+          Above the tabs' grids and outside them, because it is about every
+          shell in the pane rather than about the one showing, and because a
+          grid scrolls and this must not scroll away. See `sandboxing.tsx`. */}
+      <Unsandboxed
+        conversation={props.conversation}
+        class={styles.unsandboxed}
+        saying={UNSANDBOXED_SHELL}
+      />
 
       {/* What there is to do about a tab, where the hand asked for it. One row,
           because closing is the one thing a tab has that pressing it does not

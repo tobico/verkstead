@@ -1,5 +1,5 @@
-//! Which shell a terminal runs: the server user's own, where the machine has
-//! given it a usable one.
+//! Which shell a terminal runs: the server user's own where the machine keeps
+//! such an answer, and PowerShell where it keeps none.
 //!
 //! A terminal is the human at the machine rather than an agent on it, so what
 //! comes up in it should be the shell they would have got had they sat down at
@@ -30,20 +30,63 @@
 //! about, and one outside them falls back like every other unusable answer —
 //! see [`reachable`].
 //!
+//! **And on Windows there is no passwd database to read**, which is the other
+//! arm. An account there has no login shell recorded against it, and none of
+//! the reasoning above survives the crossing: `/bin/sh` is not a path, and the
+//! roots every Sandbox binds are a fact about a mount namespace, so a Windows
+//! answer put through [`reachable`] would fall back for every shell there is.
+//! What a human at that machine opens instead is `pwsh` where somebody has
+//! installed PowerShell 7, and Windows PowerShell where nobody has — the one
+//! every Windows machine carries. See [`installed`], which is that whole
+//! choosing, and [`on_the_path`], which is its one call to the machine.
+//!
+//! One function with two arms rather than two notions: what a Terminal *is* is
+//! the same word on both platforms, and only the machine it asks differs.
+//!
 //! **The rules are a function and the lookup is not**, so that what is tested is
 //! the answer to each kind of passwd entry rather than the account the suite
-//! happens to run under — see [`usable`], which is the whole of the deciding,
-//! and [`login_shell`], which is the one call to the machine.
+//! happens to run under, and the answer to each kind of Windows machine rather
+//! than whichever one the suite is on — see [`usable`] and [`installed`], which
+//! are the whole of the deciding, and [`login_shell`] and [`on_the_path`],
+//! which are the two calls to the machine.
 
-use std::path::Path;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 
-/// The shell a terminal opens on where the machine has no usable one to name.
+use crate::platform::Platform;
+
+/// The shell a terminal opens on where the passwd database has no usable one to
+/// name.
 ///
 /// `/bin/sh` is NixOS's and a Mac's alike, and it is inside every Sandbox for
 /// the reason [`crate::sandbox::SHELL`] says: it is the one path a shell can be
 /// counted on to be at. A terminal that fell back to it is a plainer terminal
 /// rather than a broken one.
+///
+/// The Unix arm's, that database being the only thing this is ever the answer
+/// to: what a Windows machine falls back to is [`WINDOWS_POWERSHELL`].
 pub(crate) const FALLBACK: &str = "/bin/sh";
+
+/// What a Windows terminal opens on where somebody has installed it: PowerShell
+/// 7 and after, which is the one a human working on that machine has and the
+/// one every piece of advice written this decade is about.
+///
+/// A bare name rather than a path, because where its installer put it is not
+/// something to write down: it is on the `PATH` its installer added, and that is
+/// what makes it *installed* rather than merely present. Looked for with no
+/// extension on purpose — `PATHEXT` is what says which of `pwsh.exe` and a
+/// `pwsh.cmd` beside it is the one to start, and that is the machine's answer
+/// rather than this module's.
+const PWSH: &str = "pwsh";
+
+/// And what it opens on where nobody has: Windows PowerShell, which ships with
+/// the operating system and is in the system directory on every `PATH` there is.
+///
+/// Named with its extension because that is its name — nothing has to be
+/// resolved to know it is an executable — and it is what a machine that somehow
+/// answers about neither is told to run, a name every Windows machine resolves
+/// being a better last word than a path this module invented.
+const WINDOWS_POWERSHELL: &str = "powershell.exe";
 
 /// The names an account uses to say it is not for logging into.
 ///
@@ -57,10 +100,19 @@ const REFUSED: &[&str] = &["nologin", "false"];
 
 /// What a terminal on this server runs.
 ///
-/// The passwd answer put through [`usable`], with the filesystem as the witness
-/// to whether the shell is really there.
+/// The passwd answer put through [`usable`] on the platforms that keep one, with
+/// the filesystem as the witness to whether the shell is really there; and the
+/// two PowerShells put through [`installed`] on the one that keeps none.
+///
+/// A value rather than a `cfg`, as everything but the pseudo-terminal itself is
+/// here: the arm this machine will never run is still an arm its tests call.
 pub fn of_the_server() -> String {
-    let chosen = usable(login_shell().as_deref(), |shell| shell.is_file());
+    let chosen = match Platform::HERE {
+        Platform::Windows => installed(on_the_path),
+        Platform::Linux | Platform::MacOs => {
+            usable(login_shell().as_deref(), |shell| shell.is_file())
+        }
+    };
 
     tracing::debug!(shell = chosen, "a terminal runs this shell");
 
@@ -121,6 +173,52 @@ fn reachable(shell: &str) -> bool {
             .strip_prefix(root)
             .is_some_and(|below| below.starts_with('/'))
     })
+}
+
+/// And the Windows rules: `pwsh` where the machine has one, and Windows
+/// PowerShell where it has not.
+///
+/// `look` is the machine — [`on_the_path`] out here and a value in a test — so
+/// that what is asked about is each kind of Windows machine rather than
+/// whichever one happens to be running the suite. It is the same question both
+/// times, which is why there is one of it: *is this program on the server's
+/// `PATH`, by this platform's own rules for reading a name.*
+///
+/// **What comes back is where it was found**, so that `SHELL` inside names a
+/// real file the way the passwd arm's answer does, and so that the shell that
+/// was looked at is the shell that is started. Failing that — a machine that
+/// answers about neither, or a path that will not go into a `String` — the bare
+/// name of the one every Windows machine has, which the rendering resolves for
+/// itself when it starts it.
+///
+/// Nothing here is a fallback in [`FALLBACK`]'s sense. Both of these are shells
+/// a human types into; which one they get is which one the machine has.
+fn installed(look: impl Fn(&str) -> Option<PathBuf>) -> String {
+    look(PWSH)
+        .or_else(|| look(WINDOWS_POWERSHELL))
+        .and_then(|found| found.into_os_string().into_string().ok())
+        .unwrap_or_else(|| WINDOWS_POWERSHELL.to_owned())
+}
+
+/// Where a program is on the server's own `PATH`, read the way a Windows
+/// machine reads a name.
+///
+/// The rendering's own resolving, handed the server's environment rather than a
+/// session's description — see [`crate::sandbox::open::found`], which is where
+/// the rules are. `PATHEXT` is half of them: a name with no extension is not a
+/// file on this platform, so a walk of `PATH` alone would find `pwsh` nowhere
+/// it is actually installed.
+///
+/// The server's own `PATH` because that is what *installed* means here, and
+/// because it is the `PATH` a Windows session is given — `servers_path` in
+/// [`crate::sandbox`] is the Windows arm of that same question, and answers it
+/// out of the same variable.
+fn on_the_path(program: &str) -> Option<PathBuf> {
+    crate::sandbox::open::found(
+        OsStr::new(program),
+        std::env::var_os("PATH").as_deref(),
+        std::env::var_os("PATHEXT").as_deref(),
+    )
 }
 
 /// The login shell the passwd database gives the user this server runs as, or
@@ -191,8 +289,9 @@ fn login_shell() -> Option<String> {
     }
 }
 
-/// And where there is no passwd database to ask — which is Windows, where there
-/// is no pseudo-terminal to open a shell on either.
+/// And where there is no passwd database to ask — which is Windows, whose
+/// accounts keep no login shell against them at all. What a terminal opens on
+/// there is [`installed`]'s answer rather than this one's.
 #[cfg(not(unix))]
 fn login_shell() -> Option<String> {
     None
@@ -283,5 +382,38 @@ mod tests {
         assert_eq!(usable(None, on_the_machine), FALLBACK);
         assert_eq!(usable(Some(""), on_the_machine), FALLBACK);
         assert_eq!(usable(Some("bash"), on_the_machine), FALLBACK);
+    }
+
+    /// Where PowerShell 7 was installed, that is what a Windows terminal opens
+    /// on — and what it opens on is where the lookup found it, so that the
+    /// shell that was looked at is the shell that is started.
+    #[test]
+    fn pwsh_is_what_a_windows_terminal_opens_on() {
+        const INSTALLED: &str = r"C:\Program Files\PowerShell\7\pwsh.exe";
+
+        assert_eq!(
+            installed(|program| (program == PWSH).then(|| PathBuf::from(INSTALLED))),
+            INSTALLED,
+        );
+    }
+
+    /// And where nobody installed it, Windows PowerShell — which every Windows
+    /// machine has, so a terminal there opens on a shell either way.
+    #[test]
+    fn a_machine_without_it_opens_on_windows_powershell() {
+        const SHIPPED: &str = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
+
+        assert_eq!(
+            installed(|program| (program == WINDOWS_POWERSHELL).then(|| PathBuf::from(SHIPPED))),
+            SHIPPED,
+        );
+    }
+
+    /// And a machine that answers about neither is told the name of the one it
+    /// has anyway, rather than a path this module made up: the rendering
+    /// resolves a name for itself when it starts it.
+    #[test]
+    fn a_machine_that_answers_about_neither_gets_the_name() {
+        assert_eq!(installed(|_| None), WINDOWS_POWERSHELL);
     }
 }

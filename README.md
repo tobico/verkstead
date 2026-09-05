@@ -37,15 +37,18 @@ out beside the download in
 [adoption](docs/adoption.md#the-desktop-app-on-windows). Which of the four you
 want is [adoption](docs/adoption.md#getting-it-running).
 
-**Sessions run on Linux and on a Mac**, over the mechanism each platform has
-and to one description of what a session may reach: bubblewrap, where the rest
-of the machine is not in the session's namespace at all, and Apple's sandbox,
-where the machine is in plain sight and refused. What is inside is the same
-either way, and [adoption](docs/adoption.md#the-desktop-app-on-a-mac) says what
-a Mac session can and cannot get to. **Windows has everything but those**: an
-agent works in a terminal and Windows has none to give it yet, so the workbench
-says so where a session would be started rather than failing to start one, and
-a later stage is where they arrive. The daemon install is the NixOS module's.
+**Sessions run on all three**, and on two of them behind a boundary. On Linux
+and on a Mac they run over the mechanism each platform has and to one
+description of what a session may reach: bubblewrap, where the rest of the
+machine is not in the session's namespace at all, and Apple's sandbox, where
+the machine is in plain sight and refused. What is inside is the same either
+way, and [adoption](docs/adoption.md#the-desktop-app-on-a-mac) says what a Mac
+session can and cannot get to. **A Windows session runs unsandboxed**: it gets
+a pseudoconsole and a profile of the Conversation's own, and no boundary at all
+— the agent runs with your own account's reach, which the workbench says on
+every one of them, above **Start work**, beside the session's terminal and on a
+Conversation Terminal's pane, until the stage that closes it lands. The daemon
+install is the NixOS module's.
 
 ## Where things are written down
 

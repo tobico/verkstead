@@ -44,8 +44,8 @@
 //! as the statement of intent rather than as the mechanism.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
+use super::rendering::Rendering;
 use super::surface::{Access, Reach, Surface};
 
 /// The command that applies a policy and execs what comes after it.
@@ -128,20 +128,19 @@ const DEVICES: &str = r#"
 
 /// `surface` as the `sandbox-exec` invocation that runs it under its own
 /// policy.
-pub(crate) fn command(surface: &Surface) -> Command {
+pub(crate) fn command(surface: &Surface) -> Rendering {
     realise(surface);
 
-    let mut sandbox = Command::new(SANDBOX_EXEC);
+    let mut sandbox = Rendering::running(SANDBOX_EXEC);
 
     // Nothing of the server's environment, for the reason the Linux rendering
-    // clears it: what a session has is the description's to say.
-    sandbox.env_clear();
-
+    // says none of it either: what a session has is the description's to say,
+    // and a [`Rendering`] holds the whole of what the process is handed.
     for (key, value) in surface.env() {
-        sandbox.env(key, value);
+        sandbox.set(key, value);
     }
 
-    sandbox.current_dir(surface.chdir());
+    sandbox.starting_in(surface.chdir());
     sandbox.arg("-p").arg(policy(surface));
     sandbox.args(surface.argv());
 
@@ -260,7 +259,7 @@ fn policy(surface: &Surface) -> String {
 fn realise(surface: &Surface) {
     for access in surface.reaches() {
         let made = match access {
-            Access::Empty(path) => emptied(path),
+            Access::Empty(path) => super::emptied(path),
             Access::Elsewhere { host, inside, .. } => linked(host, inside),
             _ => Ok(()),
         };
@@ -273,24 +272,6 @@ fn realise(surface: &Surface) {
             );
         }
     }
-}
-
-/// A directory that is really there and really empty.
-///
-/// Emptied rather than left where something is already in it: a HOME is one
-/// Conversation's and every session of it is given the same one, so what a
-/// session finds there should be what *it* was given rather than what the last
-/// one left — which is what the other platform's tmpfs does for nothing. The
-/// path is Verkstead's own and nothing else is ever passed here: see
-/// [`super::Homes`], which is the only thing that says where one goes.
-fn emptied(path: &Path) -> std::io::Result<()> {
-    match std::fs::remove_dir_all(path) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
-    }
-
-    std::fs::create_dir_all(path)
 }
 
 /// And a path a session finds somewhere else: a link at `inside` to `host`.
@@ -633,22 +614,21 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let command = command(&surface(dir.path(), dir.path()));
 
-        assert_eq!(command.get_program(), SANDBOX_EXEC);
-        assert_eq!(command.get_current_dir(), Some(dir.path()));
+        assert_eq!(command.program(), SANDBOX_EXEC);
+        assert_eq!(command.chdir(), Some(dir.path()));
 
-        let argv: Vec<_> = command.get_args().collect();
+        let argv = command.argv();
         assert_eq!(
             argv[argv.len() - 3..],
             ["/bin/sh", "-c", "true"],
             "what a session runs comes after the policy, whole:\n{argv:?}",
         );
 
-        let env: Vec<_> = command.get_envs().collect();
         assert_eq!(
-            env,
+            command.env(),
             [(
-                std::ffi::OsStr::new("HOME"),
-                Some(std::ffi::OsStr::new("/nowhere"))
+                std::ffi::OsString::from("HOME"),
+                std::ffi::OsString::from("/nowhere")
             )],
             "and its environment is the description's rather than the server's",
         );

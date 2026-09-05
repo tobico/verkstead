@@ -203,6 +203,18 @@ session doing harm is that there is nothing within reach to harm. The
 build and cannot disagree about a schema — with the libraries that image was
 packed with, where it was packed with any, reached through a launcher of
 Verkstead's own so that nothing else the session runs loads out of them.
+**On Windows a session has none of this yet** and runs with the human's own
+account's reach: an ordinary process, its environment cleared and set
+explicitly and the Worktree its working directory, with nothing of the machine
+refused it. What it does get of the shape above is a profile of the
+Conversation's own under the **Data Directory**, made fresh as each session
+starts and with the Agent Profile's account joined into it — every directory by
+a junction and every file by a hard link — and the Build Cache, the Skills and
+the `verkstead` it asks with, each at the path it really is rather than at one a
+mount made. The workbench says it on every Conversation there: above **Start
+work**, beside the session's terminal, and on the **Terminal** pane. It is a
+stage's state rather than the platform's answer, and the stage after it is where
+the boundary arrives and this sentence goes.
 _Avoid_: container, jail, isolation, environment
 
 **Sandbox Configuration**:
@@ -771,16 +783,22 @@ _Avoid_: terminal (that is the human's own shell — see **Terminal**), console,
 attach view, pane
 
 **Terminal**:
-A shell of the human's own inside a Conversation's Sandbox, with the Worktree as
-its working directory: the server user's login shell, `/bin/sh` where there is
-no usable one, inside the worktree's dev shell, under the implementation
-Profile's account with everything a session gets. Opened from the **Terminal
-icon on the Timeline's header** into a details pane of its own at `/terminal`,
-where each one is a tab: one opens when the pane loads with none live, plus opens
-another, a tab goes when its shell ends, and the pane never stands empty — the
-last tab going opens a fresh one, unless the shell ended within moments of
-starting or could not start at all, in which case the tab stays saying why until
-plus is pressed. Close is on the tab's menu, a right-click or a long press.
+A shell of the human's own wherever a session's agent runs, with the Worktree as
+its working directory, under the implementation Profile's account and with
+everything a session gets. Which shell is the machine's answer rather than the
+word's: on a Unix the server user's login shell, `/bin/sh` where there is no
+usable one, inside the worktree's dev shell and inside the Conversation's
+Sandbox; on Windows `pwsh` where PowerShell 7 is installed and Windows
+PowerShell where nobody has installed one — no passwd database to read a login
+shell out of, no dev shell to enter, and no Sandbox around it until that stage
+lands, so the pane says the shell is not sandboxed the way the composer says it
+of the agent. Opened from the **Terminal icon on the Timeline's header** into a
+details pane of its own at `/terminal`, where each one is a tab: one opens when
+the pane loads with none live, plus opens another, a tab goes when its shell
+ends, and the pane never stands empty — the last tab going opens a fresh one,
+unless the shell ended within moments of starting or could not start at all, in
+which case the tab stays saying why until plus is pressed. Close is on the tab's
+menu, a right-click or a long press.
 A tab is called whatever its shell sets the terminal's title to, and *Terminal N*
 by the server's number where it has set none — a fresh attach reads the number
 again, a repaint carrying the grid and not the title.

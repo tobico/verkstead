@@ -145,7 +145,6 @@ import { Mark } from "./Mark";
 import marks from "./Mark.module.css";
 import { Conflict } from "./Merging";
 import { PaneHead } from "./PaneHead";
-import { NO_SESSIONS } from "./sessions";
 import { StatusButton } from "./StatusButton";
 import styles from "./Timeline.module.css";
 import { titled } from "./naming";
@@ -184,11 +183,6 @@ const GRILL_REFUSAL: Record<
   Started: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "This conversation has already been started.",
-  // The one refusal here that is about this Verkstead rather than about this
-  // conversation, and the one the page draws before the press where it can —
-  // see `sessions.tsx`, whose sentence every other press that wanted a session
-  // says as well.
-  NotOnWindowsYet: NO_SESSIONS,
   NoGrillingProfile:
     "Pick a grilling profile and model — or No grilling — first, on the brief.",
   NoImplementationProfile:

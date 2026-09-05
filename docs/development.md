@@ -103,10 +103,10 @@ Verkstead off in either and the box goes on showing what the registration says.
 
 One directory is made outside it: the **Build Cache**, at
 `$XDG_CACHE_HOME/verkstead` — `~/.cache/verkstead` on most machines — unless
-`--build-cache-dir` says otherwise. Every sandboxed session gets it writable,
-with `CARGO_HOME` inside it, so a crate is downloaded once for the machine
-rather than once per Conversation; with `sccache` on the `PATH` the server was
-started from, it is bound into each sandbox as `RUSTC_WRAPPER` and the
+`--build-cache-dir` says otherwise. Every session gets it writable, with
+`CARGO_HOME` inside it, so a crate is downloaded once for the machine rather
+than once per Conversation; with `sccache` on the `PATH` the server was started
+from, every session is told to compile through it as `RUSTC_WRAPPER` and the
 compiling is cached too. The dev shell carries one, so a checkout run gets the
 whole thing. It is on with nothing configured, and the settings page is where
 it is switched off or given a size.
@@ -116,11 +116,13 @@ child of the running server the first time a session starts on a repo with a
 root `Cargo.toml`, in a sandbox holding `<data-dir>/worktrees` and the build
 cache and nothing else — so `ps` shows one more sandboxed child beside each
 session's, and it goes when the server does. That sandbox is described and
-rendered by the code a session's is, so it is `bwrap` on Linux and
-`sandbox-exec` on a Mac without either half saying which. Every session's
-`sccache` is only the client half reaching it. Sessions starting their own is
-what this replaces: they all bind one port, and the loser's compiles then run
-in the winner's sandbox where its worktree is not reachable.
+rendered by the code a session's is, so it is `bwrap` on Linux, `sandbox-exec`
+on a Mac, and on Windows a plain process, that platform's rendering having no
+boundary in it until the container stage lands — without either half saying
+which. Every session's `sccache` is only the client half reaching it. Sessions
+starting their own is what this replaces: they all bind one port, and the
+loser's compiles then run in the winner's sandbox where its worktree is not
+reachable.
 
 A session's GitHub auth and the author of its commits are two of those settings
 rather than anything found in a home directory. Put a token in `secrets.yaml`
@@ -556,6 +558,18 @@ never how its flakes reproduced — each loaded run failed a different test and
 every one of them passed alone — so the bar is ten in a row under load rather
 than one green run. It takes about fifty minutes, which is why nothing runs it
 for you.
+
+**Windows runs an arm of its own**, because that suite is `cfg(unix)`: it
+stands on a mount namespace, a `/bin/sh` probe and a `stty`, and a Windows
+session has none of the three. `crates/server/tests/sessions_windows.rs` asks a
+dozen of the same questions of the other machine — a grilling started by
+pressing the button, run on a pseudoconsole in a profile of the Conversation's
+own, with a PowerShell script where claude goes — and
+`crates/server/tests/terminal_windows.rs` is the console's own pair beside
+`terminal.rs`, asking `mode con` what `stty` is asked there. Both are
+`cfg(windows)`, so a Linux or a Mac checkout compiles neither: the
+`windows-2025` job is where they run, and it installs an `sccache` on the
+runner for the two of them that are about the Compile Server.
 
 And in `web/`, which is the Solid viewer
 ([ADR 0003](adr/0003-solid-spa-viewer.md)):

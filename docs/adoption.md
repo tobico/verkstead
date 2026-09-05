@@ -373,13 +373,47 @@ arguments at all. Started that way there is no console to print in, so the log
 file is the whole account of the run; started from a terminal, whatever stops
 it is said there as well.
 
-**Sessions do not run on Windows**, and the workbench says so where one would be
-started rather than failing to start one: *Verkstead does not run sessions on
-Windows yet: an agent works in a terminal, and Windows has none to give it.*
-Everything else there works — the Repos, the Briefs, the Question Sets, the
-Timeline, the pull requests — and a Conversation whose sessions should run is a
-Conversation for a Linux machine or a Mac. Bringing them here is a later stage's
-work, and nothing about this download changes when it lands.
+**Sessions run on Windows, and they run unsandboxed.** Two things stood between
+a Windows Verkstead and a session — the pseudo-terminal and the Sandbox — and
+this is the first of them alone: a session runs on a pseudoconsole Verkstead
+opens for it, as an ordinary process of your own account's, with nothing between
+it and the rest of the machine. Whatever you can reach, an agent working for you
+can reach. The workbench says so rather than leaving it to be found out, in all
+three of the places a session is set going, watched, or typed into: above
+**Start work** on the composer, beside the terminal on the session pane, and on
+a Conversation Terminal's own pane, that last one being a shell of yours with
+the same reach. The AppContainer that closes it is a later stage's, and nothing
+about this download changes when it lands.
+
+**What a session does get is a profile of the Conversation's own**, under
+`%APPDATA%\Verkstead\homes`, emptied and made again as each of that
+Conversation's sessions starts. `USERPROFILE` and `HOME` point at it, and
+`APPDATA`, `LOCALAPPDATA`, `TEMP` and `TMP` point inside it — so what npm
+caches, what a tool writes down and what either of them throws away lands there
+rather than in your own profile. The Agent Profile's account is joined into it,
+every directory by a directory junction and every file by a hard link, so the
+account an agent reads is the real one and a session starts logged in.
+
+**A hard link wants one volume**, which is the one thing about this that can
+refuse a session outright. Your account's directory and the Data Directory have
+to be on the same drive; where they are not, the session does not start and the
+log says which two paths those are and which of them to move. And a hard link
+stops being one file the moment something saves over it by writing a temporary
+file and renaming it into place, which is exactly how an agent saves its
+config — so a linked file the session replaced is written back over the
+account's own as the session ends, and the link is made fresh for the session
+after. Nothing a session wrote to its account is lost.
+
+**A Conversation Terminal opens on `pwsh`** where PowerShell 7 is installed and
+on Windows PowerShell where nobody has installed one, in the Worktree, on the
+same pseudoconsole a session runs on.
+
+**The tools a session runs are the machine's**, as they are on a Mac: `git`,
+`node`, `cargo` and whatever else an agent reaches for are found on the `PATH`
+the server itself was started with, with Verkstead's own directory in front of
+it — so an agent npm installed as a `claude.cmd` starts as readily as an
+installer's `claude.exe`. Everything else there is what it is on the other two:
+the Repos, the Briefs, the Question Sets, the Timeline, the pull requests.
 
 Out of a checkout instead — the same server, told `--data-dir .` so that
 `verkstead.db` and the rest land in the checkout rather than in the platform

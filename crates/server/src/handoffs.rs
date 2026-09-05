@@ -28,6 +28,10 @@
 //! why a HOME is a different directory per Conversation there and the same one
 //! here.
 //!
+//! Windows is that second kind twice over: nothing is bound there either, and
+//! `/tmp` is not a path that machine has at all. So it is the HOME answer, and
+//! for the same reason the Mac's is.
+//!
 //! Taking it is a move rather than a read: the copy in the directory goes as the
 //! Timeline gets one, so the Event is the handoff from then on and there is
 //! never a second one to go stale.
@@ -62,8 +66,8 @@ pub(crate) const SAID_INSIDE_HOME: &str = "$HOME/verkstead";
 /// ask for, and this one decides a path a session is told about in prose.
 pub(crate) fn inside(platform: Platform, home: &Path) -> PathBuf {
     match platform {
-        Platform::MacOs => crate::sandbox::under(home, INSIDE_HOME),
-        Platform::Linux | Platform::Windows => PathBuf::from(INSIDE),
+        Platform::MacOs | Platform::Windows => crate::sandbox::under(home, INSIDE_HOME),
+        Platform::Linux => PathBuf::from(INSIDE),
     }
 }
 
@@ -73,13 +77,46 @@ pub(crate) fn inside(platform: Platform, home: &Path) -> PathBuf {
 /// [`SAID_INSIDE_HOME`].
 pub(crate) fn said(platform: Platform) -> &'static str {
     match platform {
-        Platform::MacOs => SAID_INSIDE_HOME,
-        Platform::Linux | Platform::Windows => INSIDE,
+        Platform::MacOs | Platform::Windows => SAID_INSIDE_HOME,
+        Platform::Linux => INSIDE,
     }
 }
 
 /// What the handoff document is called inside it.
 const HANDOFF: &str = "handoff.md";
+
+/// And what a session's own prompt is called, where it is written down rather
+/// than handed over as an argument — see [`Handoffs::wrote_prompt`].
+///
+/// In this directory rather than anywhere else for the reason the handoff is in
+/// it: it is the one writable place a Conversation has that git will never see,
+/// and every session of the Conversation reaches it.
+///
+/// One name per Conversation rather than one per session. A Conversation runs
+/// one session at a time and the document beside this is one per Conversation
+/// too, so a second name would be a file nothing ever went back to.
+const PROMPT: &str = "prompt.md";
+
+/// What a session is started on where its prompt is in a file: one line, naming
+/// the file by the path the session will open it at.
+///
+/// **One line, because it is one argument.** The whole point of writing the
+/// prompt down is that the command line has a length a long handoff exceeds —
+/// see [`Handoffs::wrote_prompt`] — so what goes on it instead has to be short
+/// whatever the prompt was.
+///
+/// The path is in backticks, which is how the rest of the prompts here name a
+/// path and is also what lets something reading the line rather than
+/// understanding it find the file: a stand-in agent in the Windows suite reads
+/// the name out from between them.
+fn started_on(prompt_file: &Path) -> String {
+    format!(
+        "Your instructions for this session are in the file `{}`. Read the whole \
+         of that file and follow it: it is the message you would otherwise have \
+         been started on, and nothing else here repeats what it says.",
+        prompt_file.display(),
+    )
+}
 
 /// The two of those together, which is the path the grilling skill names and the
 /// session writes.
@@ -134,6 +171,50 @@ impl Handoffs {
                 None
             }
         }
+    }
+
+    /// Write `prompt` into `conversation_id`'s directory, and answer the one
+    /// line a session is started on in its place.
+    ///
+    /// What this is for is a platform whose command line is too short to carry
+    /// a prompt: Windows caps one at 32,767 characters, and an implementing
+    /// session's prompt carries the whole handoff document inlined. So the
+    /// prompt goes to a file there and the argument is a sentence naming it —
+    /// see [`started_on`], and [`crate::sessions::Agents::argv`], which is
+    /// where the platform decides between the two.
+    ///
+    /// `inside` is where this directory is reached from within the session —
+    /// see [`inside`] — because the line has to name the file by the path the
+    /// *session* will open it at rather than the one the server wrote it at.
+    /// The two are one directory on the far side of a junction.
+    ///
+    /// `None` where the directory could not be made or the file could not be
+    /// written, which is a session that has nothing to be started on: the
+    /// caller starts none, the way it starts none for a sandbox it could not
+    /// build.
+    ///
+    /// **This blocks**, and is called from where the sandbox is built for that
+    /// reason.
+    pub(crate) fn wrote_prompt(
+        &self,
+        conversation_id: i64,
+        inside: &Path,
+        prompt: &str,
+    ) -> Option<String> {
+        let path = self.directory(conversation_id)?.join(PROMPT);
+
+        if let Err(error) = std::fs::write(&path, prompt) {
+            tracing::error!(
+                error = ?error,
+                conversation_id,
+                path = %path.display(),
+                "a session's prompt could not be written down, so it has nothing to be \
+                 started on"
+            );
+            return None;
+        }
+
+        Some(started_on(&inside.join(PROMPT)))
     }
 
     /// Where a Conversation's handoff document is written, seen from outside its
@@ -262,10 +343,23 @@ mod tests {
         );
 
         assert_eq!(
+            inside(Platform::Windows, sevens),
+            Path::new("/data/homes/7/verkstead"),
+            "and Windows the same, having no mounts either and no `/tmp` at all",
+        );
+
+        assert_eq!(
             inside(Platform::Linux, sevens),
             Path::new(INSIDE),
             "where a tmpfs of the session's own makes that path one directory \
              per session already",
+        );
+
+        assert_eq!(
+            said(Platform::Windows),
+            said(Platform::MacOs),
+            "and a skill names it the same way on both: through the variable \
+             that already differs per Conversation",
         );
     }
 
@@ -347,6 +441,55 @@ mod tests {
 
         assert_eq!(handoffs.take(7).as_deref(), Some("# What we settled\n"));
         assert!(!written(&document), "and taking it leaves none");
+    }
+
+    /// A prompt written down goes in the directory beside the handoff, and what
+    /// comes back names it by the path the session opens it at rather than the
+    /// one the server wrote it at. The two are one directory on the far side of
+    /// a junction, and only one of them is a path the session has.
+    #[test]
+    fn a_prompt_written_down_is_named_by_the_path_the_session_opens_it_at() {
+        let state = tempfile::tempdir().unwrap();
+        let handoffs = Handoffs::under(state.path());
+        let inside = inside(Platform::Windows, Path::new("C:\\verkstead\\homes\\7"));
+
+        let started_on = handoffs
+            .wrote_prompt(7, &inside, "# Rate limiting\n")
+            .expect("a prompt to be written down");
+
+        assert_eq!(
+            std::fs::read_to_string(state.path().join("handoffs/7/prompt.md")).unwrap(),
+            "# Rate limiting\n",
+        );
+        assert!(
+            started_on.contains(&inside.join(PROMPT).display().to_string()),
+            "{started_on:?} does not name the file the session will open",
+        );
+        assert!(
+            !started_on.contains("Rate limiting"),
+            "and says nothing of the prompt itself: {started_on:?}",
+        );
+    }
+
+    /// And it is written over as each session of the Conversation starts, so
+    /// what the file holds is what the session running was started on.
+    #[test]
+    fn the_next_sessions_prompt_is_the_one_in_the_directory() {
+        let state = tempfile::tempdir().unwrap();
+        let handoffs = Handoffs::under(state.path());
+        let inside = Path::new("/home/verkstead/verkstead");
+
+        handoffs
+            .wrote_prompt(7, inside, "# Rate limiting\n")
+            .unwrap();
+        handoffs
+            .wrote_prompt(7, inside, "# What we settled\n")
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(state.path().join("handoffs/7/prompt.md")).unwrap(),
+            "# What we settled\n",
+        );
     }
 
     #[test]

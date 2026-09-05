@@ -30,10 +30,8 @@ use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::Result;
 use sqlx::SqlitePool;
-use tokio::process::{Child, Command};
 use tokio::sync::{oneshot, watch};
 use tokio::task::JoinHandle;
-use verkstead_render::SessionsHere;
 use verkstead_schema::Nudge;
 
 use crate::build_cache::{self, BuildCache};
@@ -48,7 +46,7 @@ use crate::screen::Live;
 use crate::settings::Settings;
 use crate::skills::{self, Skills};
 use crate::store;
-use crate::terminal::Terminal;
+use crate::terminal::{Child, Terminal};
 use crate::transcript::Tail;
 
 /// How much of what is running on a pseudo-terminal to take off it at once.
@@ -307,11 +305,14 @@ impl Agents {
 
         let worktree = conversation.worktree.clone()?;
 
-        Some((sandbox, under_dev_shell(&worktree, argv)))
+        Some((
+            sandbox,
+            under_dev_shell(self.homes.platform(), &worktree, argv),
+        ))
     }
 
-    /// What a session under `pairing` on `prompt`, named `session`, working in
-    /// `worktree`, runs.
+    /// What a session of `conversation_id` under `pairing` on `prompt`, named
+    /// `session`, working in `worktree`, runs.
     ///
     /// The binary is the Profile's agent type's — see [`binary`] — or whatever
     /// is standing where every type's goes, which is how a test proves this
@@ -350,13 +351,36 @@ impl Agents {
     /// Last of all comes the tail the backend itself needs — see [`Line::tail`]
     /// — which with the two above is the whole of what reads differently for one
     /// agent type than for another.
+    ///
+    /// **And on one platform the prompt is not on the line at all.** Windows
+    /// caps a command line at 32,767 characters and an implementing session's
+    /// prompt carries the whole handoff document inlined, so there the prompt is
+    /// written into the Conversation's handoff directory and what goes in its
+    /// place is one line naming the file — see [`Handoffs::wrote_prompt`].
+    /// *Always* there rather than only where it would not fit, so a Windows
+    /// session has one shape rather than two and nothing turns on a length
+    /// nobody measured; and only there, because nothing on the other two
+    /// platforms is the worse for the argument.
+    ///
+    /// The choice is off [`Platform`] as a value rather than a `cfg!`, for the
+    /// reason every other choice here is: the arm this machine will never run
+    /// is still an arm a test on it can ask for.
+    ///
+    /// `None` is a prompt that could not be written down, which is a session
+    /// with nothing to be started on — the caller starts none, the way it
+    /// starts none for a sandbox it could not build. Nothing else here can fail,
+    /// so the platform that keeps its prompt on the line is always `Some`.
+    ///
+    /// **This blocks on the platform that writes the file**, which is why it is
+    /// asked from the same blocking thread the sandbox is built on.
     fn argv(
         &self,
+        conversation_id: i64,
         pairing: &store::Pairing,
         prompt: &str,
         session: Option<&str>,
         worktree: Option<&Path>,
-    ) -> Vec<String> {
+    ) -> Option<Vec<String>> {
         let agent_type = pairing.profile.agent_type();
         let line = line(agent_type, worktree);
 
@@ -374,7 +398,14 @@ impl Agents {
             argv.push(flag.to_owned());
         }
 
-        argv.push(prompt.to_owned());
+        argv.push(match self.homes.platform() {
+            Platform::Windows => self.handoffs.wrote_prompt(
+                conversation_id,
+                self.homes.for_conversation(conversation_id).handoffs(),
+                prompt,
+            )?,
+            Platform::Linux | Platform::MacOs => prompt.to_owned(),
+        });
 
         if let Some(session) = session.filter(|_| line.names_the_session) {
             argv.push("--session-id".to_owned());
@@ -383,7 +414,7 @@ impl Agents {
 
         argv.extend(line.tail);
 
-        argv
+        Some(argv)
     }
 
     /// What a session of `agent_type` has on its Screen that says whether it has
@@ -719,10 +750,10 @@ pub(crate) struct Sessions {
     /// grilling makes the worktree either way.
     agents: Option<Arc<Agents>>,
 
-    /// And whether a session has anywhere to run on this platform at all, which
-    /// is the other half of the same question and the one that is not about this
-    /// router — see [`Sessions::here`].
-    here: SessionsHere,
+    /// And whether a session this platform runs stands outside a Sandbox, which
+    /// is a fact about the build rather than about this router — see
+    /// [`Sessions::unsandboxed`].
+    unsandboxed: bool,
 
     running: Arc<Mutex<HashMap<i64, Running>>>,
 
@@ -1283,21 +1314,30 @@ struct Running {
     agent_type: store::AgentType,
 }
 
-/// Whether a Verkstead built for `platform` runs sessions at all.
+/// Whether a session a Verkstead built for `platform` runs stands outside a
+/// Sandbox.
 ///
-/// The one place the fact is decided, and the whole of the decision: a session's
-/// agent runs on a pseudo-terminal, both Unixes have one to open and Windows has
-/// not — see [`crate::terminal`], whose Windows arm is a terminal that refuses.
+/// The one place the fact is decided, and the whole of the decision: the two
+/// Unixes have a Sandbox each — bubblewrap and seatbelt — and a Windows one has
+/// none yet, so its agent runs as an ordinary process with the human's own
+/// account's reach. Sessions themselves run everywhere: what stood in the way
+/// of a Windows one was a pseudo-terminal, and [`crate::terminal`]'s Windows
+/// arm is a pseudoconsole.
+///
+/// **Not a refusal.** A session that runs unsandboxed is a session, and what
+/// this decides is one sentence on the Conversation view rather than a press
+/// that will not go — see [`verkstead_render::ConversationView::unsandboxed`],
+/// which is where it is read.
 ///
 /// A function of the platform rather than a `cfg!`, for the reason
 /// [`Platform`] is a value: the arm this machine will never run is still an arm
 /// its tests call. What a running server answers is [`Platform::HERE`]'s answer,
 /// and it is [`Sessions::under`] that asks — everything above reads it off the
 /// registry rather than off the target it was compiled for.
-pub(crate) fn run_on(platform: Platform) -> SessionsHere {
+pub(crate) fn unsandboxed_on(platform: Platform) -> bool {
     match platform {
-        Platform::Linux | Platform::MacOs => SessionsHere::Run,
-        Platform::Windows => SessionsHere::NotOnWindowsYet,
+        Platform::Linux | Platform::MacOs => false,
+        Platform::Windows => true,
     }
 }
 
@@ -1305,12 +1345,12 @@ impl Sessions {
     /// A server that can run sessions, under `agents`.
     ///
     /// Which is what the served router is built with, so this is where the
-    /// platform's own answer is read: a Windows one runs none, whatever agents
-    /// it was handed — see [`run_on`].
+    /// platform's own answer is read: a Windows one runs its sessions outside a
+    /// Sandbox, whatever agents it was handed — see [`unsandboxed_on`].
     pub(crate) fn under(agents: Agents) -> Sessions {
         Sessions {
             agents: Some(Arc::new(agents)),
-            here: run_on(Platform::HERE),
+            unsandboxed: unsandboxed_on(Platform::HERE),
             running: Arc::new(Mutex::new(HashMap::new())),
             launching: Arc::new(Mutex::new(HashMap::new())),
             turns: Arc::new(Mutex::new(HashMap::new())),
@@ -1345,52 +1385,47 @@ impl Sessions {
     /// One that cannot: nothing is launched, and everything else about starting
     /// a grilling holds.
     ///
-    /// It answers [`SessionsHere::Run`] whatever machine it was built for, which
-    /// is the one place the platform's own answer is not read. Only a test
-    /// stands one of these up, and what a test stands it up for is what a press
-    /// leaves behind — the branch, the worktree, the record — rather than what
-    /// platform it is running on. Read here, the same suite run on Windows
-    /// would be one where every press is refused before it makes anything, and
-    /// nothing it is about would ever be asked of git.
+    /// It answers sandboxed whatever machine it was built for, which is the one
+    /// place the platform's own answer is not read. Only a test stands one of
+    /// these up, and what a test stands it up for is what a press leaves behind
+    /// — the branch, the worktree, the record — rather than what platform it is
+    /// running on.
     ///
-    /// What a Windows build answers is asked of
-    /// [`Sessions::without_sessions`] instead, on whichever machine is running
-    /// the tests.
+    /// What a Windows build answers is asked of [`Sessions::unsandboxed_here`]
+    /// instead, on whichever machine is running the tests.
     pub(crate) fn none() -> Sessions {
         Sessions {
             agents: None,
-            here: SessionsHere::Run,
+            unsandboxed: false,
             running: Arc::new(Mutex::new(HashMap::new())),
             launching: Arc::new(Mutex::new(HashMap::new())),
             turns: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    /// And one on a platform that has no session to run — which today is
-    /// Windows, and which is the whole of what it says.
+    /// And one whose sessions run outside a Sandbox — which today is a Windows
+    /// build, and which is the whole of what it says.
     ///
     /// The arm a Linux machine will never be, stood up so that its tests can
-    /// call it: what every way into a session answers where there is none to
-    /// start is a rule rather than a platform, and it is asked wherever the
-    /// suite runs. See [`crate::router_running_no_sessions`].
-    pub(crate) fn without_sessions() -> Sessions {
+    /// call it: what the Conversation view says about a session that has no
+    /// Sandbox around it is a rule rather than a platform, and it is asked
+    /// wherever the suite runs. See [`crate::router_running_unsandboxed`].
+    pub(crate) fn unsandboxed_here() -> Sessions {
         Sessions {
-            here: SessionsHere::NotOnWindowsYet,
+            unsandboxed: true,
             ..Sessions::none()
         }
     }
 
-    /// Whether a session started here would have anywhere to run at all — the
-    /// question every way into one asks before it makes anything, and what the
-    /// pane draws where a session would start.
+    /// Whether a session started here runs outside a Sandbox — what the panes a
+    /// session is started from and watched on say in a line, and nothing else.
     ///
     /// Not [`Sessions::runs_sessions`], which is a fact about this router:
-    /// whether it was given agents. This one is a fact about the build, and the
-    /// two are refused differently — a router with no agents makes the branch
-    /// and the worktree and launches nothing into them, and a build with no
-    /// sessions refuses in front of all of it and says so.
-    pub(crate) fn here(&self) -> SessionsHere {
-        self.here
+    /// whether it was given agents. This one is a fact about the build, and it
+    /// gates nothing at all — a session runs either way, and the difference is
+    /// what reach it has.
+    pub(crate) fn unsandboxed(&self) -> bool {
+        self.unsandboxed
     }
 
     /// Wait for this Conversation's Worktree, and take it.
@@ -1727,30 +1762,37 @@ impl Sessions {
         // [`skills::naming`].
         let prompt = skills::naming(&prompt, conversation.naming);
 
-        let argv = agents.argv(
-            pairing,
-            &prompt,
-            session.as_deref(),
-            conversation.worktree.as_deref(),
-        );
         let conversation_id = conversation.id;
 
         // The sandbox asks git where the worktree's object database is, and the
-        // dev-shell question is a `nix eval` or two. Both block, and both are
-        // decided before anything is spawned.
+        // dev-shell question is a `nix eval` or two. The line itself blocks on
+        // the platform that writes the prompt to a file — see [`Agents::argv`].
+        // All of it blocks, and all of it is decided before anything is spawned.
         let built = tokio::task::spawn_blocking({
             let agents = agents.clone();
             let conversation = conversation.clone();
-            let profile = pairing.profile.clone();
+            let pairing = pairing.clone();
+            let session = session.clone();
 
-            move || agents.sandboxed(&conversation, &profile, &argv)
+            move || {
+                let argv = agents.argv(
+                    conversation_id,
+                    &pairing,
+                    &prompt,
+                    session.as_deref(),
+                    conversation.worktree.as_deref(),
+                )?;
+
+                agents.sandboxed(&conversation, &pairing.profile, &argv)
+            }
         })
         .await?;
 
         let Some((sandbox, argv)) = built else {
             tracing::error!(
                 conversation_id,
-                "there is no sandbox to run a session in, so none was started"
+                "there is nothing to run a session on — no sandbox to run it in, or no \
+                 prompt it could be started on — so none was started"
             );
             return Ok(None);
         };
@@ -1788,7 +1830,19 @@ impl Sessions {
         // to have. See [`Sessions::channel`].
         let _launching = self.launching(conversation_id, pairing.profile.agent_type());
 
-        let child = match terminal.spawn(&mut captured(&sandbox, &argv)) {
+        // `argv` inside the sandbox with nothing between the two, and the three
+        // streams left to the terminal — which is the whole of what says a
+        // session runs on one.
+        //
+        // And beside it what is left to see to once this session has gone: on
+        // the platform that joins the account into a session's profile by hard
+        // link, a file the session replaced rather than wrote in place. Held by
+        // the relay from here, which is the thing that knows when the session is
+        // over. See [`crate::sandbox::Closing`], which is nothing at all on
+        // either Unix.
+        let (command, afterwards) = sandbox.command(&argv);
+
+        let child = match terminal.spawn(&command) {
             Ok(child) => child,
             Err(error) => {
                 tracing::error!(
@@ -1952,6 +2006,25 @@ impl Sessions {
                     // relay returns there is not, however long the sweep and
                     // the bookkeeping under it take.
                     gone.store(true, Ordering::Release);
+
+                    // And the profile the session was given, seen to now that
+                    // the process that had it has been reaped: a file it
+                    // replaced rather than wrote in place goes back over the
+                    // account's own, and the link is made fresh — see
+                    // [`crate::sandbox::Closing`]. Before whoever is driving
+                    // hears that the session is over, because the next thing
+                    // that happens after that word is the next session being
+                    // launched into the same profile. Off the runtime, being a
+                    // file copy at worst; nothing at all on either Unix.
+                    if let Err(error) =
+                        tokio::task::spawn_blocking(move || afterwards.close()).await
+                    {
+                        tracing::error!(
+                            error = ?error,
+                            conversation_id,
+                            "seeing to what a session wrote to its account ended badly"
+                        );
+                    }
 
                     // The session is over, so the branches are finished moving.
                     // Waited on rather than only asked to stop, because what
@@ -2128,21 +2201,6 @@ fn session_name() -> Option<String> {
     }
 
     Some(name)
-}
-
-/// `argv` as a session: run inside `sandbox`, with nothing between the two.
-///
-/// One argument vector all the way down, and the three streams are left to
-/// [`Terminal::spawn`] — which is the whole of what says a session runs on a
-/// terminal.
-fn captured(sandbox: &Sandbox, argv: &[String]) -> Command {
-    let mut command = Command::from(sandbox.command(argv));
-
-    // The relay ends the session itself, and a child left behind by a panicking
-    // task is one nothing would ever reap.
-    command.kill_on_drop(true);
-
-    command
 }
 
 /// Where a running session's output goes: the Timeline Event it is written into,
@@ -2510,6 +2568,31 @@ mod tests {
 
     use super::*;
 
+    /// The Conversation every line below is built for.
+    ///
+    /// Any id does: what it names is the directory a prompt would be written
+    /// into, and that is one platform's business — see [`Agents::argv`].
+    const CONVERSATION: i64 = 7;
+
+    impl Agents {
+        /// [`Agents::argv`] for [`CONVERSATION`], with the line it always has.
+        ///
+        /// The `None` that method can answer is a prompt that could not be
+        /// written down, which is a thing only the platform that writes one to
+        /// a file can do. Every case here but that platform's own keeps its
+        /// prompt on the command line, so every one of them has a line.
+        fn launched(
+            &self,
+            pairing: &store::Pairing,
+            prompt: &str,
+            session: Option<&str>,
+            worktree: Option<&Path>,
+        ) -> Vec<String> {
+            self.argv(CONVERSATION, pairing, prompt, session, worktree)
+                .expect("a prompt that stays on the command line is always a line")
+        }
+    }
+
     fn profile() -> store::Profile {
         store::Profile {
             id: 1,
@@ -2595,19 +2678,22 @@ mod tests {
 
     /// A server's own: the binary is the Profile's agent type's, with nothing
     /// standing where it goes.
+    ///
+    /// **Told which platform it is on rather than reading the runner's.** What
+    /// nearly every test below asks about is the line a backend takes, and one
+    /// of the three platforms does not put the prompt on that line at all — see
+    /// [`Agents::argv`]. Read off the machine, the same assertions would be
+    /// about two different lines depending on which runner ran them; the arm
+    /// that writes the prompt down is asked for by name, by [`on`].
     fn real(state: &std::path::Path) -> Agents {
         Agents::new(
-            Homes::on(
-                crate::platform::Platform::HERE,
-                PathBuf::from("/home/verkstead"),
-                state,
-            ),
+            Homes::on(Platform::Linux, PathBuf::from("/home/verkstead"), state),
             Reachable::at("127.0.0.1:8422".parse().unwrap()),
             SandboxConfig::default(),
             // What the argv is built from is not the sandbox, so this asks for
             // no cache at all rather than making one somewhere.
             BuildCache::none(),
-            Skills::installed(state).expect("this binary carries skills"),
+            Skills::installed(Platform::Linux, state).expect("this binary carries skills"),
             // A test harness is its own executable, and what a sandbox does with
             // one is bind it: any file that is really there will do where nothing
             // here runs it.
@@ -2630,7 +2716,7 @@ mod tests {
     #[test]
     fn a_session_runs_the_pairings_model_on_the_prompt() {
         let state = tempfile::tempdir().unwrap();
-        let argv = agents(vec!["claude".to_owned()], state.path()).argv(
+        let argv = agents(vec!["claude".to_owned()], state.path()).launched(
             &pairing(),
             "# Rate limiting\n",
             None,
@@ -2659,7 +2745,7 @@ mod tests {
             profile: profile(),
             model: None,
         };
-        let argv = agents(vec!["claude".to_owned()], state.path()).argv(
+        let argv = agents(vec!["claude".to_owned()], state.path()).launched(
             &unpaired,
             "# Rate limiting\n",
             None,
@@ -2683,7 +2769,7 @@ mod tests {
     #[test]
     fn a_named_session_is_run_under_the_name_it_was_given() {
         let state = tempfile::tempdir().unwrap();
-        let argv = agents(vec!["claude".to_owned()], state.path()).argv(
+        let argv = agents(vec!["claude".to_owned()], state.path()).launched(
             &pairing(),
             "# Rate limiting\n",
             Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
@@ -2713,28 +2799,28 @@ mod tests {
 
         assert_eq!(
             agents
-                .argv(&pairing(), "# Rate limiting\n", None, worktree())
+                .launched(&pairing(), "# Rate limiting\n", None, worktree())
                 .first()
                 .map(String::as_str),
             Some("claude")
         );
         assert_eq!(
             agents
-                .argv(&codex_pairing(), "# Rate limiting\n", None, worktree())
+                .launched(&codex_pairing(), "# Rate limiting\n", None, worktree())
                 .first()
                 .map(String::as_str),
             Some("codex")
         );
         assert_eq!(
             agents
-                .argv(&grok_pairing(), "# Rate limiting\n", None, worktree())
+                .launched(&grok_pairing(), "# Rate limiting\n", None, worktree())
                 .first()
                 .map(String::as_str),
             Some("grok")
         );
         assert_eq!(
             agents
-                .argv(&opencode_pairing(), "# Rate limiting\n", None, worktree())
+                .launched(&opencode_pairing(), "# Rate limiting\n", None, worktree())
                 .first()
                 .map(String::as_str),
             Some("opencode")
@@ -2753,7 +2839,7 @@ mod tests {
     #[test]
     fn a_codex_session_takes_the_line_codex_takes() {
         let state = tempfile::tempdir().unwrap();
-        let argv = agents(vec!["codex".to_owned()], state.path()).argv(
+        let argv = agents(vec!["codex".to_owned()], state.path()).launched(
             &codex_pairing(),
             "# Rate limiting\n",
             Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
@@ -2783,7 +2869,7 @@ mod tests {
     #[test]
     fn a_codex_session_with_no_worktree_trusts_nothing() {
         let state = tempfile::tempdir().unwrap();
-        let argv = agents(vec!["codex".to_owned()], state.path()).argv(
+        let argv = agents(vec!["codex".to_owned()], state.path()).launched(
             &codex_pairing(),
             "# Rate limiting\n",
             None,
@@ -2812,7 +2898,7 @@ mod tests {
     #[test]
     fn a_grok_session_takes_the_line_grok_takes() {
         let state = tempfile::tempdir().unwrap();
-        let argv = agents(vec!["grok".to_owned()], state.path()).argv(
+        let argv = agents(vec!["grok".to_owned()], state.path()).launched(
             &grok_pairing(),
             "# Rate limiting\n",
             Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
@@ -2851,7 +2937,7 @@ mod tests {
     #[test]
     fn an_opencode_session_takes_the_line_opencode_takes() {
         let state = tempfile::tempdir().unwrap();
-        let argv = agents(vec!["opencode".to_owned()], state.path()).argv(
+        let argv = agents(vec!["opencode".to_owned()], state.path()).launched(
             &opencode_pairing(),
             "# Rate limiting\n",
             Some("d3b07384-d9a0-4c9b-8f2a-1b7c5e6f0a12"),
@@ -2871,6 +2957,224 @@ mod tests {
         );
     }
 
+    /// A server told it is running on `platform`, which is the whole of what
+    /// decides whether a prompt goes on the command line or into a file.
+    ///
+    /// A value rather than a `cfg!`, so the runner this suite is on asks every
+    /// arm — see [`Agents::argv`].
+    fn on(platform: Platform, state: &std::path::Path) -> Agents {
+        Agents {
+            homes: Homes::on(platform, PathBuf::from("/home/verkstead"), state),
+            ..agents(vec!["claude".to_owned()], state)
+        }
+    }
+
+    /// Where the Conversation's prompt file is written, seen from outside the
+    /// session — the handoff directory under the Data Directory.
+    fn written_at(state: &std::path::Path) -> PathBuf {
+        state
+            .join("handoffs")
+            .join(CONVERSATION.to_string())
+            .join("prompt.md")
+    }
+
+    /// And where the session opens it: the same directory reached from inside,
+    /// which is under the profile Windows gives a Conversation.
+    ///
+    /// Composed the way the server composes it rather than by joining the names
+    /// again here. What a session is told is a path it can *open*, so the
+    /// handoff directory inside a HOME is spelled with a forward slash whichever
+    /// machine composed it — see [`crate::sandbox::under`] — and a `join` here
+    /// would put this machine's own separator where that one is and match
+    /// nothing.
+    fn opened_at(state: &std::path::Path) -> PathBuf {
+        crate::handoffs::inside(
+            Platform::Windows,
+            &state.join("homes").join(CONVERSATION.to_string()),
+        )
+        .join("prompt.md")
+    }
+
+    /// A prompt with everything a real one carries: what the builders above put
+    /// under the Brief, rather than a line invented here.
+    fn built_prompt() -> String {
+        skills::naming("# Rate limiting\n", true)
+    }
+
+    /// Windows caps a command line at 32,767 characters, so a session there is
+    /// started on one line naming a file rather than on the prompt itself — and
+    /// the file holds the whole of what the builders produced.
+    #[test]
+    fn a_windows_session_is_started_on_a_line_naming_its_prompt() {
+        let state = tempfile::tempdir().unwrap();
+        let prompt = built_prompt();
+
+        let argv = on(Platform::Windows, state.path())
+            .argv(CONVERSATION, &pairing(), &prompt, None, worktree())
+            .expect("a prompt that could be written down");
+
+        assert_eq!(
+            argv.len(),
+            5,
+            "the line is the backend's own, with one argument where the prompt was: {argv:?}",
+        );
+        assert!(
+            !argv
+                .iter()
+                .any(|argument| argument.contains("Rate limiting")),
+            "nothing of the prompt itself is on the line: {argv:?}",
+        );
+
+        let started_on = &argv[3];
+
+        assert!(
+            !started_on.contains('\n'),
+            "what is there instead is one line: {started_on:?}",
+        );
+        assert!(
+            started_on.contains(&opened_at(state.path()).display().to_string()),
+            "and it names the file by the path the session opens it at: {started_on:?}",
+        );
+
+        assert_eq!(
+            std::fs::read_to_string(written_at(state.path())).expect("a prompt file"),
+            prompt,
+            "and the file holds the whole prompt, the naming instruction included",
+        );
+    }
+
+    /// And a prompt no Windows command line could have carried starts a session
+    /// all the same, which is what writing it down is for. An implementing
+    /// session's prompt carries the whole handoff document inlined, and a
+    /// grilling that settled a lot settles more than 32,767 characters of it.
+    #[test]
+    fn a_prompt_too_long_for_a_command_line_starts_a_session_all_the_same() {
+        /// What Windows will take, as `CreateProcessW` documents it.
+        const LIMIT: usize = 32_767;
+
+        let state = tempfile::tempdir().unwrap();
+        let prompt = format!(
+            "# What we settled\n\n{}",
+            "A paragraph of the handoff document. ".repeat(1_000),
+        );
+        assert!(prompt.len() > LIMIT, "the prompt is longer than a line");
+
+        let argv = on(Platform::Windows, state.path())
+            .argv(CONVERSATION, &pairing(), &prompt, None, worktree())
+            .expect("a prompt that could be written down");
+
+        // The line as the machine measures it: every argument, and a space and
+        // a pair of quotes around each.
+        let measured: usize = argv.iter().map(|argument| argument.len() + 3).sum();
+
+        assert!(
+            measured < LIMIT,
+            "the line is {measured} characters, which is one Windows would refuse: {argv:?}",
+        );
+        assert_eq!(
+            std::fs::read_to_string(written_at(state.path())).expect("a prompt file"),
+            prompt,
+            "and the whole of it is in the file",
+        );
+    }
+
+    /// The two platforms whose command line is long enough keep the prompt on
+    /// it, byte for byte as they always have — and write nothing down.
+    #[test]
+    fn the_platforms_with_a_long_enough_line_keep_the_prompt_on_it() {
+        for platform in [Platform::Linux, Platform::MacOs] {
+            let state = tempfile::tempdir().unwrap();
+
+            let argv = on(platform, state.path())
+                .argv(
+                    CONVERSATION,
+                    &pairing(),
+                    "# Rate limiting\n",
+                    None,
+                    worktree(),
+                )
+                .expect("a prompt that stays on the command line");
+
+            assert_eq!(
+                argv,
+                vec![
+                    "claude".to_owned(),
+                    "--model".to_owned(),
+                    "claude-opus-5".to_owned(),
+                    "# Rate limiting\n".to_owned(),
+                    "--dangerously-skip-permissions".to_owned(),
+                ],
+                "{platform:?} runs the prompt itself",
+            );
+            assert!(
+                !state.path().join("handoffs").exists(),
+                "and nothing was written down for it on {platform:?}",
+            );
+        }
+    }
+
+    /// What a stand-in agent does with such a line: read the arguments it was
+    /// started with, find the one naming a file, and print what is in it.
+    ///
+    /// Which is the whole of what the stand-in agent in the Windows suite does
+    /// with the same line, written here in the shell this suite's machine has.
+    #[cfg(unix)]
+    const STAND_IN: &str = r#"
+for word in "$@"; do
+    file=$(printf '%s' "$word" | sed -n 's/.*`\(.*\)`.*/\1/p')
+    if [ -n "$file" ]; then
+        cat "$file"
+        exit 0
+    fi
+done
+exit 1
+"#;
+
+    /// And the line works: an agent that reads it finds the file and gets the
+    /// Brief out of it.
+    ///
+    /// The two ends of the path are one directory on Windows because the open
+    /// rendering joins the handoff directory into the session's profile by a
+    /// directory junction — see [`crate::sandbox::open`]. There are no
+    /// junctions on the machine this runs on, so a symbolic link stands where
+    /// one goes: what is being asked is whether the *line* names the file, and
+    /// a link makes the path it names the file it wrote.
+    #[cfg(unix)]
+    #[test]
+    fn a_stand_in_agent_reads_the_brief_out_of_the_file() {
+        let state = tempfile::tempdir().unwrap();
+        let prompt = built_prompt();
+
+        let argv = on(Platform::Windows, state.path())
+            .argv(CONVERSATION, &pairing(), &prompt, None, worktree())
+            .expect("a prompt that could be written down");
+
+        let opened = opened_at(state.path());
+        std::fs::create_dir_all(opened.parent().unwrap().parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(
+            written_at(state.path()).parent().unwrap(),
+            opened.parent().unwrap(),
+        )
+        .unwrap();
+
+        let read = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(STAND_IN)
+            .args(&argv)
+            .output()
+            .expect("a shell to stand where the agent goes");
+
+        assert!(
+            read.status.success(),
+            "the stand-in found no file to read in {argv:?}",
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&read.stdout),
+            prompt,
+            "and what it read is the Brief the session was started on",
+        );
+    }
+
     /// The stub the suite stands where an agent goes stands there for every
     /// type, and reads the line it reads today: the model first and the prompt
     /// after it, whichever backend's line that is.
@@ -2878,7 +3182,7 @@ mod tests {
     fn a_stub_stands_where_every_types_binary_goes() {
         let state = tempfile::tempdir().unwrap();
         let stub = vec!["/bin/sh".to_owned(), "-c".to_owned(), "printf x".to_owned()];
-        let argv = agents(stub.clone(), state.path()).argv(
+        let argv = agents(stub.clone(), state.path()).launched(
             &codex_pairing(),
             "# Rate limiting\n",
             None,
@@ -2924,38 +3228,32 @@ mod tests {
         }
     }
 
-    /// Which platforms run a session, said as the value it is: two do, and the
-    /// one that has no pseudo-terminal to open does not — yet.
+    /// Every platform runs a session, and the one with no Sandbox of its own
+    /// runs it outside one — which is Windows, until the Sandbox stage lands.
     ///
     /// Every arm asked on whichever machine is running this, which is the whole
     /// reason it is a function of the platform rather than a `cfg!`: what a
     /// Windows build answers is a thing the Linux runner can check.
     #[test]
-    fn the_platform_without_a_terminal_runs_no_sessions() {
-        assert_eq!(run_on(Platform::Linux), SessionsHere::Run);
-        assert_eq!(run_on(Platform::MacOs), SessionsHere::Run);
-        assert_eq!(run_on(Platform::Windows), SessionsHere::NotOnWindowsYet);
-
+    fn the_platform_without_a_sandbox_runs_sessions_outside_one() {
         assert!(
-            run_on(Platform::Windows).absent(),
-            "which is the question every way into a session asks",
+            unsandboxed_on(Platform::Windows),
+            "Windows has a terminal now and no Sandbox yet",
         );
-        assert!(!run_on(Platform::Linux).absent());
+        assert!(!unsandboxed_on(Platform::Linux));
+        assert!(!unsandboxed_on(Platform::MacOs));
     }
 
     /// And what a registry says about it: the served router's own is the
-    /// platform's answer, and a test's is the one that leaves a press making
-    /// what it makes.
+    /// platform's answer, and a test's is a build with a Sandbox unless it is
+    /// stood up as the one without.
     #[test]
-    fn a_registry_says_whether_there_is_a_session_to_start() {
-        assert_eq!(Sessions::none().here(), SessionsHere::Run);
-        assert_eq!(
-            Sessions::without_sessions().here(),
-            SessionsHere::NotOnWindowsYet,
-        );
+    fn a_registry_says_whether_a_session_here_is_sandboxed() {
+        assert!(!Sessions::none().unsandboxed());
+        assert!(Sessions::unsandboxed_here().unsandboxed());
         assert!(
-            !Sessions::without_sessions().runs_sessions(),
-            "and a build with no sessions has no agents either way",
+            !Sessions::unsandboxed_here().runs_sessions(),
+            "and a registry stood up for that question has no agents either way",
         );
     }
 }

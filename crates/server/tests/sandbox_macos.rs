@@ -60,7 +60,9 @@ use std::process::{Command, Stdio};
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::platform::Platform;
-use verkstead_server::sandbox::{Bind, Executable, Homes, Reachable, Sandbox, SandboxConfig};
+use verkstead_server::sandbox::{
+    Bind, Executable, Homes, Reachable, Rendering, Sandbox, SandboxConfig,
+};
 use verkstead_server::settings::{RustBuildCache, Settings};
 use verkstead_server::skills::Skills;
 use verkstead_server::store;
@@ -565,7 +567,8 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
         .unwrap()
         .expect("the Conversation is there");
 
-    let skills = Skills::installed(state.path()).expect("this binary carries skills");
+    let skills =
+        Skills::installed(Platform::HERE, state.path()).expect("this binary carries skills");
     let handoffs = Handoffs::under(state.path());
     let settings = Settings::in_data_dir(state.path());
 
@@ -577,7 +580,8 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
     std::fs::create_dir_all(image.parent().unwrap()).unwrap();
     std::fs::write(&image, SAYS_WHICH_BUILD).unwrap();
     std::fs::set_permissions(&image, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let verkstead = Executable::at(image, state.path()).expect("the executable was just written");
+    let verkstead = Executable::at(Platform::HERE, image, state.path())
+        .expect("the executable was just written");
 
     Grilling {
         watched,
@@ -679,9 +683,9 @@ file() {
 /// them is about.
 fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
     let whole = format!("{PROBE}\n{script}\n");
-    let mut command = sandbox.command(&[SH, "-c", &whole]);
+    let (rendering, _) = sandbox.command(&[SH, "-c", &whole]);
 
-    let output = command
+    let output = Command::from(&rendering)
         .stdin(Stdio::null())
         .output()
         .expect("sandbox-exec is part of macOS");
@@ -696,7 +700,7 @@ fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
         output.status,
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
-        policy_of(&command),
+        policy_of(&rendering),
     );
 
     String::from_utf8_lossy(&output.stdout)
@@ -711,8 +715,8 @@ fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
 /// Off the command rather than asked of the server, because that is what was
 /// actually handed to `sandbox-exec`: a reader of a failure wants the string
 /// that failed rather than one built again beside it.
-fn policy_of(command: &Command) -> String {
-    let mut args = command.get_args();
+fn policy_of(rendering: &Rendering) -> String {
+    let mut args = rendering.argv().iter();
 
     while let Some(arg) = args.next() {
         if arg == "-p" {

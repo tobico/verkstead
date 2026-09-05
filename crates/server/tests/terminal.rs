@@ -10,13 +10,14 @@
 //! The probe is a shell, because `stty` is how a process asks the terminal
 //! underneath it how big it is, and a shell is the shortest way to `stty`.
 //!
-//! On the platforms that have a pseudo-terminal to open. Windows has not, and
-//! the whole of what it has instead is a `Terminal::open` that refuses — see
-//! `terminal::absent`, where there is nothing here left to ask.
+//! On the platforms that have a pseudo-terminal to open. What Windows has
+//! instead is a pseudoconsole, and the same two questions asked of one are in
+//! `terminal_windows.rs` — `mode con` there rather than `stty` here.
 #![cfg(unix)]
 
 use std::time::{Duration, Instant};
 
+use verkstead_server::sandbox::Rendering;
 use verkstead_server::terminal::{COLUMNS, ROWS, Terminal};
 
 /// How long to wait for something the probe says. Generously long: what is
@@ -38,12 +39,9 @@ async fn a_session_is_started_on_a_terminal_of_its_own() {
     let mut terminal = Terminal::open().expect("this machine has pseudo-terminals");
 
     let mut child = terminal
-        .spawn(
-            tokio::process::Command::new(SH)
-                .arg("-c")
-                .arg(": < /dev/tty && printf 'controlling %s\\n' \"$(tty)\"")
-                .kill_on_drop(true),
-        )
+        .spawn(&shell(
+            ": < /dev/tty && printf 'controlling %s\\n' \"$(tty)\"",
+        ))
         .expect("a shell to run on it");
 
     let said = until(&terminal, |said| said.contains("controlling ")).await;
@@ -71,12 +69,9 @@ async fn resizing_a_terminal_is_something_the_session_on_it_is_told() {
     // arriving is what says the probe is ready to be resized, and a window
     // changed before anything was listening is a signal nothing hears.
     let mut child = terminal
-        .spawn(
-            tokio::process::Command::new(SH)
-                .arg("-c")
-                .arg("trap 'stty size' WINCH; stty size; while :; do sleep 0.05; done")
-                .kill_on_drop(true),
-        )
+        .spawn(&shell(
+            "trap 'stty size' WINCH; stty size; while :; do sleep 0.05; done",
+        ))
         .expect("a shell to run on it");
 
     let started = format!("{ROWS} {COLUMNS}");
@@ -97,6 +92,24 @@ async fn resizing_a_terminal_is_something_the_session_on_it_is_told() {
 
     let _ = child.start_kill();
     let _ = child.wait().await;
+}
+
+/// The probe as a terminal is given one: a shell running `script`.
+///
+/// A rendering carries the whole of the environment a process is handed — see
+/// [`Rendering`] — so a `PATH` said here is the difference between a probe that
+/// can call `stty` and one that cannot. The test's own, because what is being
+/// asked about is the terminal rather than what a session may reach.
+fn shell(script: &str) -> Rendering {
+    let mut probe = Rendering::running(SH);
+
+    probe.arg("-c").arg(script);
+
+    if let Some(path) = std::env::var_os("PATH") {
+        probe.set("PATH", path);
+    }
+
+    probe
 }
 
 /// Read the terminal until what has arrived on it satisfies `enough`, and hand

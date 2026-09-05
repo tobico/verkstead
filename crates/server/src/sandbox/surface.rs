@@ -1,9 +1,10 @@
 //! What a session may reach, said once.
 //!
-//! One description, and two renderings of it: bubblewrap's flags on Linux — see
-//! [`super::bwrap`] — and a deny-by-default policy on macOS — see
-//! [`super::seatbelt`]. Neither rendering is the description, and nothing above
-//! [`super::Sandbox`] learns which one it got.
+//! One description, and three renderings of it: bubblewrap's flags on Linux —
+//! see [`super::bwrap`] — a deny-by-default policy on macOS — see
+//! [`super::seatbelt`] — and the process itself on Windows, which has no
+//! boundary yet — see [`super::open`]. No rendering is the description, and
+//! nothing above [`super::Sandbox`] learns which one it got.
 //!
 //! **The order is part of it.** A bind is applied in the order bwrap is given
 //! it, so a directory said twice is the second one, and a temporary filesystem
@@ -11,13 +12,15 @@
 //! ordered list rather than a set of lists by kind, and a renderer walks it as
 //! it was written.
 //!
-//! **The vocabulary is what both mechanisms can answer to**, which is narrower
-//! than either of their own. A path is reachable at its own place or somewhere
+//! **The vocabulary is what the mechanisms can answer to**, which is narrower
+//! than any of their own. A path is reachable at its own place or somewhere
 //! else, and a session may read it or write it; a few things are made rather
 //! than reached, being nobody's on the host. Everything a mechanism does about
 //! *how* — a mount namespace, a policy expression, a directory really made and
 //! a link really written — is the renderer's own business and none of this
-//! file's.
+//! file's. **Answering none of it is a renderer's own business too**: the open
+//! rendering makes no path be anywhere, and what it leaves unmade is written
+//! there rather than left out of the vocabulary here.
 
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
@@ -74,7 +77,8 @@ pub(crate) enum Access {
     Temporary(PathBuf),
 
     /// A directory that is really there and really empty, which is what a
-    /// session's HOME is before the account lands in it.
+    /// session's HOME is before the account lands in it — and what each half
+    /// of a Windows profile inside that HOME is before anything writes there.
     Empty(PathBuf),
 }
 

@@ -21,14 +21,25 @@
 //! shell where its flake has one. Under the implementation Pairing's Profile —
 //! the grilling Pairing's where the implementation role has none — because a
 //! terminal has no role of its own and that is the account the work is done
-//! under. Running one outside the Sandbox was never on the table: the filesystem
-//! boundary is what makes a shell in a Conversation safe to offer at all.
+//! under. Running one outside the Sandbox is not a choice this module makes:
+//! the filesystem boundary is what makes a shell in a Conversation safe to
+//! offer at all, and it takes whatever the platform has.
+//!
+//! **Which on Windows is nothing yet**, until the sandbox stage lands: the same
+//! builder renders the same description as a plain process there, so the shell
+//! comes up with the human's own account's reach. Nothing here is gated on it —
+//! a shell in a Conversation's Worktree is the same thing to open either way —
+//! and what a human gets instead is the pane saying so before they type into
+//! it, off the one value the Conversation view carries (see
+//! [ADR 0014](../../../docs/adr/0014-windows-sessions.md)).
 //!
 //! **Running the shell the machine's own human would get.** The server user's
 //! login shell out of passwd, where that is a shell a Sandbox can run, and
-//! `/bin/sh` where it is not — see [`shell`]. There is no setting for it: on a
-//! packaged install the nix module gives the service user a shell, which is
-//! where a machine's shells are said already.
+//! `/bin/sh` where it is not; `pwsh` where the machine keeps no such database
+//! and has one, and Windows PowerShell where it has not — see [`shell`], which
+//! is the whole of that choosing. There is no setting for it: on a packaged
+//! install the nix module gives the service user a shell, which is where a
+//! machine's shells are said already.
 //!
 //! **A register of its own.** A Conversation has one session and may have any
 //! number of terminals, so these are kept apart from the sessions' map rather
@@ -41,11 +52,12 @@
 //! closes, which is [`Terminals::end_every`], before its Worktree is removed;
 //! or the server stops, which nothing here does anything about — a terminal's
 //! Sandbox is a `bwrap --die-with-parent` child like a session's, with the
-//! keeper beside it on the platform whose sandbox has no such flag (see
-//! [`outliving`]). No idle reaper and no ending on leaving the pane: the server
-//! holds the terminal so that closing the pane, switching devices or losing a
-//! connection loses nothing, and a reaper would take back with one hand what
-//! that gives with the other.
+//! keeper beside it on the platform whose sandbox has no such flag and a Job
+//! Object holding it on the platform whose child is one (see [`outliving`] and
+//! [`crate::terminal`]). No idle reaper and no ending on leaving the pane: the
+//! server holds the terminal so that closing the pane, switching devices or
+//! losing a connection loses nothing, and a reaper would take back with one
+//! hand what that gives with the other.
 //!
 //! The three this module *does* do are one ending, in [`follow`]: the shell is
 //! hung up, killed after [`LINGERING`] where it is still standing, and the
@@ -61,9 +73,9 @@
 //! terminal opened beside a running session is somebody looking, and somebody
 //! who means to take the work on by hand presses **Stop** first.
 
-/// Which shell a terminal comes up in: the server user's own, where the machine
-/// has given it a usable one — see [`shell`], which is the whole of the
-/// choosing.
+/// Which shell a terminal comes up in: the server user's own where the machine
+/// has given it a usable one, and PowerShell where the machine keeps no such
+/// answer — see [`shell`], which is the whole of the choosing.
 pub mod shell;
 
 use std::collections::HashMap;
@@ -74,20 +86,19 @@ use axum::extract::ws::{WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response as HttpResponse};
-use tokio::process::{Child, Command};
 use tokio::sync::oneshot;
 use verkstead_render::TerminalOpened;
 
 use crate::AppState;
 use crate::capture::Reading;
 use crate::platform::Platform;
-use crate::sandbox::outliving;
+use crate::sandbox::{Closing, outliving};
 use crate::screen::Live;
 use crate::sessions::CHUNK;
 use crate::store;
-use crate::terminal::Terminal;
+use crate::terminal::{Child, Terminal};
 
-/// How that shell is started.
+/// How that shell is started on the platforms whose shell wants telling.
 ///
 /// Interactive, because what is at the other end of it is a human at a keyboard.
 /// And not a login shell, because a login shell reads the system's profile,
@@ -98,6 +109,13 @@ use crate::terminal::Terminal;
 /// every shell rebuilds the environment as it starts whether it is a login shell
 /// or not, and what stops it is said in the environment — see
 /// [`crate::sandbox::Sandbox::shelled`].
+///
+/// **Not said to a PowerShell**, which is why the vector is built by Platform
+/// rather than written down once. A PowerShell started with no arguments at all
+/// is already the interactive one — being interactive there is a fact about
+/// there being a console in front of it rather than a switch — and `-i` is not
+/// the word for it either way: Windows PowerShell reads a leading `-i` as the
+/// start of `-InputFormat` and refuses a line that gives it nothing to format.
 const INTERACTIVE: &str = "-i";
 
 /// How long a shell is given to go on its own after it has been hung up, before
@@ -312,13 +330,6 @@ impl Terminals {
 /// there is none — see [`TerminalOpened`], whose refusals are the ones a
 /// session's start refuses by, asked about a shell.
 pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Result<TerminalOpened> {
-    // A build with no pseudo-terminal to open has nothing to run a shell on, and
-    // it says so in front of everything else — the same rule, asked in the same
-    // place, that refuses a session there.
-    if state.sessions.here().absent() {
-        return Ok(TerminalOpened::NotOnWindowsYet);
-    }
-
     let Some(agents) = state.sessions.agents() else {
         tracing::warn!(
             conversation_id,
@@ -356,10 +367,20 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
         move || {
             // What this machine's own human gets at a keyboard, which is what a
             // terminal is for. Asked here rather than above because it is the
-            // machine that answers — the passwd database and the filesystem —
-            // and this is the thread that is allowed to wait on either.
+            // machine that answers — the passwd database and the filesystem on
+            // one platform, the `PATH` on the other — and this is the thread
+            // that is allowed to wait on any of them.
             let chosen = shell::of_the_server();
-            let argv = vec![chosen.clone(), INTERACTIVE.to_owned()];
+
+            // And how it is told there is somebody in front of it, which is a
+            // switch on one platform and nothing at all on the other — see
+            // [`INTERACTIVE`].
+            let argv = match Platform::HERE {
+                Platform::Windows => vec![chosen.clone()],
+                Platform::Linux | Platform::MacOs => {
+                    vec![chosen.clone(), INTERACTIVE.to_owned()]
+                }
+            };
 
             // Said twice: it is the command the Sandbox runs, and it is what
             // `SHELL` names inside — so what the human is typing into and what
@@ -392,12 +413,16 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
         }
     };
 
-    let mut command = Command::from(sandbox.command(&argv));
+    // And what is left to see to once this shell has gone, which a terminal
+    // holds for the reason a session holds one: it runs in the same profile
+    // under the same account, so a file it replaced rather than wrote in place
+    // is a file the account should end up with. See [`Closing`], and
+    // [`crate::sessions`], where the same value is held by the relay. Named for
+    // what it is rather than for its type, `closing` in this module already
+    // being the word down that a terminal is to end.
+    let (command, afterwards) = sandbox.command(&argv);
 
-    // A shell left behind by a panicking task is one nothing would ever reap.
-    command.kill_on_drop(true);
-
-    let child = match terminal.spawn(&mut command) {
+    let child = match terminal.spawn(&command) {
         Ok(child) => child,
         Err(error) => {
             tracing::error!(
@@ -443,6 +468,7 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
         number,
         terminal,
         child,
+        afterwards,
         screen,
         closed,
         over,
@@ -470,11 +496,16 @@ pub(crate) async fn open(state: &AppState, conversation_id: i64) -> anyhow::Resu
 /// is the word back, and it is the holding of it rather than anything said down
 /// it: whoever is waiting hears when this returns, which is after the shell has
 /// been reaped.
+///
+/// **And `afterwards` is what the rendering left to see to**, held here for the
+/// same reason the terminal is: it is asked once the shell has gone, and the
+/// shell is what it is about — a file it replaced rather than wrote in place,
+/// in the profile it shared with the Conversation's sessions. See [`Closing`].
 #[expect(
     clippy::too_many_arguments,
     reason = "\
-    one terminal's whole self: what it runs on, what runs on it, what it draws \
-    on, and a word each way about its ending"
+    one terminal's whole self: what it runs on, what runs on it, what it leaves \
+    to see to, what it draws on, and a word each way about its ending"
 )]
 async fn follow(
     terminals: Terminals,
@@ -482,6 +513,7 @@ async fn follow(
     number: i64,
     terminal: Arc<Terminal>,
     mut child: Child,
+    afterwards: Closing,
     screen: Live,
     mut closing: oneshot::Receiver<()>,
     over: oneshot::Sender<()>,
@@ -565,6 +597,21 @@ async fn follow(
         );
     }
 
+    // And the profile that shell was in, seen to the way a session's is: a file
+    // it replaced rather than wrote in place goes back over the account's own,
+    // and the link is made fresh — see [`Closing`]. After the shell has been
+    // reaped, because until then there is something that may still be writing
+    // it. Off the runtime, being a file copy at worst; nothing at all on either
+    // Unix.
+    if let Err(error) = tokio::task::spawn_blocking(move || afterwards.close()).await {
+        tracing::error!(
+            error = ?error,
+            conversation_id,
+            number,
+            "seeing to what a terminal wrote to its account ended badly"
+        );
+    }
+
     tracing::info!(conversation_id, number, "a terminal has ended");
 
     // And whoever asked for this to end hears that it has, which is this going
@@ -610,7 +657,7 @@ fn hang_up(child: &Child, conversation_id: i64, number: i64) {
 }
 
 /// And where there are no process groups to hang up — which is Windows, where
-/// there is no pseudo-terminal to have opened a shell on either.
+/// what a shell started is held by a Job instead — see [`crate::terminal`].
 ///
 /// The kill after [`LINGERING`] is the whole of the ending there, which is what
 /// a session gets on every platform.

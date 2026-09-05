@@ -34,6 +34,7 @@
 //! its own switch, and a sibling of this module is where one would go. Naming
 //! this one for what it caches is what leaves room for that.
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -155,6 +156,13 @@ pub struct BuildCache {
 struct Compiling {
     server: Child,
     size: String,
+
+    /// And what holds it to this server's life on the platform whose answer is
+    /// something to hold: the Job Object it is in — see
+    /// [`crate::sandbox::outliving::held`]. Nothing at all on the two whose
+    /// answer is said elsewhere, and held rather than read either way: letting
+    /// go of it is what ends the tree.
+    _held: outliving::Held,
 }
 
 impl Drop for Compiling {
@@ -162,11 +170,13 @@ impl Drop for Compiling {
     ///
     /// What makes the server Verkstead's rather than something left running on
     /// the machine is the platform's own answer to the case that matters — the
-    /// server exiting: `--die-with-parent` on Linux, and a keeper of
-    /// Verkstead's own on a Mac, which has no such flag to be started with (see
-    /// [`crate::sandbox::outliving`]). This covers the other case: a size the
-    /// human changed, where the old server is replaced while Verkstead carries
-    /// on, and where nothing else would ever tell it to go.
+    /// server exiting: `--die-with-parent` on Linux, a keeper of Verkstead's
+    /// own on a Mac, which has no such flag to be started with, and on Windows
+    /// the Job Object above, whose promise is kept by the handle closing
+    /// however this process ends (see [`crate::sandbox::outliving`]). This
+    /// covers the other case: a size the human changed, where the old server is
+    /// replaced while Verkstead carries on, and where nothing else would ever
+    /// tell it to go.
     fn drop(&mut self) {
         let _ = self.server.kill();
         let _ = self.server.wait();
@@ -358,7 +368,8 @@ impl BuildCache {
                 // [`crate::sandbox::outliving`], and [`compile_server`] for the
                 // process group of its own this is the other half of. Nothing
                 // at all on Linux, where `--die-with-parent` is the whole of
-                // it.
+                // it, and nothing on Windows either, where what says it is the
+                // Job the [`Compiling`] below is holding.
                 outliving::keep(Platform::HERE, server.id(), std::process::id());
 
                 tracing::info!(
@@ -369,6 +380,7 @@ impl BuildCache {
                 );
 
                 *running = Some(Compiling {
+                    _held: outliving::held(Platform::HERE, &server),
                     server,
                     size: settings.size().to_owned(),
                 });
@@ -490,9 +502,10 @@ pub fn builds_rust(repo: &Path) -> bool {
 /// credentials a session commits with — and none of it applies to a process
 /// that serves every Conversation and belongs to none. **It is a
 /// [`crate::sandbox::Surface`] all the same**, and rendered by the renderer a
-/// session's is: what a sandbox holds is one description on both platforms, so
-/// this is bubblewrap's flags on Linux and a deny-by-default policy on a Mac
-/// without a word here saying which — see [`crate::sandbox::rendered`].
+/// session's is: what a sandbox holds is one description on every platform, so
+/// this is bubblewrap's flags on Linux, a deny-by-default policy on a Mac and a
+/// plain process on Windows without a word here saying which — see
+/// [`crate::sandbox::rendered`].
 ///
 /// What it gave up to be one is the hostname it used to be given inside. A name
 /// for the machine is something one of the two mechanisms can say and the other
@@ -503,16 +516,17 @@ fn compile_server(dir: &Path, sccache: &Path, data_dir: &Path, size: &str) -> Co
     let worktrees = crate::worktrees::directory(data_dir);
     let home = compiling_home(data_dir);
 
-    // The directory of Verkstead's own inside, which is where the sccache
-    // below is found and where a session's own `verkstead` goes — and so what
-    // leads the `PATH` in both.
+    // The directory of Verkstead's own inside, which is what leads the `PATH`
+    // here as it leads a session's — and where the sccache below is found on
+    // the platforms that join one in. See [`crate::sandbox::sccache_inside`],
+    // which is the one place that difference is written.
     let ours = sandbox::own_bin(Platform::HERE, data_dir);
-    let inside = ours.join(SCCACHE);
+    let inside = sandbox::sccache_inside(Platform::HERE, &ours, sccache);
 
     // Started in its own HOME, which is a directory of Verkstead's own holding
     // nothing: a compile server has no checkout of its own to stand in, and
     // every path it is handed is absolute.
-    let mut surface = sandbox::on_the_machine(home.clone());
+    let mut surface = sandbox::on_the_machine(Platform::HERE, home.clone());
 
     surface
         .made(Access::Empty(home.clone()))
@@ -532,7 +546,7 @@ fn compile_server(dir: &Path, sccache: &Path, data_dir: &Path, size: &str) -> Co
         // this runs is beside where a session's `verkstead` goes, and what is
         // in front of the machine's own paths is that directory either way —
         // see [`crate::sandbox::path`].
-        .set("PATH", sandbox::path(&ours))
+        .set("PATH", sandbox::path(Platform::HERE, &ours))
         .set("SCCACHE_DIR", dir.join(SCCACHE_DIR))
         .set("SCCACHE_CACHE_SIZE", size)
         .set("SCCACHE_START_SERVER", "1")
@@ -540,7 +554,33 @@ fn compile_server(dir: &Path, sccache: &Path, data_dir: &Path, size: &str) -> Co
         .set("SCCACHE_IDLE_TIMEOUT", "0")
         .running(&[&inside]);
 
-    let mut compiling = sandbox::rendered(&surface);
+    // And what a Windows process is given beyond that, which is the same
+    // profile a session there is given and is given for the same reason: a
+    // program on that platform looks for its settings under the profile it was
+    // handed, and nothing there starts without the machine's own names. See
+    // [`crate::sandbox::windows_profile`] and [`crate::sandbox::windows_names`],
+    // which are the whole of both — and [`crate::sandbox::on_the_machine`],
+    // which leaves the profile to whoever knows where it is.
+    match Platform::HERE {
+        Platform::Windows => {
+            for made in sandbox::windows_profile(&home) {
+                surface.made(made);
+            }
+
+            for (name, value) in sandbox::windows_names(&home) {
+                surface.set(name, value);
+            }
+        }
+        Platform::Linux | Platform::MacOs => {}
+    }
+
+    // And nothing to close after it, which is the one caller of a rendering
+    // that has none: what a closing sees to is a file a session replaced rather
+    // than wrote in place — see [`crate::sandbox::Closing`] — and the one file
+    // this joins in is the sccache it is running, read-only. A compile server
+    // outlives every session anyway, so there is no ending here to hang one on.
+    let (rendering, _) = sandbox::rendered(Platform::HERE, &surface);
+    let mut compiling = Command::from(&rendering);
 
     // In a process group of its own where the platform needs one, which is what
     // a keeper ends when the server has gone — see
@@ -565,13 +605,29 @@ fn compile_server(dir: &Path, sccache: &Path, data_dir: &Path, size: &str) -> Co
 /// The server's environment rather than the sandbox's fixed `PATH`: what is
 /// bound into a sandbox has to be a file on the host, and the packaged unit
 /// puts sccache on the service's path precisely so that this finds it.
+///
+/// **What a name means is the platform's**, which is the one arm here. A bare
+/// `sccache` is a file on the two Unixes and is nothing at all on Windows,
+/// where what is installed is `sccache.exe` and what says so is `PATHEXT` — so
+/// a walk of `PATH` alone would find one on no Windows machine that has it.
+/// That resolving is the open rendering's, handed the server's own environment
+/// exactly as the terminals' shell lookup hands it — see
+/// [`crate::sandbox::open::found`], which is where the rules are, and
+/// [`crate::terminals::shell`], which is the other caller.
 fn on_the_path(program: &str) -> Option<PathBuf> {
-    std::env::split_paths(&std::env::var_os("PATH")?)
-        // A `PATH` entry that is empty means the working directory, which is
-        // not somewhere to go looking for a compiler wrapper.
-        .filter(|dir| !dir.as_os_str().is_empty())
-        .map(|dir| dir.join(program))
-        .find(|path| path.is_file())
+    match Platform::HERE {
+        Platform::Windows => crate::sandbox::open::found(
+            OsStr::new(program),
+            std::env::var_os("PATH").as_deref(),
+            std::env::var_os("PATHEXT").as_deref(),
+        ),
+        Platform::Linux | Platform::MacOs => std::env::split_paths(&std::env::var_os("PATH")?)
+            // A `PATH` entry that is empty means the working directory, which
+            // is not somewhere to go looking for a compiler wrapper.
+            .filter(|dir| !dir.as_os_str().is_empty())
+            .map(|dir| dir.join(program))
+            .find(|path| path.is_file()),
+    }
 }
 
 #[cfg(test)]

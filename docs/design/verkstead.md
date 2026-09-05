@@ -48,8 +48,15 @@ flowchart LR
   roadmap ships the app on Linux and on macOS, and a Mac runs sessions as well
   — over Apple's own sandbox rather than bwrap, to one description of what a
   session may reach, said in [ADR-0012](../adr/0012-desktop-tray-binary.md).
-  The headless daemon, the one binary and the NixOS module are unchanged, and
-  Windows is still without sessions.)
+  The headless daemon, the one binary and the NixOS module are unchanged.)
+  (*revised 2026-09-05, windows sessions stage 01*: that note ended "and
+  Windows is still without sessions". Windows runs them now, on a ConPTY of
+  Verkstead's own and in a fresh profile per Conversation — and with no
+  boundary around them at all, so the agent runs with the human's own account's
+  reach and the workbench says so on every session and every Conversation
+  Terminal. [ADR-0014](../adr/0014-windows-sessions.md) is why the terminal and
+  the Sandbox land as two stages rather than one; the AppContainer of its third
+  is what takes the note away again.)
 - **Single user, no app-level auth; the tailnet is the perimeter.** Unchanged
   from askance.
 - **Fresh database.** No import of askance history.

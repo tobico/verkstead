@@ -22,7 +22,7 @@
 
 #![cfg(target_os = "linux")]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
 use std::os::unix::fs::PermissionsExt;
@@ -33,7 +33,7 @@ use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::platform::Platform;
 use verkstead_server::sandbox::{
-    Bind, Executable, Homes, Reachable, Sandbox, SandboxConfig, under_dev_shell,
+    Bind, Closing, Executable, Homes, Reachable, Sandbox, SandboxConfig, under_dev_shell,
 };
 use verkstead_server::settings::{RustBuildCache, Settings};
 use verkstead_server::skills::Skills;
@@ -271,6 +271,67 @@ fi
             extra,
         )
         .expect("a grilling Conversation has a worktree to build a sandbox around")
+    }
+
+    /// And one built the way `platform` builds one, which is how the open
+    /// rendering is reached from a machine that is not the one it is for — see
+    /// [`the_open_rendering_hands_a_session_the_environment_it_was_described_with`].
+    fn sandbox_on(&self, platform: Platform) -> Sandbox {
+        self.sandbox_on_under(&self.profile, platform)
+            .expect("a grilling Conversation has a worktree to build a sandbox around")
+    }
+
+    /// The same, around a Profile that is not the fixture's own — and handing
+    /// back what it really answered, which is how the one Conversation that
+    /// cannot have a sandbox at all is asked about.
+    ///
+    /// **The Skills and the executable are built for `platform` too**, rather
+    /// than reused off the fixture. Where a session finds either of them is
+    /// that platform's answer — see `Skills::installed` and `Executable::at` —
+    /// and the fixture's own were built for the machine this is running on. A
+    /// description mixing the two is one where the rendering that joins a path
+    /// in by hand is asked to clear and link a name off the *host's* root,
+    /// which is neither what a Windows session would find nor a thing to do to
+    /// the machine running the suite.
+    fn sandbox_on_under(&self, profile: &store::Profile, platform: Platform) -> Option<Sandbox> {
+        Sandbox::for_conversation(
+            &self.conversation,
+            profile,
+            &Homes::on(platform, self.home.path().to_owned(), self.state.path()),
+            &Reachable::at(LISTENING),
+            &Skills::installed(platform, self.state.path()).expect("this binary carries skills"),
+            &Executable::at(
+                platform,
+                self.verkstead.path().to_owned(),
+                self.state.path(),
+            )
+            .expect("the fixture's image is still there"),
+            &self.handoffs,
+            &self.settings.secrets(),
+            &self.settings.config(),
+            &BuildCache::none(),
+            vec![],
+        )
+    }
+
+    /// Where this Conversation's own Windows profile is: under the Data
+    /// Directory, named for the Conversation, and made fresh as each of its
+    /// sessions is rendered — see [`verkstead_server::sandbox::Homes`].
+    fn windows_profile(&self) -> PathBuf {
+        self.state
+            .path()
+            .join("homes")
+            .join(self.conversation.id.to_string())
+    }
+
+    /// What the fixture's own Claude Profile names: the directory half of the
+    /// account, and the file half.
+    fn claude_dir(&self) -> PathBuf {
+        self.watched.path().join("account/.claude")
+    }
+
+    fn claude_config(&self) -> PathBuf {
+        self.watched.path().join("account/.claude.json")
     }
 
     /// Write `secrets.yaml` as the settings page would, so that the sandboxes
@@ -602,7 +663,8 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
         .unwrap()
         .expect("the Conversation is there");
 
-    let skills = Skills::installed(state.path()).expect("this binary carries skills");
+    let skills =
+        Skills::installed(Platform::HERE, state.path()).expect("this binary carries skills");
     let handoffs = Handoffs::under(state.path());
     let settings = Settings::in_data_dir(state.path());
 
@@ -616,7 +678,8 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
     std::fs::create_dir_all(image.parent().unwrap()).unwrap();
     std::fs::write(&image, SAYS_WHICH_BUILD).unwrap();
     std::fs::set_permissions(&image, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let verkstead = Executable::at(image, state.path()).expect("the executable was just written");
+    let verkstead = Executable::at(Platform::HERE, image, state.path())
+        .expect("the executable was just written");
 
     Grilling {
         watched,
@@ -722,8 +785,7 @@ file() {
 fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
     let whole = format!("{PROBE}\n{script}\n");
 
-    let output = sandbox
-        .command(&[SH, "-c", &whole])
+    let output = Command::from(&sandbox.command(&[SH, "-c", &whole]).0)
         .stdin(Stdio::null())
         .output()
         .expect("bwrap should be on the PATH: the dev shell declares bubblewrap");
@@ -732,6 +794,31 @@ fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
     assert!(
         output.status.success(),
         "the probe failed inside the sandbox: {stderr}"
+    );
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect()
+}
+
+/// And what the process a sandbox renders to is actually handed, read off the
+/// machine's own `env` run with nothing in front of it.
+///
+/// Not the probe above, which is a shell script and therefore a shell: what is
+/// being asked here is what the *first* thing started inside gets, and a shell
+/// between it and the rendering is a shell that says something of its own.
+fn environment(sandbox: &Sandbox) -> BTreeMap<String, String> {
+    let output = Command::from(&sandbox.command(&[on_the_host("env")]).0)
+        .stdin(Stdio::null())
+        .output()
+        .expect("the rendering to be startable");
+
+    assert!(
+        output.status.success(),
+        "the probe failed: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
 
     String::from_utf8_lossy(&output.stdout)
@@ -991,6 +1078,428 @@ async fn the_url_form_of_an_ssh_github_remote_is_rewritten_too() {
         reported["remote"], "https://github.com/tobico/verkstead.git",
         "`ssh://git@github.com/` is the same remote written another way"
     );
+}
+
+/// The third rendering, asked here rather than in a suite of its own: what a
+/// session on the platform with no boundary yet is handed.
+///
+/// **The rendering is portable and the boundary is what is not**, which is why
+/// this can be asked on the machine running these tests at all. There are no
+/// flags and no policy in it — it sets the environment, starts in the
+/// Conversation's Worktree and runs the vector — so a Conversation built
+/// against a Windows [`Homes`] renders to a process this machine can start and
+/// read back. What that cannot say is what a Windows machine makes of it, which
+/// is the Windows job's to say; what it does say is the whole of the
+/// description, which is what a rendering is.
+///
+/// The probe is the machine's own `env`, run with nothing in front of it: a
+/// wrapper would be the first thing in the report.
+#[tokio::test]
+async fn the_open_rendering_hands_a_session_the_environment_it_was_described_with() {
+    let fixture = grilling().await;
+    let sandbox = fixture.sandbox_on(Platform::Windows);
+
+    let reported = environment(&sandbox);
+
+    // Counted by its own variable rather than written down here: how many
+    // pairs git's configuration comes to is that configuration's business.
+    let git_config: usize = reported["GIT_CONFIG_COUNT"].parse().expect("a count");
+
+    let mut expected: BTreeSet<String> = [
+        "HOME",
+        "PATH",
+        "SHELL",
+        "TERM",
+        "VERKSTEAD_SERVER",
+        "VERKSTEAD_AGENT",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "TEMP",
+        "TMP",
+        "GIT_CONFIG_COUNT",
+        "GIT_TERMINAL_PROMPT",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .chain((0..git_config).flat_map(|n| {
+        [
+            format!("GIT_CONFIG_KEY_{n}"),
+            format!("GIT_CONFIG_VALUE_{n}"),
+        ]
+    }))
+    .collect();
+
+    // And whichever of the machine's own names the machine has. None of them on
+    // the Linux this suite runs on, which is what makes the set above the whole
+    // of it here — they are read off the server's environment, and a Windows
+    // machine is the only one that has them.
+    expected.extend(
+        ["SystemRoot", "SystemDrive", "ComSpec", "PATHEXT"]
+            .into_iter()
+            .filter(|name| std::env::var_os(name).is_some())
+            .map(str::to_owned),
+    );
+
+    assert_eq!(
+        reported.keys().cloned().collect::<BTreeSet<String>>(),
+        expected,
+        "what a session has is what the description said and nothing else — \
+         the environment is cleared, so the harness's own is not in it"
+    );
+
+    assert_eq!(
+        reported["HOME"],
+        fixture.windows_profile().display().to_string(),
+        "and the one name both platforms read is the profile Verkstead made for \
+         this Conversation rather than the server's own"
+    );
+    // Which leads with where the running image really is, this being the
+    // platform that binds nothing and links nothing: what a session asks with
+    // is the build serving it, said as the path that build is at rather than as
+    // a name a mount would have made. See `Executable::at`.
+    assert_eq!(
+        reported["PATH"],
+        format!(
+            "{};{}",
+            fixture.state.path().join("image").display(),
+            std::env::var("PATH").expect("this machine has a PATH")
+        ),
+        "Verkstead's own directory leads, and what follows it is where the human \
+         on this machine put their tools"
+    );
+
+    // The five that follow HOME on this platform, which is where a Windows
+    // program looks for the account's own things — see the sandbox module.
+    let profile = Path::new(&reported["USERPROFILE"]);
+
+    assert_eq!(profile, fixture.windows_profile());
+    assert_eq!(
+        Path::new(&reported["APPDATA"]),
+        profile.join("AppData").join("Roaming")
+    );
+    assert_eq!(
+        Path::new(&reported["LOCALAPPDATA"]),
+        profile.join("AppData").join("Local")
+    );
+    assert_eq!(reported["TEMP"], reported["TMP"]);
+    assert!(
+        Path::new(&reported["TEMP"]).starts_with(profile),
+        "a file a session throws away should land under its own profile, and \
+         TEMP is {}",
+        reported["TEMP"]
+    );
+}
+
+/// The profile that rendering makes, and the Profile's account joined into it.
+///
+/// **Asked of the description rather than of a session**, for the reason the
+/// environment above is asked that way: what this rendering makes, it makes on
+/// whichever machine renders it. There is no boundary on that platform, so
+/// every path here is a host path and every one of them can be read from
+/// outside — which is the whole of what a session inside would find. The one
+/// word that differs is the mechanism: a directory is joined in by a junction
+/// there and by a symbolic link on the machine running this, and it is the
+/// `windows-2025` job that reads the first of those back.
+///
+/// Claude's pair, which is the one shape of account that is a directory *and* a
+/// file — so this is the junction and the hard link in one test.
+#[tokio::test]
+async fn a_windows_session_finds_the_profiles_account_inside_a_profile_of_its_own() {
+    let fixture = grilling().await;
+
+    made(&fixture.sandbox_on(Platform::Windows));
+
+    let profile = fixture.windows_profile();
+
+    assert_eq!(
+        std::fs::read_to_string(profile.join(".claude/settings.json")).unwrap(),
+        "{}\n",
+        "what the account holds should be readable at the name Claude looks for \
+         it under"
+    );
+
+    // And the other direction, which is the half that says this is the account
+    // rather than a copy of it: a session logging in writes a file, and the
+    // human's own account is where it has to land.
+    std::fs::write(profile.join(".claude/written-inside.json"), "inside\n").unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_dir().join("written-inside.json")).unwrap(),
+        "inside\n",
+        "a file a session writes into its account should be on the account"
+    );
+
+    // The file half, written the way a program writes one in place — which is
+    // the case a hard link answers whole. The other case, a file replaced by a
+    // rename, is answered as the session ends — see
+    // [`a_file_a_session_replaced_is_written_back_to_the_account_as_the_session_ends`].
+    std::fs::write(profile.join(".claude.json"), "{\"logged-in\": true}\n").unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_config()).unwrap(),
+        "{\"logged-in\": true}\n",
+        "the account's config file and the one inside the profile should be one \
+         file, which is what a hard link is"
+    );
+}
+
+/// And the same rule over an account that is one directory, which is what the
+/// three agent types after Claude keep one as.
+///
+/// Asked because the rule is written over the account rather than over Claude's
+/// pair: a Codex or opencode session started into a profile with nothing joined
+/// into it would be logged out, with nothing saying why.
+#[tokio::test]
+async fn an_account_that_is_one_directory_is_joined_into_the_profile_too() {
+    let fixture = grilling().await;
+    let codex = fixture.codex_profile().await;
+
+    made(
+        &fixture
+            .sandbox_on_under(&codex, Platform::Windows)
+            .expect("a grilling Conversation has a worktree to build a sandbox around"),
+    );
+
+    let inside = fixture.windows_profile().join(".codex");
+
+    assert_eq!(
+        std::fs::read_to_string(inside.join("config.toml")).unwrap(),
+        "# the account's own\n",
+        "what the Profile named should be what a session finds under the name \
+         codex keeps an account at"
+    );
+
+    std::fs::write(inside.join("auth.json"), "{}\n").unwrap();
+
+    assert!(
+        fixture
+            .watched
+            .path()
+            .join("codex-account/.codex/auth.json")
+            .exists(),
+        "and a file written inside should be on the account"
+    );
+}
+
+/// Somewhere to write a temporary file, which on this platform is inside the
+/// profile rather than shared with everybody on the machine.
+#[tokio::test]
+async fn what_a_windows_session_throws_away_is_thrown_away_under_its_own_profile() {
+    let fixture = grilling().await;
+
+    made(&fixture.sandbox_on(Platform::Windows));
+
+    let temporary = fixture
+        .windows_profile()
+        .join("AppData")
+        .join("Local")
+        .join("Temp");
+
+    assert!(
+        temporary.is_dir(),
+        "TEMP names {}, so it has to be a directory that is really there",
+        temporary.display()
+    );
+}
+
+/// The profile is one Conversation's and is made fresh for each of its
+/// sessions: what one left there is not what the next one finds.
+///
+/// And the account is not, which is the other half of the same claim and the
+/// one worth being sure of. The account is joined in by a name, and emptying
+/// the profile takes the name rather than what is behind it — anything else
+/// would be Verkstead deleting the human's own login.
+#[tokio::test]
+async fn each_session_gets_the_profile_fresh_and_the_account_untouched() {
+    let fixture = grilling().await;
+
+    made(&fixture.sandbox_on(Platform::Windows));
+
+    let profile = fixture.windows_profile();
+    std::fs::write(profile.join("what-the-last-session-left"), "state\n").unwrap();
+
+    made(&fixture.sandbox_on(Platform::Windows));
+
+    assert!(
+        !profile.join("what-the-last-session-left").exists(),
+        "a session should start in a profile holding nothing of the session \
+         before it"
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_dir().join("settings.json")).unwrap(),
+        "{}\n",
+        "and the account should be joined in again, whole"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_config()).unwrap(),
+        "{}\n",
+        "the file half included"
+    );
+    assert!(
+        fixture
+            .claude_dir()
+            .join("skills/the-accounts-own/SKILL.md")
+            .exists(),
+        "and nothing inside it touched: what a rendering makes it makes in the \
+         profile, and there is no boundary on this platform to make anything in \
+         the account"
+    );
+}
+
+/// A file the session replaced rather than wrote in place is on the account
+/// once the session has ended, and the session after it finds one file again.
+///
+/// **The case a hard link cannot answer by itself.** An agent that saves its
+/// config by writing a temporary file and renaming it over the top leaves the
+/// session writing to a file of its own, with the account's copy seeing none of
+/// it — so the ending the rendering handed back is asked, and what the session
+/// wrote goes back over the account (ADR-0014).
+///
+/// Asked of the description on whichever machine is running this, as everything
+/// else about that rendering is: a file is joined into the profile by a hard
+/// link on either kind of machine, and what a rename over one costs is the same
+/// fact about the filesystem either way.
+#[tokio::test]
+async fn a_file_a_session_replaced_is_written_back_to_the_account_as_the_session_ends() {
+    let fixture = grilling().await;
+
+    let afterwards = made(&fixture.sandbox_on(Platform::Windows));
+    let inside = fixture.windows_profile().join(".claude.json");
+
+    let written = fixture.windows_profile().join(".claude.json.tmp");
+    std::fs::write(&written, "{\"logged-in\": true}\n").unwrap();
+    std::fs::rename(&written, &inside).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_config()).unwrap(),
+        "{}\n",
+        "which is the whole of the problem: the two names have stopped being one \
+         file, and the account has seen none of what the session wrote"
+    );
+
+    afterwards.close();
+
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_config()).unwrap(),
+        "{\"logged-in\": true}\n",
+        "so as the session ends what it wrote is written back over the account's own"
+    );
+
+    // And the session after it finds one file rather than two: the link is made
+    // fresh, so a change written in place inside is on the account without
+    // anything being copied anywhere.
+    made(&fixture.sandbox_on(Platform::Windows));
+
+    std::fs::write(&inside, "{\"logged-in\": true, \"in\": \"place\"}\n").unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_config()).unwrap(),
+        "{\"logged-in\": true, \"in\": \"place\"}\n",
+        "the session after a write-back is writing the account itself again"
+    );
+}
+
+/// And what each rendering leaves to be seen to, which is nothing at all on the
+/// platform whose links follow their own target.
+///
+/// A Conversation Terminal holds one of these as a session does — it is a shell
+/// in the same profile under the same account — and on Linux what either of
+/// them holds is empty. The Mac's is asked of the rendering itself, in the
+/// server's own tests, because a Mac sandbox is not one this machine can build.
+#[tokio::test]
+async fn a_rendering_whose_links_follow_their_target_leaves_nothing_to_close() {
+    let fixture = grilling().await;
+
+    assert_eq!(
+        made(&fixture.sandbox_on(Platform::Linux)).linked().count(),
+        0,
+        "a bind is a name that follows whatever happens at the far end of it, so \
+         a session that ends leaves nothing to see to"
+    );
+
+    let linked: Vec<PathBuf> = made(&fixture.sandbox_on(Platform::Windows))
+        .linked()
+        .map(Path::to_owned)
+        .collect();
+
+    assert!(
+        linked.contains(&fixture.windows_profile().join(".claude.json")),
+        "and the platform that joins a file in by hard link leaves the file it \
+         joined in: {linked:?}"
+    );
+
+    // And nothing else anywhere. A name outside the profile is a rendering
+    // about to clear and link somewhere on the *host* — which on the machine
+    // running this is its own `/verkstead`, and is what asking every one of
+    // these for the platform it renders for is there to stop. See
+    // `sandbox_on_under`.
+    assert!(
+        linked
+            .iter()
+            .all(|inside| inside.starts_with(fixture.windows_profile())),
+        "everything a Windows rendering joins in by hand is inside the profile \
+         it is building: {linked:?}"
+    );
+}
+
+/// An account on another volume from the Data Directory is a session that is
+/// not started.
+///
+/// A hard link is two names for one file, and one volume is the whole of what
+/// it needs. What is refused is the sandbox — which is how every other thing a
+/// session cannot be given is refused — rather than found out as the link fails
+/// and a session starts logged out with nothing saying why.
+#[tokio::test]
+async fn an_account_on_another_volume_is_a_session_that_is_not_started() {
+    let fixture = grilling().await;
+
+    let elsewhere = store::create_profile(
+        &fixture.pool,
+        &store::ProfileFacts {
+            name: "on-the-other-drive".to_owned(),
+            // The directory half where the fixture's own is, so that what is
+            // being refused is the one path a hard link is asked for rather
+            // than the whole account being somewhere odd.
+            account: store::Account::Claude {
+                claude_dir: fixture.claude_dir(),
+                config_file: PathBuf::from(r"Z:\accounts\work\.claude.json"),
+            },
+            models: vec!["claude-opus-5".to_owned()],
+        },
+    )
+    .await
+    .unwrap()
+    .expect("nothing is called that yet");
+
+    assert!(
+        fixture
+            .sandbox_on_under(&elsewhere, Platform::Windows)
+            .is_none(),
+        "there is no way to join that account into a profile under the Data \
+         Directory, so there is no sandbox to run a session in"
+    );
+
+    assert!(
+        fixture
+            .sandbox_on_under(&fixture.profile, Platform::Windows)
+            .is_some(),
+        "and an account on the Data Directory's own volume is a session that \
+         runs, which is what says the refusal above is about the volume"
+    );
+}
+
+/// Render `sandbox`, throw the rendering away and keep what its ending is left
+/// to see to — which is what makes everything the description says is made.
+///
+/// The rendering itself is what the tests above it read; these are about what
+/// is on the disk by the time there is one — see the open rendering's
+/// `realise`, which the seatbelt rendering does the same thing in. What comes
+/// back is what a session's relay holds until the process has gone, and the two
+/// tests about a session's ending are the only ones that ask it anything.
+fn made(sandbox: &Sandbox) -> Closing {
+    sandbox.command(&["the-agent"]).1
 }
 
 /// GitHub auth is said rather than found: the token the human configured, in
@@ -1492,7 +2001,7 @@ async fn an_image_packed_with_libraries_is_reached_through_a_launcher() {
     .unwrap();
     std::fs::set_permissions(&image, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-    fixture.verkstead = Executable::at(image, fixture.state.path())
+    fixture.verkstead = Executable::at(Platform::HERE, image, fixture.state.path())
         .expect("the image was just written")
         .bundling(fixture.state.path(), Some(&appdir));
 
@@ -2503,7 +3012,7 @@ fn a_repository_whose_flake_has_a_dev_shell_runs_its_command_under_nix_develop()
     std::fs::write(dir.path().join("flake.nix"), DEV_SHELL).unwrap();
 
     assert_eq!(
-        under_dev_shell(dir.path(), &["claude".to_owned()]),
+        under_dev_shell(Platform::HERE, dir.path(), &["claude".to_owned()]),
         vec![
             "nix".to_owned(),
             "develop".to_owned(),
@@ -2519,7 +3028,7 @@ fn a_flake_that_defines_no_shell_runs_the_command_as_it_stands() {
     std::fs::write(dir.path().join("flake.nix"), NO_DEV_SHELL).unwrap();
 
     assert_eq!(
-        under_dev_shell(dir.path(), &["claude".to_owned()]),
+        under_dev_shell(Platform::HERE, dir.path(), &["claude".to_owned()]),
         vec!["claude".to_owned()],
         "`nix develop` errors out where none of the attributes it falls through exist"
     );
@@ -2530,7 +3039,25 @@ fn a_repository_with_no_flake_at_all_runs_the_command_as_it_stands() {
     let dir = tempfile::tempdir().unwrap();
 
     assert_eq!(
-        under_dev_shell(dir.path(), &["claude".to_owned()]),
+        under_dev_shell(Platform::HERE, dir.path(), &["claude".to_owned()]),
+        vec!["claude".to_owned()],
+    );
+}
+
+/// And a Windows session is never put under one, whatever the worktree holds.
+///
+/// The same worktree the test above this one wraps: a flake that really does
+/// define a dev shell, which is the one case the answer could have come from
+/// asking. So an unwrapped command here is an answer that was never asked for
+/// — there is no `nix` on that machine to ask, and a session should not pay a
+/// process to find out.
+#[test]
+fn a_windows_session_is_never_put_under_a_dev_shell() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("flake.nix"), DEV_SHELL).unwrap();
+
+    assert_eq!(
+        under_dev_shell(Platform::Windows, dir.path(), &["claude".to_owned()]),
         vec!["claude".to_owned()],
     );
 }

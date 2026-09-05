@@ -90,7 +90,6 @@
       }
     }
   },
-  "sessions": "Run",
   "shared": null,
   "state": "Draft",
   "stop_asked": false,
@@ -107,6 +106,7 @@
     }
   ],
   "trimmed": false,
+  "unsandboxed": false,
   "waiting": false,
   "waiting_on_checks": false,
   "working": false,

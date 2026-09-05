@@ -11,9 +11,19 @@ use rustix::pty::OpenptFlags;
 use rustix::termios::Winsize;
 use tokio::io::Interest;
 use tokio::io::unix::AsyncFd;
-use tokio::process::{Child, Command};
+use tokio::process::Command;
 
 use super::{COLUMNS, ROWS};
+use crate::sandbox::Rendering;
+
+/// The child a session is, which on a platform with `fork` is the runtime's
+/// own: a process started this way is an ordinary child of the server, reaped
+/// by the runtime, and killed on drop because [`Terminal::spawn`] asks for it.
+///
+/// The Windows arm has one of Verkstead's own instead — there is no `Command`
+/// there that can attach a pseudoconsole — and what the two have in common is
+/// what is asked of them: see [`super`].
+pub use tokio::process::Child;
 
 /// One session's terminal: the end Verkstead holds.
 ///
@@ -64,7 +74,7 @@ impl Terminal {
         Ok(terminal)
     }
 
-    /// Start `command` on this terminal, and let go of the end it now has.
+    /// Start `rendering` on this terminal, and let go of the end it now has.
     ///
     /// The three streams are the one terminal, which is what puts the sandbox's
     /// own complaints in among what the session printed. Before the sandbox is
@@ -72,14 +82,21 @@ impl Terminal {
     /// controlling terminal — a terminal application asks its controlling
     /// terminal about itself, and one whose window nothing owns is one that
     /// hears about no resize.
-    pub fn spawn(&mut self, command: &mut Command) -> io::Result<Child> {
+    ///
+    /// Killed on drop, said here rather than by either caller: a child left
+    /// behind by a panicking task is one nothing would ever reap, and it is the
+    /// same promise the Windows arm keeps with the Job its child is in.
+    pub fn spawn(&mut self, rendering: &Rendering) -> io::Result<Child> {
         let Some(inside) = self.inside.take() else {
             return Err(io::Error::other(
                 "this terminal has already had a session started on it",
             ));
         };
 
+        let mut command = Command::from(std::process::Command::from(rendering));
+
         command
+            .kill_on_drop(true)
             .stdin(Stdio::from(inside.try_clone()?))
             .stdout(Stdio::from(inside.try_clone()?))
             .stderr(Stdio::from(inside.try_clone()?));

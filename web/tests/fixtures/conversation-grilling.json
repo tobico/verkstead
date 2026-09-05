@@ -76,7 +76,6 @@
       }
     }
   },
-  "sessions": "Run",
   "shared": null,
   "state": "Grilling",
   "stop_asked": false,
@@ -279,6 +278,7 @@
     }
   ],
   "trimmed": false,
+  "unsandboxed": false,
   "waiting": true,
   "waiting_on_checks": false,
   "working": false,
