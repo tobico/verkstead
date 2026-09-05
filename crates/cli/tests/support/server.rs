@@ -77,6 +77,19 @@ impl Server {
             (listener, addr, pool)
         });
 
+        // One router, however many listeners it is served over — which is what
+        // `run_on` does, and here it is what makes the two transports one
+        // server rather than two. A held wait is woken by an in-memory
+        // announcement that belongs to the router the answer arrived at, so two
+        // routers over one database would leave an ask waiting on the pipe
+        // unwoken by an answer posted to the socket: it would find its Response
+        // when the hold ran out, half a minute later, and the waking would go
+        // untested.
+        //
+        // Built on the runtime, because building one starts the sweep the
+        // server starts and that wants a runtime under it.
+        let app = runtime.block_on(async { verkstead_server::router(pool) });
+
         // The pipe beside the socket, so that one test can put the round trip
         // through the pipe and the next through the URL against the same
         // server. Named after the database's own directory, which is the Data
@@ -87,17 +100,13 @@ impl Server {
         #[cfg(windows)]
         let pipe = {
             let data_dir = database.parent().unwrap().to_owned();
-            let pool = pool.clone();
+            let served = app.clone();
 
             runtime.block_on(async move {
                 let listener = verkstead_server::pipe::Listener::open(&data_dir, None)
                     .expect("nothing else holds this Data Directory's pipe");
                 let spelling = listener.asked_through().to_owned();
 
-                // The router built in here with it, because building one starts
-                // the sweep the server starts, and that wants a runtime under
-                // it.
-                let served = verkstead_server::router(pool);
                 tokio::spawn(async move {
                     let _ = axum::serve(listener, served).await;
                 });
@@ -107,7 +116,7 @@ impl Server {
         };
 
         runtime.spawn(async move {
-            let _ = axum::serve(listener, verkstead_server::router(pool)).await;
+            let _ = axum::serve(listener, app).await;
         });
 
         Server {
