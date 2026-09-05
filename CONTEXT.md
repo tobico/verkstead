@@ -202,7 +202,14 @@ session doing harm is that there is nothing within reach to harm. The
 `PATH` inside, so the CLI a session asks with and the server it asks are one
 build and cannot disagree about a schema — with the libraries that image was
 packed with, where it was packed with any, reached through a launcher of
-Verkstead's own so that nothing else the session runs loads out of them.
+Verkstead's own so that nothing else the session runs loads out of them. What
+it asks *through* is the loopback, scoped to the Conversation it is asking
+from — except on Windows, where it is a **named pipe** the server opens beside
+its socket and names in the session's environment, in the same
+Conversation-scoped shape. The pipe is there because the boundary that platform
+is headed for is refused the loopback interface and can be granted a pipe
+instead, and it is named after the **Data Directory**, so two Verksteads on one
+machine are two pipes.
 **On Windows a session has none of this yet** and runs with the human's own
 account's reach: an ordinary process, its environment cleared and set
 explicitly and the Worktree its working directory, with nothing of the machine

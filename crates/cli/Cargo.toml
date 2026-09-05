@@ -76,3 +76,9 @@ axum = "0.8"
 serde_json.workspace = true
 tempfile = "3"
 tokio = { workspace = true, features = ["net", "time"] }
+# Asking the Router a question without a socket under it, which is what the
+# Windows sandbox test needs: the server it stands up listens on a named pipe
+# and nothing else, and the human answering a Set is a request that has to reach
+# the same router the session is held by. The same version the server crate's
+# own tests ask one with.
+tower = { version = "0.5", features = ["util"] }

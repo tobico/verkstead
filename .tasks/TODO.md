@@ -21,4 +21,4 @@ Roadmap stage: [02: The named pipe](docs/roadmaps/windows-sessions/02-named-pipe
 
 - [x] 01: A pipe beside the socket — [details](01-pipe-beside-the-socket.md)
 - [x] 02: Asking through a pipe — [details](02-asking-through-a-pipe.md)
-- [ ] 03: Sessions ask through the pipe — [details](03-sessions-ask-through-the-pipe.md)
+- [x] 03: Sessions ask through the pipe — [details](03-sessions-ask-through-the-pipe.md)

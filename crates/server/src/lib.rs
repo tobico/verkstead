@@ -960,6 +960,16 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
     #[cfg(windows)]
     tracing::info!(pipe = %pipe.asked_through(), "verkstead is listening on a named pipe too");
 
+    // Where a session is told Verkstead is: the socket everywhere, and the pipe
+    // beside it on the platform that opened one — a Windows session is headed
+    // for a container refused the loopback interface, and the pipe is what an
+    // identity can be granted instead. Which of the two a session is handed is
+    // [`sandbox::Reachable`]'s, off the Platform it runs on.
+    let reachable = sandbox::Reachable::at(config.listen);
+
+    #[cfg(windows)]
+    let reachable = reachable.piped(pipe.asked_through());
+
     let app = router_with_ui(
         pool,
         config.releases(),
@@ -967,7 +977,7 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
         data_dir,
         Agents::new(
             homes,
-            sandbox::Reachable::at(config.listen),
+            reachable,
             binds,
             cache,
             skills,
