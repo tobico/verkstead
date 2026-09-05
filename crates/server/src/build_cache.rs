@@ -554,16 +554,18 @@ fn compile_server(dir: &Path, sccache: &Path, data_dir: &Path, size: &str) -> Co
         .set("SCCACHE_IDLE_TIMEOUT", "0")
         .running(&[&inside]);
 
-    // And what a Windows process is told beyond that, which is the same set a
-    // session there is told and is told for the same reason: nothing on that
-    // platform starts without the machine's own names, and a profile of this
-    // server's own is where the compiling writes what it throws away. See
-    // [`crate::sandbox::windows_names`], which is the whole of both — and
-    // [`crate::sandbox::on_the_machine`], which leaves the temporary directory
-    // to whoever knows where the profile is.
+    // And what a Windows process is given beyond that, which is the same
+    // profile a session there is given and is given for the same reason: a
+    // program on that platform looks for its settings under the profile it was
+    // handed, and nothing there starts without the machine's own names. See
+    // [`crate::sandbox::windows_profile`] and [`crate::sandbox::windows_names`],
+    // which are the whole of both — and [`crate::sandbox::on_the_machine`],
+    // which leaves the profile to whoever knows where it is.
     match Platform::HERE {
         Platform::Windows => {
-            surface.made(Access::Temporary(sandbox::temporary_inside(&home)));
+            for made in sandbox::windows_profile(&home) {
+                surface.made(made);
+            }
 
             for (name, value) in sandbox::windows_names(&home) {
                 surface.set(name, value);

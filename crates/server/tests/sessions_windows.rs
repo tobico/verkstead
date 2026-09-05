@@ -1153,9 +1153,10 @@ async fn force_stop_ends_a_session_where_it_stands() {
 ///
 /// The whole of what *fresh profile* means in code, asked from inside: the five
 /// names a Windows program reads for the account's own directories all point
-/// inside one directory under the Data Directory; what a session throws away
-/// lands in it; and the account the Profile named is really there, joined in by
-/// the junction and the hard link the open rendering makes.
+/// inside one directory under the Data Directory; the two halves they name are
+/// really there; what a session throws away lands in it; and the account the
+/// Profile named is really there, joined in by the junction and the hard link
+/// the open rendering makes.
 #[tokio::test]
 async fn a_session_runs_in_a_profile_of_the_conversations_own() {
     let fixture = grilling(
@@ -1179,19 +1180,18 @@ async fn a_session_runs_in_a_profile_of_the_conversations_own() {
     .await;
 
     let profile = fixture.profile();
+    let roaming = profile.join("AppData").join("Roaming");
     let local = profile.join("AppData").join("Local");
     let temporary = local.join("Temp");
 
     // Compared as they are spelled rather than as the filesystem has them,
     // which is the stricter of the two here: every one of these is built out of
     // the Data Directory this fixture handed in, so a name that differs at all
-    // is a name Verkstead composed differently. And one of them is a directory
-    // nothing has made yet — a session that writes under `APPDATA` makes it —
-    // which is a path there is no resolving to be done on.
+    // is a name Verkstead composed differently.
     for (name, expected) in [
         ("userprofile", profile.clone()),
         ("home", profile.clone()),
-        ("appdata", profile.join("AppData").join("Roaming")),
+        ("appdata", roaming.clone()),
         ("localappdata", local.clone()),
         ("temp", temporary.clone()),
         ("tmp", temporary.clone()),
@@ -1211,6 +1211,21 @@ async fn a_session_runs_in_a_profile_of_the_conversations_own() {
          profile it was given, which is what makes it thrown away with it",
     )
     .await;
+
+    // And both halves are really there, which is a claim about the profile
+    // rather than about anything the session did in it. A Windows program does
+    // not read `APPDATA` to find where its settings go — it asks the shell,
+    // which resolves the halves against `USERPROFILE` and then will not answer
+    // at all for one that is not really a directory. A half left to be made by
+    // whoever writes there first is a half nothing can ask about.
+    for half in [&roaming, &local] {
+        assert!(
+            half.is_dir(),
+            "{} is a half of the profile a session was told it has, so it is \
+             one the profile really has",
+            half.display(),
+        );
+    }
 
     assert_eq!(
         fixture.written("marker").await,

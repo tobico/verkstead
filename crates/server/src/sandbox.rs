@@ -731,7 +731,49 @@ const TEMPORARY: &str = "Temp";
 /// the variable to, and what the description says a session is given somewhere
 /// to write — see [`Access::Temporary`], which is what really makes it.
 pub(crate) fn temporary_inside(home: &Path) -> PathBuf {
-    home.join(APP_DATA).join(LOCAL).join(TEMPORARY)
+    let [_, local] = app_data_inside(home);
+
+    local.join(TEMPORARY)
+}
+
+/// The two halves of a Windows profile, roaming first: where a program keeps
+/// the settings that follow the account between machines, and where it keeps
+/// the ones that stay on this one.
+///
+/// Said off one function because three things ask, and the third is why this
+/// exists at all: [`windows_names`] points `APPDATA` and `LOCALAPPDATA` at
+/// them, [`temporary_inside`] puts the temporary directory inside the second,
+/// and [`windows_profile`] makes both — because a program that never reads
+/// either variable still finds them.
+///
+/// **It asks the shell instead**, which resolves the profile's halves against
+/// `USERPROFILE` and then refuses to answer at all for a directory that is not
+/// really there: `SHGetKnownFolderPath` verifies a folder exists unless it is
+/// told not to. So a profile whose roaming half was never made is one where
+/// every program built on that call — an sccache reaching for its config file
+/// among them — fails at the question rather than at anything it was asked to
+/// do.
+pub(crate) fn app_data_inside(home: &Path) -> [PathBuf; 2] {
+    let app_data = home.join(APP_DATA);
+
+    [app_data.join(ROAMING), app_data.join(LOCAL)]
+}
+
+/// And what a Windows profile is made of, which is what the description says a
+/// session and the compile server alike are given: the two halves above, and
+/// the temporary directory inside the second.
+///
+/// The profile itself is not in here. It is emptied rather than made — see
+/// [`Access::Empty`] — and it is emptied before these, which is why whoever
+/// says it says it first.
+pub(crate) fn windows_profile(home: &Path) -> [Access; 3] {
+    let [roaming, local] = app_data_inside(home);
+
+    [
+        Access::Empty(roaming),
+        Access::Empty(local),
+        Access::Temporary(temporary_inside(home)),
+    ]
 }
 
 /// Everything a Windows session is told beyond what every session is told: the
@@ -750,15 +792,12 @@ pub(crate) fn temporary_inside(home: &Path) -> PathBuf {
 ///
 /// And then [`MACHINE_NAMES`], which are the machine's own to say.
 pub(crate) fn windows_names(home: &Path) -> Vec<(&'static str, OsString)> {
-    let local = home.join(APP_DATA).join(LOCAL);
+    let [roaming, local] = app_data_inside(home);
     let temporary = temporary_inside(home);
 
     let mut named = vec![
         ("USERPROFILE", home.as_os_str().to_owned()),
-        (
-            "APPDATA",
-            home.join(APP_DATA).join(ROAMING).into_os_string(),
-        ),
+        ("APPDATA", roaming.into_os_string()),
         ("LOCALAPPDATA", local.into_os_string()),
         ("TEMP", temporary.as_os_str().to_owned()),
         ("TMP", temporary.into_os_string()),
@@ -2266,13 +2305,17 @@ impl Sandbox {
         // absent.
         surface.made(Access::Empty(self.home.path().to_owned()));
 
-        // And where a temporary file goes on the platform whose one is inside
-        // the profile rather than shared with the machine — after the profile,
-        // because it is under it and what emptied that would take this with it.
-        // See [`temporary_inside`], and [`on_the_machine`] for the two
-        // platforms that say this before ever reaching here.
+        // And the rest of the profile on the platform that has one: its two
+        // halves, and the temporary directory inside the second — where a
+        // Windows session writes what it throws away rather than into the one
+        // everybody on the box shares. After the profile, because all three are
+        // under it and what emptied that would take them with it. See
+        // [`windows_profile`], and [`on_the_machine`] for the two platforms
+        // that say the temporary one before ever reaching here.
         if self.platform == Platform::Windows {
-            surface.made(Access::Temporary(temporary_inside(self.home.path())));
+            for made in windows_profile(self.home.path()) {
+                surface.made(made);
+            }
         }
 
         surface
@@ -2851,6 +2894,42 @@ mod tests {
              the server itself was started with — there is no list of Windows \
              paths written down anywhere"
         );
+    }
+
+    /// And every directory a Windows session is told its profile has is one the
+    /// description really makes.
+    ///
+    /// The half that was told and not made was the roaming one, and what fell
+    /// over it was not a program looking for `APPDATA`: it was a program asking
+    /// the shell where the profile's halves are, which resolves them against
+    /// `USERPROFILE` and then refuses to answer for a directory that is not
+    /// really there. So the compile server's sccache died looking for a config
+    /// file it would not have found anyway. See [`windows_profile`].
+    #[test]
+    fn every_half_of_a_windows_profile_is_a_directory_the_description_makes() {
+        let home = Path::new("C:/data/homes/7");
+        let profile = windows_profile(home);
+
+        let made: Vec<&Path> = profile
+            .iter()
+            .map(|access| match access {
+                Access::Empty(path) | Access::Temporary(path) => path.as_path(),
+                other => panic!("a profile is directories and nothing else, not {other:?}"),
+            })
+            .collect();
+
+        for (name, value) in windows_names(home) {
+            if !["APPDATA", "LOCALAPPDATA", "TEMP", "TMP"].contains(&name) {
+                continue;
+            }
+
+            assert!(
+                made.contains(&Path::new(&value)),
+                "{name} names {value:?}, which nothing makes: a Windows program \
+                 that asks the shell for the profile's halves is told there are \
+                 none"
+            );
+        }
     }
 
     /// Every path on a session's `PATH` is one the policy also lets it reach,

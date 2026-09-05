@@ -77,7 +77,8 @@ pub(crate) enum Access {
     Temporary(PathBuf),
 
     /// A directory that is really there and really empty, which is what a
-    /// session's HOME is before the account lands in it.
+    /// session's HOME is before the account lands in it — and what each half
+    /// of a Windows profile inside that HOME is before anything writes there.
     Empty(PathBuf),
 }
 
