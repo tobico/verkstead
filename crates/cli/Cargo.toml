@@ -51,12 +51,14 @@ tracing = { version = "0.1", optional = true }
 # Where the server's `tracing` goes is the starting binary's call rather than
 # the library's, so the subscriber lives here — see `serve`.
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-# **Pinned to a minor rather than a major.** The named-pipe transport in
-# `src/pipe.rs` is written against `ureq::unversioned::transport`, whose own
-# documentation says it does not follow semver yet and that breaking changes to
-# it land in *minor* versions. `3` would take one of those on an ordinary
-# `cargo update`; `3.3` takes the patches and no more.
-ureq = "3.3"
+# **Pinned to a minor rather than a major**, which takes a tilde rather than the
+# default. The named-pipe transport in `src/pipe.rs` is written against
+# `ureq::unversioned::transport`, whose own documentation says it does not follow
+# semver yet and that breaking changes to it land in *minor* versions. `"3"` and
+# `"3.3"` are both caret requirements and both stop only at 4, so either would
+# take one of those on an ordinary `cargo update`; `"~3.3"` stops at 3.4, which
+# is the patches and no more.
+ureq = "~3.3"
 
 # What a Windows session asks through: the named pipe the server listens on
 # beside its socket, opened here by `src/pipe.rs`. `tokio` gains the pipe itself
