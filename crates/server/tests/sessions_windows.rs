@@ -80,10 +80,25 @@ const LISTENING: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8
 /// Who a session commits as, which every sandbox is configured out of.
 const THE_AUTHOR: &str = "git_author:\n  name: Verkstead Test\n  email: test@verkstead.invalid\n";
 
-/// How long to wait for something a session says. Generously long: what is
-/// being waited on is a process starting, and a first `powershell.exe` on a
-/// cold two-core runner is not quick.
-const PATIENCE: Duration = Duration::from_secs(60);
+/// How long to wait for something a session says.
+///
+/// **Long enough for the first four of these at once**, which is the case it has
+/// to cover and is nothing like what one of them costs. libtest runs as many
+/// tests as the machine has cores, so the `windows-2025` runner starts four of
+/// these together — four workbenches, four pseudoconsoles and four Windows
+/// PowerShells coming up on four cores — and the four whose names sort first are
+/// the ones that pay for it.
+///
+/// Measured on the job: that first four take three quarters of a minute to reach
+/// their first line, where a test behind them reaches its own in ten. So a minute
+/// sat on the wrong side of the one cohort that is slow, and the run this was
+/// raised for is the run where exactly those four timed out together and all
+/// eight behind them passed.
+///
+/// Three minutes, then — which is not a claim that anything should take three
+/// minutes. What this deadline is for is a session that is never going to say
+/// anything at all, and nothing that is going to say something comes near it.
+const PATIENCE: Duration = Duration::from_secs(180);
 
 /// What the stand-in is started as: Windows PowerShell, which every machine
 /// carries, running a script file.
