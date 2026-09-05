@@ -3691,12 +3691,14 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tower",
  "tracing",
  "tracing-subscriber",
  "ureq",
  "verkstead-desktop",
  "verkstead-schema",
  "verkstead-server",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

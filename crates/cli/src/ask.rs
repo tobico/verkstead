@@ -58,7 +58,7 @@ pub fn ask(file: Option<&Path>, deferred: bool, server: &str) -> Result<()> {
     // A wait that goes to plan is silent. A harness runs this in the background
     // and captures both streams into one file, so anything said here on the way
     // would arrive ahead of the Response the agent came for.
-    let client = Client::new(server);
+    let client = Client::new(server)?;
     let created = client.submit(&set, deferred)?;
 
     // The Response is the CLI's whole output: the agent parses stdout, so

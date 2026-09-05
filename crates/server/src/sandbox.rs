@@ -1717,9 +1717,21 @@ fn unwrapped(path: &Path) -> PathBuf {
 /// still that address. An unspecified one — `0.0.0.0`, `[::]` — is every
 /// interface at once, and there is no such thing to put in a URL: the loopback
 /// is the one of them certain to answer, and it is the one a session shares.
+///
+/// **And on one platform it is not an address at all.** A Windows server opens a
+/// named pipe beside its socket — see [`crate::pipe`] — because the container a
+/// session there is headed for is refused the loopback interface and can be
+/// granted a pipe instead. So this holds both of what a server opened and hands
+/// out whichever the Platform a session runs on asks through: the pipe on
+/// Windows, the URL as before on Linux and macOS.
 #[derive(Debug, Clone)]
 pub struct Reachable {
     base: String,
+
+    /// The pipe beside it, in the spelling a client is told it in, where the
+    /// server opened one. `None` on the platforms that have no such thing, and
+    /// on anything built from an address alone.
+    pipe: Option<String>,
 }
 
 impl Reachable {
@@ -1736,17 +1748,54 @@ impl Reachable {
             // the brackets round an IPv6 address — `[::1]:8422` is a URL and
             // `::1:8422` is not a number anything could parse.
             base: format!("http://{}", SocketAddr::new(host, listen.port())),
+            pipe: None,
         }
     }
 
-    /// The base URL a session on `conversation_id` is given, which is what makes
-    /// its Question Sets that Conversation's.
+    /// The same server, with the named pipe it opened beside that socket.
+    ///
+    /// `asked_through` is the pipe as a client is told it — `pipe://<name>`,
+    /// the spelling `--server` and `VERKSTEAD_SERVER` take, which is
+    /// [`crate::pipe::Listener::asked_through`]'s to say and nothing here's to
+    /// spell.
+    pub fn piped(self, asked_through: &str) -> Reachable {
+        Reachable {
+            pipe: Some(asked_through.to_owned()),
+            ..self
+        }
+    }
+
+    /// The base a session on `platform` and on `conversation_id` is given, which
+    /// is what makes its Question Sets that Conversation's.
     ///
     /// Explicit rather than inferred: the CLI derives the project and the branch
     /// from the working directory, and two Conversations against one Repo would
     /// be indistinguishable by either.
-    pub(crate) fn asking_from(&self, conversation_id: i64) -> String {
-        format!("{}{}/{conversation_id}", self.base, crate::ASKING_FROM)
+    ///
+    /// The Conversation goes on the end of whichever half of this a session asks
+    /// through, so `{base}/api/v1/sets` composes over the pipe exactly as it
+    /// composes over the socket — which is what the pipe being spelt like a URL
+    /// at all is for. See [`crate::pipe`].
+    pub(crate) fn asking_from(&self, platform: Platform, conversation_id: i64) -> String {
+        format!(
+            "{}{}/{conversation_id}",
+            self.through(platform),
+            crate::ASKING_FROM
+        )
+    }
+
+    /// What a session on `platform` asks through: the pipe where that platform
+    /// has one and this server opened it, and the URL in every other case.
+    ///
+    /// A Windows server with no pipe is the URL as well, rather than nothing at
+    /// all: a session given no server could not ask anything, and the loopback
+    /// is what a Windows session asked through before there was a pipe to ask
+    /// through instead.
+    fn through(&self, platform: Platform) -> &str {
+        match (platform, &self.pipe) {
+            (Platform::Windows, Some(pipe)) => pipe,
+            _ => &self.base,
+        }
     }
 }
 
@@ -2235,7 +2284,7 @@ impl Sandbox {
             home,
             github_token: secrets.github_token().map(str::to_owned),
             git_author: config.git_author().clone(),
-            server: reachable.asking_from(conversation.id),
+            server: reachable.asking_from(homes.platform(), conversation.id),
             binds,
             shell: None,
             build_cache: cache.shared(config.rust_build_cache()),
@@ -2930,6 +2979,41 @@ mod tests {
                  none"
             );
         }
+    }
+
+    /// A Windows session is told the pipe and every other session the URL, and
+    /// the Conversation goes on the end of whichever it was — so the base a
+    /// session composes `{base}/api/v1/sets` onto is a base either way.
+    ///
+    /// Asked of all three platforms from the one this runs on, which is what
+    /// [`Platform`] being a value rather than a `cfg` is for: what a Windows
+    /// session is given is settled here rather than only on the runner that has
+    /// one.
+    #[test]
+    fn a_windows_session_asks_through_the_pipe_and_every_other_one_through_the_url() {
+        let reachable = Reachable::at("127.0.0.1:8422".parse().unwrap())
+            .piped("pipe://verkstead-0123456789abcdef");
+
+        assert_eq!(
+            reachable.asking_from(Platform::Windows, 7),
+            "pipe://verkstead-0123456789abcdef/conversations/7",
+            "a Windows session asks through the pipe, scoped to its own Conversation"
+        );
+
+        for elsewhere in [Platform::Linux, Platform::MacOs] {
+            assert_eq!(
+                reachable.asking_from(elsewhere, 7),
+                "http://127.0.0.1:8422/conversations/7",
+                "and a {elsewhere:?} session through the URL, exactly as before"
+            );
+        }
+
+        assert_eq!(
+            Reachable::at("127.0.0.1:8422".parse().unwrap()).asking_from(Platform::Windows, 7),
+            "http://127.0.0.1:8422/conversations/7",
+            "and a Windows server that opened no pipe is the URL as well: a session \
+             given no server at all could ask nothing"
+        );
     }
 
     /// Every path on a session's `PATH` is one the policy also lets it reach,
