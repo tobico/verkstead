@@ -26,6 +26,11 @@ mod client;
 #[cfg(feature = "desktop")]
 mod desktop;
 mod guide;
+/// The named pipe a Windows session asks through, from the end that dials it:
+/// the `pipe://` spelling `--server` takes, and the ureq transport that opens
+/// one. Read on every platform, so that a pipe named where there are none is
+/// refused as the pipe it is rather than as an unparseable URL.
+mod pipe;
 pub mod repo;
 mod serve;
 
@@ -82,7 +87,9 @@ enum Command {
         #[arg(long)]
         deferred: bool,
 
-        /// Base URL of the Verkstead server.
+        /// Where the Verkstead server is: its base URL, or `pipe://<name>` for
+        /// a named pipe, which is Windows' own and what a session in a
+        /// container asks through.
         #[arg(long, env = "VERKSTEAD_SERVER", default_value = DEFAULT_SERVER)]
         server: String,
     },
@@ -104,7 +111,9 @@ enum Command {
         /// The id of the stored Set, as the ask that stored it printed it.
         id: i64,
 
-        /// Base URL of the Verkstead server.
+        /// Where the Verkstead server is: its base URL, or `pipe://<name>` for
+        /// a named pipe, which is Windows' own and what a session in a
+        /// container asks through.
         #[arg(long, env = "VERKSTEAD_SERVER", default_value = DEFAULT_SERVER)]
         server: String,
     },

@@ -64,12 +64,22 @@ use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken}
 /// spent on nothing.
 const AGAIN: Duration = Duration::from_secs(1);
 
-/// The named pipe a server keeping its Data Directory at `data_dir` listens on.
+/// What Win32 puts in front of every pipe name. The API's, rather than
+/// anybody's to type — see [`Listener::asked_through`].
+const PREFIX: &str = r"\\.\pipe\";
+
+/// The named pipe a server keeping its Data Directory at `data_dir` listens on,
+/// as Win32 names one: the spelling `CreateNamedPipeW` takes and `CreateFileW`
+/// opens.
 ///
-/// A Win32 pipe name, which is what a human pastes and what a client opens.
 /// Every character after the prefix comes off the Data Directory, so this is
 /// the same name every time for one directory and a different one for the next.
 pub fn named(data_dir: &Path) -> String {
+    format!("{PREFIX}{}", bare(data_dir))
+}
+
+/// What the pipe is called, with neither spelling's prefix on it.
+fn bare(data_dir: &Path) -> String {
     // Through the resolved path rather than the one that was typed: `.` and the
     // absolute name of the same directory are one Data Directory, and two
     // servers pointed at it by those two spellings have to collide. Windows
@@ -80,7 +90,7 @@ pub fn named(data_dir: &Path) -> String {
     let settled = data_dir.canonicalize();
     let settled = settled.as_deref().unwrap_or(data_dir);
 
-    format!(r"\\.\pipe\verkstead-{:016x}", fingerprint(settled))
+    format!("verkstead-{:016x}", fingerprint(settled))
 }
 
 /// `path` as one number, by FNV-1a over the way Windows itself spells it.
@@ -115,6 +125,10 @@ pub struct Listener {
     /// by it and because it is what [`Listener::local_addr`] answers.
     name: String,
 
+    /// The same name in the spelling a client is told it in — see
+    /// [`Listener::asked_through`], which is the whole of what it is for.
+    asked_through: String,
+
     /// What each instance is created with. Held for the listener's whole life:
     /// an instance is made per connection, and each one is made granting this.
     granting: Descriptor,
@@ -138,21 +152,35 @@ impl Listener {
     /// instance, so the pipe answers that the way the socket answers a taken
     /// address.
     pub fn open(data_dir: &Path, also: Option<&str>) -> io::Result<Listener> {
-        let name = named(data_dir);
+        let bare = bare(data_dir);
+        let name = format!("{PREFIX}{bare}");
         let granting = Descriptor::granting(also)?;
         let waiting = instance(&name, &granting, true)?;
 
         Ok(Listener {
             name,
+            asked_through: format!("pipe://{bare}"),
             granting,
             waiting,
         })
     }
 
-    /// What the pipe is called: the name a client opens, and the one the
-    /// startup line says.
+    /// What the pipe is called as Win32 names one: the spelling every instance
+    /// is created under, and what [`Listener::local_addr`] answers.
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// And in the spelling a client is *told* it in: `pipe://<name>`, which is
+    /// what the CLI's `--server` and `VERKSTEAD_SERVER` take, and what the
+    /// startup line says.
+    ///
+    /// Windows' `\\.\pipe\` belongs to the API rather than to a human: this
+    /// goes in a terminal and in an environment value, where backslashes are
+    /// the shell's. So what travels is the name alone, and the end that dials
+    /// puts the prefix back on — `crates/cli/src/pipe.rs`.
+    pub fn asked_through(&self) -> &str {
+        &self.asked_through
     }
 }
 
@@ -435,6 +463,23 @@ mod tests {
         let roundabout = dir.path().join("under").join("..");
 
         assert_eq!(named(&roundabout), named(dir.path()));
+    }
+
+    /// The two spellings are one pipe: what a client is told is the name Win32
+    /// was given with its prefix taken off, and the end that dials puts it
+    /// back on.
+    #[tokio::test]
+    async fn what_a_client_is_told_is_the_name_without_the_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let listener = Listener::open(dir.path(), None).unwrap();
+
+        let bare = listener
+            .name()
+            .strip_prefix(PREFIX)
+            .expect("a Win32 pipe name starts with the prefix");
+
+        assert_eq!(listener.asked_through(), format!("pipe://{bare}"));
+        assert_eq!(listener.name(), named(dir.path()));
     }
 
     /// A second server against one Data Directory is refused by the pipe, the

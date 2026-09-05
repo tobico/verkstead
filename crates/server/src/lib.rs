@@ -954,10 +954,11 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
 
     // The pipe on a line of its own rather than as a field on the one above:
     // the other platforms have no pipe, and a field saying so at every startup
-    // there would be a line about nothing. In the spelling a client opens, so
-    // that a human can paste what they read.
+    // there would be a line about nothing. In the spelling a client is given
+    // rather than the one Win32 takes, so that a human can paste what they read
+    // straight into `--server` — see `pipe::Listener::asked_through`.
     #[cfg(windows)]
-    tracing::info!(pipe = %pipe.name(), "verkstead is listening on a named pipe too");
+    tracing::info!(pipe = %pipe.asked_through(), "verkstead is listening on a named pipe too");
 
     let app = router_with_ui(
         pool,

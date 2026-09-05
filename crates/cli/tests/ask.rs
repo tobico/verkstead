@@ -160,6 +160,50 @@ fn a_schema_violating_set_is_refused_locally_naming_the_question() {
     );
 }
 
+/// A `pipe://` server where there are no pipes is refused as the pipe it is.
+///
+/// Named pipes are Windows' own, and every other platform has a loopback
+/// interface nothing refuses a session — so the spelling is still read here,
+/// and what comes back says why it cannot be used rather than the "unknown
+/// scheme" a URL parser would have said about it.
+#[cfg(not(windows))]
+#[test]
+fn a_pipe_is_refused_where_there_are_no_pipes() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_verkstead"))
+        .arg("ask")
+        .env("VERKSTEAD_SERVER", "pipe://verkstead-0123456789abcdef")
+        .current_dir(tmp.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the verkstead binary should be built for its own tests");
+
+    let mut stdin = child.stdin.take().unwrap();
+    stdin.write_all(SET.as_bytes()).unwrap();
+    drop(stdin);
+
+    let output = finished(child);
+
+    assert!(
+        !output.status.success(),
+        "a server that cannot be reached at all is a non-zero exit, got {:?}",
+        output.status
+    );
+    assert!(
+        stderr(&output).contains("named pipes are Windows' own"),
+        "the refusal should say why the spelling cannot be used here, got:\n{}",
+        stderr(&output)
+    );
+    assert!(
+        stdout(&output).is_empty(),
+        "a refusal has nothing to say on stdout, got:\n{}",
+        stdout(&output)
+    );
+}
+
 #[test]
 fn the_response_is_delivered_on_stdout_as_yaml() {
     let tmp = tempfile::tempdir().unwrap();

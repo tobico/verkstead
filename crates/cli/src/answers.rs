@@ -16,7 +16,7 @@ use crate::client::Client;
 
 /// Print Set `id`'s Response on stdout, or fail saying why there is none.
 pub fn answers(id: i64, server: &str) -> Result<()> {
-    let response = Client::new(server).fetch(id)?;
+    let response = Client::new(server)?.fetch(id)?;
 
     crate::ask::deliver(
         response

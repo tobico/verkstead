@@ -38,8 +38,11 @@ verkstead-desktop = { path = "../desktop", optional = true }
 verkstead-server = { path = "../server" }
 clap.workspace = true
 serde-saphyr.workspace = true
-# The runtime `serve` starts. The other verbs are blocking calls and want none
-# of it, so it is started by that verb rather than wrapped around `main`.
+# The runtime `serve` starts, and — on Windows only — the one an ask over a
+# named pipe gives its reads and writes a deadline on. The other verbs are
+# blocking calls, so a runtime is started by the verb that needs one rather than
+# wrapped around `main`, and the pipe's is a current-thread runtime that drives
+# its I/O on the thread already blocking on it. See `src/pipe.rs`.
 tokio.workspace = true
 # The one event this binary emits itself: a `desktop` that stopped, said in the
 # log file the tray app keeps because there is no terminal to say it in. The
@@ -48,7 +51,21 @@ tracing = { version = "0.1", optional = true }
 # Where the server's `tracing` goes is the starting binary's call rather than
 # the library's, so the subscriber lives here — see `serve`.
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-ureq = "3"
+# **Pinned to a minor rather than a major.** The named-pipe transport in
+# `src/pipe.rs` is written against `ureq::unversioned::transport`, whose own
+# documentation says it does not follow semver yet and that breaking changes to
+# it land in *minor* versions. `3` would take one of those on an ordinary
+# `cargo update`; `3.3` takes the patches and no more.
+ureq = "3.3"
+
+# What a Windows session asks through: the named pipe the server listens on
+# beside its socket, opened here by `src/pipe.rs`. `tokio` gains the pipe itself
+# and the deadline every read and write is given; `windows-sys` is the one
+# constant that says an instance is momentarily taken rather than absent, and it
+# is the same binding the server and desktop crates use.
+[target.'cfg(windows)'.dependencies]
+tokio = { workspace = true, features = ["io-util", "net", "time"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation"] }
 
 [dev-dependencies]
 # The tests run the real server in-process, so the round trip they check is the

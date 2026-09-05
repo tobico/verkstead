@@ -30,12 +30,23 @@ const MAX_BACKOFF: Duration = Duration::from_secs(10);
 
 pub struct Client {
     agent: ureq::Agent,
+
+    /// What every request is composed onto: the server as it was given, where
+    /// that was a URL — and the placeholder URL a pipe is dialled at, where it
+    /// was a pipe, because ureq is handed URLs and nothing else.
     base: String,
+
+    /// And what the server is *called*, which is what was given either way.
+    /// Everything read by anybody says this, so a pipe that could not be
+    /// reached is reported as the pipe rather than as a host that is not one.
+    said: String,
 }
 
 impl Client {
-    /// A client pointed at a Verkstead server, e.g. `http://127.0.0.1:8422`.
-    pub fn new(base: &str) -> Self {
+    /// A client pointed at a Verkstead server, e.g. `http://127.0.0.1:8422` —
+    /// or at a named pipe, spelt `pipe://<name>`, which is Windows' own and is
+    /// [`crate::pipe`]'s.
+    pub fn new(server: &str) -> Result<Self> {
         let config = ureq::Agent::config_builder()
             .timeout_global(Some(REQUEST_TIMEOUT))
             // Statuses are answers, not errors: a 204 means "nothing yet" and
@@ -43,10 +54,19 @@ impl Client {
             .http_status_as_error(false)
             .build();
 
-        Client {
-            agent: config.into(),
+        // Which of the two it is is read off the scheme and nothing else. A
+        // pipe wants an agent built around a transport of Verkstead's own; a
+        // URL is what ureq does unaided.
+        let (agent, base) = match crate::pipe::spelt(server) {
+            Some(named) => crate::pipe::dialling(&named, config)?,
+            None => (config.into(), server.to_owned()),
+        };
+
+        Ok(Client {
+            agent,
             base: base.trim_end_matches('/').to_owned(),
-        }
+            said: server.to_owned(),
+        })
     }
 
     /// Submit a Set and take back the id the wait is held on — or, for a
@@ -77,7 +97,7 @@ impl Client {
             .post(format!("{}/api/v1/sets{deferred}", self.base))
             .header("Content-Type", "application/yaml")
             .send(&body)
-            .with_context(|| format!("submitting the Question Set to {}", self.base))?;
+            .with_context(|| format!("submitting the Question Set to {}", self.said))?;
 
         let status = reply.status().as_u16();
         let text = reply
@@ -112,7 +132,7 @@ impl Client {
             .agent
             .get(&url)
             .call()
-            .with_context(|| format!("fetching the Response from {}", self.base))?;
+            .with_context(|| format!("fetching the Response from {}", self.said))?;
 
         match reply.status().as_u16() {
             200 => {

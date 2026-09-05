@@ -148,7 +148,7 @@ Options:
           Prints the stored Set as YAML instead of a Response — its `id` and when the server took it — and exits 0, on every backend. The human answers it in their own time, and their Answers reach a later session of this Conversation and never this one, so `verkstead answers` refuses one. Wait only on Questions whose Answers affect the work about to be done.
 
       --server <SERVER>
-          Base URL of the Verkstead server
+          Where the Verkstead server is: its base URL, or `pipe://<name>` for a named pipe, which is Windows' own and what a session in a container asks through
           
           [env: VERKSTEAD_SERVER=]
           [default: http://127.0.0.1:8422]

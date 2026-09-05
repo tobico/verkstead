@@ -25,6 +25,12 @@ pub const ASKING_FROM: i64 = 1;
 pub struct Server {
     addr: SocketAddr,
     database: PathBuf,
+
+    /// What a client is told the pipe beside the socket is called. Windows'
+    /// own: there is no pipe to open anywhere else.
+    #[cfg(windows)]
+    pipe: String,
+
     runtime: tokio::runtime::Runtime,
 }
 
@@ -71,6 +77,35 @@ impl Server {
             (listener, addr, pool)
         });
 
+        // The pipe beside the socket, so that one test can put the round trip
+        // through the pipe and the next through the URL against the same
+        // server. Named after the database's own directory, which is the Data
+        // Directory as far as the pipe is concerned — so a server brought back
+        // up over the same database comes back on the same pipe as well as on
+        // the same port. Opened on this runtime, because tokio's pipes register
+        // with its reactor.
+        #[cfg(windows)]
+        let pipe = {
+            let data_dir = database.parent().unwrap().to_owned();
+            let pool = pool.clone();
+
+            runtime.block_on(async move {
+                let listener = verkstead_server::pipe::Listener::open(&data_dir, None)
+                    .expect("nothing else holds this Data Directory's pipe");
+                let spelling = listener.asked_through().to_owned();
+
+                // The router built in here with it, because building one starts
+                // the sweep the server starts, and that wants a runtime under
+                // it.
+                let served = verkstead_server::router(pool);
+                tokio::spawn(async move {
+                    let _ = axum::serve(listener, served).await;
+                });
+
+                spelling
+            })
+        };
+
         runtime.spawn(async move {
             let _ = axum::serve(listener, verkstead_server::router(pool)).await;
         });
@@ -78,6 +113,8 @@ impl Server {
         Server {
             addr,
             database,
+            #[cfg(windows)]
+            pipe,
             runtime,
         }
     }
@@ -100,6 +137,13 @@ impl Server {
         format!("{}/conversations/{ASKING_FROM}", self.base())
     }
 
+    /// And what a Windows session is given instead: the same server on the
+    /// pipe beside its socket, scoped to the same Conversation.
+    #[cfg(windows)]
+    pub fn pipe_url(&self) -> String {
+        format!("{}/conversations/{ASKING_FROM}", self.pipe)
+    }
+
     pub fn block_on<F: Future>(&self, future: F) -> F::Output {
         self.runtime.block_on(future)
     }
@@ -112,6 +156,7 @@ impl Server {
             addr,
             database,
             runtime,
+            ..
         } = self;
         runtime.shutdown_timeout(Duration::from_millis(100));
         (addr, database)
