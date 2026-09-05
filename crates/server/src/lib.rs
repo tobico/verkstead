@@ -65,6 +65,18 @@ mod nudging;
 /// reads them: which of the two places said each one, and whether the server can
 /// see it.
 mod paths;
+/// The named pipe the server listens on beside its socket, which is the whole
+/// of what a sandboxed Windows session will have to ask through — an
+/// AppContainer is refused the loopback interface.
+///
+/// Public for the reason [`sandbox`] is: what a session reaches Verkstead
+/// through is the product's answer rather than an endpoint's, and what proves a
+/// pipe is a pipe is a request really made over one.
+///
+/// Windows' own. The other platforms have a loopback nothing refuses them, so
+/// there is no pipe here and no Unix-socket twin beside it either.
+#[cfg(windows)]
+pub mod pipe;
 /// Where a directory of Verkstead's own goes when nobody has said: the
 /// platform's own place for the Data Directory, and the environment values it
 /// is resolved out of.
@@ -914,6 +926,17 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
     // waited anyway.
     tokio::task::spawn_blocking(verkstead_render::warm_highlighter);
 
+    // And the pipe beside the socket, which is what a sandboxed Windows session
+    // asks through. Here rather than with the bind, because its name comes off
+    // the Data Directory — see [`pipe`] — and that is only settled above.
+    //
+    // Granting nobody beyond the account this runs as: the identity a
+    // container's sessions run under is what the further argument is for, and
+    // there are no containers yet.
+    #[cfg(windows)]
+    let pipe = pipe::Listener::open(&data_dir, None)
+        .context("opening the named pipe a Windows session asks through")?;
+
     tracing::info!(
         listen = %config.listen,
         data_dir = %data_dir.display(),
@@ -929,29 +952,52 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
         "verkstead is listening",
     );
 
-    axum::serve(
-        listener,
-        router_with_ui(
-            pool,
-            config.releases(),
-            watched,
-            data_dir,
-            Agents::new(
-                homes,
-                sandbox::Reachable::at(config.listen),
-                binds,
-                cache,
-                skills,
-                verkstead,
-                handoffs,
-                settings.clone(),
-            ),
-            // Whatever `gh` this machine has, authenticating as the configured
-            // token — the same one the sessions get, so one token is the whole
-            // of Verkstead's GitHub auth.
-            Gh::on_path().authenticated_by(settings),
+    // The pipe on a line of its own rather than as a field on the one above:
+    // the other platforms have no pipe, and a field saying so at every startup
+    // there would be a line about nothing. In the spelling a client opens, so
+    // that a human can paste what they read.
+    #[cfg(windows)]
+    tracing::info!(pipe = %pipe.name(), "verkstead is listening on a named pipe too");
+
+    let app = router_with_ui(
+        pool,
+        config.releases(),
+        watched,
+        data_dir,
+        Agents::new(
+            homes,
+            sandbox::Reachable::at(config.listen),
+            binds,
+            cache,
+            skills,
+            verkstead,
+            handoffs,
+            settings.clone(),
         ),
-    )
-    .await
-    .context("serving Verkstead")
+        // Whatever `gh` this machine has, authenticating as the configured
+        // token — the same one the sessions get, so one token is the whole
+        // of Verkstead's GitHub auth.
+        Gh::on_path().authenticated_by(settings),
+    );
+
+    // Two listeners over one router here, so that everything a request can ask
+    // for over the socket it can ask for over the pipe. Either one ending is
+    // the server ending: there is no graceful shutdown — the process stopping
+    // is the whole of stopping — so a half that has stopped answering is a
+    // Verkstead that has stopped serving.
+    #[cfg(windows)]
+    {
+        tokio::select! {
+            served = axum::serve(listener, app.clone()) => served.context("serving Verkstead"),
+            served = axum::serve(pipe, app) => served.context("serving Verkstead over its named pipe"),
+        }
+    }
+
+    // And the socket on its own everywhere else, there being no pipe to serve.
+    #[cfg(not(windows))]
+    {
+        axum::serve(listener, app)
+            .await
+            .context("serving Verkstead")
+    }
 }
