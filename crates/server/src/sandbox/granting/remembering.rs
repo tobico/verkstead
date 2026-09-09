@@ -314,6 +314,17 @@ struct Line {
 enum Word {
     ReadOnly,
     ReadWrite,
+
+    /// **Every step a description asked for, rather than the ones the machine
+    /// took.** A record is written before a word of it is — see
+    /// [`super::super::container::Container::wrote`] — so what is remembered
+    /// here is the whole list, and an ancestor the machine refused an entry on
+    /// is one there was never anything to take back from. Which is the safe way
+    /// round: a step written and not remembered would sit on a directory of the
+    /// human's naming an identity that has gone, and that is the one outcome
+    /// this file exists to prevent.
+    Stepped,
+
     Refused,
 }
 
@@ -325,6 +336,7 @@ impl Line {
             wanted: match entry.wanted {
                 Wanted::Granted(Reach::ReadOnly) => Word::ReadOnly,
                 Wanted::Granted(Reach::ReadWrite) => Word::ReadWrite,
+                Wanted::Stepped => Word::Stepped,
                 Wanted::Refused => Word::Refused,
             },
         }
@@ -337,6 +349,7 @@ impl Line {
             wanted: match self.wanted {
                 Word::ReadOnly => Wanted::Granted(Reach::ReadOnly),
                 Word::ReadWrite => Wanted::Granted(Reach::ReadWrite),
+                Word::Stepped => Wanted::Stepped,
                 Word::Refused => Wanted::Refused,
             },
         }
@@ -366,6 +379,13 @@ mod tests {
                 Entry {
                     path: PathBuf::from(r"C:\Users\ada\.claude\skills"),
                     wanted: Wanted::Refused,
+                },
+                // And the way to one of them, which is remembered beside the
+                // rest for the same reason the rest are: a step is an entry on
+                // a directory of the human's, and it comes off with them.
+                Entry {
+                    path: PathBuf::from(r"C:\Users\ada"),
+                    wanted: Wanted::Stepped,
                 },
             ],
             cut: vec![PathBuf::from(r"C:\Users\ada\.claude\skills")],

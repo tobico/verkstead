@@ -13,6 +13,17 @@
 //! `target/` would pay for the whole tree at every launch. The second session
 //! of a Conversation finds its own entries and writes nothing.
 //!
+//! **A step through is one entry that inherits nowhere** — see [`stepped`],
+//! which is the other half of what a session needs and is not a reach at all.
+//! It goes on the directories on the way to a granted path so that the path can
+//! be *resolved*, and it grants a walk and an attribute read and nothing else:
+//! the directory it is on stays unlistable, and no list under it is touched or
+//! even walked. And an ancestor that will not take one is not a session
+//! refused, which is the one place [`write`] carries on — the directories above
+//! a human's profile are the machine's own, they already let `Users` step
+//! through them, and how many were written and how many were refused goes in
+//! the log.
+//!
 //! **A refusal is the one thing the probe could not settle from outside**, and
 //! what it found is why this is not simply a deny entry. A deny written under a
 //! granted tree did not refuse a file *below* it: on that file both entries are
@@ -78,18 +89,19 @@ use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use windows_sys::Win32::Foundation::LocalFree;
 use windows_sys::Win32::Security::Authorization::{
-    EXPLICIT_ACCESS_W, GetNamedSecurityInfoW, NO_MULTIPLE_TRUSTEE, REVOKE_ACCESS, SE_FILE_OBJECT,
-    SET_ACCESS, SetEntriesInAclW, SetNamedSecurityInfoW, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN,
-    TRUSTEE_W,
+    EXPLICIT_ACCESS_W, GRANT_ACCESS, GetNamedSecurityInfoW, NO_MULTIPLE_TRUSTEE, REVOKE_ACCESS,
+    SE_FILE_OBJECT, SET_ACCESS, SetEntriesInAclW, SetNamedSecurityInfoW, TRUSTEE_IS_SID,
+    TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
 };
 use windows_sys::Win32::Security::{
     ACE_HEADER, ACL, ACL_REVISION, ACL_SIZE_INFORMATION, AclSizeInformation, AddAccessDeniedAceEx,
-    AddAce, DACL_SECURITY_INFORMATION, GetAce, GetAclInformation, InitializeAcl,
+    AddAce, DACL_SECURITY_INFORMATION, GetAce, GetAclInformation, InitializeAcl, NO_INHERITANCE,
     OBJECT_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
     SUB_CONTAINERS_AND_OBJECTS_INHERIT, UNPROTECTED_DACL_SECURITY_INFORMATION,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    DELETE, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
+    DELETE, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_READ_ATTRIBUTES,
+    FILE_TRAVERSE, SYNCHRONIZE,
 };
 
 use super::super::container::Sid;
@@ -230,6 +242,8 @@ pub(crate) fn write(entries: &[Entry], sid: &str, cut: &[PathBuf]) -> io::Result
     let sid = Sid::of(sid)?;
     let _one = one_at_a_time();
 
+    let (mut through, mut refused) = (0usize, 0usize);
+
     for entry in refusals_first(entries) {
         if !entry.path.exists() {
             continue;
@@ -238,20 +252,55 @@ pub(crate) fn write(entries: &[Entry], sid: &str, cut: &[PathBuf]) -> io::Result
         let written = match entry.wanted {
             Wanted::Granted(reach) => grant(&sid, &entry.path, reach),
             Wanted::Refused => refuse(&sid, &entry.path, cut.contains(&entry.path)),
+
+            // **An ancestor that will not take one is an answer rather than a
+            // fault**, which is the one thing here that does not refuse the
+            // session and is why this arm goes no further. The directories
+            // above a human's profile are the machine's own and already let
+            // `Users` step through them, so an entry there is refused and is
+            // not needed — and there is no telling from here which of the two
+            // an ancestor is. What matters is that the ones Verkstead *can*
+            // write are written, so the count goes in the log and the session
+            // goes on.
+            Wanted::Stepped => {
+                match stepped(&sid, &entry.path) {
+                    Ok(()) => through += 1,
+                    Err(error) => {
+                        refused += 1;
+
+                        tracing::debug!(
+                            error = ?error,
+                            path = %entry.path.display(),
+                            "a directory on the way to something this session may reach would \
+                             not take a step through it, which is what the machine's own \
+                             directories answer and is not a session refused",
+                        );
+                    }
+                }
+
+                continue;
+            }
         };
 
         written.map_err(|error| {
             io::Error::other(format!(
-                "{} could not be made {} the AppContainer: {error}",
+                "{} could not be made {} the identity this session runs as: {error}",
                 entry.path.display(),
                 match entry.wanted {
                     Wanted::Granted(Reach::ReadOnly) => "readable by",
                     Wanted::Granted(Reach::ReadWrite) => "writable by",
-                    Wanted::Refused => "unreachable from",
+                    Wanted::Stepped | Wanted::Refused => "unreachable from",
                 },
             ))
         })?;
     }
+
+    tracing::debug!(
+        written = through,
+        refused,
+        "the directories on the way to what this session may reach, stepped through where \
+         this machine would have one",
+    );
 
     Ok(())
 }
@@ -287,20 +336,39 @@ pub(crate) fn strip(entries: &[Entry], cut: &[PathBuf], sid: &str) {
 
         // A refusal cut the inheritance on that directory as well as writing a
         // deny, so taking it back is more than taking an entry off — see
-        // [`restored`], and [`refuse`] for what it is undoing.
+        // [`restored`], and [`refuse`] for what it is undoing. A step is an
+        // allow like a grant and comes off the same way.
         let taken = match entry.wanted {
-            Wanted::Granted(_) => revoked(&sid, &entry.path),
+            Wanted::Granted(_) | Wanted::Stepped => revoked(&sid, &entry.path),
             Wanted::Refused => restored(&sid, &entry.path, cut.contains(&entry.path)),
         };
 
         if let Err(error) = taken {
-            tracing::warn!(
-                error = ?error,
-                path = %entry.path.display(),
-                "an access-control entry written for a session's AppContainer could not be \
-                 taken off again, so it is left on a directory naming an identity that has \
-                 gone"
-            );
+            // **A step is the one entry whose failing to come off is ordinary**,
+            // because a record says every step a description asked for rather
+            // than the ones the machine took — see
+            // [`super::super::container::Container::wrote`], which writes the
+            // record before a word of it is written. So an ancestor Verkstead
+            // could not write is one it now cannot take back, and there was
+            // never anything there to take: that is a line for somebody
+            // reading the log on purpose rather than a warning.
+            if entry.wanted == Wanted::Stepped {
+                tracing::debug!(
+                    error = ?error,
+                    path = %entry.path.display(),
+                    "a step through a directory on the way to a session's own would not come \
+                     off, which is what a directory that would not take one in the first place \
+                     answers",
+                );
+            } else {
+                tracing::warn!(
+                    error = ?error,
+                    path = %entry.path.display(),
+                    "an access-control entry written for a session's identity could not be \
+                     taken off again, so it is left on a directory naming an identity that has \
+                     gone"
+                );
+            }
         }
     }
 }
@@ -344,7 +412,7 @@ fn grant(sid: &Sid, path: &Path, reach: Reach) -> io::Result<()> {
         Reach::ReadWrite => FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE | DELETE,
     };
 
-    if already(sid, path, rights)? {
+    if already(sid, path, rights, SUB_CONTAINERS_AND_OBJECTS_INHERIT)? {
         return Ok(());
     }
 
@@ -352,6 +420,47 @@ fn grant(sid: &Sid, path: &Path, reach: Reach) -> io::Result<()> {
         grfAccessPermissions: rights,
         grfAccessMode: SET_ACCESS,
         grfInheritance: SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+        Trustee: trustee(sid),
+    };
+
+    merged(path, &access, DACL_SECURITY_INFORMATION)
+}
+
+/// And `path` stepped through on the way to somewhere else: its attributes
+/// asked for and a walk through it allowed, and nothing else at all.
+///
+/// **The three rights a resolution takes.** `FILE_TRAVERSE` is the walk itself;
+/// `FILE_READ_ATTRIBUTES` is what an agent asks a directory for before it opens
+/// what is under it; and `SYNCHRONIZE` is what `CreateFileW` adds to every
+/// desired access it is not handed `FILE_FLAG_OVERLAPPED` with, so a directory
+/// granted the first two and not the third is one nothing can open at all.
+/// What is deliberately not among them is `FILE_LIST_DIRECTORY`: the human's
+/// profile is walked through and stays unlistable, which is the whole point of
+/// the entry.
+///
+/// **And it does not inherit.** [`NO_INHERITANCE`] is what makes this an entry
+/// about one directory rather than a grant of everything under it — a step
+/// through `C:\Users\ada` that propagated would be the human's whole account
+/// given away by the mechanism that exists to avoid giving it.
+///
+/// **Added rather than set**, which is the one place this differs from
+/// [`grant`]. `SET_ACCESS` replaces whatever the trustee already had on the
+/// path, and a step is the narrowest thing written anywhere here: on a machine
+/// where two sessions share one identity, a step landing on a directory another
+/// session was granted would leave that session behind a boundary narrower than
+/// its description. `GRANT_ACCESS` adds to what is there and can only ever
+/// widen.
+fn stepped(sid: &Sid, path: &Path) -> io::Result<()> {
+    let rights = FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE;
+
+    if already(sid, path, rights, NO_INHERITANCE)? {
+        return Ok(());
+    }
+
+    let access = EXPLICIT_ACCESS_W {
+        grfAccessPermissions: rights,
+        grfAccessMode: GRANT_ACCESS,
+        grfInheritance: NO_INHERITANCE,
         Trustee: trustee(sid),
     };
 
@@ -646,14 +755,19 @@ fn added(acl: *mut ACL, aces: &[Vec<u8>]) -> io::Result<()> {
     Ok(())
 }
 
-/// Whether `path` already says what a grant of `rights` would say.
+/// Whether `path` already says what an entry of `rights` inheriting `how` would
+/// say.
 ///
 /// Its own entry rather than one it inherits, at exactly the rights and exactly
 /// the inheritance this would write: an entry that says something narrower is
 /// one that has to be written over, and one it inherits from above is one a
 /// path of its own has to be written for — a grant is what makes a *directory*
 /// reachable, and inheriting one from somewhere else says nothing about that.
-fn already(sid: &Sid, path: &Path, rights: u32) -> io::Result<bool> {
+///
+/// `how` is the inheritance because a grant and a step are two different
+/// answers to that and are otherwise the same question: what a second session
+/// of a Conversation finds already written, and so does not write again.
+fn already(sid: &Sid, path: &Path, rights: u32, how: u32) -> io::Result<bool> {
     let held = Held::of(path)?;
 
     let Some(existing) = held.list() else {
@@ -663,7 +777,7 @@ fn already(sid: &Sid, path: &Path, rights: u32) -> io::Result<bool> {
     Ok(existing.iter().any(|ace| {
         ace.len() > THE_SID
             && ace[0] == ALLOWED
-            && u32::from(ace[1]) == SUB_CONTAINERS_AND_OBJECTS_INHERIT
+            && u32::from(ace[1]) == how
             && mask(ace) == rights
             && whose(ace).is_some_and(|theirs| sid.is(theirs))
     }))
@@ -893,6 +1007,7 @@ mod tests {
 
     use std::path::PathBuf;
 
+    use crate::sandbox::account::Logon;
     use crate::sandbox::container::Container;
     use crate::sandbox::rendering::Rendering;
     use crate::sandbox::starting::off_a_console;
@@ -1418,6 +1533,175 @@ mod tests {
         );
 
         crate::sandbox::container::taken_back(held.path(), 2);
+    }
+
+    /// The whole of what a step through an ancestor is for, asked of the
+    /// machine: under the session account, a path deep beneath the human's own
+    /// profile is resolved and read — and the profile it is under is still
+    /// refused a listing in the same run.
+    ///
+    /// **Asked of the account rather than of a container**, which is the one
+    /// test here that is: an AppContainer refuses a path *resolution* however
+    /// well the path is granted, so a probe inside one would fail this whatever
+    /// was written and would be answering about the container. The account is
+    /// what stage 04 switches every session to — see [`Rendering::as_account`]
+    /// — and what a step exists for.
+    ///
+    /// **The real profile rather than a stand-in**, for the same reason: what
+    /// is being asked is whether a directory whose list gives an ordinary local
+    /// account nothing at all can be walked through without being opened, and
+    /// the human's own profile is the directory that is really like that on
+    /// every Windows machine there is.
+    ///
+    /// **Both halves in one run**, because either alone is passable by
+    /// accident: a machine that granted the account the profile outright would
+    /// read the file, and one that had granted it nothing would refuse the
+    /// listing.
+    ///
+    /// It needs the account and says so rather than passing — the rule
+    /// `tests/account_windows.rs` follows, and for its reason: creating a local
+    /// account is an administrator's call, so a machine where the verb has
+    /// never been run fails here with the line that names it.
+    #[test]
+    fn under_the_account_a_path_under_the_profile_resolves_and_the_profile_will_not_list() {
+        use crate::platform;
+        use crate::sandbox::account::machine::Account;
+        use crate::sandbox::surface::Surface;
+        use crate::settings::Settings;
+
+        let data_dir =
+            platform::data_dir(None).expect("this machine has somewhere for a Data Directory");
+        let settings = Settings::in_data_dir(&data_dir);
+
+        let account = match Account::on_this_machine(&data_dir, &settings.secrets()) {
+            Ok(account) => account,
+            Err(missing) => panic!(
+                "this test runs a probe as the session account and there is not one: \
+                 {missing}\n\nThe Data Directory it asked about is {}.",
+                data_dir.display(),
+            ),
+        };
+
+        let profile = PathBuf::from(
+            std::env::var_os("USERPROFILE").expect("every Windows account has a profile"),
+        );
+
+        // Under the human's own profile rather than in the temporary directory
+        // this file's other tests use, because being under the profile is the
+        // whole question — and removed on the way out, whatever this asserts.
+        let held = tempfile::tempdir_in(&profile).expect("somewhere under the human's profile");
+
+        let deep = held.path().join("worktrees").join("a-conversation");
+        let readable = deep.join("readable.txt");
+
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(&readable, "the description named this").unwrap();
+
+        // One granted path and nothing else: every other entry this comes to is
+        // a step on the way to it, which is what is being asked.
+        let mut surface = Surface::starting_in(deep.clone());
+        surface.own(&deep, Reach::ReadWrite);
+
+        let entries = super::super::entries(&surface, None);
+
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.wanted == Wanted::Stepped && entry.path == profile),
+            "the human's own profile is on the way to this path and so is stepped \
+             through: {entries:?}"
+        );
+
+        let cut = inheriting(&entries);
+
+        write(&entries, account.sid().text(), &cut).expect("the entries this description comes to");
+
+        let said = as_the_account(
+            &Logon::of(account.name(), account.password()),
+            &readable,
+            &profile,
+        );
+
+        // Taken off before anything is asserted, so that a failing assertion
+        // still leaves the human's own profile as this found it.
+        strip(&entries, &cut, account.sid().text());
+
+        assert!(
+            said.contains("deep=read"),
+            "a granted path deep under the human's profile resolves and is read \
+             once every directory on the way to it has been stepped through, and \
+             the probe said: {said:?}"
+        );
+        assert!(
+            said.contains("profile=UnauthorizedAccessException"),
+            "and the profile it is under is walked through without being opened: \
+             a step says nothing about what is inside, and the probe said: {said:?}"
+        );
+    }
+
+    /// Read `read` and list `list` from a process started as the account, and
+    /// hand back the two `name=word` lines it printed.
+    ///
+    /// **Listing rather than reading, for the second of them**, because that is
+    /// the reach a step is asserted not to give: a directory whose attributes
+    /// can be asked for and whose contents cannot be enumerated is exactly what
+    /// [`stepped`] writes, and a probe that only tried to read a file out of it
+    /// would pass against an entry that granted the listing too.
+    ///
+    /// The environment is this test's own and small — see
+    /// `tests/account_windows.rs`, which says why: a rendering is the whole of
+    /// what a process is handed, and the server's own environment is full of
+    /// paths this account is refused.
+    ///
+    /// And the word is the innermost exception, for [`attempted`]'s reason and
+    /// one more of its own: a static method that throws reaches a PowerShell
+    /// `catch` wrapped in a `MethodInvocationException`, which is the same word
+    /// whatever went wrong underneath it.
+    fn as_the_account(logon: &Logon, read: &Path, list: &Path) -> String {
+        let quoted = |path: &Path| path.display().to_string().replace('\'', "''");
+
+        let mut probe = Rendering::running("powershell.exe");
+
+        probe
+            .set("SystemRoot", r"C:\Windows")
+            .set("SystemDrive", "C:")
+            .set("PATH", r"C:\Windows\System32;C:\Windows")
+            .set("PATHEXT", ".COM;.EXE;.BAT;.CMD;.PS1")
+            .set("TEMP", r"C:\Windows\Temp")
+            .set("TMP", r"C:\Windows\Temp")
+            .starting_in(PathBuf::from(r"C:\Windows"))
+            .arg("-NoProfile")
+            .arg("-NonInteractive")
+            .arg("-Command")
+            .arg(format!(
+                "function Why($e) {{ \
+                   while ($e.InnerException) {{ $e = $e.InnerException }}; \
+                   $e.GetType().Name \
+                 }}; \
+                 try {{ \
+                   [void][System.IO.File]::ReadAllText('{}'); \
+                   [Console]::Out.WriteLine('deep=read') \
+                 }} catch {{ \
+                   [Console]::Out.WriteLine('deep=' + (Why $_.Exception)) \
+                 }}; \
+                 try {{ \
+                   [void][System.IO.Directory]::GetFileSystemEntries('{}'); \
+                   [Console]::Out.WriteLine('profile=listed') \
+                 }} catch {{ \
+                   [Console]::Out.WriteLine('profile=' + (Why $_.Exception)) \
+                 }}",
+                quoted(read),
+                quoted(list),
+            ))
+            .as_account(logon.clone());
+
+        let printed = off_a_console(&probe, b"").expect("a probe started as the session account");
+
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&printed.stdout),
+            String::from_utf8_lossy(&printed.stderr),
+        )
     }
 
     /// Read each of `paths` from inside the container `sid` names, and hand
