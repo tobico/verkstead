@@ -630,11 +630,15 @@ them.
    that it is on `main`. Nothing in the pipeline merges anything.
 
 **On a roadmap**, settling is also what starts the next **Stage**: a
-Conversation of its own, on a branch stacked on the unmerged predecessor where
-the repository's workflow records how, primed with the stage brief as its Brief
-and Implementing from the first moment. A **Notice** on the Timeline says which
-Stage started and where its branch went — or that the roadmap has no Stage left
-to run. Nobody presses anything for either.
+Conversation of its own, primed with the stage brief as its Brief and
+Implementing from the first moment. Its branch stands on the predecessor's
+wherever the default branch does not yet hold that work — that being where the
+work this Stage builds on is — and comes off the default branch once it does.
+Where the repository's workflow records how to stack a Stage for review the
+session follows it; where it records none the pull request carries the Stage
+before it until that one merges. A **Notice** on the Timeline says which Stage
+started and where its branch went — or that the roadmap has no Stage left to
+run. Nobody presses anything for either.
 
 ## What is different in practice
 
