@@ -9,10 +9,11 @@
 //! one, so a key kept there is a key a session cannot read (ADR-0015).
 //!
 //! **A file of its own, beside the settings files rather than inside one.**
-//! Clearing the GitHub token writes `secrets.yaml` empty — see
-//! [`crate::settings::Settings::save_secrets`] — so a key kept there would be
-//! destroyed by an ordinary settings save, and every device logged out by
-//! somebody tidying up a token.
+//! A settings save writes the whole of `secrets.yaml` out of what the page was
+//! told — see [`crate::settings::Settings::save_secrets`] — so a key kept there
+//! would be a key an ordinary settings save rewrote, and every device logged
+//! out by somebody tidying up a token. What is in that file is what somebody
+//! configured; this is not configured by anybody.
 //!
 //! **The link is the address with `?key=…`.** Opening it sets the cookie and
 //! redirects to the same path without the parameter, so the secret is out of the

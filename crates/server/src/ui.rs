@@ -47,9 +47,7 @@ use verkstead_render::{
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
-use crate::settings::{
-    Cleanup, CleanupStep, Config, GitAuthor, RuleTrouble, RustBuildCache, Secrets,
-};
+use crate::settings::{Cleanup, CleanupStep, Config, GitAuthor, RuleTrouble, RustBuildCache};
 use crate::{AppState, store};
 
 /// The viewer's routes, over the state the agent API is already holding: a
@@ -4181,10 +4179,15 @@ async fn save_settings(
             rules,
         ))?;
 
+        // On what the file already holds rather than on nothing: a save writes
+        // the whole of `secrets.yaml`, and the session account's password is in
+        // there beside the token on a Windows machine — see
+        // [`crate::settings::Settings::save_secrets`]. A page that has been
+        // told about one secret has no business rewriting the other.
         let verifying = match &edit.github_token {
             TokenEdit::Keep => None,
             TokenEdit::Set { token } => {
-                settings.save_secrets(&Secrets::of_token(Some(token.clone())))?;
+                settings.save_secrets(&settings.secrets().with_token(Some(token.clone())))?;
 
                 // Read back rather than taken from the request: a token that was
                 // only whitespace is nothing configured, and verifying what was
@@ -4193,7 +4196,7 @@ async fn save_settings(
                 settings.secrets().github_token().map(str::to_owned)
             }
             TokenEdit::Clear => {
-                settings.save_secrets(&Secrets::of_token(None))?;
+                settings.save_secrets(&settings.secrets().with_token(None))?;
 
                 None
             }

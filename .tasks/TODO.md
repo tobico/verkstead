@@ -23,7 +23,7 @@ Roadmap stage: [04: The session account](docs/roadmaps/windows-sessions/04-sessi
 
 ## Tasks
 
-- [ ] 01: The session account and the verb that makes it — [details](01-account-and-verb.md)
+- [x] 01: The session account and the verb that makes it — [details](01-account-and-verb.md)
 - [ ] 02: Starting a process as the account, on a console — [details](02-starting-as-the-account.md)
 - [ ] 03: Entries for an account, with a step through every ancestor — [details](03-entries-and-ancestors.md)
 - [ ] 04: Windows sessions run as the account — [details](04-sessions-run-as-it.md)

@@ -204,10 +204,20 @@ impl Settings {
     /// what a missing file says — see [`Secrets::read`] — and leaving the file
     /// there keeps its mode, its ownership and the fact that this is where the
     /// token goes.
+    ///
+    /// **Cleared means nothing set at all, rather than no token.** There is
+    /// more than one secret in this file now — the Windows session account's
+    /// password is kept beside the token, written once by an elevated verb and
+    /// never again — so emptying the file whenever the token is absent would
+    /// take that password away the first time somebody cleared a token, and
+    /// leave a machine whose sessions cannot start with nothing on the settings
+    /// page to say why. What a caller hands in is the whole of what the file
+    /// will hold, which is why the two ways of building one are both `with_` on
+    /// the secrets already there — see [`Secrets::with_token`].
     pub fn save_secrets(&self, secrets: &Secrets) -> std::io::Result<()> {
-        let text = match secrets.github_token() {
-            Some(_) => yaml(secrets)?,
-            None => String::new(),
+        let text = match secrets.anything_set() {
+            true => yaml(secrets)?,
+            false => String::new(),
         };
 
         write_atomically(&self.secrets_path(), &text, SECRET_MODE)
@@ -357,11 +367,21 @@ fn unreadable(path: &Path, error: &serde_saphyr::Error) {
     );
 }
 
-/// What `secrets.yaml` says. Flat, because there is one secret in it.
+/// What `secrets.yaml` says. Flat, because what is in it are secrets rather
+/// than a structure.
 ///
 /// Unknown keys are ignored rather than refused: the human hand-edits this file,
 /// and a key from a later Verkstead — or a comment they left as a key by mistake
 /// — is not worth taking a session's credentials away over.
+///
+/// **Two secrets now, and they are written by different hands.** The token is
+/// the settings page's, typed and retyped and cleared; the session account's
+/// password is an elevated verb's, written once when the account is made and
+/// read by every Windows session after that. Neither may take the other away,
+/// which is why there is no constructor here that says what the whole file is —
+/// only [`Secrets::with_token`] and
+/// [`Secrets::with_session_account_password`], each of which is the secrets
+/// that are already there with one of them replaced.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Secrets {
     /// The GitHub token every session and every host-side `gh` authenticates
@@ -372,6 +392,19 @@ pub struct Secrets {
     /// reads as a setting that went wrong rather than as one nobody has made.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     github_token: Option<String>,
+
+    /// And the password of the local account a Windows session runs as, or
+    /// `None` on a machine where the elevated verb has not been run — which is
+    /// every machine that is not a Windows one.
+    ///
+    /// Here rather than in a file of its own because this is the file that is
+    /// already written 0600 and already never in a sandbox: what
+    /// `CreateProcessWithLogonW` needs is a password, and a password Verkstead
+    /// keeps is a secret whatever it opens — see
+    /// [`crate::sandbox::account`], which is what generates one and what reads
+    /// it back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    session_account_password: Option<String>,
 }
 
 impl Secrets {
@@ -389,24 +422,65 @@ impl Secrets {
 
         Ok(Secrets {
             github_token: secrets.github_token.and_then(blank_is_nothing),
+            session_account_password: secrets.session_account_password.and_then(blank_is_nothing),
         })
     }
 
-    /// The secrets a settings page has just been told: `token` as it was typed,
+    /// These secrets with the GitHub token replaced: `token` as it was typed,
     /// or `None` where the human cleared it.
+    ///
+    /// On the secrets that are already there rather than on nothing, because
+    /// what a save writes is the whole file — see
+    /// [`Settings::save_secrets`] — and the other secret in it is not the
+    /// settings page's to take away.
     ///
     /// Whitespace is nothing, as it is on the way in — see [`blank_is_nothing`].
     /// A token pasted with the newline that came with it is the ordinary case,
     /// and one that was only spaces is a cleared field spelled another way.
-    pub fn of_token(token: Option<String>) -> Secrets {
+    pub fn with_token(&self, token: Option<String>) -> Secrets {
         Secrets {
             github_token: token.and_then(blank_is_nothing),
+            ..self.clone()
+        }
+    }
+
+    /// And these secrets with the session account's password replaced, which is
+    /// the elevated verb's write and nobody else's.
+    ///
+    /// `None` is the account having been taken away: the verb that deletes one
+    /// clears the password in the same breath, so a Data Directory whose
+    /// account is gone does not go on holding the password of an account that
+    /// is not there.
+    pub fn with_session_account_password(&self, password: Option<String>) -> Secrets {
+        Secrets {
+            session_account_password: password.and_then(blank_is_nothing),
+            ..self.clone()
         }
     }
 
     /// The configured GitHub token, or `None` where there is none.
     pub fn github_token(&self) -> Option<&str> {
         self.github_token.as_deref()
+    }
+
+    /// And the session account's password, or `None` where the elevated verb
+    /// has not been run for this Data Directory.
+    pub fn session_account_password(&self) -> Option<&str> {
+        self.session_account_password.as_deref()
+    }
+
+    /// Whether anything at all is configured here, which is what says a save
+    /// writes a file rather than empties one.
+    ///
+    /// Every field, said once: a secret added to this struct and left out of
+    /// here would be a secret that a save quietly threw away.
+    fn anything_set(&self) -> bool {
+        let Secrets {
+            github_token,
+            session_account_password,
+        } = self;
+
+        github_token.is_some() || session_account_password.is_some()
     }
 }
 
@@ -1066,6 +1140,62 @@ mod tests {
     }
 
     #[test]
+    fn the_session_accounts_password_is_read_beside_the_token() {
+        let secrets =
+            Secrets::read("github_token: ghp_thetoken\nsession_account_password: Vk1-hunter2\n")
+                .unwrap();
+
+        assert_eq!(secrets.github_token(), Some("ghp_thetoken"));
+        assert_eq!(secrets.session_account_password(), Some("Vk1-hunter2"));
+    }
+
+    #[test]
+    fn a_blank_password_is_no_password() {
+        assert_eq!(
+            Secrets::read("session_account_password: ''\n")
+                .unwrap()
+                .session_account_password(),
+            None
+        );
+    }
+
+    #[test]
+    fn a_stored_password_survives_the_token_being_cleared() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        // The elevated verb's write, and then the settings page's — in that
+        // order, because that is the order a machine does them in.
+        settings
+            .save_secrets(
+                &settings
+                    .secrets()
+                    .with_session_account_password(Some("Vk1-hunter2".to_owned())),
+            )
+            .unwrap();
+        settings
+            .save_secrets(
+                &settings
+                    .secrets()
+                    .with_token(Some("ghp_thetoken".to_owned())),
+            )
+            .unwrap();
+
+        // And now somebody tidies up the token they had finished with, which is
+        // what used to empty this file.
+        settings
+            .save_secrets(&settings.secrets().with_token(None))
+            .unwrap();
+
+        assert_eq!(settings.secrets().github_token(), None);
+        assert_eq!(
+            settings.secrets().session_account_password(),
+            Some("Vk1-hunter2"),
+            "clearing a token should not have taken the session account's password with it",
+        );
+    }
+
+    #[test]
     fn a_key_this_version_never_heard_of_is_not_the_end_of_the_file() {
         let secrets = Secrets::read("github_token: ghp_thetoken\nsomething_later: yes\n").unwrap();
 
@@ -1572,7 +1702,11 @@ mod tests {
         let settings = Settings::in_data_dir(dir.path());
 
         settings
-            .save_secrets(&Secrets::of_token(Some("ghp_thetoken".to_owned())))
+            .save_secrets(
+                &settings
+                    .secrets()
+                    .with_token(Some("ghp_thetoken".to_owned())),
+            )
             .unwrap();
 
         assert_eq!(settings.secrets().github_token(), Some("ghp_thetoken"));
@@ -1590,7 +1724,11 @@ mod tests {
         let settings = Settings::in_data_dir(dir.path());
 
         settings
-            .save_secrets(&Secrets::of_token(Some("ghp_thetoken".to_owned())))
+            .save_secrets(
+                &settings
+                    .secrets()
+                    .with_token(Some("ghp_thetoken".to_owned())),
+            )
             .unwrap();
 
         let mode = std::fs::metadata(settings.secrets_path())
@@ -1621,7 +1759,11 @@ mod tests {
         .unwrap();
 
         settings
-            .save_secrets(&Secrets::of_token(Some("ghp_thetoken".to_owned())))
+            .save_secrets(
+                &settings
+                    .secrets()
+                    .with_token(Some("ghp_thetoken".to_owned())),
+            )
             .unwrap();
 
         let mode = std::fs::metadata(settings.secrets_path())
@@ -1638,9 +1780,15 @@ mod tests {
         let settings = Settings::in_data_dir(dir.path());
 
         settings
-            .save_secrets(&Secrets::of_token(Some("ghp_thetoken".to_owned())))
+            .save_secrets(
+                &settings
+                    .secrets()
+                    .with_token(Some("ghp_thetoken".to_owned())),
+            )
             .unwrap();
-        settings.save_secrets(&Secrets::of_token(None)).unwrap();
+        settings
+            .save_secrets(&settings.secrets().with_token(None))
+            .unwrap();
 
         assert_eq!(settings.secrets().github_token(), None);
         assert_eq!(
@@ -1656,7 +1804,7 @@ mod tests {
         let settings = Settings::in_data_dir(dir.path());
 
         settings
-            .save_secrets(&Secrets::of_token(Some("   \n".to_owned())))
+            .save_secrets(&settings.secrets().with_token(Some("   \n".to_owned())))
             .unwrap();
 
         assert_eq!(settings.secrets().github_token(), None);
@@ -1668,7 +1816,11 @@ mod tests {
         let settings = Settings::in_data_dir(dir.path());
 
         settings
-            .save_secrets(&Secrets::of_token(Some(" ghp_thetoken\n".to_owned())))
+            .save_secrets(
+                &settings
+                    .secrets()
+                    .with_token(Some(" ghp_thetoken\n".to_owned())),
+            )
             .unwrap();
 
         assert_eq!(settings.secrets().github_token(), Some("ghp_thetoken"));
@@ -1793,7 +1945,11 @@ mod tests {
         assert!(settings.secrets_written_at().is_none());
 
         settings
-            .save_secrets(&Secrets::of_token(Some("ghp_thetoken".to_owned())))
+            .save_secrets(
+                &settings
+                    .secrets()
+                    .with_token(Some("ghp_thetoken".to_owned())),
+            )
             .unwrap();
 
         assert!(settings.secrets_written_at().is_some());
@@ -1807,7 +1963,11 @@ mod tests {
         let settings = Settings::in_data_dir(dir.path());
 
         settings
-            .save_secrets(&Secrets::of_token(Some("ghp_thetoken".to_owned())))
+            .save_secrets(
+                &settings
+                    .secrets()
+                    .with_token(Some("ghp_thetoken".to_owned())),
+            )
             .unwrap();
         settings
             .save_config(&Config::of(
@@ -1834,7 +1994,11 @@ mod tests {
         let settings = Settings::in_data_dir(dir.path());
 
         settings
-            .save_secrets(&Secrets::of_token(Some("ghp_thetoken".to_owned())))
+            .save_secrets(
+                &settings
+                    .secrets()
+                    .with_token(Some("ghp_thetoken".to_owned())),
+            )
             .unwrap();
         settings
             .save_config(&Config::of(

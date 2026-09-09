@@ -103,6 +103,16 @@ pub(crate) mod open;
 // description — only the writing of one is a Win32 call, and that is `cfg`-ed
 // inside.
 pub(crate) mod granting;
+// And who those entries are written for: the local account a Windows session
+// runs as, the name it goes by and the password Verkstead keeps for it. Built
+// everywhere for the reason [`granting`] is — what an account is *called* is
+// arithmetic over a Data Directory, and only the machine's own account database
+// is a Win32 call, which is `cfg`-ed inside.
+//
+// Public for the reason this module is: an account is the whole of the boundary
+// on that platform, and the verb that makes one is the human's rather than an
+// endpoint's — see `crates/cli`, which is where it is run from.
+pub mod account;
 // And the three ends of what a renderer is: the description going in, the
 // process coming out, and what is left to see to once that process has gone.
 // The last of those is nothing on the two platforms whose links follow their
