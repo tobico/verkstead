@@ -72,6 +72,65 @@ use std::path::Path;
 /// on a machine nobody is watching.
 pub const MOST: usize = 20;
 
+/// The account a process is started as, as a description carries one: the name
+/// this machine knows it by and the password `CreateProcessWithLogonW` is
+/// given.
+///
+/// **What crosses the seam**, the way a container's SID is what crosses it —
+/// see [`super::rendering::Rendering::as_account`]. A [`machine::Account`] is
+/// three things and one of them is a SID, which is a block of bytes this
+/// machine resolved and which nothing off it can read; a rendering is a
+/// description that is copied, compared and built on machines that have no such
+/// account at all. So what travels is the two words a logon is made of, and the
+/// SID stays where it was resolved.
+///
+/// **The password is in it because there is nowhere else for it to be.**
+/// `CreateProcessWithLogonW` takes one and there is no passwordless route to
+/// another account's token, and the two places that start a process are handed
+/// a rendering and nothing else — see [`super::starting`] and
+/// [`crate::terminal`]. What that costs is guarded rather than avoided: the
+/// [`fmt::Debug`] below is written rather than derived, so a rendering in a log
+/// line or in a failed assertion says the name and never the password.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Logon {
+    name: String,
+    password: String,
+}
+
+/// The name, and the password said to be there rather than said.
+///
+/// Derived, this would put the password into every log line and every failed
+/// assertion that carried a rendering — which is a secret leaving the file it
+/// is kept 0600 in by the most ordinary route there is. The same reason
+/// `machine::Account`'s own is written out.
+impl fmt::Debug for Logon {
+    fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result {
+        out.debug_struct("Logon")
+            .field("name", &self.name)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Logon {
+    /// The account called `name`, whose password is `password`.
+    pub fn of(name: impl Into<String>, password: impl Into<String>) -> Logon {
+        Logon {
+            name: name.into(),
+            password: password.into(),
+        }
+    }
+
+    /// What the account is called on this machine.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// And the password a logon as it is made with.
+    pub fn password(&self) -> &str {
+        &self.password
+    }
+}
+
 /// What every session account's name begins with, so that a human looking at
 /// the accounts on their machine can see whose it is.
 ///

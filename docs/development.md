@@ -602,6 +602,22 @@ runner for the two of them that are about the build cache — both of which prov
 a negative, that a machine which *has* one still starts no Compile Server and
 still hands a session no `RUSTC_WRAPPER`.
 
+**And a Windows checkout needs the session account, once.** Two suites start a
+process as it — `crates/server/tests/account_windows.rs`, which reads back what
+one printed, and `crates/cli/tests/launcher_windows.rs`, which puts one on a
+console a launcher made on the far side of the boundary — and neither can make
+an account, that being an administrator's call. So a machine that has never run
+the verb fails there with the line naming it rather than passing quietly, and
+the verb is run once from an elevated terminal:
+
+```console
+$ verkstead session-account create   # elevated, once per Data Directory
+$ verkstead session-account remove   # elevated, and the way to undo it
+```
+
+The `windows-2025` job runs the same verb in a step of its own, a runner being
+elevated already. Nothing else about a test run is privileged, here or there.
+
 And in `web/`, which is the Solid viewer
 ([ADR 0003](adr/0003-solid-spa-viewer.md)):
 

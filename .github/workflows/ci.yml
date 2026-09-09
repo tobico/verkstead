@@ -245,6 +245,21 @@ jobs:
       - name: Build
         run: cargo build --workspace --all-targets --features verkstead-desktop/shim
 
+      # **The session account, which two suites here cannot make for
+      # themselves.** A Windows session runs as a local account of Verkstead's
+      # own (ADR-0014, amended), and creating one is an administrator's call —
+      # so `crates/server/tests/account_windows.rs` and
+      # `crates/cli/tests/launcher_windows.rs` ask for the account this
+      # machine's Data Directory already has, and fail with the line that names
+      # this verb where there is none. A runner is elevated, so this is the one
+      # place the verb can be run for them.
+      #
+      # The binary the step above built rather than a `cargo run`, so that
+      # nothing is compiled twice — and against no `--data-dir`, because the
+      # default is the one the suites resolve.
+      - name: Create the session account
+        run: target/debug/verkstead.exe session-account create
+
       # What is left out of the run is left out of the build above: a suite that
       # stands on a mount namespace or on Apple's sandbox is `cfg`-gated at its
       # own file, so this is the whole of what a Windows Verkstead has to say

@@ -14,6 +14,15 @@
 //! `InitializeProcThreadAttributeList` is asked for a count before anything
 //! goes on it, and a console and a container are two attributes on one list.
 //!
+//! **And the account, which carries no list at all.** From this stage on a
+//! Windows process can also be started *as* a local account of Verkstead's own
+//! (ADR-0014, *Amended: the Sandbox is an account*), which is
+//! `CreateProcessWithLogonW` — see `as_the_account`. That call refuses an
+//! extended startup info outright, so a process started as somebody else can be
+//! given no console and no container: what it is given is the same four things
+//! a rendering comes to, and a console it is to run on is made on the far side
+//! of the boundary by a launcher of Verkstead's own.
+//!
 //! And beside them, the other way of starting a rendering: [`off_a_console`],
 //! for everything that reads what a process printed rather than watching it —
 //! the boundary suite, the ask test, the Compile Server. A rendering that names
@@ -28,6 +37,8 @@ use std::os::windows::io::{FromRawHandle, RawHandle};
 use std::os::windows::process::ExitStatusExt;
 use std::process::{Command, ExitStatus, Output, Stdio};
 use std::ptr;
+use std::sync::{Mutex, PoisonError};
+use std::time::Duration;
 
 use windows_sys::Win32::Foundation::{
     CloseHandle, HANDLE, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation,
@@ -38,12 +49,14 @@ use windows_sys::Win32::Security::{
 };
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
-    CREATE_UNICODE_ENVIRONMENT, CreateProcessW, DeleteProcThreadAttributeList,
-    EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList,
-    LPPROC_THREAD_ATTRIBUTE_LIST, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, PROCESS_INFORMATION,
-    STARTF_USESTDHANDLES, STARTUPINFOEXW, UpdateProcThreadAttribute, WaitForSingleObject,
+    CREATE_UNICODE_ENVIRONMENT, CreateProcessW, CreateProcessWithLogonW,
+    DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, INFINITE,
+    InitializeProcThreadAttributeList, LOGON_WITH_PROFILE, LPPROC_THREAD_ATTRIBUTE_LIST,
+    PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, PROCESS_INFORMATION, STARTF_USESTDHANDLES,
+    STARTUPINFOEXW, STARTUPINFOW, UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
+use super::account::{Logon, MAKE_IT};
 use super::container::{INTERNET_CLIENT, SE_GROUP_ENABLED, Sid};
 use super::rendering::Rendering;
 
@@ -62,20 +75,44 @@ use super::rendering::Rendering;
 /// all is the ordinary case; a Set on the way to `verkstead ask` is the case
 /// that is not.
 ///
-/// **A rendering that names no container is an ordinary `Command`**, which is
-/// what the two Unix platforms and the Compile Server are. One that
-/// names a container is the whole reason this exists: the security
-/// capabilities go on an attribute list, and a list is precisely what the
-/// standard library will not carry.
+/// **A rendering that names neither a container nor an account is an ordinary
+/// `Command`**, which is what the two Unix platforms and the Compile Server
+/// are. The two that name one are the whole reason this exists: a container's
+/// security capabilities go on an attribute list, which is precisely what the
+/// standard library will not carry, and an account is a
+/// `CreateProcessWithLogonW`, which is a call it does not make at all.
+///
+/// **Both are the same three pipes** — see `over_pipes`, which is that half
+/// said once. What differs is the one call in the middle of it.
 ///
 /// It waits, so a caller that has to answer the process it started — the ask
 /// test, whose Set has to be answered before the process will exit — runs this
 /// on a thread of its own.
 pub fn off_a_console(rendering: &Rendering, typed: &[u8]) -> io::Result<Output> {
-    match rendering.container() {
-        Some(container) => inside(rendering, container, typed),
-        None => ordinarily(rendering, typed),
+    match (rendering.account(), rendering.container()) {
+        // A description is one boundary or the other and never both: an
+        // AppContainer identity and a local account are two answers to the same
+        // question, and a rendering carrying both is a mistake upstream rather
+        // than a session to start under whichever was read first.
+        (Some(logon), Some(container)) => Err(io::Error::other(format!(
+            "this rendering runs both as the local account {} and inside the AppContainer \
+             {container}, and a process is started one way or the other",
+            logon.name(),
+        ))),
+        (Some(logon), None) => over_pipes(rendering, Started::As(logon), typed),
+        (None, Some(container)) => over_pipes(rendering, Started::Inside(container), typed),
+        (None, None) => ordinarily(rendering, typed),
     }
+}
+
+/// Which of the two boundaries a process is started behind — see
+/// [`over_pipes`], where the difference is the whole of what this decides.
+enum Started<'a> {
+    /// Inside an AppContainer, whose identity goes on an attribute list.
+    Inside(&'a str),
+
+    /// As a local account, which is a logon and no attribute list at all.
+    As(&'a Logon),
 }
 
 /// A rendering with no container, started as anything else is started.
@@ -93,66 +130,48 @@ fn ordinarily(rendering: &Rendering, typed: &[u8]) -> io::Result<Output> {
     running.wait_with_output()
 }
 
-/// And one inside `container`, which is the same four things said to
-/// `CreateProcessW` by hand: the command line, the environment block, where it
-/// starts, and the attribute list carrying the container's identity.
+/// The three pipes both boundaries are started over, and everything the process
+/// printed read back off two of them.
+///
+/// The same four things said to Win32 by hand — the command line, the
+/// environment block, where it starts, and whichever of an attribute list or a
+/// logon the boundary is — with only the call in the middle differing. Which is
+/// why they share this: everything around that call is the plumbing, and
+/// plumbing written twice is plumbing that drifts.
 ///
 /// Each of the three standard handles is a pipe of its own, with the child's
 /// end inheritable and this process's end not — see [`piped`]. Both of the ends
 /// this holds are read on threads of their own and the input is written on a
 /// third, so that a process printing more than a pipe holds is not one waiting
 /// on a reader that is waiting on it.
-fn inside(rendering: &Rendering, container: &str, typed: &[u8]) -> io::Result<Output> {
-    let capabilities = Capabilities::of(container)?;
-
-    let mut attributes = Attributes::of(1)?;
-    attributes.carrying(
-        PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES as usize,
-        capabilities.attribute(),
-        size_of::<SECURITY_CAPABILITIES>(),
-    )?;
-
+fn over_pipes(rendering: &Rendering, how: Started<'_>, typed: &[u8]) -> io::Result<Output> {
     let (given, mut typing) = piped(Reads::TheChild)?;
     let (printing, printed) = piped(Reads::ThisProcess)?;
     let (complaining, complained) = piped(Reads::ThisProcess)?;
 
-    let mut startup: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
-    startup.StartupInfo.cb = u32::try_from(size_of::<STARTUPINFOEXW>()).unwrap_or(u32::MAX);
-    startup.lpAttributeList = attributes.list();
-    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-    startup.StartupInfo.hStdInput = given.0;
-    startup.StartupInfo.hStdOutput = printing.0;
-    startup.StartupInfo.hStdError = complaining.0;
-
     let mut line = command_line(rendering);
     let environment = environment(rendering);
     let chdir = rendering.chdir().map(|chdir| wide(chdir.as_os_str()));
+    let standard = [given.0, printing.0, complaining.0];
 
-    let mut information: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
-
-    // Handles inherited, which is what puts the three pipes at the other end
-    // where a program looks for its standard handles. Nothing else of this
-    // process's goes with them: what a pipe of Verkstead's own is created as is
-    // uninheritable — see [`crate::terminal`] — and the three that are
-    // inheritable are these.
-    let started = unsafe {
-        CreateProcessW(
-            ptr::null(),
-            line.as_mut_ptr(),
-            ptr::null(),
-            ptr::null(),
-            1,
-            EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
-            environment.as_ptr().cast::<c_void>(),
-            chdir.as_ref().map_or(ptr::null(), |chdir| chdir.as_ptr()),
-            &raw const startup.StartupInfo,
-            &mut information,
-        )
+    let information = match how {
+        Started::Inside(container) => inside_a_container(
+            container,
+            &mut line,
+            &environment,
+            chdir.as_deref(),
+            standard,
+        )?,
+        Started::As(logon) => as_the_account(
+            logon,
+            &mut line,
+            &environment,
+            chdir.as_deref(),
+            standard,
+            0,
+            &rendering.program().to_string_lossy(),
+        )?,
     };
-
-    if started == 0 {
-        return Err(io::Error::last_os_error());
-    }
 
     let process = Handle(information.hProcess);
     drop(Handle(information.hThread));
@@ -201,6 +220,256 @@ fn inside(rendering: &Rendering, container: &str, typed: &[u8]) -> io::Result<Ou
         stdout: said,
         stderr: complained,
     })
+}
+
+/// One process inside `container`: an ordinary `CreateProcessW` with the
+/// container's security capabilities on its attribute list.
+///
+/// `standard` is its three standard handles, in the order a process reads them:
+/// what it is given, what it prints, and what it complains about.
+fn inside_a_container(
+    container: &str,
+    line: &mut [u16],
+    environment: &[u16],
+    chdir: Option<&[u16]>,
+    standard: [HANDLE; 3],
+) -> io::Result<PROCESS_INFORMATION> {
+    let capabilities = Capabilities::of(container)?;
+
+    let mut attributes = Attributes::of(1)?;
+    attributes.carrying(
+        PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES as usize,
+        capabilities.attribute(),
+        size_of::<SECURITY_CAPABILITIES>(),
+    )?;
+
+    let mut startup: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
+    startup.StartupInfo.cb = u32::try_from(size_of::<STARTUPINFOEXW>()).unwrap_or(u32::MAX);
+    startup.lpAttributeList = attributes.list();
+    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startup.StartupInfo.hStdInput = standard[0];
+    startup.StartupInfo.hStdOutput = standard[1];
+    startup.StartupInfo.hStdError = standard[2];
+
+    let mut information: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
+
+    // Handles inherited, which is what puts the three pipes at the other end
+    // where a program looks for its standard handles. Nothing else of this
+    // process's goes with them: what a pipe of Verkstead's own is created as is
+    // uninheritable — see [`crate::terminal`] — and the three that are
+    // inheritable are these.
+    let started = unsafe {
+        CreateProcessW(
+            ptr::null(),
+            line.as_mut_ptr(),
+            ptr::null(),
+            ptr::null(),
+            1,
+            EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
+            environment.as_ptr().cast::<c_void>(),
+            chdir.map_or(ptr::null(), |chdir| chdir.as_ptr()),
+            &raw const startup.StartupInfo,
+            &mut information,
+        )
+    };
+
+    if started == 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    Ok(information)
+}
+
+/// And one **as** `logon`: `CreateProcessWithLogonW`, which is the one call
+/// that starts a process as somebody else without a privilege a per-user
+/// install has not got.
+///
+/// **It will not carry an attribute list.** Handed an extended startup info it
+/// refuses outright with *The parameter is incorrect*, which is why a
+/// pseudoconsole cannot be given to a process started as somebody else, and why
+/// the console a session runs on is made on the far side of the boundary
+/// instead — see [`crate::terminal::launcher`]. What goes to it here is a plain
+/// `STARTUPINFOW` and the same four things a rendering already comes to.
+///
+/// **Its standard handles are inherited.** There is no `bInheritHandles` to
+/// pass — the secondary logon service duplicates the three named in `standard`
+/// into the process it starts — and they are marked inheritable here so that
+/// every caller's are, whether they came from [`piped`] or from a terminal's
+/// own pipes.
+///
+/// `also` is whatever creation flags the caller wants beside the environment's:
+/// `CREATE_SUSPENDED` for a process that is to be in a Job before it has run an
+/// instruction, and nothing for one that is not. `what` is what is being
+/// started, said in the refusal so that a person reading a log is told which of
+/// the two ends of this failed.
+pub(crate) fn as_the_account(
+    logon: &Logon,
+    line: &mut [u16],
+    environment: &[u16],
+    chdir: Option<&[u16]>,
+    standard: [HANDLE; 3],
+    also: u32,
+    what: &str,
+) -> io::Result<PROCESS_INFORMATION> {
+    // Refused here rather than by the call, which would take it: an account
+    // with an empty password is either a logon that fails with a number, or —
+    // on a machine whose policy allows one — a boundary made with no secret at
+    // all. Neither is something to start a session on.
+    if logon.password().is_empty() {
+        return Err(io::Error::other(format!(
+            "nothing holds a password for the local account {}, so {what} cannot be started as \
+             it — the account end of this, rather than the program",
+            logon.name(),
+        )));
+    }
+
+    // Inheritable, which is what the far side reads as its standard handles.
+    // Left inheritable rather than put back: every one of these is let go of by
+    // its caller as soon as the process is started, and a handle that is closed
+    // is a handle nothing else can inherit.
+    for handle in standard {
+        if unsafe { SetHandleInformation(handle, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+    }
+
+    let mut startup: STARTUPINFOW = unsafe { std::mem::zeroed() };
+    startup.cb = u32::try_from(size_of::<STARTUPINFOW>()).unwrap_or(u32::MAX);
+    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.hStdInput = standard[0];
+    startup.hStdOutput = standard[1];
+    startup.hStdError = standard[2];
+
+    let name = wide(OsStr::new(logon.name()));
+    let password = wide(OsStr::new(logon.password()));
+
+    let mut information: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
+
+    // One of Verkstead's at a time — see [`ONE_AT_A_TIME`]. Held across the
+    // retries as well as across the call, so that two sessions starting
+    // together take their turns rather than both backing off into each other.
+    let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(PoisonError::into_inner);
+
+    for left in (0..AGAIN).rev() {
+        // No domain, which is what says a local account of this machine's; and
+        // LOGON_WITH_PROFILE, which loads the account's own profile and is what
+        // makes the directory under C:\Users at the first session — see
+        // `sandbox::account::machine::remove`, which is what takes it away
+        // again.
+        let started = unsafe {
+            CreateProcessWithLogonW(
+                name.as_ptr(),
+                ptr::null(),
+                password.as_ptr(),
+                LOGON_WITH_PROFILE,
+                ptr::null(),
+                line.as_mut_ptr(),
+                CREATE_UNICODE_ENVIRONMENT | also,
+                environment.as_ptr().cast::<c_void>(),
+                chdir.map_or(ptr::null(), |chdir| chdir.as_ptr()),
+                &raw const startup,
+                &mut information,
+            )
+        };
+
+        if started != 0 {
+            return Ok(information);
+        }
+
+        let said = io::Error::last_os_error();
+
+        // Somebody else's logon, still going. A blocking sleep in what may be a
+        // runtime's thread, and deliberately: this is the retry path of a call
+        // that is a blocking Win32 call the whole way down, it is two seconds at
+        // the very worst, and the alternative is a session refused for a reason
+        // that has nothing to do with it.
+        if said.raw_os_error() == Some(ALREADY_BUSY) && left > 0 {
+            std::thread::sleep(AFTER);
+
+            continue;
+        }
+
+        return Err(which_end(logon, what, said));
+    }
+
+    unreachable!("the loop above returns on its last turn")
+}
+
+/// What the secondary logon service says when it is already busy with one of
+/// these: `ERROR_SERVICE_ALREADY_RUNNING`.
+///
+/// **It does one logon at a time**, machine-wide, which is not documented
+/// anywhere and is what two sessions starting together find out. It is neither
+/// end of a logon — the account is fine and the program is fine — so it is
+/// waited out rather than reported: see [`ONE_AT_A_TIME`] and [`AGAIN`].
+const ALREADY_BUSY: i32 = 1056;
+
+/// How many times a logon that collided with another is tried again, and how
+/// long is left between two tries.
+///
+/// Two seconds all told, which is far longer than a logon takes and far shorter
+/// than a session is worth. A machine where something else is holding the
+/// service for longer than that is one where the refusal says what happened,
+/// which is better than a wait nobody can see the end of.
+const AGAIN: usize = 20;
+
+/// How long between two tries — see [`AGAIN`].
+const AFTER: Duration = Duration::from_millis(100);
+
+/// Verkstead's own logons, one at a time.
+///
+/// The service is machine-wide and so is the collision, so this does not remove
+/// the retry above it — what it removes is Verkstead colliding with *itself*,
+/// which is two sessions starting together and is the common case by a long
+/// way.
+static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
+/// Every way this machine says *the account or its password*, as against every
+/// other way a `CreateProcessWithLogonW` can fail.
+///
+/// Win32's own numbers, said here as numbers: what a refusal has to tell apart
+/// is a list, and a list of ten `use` lines for constants nothing else in this
+/// crate reads is a worse way to keep one. The spellings are
+/// `ERROR_NO_SUCH_USER`, `ERROR_LOGON_TYPE_NOT_GRANTED`,
+/// `ERROR_PASSWORD_MUST_CHANGE`, `ERROR_ACCOUNT_LOCKED_OUT` and the run from
+/// `ERROR_LOGON_FAILURE` to `ERROR_ACCOUNT_DISABLED`.
+const THE_ACCOUNT_END: &[i32] = &[
+    1317, // there is no such user
+    1326, // the user name or the password is wrong
+    1327, // the account is restricted from logging on
+    1328, // not at this hour
+    1329, // not from this workstation
+    1330, // the password has expired
+    1331, // the account is disabled
+    1385, // this logon type is not granted to it
+    1907, // the password must be changed before it may be used
+    1909, // the account is locked out
+];
+
+/// A logon that would not happen, said as which end of it was refused.
+///
+/// **Which is the whole of what a person can act on.** A session refused with
+/// error 1326 is a session nobody can do anything about; one refused with *the
+/// local account vk-… or its password was refused* is one somebody runs the
+/// elevated verb again for. So the account end and the program end are told
+/// apart by what the machine said, and the answer says which it was either way.
+fn which_end(logon: &Logon, what: &str, said: io::Error) -> io::Error {
+    let account = said
+        .raw_os_error()
+        .is_some_and(|code| THE_ACCOUNT_END.contains(&code));
+
+    if account {
+        return io::Error::other(format!(
+            "this machine refused the local account {} or the password Verkstead holds for it, \
+             so {what} was never started: {said} — run `{MAKE_IT}` from an elevated terminal",
+            logon.name(),
+        ));
+    }
+
+    io::Error::other(format!(
+        "the local account {} was accepted and {what} would not start as it: {said}",
+        logon.name(),
+    ))
 }
 
 /// Everything there is to read at one end of a pipe, read until there is no

@@ -46,6 +46,16 @@ mod pty;
 #[cfg(windows)]
 mod conpty;
 
+/// And the far side of the boundary on that platform: the verb of Verkstead's
+/// own binary that makes a session's console as the session account, because a
+/// console cannot be handed to a process started as somebody else — see
+/// [`launcher`], which is both ends of it.
+///
+/// Public because the CLI is where the verb is typed, and because a launcher
+/// run by hand should refuse rather than be impossible to reach.
+#[cfg(windows)]
+pub mod launcher;
+
 #[cfg(windows)]
 pub use conpty::{Child, Terminal};
 #[cfg(unix)]

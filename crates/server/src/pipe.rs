@@ -502,7 +502,7 @@ async fn went_wrong(what: &io::Error) {
 /// hands back is a block this process is to free — and it is read again at
 /// every instance, so it is freed when the listener goes rather than after the
 /// first one.
-struct Descriptor(PSECURITY_DESCRIPTOR);
+pub(crate) struct Descriptor(PSECURITY_DESCRIPTOR);
 
 impl Descriptor {
     /// A descriptor granting the account the server runs as, and `also` beside
@@ -515,7 +515,7 @@ impl Descriptor {
     /// account needs it, because creating each further instance of the pipe and
     /// writing this onto one are both accesses the descriptor either allows or
     /// refuses — and `GRGW` is what a client needs and no more.
-    fn granting(also: &[String]) -> io::Result<Descriptor> {
+    pub(crate) fn granting(also: &[String]) -> io::Result<Descriptor> {
         let mut sddl = format!("D:P(A;;GA;;;{})", the_server_runs_as()?);
 
         for identity in also {
@@ -548,7 +548,7 @@ impl Descriptor {
     /// Made per call rather than held: it is a pointer to `self` and two
     /// numbers, and a struct holding a pointer to itself is not a thing to keep
     /// around.
-    fn attributes(&self) -> SECURITY_ATTRIBUTES {
+    pub(crate) fn attributes(&self) -> SECURITY_ATTRIBUTES {
         SECURITY_ATTRIBUTES {
             nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
             lpSecurityDescriptor: self.0,

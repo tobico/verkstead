@@ -26,6 +26,11 @@ mod client;
 #[cfg(feature = "desktop")]
 mod desktop;
 mod guide;
+/// The verb nobody types: the launcher a Windows session's console is made by,
+/// as the session account, because a console cannot be handed to a process
+/// started as somebody else. Windows' own, and hidden.
+#[cfg(windows)]
+mod launcher;
 /// The named pipe a Windows session asks through, from the end that dials it:
 /// the `pipe://` spelling `--server` takes, and the ureq transport that opens
 /// one. Read on every platform, so that a pipe named where there are none is
@@ -172,6 +177,16 @@ enum Command {
         /// Omit for the core Guide.
         topic: Option<String>,
     },
+
+    /// The launcher a Windows session's console is made by, as the session
+    /// account. Verkstead's own, and nobody's to type.
+    ///
+    /// Hidden, because it is internal surface rather than a verb: it takes the
+    /// two ends of a console as its standard handles, and run any other way it
+    /// refuses in words rather than doing anything.
+    #[cfg(windows)]
+    #[command(name = verkstead_server::terminal::launcher::VERB, hide = true)]
+    SessionLauncher(launcher::Launcher),
 }
 
 impl Cli {
@@ -188,6 +203,8 @@ impl Cli {
             Some(Command::Desktop(app)) => desktop::desktop(app),
             #[cfg(windows)]
             Some(Command::SessionAccount { what }) => session_account::session_account(what),
+            #[cfg(windows)]
+            Some(Command::SessionLauncher(asked)) => launcher::launcher(asked),
             Some(Command::Guide { topic }) => guide::guide(topic.as_deref()),
             None => guide::guide(None),
         }
