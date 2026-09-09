@@ -315,12 +315,28 @@ mod probe {
         // ordinarily an npm install, which is the per-user case the grant is
         // for — a machine without them leaves that question open rather than
         // answered, and says so.
-        for tool in ["node", "npm", "pwsh", "powershell", "git"] {
+        // **`bash` is in the list because an agent's own shell is**, and it is
+        // the one this probe was extended for: Claude's shell tool on Windows
+        // is Git for Windows' bash, which is msys2, and a session that cannot
+        // run it has no shell at all whatever else works.
+        for tool in ["node", "npm", "pwsh", "powershell", "git", "bash"] {
             say(&format!(
                 "tool {tool:10} = {}",
                 ran_tool(&profile, tool, &mut written)
             ));
         }
+
+        // And the two things an agent does with a path that nothing above it
+        // does: run a batch file the way `sandbox::open` runs one, and resolve
+        // a path the way a program written in node resolves one.
+        say(&format!(
+            "batch          = {}",
+            batch(&profile, &playground)
+        ));
+        say(&format!(
+            "resolving      = {}",
+            resolving(&profile, &playground)
+        ));
 
         say(&format!(
             "sccache        = {}",
@@ -519,7 +535,113 @@ mod probe {
                 .iter()
                 .map(OsString::from)
                 .collect(),
+            "bash" => ["-c", "exit 0"].iter().map(OsString::from).collect(),
             _ => vec![OsString::from("--version")],
+        }
+    }
+
+    /// How a process that did not exit 0 ended, and what it printed on the way.
+    ///
+    /// The printing is half the answer where the exit code is a number nobody
+    /// reads: `0xc0000142` is a library refusing to start and says nothing about
+    /// which, and what the program said on its way down is what names it.
+    fn said_by(outcome: &Outcome) -> String {
+        let said = outcome.output.replace(char::is_control, " ");
+        let said = said.trim();
+
+        if said.is_empty() {
+            format!("exited {}, saying nothing", ended(outcome.exit))
+        } else {
+            format!("exited {}, saying: {said}", ended(outcome.exit))
+        }
+    }
+
+    /// Whether a batch file runs inside, which is how an npm-installed agent
+    /// starts — see `sandbox::open`, whose `cmd /d /c call` this is.
+    ///
+    /// The file is the probe's own and in a directory granted read-write, so
+    /// what this asks about is the shell and the container rather than whether
+    /// some tool's own installer left a script that works.
+    fn batch(profile: &Profile, playground: &Path) -> String {
+        let Some(shell) = on_the_path("cmd") else {
+            return String::from("there is no cmd.exe on this machine's PATH");
+        };
+
+        let script = playground.join("granted-rw").join("probe.cmd");
+
+        if let Err(error) = std::fs::write(&script, "@echo off\r\necho batch-ran-ok\r\n") {
+            return format!("the batch file would not be written: {error}");
+        }
+
+        let asked = [
+            OsString::from("/d"),
+            OsString::from("/c"),
+            OsString::from("call"),
+            script.into_os_string(),
+        ];
+
+        match started(profile, shell.as_os_str(), &asked, None, true) {
+            Ok(outcome) if outcome.exit == Some(0) => String::from("ran"),
+            Ok(outcome) => said_by(&outcome),
+            Err(error) => format!("refused: {error}"),
+        }
+    }
+
+    /// What node makes of a path inside a container, which is what an agent
+    /// written in it makes of one.
+    ///
+    /// **This is the question a session failed on**, and it is not the question
+    /// every line above it asks. Those ask whether a path can be *opened*; this
+    /// asks whether it can be *resolved* — `fs.realpathSync`, which walks a path
+    /// from the volume root down, and `fs.realpathSync.native`, which asks the
+    /// operating system for the final name of an open handle. An agent that
+    /// checks a path is what it was when permission was given calls one of them
+    /// before every read, so a container where they cannot answer is a container
+    /// where the agent refuses its own files however well they are granted.
+    ///
+    /// Asked with `-e` rather than a script named by path, because resolving a
+    /// main module is itself a `realpath`: a script would never get as far as
+    /// running.
+    fn resolving(profile: &Profile, playground: &Path) -> String {
+        let Some(node) = on_the_path("node") else {
+            return String::from("node is not on this machine's PATH, so this went unasked");
+        };
+
+        // One of each: a directory granted read-write, the machine's own
+        // system directory — which every container reads with no entry at all —
+        // and the directory above every human's profile, which none is granted.
+        let asked_about = [
+            playground.join("granted-rw"),
+            PathBuf::from(r"C:\Windows"),
+            PathBuf::from(r"C:\Users"),
+        ];
+
+        let listed = asked_about
+            .iter()
+            .map(|path| format!("{:?}", path.display().to_string()))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let script = format!(
+            "const fs = require('fs'); \
+             const tried = (f) => {{ try {{ f(); return 'ok'; }} catch (e) {{ return '!' + \
+             (e.code || String(e)); }} }}; \
+             for (const p of [{listed}]) {{ \
+               console.log(p + ' lstat=' + tried(() => fs.lstatSync(p)) \
+                 + ' realpath=' + tried(() => fs.realpathSync(p)) \
+                 + ' native=' + tried(() => fs.realpathSync.native(p))); \
+             }}"
+        );
+
+        let asked = [OsString::from("-e"), OsString::from(script)];
+
+        match started(profile, node.as_os_str(), &asked, None, true) {
+            Ok(outcome) => outcome
+                .output
+                .replace(char::is_control, " ")
+                .trim()
+                .to_owned(),
+            Err(error) => format!("refused: {error}"),
         }
     }
 
@@ -537,7 +659,7 @@ mod probe {
 
         let ungranted = match started(profile, path.as_os_str(), &asked, None, true) {
             Ok(outcome) if outcome.exit == Some(0) => String::from("ran"),
-            Ok(outcome) => format!("exited {}", ended(outcome.exit)),
+            Ok(outcome) => said_by(&outcome),
             Err(error) => format!("refused: {error}"),
         };
 
@@ -545,7 +667,7 @@ mod probe {
 
         let granted = match started(profile, path.as_os_str(), &asked, None, true) {
             Ok(outcome) if outcome.exit == Some(0) => String::from("ran"),
-            Ok(outcome) => format!("exited {}", ended(outcome.exit)),
+            Ok(outcome) => said_by(&outcome),
             Err(error) => format!("refused: {error}"),
         };
 

@@ -147,8 +147,16 @@ rustix = { version = "1", features = ["fs", "process", "pty", "termios"] }
 # runs under: see `src/sandbox/container.rs`, and
 # `examples/appcontainer-probe.rs`, which is what settled what this platform
 # would allow one before the boundary around a session was written.
+# `Win32_NetworkManagement_NetManagement` is the local account a session runs
+# as, created and deleted — see `examples/session-account-probe.rs`.
+# `Win32_System_StationsAndDesktops` is the window station and the desktop a
+# process is on, which a boundary built on a restricted token has to write an
+# entry on the way it writes one on a directory — see
+# `examples/restricted-token-probe.rs`, which is the second mechanism being
+# asked about after the first turned out not to host the agent at all.
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
+  "Win32_NetworkManagement_NetManagement",
   "Win32_Security",
   "Win32_Security_Authorization",
   "Win32_Security_Isolation",
@@ -158,6 +166,7 @@ windows-sys = { version = "0.61", features = [
   "Win32_System_Ioctl",
   "Win32_System_JobObjects",
   "Win32_System_Pipes",
+  "Win32_System_StationsAndDesktops",
   "Win32_System_Threading",
 ] }
 

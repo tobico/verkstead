@@ -24,8 +24,18 @@ pipe from 02, without which a container's session could not ask. 03 opens
 with a probe the human runs on a Windows machine, and its own grilling reads
 that output before the rendering is written.
 
+**04 is 03 done again on a mechanism that works.** The AppContainer landed and
+then met a real session, which refused every file it was given: a path cannot be
+*resolved* inside a container however well it is granted, and msys2 will not
+start in one at all. Two more mechanisms were probed on the machine and only the
+last runs the agent — ADR-0014's *Amended: the Sandbox is an account* is the
+decision, and the two *What the probe answered* sections before it are what it
+rests on. Almost all of 03 survives: the Surface, the entries, the record and
+the sweep are the same work against a different identity.
+
 ## Stages
 
 - [x] 01: The ConPTY terminal and unsandboxed sessions — [brief](01-conpty-terminal.md)
 - [x] 02: The named pipe — [brief](02-named-pipe.md)
-- [x] 03: The AppContainer — [brief](03-appcontainer.md)
+- [x] 03: The AppContainer — [brief](03-appcontainer.md) — landed, and replaced by 04
+- [ ] 04: The session account — [brief](04-session-account.md)
