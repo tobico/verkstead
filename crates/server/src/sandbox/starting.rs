@@ -3,30 +3,25 @@
 //!
 //! **Because the standard library cannot start either of them.** A session runs
 //! on a pseudoconsole, which is an attribute on a `CreateProcessW` that
-//! `std::process::Command` has no way to carry — see [`crate::terminal`] — and
-//! from this stage on a Windows process also runs inside an AppContainer, which
-//! is a second attribute on the same list. So the words a rendering becomes —
-//! the command line, the environment block — and the list they are carried on
-//! are here, where both callers can reach them, rather than copied into each.
-//!
-//! **The list is one block sized for what it holds**, which is why widening it
-//! is what this module is for rather than adding a second one:
-//! `InitializeProcThreadAttributeList` is asked for a count before anything
-//! goes on it, and a console and a container are two attributes on one list.
-//!
-//! **And the account, which carries no list at all.** From this stage on a
-//! Windows process can also be started *as* a local account of Verkstead's own
+//! `std::process::Command` has no way to carry — see [`crate::terminal`] — and a
+//! Windows session also runs **as** a local account of Verkstead's own
 //! (ADR-0014, *Amended: the Sandbox is an account*), which is
-//! `CreateProcessWithLogonW` — see `as_the_account`. That call refuses an
-//! extended startup info outright, so a process started as somebody else can be
-//! given no console and no container: what it is given is the same four things
-//! a rendering comes to, and a console it is to run on is made on the far side
-//! of the boundary by a launcher of Verkstead's own.
+//! `CreateProcessWithLogonW` — a call it does not make at all. So the words a
+//! rendering becomes — the command line, the environment block — and the
+//! attribute list one of the two carries them on are here, where both callers
+//! can reach them, rather than copied into each.
+//!
+//! **The two do not compose, which is why there is a launcher.**
+//! `CreateProcessWithLogonW` refuses an extended startup info outright, so a
+//! process started as somebody else can be given no console: what it is given is
+//! the same four things a rendering comes to, and the console it is to run on is
+//! made on the far side of the boundary by a launcher of Verkstead's own — see
+//! [`crate::terminal::launcher`], which is what `as_the_account` starts.
 //!
 //! And beside them, the other way of starting a rendering: [`off_a_console`],
 //! for everything that reads what a process printed rather than watching it —
 //! the boundary suite, the ask test, the Compile Server. A rendering that names
-//! a container cannot go through `Command` at all, so it goes through here.
+//! an account cannot go through `Command` at all, so it goes through here.
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, c_void};
@@ -44,20 +39,16 @@ use windows_sys::Win32::Foundation::{
     CloseHandle, HANDLE, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation,
     WAIT_FAILED,
 };
-use windows_sys::Win32::Security::{
-    SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES,
-};
+use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
 use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
-    CREATE_UNICODE_ENVIRONMENT, CreateProcessW, CreateProcessWithLogonW,
-    DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, INFINITE,
-    InitializeProcThreadAttributeList, LOGON_WITH_PROFILE, LPPROC_THREAD_ATTRIBUTE_LIST,
-    PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, PROCESS_INFORMATION, STARTF_USESTDHANDLES,
-    STARTUPINFOEXW, STARTUPINFOW, UpdateProcThreadAttribute, WaitForSingleObject,
+    CREATE_UNICODE_ENVIRONMENT, CreateProcessWithLogonW, DeleteProcThreadAttributeList,
+    GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList, LOGON_WITH_PROFILE,
+    LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOW,
+    UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
 use super::account::{Logon, MAKE_IT};
-use super::container::{INTERNET_CLIENT, SE_GROUP_ENABLED, Sid};
 use super::rendering::Rendering;
 
 /// `rendering` run to its end with nothing watching it, and everything it
@@ -75,47 +66,23 @@ use super::rendering::Rendering;
 /// all is the ordinary case; a Set on the way to `verkstead ask` is the case
 /// that is not.
 ///
-/// **A rendering that names neither a container nor an account is an ordinary
-/// `Command`**, which is what the two Unix platforms and the Compile Server
-/// are. The two that name one are the whole reason this exists: a container's
-/// security capabilities go on an attribute list, which is precisely what the
-/// standard library will not carry, and an account is a
-/// `CreateProcessWithLogonW`, which is a call it does not make at all.
-///
-/// **Both are the same three pipes** — see `over_pipes`, which is that half
-/// said once. What differs is the one call in the middle of it.
+/// **A rendering that names no account is an ordinary `Command`**, which is
+/// what the two Unix platforms and the Compile Server are. One that names an
+/// account is the whole reason this exists: starting a process as somebody else
+/// is `CreateProcessWithLogonW`, which is a call the standard library does not
+/// make.
 ///
 /// It waits, so a caller that has to answer the process it started — the ask
 /// test, whose Set has to be answered before the process will exit — runs this
 /// on a thread of its own.
 pub fn off_a_console(rendering: &Rendering, typed: &[u8]) -> io::Result<Output> {
-    match (rendering.account(), rendering.container()) {
-        // A description is one boundary or the other and never both: an
-        // AppContainer identity and a local account are two answers to the same
-        // question, and a rendering carrying both is a mistake upstream rather
-        // than a session to start under whichever was read first.
-        (Some(logon), Some(container)) => Err(io::Error::other(format!(
-            "this rendering runs both as the local account {} and inside the AppContainer \
-             {container}, and a process is started one way or the other",
-            logon.name(),
-        ))),
-        (Some(logon), None) => over_pipes(rendering, Started::As(logon), typed),
-        (None, Some(container)) => over_pipes(rendering, Started::Inside(container), typed),
-        (None, None) => ordinarily(rendering, typed),
+    match rendering.account() {
+        Some(logon) => over_pipes(rendering, logon, typed),
+        None => ordinarily(rendering, typed),
     }
 }
 
-/// Which of the two boundaries a process is started behind — see
-/// [`over_pipes`], where the difference is the whole of what this decides.
-enum Started<'a> {
-    /// Inside an AppContainer, whose identity goes on an attribute list.
-    Inside(&'a str),
-
-    /// As a local account, which is a logon and no attribute list at all.
-    As(&'a Logon),
-}
-
-/// A rendering with no container, started as anything else is started.
+/// A rendering that names no account, started as anything else is started.
 fn ordinarily(rendering: &Rendering, typed: &[u8]) -> io::Result<Output> {
     let mut running = Command::try_from(rendering)?
         .stdin(Stdio::piped())
@@ -130,21 +97,19 @@ fn ordinarily(rendering: &Rendering, typed: &[u8]) -> io::Result<Output> {
     running.wait_with_output()
 }
 
-/// The three pipes both boundaries are started over, and everything the process
-/// printed read back off two of them.
+/// The three pipes a process started as the account runs over, and everything
+/// it printed read back off two of them.
 ///
-/// The same four things said to Win32 by hand — the command line, the
-/// environment block, where it starts, and whichever of an attribute list or a
-/// logon the boundary is — with only the call in the middle differing. Which is
-/// why they share this: everything around that call is the plumbing, and
-/// plumbing written twice is plumbing that drifts.
+/// The same four things a rendering comes to, said to Win32 by hand: the
+/// command line, the environment block, where it starts, and the logon that is
+/// the boundary.
 ///
 /// Each of the three standard handles is a pipe of its own, with the child's
 /// end inheritable and this process's end not — see [`piped`]. Both of the ends
 /// this holds are read on threads of their own and the input is written on a
 /// third, so that a process printing more than a pipe holds is not one waiting
 /// on a reader that is waiting on it.
-fn over_pipes(rendering: &Rendering, how: Started<'_>, typed: &[u8]) -> io::Result<Output> {
+fn over_pipes(rendering: &Rendering, logon: &Logon, typed: &[u8]) -> io::Result<Output> {
     let (given, mut typing) = piped(Reads::TheChild)?;
     let (printing, printed) = piped(Reads::ThisProcess)?;
     let (complaining, complained) = piped(Reads::ThisProcess)?;
@@ -154,24 +119,15 @@ fn over_pipes(rendering: &Rendering, how: Started<'_>, typed: &[u8]) -> io::Resu
     let chdir = rendering.chdir().map(|chdir| wide(chdir.as_os_str()));
     let standard = [given.0, printing.0, complaining.0];
 
-    let information = match how {
-        Started::Inside(container) => inside_a_container(
-            container,
-            &mut line,
-            &environment,
-            chdir.as_deref(),
-            standard,
-        )?,
-        Started::As(logon) => as_the_account(
-            logon,
-            &mut line,
-            &environment,
-            chdir.as_deref(),
-            standard,
-            0,
-            &rendering.program().to_string_lossy(),
-        )?,
-    };
+    let information = as_the_account(
+        logon,
+        &mut line,
+        &environment,
+        chdir.as_deref(),
+        standard,
+        0,
+        &rendering.program().to_string_lossy(),
+    )?;
 
     let process = Handle(information.hProcess);
     drop(Handle(information.hThread));
@@ -220,64 +176,6 @@ fn over_pipes(rendering: &Rendering, how: Started<'_>, typed: &[u8]) -> io::Resu
         stdout: said,
         stderr: complained,
     })
-}
-
-/// One process inside `container`: an ordinary `CreateProcessW` with the
-/// container's security capabilities on its attribute list.
-///
-/// `standard` is its three standard handles, in the order a process reads them:
-/// what it is given, what it prints, and what it complains about.
-fn inside_a_container(
-    container: &str,
-    line: &mut [u16],
-    environment: &[u16],
-    chdir: Option<&[u16]>,
-    standard: [HANDLE; 3],
-) -> io::Result<PROCESS_INFORMATION> {
-    let capabilities = Capabilities::of(container)?;
-
-    let mut attributes = Attributes::of(1)?;
-    attributes.carrying(
-        PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES as usize,
-        capabilities.attribute(),
-        size_of::<SECURITY_CAPABILITIES>(),
-    )?;
-
-    let mut startup: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
-    startup.StartupInfo.cb = u32::try_from(size_of::<STARTUPINFOEXW>()).unwrap_or(u32::MAX);
-    startup.lpAttributeList = attributes.list();
-    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-    startup.StartupInfo.hStdInput = standard[0];
-    startup.StartupInfo.hStdOutput = standard[1];
-    startup.StartupInfo.hStdError = standard[2];
-
-    let mut information: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
-
-    // Handles inherited, which is what puts the three pipes at the other end
-    // where a program looks for its standard handles. Nothing else of this
-    // process's goes with them: what a pipe of Verkstead's own is created as is
-    // uninheritable — see [`crate::terminal`] — and the three that are
-    // inheritable are these.
-    let started = unsafe {
-        CreateProcessW(
-            ptr::null(),
-            line.as_mut_ptr(),
-            ptr::null(),
-            ptr::null(),
-            1,
-            EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
-            environment.as_ptr().cast::<c_void>(),
-            chdir.map_or(ptr::null(), |chdir| chdir.as_ptr()),
-            &raw const startup.StartupInfo,
-            &mut information,
-        )
-    };
-
-    if started == 0 {
-        return Err(io::Error::last_os_error());
-    }
-
-    Ok(information)
 }
 
 /// And one **as** `logon`: `CreateProcessWithLogonW`, which is the one call
@@ -537,88 +435,6 @@ fn piped(reads: Reads) -> io::Result<(Handle, File)> {
     Ok((Handle(theirs), unsafe {
         File::from_raw_handle(ours as RawHandle)
     }))
-}
-
-/// The container a process is started inside, as `CreateProcessW` is told one.
-///
-/// Held rather than made where it is used, because what goes on an attribute
-/// list is a *pointer*: the structure and the SID it points at both have to
-/// outlive the call that reads them, which is the `CreateProcessW` several
-/// lines further down.
-pub(crate) struct Capabilities {
-    /// The container's SID, whose block this owns — see [`Sid`]. Read through
-    /// the pointer inside [`Capabilities::capabilities`] rather than from here.
-    #[allow(dead_code)]
-    sid: Sid,
-
-    /// The internet client's own SID, held for the reason the container's is:
-    /// [`Capabilities::capability`] points at the block this owns.
-    #[allow(dead_code)]
-    internet: Sid,
-
-    /// The capability list itself, one entry long, **boxed so that its address
-    /// outlives the move** this structure makes on its way out of
-    /// [`Capabilities::of`]. What goes on the attribute list is a pointer to
-    /// this entry, and one held inline would sit at one address while it was
-    /// written and another by the time `CreateProcessW` read it.
-    #[allow(dead_code)]
-    capability: Box<SID_AND_ATTRIBUTES>,
-
-    /// And what the attribute is: that SID, and the one capability a session is
-    /// allowed.
-    ///
-    /// **A capability is carried by the token, not by the profile.** The list
-    /// `CreateAppContainerProfile` is given says what the container is
-    /// registered for; what a running process actually holds is what is handed
-    /// to `CreateProcessW` here. Started with none, a session reaches no
-    /// network at all — not the internet ADR-0014 grants it, and not the DNS it
-    /// would find anything by, which it meets as a name that will not resolve.
-    ///
-    /// So the profile's capability is said again here, off the same constant
-    /// rather than a second spelling of it: one decision read twice, which is
-    /// not a widening — a token cannot hold what its profile was never
-    /// registered for.
-    capabilities: SECURITY_CAPABILITIES,
-}
-
-impl Capabilities {
-    /// The container named by `sid`, as the SID a person reads.
-    ///
-    /// A SID that will not resolve is an error rather than a process started
-    /// outside a container: what names a container is a value that crossed the
-    /// seam from the sandbox — see [`Rendering::container`] — and a rendering
-    /// asking for a boundary is not one to start without it (ADR-0014).
-    pub(crate) fn of(sid: &str) -> io::Result<Capabilities> {
-        let held = Sid::of(sid)?;
-        let internet = Sid::of(INTERNET_CLIENT)?;
-
-        // Boxed before the pointer to it is taken, so that what the attribute
-        // list reads is the address it will still be at: a `Box` keeps its
-        // contents where they are however often the structure around it moves.
-        let capability = Box::new(SID_AND_ATTRIBUTES {
-            Sid: internet.as_psid(),
-            Attributes: SE_GROUP_ENABLED,
-        });
-
-        let capabilities = SECURITY_CAPABILITIES {
-            AppContainerSid: held.as_psid(),
-            Capabilities: ptr::from_ref(capability.as_ref()).cast_mut(),
-            CapabilityCount: 1,
-            Reserved: 0,
-        };
-
-        Ok(Capabilities {
-            sid: held,
-            internet,
-            capability,
-            capabilities,
-        })
-    }
-
-    /// What goes on the attribute list, and how much of it there is to read.
-    pub(crate) fn attribute(&self) -> *const c_void {
-        ptr::from_ref(&self.capabilities).cast::<c_void>()
-    }
 }
 
 /// The attribute list a process is started with, sized for as many attributes

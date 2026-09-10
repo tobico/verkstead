@@ -94,8 +94,7 @@ async fn standing() -> Standing {
 
     let app = router(pool.clone());
 
-    let pipe = pipe::Listener::open(dir.path(), &pipe::Grants::none())
-        .expect("nothing holds this name yet");
+    let pipe = pipe::Listener::open(dir.path(), None).expect("nothing holds this name yet");
     let named = pipe.name().to_owned();
 
     let socket = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))

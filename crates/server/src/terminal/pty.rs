@@ -94,9 +94,10 @@ impl Terminal {
         };
 
         // Which cannot refuse on this arm: what a conversion to a command
-        // refuses is a rendering that names an AppContainer, and there are none
-        // on a platform whose boundary is a wrapper the vector already carries
-        // — see [`Rendering::container`].
+        // refuses is a rendering that names an account to be started as, and
+        // there are none on a platform whose boundary is a wrapper the vector
+        // already carries — see [`Rendering::as_account`].
+
         let mut command = Command::from(std::process::Command::try_from(rendering)?);
 
         command

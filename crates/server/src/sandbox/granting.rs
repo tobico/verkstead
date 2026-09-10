@@ -9,9 +9,11 @@
 //!
 //! **Whose identity is given rather than assumed.** A list worked out here
 //! names no SID at all — [`writing::write`] is handed one — so what these
-//! entries are for is the caller's to say: an AppContainer profile's today
-//! (see [`super::container`]) and the local account of Verkstead's own that
-//! replaces it, without a word of this list changing.
+//! entries are for is the caller's to say. What it says today is the local
+//! account of Verkstead's own that every session runs as (see
+//! [`super::account`]), and the list did not change a word when it stopped
+//! being an AppContainer profile's.
+
 //!
 //! **The list is worked out here and written next door.** What a description
 //! comes to is a fact about the description rather than about Win32, so
@@ -31,6 +33,13 @@
 //! - **`Empty` and `Temporary`** are a grant read-write: they are the session's
 //!   own profile and the directory it throws things away in, which nobody else
 //!   has any business in and which a session cannot do without.
+//!
+//! Read for the identity every session shares, they are what a Conversation's
+//! boundary *is*: one account for the installation means the entries alone say
+//! what one Conversation's session may reach that the next one's may not — see
+//! [`super::entries`], which is what holds a Conversation's and takes them off
+//! the machine when its work stops.
+
 //! - **`Nothing`** is refused — see [`Wanted::Refused`], and
 //!   [`writing::refuse`] for the mechanism, which is the one part of this the
 //!   probe could not settle from outside.
@@ -40,37 +49,38 @@
 //!
 //! **And one thing that is in no description**: each `PATH` entry under the
 //! human's own profile, read-only. Program Files, the system directory and
-//! Windows PowerShell are all readable by a container with no entry at all —
-//! the probe ran `node`, `git` and PowerShell out of them — but a per-user tool
-//! install is not, and an agent installed by npm is exactly that. So the
-//! directories a session is told to look for a program in are granted where
-//! they are the human's own, and nothing else of that profile is.
+//! Windows PowerShell are all readable by an ordinary local account with no
+//! entry at all — the probe ran `node`, `git` and PowerShell out of them — but a
+//! per-user tool install is not, and an agent installed by npm is exactly that.
+//! So the directories a session is told to look for a program in are granted
+//! where they are the human's own, and nothing else of that profile is.
+
 //!
 //! **And a step through every directory on the way to a granted path** — see
 //! [`Wanted::Stepped`], which is the one thing here that is about *resolving* a
 //! path rather than about reaching one. *Reaching* a path deep under the
 //! human's profile needs no entry above it: an ordinary account holds the
-//! privilege that skips the traverse check, which is why the AppContainer probe
-//! reached one with nothing anywhere above it. But *resolving* a path walks its
-//! prefixes and asks each for its attributes, and an agent resolves a path
-//! before it reads it — so a session granted its Worktree and nothing on the
-//! way to it refuses its own Worktree the moment it checks. One entry on each
-//! directory along the way answers that, and says nothing whatever about what
-//! is inside: the human's profile is walked through in the same breath as
-//! staying unlistable.
+//! privilege that skips the traverse check, which is why a probe reached one
+//! with nothing anywhere above it. But *resolving* a path walks its prefixes and
+//! asks each for its attributes, and an agent resolves a path before it reads it
+//! — so a session granted its Worktree and nothing on the way to it refuses its
+//! own Worktree the moment it checks. One entry on each directory along the way
+//! answers that, and says nothing whatever about what is inside: the human's
+//! profile is walked through in the same breath as staying unlistable.
 
 #[cfg(windows)]
 pub(crate) mod writing;
 
 // And what was written down about what was written: the record under the Data
-// Directory that lets a server which did not make a container take it away all
+// Directory that lets a server which did not write an entry take it away all
 // the same. Built everywhere, for this module's own reason — a record is a
 // file, and only the taking-back of an entry is a Win32 call.
 //
 // Half of it is a Win32 machine's all the same: what *writes* a record is a
-// container being made, which is a call one platform has, so a build for either
-// of the others carries the writing of one for its tests and for the shape of
-// the thing rather than for anything it does.
+// Conversation's boundary being begun, which happens on one platform only, so a
+// build for either of the others carries the writing of one for its tests and
+// for the shape of the thing rather than for anything it does.
+
 #[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) mod remembering;
 

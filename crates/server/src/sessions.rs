@@ -1337,8 +1337,9 @@ impl Sessions {
     /// A server that can run sessions, under `agents`.
     ///
     /// Which is what the served router is built with: every platform it is
-    /// built for has a Sandbox of its own — bubblewrap, the seatbelt, the
-    /// AppContainer — so a session runs inside one wherever it runs at all.
+    /// built for has a Sandbox of its own — bubblewrap, the seatbelt, a local
+    /// account and what it has been granted — so a session runs behind one
+    /// wherever it runs at all.
     pub(crate) fn under(agents: Agents) -> Sessions {
         Sessions {
             agents: Some(Arc::new(agents)),

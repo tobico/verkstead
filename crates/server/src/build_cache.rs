@@ -107,17 +107,22 @@ fn compiling_home(data_dir: &Path) -> PathBuf {
 /// is the whole of the difference between a cache of downloads and a cache of
 /// compiled objects, and the one place it is decided.
 ///
-/// **The two Unixes do and Windows does not** (ADR-0014, *What the probe
-/// answered*). An sccache is a client and a server that talk over the loopback,
-/// and a session on Windows runs inside an AppContainer, which is refused the
-/// local machine: the probe's connections to `127.0.0.1` and to the machine's
-/// own address both timed out from inside one. The client would not have got
-/// that far anyway — the one the probe ran panicked reading its own
-/// configuration before it ever reached the network — so what a `RUSTC_WRAPPER`
-/// bought there would be every Rust build inside failing rather than one
-/// running uncached. The half of the cache that is directories is untouched by
-/// any of that, so a Windows session still gets the shared `CARGO_HOME` and
-/// downloads a crate once for the machine like everybody else.
+/// **The two Unixes do and Windows does not** — and on Windows that is now a
+/// switch waiting to be turned back on rather than a boundary standing in the
+/// way. It was off because an sccache is a client and a server that talk over
+/// the loopback and a session there ran inside an AppContainer, which is refused
+/// the local machine: the probe's connections to `127.0.0.1` and to the
+/// machine's own address both timed out from inside one (ADR-0014, *What the
+/// probe answered*). A session runs as a local account of Verkstead's own now,
+/// and an ordinary local account reaches the loopback like anything else — which
+/// `crates/cli/tests/sandbox_windows.rs` attempts rather than assumes. What is
+/// left to do about it is a task of its own: an sccache client inside a session
+/// still has to be shown to work, the probe's own panicking on its configuration
+/// having been the second half of why this is off.
+///
+/// The half of the cache that is directories was untouched by any of it, so a
+/// Windows session gets the shared `CARGO_HOME` and downloads a crate once for
+/// the machine like everybody else, exactly as it always did.
 ///
 /// **Read before the server's own `PATH` is walked**, so an sccache installed
 /// on a Windows machine is one nothing here finds: a [`BuildCache`] with none
@@ -275,10 +280,10 @@ impl BuildCache {
 
         let through_one = compiles_through_an_sccache(Platform::HERE);
 
-        // Not looked for at all where nothing could reach one, rather than
-        // found and then ignored: an sccache installed on such a machine is one
-        // no session gets to from inside its container, so the honest answer is
-        // that this server has none — see [`compiles_through_an_sccache`].
+        // Not looked for at all where a session does not compile through one,
+        // rather than found and then ignored: the honest answer is that this
+        // server has none — see [`compiles_through_an_sccache`].
+
         let sccache = through_one.then(|| on_the_path(SCCACHE)).flatten();
 
         match (&sccache, through_one) {
@@ -292,10 +297,8 @@ impl BuildCache {
             ),
             (None, false) => tracing::info!(
                 cache = %dir.display(),
-                "compile caching is off on this platform: a session runs inside an \
-                 AppContainer, which is refused the loopback an sccache client \
-                 reaches its server over, so nothing installed here would be \
-                 reached. Crate downloads are still shared between sessions",
+                "compile caching is off on this platform, so nothing installed here is \
+                 looked for. Crate downloads are still shared between sessions",
             ),
         }
 
@@ -398,10 +401,8 @@ impl BuildCache {
     /// read at this moment like everything else a session is built from.
     ///
     /// **And never on Windows**, which falls out of there being no sccache to
-    /// start one of — see [`compiles_through_an_sccache`]. A server there would
-    /// be a process nobody could reach: it serves sessions through
-    /// `RUSTC_WRAPPER` over the loopback and nothing else, and a session inside
-    /// an AppContainer is refused the loopback.
+    /// start one of — see [`compiles_through_an_sccache`], which is where the
+    /// switch is and where what is left to do about it is said.
     ///
     /// Nothing waits on it and nothing fails if it will not start: a session
     /// whose compile server is missing falls back to starting one of its own,
@@ -664,12 +665,13 @@ fn compile_server(
     // outlives every session anyway, so there is no ending here to hang one on.
     let (rendering, _) = sandbox::rendered(Platform::HERE, &surface);
 
-    // Which is where this can refuse: a rendering naming an AppContainer is one
-    // the standard library cannot start — see
+    // Which is where this can refuse: a rendering naming an account to be
+    // started as is one the standard library cannot start — see
     // [`crate::sandbox::off_a_console`], which is what starts such a thing. The
     // compile server names none on any platform this runs on, and an error
     // here is carried the way every other failure to start one is: said in the
     // log, with each session starting a server of its own.
+
     let mut compiling = Command::try_from(&rendering)?;
 
     // In a process group of its own where the platform needs one, which is what
@@ -854,8 +856,8 @@ mod tests {
         assert!(compiles_through_an_sccache(Platform::MacOs));
         assert!(
             !compiles_through_an_sccache(Platform::Windows),
-            "a session there is inside an AppContainer, which is refused the \
-             loopback an sccache client reaches its server over",
+            "compile caching is still off there — see the function's own \
+             documentation, which says what is left to do about it",
         );
     }
 

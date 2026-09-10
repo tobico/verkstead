@@ -1,25 +1,29 @@
-//! What was written for a container, written down: the one thing a server that
-//! did not make a profile has to have before it can take that profile away.
+//! What was written for a Conversation, written down: the one thing a server
+//! that did not write an entry has to have before it can take that entry away.
 //!
 //! **Because an access-control entry outlives the process that wrote it.** A
 //! grant is a change to a directory on the human's own disk, and the identity it
-//! names is a profile on their machine — neither goes when Verkstead does. So a
-//! server that died holding a Conversation's container left a boundary standing
-//! that nothing in memory can describe any more, and the next server has to be
-//! able to say, of a directory it never granted, *this entry is one of mine and
-//! here is what it names*. This is where that is said (ADR-0014).
+//! names is a local account on their machine — neither goes when Verkstead does.
+//! So a server that died holding a Conversation's entries left a boundary
+//! standing that nothing in memory can describe any more, and the next server
+//! has to be able to say, of a directory it never granted, *this entry is one of
+//! mine and here is what it names*. This is where that is said (ADR-0014).
+
 //!
 //! **One record per Conversation**, under the Data Directory, named by the
 //! Conversation's id — which is what the sweep at startup reads back, one
 //! candidate per file, the way the orphaned worktrees are one candidate per
-//! directory (see [`crate::containers`]).
+//! directory (see [`crate::boundaries`]).
+
 //!
-//! **What is in it is the profile and every entry written for it.** The name,
-//! because that is what deletes a profile; the SID, because that is what an
-//! entry names and what a grant is taken back for; and the entries themselves,
-//! because a description cannot be worked out again after the fact — a closed
+//! **What is in it is the account and every entry written for it.** The
+//! account's name, so that a server which did not resolve it can still say
+//! which one its entries are for; the SID, because that is what an entry names
+//! and what a grant is taken back for; and the entries themselves, because a
+//! description cannot be worked out again after the fact — a closed
 //! Conversation has no Worktree left to build one from, and what is on those
 //! directories was written by a description that no longer exists anywhere else.
+
 //! And beside them, of the paths a description refuses, the ones that were
 //! taking entries from above before any of this was written: a refusal cuts
 //! that, so it is the one thing about those directories that stops being
@@ -32,9 +36,10 @@
 //! cannot read.
 //!
 //! **A record that will not read is left exactly as it is.** Nothing here
-//! guesses: a half-understood record would be a profile deleted with entries
-//! still on somebody's directories naming it, which is the one outcome worse
-//! than the entries staying — see [`read`].
+//! guesses: a half-understood record would be half a boundary taken back, with
+//! entries left standing on somebody's directories that nothing will look at
+//! again — see [`read`].
+
 //!
 //! Built on every machine, for the reason [`super::entries`] is: what was
 //! written down is a file, and only the taking-back of an entry is a call one
@@ -53,19 +58,28 @@ use super::{Entry, Wanted};
 /// Named here rather than composed by its callers, for the reason
 /// [`crate::worktrees::directory`] is: two things want it whole — what writes a
 /// record, and the sweep that reads every one there is.
+///
+/// **Still called what it was called when a Conversation's boundary was an
+/// AppContainer**, which is this module's own rule about spellings read the
+/// other way round: what is on the disk is written by one build and read by the
+/// next, and a directory renamed here is every record the build before it wrote
+/// left where nothing will ever look at it again. The entries in one of those
+/// are entries on the human's directories whichever identity they name, and the
+/// sweep takes them off either way.
 pub(crate) fn directory(data_dir: &Path) -> PathBuf {
     data_dir.join("containers")
 }
 
-/// One Conversation's record: the profile its sessions run inside, and every
-/// entry written on a real directory for it.
+/// One Conversation's record: the account its sessions run as, and every entry
+/// written on a real directory for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Remembered {
     /// Whose it is, which is the file's own name.
     pub(crate) conversation: i64,
 
-    /// What the profile is called on this machine, which is what deletes it.
-    pub(crate) name: String,
+    /// What the account is called on this machine, which is what a server that
+    /// did not resolve it says in the log as it takes the entries back.
+    pub(crate) account: String,
 
     /// And the identity it is, which is what every entry below names.
     pub(crate) sid: String,
@@ -90,17 +104,15 @@ pub(crate) struct Remembered {
 /// Write `remembered` down, whole.
 ///
 /// **Rewritten rather than added to.** A Conversation's second session
-/// describes its own surface and the container remembers both descriptions
-/// together — see [`super::super::container::Container::wrote`] — so what is
+/// describes its own surface and its entries remember both descriptions
+/// together — see [`super::super::entries::Entries::wrote`] — so what is
 /// written here is that whole list each time, and a record is never half of
 /// one.
 ///
-/// **Refusing matters**, which is why this hands back an error at all: a
-/// container nothing wrote down is one no later server can take away, and its
-/// entries would sit on the human's own directories for good. So the caller
-/// that cannot write one refuses the session rather than granting anything —
-/// which is the same answer a profile that will not be created gets (ADR-0014,
-/// Q18).
+/// **Refusing matters**, which is why this hands back an error at all: entries
+/// nothing wrote down are entries no later server can take away, and they would
+/// sit on the human's own directories for good. So the caller that cannot write
+/// one refuses the session rather than granting anything (ADR-0014, Q18).
 ///
 /// **And atomically**, through the settings files' own
 /// [`crate::settings::write_atomically`]: a record is rewritten at every
@@ -117,8 +129,9 @@ pub(crate) fn wrote(data_dir: &Path, remembered: &Remembered) -> io::Result<()> 
     std::fs::create_dir_all(&directory)?;
 
     let written = Written {
-        name: remembered.name.clone(),
+        account: remembered.account.clone(),
         sid: remembered.sid.clone(),
+
         entries: remembered.entries.iter().map(Line::of).collect(),
         cut: remembered.cut.clone(),
     };
@@ -139,6 +152,10 @@ pub(crate) fn wrote(data_dir: &Path, remembered: &Remembered) -> io::Result<()> 
 /// what a caller does about either is leave the machine as it found it, and a
 /// record this build cannot make sense of is one whose entries it cannot take
 /// back safely.
+///
+/// A record the AppContainer build wrote reads as one of these: it names a
+/// profile's SID rather than an account's, and the entries it carries come off
+/// the human's directories exactly the same way. See [`Written::account`].
 pub(crate) fn read(data_dir: &Path, conversation: i64) -> Option<Remembered> {
     at(&record(data_dir, conversation), conversation)
 }
@@ -220,11 +237,11 @@ pub(crate) fn left_behind(data_dir: &Path) -> Vec<Remembered> {
 
 /// Take a record away, whatever it said.
 ///
-/// The last thing that happens to a container: the entries have come off and
-/// the profile has gone, so what is left is a record of a boundary that is no
-/// longer anywhere. A record that will not go is named in the log and nothing
-/// else — the next sweep reads it, finds a profile that is not there and takes
-/// nothing back, which is the same nothing this failed to do.
+/// The last thing that happens to a Conversation's boundary: the entries have
+/// come off, so what is left is a record of one that is no longer anywhere. A
+/// record that will not go is named in the log and nothing else — the next
+/// sweep reads it and takes off entries that are not there any more, which is
+/// the same nothing this failed to do.
 pub(crate) fn forget(data_dir: &Path, conversation: i64) {
     let path = record(data_dir, conversation);
 
@@ -277,8 +294,9 @@ fn at(path: &Path, conversation: i64) -> Option<Remembered> {
 
     Some(Remembered {
         conversation,
-        name: written.name,
+        account: written.account,
         sid: written.sid,
+
         entries: written.entries.iter().map(Line::entry).collect(),
         cut: written.cut,
     })
@@ -288,7 +306,16 @@ fn at(path: &Path, conversation: i64) -> Option<Remembered> {
 /// it is a shape of its own rather than the types it is made from.
 #[derive(Debug, Serialize, Deserialize)]
 struct Written {
-    name: String,
+    /// What the account these entries were written for is called.
+    ///
+    /// Read under its old spelling as well, which is what a record the
+    /// AppContainer build wrote carries: `name` was the profile's name there,
+    /// and it is a name for the identity either way. A record whose entries
+    /// name a profile that has since been deleted is still a record whose
+    /// entries are on the human's directories, and the sweep takes them off.
+    #[serde(alias = "name")]
+    account: String,
+
     sid: String,
     entries: Vec<Line>,
 
@@ -317,7 +344,7 @@ enum Word {
 
     /// **Every step a description asked for, rather than the ones the machine
     /// took.** A record is written before a word of it is — see
-    /// [`super::super::container::Container::wrote`] — so what is remembered
+    /// [`super::super::entries::Entries::wrote`] — so what is remembered
     /// here is the whole list, and an ancestor the machine refused an entry on
     /// is one there was never anything to take back from. Which is the safe way
     /// round: a step written and not remembered would sit on a directory of the
@@ -365,8 +392,9 @@ mod tests {
     fn remembered(conversation: i64) -> Remembered {
         Remembered {
             conversation,
-            name: format!("verkstead-0123456789abcdef-{conversation}"),
-            sid: "S-1-15-2-1234567890-1234567890-1234567890-1234567890".to_owned(),
+            account: "vk-0123456789ab".to_owned(),
+            sid: "S-1-5-21-1234567890-1234567890-1234567890-1001".to_owned(),
+
             entries: vec![
                 Entry {
                     path: PathBuf::from(r"C:\state\worktrees\verkstead-rate-limiting"),
@@ -395,7 +423,7 @@ mod tests {
     /// Every entry comes back as it went in, which is the whole of what a record
     /// is for: the server that reads one never saw the description it came from.
     #[test]
-    fn what_was_written_for_a_container_is_read_back_whole() {
+    fn what_was_written_for_a_conversation_is_read_back_whole() {
         let held = tempfile::tempdir().unwrap();
         let written = remembered(7);
 
@@ -408,7 +436,7 @@ mod tests {
     /// And a record that has gone is nothing, which is what a sweep finds after
     /// a close.
     #[test]
-    fn a_container_that_was_forgotten_is_no_longer_remembered() {
+    fn a_boundary_that_was_forgotten_is_no_longer_remembered() {
         let held = tempfile::tempdir().unwrap();
 
         wrote(held.path(), &remembered(7)).unwrap();
@@ -435,6 +463,43 @@ mod tests {
 
         assert_eq!(read(held.path(), 7), None);
         assert_eq!(left_behind(held.path()), Vec::<Remembered>::new());
+    }
+
+    /// And a record the AppContainer build wrote reads back whole, naming what
+    /// it named: a profile's SID and a profile's name, which are an identity
+    /// and a name for it like any other.
+    ///
+    /// **Because the entries in it are on the human's directories either way.**
+    /// A machine upgraded from that build has records under this directory that
+    /// no session will ever run behind again, and a build that could not read
+    /// one would leave every entry in it standing for good.
+    #[test]
+    fn a_record_the_appcontainer_build_wrote_still_names_what_to_take_back() {
+        let held = tempfile::tempdir().unwrap();
+
+        std::fs::create_dir_all(directory(held.path())).unwrap();
+        std::fs::write(
+            directory(held.path()).join("7"),
+            r#"{
+              "name": "verkstead-0123456789abcdef-7",
+              "sid": "S-1-15-2-1234567890-1234567890-1234567890-1234567890",
+              "entries": [
+                { "path": "C:\\state\\worktrees\\verkstead-rate-limiting", "wanted": "read-write" }
+              ]
+            }"#,
+        )
+        .unwrap();
+
+        let read = read(held.path(), 7).expect("a record the build before this one wrote");
+
+        assert_eq!(read.account, "verkstead-0123456789abcdef-7");
+        assert_eq!(
+            read.entries,
+            vec![Entry {
+                path: PathBuf::from(r"C:\state\worktrees\verkstead-rate-limiting"),
+                wanted: Wanted::Granted(Reach::ReadWrite),
+            }],
+        );
     }
 
     /// And what is in that directory under no Conversation's name is nothing

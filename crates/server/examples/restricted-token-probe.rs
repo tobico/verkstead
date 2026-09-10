@@ -1,14 +1,16 @@
 //! What a Windows machine allows a *restricted token*, asked by attempting.
 //!
-//! The sibling of [`appcontainer-probe`](appcontainer-probe.rs), and the reason
-//! there is a second one. That probe settled what an AppContainer allows, and
-//! its second run — recorded in [ADR-0014](../../../docs/adr/0014-windows-sessions.md),
-//! *What the probe answered the second time* — settled that an AppContainer
-//! cannot host the agent it exists to sandbox: a path cannot be *resolved*
-//! inside one however well it is granted, and msys2 will not start in one at
-//! all. So the boundary is being rendered again, on the mechanism ADR-0014
-//! considered and set aside, and this asks that mechanism the same questions by
-//! trying them.
+//! The second of the boundary probes, and the reason there is more than one.
+//! The first settled what an AppContainer allows, and its second run — recorded
+//! in [ADR-0014](../../../docs/adr/0014-windows-sessions.md), *What the probe
+//! answered the second time* — settled that an AppContainer cannot host the
+//! agent it exists to sandbox: a path cannot be *resolved* inside one however
+//! well it is granted, and msys2 will not start in one at all. That probe went
+//! off this tree with the mechanism it was about — nothing here makes an
+//! AppContainer any more — and what it answered is in the ADR. So the boundary
+//! is being rendered again, on the mechanism ADR-0014 considered and set aside,
+//! and this asks that mechanism the same questions by trying them.
+
 //!
 //! **What a restricted token is, for the purposes of this program.** A process
 //! started with one is the human's own account with a second access check
@@ -646,8 +648,8 @@ mod probe {
     ///
     /// **Derived rather than registered, and that is a finding rather than a
     /// convenience.** The obvious identity was the one the AppContainer
-    /// rendering already mints — `CreateAppContainerProfile` hands back a SID
-    /// that is this machine's and needs no elevation — and this machine will
+    /// rendering already minted — creating a profile hands back a SID that is
+    /// this machine's and needs no elevation — and this machine will
     /// not have it: `CreateRestrictedToken` refuses a SID under the package
     /// authority, and refuses a capability SID beside it, with *The parameter
     /// is incorrect*. What it takes is an ordinary one, so what is written here

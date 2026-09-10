@@ -51,19 +51,20 @@ pub struct Closing {
     /// own path first and the name inside the profile second.
     linked: Vec<(PathBuf, PathBuf)>,
 
-    /// And the AppContainer the session is running inside, held for as long as
-    /// it runs.
+    /// And the Conversation's entries the session is running behind, held for
+    /// as long as it runs.
     ///
     /// **Held rather than seen to**, and held here as well as by the module
-    /// that owns it. A container's life is its Conversation's — granted at the
-    /// first session, taken back with the Worktree, swept for at startup (see
-    /// [`super::container`] and [`crate::containers`]) — so what this adds is
-    /// the one thing that lifetime cannot say on its own: a session is still
-    /// running. A close that arrives while one is takes the container out of
-    /// the module's hands and finds this one still holding it, and the profile
-    /// goes when the session does rather than out from under it.
+    /// that owns them. Their life is the Conversation's — written at the first
+    /// session, taken back with the Worktree, swept for at startup (see
+    /// [`super::entries`] and [`crate::boundaries`]) — so what this adds is the
+    /// one thing that lifetime cannot say on its own: a session is still
+    /// running. A close that arrives while one is takes the entries out of the
+    /// module's hands and finds this one still holding them, and they come off
+    /// the human's directories when the session ends rather than out from under
+    /// it.
     #[cfg(windows)]
-    inside: Option<std::sync::Arc<super::container::Container>>,
+    behind: Option<std::sync::Arc<super::entries::Entries>>,
 }
 
 impl Closing {
@@ -78,7 +79,7 @@ impl Closing {
         Closing {
             linked: Vec::new(),
             #[cfg(windows)]
-            inside: None,
+            behind: None,
         }
     }
 
@@ -88,18 +89,15 @@ impl Closing {
         Closing {
             linked,
             #[cfg(windows)]
-            inside: None,
+            behind: None,
         }
     }
 
-    /// The same, holding the AppContainer the session runs inside — see the
-    /// field, which is where the whole of what holding it means is.
+    /// The same, holding the entries the session runs behind — see the field,
+    /// which is where the whole of what holding them means is.
     #[cfg(windows)]
-    pub(crate) fn inside(
-        mut self,
-        container: std::sync::Arc<super::container::Container>,
-    ) -> Closing {
-        self.inside = Some(container);
+    pub(crate) fn behind(mut self, entries: std::sync::Arc<super::entries::Entries>) -> Closing {
+        self.behind = Some(entries);
 
         self
     }

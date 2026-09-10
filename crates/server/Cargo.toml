@@ -142,18 +142,15 @@ rustix = { version = "1", features = ["fs", "process", "pty", "termios"] }
 # descriptor the server's pipe is created with — that account and nothing wider
 # — and the token its identity is read out of; `Win32_Security_Authorization` is
 # how both are written and read back, which is SDDL, the spelling of a
-# descriptor a person can read. `Win32_Security_Isolation` is the AppContainer
-# profile itself — created and deleted — which is the identity a Windows session
-# runs under: see `src/sandbox/container.rs`, and
-# `examples/appcontainer-probe.rs`, which is what settled what this platform
-# would allow one before the boundary around a session was written.
-# `Win32_NetworkManagement_NetManagement` is the local account a session runs
-# as, created and deleted — see `src/sandbox/account/machine.rs`, and
+# descriptor a person can read. `Win32_NetworkManagement_NetManagement` is the
+# local account a Windows session runs as, created and deleted — which is that
+# platform's whole boundary: see `src/sandbox/account/machine.rs`, and
 # `examples/session-account-probe.rs` before it. The three that go with that
 # account are `Win32_Security_Authentication_Identity`, which is how a logon
 # type is denied to it, `Win32_System_Registry`, which is how it is kept off
 # the sign-in screen, and `Win32_UI_Shell`, which is the one call that deletes a
 # profile directory *and* the machine's record of where it was.
+
 # `Win32_System_StationsAndDesktops` is the window station and the desktop a
 # process is on, which a boundary built on a restricted token has to write an
 # entry on the way it writes one on a directory — see
@@ -165,8 +162,8 @@ windows-sys = { version = "0.61", features = [
   "Win32_Security",
   "Win32_Security_Authentication_Identity",
   "Win32_Security_Authorization",
-  "Win32_Security_Isolation",
   "Win32_Storage_FileSystem",
+
   "Win32_System_Console",
   "Win32_System_IO",
   "Win32_System_Ioctl",

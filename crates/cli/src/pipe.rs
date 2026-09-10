@@ -1,11 +1,15 @@
 //! The named pipe a Windows session asks through, from the end that dials it.
 //!
 //! **Why a pipe at all** ([ADR-0014](../../../docs/adr/0014-windows-sessions.md)).
-//! An AppContainer is refused the loopback interface, and the exemption is an
-//! elevated command per machine that an unsigned per-user install cannot ask
-//! for. So a session inside one cannot dial `127.0.0.1`, and what it asks
-//! through is a named pipe — `crates/server/src/pipe.rs` is the end that
-//! listens, and this is the end that opens it.
+//! It was an AppContainer that could not dial `127.0.0.1`: a session inside one
+//! is refused the loopback interface, and the exemption is an elevated command
+//! per machine that an unsigned per-user install cannot ask for. So what a
+//! session asked through was a named pipe. It runs as a local account now and
+//! could dial the loopback, and the pipe stays: it is landed, and it is the one
+//! transport no firewall on the human's machine has to agree with.
+//! `crates/server/src/pipe.rs` is the end that listens, and this is the end that
+//! opens it.
+
 //!
 //! **The spelling is `pipe://<name>`.** Windows' own `\\.\pipe\<name>` is what
 //! the API takes, and it is not what a human is given: this goes in a terminal

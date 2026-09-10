@@ -132,25 +132,47 @@ impl Account {
     /// a [`Missing`] that says which, in words somebody can act on — see
     /// [`Missing`], and the verb it names.
     pub fn on_this_machine(data_dir: &Path, secrets: &Secrets) -> Result<Account, Missing> {
-        Account::called(named(data_dir), secrets)
+        Account::called(
+            named(data_dir),
+            secrets.session_account_password().unwrap_or_default(),
+        )
+    }
+
+    /// And the same read of an account a description already carries the two
+    /// portable halves of — see [`super::Logon`], which is the name and the
+    /// password and never the SID.
+    ///
+    /// **What a session start asks**, and the reason a sandbox holds a `Logon`
+    /// rather than an `Account`: the name is arithmetic over a Data Directory
+    /// and the password is a file, so both are settled wherever a description is
+    /// built, and only the SID is a question for the machine the session runs
+    /// on. This is where that question is put.
+    pub fn resolving(logon: &super::Logon) -> Result<Account, Missing> {
+        Account::called(logon.name().to_owned(), logon.password())
     }
 
     /// The same read, of an account said rather than worked out.
     ///
-    /// Named apart from [`Account::on_this_machine`] so that both refusals can
-    /// be asked for: an account this machine has never heard of is any name at
-    /// all, and an account it *has* heard of is one the suite cannot make
-    /// without an elevation it has not got — so the second half is asked about
-    /// an account every Windows machine already has.
-    fn called(name: String, secrets: &Secrets) -> Result<Account, Missing> {
+    /// Named apart from [`Account::on_this_machine`] and
+    /// [`Account::resolving`] so that both refusals can be asked for: an
+    /// account this machine has never heard of is any name at all, and an
+    /// account it *has* heard of is one the suite cannot make without an
+    /// elevation it has not got — so the second half is asked about an account
+    /// every Windows machine already has.
+    fn called(name: String, password: &str) -> Result<Account, Missing> {
         let sid = sid_of(&name).map_err(|why| Missing::Account {
             name: name.clone(),
             why,
         })?;
 
-        let Some(password) = secrets.session_account_password() else {
+        // Empty and absent are one answer here, and the same one: a password
+        // nobody holds and a password somebody blanked by hand are both an
+        // account nothing can start a process as — see
+        // [`crate::settings::Secrets`], which reads a blank back as nothing in
+        // the first place.
+        if password.is_empty() {
             return Err(Missing::Password { name });
-        };
+        }
 
         Ok(Account {
             name,
@@ -852,8 +874,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let secrets = Settings::in_data_dir(dir.path()).secrets();
 
-        let missing = Account::called(String::from("SYSTEM"), &secrets)
-            .expect_err("a directory made a moment ago holds no password");
+        let missing = Account::called(
+            String::from("SYSTEM"),
+            secrets.session_account_password().unwrap_or_default(),
+        )
+        .expect_err("a directory made a moment ago holds no password");
 
         assert!(
             matches!(missing, Missing::Password { .. }),
@@ -878,12 +903,46 @@ mod tests {
             )
             .unwrap();
 
-        let account = Account::called(String::from("SYSTEM"), &settings.secrets())
-            .expect("SYSTEM resolves and the password was just written");
+        let account = Account::called(String::from("SYSTEM"), "Vk1-hunter2")
+            .expect("SYSTEM resolves and a password was said");
 
         assert_eq!(account.name(), "SYSTEM");
         assert_eq!(account.password(), "Vk1-hunter2");
         assert_eq!(account.sid().text(), "S-1-5-18");
+
+        // And the same read of the two halves a description carries, which is
+        // what a session start asks — see [`Account::resolving`]. The password
+        // written above is the one a sandbox would have read out of the same
+        // file, so this is that whole route in one line.
+        let resolved = Account::resolving(&super::super::Logon::of(
+            "SYSTEM",
+            settings
+                .secrets()
+                .session_account_password()
+                .expect("the password was just written"),
+        ))
+        .expect("the same name and the same password");
+
+        assert_eq!(resolved.sid().text(), account.sid().text());
+    }
+
+    /// And a `Logon` with nothing in its password half is the password refusal
+    /// rather than a logon attempted with an empty secret.
+    ///
+    /// Which is what a sandbox built on a machine whose `secrets.yaml` holds
+    /// nothing carries — see `sandbox::Sandbox::session_account`, where the
+    /// empty half is deliberate: a description is portable, so it says the
+    /// account it *would* run as and this is where the machine says there is
+    /// none to run as.
+    #[test]
+    fn a_logon_with_no_password_is_the_password_refusal() {
+        let missing = Account::resolving(&super::super::Logon::of("SYSTEM", ""))
+            .expect_err("an empty password is nobody's password");
+
+        assert!(
+            matches!(missing, Missing::Password { .. }),
+            "got {missing:?}",
+        );
     }
 
     #[test]

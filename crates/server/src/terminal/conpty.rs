@@ -29,22 +29,21 @@
 //! platform wherever it is started, and this is one of the two places that
 //! starts one.
 //!
-//! **And the container beside the console.** A Windows session runs inside an
-//! AppContainer, which is a second attribute on the same list — the identity
-//! its token carries rather than a wrapper around it (ADR-0014). So a rendering
-//! that names one is started with the list widened by one, and a container that
-//! will not resolve is a session refused rather than a session started outside
-//! its boundary.
+//! **And the account instead of the console, where a rendering names one.** A
+//! session that runs as a local account of Verkstead's own — which is every
+//! Windows session (ADR-0014, *Amended: the Sandbox is an account*) — cannot be
+//! handed a console at all: `CreateProcessWithLogonW` refuses an attribute list
+//! outright. So the console for one is made on the far side by a launcher — see
+//! [`launcher`] — and this arm hands that launcher the two pipes as its plain
+//! standard handles rather than making anything over them itself. Which is why a
+//! terminal is *opened* as a pair of pipes and a size, and why the console
+//! appears at [`Terminal::spawn`]: it is the rendering that says which side of
+//! the boundary one is made on.
 //!
-//! **And the account instead of both, where a rendering names one.** A session
-//! that runs as a local account of Verkstead's own cannot be handed a console
-//! at all: `CreateProcessWithLogonW` refuses an attribute list outright. So the
-//! console for one is made on the far side by a launcher — see [`launcher`] —
-//! and this arm hands that launcher the two pipes as its plain standard handles
-//! rather than making anything over them itself. Which is why a terminal is
-//! *opened* as a pair of pipes and a size, and why the console appears at
-//! [`Terminal::spawn`]: it is the rendering that says which side of the
-//! boundary one is made on.
+//! **The console made here is therefore the unsandboxed one**: a Conversation
+//! Terminal or a probe that names no account, started as Verkstead itself. No
+//! session takes that arm.
+
 //!
 //! **And a launcher's console is the launcher's to close**, so the two things
 //! this arm does about an ended session are done on the far side for one: the
@@ -83,7 +82,6 @@ use tokio::sync::{mpsc, watch};
 use windows_sys::Win32::Foundation::{
     GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE, WAIT_FAILED,
 };
-use windows_sys::Win32::Security::SECURITY_CAPABILITIES;
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, OPEN_EXISTING,
     PIPE_ACCESS_DUPLEX,
@@ -96,9 +94,8 @@ use windows_sys::Win32::System::Pipes::{
 };
 use windows_sys::Win32::System::Threading::{
     CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, EXTENDED_STARTUPINFO_PRESENT,
-    GetExitCodeProcess, INFINITE, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-    PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, PROCESS_INFORMATION, ResumeThread,
-    STARTF_USESTDHANDLES, STARTUPINFOEXW, TerminateProcess, WaitForSingleObject,
+    GetExitCodeProcess, INFINITE, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION,
+    ResumeThread, STARTF_USESTDHANDLES, STARTUPINFOEXW, TerminateProcess, WaitForSingleObject,
 };
 
 use super::launcher::{self, Channel};
@@ -107,7 +104,7 @@ use crate::sandbox::Rendering;
 use crate::sandbox::account::Logon;
 use crate::sandbox::outliving::job::Job;
 use crate::sandbox::starting::{
-    Attributes, Capabilities, Handle, as_the_account, command_line, environment, wide,
+    Attributes, Handle, as_the_account, command_line, environment, wide,
 };
 
 /// How much of each direction the console host may get ahead by, in bytes.
@@ -264,35 +261,15 @@ impl Terminal {
 
         self.console.here(console);
 
-        // The container the description named, resolved before anything is
-        // started: a session that asked for a boundary and could not be given
-        // one is a session refused rather than a session started outside it
-        // (ADR-0014, Q18). Held for as long as the list is, because what goes
-        // on a list is a pointer to it.
-        let capabilities = match rendering.container() {
-            Some(container) => Some(Capabilities::of(container)?),
-            None => None,
-        };
-
-        // One list of one or of two: the console every session comes up on, and
-        // the identity a Windows session runs under where there is one. A list
-        // is one block of memory sized for what it will hold, which is why the
-        // second attribute widens this rather than adding a list beside it.
-        let mut attributes = Attributes::of(1 + usize::from(capabilities.is_some()))?;
+        // A list of one: the console this process just made, which is the whole
+        // of what a rendering naming no account is started with.
+        let mut attributes = Attributes::of(1)?;
 
         attributes.carrying(
             PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE as usize,
             console as *const c_void,
             size_of::<HPCON>(),
         )?;
-
-        if let Some(capabilities) = &capabilities {
-            attributes.carrying(
-                PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES as usize,
-                capabilities.attribute(),
-                size_of::<SECURITY_CAPABILITIES>(),
-            )?;
-        }
 
         let mut startup: STARTUPINFOEXW = unsafe { std::mem::zeroed() };
         startup.StartupInfo.cb = u32::try_from(size_of::<STARTUPINFOEXW>()).unwrap_or(u32::MAX);

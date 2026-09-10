@@ -602,21 +602,39 @@ runner for the two of them that are about the build cache — both of which prov
 a negative, that a machine which *has* one still starts no Compile Server and
 still hands a session no `RUSTC_WRAPPER`.
 
-**And a Windows checkout needs the session account, once.** Two suites start a
-process as it — `crates/server/tests/account_windows.rs`, which reads back what
-one printed, and `crates/cli/tests/launcher_windows.rs`, which puts one on a
-console a launcher made on the far side of the boundary — and neither can make
-an account, that being an administrator's call. So a machine that has never run
-the verb fails there with the line naming it rather than passing quietly, and
-the verb is run once from an elevated terminal:
+**And a Windows checkout needs the session account, once.** Every suite that
+starts a session starts it *as* that account — `sessions_windows.rs`, the two
+boundary suites, `account_windows.rs`, `launcher_windows.rs`, and the
+`sandbox::granting::writing` tests inside the server crate — and none of them
+can make an account, that being an administrator's call. So a machine that has
+never run the verb fails there with the line naming it rather than passing
+quietly, and the verb is run once from an elevated terminal:
 
 ```console
 $ verkstead session-account create   # elevated, once per Data Directory
 $ verkstead session-account remove   # elevated, and the way to undo it
 ```
 
+**It is the account of the machine's *own* Data Directory that they use.** An
+account's name is a fingerprint of the Data Directory it belongs to, and every
+one of those suites runs against a temporary one — so the account they would be
+named after is one no verb was ever run for. What they run as instead is the
+account the human really has, said outright on the `Homes` a sandbox is built
+against and with its password copied into the fixture's own `secrets.yaml`. Run
+the verb with no `--data-dir`, which is the default the suites resolve.
+
 The `windows-2025` job runs the same verb in a step of its own, a runner being
 elevated already. Nothing else about a test run is privileged, here or there.
+
+**And `sessions_windows.rs` wants the workspace built first**, which
+`cargo test` does not do for it: a session comes up on a console made on the far
+side of the boundary by `verkstead session-launcher`, so the image a description
+names has to be a real `verkstead.exe` rather than the test harness's own —
+and a server-crate test has no `CARGO_BIN_EXE_verkstead` to read. It looks for
+one beside its own binary, in `target/debug`, and says so where there is none.
+`cargo build --workspace --all-targets` puts it there, which is what the
+`windows-2025` job does before it runs anything.
+
 
 And in `web/`, which is the Solid viewer
 ([ADR 0003](adr/0003-solid-spa-viewer.md)):

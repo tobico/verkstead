@@ -35,9 +35,10 @@
 //!
 //! **Running the shell the machine's own human would get.** The server user's
 //! login shell out of passwd, where that is a shell a Sandbox can run, and
-//! `/bin/sh` where it is not; `pwsh` where the machine keeps no such database
-//! and has one, and Windows PowerShell where it has not — see [`shell`], which
-//! is the whole of that choosing. There is no setting for it: on a packaged
+//! `/bin/sh` where it is not; and Windows PowerShell where the machine keeps no
+//! such database — see [`shell`], which is the whole of that choosing and which
+//! says why PowerShell 7 is not it. There is no setting for it: on a packaged
+
 //! install the nix module gives the service user a shell, which is where a
 //! machine's shells are said already.
 //!

@@ -1,5 +1,7 @@
-//! What a session on Windows can reach, asked by running a probe inside a
-//! Conversation's own AppContainer.
+//! What a session on Windows can reach, asked by running a probe behind a
+//! Conversation's own boundary — started as the local account of Verkstead's
+//! own that every session on this platform runs as.
+
 //!
 //! The third arm of `tests/sandbox.rs` and `tests/sandbox_macos.rs`, settled the
 //! same way both of those are: **nothing here reads what the rendering wrote.**
@@ -7,8 +9,9 @@
 //! one back would be asserting itself — it would go on passing while Windows
 //! changed what an entry meant, or while an inherited allow quietly outranked a
 //! deny somewhere above it. What settles whether the rest of the machine is
-//! still reachable is a program inside the container attempting each access and
+//! still reachable is a program behind the boundary attempting each access and
 //! saying what the operating system said.
+
 //!
 //! **The vocabulary is the Mac's** — `write`, `read`, `refused`, `absent` — and
 //! for the Mac's reason (ADR-0012). A path a session may not reach on Linux is
@@ -23,8 +26,9 @@
 //! attempt.** `ProcessTable` is a directory on the platform that keeps one in
 //! the filesystem and nothing on this one, and `Devices` is the machine's own —
 //! neither comes to an access-control entry at all, which is a claim about what
-//! a description comes to rather than about what a container can open, and is
-//! held where the entries are worked out (see the server's `sandbox::granting`).
+//! a description comes to rather than about what a session can open, and is held
+//! where the entries are worked out (see the server's `sandbox::granting`).
+
 //! Every kind that does name a path is attempted below.
 //!
 //! **What the probe says, it says on one short line.** A console is a grid and
@@ -41,13 +45,19 @@
 //! to run out of and no `PATIENCE` to raise — unlike
 //! `tests/sessions_windows.rs`, whose every assertion is a poll. What the suite
 //! costs the job is therefore wall time and nothing else, and each test's is one
-//! AppContainer profile created and deleted, the entries of one description
-//! written and taken off, and one Windows PowerShell started inside. Measured on
-//! the job: *(unmeasured — the first `windows-2025` run of this branch is what
-//! fills this in; see the pull request the stage finishes with)*.
+//! logon as the session account, the entries of one description written and
+//! taken off, and one Windows PowerShell started as it. Measured on the job:
+//! *(unmeasured — the first `windows-2025` run of this branch is what fills this
+//! in; see the pull request the stage finishes with)*.
+//!
+//! **And it needs the session account**, which is an administrator's call to
+//! make and so not one this suite can make for itself: a machine where
+//! `verkstead session-account create` has never been run fails here with the
+//! line that names it, rather than passing quietly.
 //!
 //! Windows only, which is where "everywhere" stops for this one: what it starts
-//! is an AppContainer, and the two Unixes have no such call to make.
+//! is a logon as another account, and the two Unixes have no such call to make.
+
 #![cfg(windows)]
 
 use std::collections::BTreeMap;
@@ -56,12 +66,18 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use verkstead_server::attachments::Attachments;
+use verkstead_server::boundaries;
 use verkstead_server::build_cache::BuildCache;
-use verkstead_server::containers;
+
 use verkstead_server::handoffs::Handoffs;
+use verkstead_server::platform;
 use verkstead_server::platform::Platform;
-use verkstead_server::sandbox::container::{self, Container};
+use verkstead_server::sandbox::account::Logon;
+use verkstead_server::sandbox::account::machine::Account;
+use verkstead_server::sandbox::entries;
+
 use verkstead_server::sandbox::{Bind, Executable, Homes, Reachable, Sandbox, off_a_console};
+
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::store;
@@ -154,7 +170,7 @@ const SAYS_WHICH_BUILD: &str = "the server's own image would be here\n";
 /// PowerShell arrives wrapped.
 ///
 /// **And not one cmdlet in the whole of it**, which is a rule rather than a
-/// style. Windows PowerShell starts inside a container and parses and runs what
+/// style. Windows PowerShell starts behind the boundary and parses and runs what
 /// it is given, and the commands it would ordinarily import from a module at
 /// startup are not there: the `windows-2025` job answered
 /// `CommandNotFoundException` for `Write-Output` the first time a probe of this
@@ -286,15 +302,15 @@ struct Grilling {
     conversation: store::Conversation,
     profile: store::Profile,
 
-    /// The record itself, kept for the tests about a container's lifetime:
-    /// what a sweep decides is what the store says about a Conversation, so a
+    /// The record itself, kept for the tests about a boundary's lifetime: what
+    /// a sweep decides is what the store says about a Conversation, so a
     /// fixture that closed the database behind it could say nothing about
     /// either.
     pool: sqlx::SqlitePool,
 
-    /// And every Conversation of this fixture's that has had a container made
-    /// for it, so that the profiles go when the fixture does — see
-    /// [`Grilling::drop`], which is the whole of why it is kept.
+    /// And every Conversation of this fixture's that has had entries written
+    /// for it, so that they come off the human's directories when the fixture
+    /// does — see [`Grilling::drop`], which is the whole of why it is kept.
     made: std::sync::Mutex<Vec<i64>>,
 
     skills: Skills,
@@ -316,21 +332,47 @@ impl Grilling {
         self.sandbox_of(&self.conversation)
     }
 
+    /// And the same sandbox running as an account said outright, which is what
+    /// the two refusals need: a name no machine has, and a name every machine
+    /// has that nothing holds a password for.
+    ///
+    /// The settings are read afresh rather than the fixture's own, because the
+    /// second of those is asked by emptying the secrets file first.
+    fn sandbox_running_as(&self, account: &str) -> Sandbox {
+        self.built(
+            &self.conversation,
+            self.homes().running_sessions_as(account),
+            &Settings::in_data_dir(self.state.path()),
+        )
+    }
+
     /// And the one any Conversation of this fixture's runs in, which is what
     /// the second Conversation below needs: everything but the Conversation is
     /// the machine's, and the machine is one machine.
     fn sandbox_of(&self, conversation: &store::Conversation) -> Sandbox {
+        self.built(conversation, self.homes(), &self.settings)
+    }
+
+    /// One sandbox out of the three things that ever differ between them here:
+    /// whose Conversation it is, whose account its sessions run as, and which
+    /// settings the password comes out of.
+    fn built(
+        &self,
+        conversation: &store::Conversation,
+        homes: Homes,
+        settings: &Settings,
+    ) -> Sandbox {
         Sandbox::for_conversation(
             conversation,
             &self.profile,
-            &self.homes(),
+            &homes,
             &Reachable::at(LISTENING),
             &self.skills,
             &self.verkstead,
             &self.handoffs,
             &self.attachments,
-            &self.settings.secrets(),
-            &self.settings.config(),
+            &settings.secrets(),
+            &settings.config(),
             // Nothing is compiled inside a probe, so there is no cache for one
             // to compile into: the shared build cache is a directory granted
             // read-write like any other, and the two below are what say what
@@ -345,7 +387,7 @@ impl Grilling {
     }
 
     /// A second Conversation on the same Repo, grilling in a checkout of its
-    /// own — which is the other half of *one profile per Conversation*.
+    /// own — which is the other half of *one set of entries per Conversation*.
     ///
     /// Everything about it is the first one's except the two things that make
     /// it another Conversation: its own row, and its own worktree. Which is the
@@ -403,12 +445,16 @@ impl Grilling {
     /// that: the first is the human's own, which a session is refused, and a
     /// session's `USERPROFILE` is a directory of Verkstead's made fresh under
     /// the second.
+    ///
+    /// **And the account said outright**, which is the one thing a temporary
+    /// Data Directory cannot name for itself — see [`the_machines_account`].
     fn homes(&self) -> Homes {
         Homes::on(
             Platform::HERE,
             self.home.path().to_owned(),
             self.state.path(),
         )
+        .running_sessions_as(the_machines_account().name())
     }
 
     fn worktree(&self) -> &Path {
@@ -451,6 +497,17 @@ impl Grilling {
         self.home.path().join("Documents")
     }
 
+    /// The local account this machine's Verkstead runs its sessions as, which
+    /// is what every entry in this fixture's boundary is written for.
+    ///
+    /// Read off the machine rather than off the rendering, because that is what
+    /// the two lifetime tests need it for: an entry is read back out of
+    /// `icacls` under a SID or a name, and neither is a thing a description
+    /// carries — see the server's `sandbox::account`.
+    fn session_account(&self) -> Account {
+        Account::resolving(&the_machines_account()).expect("the account resolved a moment ago")
+    }
+
     /// The account's own skills, on the host: the one path a description
     /// refuses rather than grants.
     ///
@@ -480,13 +537,13 @@ impl Grilling {
     /// `windows-2025` job is the only machine that answers any of this, so a
     /// refusal that did not leave the directory as it found it is a failure
     /// nobody can read a second time: what the list said before, what it said
-    /// while the container stood, and what was written down about it are the
+    /// while the boundary stood, and what was written down about it are the
     /// three things a reading of that failure needs, and none of them survives
     /// the run.
     fn trail(&self, before: &str, standing: &str, written_down: &str) -> String {
         format!(
             "\n  before: {before}\
-             \n  while the container stood: {standing}\
+             \n  while the boundary stood: {standing}\
              \n  now: {}\
              \n  written down: {written_down}",
             self.reading(),
@@ -509,8 +566,8 @@ impl Grilling {
     }
 
     /// And what the record under the Data Directory says about this
-    /// Conversation's container, which is what a later server takes the
-    /// boundary back from — read while there is still one to read.
+    /// Conversation's entries, which is what a later server takes the boundary
+    /// back from — read while there is still one to read.
     fn written_down(&self) -> String {
         let record = self
             .state
@@ -523,7 +580,7 @@ impl Grilling {
     }
 
     /// The directories of the human's and the machine's own that this
-    /// fixture's description grants — which is what a container's ending has to
+    /// fixture's description grants — which is what a boundary's ending has to
     /// leave as it found them.
     ///
     /// Said here rather than in each test, because it is one list and two tests
@@ -546,15 +603,14 @@ impl Grilling {
         ]
     }
 
-    /// Run the probe inside this Conversation's container and hand back the
+    /// Run the probe behind this Conversation's boundary and hand back the
     /// `name=word` lines it printed.
     ///
-    /// **The container is made here rather than by this file**, which is the
+    /// **The boundary is written here rather than by this file**, which is the
     /// point: [`Sandbox::command`] is what a session start calls, so what is
     /// probed is the boundary a session really gets rather than one this test
     /// assembled beside it. The `Closing` is held for as long as the probe runs
-    /// and dropped after it, which is what takes the entries off the human's own
-    /// directories and deletes the profile again.
+    /// and dropped after it.
     ///
     /// **A probe that did not run says everything it can about why.** The only
     /// machines that enforce this boundary are the `windows-2025` runner and
@@ -573,9 +629,9 @@ impl Grilling {
 
         let (rendering, closing) = sandbox
             .command(&argv)
-            .expect("this machine to make the AppContainer a session runs inside");
+            .expect("this machine to have the account a session runs as");
 
-        let output = off_a_console(&rendering, b"").expect("the probe to start inside it");
+        let output = off_a_console(&rendering, b"").expect("the probe to start as it");
 
         closing.close();
 
@@ -583,16 +639,16 @@ impl Grilling {
 
         assert!(
             output.status.success(),
-            "the probe did not run inside the container.\n\
+            "the probe did not run behind the boundary.\n\
              how it ended: {}\n\
              what it printed: {printed:?}\n\
              what it complained: {:?}\n\
              the program the description resolved: {:?}\n\
-             the container it was started inside: {:?}",
+             the account it was started as: {:?}",
             output.status,
             String::from_utf8_lossy(&output.stderr),
             rendering.program(),
-            rendering.container(),
+            rendering.account().map(|logon| logon.name()),
         );
 
         printed
@@ -604,20 +660,20 @@ impl Grilling {
 }
 
 impl Drop for Grilling {
-    /// Every profile this fixture had made for it, off the machine again.
+    /// Every entry this fixture had written for it, off the machine again.
     ///
-    /// **Which a fixture has to say now that a container's life is its
-    /// Conversation's.** A profile is not a session's to end — see the server's
-    /// `sandbox::container` — so a test that rendered a description and walked
-    /// away would leave one on the runner for every fixture the suite stood up,
-    /// each of them carrying entries on directories that have since gone. This
-    /// is that close and that sweep, said once for the whole suite.
+    /// **Which a fixture has to say now that a boundary's life is its
+    /// Conversation's.** An entry is not a session's to take back — see the
+    /// server's `sandbox::entries` — so a test that rendered a description and
+    /// walked away would leave one on the runner for every fixture the suite
+    /// stood up, each of them on a directory that has since gone. This is that
+    /// close and that sweep, said once for the whole suite.
     ///
     /// The tests that take one back themselves are none the worse for it: a
-    /// container that has already gone is nothing left to take.
+    /// boundary that has already gone is nothing left to take.
     fn drop(&mut self) {
         for conversation in self.made.lock().unwrap().iter() {
-            containers::remove(self.state.path(), *conversation);
+            boundaries::remove(self.state.path(), *conversation);
         }
     }
 }
@@ -735,8 +791,23 @@ async fn grilling() -> Grilling {
     let attachments = Attachments::under(state.path());
     let settings = Settings::in_data_dir(state.path());
 
+    // And the account's password written into this Data Directory's own
+    // secrets, which is the other half of running as the machine's account —
+    // see [`the_machines_account`]. The name travels on the `Homes`, and the
+    // password is read out of the file a description was built against.
+    settings
+        .save_secrets(
+            &settings
+                .secrets()
+                .with_session_account_password(Some(the_machines_account().password().to_owned())),
+        )
+        .expect("a secrets file to be writable under a temporary Data Directory");
+
+    let settings = Settings::in_data_dir(state.path());
+
     // A file the human attached, which is what makes the attachments directory
     // one the description names at all.
+
     let attached = state.path().join("attachments").join(id.to_string());
     std::fs::create_dir_all(&attached).unwrap();
     std::fs::write(attached.join(MARKER), SAID).unwrap();
@@ -779,7 +850,8 @@ async fn grilling() -> Grilling {
         repo,
         sibling,
         account,
-        // The Conversation this fixture is, seeded here because a container is
+        // The Conversation this fixture is, seeded here because a boundary is
+
         // made for it the moment a description is rendered — see
         // [`Grilling::drop`].
         made: std::sync::Mutex::new(vec![conversation.id]),
@@ -793,6 +865,37 @@ async fn grilling() -> Grilling {
         settings,
         writable,
         readable,
+    }
+}
+
+/// The local account this machine's Verkstead runs its sessions as, name and
+/// password both.
+///
+/// **A suite cannot make one and says so rather than passing** — the rule
+/// `tests/account_windows.rs` follows, and for its reason: creating a local
+/// account is an administrator's call, so a machine where the elevated verb has
+/// never been run fails here with the line that names it.
+///
+/// **Which is why it is the *machine's* Data Directory rather than this
+/// fixture's.** An account's name is a fingerprint of the Data Directory it
+/// belongs to (see the server's `sandbox::account`), and every fixture here runs
+/// against a temporary one — so the account they would be named after is one no
+/// elevated verb was ever run for. What they run as instead is the account the
+/// human really has, said outright on the `Homes` and with its password written
+/// into the fixture's own secrets.
+fn the_machines_account() -> Logon {
+    let data_dir =
+        platform::data_dir(None).expect("this machine has somewhere for a Data Directory");
+    let settings = Settings::in_data_dir(&data_dir);
+
+    match Account::on_this_machine(&data_dir, &settings.secrets()) {
+        Ok(account) => Logon::of(account.name(), account.password()),
+        Err(missing) => panic!(
+            "this suite runs sessions as the session account and there is not one: {missing}\n\
+             \n\
+             The Data Directory it asked about is {}.",
+            data_dir.display(),
+        ),
     }
 }
 
@@ -838,9 +941,9 @@ fn said<'a>(classified: &'a BTreeMap<String, String>, name: &str) -> &'a str {
 /// Every access kind a description can name, classified by attempting it — and
 /// each of them what the description said it would be.
 ///
-/// **One container and one probe**, which is not a shortcut: these are one
-/// description, and a suite that stood a container up per path would be asking
-/// one question a dozen times over on the runner this stage has to fit inside.
+/// **One boundary and one probe**, which is not a shortcut: these are one
+/// description, and a suite that wrote a boundary per path would be asking one
+/// question a dozen times over on the runner this stage has to fit inside.
 /// What is asserted is a path at a time all the same, so a failure names the one
 /// that moved.
 ///
@@ -960,6 +1063,139 @@ async fn the_attachments_directory_is_given_though_nothing_has_been_attached() {
     );
 }
 
+/// And `bash` runs behind the boundary, which is the whole reason this stage
+/// exists.
+///
+/// **The one program every mechanism before the account broke.** An AppContainer
+/// would not start msys2 at all; a restricted SID list and a deny-only account
+/// SID broke node and both PowerShells with it; a lowered integrity level left
+/// the toolchain standing and still cost `bash`, because msys2 makes its shared
+/// objects under `\BaseNamedObjects` and nothing below medium may write there
+/// (ADR-0014). An ordinary local account is none of those, and this is where
+/// that is attempted rather than believed.
+///
+/// **Started by name off the session's own `PATH`**, which is the same claim
+/// the probe's `powershell` makes and one more besides: what a session finds is
+/// the machine's own `bash` — Git for Windows' — reached through a `PATH` entry
+/// nothing in the description grants, the way `git` and `node` are.
+///
+/// **And it writes into its Worktree**, because starting is the smaller half:
+/// a shell that came up and could reach nothing would be a shell that ran. The
+/// file is read back out here rather than off what it printed, for the reason
+/// `tests/sessions_windows.rs` reads its evidence off files.
+///
+/// A machine with no `bash` on its `PATH` fails here rather than passing
+/// quietly, which is the rule the two build-cache tests in
+/// `tests/sessions_windows.rs` follow: the `windows-2025` runner has Git for
+/// Windows, and so does every machine anybody develops Verkstead on.
+#[tokio::test]
+async fn bash_runs_behind_the_boundary_and_writes_into_the_worktree() {
+    let fixture = grilling().await;
+
+    let wrote = fixture.worktree().join("what-bash-wrote.txt");
+
+    // A path `bash` will take as it stands: msys2 reads a drive letter and
+    // backslashes, and the single quotes keep the shell out of it.
+    let inside = wrote.display().to_string().replace('\\', "/");
+
+    let (rendering, closing) = fixture
+        .sandbox()
+        .command(&["bash", "-c", &format!("echo {BASH_WROTE} > '{inside}'")])
+        .expect("this machine to have the account a session runs as");
+
+    let output = off_a_console(&rendering, b"").expect("bash to start as the session account");
+
+    closing.close();
+
+    assert!(
+        output.status.success(),
+        "bash should have run behind the boundary and exited well.\n\
+         how it ended: {}\n\
+         what it printed: {:?}\n\
+         what it complained: {:?}\n\
+         the program the description resolved: {:?}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+        rendering.program(),
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(&wrote)
+            .unwrap_or_else(|error| format!("{}: {error}", wrote.display()))
+            .trim(),
+        BASH_WROTE,
+        "and what it wrote should have landed in the Worktree it was started in",
+    );
+}
+
+/// What that shell writes, said as one word: it goes on a command line the
+/// shell itself parses, and a marker with a space or a newline in it would be
+/// this test asking about quoting rather than about `bash`.
+const BASH_WROTE: &str = "bash-ran-behind-the-boundary";
+
+/// A machine with no account for its sessions to run as refuses the session,
+/// and says which half of it is not there.
+///
+/// **The two halves are two different things to do about**, which is why they
+/// are told apart: an account this machine has never heard of is the elevated
+/// verb never having been run, and an account it *has* heard of with no
+/// password is that verb having been run and `secrets.yaml` since emptied. Both
+/// name the verb, because that is what mends either.
+///
+/// **And nothing is started either way** — no unsandboxed session to fall back
+/// to, which is the whole of ADR-0014 Q18. What comes back is a refusal from
+/// [`Sandbox::command`], which is before there is a process at all.
+///
+/// Neither half needs a machine that has the account, so this is the one test
+/// here that would pass on a Windows box where the verb has never been run.
+#[tokio::test]
+async fn a_machine_with_no_account_or_no_password_refuses_the_session() {
+    let fixture = grilling().await;
+
+    // A name no machine has, which is the first half: the lookup is what fails,
+    // and it fails before the password is looked at.
+    let nobody = fixture.sandbox_running_as("vk-nobody-at-all");
+
+    let refused = nobody
+        .command(&[POWERSHELL])
+        .expect_err("a session whose account is on no machine should not be started")
+        .to_string();
+
+    assert!(
+        refused.contains("vk-nobody-at-all"),
+        "the refusal should name the account, and it said: {refused}"
+    );
+    assert!(
+        refused.contains("verkstead session-account create"),
+        "and say what to run about it, and it said: {refused}"
+    );
+
+    // And a name that resolves with nothing holding its password, which is the
+    // second: asked of an account every Windows machine already has, this suite
+    // having no way to make one.
+    let secrets = Settings::in_data_dir(fixture.state.path());
+    secrets
+        .save_secrets(&secrets.secrets().with_session_account_password(None))
+        .expect("a secrets file to be writable");
+
+    let unknown = fixture.sandbox_running_as("SYSTEM");
+
+    let refused = unknown
+        .command(&[POWERSHELL])
+        .expect_err("a session whose account has no password should not be started")
+        .to_string();
+
+    assert!(
+        refused.contains("secrets.yaml"),
+        "the refusal should say which half was missing, and it said: {refused}"
+    );
+    assert!(
+        refused.contains("verkstead session-account create"),
+        "and say what to run about it, and it said: {refused}"
+    );
+}
+
 /// And what the description does not name is refused rather than absent, with
 /// a name nobody ever made told apart from both.
 ///
@@ -1066,22 +1302,31 @@ async fn what_no_description_names_is_refused_and_a_name_nobody_made_is_absent()
     );
 }
 
-/// One Conversation's session is refused another Conversation's Worktree, asked
-/// by attempting it from inside.
+/// A live Conversation's Worktree is reachable from another Conversation's
+/// session, and a stopped one's is not — asked by attempting both.
 ///
-/// **The whole of what *one profile per Conversation* is for** (ADR-0014, Q14).
-/// Two Conversations on this machine are two identities, so what the second's
-/// description granted is granted to the second's SID and to nothing else — and
-/// the first's session, whose own Worktree is a directory away on the same
-/// disk, finds it refused.
+/// **This is the cost the account stage accepted, asserted rather than allowed
+/// for** (ADR-0014, *Amended: the Sandbox is an account*). There is one account
+/// for the installation, because making one needs elevation and one per
+/// Conversation would need elevation per Conversation — so two Conversations
+/// running at once are one identity, and what the second was granted the first
+/// can reach. A suite that did not say so out loud would leave the reader of
+/// this file believing the boundary is narrower than it is.
+///
+/// **And the bound on it, in the same run.** What keeps that cost to *live*
+/// work is that a Conversation's entries come off with its Worktree — see the
+/// server's `sandbox::entries` — so the same directory, once its Conversation
+/// has stopped, is refused to exactly the session that could read it a moment
+/// ago. Either half alone is passable by accident: a machine that granted
+/// everything would pass the first, and one that had granted nothing would pass
+/// the second.
 ///
 /// **The second Conversation's session really runs its description**, which is
-/// what makes the refusal worth asserting: a checkout nothing had ever been
+/// what makes both halves worth asserting: a checkout nothing had ever been
 /// granted would be refused by a machine that had never heard of either
-/// Conversation. So the entries are written for the second the way a session
-/// start writes them, and only then is the first asked.
+/// Conversation.
 #[tokio::test]
-async fn a_second_conversations_worktree_is_refused_to_the_firsts_session() {
+async fn a_live_conversations_worktree_is_reachable_and_a_stopped_ones_is_not() {
     let fixture = grilling().await;
     let theirs = fixture.beside("something-of-their-own").await;
 
@@ -1091,51 +1336,78 @@ async fn a_second_conversations_worktree_is_refused_to_the_firsts_session() {
         .expect("the second Conversation has a worktree");
 
     // Its boundary written on the machine, and held for as long as the probe
-    // below runs: what is being asked is what *this* identity may reach while
-    // that one may reach it.
+    // below runs: what is being asked is what this session may reach while that
+    // Conversation is still working.
     let (_theirs, closing) = fixture
         .sandbox_of(&theirs)
         .command(&[POWERSHELL])
-        .expect("the second Conversation's own AppContainer");
+        .expect("this machine to have the account a session runs as");
 
-    let classified = fixture.probe(&[
+    let asked = [
         directory("theirs", &worktree),
         file("their-file", worktree.join(MARKER)),
         directory("ours", fixture.worktree()),
-    ]);
+    ];
 
-    closing.close();
+    let while_live = fixture.probe(&asked);
 
     assert_eq!(
-        said(&classified, "ours"),
+        said(&while_live, "ours"),
         "write",
         "a session reaches its own Conversation's checkout, which is what says \
-         the two below are about whose it is. The probe said: {classified:?}",
+         the rest of this is about whose it is. The probe said: {while_live:?}",
     );
 
     for (name, what) in [
-        ("theirs", "another Conversation's checkout"),
+        ("theirs", "another live Conversation's checkout"),
         ("their-file", "and a file inside it"),
     ] {
         assert_eq!(
-            said(&classified, name),
+            said(&while_live, name),
+            "write",
+            "{what} is reachable while that Conversation is working, there being \
+             one account for the installation — which is the cost this stage \
+             accepted. The probe said: {while_live:?}",
+        );
+    }
+
+    // And that Conversation stopping, which is what takes its entries off: the
+    // close, said the way the server says it — see `boundaries::remove`.
+    closing.close();
+    boundaries::remove(fixture.state.path(), theirs.id);
+
+    let once_stopped = fixture.probe(&asked);
+
+    assert_eq!(
+        once_stopped.get("ours").map(String::as_str),
+        Some("write"),
+        "this session's own checkout is untouched by another Conversation \
+         ending. The probe said: {once_stopped:?}",
+    );
+
+    for (name, what) in [
+        ("theirs", "a stopped Conversation's checkout"),
+        ("their-file", "and a file inside it"),
+    ] {
+        assert_eq!(
+            said(&once_stopped, name),
             "refused",
-            "{what} is refused from inside this one's session — refused rather \
-             than absent, the directory being there and granted to the other \
-             Conversation's identity. The probe said: {classified:?}",
+            "{what} is refused once its entries have come off — refused rather \
+             than absent, the directory being still there. The probe said: \
+             {once_stopped:?}",
         );
     }
 }
 
-/// Closing a Conversation takes its profile off the machine and every entry
-/// written for it off the human's own directories.
+/// Closing a Conversation takes every entry written for it off the human's own
+/// directories.
 ///
 /// **Read back rather than attempted, which is the one place this suite has to
-/// be.** Everything else here asks the boundary by running a program inside it;
-/// what is being asserted here is that the identity is *gone*, and there is
-/// nothing left to run anything inside. So the machine's own `icacls` is asked
-/// what each directory's list says, and the profile is asked for by name — a
-/// name that can be taken again is a profile that has really been deleted.
+/// be.** Everything else here asks the boundary by running a program behind it;
+/// what is being asserted here is that the entries are *gone*, and the account
+/// they named is still on the machine — it is the installation's, not this
+/// Conversation's. So the machine's own `icacls` is asked what each directory's
+/// list says.
 ///
 /// **And the entries are asserted to have been there first.** Otherwise this
 /// would pass just as happily against a run where nothing was ever written.
@@ -1149,10 +1421,10 @@ async fn a_second_conversations_worktree_is_refused_to_the_firsts_session() {
 /// skills — a read-only grant on a real directory — and is in no description
 /// here, this fixture's human profile being a temporary directory that nothing
 /// on the machine's `PATH` is under. Where that rule is proved against a real
-/// container is the server's own `sandbox::granting::writing` tests, which can
+/// boundary is the server's own `sandbox::granting::writing` tests, which can
 /// say what the `PATH` is without saying it to this whole process.
 #[tokio::test]
-async fn closing_a_conversation_takes_its_profile_and_every_entry_written_for_it() {
+async fn closing_a_conversation_takes_every_entry_written_for_it() {
     let fixture = grilling().await;
 
     // Read before anything is written, because what a refusal has to leave
@@ -1162,41 +1434,37 @@ async fn closing_a_conversation_takes_its_profile_and_every_entry_written_for_it
     let before = fixture.reading();
     let as_it_was = listed(&refused);
 
-    let (rendering, closing) = fixture
+    let (_rendering, closing) = fixture
         .sandbox()
         .command(&[POWERSHELL])
-        .expect("this machine to make the AppContainer a session runs inside");
+        .expect("this machine to have the account a session runs as");
 
-    let sid = rendering
-        .container()
-        .expect("a Windows rendering names the container it runs inside")
-        .to_owned();
+    let account = fixture.session_account();
 
     let standing = fixture.reading();
     let written_down = fixture.written_down();
 
     closing.close();
 
-    let name = container::profile(fixture.state.path(), fixture.conversation.id);
     let granted = fixture.granted();
 
     for path in granted.iter().chain([&refused]) {
         assert!(
-            names(&sid, &name, path),
-            "{} should be carrying an entry for the session's own identity \
-             before anything is taken back",
+            names(&account, path),
+            "{} should be carrying an entry for the session account before \
+             anything is taken back",
             path.display(),
         );
     }
 
     // What the close does about the boundary, which is the whole of this test's
-    // subject — see the server's `containers::closing`, the one line of the
+    // subject — see the server's `boundaries::closing`, the one line of the
     // close that reaches it.
-    containers::remove(fixture.state.path(), fixture.conversation.id);
+    boundaries::remove(fixture.state.path(), fixture.conversation.id);
 
     for path in granted.iter().chain([&refused]) {
         assert!(
-            !names(&sid, &name, path),
+            !names(&account, path),
             "{} should have been left as the human's own again, and it says: {}",
             path.display(),
             listed(path),
@@ -1212,15 +1480,19 @@ async fn closing_a_conversation_takes_its_profile_and_every_entry_written_for_it
         reach(&listed(&refused)),
         reach(&as_it_was),
         "the one directory a description refuses should leave the human \
-         reaching it exactly as they did before the container was made, and \
+         reaching it exactly as they did before the boundary was written, and \
          what it said all along is: {}",
         fixture.trail(&before, &standing, &written_down),
     );
 
     assert!(
-        Container::named(&name).is_ok(),
-        "and the name should be free, which nothing but the profile really \
-         having been deleted would leave it",
+        !fixture
+            .state
+            .path()
+            .join("containers")
+            .join(fixture.conversation.id.to_string())
+            .exists(),
+        "and the record they were written down in should have gone with them",
     );
 }
 
@@ -1229,63 +1501,58 @@ async fn closing_a_conversation_takes_its_profile_and_every_entry_written_for_it
 ///
 /// **The case nothing else covers.** A close takes a Conversation's boundary
 /// with its Worktree; a server that died took nothing at all, and what it left
-/// is a profile and a set of entries on the human's own directories that
-/// nothing in any memory describes any more. What the next server has to go on
-/// is what this one wrote down — see the server's `sandbox::granting::remembering`.
+/// is a set of entries on the human's own directories that nothing in any
+/// memory describes any more. What the next server has to go on is what this
+/// one wrote down — see the server's `sandbox::granting::remembering`.
 ///
 /// The crash is made by letting go of the hold without taking anything back,
-/// which is exactly what a process that died did — see
-/// [`container::forgotten`]. The Conversation is Done rather than Closed
-/// because Done is the harder half of the rule: its Worktree stays, and its
-/// boundary goes.
+/// which is exactly what a process that died did — see [`entries::forgotten`].
+/// The Conversation is Done rather than Closed because Done is the harder half
+/// of the rule: its Worktree stays, and its boundary goes.
 #[tokio::test]
-async fn a_container_a_crash_left_behind_is_swept_at_the_next_startup() {
+async fn the_entries_a_crash_left_behind_are_swept_at_the_next_startup() {
     let fixture = grilling().await;
 
     let refused = fixture.their_skills();
     let before = fixture.reading();
     let as_it_was = listed(&refused);
 
-    let (rendering, closing) = fixture
+    let (_rendering, closing) = fixture
         .sandbox()
         .command(&[POWERSHELL])
-        .expect("this machine to make the AppContainer a session runs inside");
+        .expect("this machine to have the account a session runs as");
 
-    let sid = rendering
-        .container()
-        .expect("a Windows rendering names the container it runs inside")
-        .to_owned();
+    let account = fixture.session_account();
 
     let standing = fixture.reading();
     let written_down = fixture.written_down();
 
     closing.close();
 
-    let name = container::profile(fixture.state.path(), fixture.conversation.id);
     let granted = fixture.granted();
 
     store::set_state(&fixture.pool, fixture.conversation.id, Lifecycle::Done)
         .await
         .expect("the Conversation to have finished");
 
-    // And the server dies holding it: the profile and its entries stay exactly
-    // where they are, and this process stops knowing about either.
-    container::forgotten(fixture.state.path(), fixture.conversation.id);
+    // And the server dies holding them: the entries stay exactly where they
+    // are, and this process stops knowing about them.
+    entries::forgotten(fixture.state.path(), fixture.conversation.id);
 
     for path in granted.iter().chain([&refused]) {
         assert!(
-            names(&sid, &name, path),
+            names(&account, path),
             "{} should still be carrying the entry a crash left on it",
             path.display(),
         );
     }
 
     // What the next server does before it serves anything.
-    containers::swept(&fixture.pool, fixture.state.path()).await;
+    boundaries::swept(&fixture.pool, fixture.state.path()).await;
 
     for path in granted.iter().chain([&refused]) {
         assert!(
-            !names(&sid, &name, path),
+            !names(&account, path),
             "{} should have been left as the human's own again, and it says: {}",
             path.display(),
             listed(path),
@@ -1300,15 +1567,11 @@ async fn a_container_a_crash_left_behind_is_swept_at_the_next_startup() {
         reach(&listed(&refused)),
         reach(&as_it_was),
         "the sweep should leave the human reaching the account's own skills as \
-         they did before the container was made, and what they said all along \
+         they did before the boundary was written, and what they said all along \
          is: {}",
         fixture.trail(&before, &standing, &written_down),
     );
 
-    assert!(
-        Container::named(&name).is_ok(),
-        "and the profile should have gone with them",
-    );
     assert!(
         !fixture
             .state
@@ -1372,17 +1635,17 @@ fn reach(listed: &str) -> String {
     listed.replace("(I)", "")
 }
 
-/// And whether that list names one container's identity, by either of the two
+/// And whether that list names the session account, by either of the two
 /// spellings it can be printed in.
 ///
-/// The SID and the profile's own name both, because which of them appears is
-/// the machine's business: an AppContainer's SID resolves to the name the
-/// profile was created under wherever Windows can look it up, and to the number
-/// itself where it cannot. Neither is a spelling anything else on the machine
-/// writes — a Data Directory's fingerprint and a Conversation's id — so a list
-/// holding either is a list holding this identity.
-fn names(sid: &str, name: &str, path: &Path) -> bool {
+/// The SID and the account's own name both, because which of them appears is
+/// the machine's business: `icacls` resolves a SID to the name it belongs to
+/// wherever Windows can look it up, and prints the number itself where it
+/// cannot. Neither is a spelling anything else on this machine writes — the
+/// name is a Data Directory's fingerprint behind `vk-` — so a list holding
+/// either is a list holding this identity.
+fn names(account: &Account, path: &Path) -> bool {
     let listed = listed(path);
 
-    listed.contains(sid) || listed.contains(name)
+    listed.contains(account.sid().text()) || listed.contains(account.name())
 }

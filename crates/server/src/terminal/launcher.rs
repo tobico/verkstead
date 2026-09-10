@@ -63,7 +63,8 @@ use windows_sys::Win32::System::Console::{
 use windows_sys::Win32::System::IO::{GetOverlappedResult, OVERLAPPED};
 use windows_sys::Win32::System::Threading::{
     CreateEventW, CreateProcessW, EXTENDED_STARTUPINFO_PRESENT, GetExitCodeProcess, INFINITE,
-    PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION, STARTUPINFOEXW, WaitForSingleObject,
+    PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOEXW,
+    WaitForSingleObject,
 };
 
 use crate::pipe::Descriptor;
@@ -165,7 +166,7 @@ impl Channel {
             NAMED.fetch_add(1, Ordering::Relaxed),
         );
 
-        let granting = Descriptor::granting(&[sid.text().to_owned()])?;
+        let granting = Descriptor::granting(Some(sid.text()))?;
         let mut attributes = granting.attributes();
 
         // SAFETY: the attributes are valid for the length of the call and point
@@ -310,7 +311,22 @@ fn on_the_console(
     startup.StartupInfo.cb = u32::try_from(size_of::<STARTUPINFOEXW>()).unwrap_or(u32::MAX);
     startup.lpAttributeList = attributes.list();
 
+    // **And this launcher's own standard handles kept off it**, which is the
+    // same move `conpty` makes and is here for a reason of this side of the
+    // boundary. A launcher's three handles are the two pipes Verkstead started
+    // it with — that is the whole of how a console is made out here — and a
+    // child inherits its parent's unless the parent says otherwise, even one
+    // attached to a pseudoconsole. Handed those, the session sets the console's
+    // title, draws nothing on it, reads end-of-file where a watcher typed, and
+    // asks how wide the window is only to be told the handle is invalid.
+    //
+    // So the flag is set with the handles left zero, which says *these three,
+    // and they are nothing*: what fills them in is the console the process comes
+    // up on.
+    startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+
     let mut running = Rendering::running(program);
+
     running.args(argv);
 
     let mut line = command_line(&running);

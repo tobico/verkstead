@@ -1,10 +1,13 @@
 //! `verkstead ask` and `verkstead answers` over the named pipe the server
 //! listens on beside its socket.
 //!
-//! Windows' own, and the whole of what a sandboxed session there will ask
-//! through: an AppContainer is refused the loopback interface, so the transport
-//! has to be one an identity can be granted rather than one an address is
-//! routed to (ADR-0014).
+//! Windows' own, and what a sandboxed session there asks through: an
+//! AppContainer was refused the loopback interface, so the transport had to be
+//! one an identity could be granted rather than one an address is routed to
+//! (ADR-0014). A session runs as a local account now and could dial the
+//! loopback; the pipe stays because it is landed and because no firewall has to
+//! agree with it.
+
 //!
 //! What is proved here is that the pipe is the *same* ask. The Set goes, the
 //! wait holds, the Response comes back on stdout, a restart mid-wait is ridden

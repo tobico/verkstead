@@ -32,6 +32,16 @@ mod browsing;
 /// Public for the reason [`sandbox`] is — what a session builds into is part of
 /// the surface it runs on rather than an implementation detail of an endpoint,
 /// and standing a router up that runs sessions means saying where it is.
+/// How long a Conversation's boundary lasts on the platform whose boundary is
+/// an identity: the entries written at its first session, taken away with its
+/// Worktree, and swept for at startup.
+///
+/// Public for the reason the sandbox is: how long what a session may reach
+/// lasts is part of the product's own promise rather than an implementation
+/// detail of an endpoint, and what proves a boundary has really been taken back
+/// is a suite standing where the close and the sweep do — see
+/// `crates/server/tests/sandbox_windows.rs`.
+pub mod boundaries;
 pub mod build_cache;
 mod capture;
 mod checklist;
@@ -40,17 +50,8 @@ mod cleanup;
 mod commenting;
 mod comments;
 mod commits;
-/// How long a Conversation's boundary lasts on the platform whose boundary is
-/// an identity: the AppContainer granted at its first session, taken away with
-/// its Worktree, and swept for at startup.
-///
-/// Public for the reason the sandbox is: how long what a session may reach
-/// lasts is part of the product's own promise rather than an implementation
-/// detail of an endpoint, and what proves a boundary has really been taken back
-/// is a suite standing where the close and the sweep do — see
-/// `crates/server/tests/sandbox_windows.rs`.
-pub mod containers;
 mod continuing;
+
 mod conversations;
 mod deferrals;
 /// The uncommitted changes the server reads for a Question Set's Diff.
@@ -101,9 +102,10 @@ pub mod onboarding;
 /// Every Sandbox Configuration bind as the settings page reads them: which of
 /// the two places said each one, and whether the server can see it.
 mod paths;
-/// The named pipe the server listens on beside its socket, which is the whole
-/// of what a sandboxed Windows session will have to ask through — an
-/// AppContainer is refused the loopback interface.
+/// The named pipe the server listens on beside its socket, which is what a
+/// sandboxed Windows session asks Verkstead through — the one way in when that
+/// platform's boundary was an AppContainer, and a transport that has stayed
+/// because no firewall has to agree with it.
 ///
 /// Public for the reason [`sandbox`] is: what a session reaches Verkstead
 /// through is the product's answer rather than an endpoint's, and what proves a
@@ -923,12 +925,12 @@ fn routed(
 
     // And the boundaries of the Conversations that have stopped, which is the
     // same sweep one platform further out: a close takes a Conversation's
-    // AppContainer with its Worktree, and a server that died took nothing at
-    // all — so what is written down under the Data Directory and belongs to a
-    // Conversation that has finished or closed is a profile and a set of
-    // entries on the human's own directories that nothing else will ever look
-    // at. See [`containers::at_startup`].
-    containers::at_startup(&state);
+    // entries with its Worktree, and a server that died took nothing at all —
+    // so what is written down under the Data Directory and belongs to a
+    // Conversation that has finished or closed is a set of entries on the
+    // human's own directories that nothing else will ever look at. See
+    // [`boundaries::at_startup`].
+    boundaries::at_startup(&state);
 
     // Before anything is served, because it is about what was already happening
     // rather than about anything a request will start: every Conversation the
@@ -1259,14 +1261,33 @@ pub async fn run_on_keyed(
     // asks through. Here rather than with the bind, because its name comes off
     // the Data Directory — see [`pipe`] — and that is only settled above.
     //
-    // Granting nobody beyond the account this runs as, because there are no
-    // containers yet: what it is opened against is the set this process's own
-    // containers put themselves into as they are made, so a Conversation
-    // starting its first session an hour from now is granted then — see
-    // [`pipe::Grants`].
+    // Granting the account this installation's sessions run as, beside the one
+    // this server runs as — and nobody where there is no such account, which is
+    // a machine the elevated verb has never been run on and is a machine that
+    // will refuse every session anyway. There is one account for the whole
+    // installation, so this is settled here rather than added to later; see
+    // [`pipe`], where the whole of that is.
     #[cfg(windows)]
-    let pipe = pipe::Listener::open(&data_dir, &pipe::Grants::of_this_process())
-        .context("opening the named pipe a Windows session asks through")?;
+    let session_account = sandbox::account::machine::sid_of(homes.session_account());
+
+    #[cfg(windows)]
+    if let Err(why) = &session_account {
+        tracing::warn!(
+            account = homes.session_account(),
+            why,
+            "there is no local account for this Data Directory to run sessions as, so the \
+             named pipe is granting nobody beyond this server — and no session will start \
+             until `{}` has been run from an elevated terminal",
+            sandbox::account::MAKE_IT,
+        );
+    }
+
+    #[cfg(windows)]
+    let pipe = pipe::Listener::open(
+        &data_dir,
+        session_account.as_ref().ok().map(|sid| sid.text()),
+    )
+    .context("opening the named pipe a Windows session asks through")?;
 
     // The one line an operator reads as Verkstead comes up, and so the daemon's
     // whole way of handing the login link over: the address with the key on it,

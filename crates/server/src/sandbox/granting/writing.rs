@@ -33,10 +33,10 @@
 //!
 //! So the refusal is a **protected** list on that one directory: inheritance is
 //! cut there, the entries the directory had inherited are kept as its own so
-//! that the human's own reach is exactly what it was, everything of the
-//! container's is dropped, and a deny of the container goes at the front. Cut
-//! that way, no grant above can reach into the tree at all — and the deny says
-//! in words what the missing grant would only imply, so an entry re-granted
+//! that the human's own reach is exactly what it was, everything of the session
+//! account's is dropped, and a deny of the session account goes at the front.
+//! Cut that way, no grant above can reach into the tree at all — and the deny
+//! says in words what the missing grant would only imply, so an entry re-granted
 //! above by some other hand still refuses.
 //!
 //! **And it is put back as it was, copies and all** — see [`restored`]. Those
@@ -80,8 +80,9 @@
 //! walks past a directory that is already protected. [`strip`] undoes it the
 //! other way round: every grant comes off before a refusal is put back, so
 //! what [`uncopied`] tells a copy from is the human's own list above it rather
-//! than one still carrying this container's grant.
+//! than one still carrying this session's grant.
 
+use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::ptr;
@@ -89,25 +90,79 @@ use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use windows_sys::Win32::Foundation::LocalFree;
 use windows_sys::Win32::Security::Authorization::{
-    EXPLICIT_ACCESS_W, GRANT_ACCESS, GetNamedSecurityInfoW, NO_MULTIPLE_TRUSTEE, REVOKE_ACCESS,
-    SE_FILE_OBJECT, SET_ACCESS, SetEntriesInAclW, SetNamedSecurityInfoW, TRUSTEE_IS_SID,
-    TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
+    ConvertStringSidToSidW, EXPLICIT_ACCESS_W, GRANT_ACCESS, GetNamedSecurityInfoW,
+    NO_MULTIPLE_TRUSTEE, REVOKE_ACCESS, SE_FILE_OBJECT, SET_ACCESS, SetEntriesInAclW,
+    SetNamedSecurityInfoW, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
 };
 use windows_sys::Win32::Security::{
     ACE_HEADER, ACL, ACL_REVISION, ACL_SIZE_INFORMATION, AclSizeInformation, AddAccessDeniedAceEx,
-    AddAce, DACL_SECURITY_INFORMATION, GetAce, GetAclInformation, InitializeAcl, NO_INHERITANCE,
-    OBJECT_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+    AddAce, DACL_SECURITY_INFORMATION, EqualSid, GetAce, GetAclInformation, GetLengthSid,
+    InitializeAcl, NO_INHERITANCE, OBJECT_SECURITY_INFORMATION,
+    PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
     SUB_CONTAINERS_AND_OBJECTS_INHERIT, UNPROTECTED_DACL_SECURITY_INFORMATION,
 };
+
 use windows_sys::Win32::Storage::FileSystem::{
     DELETE, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_READ_ATTRIBUTES,
     FILE_TRAVERSE, SYNCHRONIZE,
 };
 
-use super::super::container::Sid;
 use super::super::starting::wide;
 use super::super::surface::Reach;
 use super::{Entry, Wanted};
+
+/// A SID read out of the spelling a person writes, freed when it is let go of.
+///
+/// One reading per call that writes or strips a list, rather than one per entry:
+/// a second reading of the same spelling would be a second answer to *which
+/// identity is this*, and every entry in a description names one identity.
+pub(crate) struct Sid(PSID);
+
+impl Sid {
+    /// One read out of the way it is written down, or a refusal saying which
+    /// spelling would not resolve.
+    pub(crate) fn of(sid: &str) -> io::Result<Sid> {
+        let mut read: PSID = ptr::null_mut();
+
+        if unsafe { ConvertStringSidToSidW(wide(OsStr::new(sid)).as_ptr(), &mut read) } == 0 {
+            return Err(io::Error::other(format!(
+                "the identity {sid} would not resolve: {}",
+                io::Error::last_os_error()
+            )));
+        }
+
+        Ok(Sid(read))
+    }
+
+    /// What a call that wants one is handed.
+    pub(crate) fn as_psid(&self) -> PSID {
+        self.0
+    }
+
+    /// How many bytes of it there are, which is what a list built around one
+    /// has to be big enough for.
+    pub(crate) fn length(&self) -> usize {
+        usize::try_from(unsafe { GetLengthSid(self.0) }).unwrap_or(0)
+    }
+
+    /// And whether the bytes at `theirs` are this identity — which is how an
+    /// entry already on a directory is told from somebody else's.
+    ///
+    /// The bytes rather than the spelling, because that is what a list holds:
+    /// an entry carries a SID after its mask and never the text of one.
+    pub(crate) fn is(&self, theirs: &[u8]) -> bool {
+        theirs.len() >= self.length()
+            && unsafe { EqualSid(self.0, theirs.as_ptr().cast_mut().cast()) } != 0
+    }
+}
+
+impl Drop for Sid {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe { LocalFree(self.0.cast()) };
+        }
+    }
+}
 
 /// One description's entries at a time.
 ///
@@ -166,8 +221,8 @@ const INHERITED: u8 = 0x10;
 ///
 /// **What [`restored`] cannot read off the list in front of it**, which is the
 /// reason it is read here at all: a refusal cuts the inheritance on the path
-/// it refuses, so from the moment a container exists that directory reads as
-/// one that was never inheriting anything — and putting an inheritance back
+/// it refuses, so from the moment a boundary exists that directory reads as one
+/// that was never inheriting anything — and putting an inheritance back
 /// that was never cut takes the directory's own entries off it. Read while
 /// there is still an answer to read, and the answer is the one about the
 /// machine as the session found it.
@@ -178,19 +233,20 @@ const INHERITED: u8 = 0x10;
 ///
 /// **And nothing of Verkstead's own has happened in between.** This is read in
 /// one window — after the rendering has made the profile the refused path is
-/// inside, and before the AppContainer profile is created — and the second half
-/// of that is not a nicety: creating a profile is a write to the machine, and
-/// on the `windows-2025` runner a directory under the temporary one came back
-/// from it holding the same entries marked as taken from above. Read after
-/// that, this would answer about a machine Verkstead had already changed, and
-/// the answer it gave would put [`restored`] on the wrong side of the one
-/// decision it cannot make for itself. See [`super::super::Sandbox::command`],
-/// which is where the order is.
+/// inside, and before anything of the boundary is written — and the second half
+/// of that is not a nicety: a write to the machine's own access-control lists in
+/// that window is one this reading would then be answering about rather than
+/// about the machine as the session found it. It was a profile being created
+/// that showed it, on the `windows-2025` runner, where a directory under the
+/// temporary one came back from that holding the same entries marked as taken
+/// from above. Read late, this would put [`restored`] on the wrong side of the
+/// one decision it cannot make for itself. See
+/// [`super::super::Sandbox::command`], which is where the order is.
 ///
 /// **And it is the caller's to keep**, because the taking-back is a later
 /// server's as often as it is this one's: what comes back is remembered with
 /// the entries — see [`super::remembering`] — and handed to [`strip`] by
-/// whoever ends the container.
+/// whoever ends the Conversation's boundary — see [`super::super::entries`].
 ///
 /// A path that is not there and a path with no list of its own are both
 /// nothing here, for [`write`]'s reason and [`refuse`]'s: neither is a
@@ -211,7 +267,7 @@ pub(crate) fn inheriting(entries: &[Entry]) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Everything `entries` says, written for the container `sid` names.
+/// Everything `entries` says, written for the identity `sid` names.
 ///
 /// **A path that is not there gets no entry**, which is the same answer
 /// [`super::super::on_the_machine`] gives a system directory this machine has
@@ -307,9 +363,9 @@ pub(crate) fn write(entries: &[Entry], sid: &str, cut: &[PathBuf]) -> io::Result
 
 /// And every one of them taken back off the directories it was written on.
 ///
-/// **Nothing here refuses anything.** This is what a container's ending does
-/// with what it wrote — see [`super::super::container::Container`] — and a
-/// container has already ended by the time anything could be refused. An entry
+/// **Nothing here refuses anything.** This is what a Conversation's boundary
+/// ending does with what it wrote — see [`super::super::entries::Entries`] —
+/// and it has already ended by the time anything could be refused. An entry
 /// that will not come off is named in the log and the rest go.
 ///
 /// **A refused path is left as it was found**, copies and all — see
@@ -320,7 +376,7 @@ pub(crate) fn write(entries: &[Entry], sid: &str, cut: &[PathBuf]) -> io::Result
 /// **And it is put back after every grant has come off**, which is [`write`]'s
 /// order the other way round and is [`uncopied`]'s to need: what tells a copy
 /// from an entry of the directory's own is that the list above says the same
-/// thing, so a grant of this container's still standing up there is one more
+/// thing, so a grant of this session's still standing up there is one more
 /// thing for a copy to be told from.
 pub(crate) fn strip(entries: &[Entry], cut: &[PathBuf], sid: &str) {
     let Ok(sid) = Sid::of(sid) else {
@@ -347,7 +403,8 @@ pub(crate) fn strip(entries: &[Entry], cut: &[PathBuf], sid: &str) {
             // **A step is the one entry whose failing to come off is ordinary**,
             // because a record says every step a description asked for rather
             // than the ones the machine took — see
-            // [`super::super::container::Container::wrote`], which writes the
+            // [`super::super::entries::Entries::wrote`], which writes the
+
             // record before a word of it is written. So an ancestor Verkstead
             // could not write is one it now cannot take back, and there was
             // never anything there to take: that is a line for somebody
@@ -574,7 +631,7 @@ fn restored(sid: &Sid, path: &Path, cut: bool) -> io::Result<()> {
 /// out from under it.
 ///
 /// So what goes on is the list as it stands with every entry of the
-/// container's taken out of it, written unprotected — the same write
+/// session's taken out of it, written unprotected — the same write
 /// [`refuse`] made in the other direction, which puts the inheritance back in
 /// the same breath as it takes the deny off.
 ///
@@ -691,7 +748,7 @@ fn only(aces: &[Vec<u8>]) -> io::Result<Vec<u32>> {
     Ok(list)
 }
 
-/// A list with the container denied at the front of it and `kept` behind, in
+/// A list with the identity denied at the front of it and `kept` behind, in
 /// the order they were in.
 ///
 /// The front is the whole of it. A check reads a list in order and stops at the
@@ -713,7 +770,8 @@ fn denial(sid: &Sid, kept: &[Vec<u8>]) -> io::Result<Vec<u32>> {
     }
 
     // Everything, rather than the read and the write alone: what is being said
-    // is that this path is not the container's business, and a right left out
+    // is that this path is not the session's business, and a right left out
+
     // would be a right a grant above could still hand it.
     if unsafe {
         AddAccessDeniedAceEx(
@@ -872,8 +930,8 @@ fn refused(status: u32) -> io::Error {
 }
 
 /// Who the trustee is, said the one way everything here says it: a SID rather
-/// than a name, because an AppContainer's identity has no name to be looked up
-/// under.
+/// than a name, because the caller has already resolved one and a second lookup
+/// would be a second answer to which identity this is.
 fn trustee(sid: &Sid) -> TRUSTEE_W {
     TRUSTEE_W {
         pMultipleTrustee: ptr::null_mut(),
@@ -1007,10 +1065,36 @@ mod tests {
 
     use std::path::PathBuf;
 
+    use crate::platform;
     use crate::sandbox::account::Logon;
-    use crate::sandbox::container::Container;
+    use crate::sandbox::account::machine::Account;
     use crate::sandbox::rendering::Rendering;
     use crate::sandbox::starting::off_a_console;
+    use crate::sandbox::surface::Surface;
+    use crate::settings::Settings;
+
+    /// The account this machine's Verkstead runs its sessions as, or a failure
+    /// saying what to run.
+    ///
+    /// **Every test here that attempts an access needs it, and says so rather
+    /// than passing** — the rule `tests/account_windows.rs` follows, and for its
+    /// reason: creating a local account is an administrator's call, so this
+    /// suite cannot make one, and a machine where the elevated verb has never
+    /// been run fails here with the line that names it.
+    fn the_session_account() -> Account {
+        let data_dir =
+            platform::data_dir(None).expect("this machine has somewhere for a Data Directory");
+        let settings = Settings::in_data_dir(&data_dir);
+
+        match Account::on_this_machine(&data_dir, &settings.secrets()) {
+            Ok(account) => account,
+            Err(missing) => panic!(
+                "this suite runs a probe as the session account and there is not one: \
+                 {missing}\n\nThe Data Directory it asked about is {}.",
+                data_dir.display(),
+            ),
+        }
+    }
 
     /// A SID that is a SID and names nobody, for the entries that are about
     /// what gets written rather than about who reaches what.
@@ -1020,18 +1104,21 @@ mod tests {
     /// the calls this makes are the calls a real grant makes.
     const NOBODY: &str = "S-1-15-2-1-1-1-1-1-1-1-1-1-1";
 
-    /// What a probe inside a container has to be handed to run at all — the
-    /// same list `tests/container_windows.rs` gives one, and for the same
-    /// reason: a rendering is the whole of what a process gets.
-    const NEEDED: [&str; 8] = [
-        "ComSpec",
-        "PATH",
-        "PATHEXT",
-        "SystemDrive",
-        "SystemRoot",
-        "TEMP",
-        "TMP",
-        "LOCALAPPDATA",
+    /// What a probe started as the session account has to be handed to run at
+    /// all: a rendering is the whole of what a process gets, and a shell with no
+    /// `SystemRoot` is one that will not start.
+    ///
+    /// Said outright rather than taken off this process, which is the one thing
+    /// `tests/account_windows.rs` is careful about too — the server's own
+    /// environment is full of paths the account is refused, and its `TEMP` is
+    /// under the human's own profile.
+    const NEEDED: [(&str, &str); 6] = [
+        ("SystemRoot", r"C:\Windows"),
+        ("SystemDrive", "C:"),
+        ("PATH", r"C:\Windows\System32;C:\Windows"),
+        ("PATHEXT", ".COM;.EXE;.BAT;.CMD;.PS1"),
+        ("TEMP", r"C:\Windows\Temp"),
+        ("TMP", r"C:\Windows\Temp"),
     ];
 
     /// An entry's SID is read where an entry keeps one, which is the offset
@@ -1218,7 +1305,7 @@ mod tests {
         assert_ne!(
             listed(&skills),
             before,
-            "a refused directory should be carrying the refusal while the container is there, \
+            "a refused directory should be carrying the refusal while the boundary is there, \
              and a test that could not see one would pass against a description that wrote \
              nothing at all",
         );
@@ -1228,7 +1315,7 @@ mod tests {
         assert_eq!(
             listed(&skills),
             before,
-            "and reading as it did before once the container has gone",
+            "and reading as it did before once the boundary has gone",
         );
     }
 
@@ -1345,7 +1432,7 @@ mod tests {
             said_plainly(&skills),
             before,
             "the refusal should be on the account's own skills while the \
-             container is there, whichever name it was written under",
+             boundary is there, whichever name it was written under",
         );
 
         strip(&entries, &cut, NOBODY);
@@ -1353,15 +1440,15 @@ mod tests {
         assert_eq!(
             said_plainly(&skills),
             before,
-            "and the directory should read as it did before once the container \
+            "and the directory should read as it did before once the boundary \
              has gone. What was recorded as taking entries from above is: \
              {cut:?}",
         );
     }
 
     /// The whole of what this module is for, asked of the machine by attempting
-    /// it from inside a real container: a granted directory is read, a refused
-    /// one under it is not, and a path no entry ever named is not either.
+    /// it as the session account: a granted directory is read, a refused one
+    /// under it is not, and a path no entry ever named is not either.
     ///
     /// **The refusal is the half the probe could not settle**, and it is the
     /// half this is really about — see this module's own documentation. The
@@ -1373,8 +1460,16 @@ mod tests {
     /// **And the refusal is told from a path that was never there**, because
     /// the two look the same to anything coarser and only one of them is a
     /// boundary.
+    ///
+    /// **The entries come off a [`Surface`] rather than being written by
+    /// hand**, which is not tidiness: what makes the granted path resolve at
+    /// all is the step on every directory on the way to it, and a list naming
+    /// only the two paths this test cares about would be refused at the first
+    /// ancestor. See [`super::entries`], which is what a session start asks and
+    /// what puts the steps in.
     #[test]
-    fn a_granted_path_is_read_from_inside_and_a_refused_one_is_not() {
+    fn a_granted_path_is_read_as_the_account_and_a_refused_one_is_not() {
+        let account = the_session_account();
         let held = tempfile::tempdir().expect("a directory to lay a description out in");
 
         let granted = held.path().join("worktree");
@@ -1390,38 +1485,18 @@ mod tests {
             std::fs::write(directory.join(file), said).unwrap();
         }
 
-        // Named the way a session's is, off a Data Directory of this test's own
-        // — so the name is this run's alone and a profile some earlier run left
-        // under it is replaced rather than in the way. See
-        // [`Container::for_conversation`].
-        let container = Container::for_conversation(held.path(), 1)
-            .expect("this machine to make an AppContainer");
+        let mut surface = Surface::starting_in(granted.clone());
+        surface
+            .own(&granted, Reach::ReadWrite)
+            .nothing(&refused, &refused);
 
-        let entries = vec![
-            Entry {
-                path: granted.clone(),
-                wanted: Wanted::Granted(Reach::ReadWrite),
-            },
-            Entry {
-                path: refused.clone(),
-                wanted: Wanted::Refused,
-            },
-        ];
-
+        let entries = super::super::entries(&surface, None);
         let cut = inheriting(&entries);
 
-        write(&entries, container.sid(), &cut).expect("the entries this description comes to");
-
-        // Held by the container from here, and written down with it — see
-        // [`Container::wrote`], which is called before the write above in a
-        // session start and after it here, there being nothing to refuse for in
-        // a test that has already written them.
-        container
-            .wrote(entries, cut)
-            .expect("the entries to be written down");
+        write(&entries, account.sid().text(), &cut).expect("the entries this description comes to");
 
         let said = attempted(
-            container.sid(),
+            &Logon::of(account.name(), account.password()),
             &[
                 ("granted", &granted.join("readable.txt")),
                 ("refused", &refused.join("theirs.txt")),
@@ -1429,9 +1504,14 @@ mod tests {
             ],
         );
 
+        // Taken off before anything is asserted, so that a failing assertion
+        // still leaves the human's own temporary directory as this found it —
+        // every step above is an entry on a directory of theirs.
+        strip(&entries, &cut, account.sid().text());
+
         assert!(
             said.contains("granted=read"),
-            "a granted directory is read from inside, and the probe said: {said:?}"
+            "a granted directory is read as the account, and the probe said: {said:?}"
         );
         assert!(
             said.contains("refused=UnauthorizedAccessException"),
@@ -1442,13 +1522,6 @@ mod tests {
             said.contains("unnamed=UnauthorizedAccessException"),
             "and so is a path no entry ever named, and the probe said: {said:?}"
         );
-
-        // And taken off the machine again, which a test has to say now that a
-        // container's life is its Conversation's rather than its holder's — see
-        // [`super::super::container::taken_back`]. Everything written above
-        // comes off the human's own temporary directory here, and the profile
-        // goes with it.
-        crate::sandbox::container::taken_back(held.path(), 1);
     }
 
     /// And the one rule that is in no description: a directory a session is
@@ -1470,16 +1543,15 @@ mod tests {
     /// really there and both holding a file — so a rule that granted
     /// everything on a `PATH`, or nothing on one, fails this either way.
     #[test]
-    fn a_path_entry_under_the_humans_profile_is_read_from_inside_and_one_elsewhere_is_not() {
+    fn a_path_entry_under_the_humans_profile_is_read_as_the_account_and_one_elsewhere_is_not() {
         use std::ffi::OsString;
 
-        use crate::sandbox::surface::Surface;
-
+        let account = the_session_account();
         let held = tempfile::tempdir().expect("a directory to lay a machine out in");
 
         // What stands for the human's own profile, with a tool installed under
         // it the way npm installs one — and, outside it, what stands for a
-        // machine-wide install, which a container reaches without any entry
+        // machine-wide install, which every account reaches without any entry
         // and which this therefore expects to be granted nothing.
         let profile = held.path().join("Users").join("ada");
         let theirs = profile.join("AppData").join("Roaming").join("npm");
@@ -1499,25 +1571,20 @@ mod tests {
             OsString::from(format!("{};{}", theirs.display(), everybodys.display())),
         );
 
-        let container = Container::for_conversation(held.path(), 2)
-            .expect("this machine to make an AppContainer");
-
         let entries = super::super::entries(&surface, Some(&profile));
-
         let cut = inheriting(&entries);
 
-        write(&entries, container.sid(), &cut).expect("the entries this description comes to");
-        container
-            .wrote(entries, cut)
-            .expect("the entries to be written down");
+        write(&entries, account.sid().text(), &cut).expect("the entries this description comes to");
 
         let said = attempted(
-            container.sid(),
+            &Logon::of(account.name(), account.password()),
             &[
                 ("per-user", &theirs.join("a-tool.txt")),
                 ("machine-wide", &everybodys.join("a-tool.txt")),
             ],
         );
+
+        strip(&entries, &cut, account.sid().text());
 
         assert!(
             said.contains("per-user=read"),
@@ -1531,8 +1598,6 @@ mod tests {
              Files readable is that it is Program Files, which this stand-in \
              for one is not. The probe said: {said:?}"
         );
-
-        crate::sandbox::container::taken_back(held.path(), 2);
     }
 
     /// The whole of what a step through an ancestor is for, asked of the
@@ -1540,14 +1605,8 @@ mod tests {
     /// profile is resolved and read — and the profile it is under is still
     /// refused a listing in the same run.
     ///
-    /// **Asked of the account rather than of a container**, which is the one
-    /// test here that is: an AppContainer refuses a path *resolution* however
-    /// well the path is granted, so a probe inside one would fail this whatever
-    /// was written and would be answering about the container. The account is
-    /// what stage 04 switches every session to — see [`Rendering::as_account`]
-    /// — and what a step exists for.
-    ///
-    /// **The real profile rather than a stand-in**, for the same reason: what
+    /// **The real profile rather than a stand-in**, which is what this test has
+    /// that the two above have not: what
     /// is being asked is whether a directory whose list gives an ordinary local
     /// account nothing at all can be walked through without being opened, and
     /// the human's own profile is the directory that is really like that on
@@ -1557,30 +1616,9 @@ mod tests {
     /// accident: a machine that granted the account the profile outright would
     /// read the file, and one that had granted it nothing would refuse the
     /// listing.
-    ///
-    /// It needs the account and says so rather than passing — the rule
-    /// `tests/account_windows.rs` follows, and for its reason: creating a local
-    /// account is an administrator's call, so a machine where the verb has
-    /// never been run fails here with the line that names it.
     #[test]
     fn under_the_account_a_path_under_the_profile_resolves_and_the_profile_will_not_list() {
-        use crate::platform;
-        use crate::sandbox::account::machine::Account;
-        use crate::sandbox::surface::Surface;
-        use crate::settings::Settings;
-
-        let data_dir =
-            platform::data_dir(None).expect("this machine has somewhere for a Data Directory");
-        let settings = Settings::in_data_dir(&data_dir);
-
-        let account = match Account::on_this_machine(&data_dir, &settings.secrets()) {
-            Ok(account) => account,
-            Err(missing) => panic!(
-                "this test runs a probe as the session account and there is not one: \
-                 {missing}\n\nThe Data Directory it asked about is {}.",
-                data_dir.display(),
-            ),
-        };
+        let account = the_session_account();
 
         let profile = PathBuf::from(
             std::env::var_os("USERPROFILE").expect("every Windows account has a profile"),
@@ -1662,13 +1700,11 @@ mod tests {
 
         let mut probe = Rendering::running("powershell.exe");
 
+        for (name, value) in NEEDED {
+            probe.set(name, value);
+        }
+
         probe
-            .set("SystemRoot", r"C:\Windows")
-            .set("SystemDrive", "C:")
-            .set("PATH", r"C:\Windows\System32;C:\Windows")
-            .set("PATHEXT", ".COM;.EXE;.BAT;.CMD;.PS1")
-            .set("TEMP", r"C:\Windows\Temp")
-            .set("TMP", r"C:\Windows\Temp")
             .starting_in(PathBuf::from(r"C:\Windows"))
             .arg("-NoProfile")
             .arg("-NonInteractive")
@@ -1704,8 +1740,8 @@ mod tests {
         )
     }
 
-    /// Read each of `paths` from inside the container `sid` names, and hand
-    /// back the `name=word` lines it printed.
+    /// Read each of `paths` as the account `logon` names, and hand back the
+    /// `name=word` lines it printed.
     ///
     /// The word is the name of what stopped the read rather than one of this
     /// test's own, for the reason `tests/sessions_windows.rs` reads one:
@@ -1713,14 +1749,13 @@ mod tests {
     /// is a path that was never there, and a test that could not tell them
     /// apart would pass against a description that named nothing at all.
     ///
-    /// **And not one cmdlet in it.** Windows PowerShell starts inside a
-    /// container and runs what it is given, and the commands it would
-    /// ordinarily import from a module at startup are not there — the
-    /// `windows-2025` job answered `CommandNotFoundException` for
-    /// `Write-Output` the first time a probe of this shape ran inside one. So
-    /// what a probe is written in is the language and the framework: a cast
-    /// rather than `Out-Null`, `[Console]::Out` rather than `Write-Output`.
-    fn attempted(sid: &str, paths: &[(&str, &PathBuf)]) -> String {
+    /// **And not one cmdlet in it**, which is a rule the boundary suites keep
+    /// for a reason of their own — the `windows-2025` job answered
+    /// `CommandNotFoundException` for `Write-Output` the first time a probe of
+    /// this shape ran behind one. So what a probe is written in is the language
+    /// and the framework: a cast rather than `Out-Null`, `[Console]::Out`
+    /// rather than `Write-Output`.
+    fn attempted(logon: &Logon, paths: &[(&str, &PathBuf)]) -> String {
         let asked = paths
             .iter()
             .map(|(name, path)| {
@@ -1734,13 +1769,12 @@ mod tests {
 
         let mut probe = Rendering::running("powershell.exe");
 
-        for name in NEEDED {
-            if let Some(value) = std::env::var_os(name) {
-                probe.set(name, value);
-            }
+        for (name, value) in NEEDED {
+            probe.set(name, value);
         }
 
         probe
+            .starting_in(PathBuf::from(r"C:\Windows"))
             .arg("-NoProfile")
             .arg("-NonInteractive")
             .arg("-Command")
@@ -1756,9 +1790,9 @@ mod tests {
                    }} \
                  }}"
             ))
-            .inside(sid);
+            .as_account(logon.clone());
 
-        let printed = off_a_console(&probe, b"").expect("a probe inside a container");
+        let printed = off_a_console(&probe, b"").expect("a probe started as the session account");
 
         format!(
             "{}{}",

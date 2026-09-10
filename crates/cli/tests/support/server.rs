@@ -103,11 +103,8 @@ impl Server {
             let served = app.clone();
 
             runtime.block_on(async move {
-                let listener = verkstead_server::pipe::Listener::open(
-                    &data_dir,
-                    &verkstead_server::pipe::Grants::of_this_process(),
-                )
-                .expect("nothing else holds this Data Directory's pipe");
+                let listener = verkstead_server::pipe::Listener::open(&data_dir, None)
+                    .expect("nothing else holds this Data Directory's pipe");
                 let spelling = listener.asked_through().to_owned();
 
                 tokio::spawn(async move {

@@ -9,19 +9,22 @@
 //! this module learns which one it got (ADR-0012).
 //!
 //! **And on Windows into an identity, which is that platform's whole boundary**
-//! — see [`container`] for the AppContainer a session runs inside and
-//! [`granting`] for the access-control entries that are the entirety of what it
-//! reaches. There is nothing to mount and no policy to write there: a process
-//! started with that identity on its token reaches the paths the identity has
-//! been granted and is refused the rest of the machine, which the description
-//! above becomes one entry at a time (ADR-0014). [`open`] is the process half
-//! of it — the environment said, the Worktree started in, the vector run — and
-//! carries the identity rather than standing in front of the program.
+//! — see [`account`] for the local account of Verkstead's own that a session
+//! runs *as*, [`granting`] for the access-control entries that are the entirety
+//! of what it reaches, and [`entries`] for the Conversation those entries belong
+//! to. There is nothing to mount and no policy to write there: a process started
+//! as that account reaches the paths the account has been granted and is refused
+//! the rest of the machine, which the description above becomes one entry at a
+//! time (ADR-0014, *Amended: the Sandbox is an account*). [`open`] is the
+//! process half of it — the environment said, the Worktree started in, the
+//! vector run — and names the account rather than standing in front of the
+//! program.
 //!
 //! **A boundary that cannot be made refuses the session** on that platform, the
-//! way a missing `bwrap` does on this one: a profile that will not be created
-//! and an entry that will not be written are both answered by starting nothing,
-//! with no unsandboxed session to fall back to.
+//! way a missing `bwrap` does on this one: no account, no password for it, and
+//! an entry that will not be written are all answered by starting nothing, with
+//! no unsandboxed session to fall back to.
+
 //!
 //! Evolved from `tobico-scripts/bin/sandbox`, which is the working reference —
 //! but narrowed where it matters. That script binds the whole of `~/src`
@@ -127,17 +130,18 @@ mod surface;
 // arms are built and called wherever the tests are.
 pub(crate) mod outliving;
 
-// And the two halves of the boundary the third rendering is getting: the
-// identity a Windows session runs under, and what a process started with that
-// identity takes to start at all. Both are Win32 and neither has anything to
-// say on a machine with no such call, so they are compiled where they are the
-// answer and nowhere else — the way [`bwrap`] and [`seatbelt`] are.
+// And the two halves of the third rendering's boundary that are the machine's:
+// a Conversation's own entries, held for as long as its work lasts, and what a
+// process started as the session account takes to start at all. Both are Win32
+// and neither has anything to say on a machine with no such call, so they are
+// compiled where they are the answer and nowhere else — the way [`bwrap`] and
+// [`seatbelt`] are.
 //
 // Public, both of them, for the reason this module is: what a session may reach
 // is the product's own promise, and what proves a boundary is a process really
-// started behind one — see `crates/server/tests/container_windows.rs`.
+// started behind one — see `crates/server/tests/account_windows.rs`.
 #[cfg(windows)]
-pub mod container;
+pub mod entries;
 #[cfg(windows)]
 pub mod starting;
 
@@ -685,16 +689,16 @@ pub(crate) fn rendered(platform: Platform, surface: &Surface) -> (Rendering, Clo
 }
 
 /// Everything a Conversation's boundary left on this machine, taken back: on
-/// the platform whose boundary is an identity, the entries written for its
-/// AppContainer, the profile itself and the record of both.
+/// the platform whose boundary is an identity, the entries written for the
+/// session account and the record of them.
 ///
-/// **The one call the rest of the server makes about a container's ending**,
-/// which is why it is here rather than inside the Windows arm: what ends a
-/// boundary is a Conversation being closed or a sweep finding one that has
-/// stopped — see [`crate::containers`] — and neither of those is a fact about
-/// Win32. The two platforms that hide a session behind a wrapper leave nothing
-/// behind for this to take: a mount namespace and a policy are gone with the
-/// process they were around.
+/// **The one call the rest of the server makes about a boundary's ending**,
+/// which is why it is here rather than inside the Windows arm: what ends one is
+/// a Conversation being closed or a sweep finding one that has stopped — see
+/// [`crate::boundaries`] — and neither of those is a fact about Win32. The two
+/// platforms that hide a session behind a wrapper leave nothing behind for this
+/// to take: a mount namespace and a policy are gone with the process they were
+/// around.
 ///
 /// So the record is what a machine with no such call still has to see to. There
 /// are none on a Unix — nothing writes one there — and the sweep that reads
@@ -704,7 +708,7 @@ pub(crate) fn rendered(platform: Platform, surface: &Surface) -> (Rendering, Clo
 /// Blocks: it walks back the directory trees the entries were written on.
 pub(crate) fn taken_back(data_dir: &Path, conversation: i64) {
     #[cfg(windows)]
-    container::taken_back(data_dir, conversation);
+    entries::taken_back(data_dir, conversation);
 
     #[cfg(not(windows))]
     granting::remembering::forget(data_dir, conversation);
@@ -922,7 +926,7 @@ fn joined(entries: &[&OsStr]) -> OsString {
 ///
 /// **Nothing at all on Windows**, where the same rule is the boundary's own
 /// rather than the description's: an entry is written on each `PATH` directory
-/// under the human's profile as the container is made, out of the same
+/// under the human's profile as the boundary is written, out of the same
 /// description and against the same home — see [`granting::entries`]. One rule,
 /// said where each platform's boundary can hear it.
 pub(crate) fn per_user(platform: Platform, path: &OsStr, home: &Path) -> Vec<PathBuf> {
@@ -1417,7 +1421,7 @@ const HOPS: usize = 40;
 /// description is a path said once.
 ///
 /// **Nothing at all on Windows**, for [`per_user`]'s reason: the same rule is
-/// the boundary's own there, written on the real path as the container is made.
+/// the boundary's own there, written on the real path as the boundary is.
 pub(crate) fn installs(platform: Platform, path: &OsStr, home: &Path) -> Vec<PathBuf> {
     let mut directories: Vec<PathBuf> = Vec::new();
 
@@ -2189,8 +2193,8 @@ const GITHUB: &str = "https://github.com";
 /// writes down and what a session throws away all land there rather than in
 /// the human's own. What keeps one Conversation out of another's is again
 /// that they are different directories, and what keeps a session out of the
-/// rest of the machine is the identity it runs under — see [`container`], whose
-/// profile is named per Conversation for the same reason this directory is.
+/// rest of the machine is the identity it runs as and what that identity has
+/// been granted — see [`account`] and [`entries`].
 ///
 /// One is emptied as each of that Conversation's sessions starts rather than
 /// removed when the Conversation ends. What a session left in it is nothing
@@ -2209,11 +2213,29 @@ pub struct Homes {
     root: PathBuf,
 
     /// The Data Directory the root above is under, kept because one more thing
-    /// than a home is named from it: the AppContainer a Windows session runs
-    /// inside — see [`container::Container::for_conversation`]. Here rather
-    /// than passed beside a `Homes`, so that what a sandbox is built against is
-    /// one value however many things this machine names per Conversation.
+    /// than a home is named from it: the record a Conversation's entries are
+    /// written down in. Here rather than passed beside a `Homes`, so that what a
+    /// sandbox is built against is one value however many things this machine
+    /// names off that directory.
     data: PathBuf,
+
+    /// And what the local account a Windows session runs as is called on this
+    /// machine — the other thing named off that directory, and the one that can
+    /// be said outright instead.
+    ///
+    /// **Why it is a field rather than arithmetic read where it is wanted.**
+    /// The name is a fingerprint of the Data Directory (see [`account::named`]),
+    /// and the account itself is made by an elevated verb run once — so a
+    /// Verkstead pointed at a Data Directory that has never had the verb run for
+    /// it has no account, and there is no call it could make to get one. That is
+    /// the right answer for a server and the wrong one for a suite, which runs
+    /// against a temporary Data Directory and cannot elevate: what those hand
+    /// over is the account of the machine's *real* Data Directory, which is the
+    /// one the human ran the verb for. See [`Homes::running_sessions_as`].
+    ///
+    /// Nothing about it is Windows-only here, for the reason `platform` below
+    /// is a value: a name is arithmetic, and only having an account is not.
+    account: String,
 
     /// Which of those a session gets. A value rather than a `cfg`, for the
     /// reason [`Platform`] is one: the arm this machine will never run is still
@@ -2250,14 +2272,34 @@ impl Homes {
             servers,
             root: data_dir.join("homes"),
             data: data_dir.to_owned(),
+            account: account::named(data_dir),
             platform,
         }
+    }
+
+    /// The same, running its sessions as an account said outright rather than
+    /// one named off the Data Directory.
+    ///
+    /// **What a suite hands over, and nothing else does** — see the `account`
+    /// field, where the whole of the reason is. A server never calls this: the
+    /// account of its own Data Directory is the one the elevated verb was run
+    /// for, and a name said over the top of it would be a session running as
+    /// somebody nobody decided on.
+    pub fn running_sessions_as(mut self, account: impl Into<String>) -> Homes {
+        self.account = account.into();
+
+        self
     }
 
     /// The home of whoever is running the server, for the startup line that
     /// says which machine this is running on.
     pub fn servers(&self) -> &Path {
         &self.servers
+    }
+
+    /// And what the account a session runs as is called — see the field.
+    pub fn session_account(&self) -> &str {
+        &self.account
     }
 
     /// And whose platform these are, which is the same answer to two more
@@ -2646,6 +2688,19 @@ impl Executable {
         ]
     }
 
+    /// Where a session finds the image itself, which on Windows is where it
+    /// already is — see [`Executable::at`].
+    ///
+    /// Read by the one platform whose boundary needs a path *the session
+    /// account* can reach rather than one the server can: a console there is
+    /// made by a launcher verb of this binary, started on the far side of the
+    /// boundary — see [`Rendering::launched_by`]. Which is why the two with a
+    /// wrapper never ask, and why the `allow` is here.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub(crate) fn inside(&self) -> &Path {
+        &self.inside
+    }
+
     /// And the directory a session finds it in, which is what goes first on a
     /// session's `PATH` — see [`path`].
     fn bin(&self) -> &Path {
@@ -2747,9 +2802,10 @@ fn unwrapped(path: &Path) -> PathBuf {
 /// is the one of them certain to answer, and it is the one a session shares.
 ///
 /// **And on one platform it is not an address at all.** A Windows server opens a
-/// named pipe beside its socket — see [`crate::pipe`] — because the container a
-/// session there is headed for is refused the loopback interface and can be
-/// granted a pipe instead. So this holds both of what a server opened and hands
+/// named pipe beside its socket — see [`crate::pipe`] — which is the transport a
+/// Windows session was given when an AppContainer could not reach the loopback,
+/// and which stays because it is the one no firewall has to agree with. So this
+/// holds both of what a server opened and hands
 /// out whichever the Platform a session runs on asks through: the pipe on
 /// Windows, the URL as before on Linux and macOS.
 #[derive(Debug, Clone)]
@@ -3259,13 +3315,33 @@ pub struct Sandbox {
 
     /// Which Conversation this is, and the Data Directory it is running under.
     ///
-    /// The two halves of what the identity a Windows session runs under is
-    /// named from — see [`container::Container::for_conversation`]. Nothing
-    /// else in a description needs either: the paths a session reaches are
-    /// resolved before they get here, and these are here because a *boundary*
-    /// on that platform is a name rather than a path.
+    /// What a Windows boundary is written and written down against: the
+    /// Conversation, because the entries are its and come off with its Worktree
+    /// — see [`entries::Entries::of_conversation`] — and the Data Directory,
+    /// because that is where the record of them goes and what the account's own
+    /// name is arithmetic over.
     conversation: i64,
     data_dir: PathBuf,
+
+    /// And the account a session of this Conversation is started as, where this
+    /// description is for the platform that has one.
+    ///
+    /// **The name and the password, worked out where every platform can** — see
+    /// [`account::named`], which is arithmetic over the Data Directory, and
+    /// `secrets.yaml`, which is where the password is. What is *not* here is
+    /// the SID, which only the machine can answer for and which is asked for at
+    /// the moment a session starts — see [`Sandbox::command`].
+    ///
+    /// `None` on the two platforms whose boundary is a wrapper. `Some` with an
+    /// empty password on a Windows machine where nothing holds one, which is
+    /// what refuses the session in words rather than with a number.
+    ///
+    /// Said on every platform and read on one, which is what the `allow` is
+    /// for: a description is portable — see [`Rendering::as_account`] — so a
+    /// Windows sandbox is a thing a test on a Unix builds, and only the
+    /// *starting* of one is a call that platform has.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    session_account: Option<account::Logon>,
 
     /// And the home of whoever is running the server, which is the human's own
     /// profile on the platform that has one.
@@ -3283,15 +3359,16 @@ pub struct Sandbox {
 /// of it is.
 #[derive(Debug)]
 struct Boundary<'a> {
-    /// The two halves the identity is named from: the Data Directory, so that
-    /// two Verksteads on one machine are two sets of containers, and the
-    /// Conversation, so that one Conversation's session is refused another's
-    /// Worktree — see [`container::Container::for_conversation`], which is what
-    /// puts them together.
+    /// Whose entries these are, and where the record of them goes: the
+    /// Conversation, so that what one Conversation's session may reach comes
+    /// off when its work stops, and the Data Directory it is running under —
+    /// see [`entries::Entries::of_conversation`], which is what puts them
+    /// together.
     data_dir: &'a Path,
     conversation: i64,
 
-    /// And what has to be written for it, in the order the description said it.
+    /// And what has to be written for the account, in the order the description
+    /// said it.
     entries: Vec<granting::Entry>,
 }
 
@@ -3408,6 +3485,19 @@ impl Sandbox {
             platform: homes.platform(),
             conversation: conversation.id,
             data_dir: homes.data.clone(),
+            // Both halves off files rather than off the machine, for the reason
+            // the token and the author above are: the name comes off the Data
+            // Directory — see [`Homes::session_account`] — and the password is
+            // in `secrets.yaml`, which is read afresh at every spawn, so an
+            // account made an hour after the server started is one the next
+            // session runs as.
+            session_account: (homes.platform() == Platform::Windows).then(|| {
+                account::Logon::of(
+                    homes.session_account(),
+                    secrets.session_account_password().unwrap_or_default(),
+                )
+            }),
+
             servers_home: homes.servers.clone(),
         })
     }
@@ -3452,14 +3542,15 @@ impl Sandbox {
     /// is over. Nothing at all on the two platforms whose links follow their own
     /// target; see [`Closing`].
     ///
-    /// **And it can refuse**, on the platform whose boundary is an identity: a
-    /// profile that will not be created, a boundary that cannot be written down
-    /// and a grant that will not be written are all a session that would
-    /// otherwise run behind no boundary at all, or behind one nothing could
-    /// ever take back — which is the one thing ADR-0014 refuses (Q18). What
-    /// comes back says which, and the caller starts nothing — the same answer a
-    /// missing `bwrap` gets on Linux. The two platforms with a wrapper never
-    /// refuse here.
+    /// **And it can refuse**, on the platform whose boundary is an identity: an
+    /// account this machine has never heard of, an account nothing holds a
+    /// password for, a boundary that cannot be written down and a grant that
+    /// will not be written are all a session that would otherwise run behind no
+    /// boundary at all, or behind one nothing could ever take back — which is
+    /// the one thing ADR-0014 refuses (Q18). What comes back says which, and the
+    /// caller starts nothing — the same answer a missing `bwrap` gets on Linux,
+    /// and there is no unsandboxed session to fall back to. The two platforms
+    /// with a wrapper never refuse here.
     pub fn command<S: AsRef<OsStr>>(&self, argv: &[S]) -> std::io::Result<(Rendering, Closing)> {
         let surface = self.surface(argv);
 
@@ -3477,8 +3568,8 @@ impl Sandbox {
                 conversation_id = boundary.conversation,
                 data_dir = %boundary.data_dir.display(),
                 entries = boundary.entries.len(),
-                "this session's description asks for an AppContainer of its Conversation's \
-                 own and this many access-control entries on real directories"
+                "this session's description asks to run as this installation's own local \
+                 account with this many access-control entries on real directories"
             );
         }
 
@@ -3497,40 +3588,50 @@ impl Sandbox {
             // which anything can tell whether that path was inheriting to begin
             // with — see [`granting::writing::inheriting`].
             //
-            // **After the rendering and before the profile**, which is the one
-            // window in which the answer is the machine's own. It cannot be
-            // read any earlier: what a description refuses is a path *inside*
-            // the profile, reached through the junction the rendering has just
-            // made, and there is nothing at that name until then. And it cannot
-            // be read any later, because making an AppContainer profile is
-            // itself a write to this machine — on the `windows-2025` runner,
-            // whose temporary directory is where a test's stand-in for the
-            // human's account lives, the account's own skills came back from it
-            // holding the same entries marked as taken from above. Anything
-            // Verkstead does before this reading is something this reading is
-            // answering about, so the profile is made after it.
+            // **After the rendering and before a word of the boundary**, which
+            // is the one window in which the answer is the machine's own. It
+            // cannot be read any earlier: what a description refuses is a path
+            // *inside* the profile, reached through the junction the rendering
+            // has just made, and there is nothing at that name until then. And
+            // it cannot be read any later, because anything Verkstead writes to
+            // an access-control list in the meantime is something this reading
+            // would then be answering about rather than about the machine as
+            // the session found it.
             let cut = granting::writing::inheriting(&boundary.entries);
 
-            let container =
-                container::Container::for_conversation(boundary.data_dir, boundary.conversation)
-                    .map_err(|refused| {
-                        std::io::Error::other(format!(
-                            "the AppContainer a session of Conversation {} runs inside could \
-                             not be made, so no session was started: {refused}",
-                            boundary.conversation
-                        ))
-                    })?;
+            // The identity, resolved rather than made: there is one account for
+            // the whole installation — see [`account`] — so what a session start
+            // does here is ask the machine about a name it worked out and read
+            // back the SID every entry below is written for. A machine with no
+            // such account, or nothing holding its password, refuses the session
+            // in words that name the verb to run.
+            let account = self.session_account()?;
 
-            // Remembered before it is written, and remembered by the container
-            // rather than by the session: an entry names the container's
-            // identity and goes when it does — see
-            // [`container::Container::wrote`], which is also where the order is.
-            container.wrote(boundary.entries.clone(), cut.clone())?;
+            let entries = entries::Entries::of_conversation(
+                boundary.data_dir,
+                boundary.conversation,
+                account.name(),
+                account.sid().text(),
+            )?;
 
-            granting::writing::write(&boundary.entries, container.sid(), &cut)?;
+            // Remembered before it is written, and remembered by the
+            // Conversation's entries rather than by the session: an entry is
+            // this Conversation's and comes off when its work stops — see
+            // [`entries::Entries::wrote`], which is also where the order is.
+            entries.wrote(boundary.entries.clone(), cut.clone())?;
 
-            rendering.inside(container.sid());
-            closing = closing.inside(container);
+            granting::writing::write(&boundary.entries, account.sid().text(), &cut)?;
+
+            rendering.as_account(account::Logon::of(account.name(), account.password()));
+
+            // And the image a launcher verb is run out of, which is what makes
+            // a console on the far side of the boundary — see
+            // [`Rendering::launched_by`]. Said whether or not this rendering is
+            // headed for a console: a description says what it is, and the arm
+            // that puts a process on one is what reads it.
+            rendering.launched_by(self.verkstead.inside());
+
+            closing = closing.behind(entries);
         }
 
         Ok((rendering, closing))
@@ -3556,6 +3657,36 @@ impl Sandbox {
             data_dir: &self.data_dir,
             conversation: self.conversation,
             entries: granting::entries(surface, Some(&self.servers_home)),
+        })
+    }
+
+    /// The account this session is started as, resolved on the machine — or a
+    /// refusal saying which half of it is not there.
+    ///
+    /// **The one thing about the boundary this description cannot say on its
+    /// own.** The name and the password came off a Data Directory and a
+    /// settings file when the sandbox was built and travel with it anywhere;
+    /// the SID is the machine's answer about that name, and it is asked for
+    /// here, at the moment a session starts, so that an account made since the
+    /// server came up is one this session can run as.
+    ///
+    /// **And it refuses in words.** A machine with no such account and a
+    /// machine whose `secrets.yaml` holds no password for one are two different
+    /// things to do about, so [`account::Missing`] says which and names the
+    /// elevated verb — and what the caller does with either is start nothing.
+    #[cfg(windows)]
+    fn session_account(&self) -> std::io::Result<account::machine::Account> {
+        let logon = self
+            .session_account
+            .as_ref()
+            .expect("a sandbox for the Windows platform names the account its sessions run as");
+
+        account::machine::Account::resolving(logon).map_err(|missing| {
+            std::io::Error::other(format!(
+                "a session of Conversation {} runs as this installation's own local account \
+                 and there is not one, so no session was started: {missing}",
+                self.conversation,
+            ))
         })
     }
 
@@ -3834,9 +3965,9 @@ impl Sandbox {
             // every Rust build inside failing rather than one running uncached.
             //
             // Which is the whole of what a Windows session gets: there is never
-            // one to point at there, because a container is refused the
-            // loopback a client reaches its server over — see
-            // [`crate::build_cache::compiles_through_an_sccache`]. The
+            // one to point at there — see
+            // [`crate::build_cache::compiles_through_an_sccache`], which is
+            // where that is decided and where the reason for it is. The
             // `CARGO_HOME` above is a directory granted read-write like any
             // other, and works on that platform exactly as it does here.
             //
@@ -4519,7 +4650,7 @@ mod tests {
 
     /// And on Windows the description says none of it, the same rule being the
     /// boundary's own there — an entry written on each per-user directory as
-    /// the container is made, out of this same `PATH` and against this same
+    /// the boundary is written, out of this same `PATH` and against this same
     /// home. See [`granting::entries`].
     #[test]
     fn a_windows_session_is_granted_its_path_entries_by_its_boundary_instead() {
@@ -4915,8 +5046,8 @@ mod tests {
     }
 
     /// And on Windows nothing is followed and nothing is granted: what a
-    /// session reaches there is written on the real path as the container is
-    /// made, and what a name means is `%PATHEXT%`'s.
+    /// session reaches there is written on the real path as the boundary is,
+    /// and what a name means is `%PATHEXT%`'s.
     #[test]
     fn a_windows_name_is_resolved_and_left_where_it_was_found() {
         let home = tempfile::tempdir().unwrap();

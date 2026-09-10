@@ -6,10 +6,12 @@
 //! the same way — see
 //! [ADR-0014](../../../docs/adr/0014-windows-sessions.md):
 //!
-//! - [`appcontainer-probe`](appcontainer-probe.rs) — an AppContainer refuses a
-//!   path *resolution* however well the path is granted, so an agent that
-//!   checks a path before reading it refuses every file it has; and msys2 will
-//!   not start in one.
+//! - **The AppContainer probe** — an AppContainer refuses a path *resolution*
+//!   however well the path is granted, so an agent that checks a path before
+//!   reading it refuses every file it has; and msys2 will not start in one. Its
+//!   program went off this tree with the mechanism, and what it answered is in
+//!   the ADR.
+
 //! - [`restricted-token-probe`](restricted-token-probe.rs) — a restricted SID
 //!   list, and a deny-only account SID beside it, each give a real boundary and
 //!   each break node, both PowerShells and msys2. Only lowering the *integrity*

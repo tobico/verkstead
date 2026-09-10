@@ -5,10 +5,11 @@
 //! other machine — that a session runs the executable the server equipped it
 //! with, and that the ask it makes with it goes through. What is different here
 //! is the transport. A Windows session is told the **named pipe** the server
-//! opened beside its socket, because the container that platform is headed for
-//! is refused the loopback interface and can be granted a pipe instead
-//! (ADR-0014), and this is where that ends up being true of a real
-//! `verkstead ask` rather than of a client a test built by hand.
+//! opened beside its socket: it was the one way in when that platform's boundary
+//! was an AppContainer, which is refused the loopback interface, and it stays
+//! because it is landed and is the one transport no firewall on the human's
+//! machine has to agree with (ADR-0014). This is where that ends up being true
+//! of a real `verkstead ask` rather than of a client a test built by hand.
 //!
 //! **Nothing is listening on TCP here.** The server in this file is a router
 //! served over a pipe and nothing else, and the socket address the sandbox is
@@ -17,32 +18,35 @@
 //! human's own route, asked of the same router in this process, which is the
 //! one way in that does not put a socket back.
 //!
-//! **Except in the one test that asks why.** A pipe is only worth the trouble
-//! if the loopback really is closed to a container, and the probe found that it
-//! closes by *timing out* rather than by refusing — which a test has to be
-//! written for, because a connection that hangs and a connection that is
-//! refused look the same to a test with no deadline of its own. So
-//! [`the_loopback_is_refused_from_inside_a_container`] binds a socket that is
-//! genuinely listening, reaches it from out here to prove that it answers, and
-//! then fails to reach it from inside the same container a session runs in
-//! (ADR-0014).
+//! **And the loopback is open again, which is what the account changed.** A
+//! session runs as a local account of Verkstead's own now, and an ordinary local
+//! account reaches `127.0.0.1` like anything else on the machine — so
+//! [`the_loopback_answers_a_session`] binds a socket that is genuinely
+//! listening and reaches it from behind the boundary. It is asserted rather than
+//! assumed because the Compile Server depends on it: an sccache is a client and
+//! a server talking over the loopback, and it was refused for want of that.
 //!
-//! **And a session really is inside one now.** A Windows rendering names an
-//! AppContainer, which `std::process::Command` has no way to start — so what
-//! runs the CLI here is [`off_a_console`], the same call the server's own
-//! [`Sandbox`] work stands on. Which makes the pipe load-bearing in this file
-//! rather than merely chosen: the container is granted the pipe as it is made,
-//! and a container the pipe was never told about is refused it.
+//! **A session really runs behind that boundary here.** A Windows rendering
+//! names the account it is started as, which `std::process::Command` has no way
+//! to start — so what runs the CLI here is [`off_a_console`], the same call the
+//! server's own [`Sandbox`] work stands on. Which makes the pipe's descriptor
+//! load-bearing in this file rather than merely chosen: the pipe is opened
+//! granting that account, and a pipe opened granting nobody refuses it.
 //!
-//! **A probe inside a container is written without cmdlets**, which is what the
+//! **It needs the session account**, which is an administrator's call to make
+//! and so not one this suite can make for itself: a machine where
+//! `verkstead session-account create` has never been run fails here with the
+//! line that names it, rather than passing quietly.
+//!
+//! **A probe behind the boundary is written without cmdlets**, which is what the
 //! `windows-2025` job answered the first time one ran there. Windows PowerShell
-//! starts inside a container and parses and runs what it is given, and the
-//! commands it would ordinarily import from a module at startup are not there:
-//! `New-Object` and `Write-Output` alike came back
-//! `CommandNotFoundException`. So the probe below is the language and the
-//! framework and nothing else — a constructor rather than `New-Object`,
-//! `[Console]::Out` rather than `Write-Output` — which is what a program has
-//! inside a boundary whatever the shell managed to load.
+//! starts behind one and parses and runs what it is given, and the commands it
+//! would ordinarily import from a module at startup are not there: `New-Object`
+//! and `Write-Output` alike came back `CommandNotFoundException`. So the probe
+//! below is the language and the framework and nothing else — a constructor
+//! rather than `New-Object`, `[Console]::Out` rather than `Write-Output` — which
+//! is what a program has behind a boundary whatever the shell managed to load.
+
 //!
 //! **Why here rather than in the server crate's Windows sessions suite.** That
 //! suite cannot run this command at all: it is a server-crate test, so what a
@@ -67,8 +71,10 @@ use verkstead_schema::{QuestionSet, Response};
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
-use verkstead_server::pipe::Grants;
-use verkstead_server::platform::Platform;
+use verkstead_server::platform::{self, Platform};
+use verkstead_server::sandbox::account::Logon;
+use verkstead_server::sandbox::account::machine::Account;
+
 use verkstead_server::sandbox::{Executable, Homes, Reachable, Rendering, Sandbox, off_a_console};
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
@@ -105,16 +111,17 @@ answers:
 /// time at all. Long only by the standards of what it is measuring.
 const OUT_HERE: Duration = Duration::from_secs(5);
 
-/// And from inside a container, where the probe found the connection is dropped
-/// rather than refused — so this is a wait rather than a timeout, and what
-/// running out of it says is that nothing arrived.
+/// And from behind the boundary, which is the same connection made by another
+/// account of the same machine.
 ///
-/// Well past the round trip out here, which is a fraction of a millisecond on
-/// the same machine, and well short of the twenty-odd seconds Windows spends
+/// A wait rather than a timeout, and generous: what a failing run has to be able
+/// to say is that nothing arrived rather than that this file was impatient. Well
+/// past the round trip out here, which is a fraction of a millisecond on the
+/// same machine, and well short of the twenty-odd seconds Windows spends
 /// retrying a connection nothing answers.
 const INSIDE: Duration = Duration::from_secs(10);
 
-/// The two words the probe inside the container prints, one of which it is.
+/// The two words the probe behind the boundary prints, one of which it is.
 const REACHED: &str = "the loopback answered";
 const REFUSED: &str = "the loopback did not answer";
 
@@ -161,11 +168,14 @@ impl Grilling {
         Sandbox::for_conversation(
             &self.conversation,
             &self.profile,
+            // The account said outright, which is the one thing a temporary Data
+            // Directory cannot name for itself — see [`the_machines_account`].
             &Homes::on(
                 Platform::HERE,
                 self.home.path().to_owned(),
                 self.state.path(),
-            ),
+            )
+            .running_sessions_as(the_machines_account().name()),
             // The pipe beside an address nothing answers on: what a Windows
             // session is given is the pipe, and this is where that is decided.
             &Reachable::at(NOWHERE).piped(&self.pipe),
@@ -297,27 +307,41 @@ impl Grilling {
     }
 }
 
-/// Stand one up, its pipe granting every container this process makes — which
-/// is what a real server's does.
+/// Stand one up, its pipe granting the account a session runs as — which is
+/// what a real server's does.
 fn grilling() -> Grilling {
-    standing(&Grants::of_this_process())
+    standing(true)
 }
 
-/// And one whose pipe was told about nobody: a server that opened its pipe and
-/// never heard of the container the session it started runs in.
+/// And one whose pipe grants nobody beyond the server itself.
 ///
-/// Which is not a thing a real Verkstead does — a container tells the pipe as
-/// it is made — and is the only way to ask, on a machine where every process is
-/// the same account, whether the descriptor is what lets a session in.
-fn a_pipe_told_about_nobody() -> Grilling {
-    standing(&Grants::none())
+/// Which is not a thing a real Verkstead does where there is an account to
+/// grant, and is the only way to ask, on a machine where the test and the
+/// server are one account, whether the descriptor is what lets a session in.
+fn a_pipe_granting_nobody() -> Grilling {
+    standing(false)
 }
 
-/// One Conversation part-way through a grilling, its pipe granting `granting`.
-fn standing(granting: &Grants) -> Grilling {
+/// One Conversation part-way through a grilling, its pipe granting the session
+/// account where `granting` says so.
+fn standing(granting: bool) -> Grilling {
     let work = tempfile::tempdir().unwrap();
     let state = tempfile::tempdir().unwrap();
     let home = tempfile::tempdir().unwrap();
+
+    // And the password of the account this session runs as, written into this
+    // Data Directory's own secrets — the other half of running as the machine's
+    // account, whose name goes on the `Homes`. See [`the_machines_account`].
+    let running_as = the_machines_account();
+    let settings = Settings::in_data_dir(state.path());
+
+    settings
+        .save_secrets(
+            &settings
+                .secrets()
+                .with_session_account_password(Some(running_as.password().to_owned())),
+        )
+        .expect("a secrets file to be writable under a temporary Data Directory");
 
     let repo = repo_with_a_commit(work.path());
     let database = state.path().join("verkstead.db");
@@ -397,8 +421,20 @@ fn standing(granting: &Grants) -> Grilling {
         // The pipe the server would have opened, named after the Data Directory
         // the database is in — and opened on this runtime, because tokio's
         // pipes register with its reactor.
-        let listener = verkstead_server::pipe::Listener::open(state.path(), granting)
+        // The identity the pipe is opened granting: the account every session of
+        // this installation runs as, resolved the way the server resolves it at
+        // startup.
+        let granted = granting.then(|| {
+            Account::resolving(&running_as)
+                .expect("the account resolved a moment ago")
+                .sid()
+                .text()
+                .to_owned()
+        });
+
+        let listener = verkstead_server::pipe::Listener::open(state.path(), granted.as_deref())
             .expect("nothing else holds this Data Directory's pipe");
+
         let pipe = listener.asked_through().to_owned();
 
         let app = verkstead_server::router(pool);
@@ -420,6 +456,37 @@ fn standing(granting: &Grants) -> Grilling {
         database,
         app,
         runtime,
+    }
+}
+
+/// The local account this machine's Verkstead runs its sessions as, name and
+/// password both.
+///
+/// **A suite cannot make one and says so rather than passing** — the rule
+/// `crates/server/tests/account_windows.rs` follows, and for its reason:
+/// creating a local account is an administrator's call, so a machine where the
+/// elevated verb has never been run fails here with the line that names it.
+///
+/// **Which is why it is the *machine's* Data Directory rather than this
+/// fixture's.** An account's name is a fingerprint of the Data Directory it
+/// belongs to (see the server's `sandbox::account`), and every fixture here runs
+/// against a temporary one — so the account it would be named after is one no
+/// elevated verb was ever run for. What a fixture runs as instead is the account
+/// the human really has, said outright on the `Homes` and with its password
+/// written into the fixture's own secrets.
+fn the_machines_account() -> Logon {
+    let data_dir =
+        platform::data_dir(None).expect("this machine has somewhere for a Data Directory");
+    let settings = Settings::in_data_dir(&data_dir);
+
+    match Account::on_this_machine(&data_dir, &settings.secrets()) {
+        Ok(account) => Logon::of(account.name(), account.password()),
+        Err(missing) => panic!(
+            "this suite runs sessions as the session account and there is not one: {missing}\n\
+             \n\
+             The Data Directory it asked about is {}.",
+            data_dir.display(),
+        ),
     }
 }
 
@@ -458,9 +525,9 @@ fn a_windows_session_is_told_the_pipe_its_server_opened() {
 }
 
 /// The whole round trip, made by the binary a session is equipped with, from
-/// inside the container a session runs in and over the only transport it has:
-/// the Set goes through the pipe onto this Conversation's Timeline, the human
-/// answers it, and the Response comes back on the session's stdout.
+/// behind the boundary a session runs in and over the transport it is told
+/// about: the Set goes through the pipe onto this Conversation's Timeline, the
+/// human answers it, and the Response comes back on the session's stdout.
 #[test]
 fn a_session_asks_through_the_pipe_and_the_response_comes_back() {
     let fixture = grilling();
@@ -470,8 +537,8 @@ fn a_session_asks_through_the_pipe_and_the_response_comes_back() {
         .expect("a session's sandbox to be one this machine can make");
 
     assert!(
-        rendering.container().is_some(),
-        "a Windows session runs inside an AppContainer, and this one names none"
+        rendering.account().is_some(),
+        "a Windows session runs as a local account of Verkstead's own, and this one names none"
     );
 
     // On a thread, because the ask does not end until the human has answered it
@@ -507,16 +574,16 @@ fn a_session_asks_through_the_pipe_and_the_response_comes_back() {
     );
 }
 
-/// And a container the pipe was never told about cannot open it, so the same
-/// ask goes nowhere.
+/// And a pipe opened granting nobody cannot be opened from behind the boundary,
+/// so the same ask goes nowhere.
 ///
 /// Which is what makes the test above about the descriptor rather than about
-/// this machine being permissive: every process here is the same account, so
-/// the one thing separating a session that gets in from one that does not is
-/// the entry written for its identity.
+/// this machine being permissive: the one thing separating a session that gets
+/// in from one that does not is the entry written for the account it runs as.
 #[test]
-fn a_container_the_pipe_was_not_told_about_cannot_open_it() {
-    let fixture = a_pipe_told_about_nobody();
+fn a_pipe_that_does_not_grant_the_session_account_cannot_be_opened_by_one() {
+    let fixture = a_pipe_granting_nobody();
+
     let (rendering, _closing) = fixture
         .sandbox()
         .command(&["verkstead", "ask"])
@@ -539,27 +606,33 @@ fn a_container_the_pipe_was_not_told_about_cannot_open_it() {
     );
 }
 
-/// The loopback, from inside the container a session runs in: refused, against
-/// a socket that is genuinely listening and that answers this process at once.
+/// The loopback, from behind the boundary a session runs in: reached, against a
+/// socket that is genuinely listening and that answers this process at once.
 ///
-/// **The deadline is the probe's own.** ADR-0014 records that a connection from
-/// inside a container times out rather than being refused outright, so what
-/// says *refused* here is a connect that did not finish inside a wait far
-/// longer than the one out here takes — a test with no deadline of its own
-/// would hang instead of failing, and one with no listener to reach would be
-/// proving that nothing is nothing.
+/// **Which is what the account changed, and what the Compile Server needs.** An
+/// AppContainer was refused the local machine — a connection from inside one
+/// timed out rather than being refused outright — and an sccache is a client and
+/// a server talking over the loopback, so it was off on this platform for want
+/// of that. An ordinary local account reaches it, and this is where that is
+/// attempted rather than assumed (ADR-0014, *Amended: the Sandbox is an
+/// account*).
+///
+/// **The deadline is still the probe's own**, and for the reason it was: a
+/// connect that is being dropped rather than refused comes back only when
+/// Windows has finished retrying it, so a test with no deadline of its own would
+/// hang instead of failing.
 #[test]
-fn the_loopback_is_refused_from_inside_a_container() {
+fn the_loopback_answers_a_session() {
     let fixture = grilling();
     let (rendering, _closing) = fixture
         .sandbox()
         .command(&["verkstead", "guide"])
         .expect("a session's sandbox to be one this machine can make");
 
-    let container = rendering
-        .container()
-        .expect("a Windows session runs inside an AppContainer")
-        .to_owned();
+    let logon = rendering
+        .account()
+        .expect("a Windows session runs as a local account of Verkstead's own")
+        .clone();
 
     // A socket nothing serves anything on: what is being asked is whether a
     // connection can be made at all, and a listener with a backlog answers that
@@ -576,25 +649,33 @@ fn the_loopback_is_refused_from_inside_a_container() {
         .arg("-NonInteractive")
         .arg("-Command")
         .arg(dialling(address))
-        .inside(&container);
+        .as_account(logon);
 
     // The session's own environment rather than a list of names taken off this
-    // process, which is what this used to hand over and is a thing a container
-    // is refused: a `USERPROFILE` read out here is the human's own profile, and
-    // the whole point of the boundary the probe is standing inside is that it
-    // cannot reach one. What a session gets instead points at the profile the
-    // description grants it, so this is both what a session really has and a
-    // set of paths the container can open.
+    // process, which is a thing the session account is refused: a `USERPROFILE`
+    // read out here is the human's own profile, and the whole point of the
+    // boundary the probe is standing behind is that it cannot reach one. What a
+    // session gets instead points at the profile the description grants it, so
+    // this is both what a session really has and a set of paths the account can
+    // open.
     for (name, value) in rendering.env() {
         probe.set(name, value);
     }
 
-    let output = off_a_console(&probe, b"").expect("a probe inside the session's container");
+    // And where it starts, which a rendering of this test's own has to say: a
+    // process started with nowhere to be is one the machine refuses before it
+    // has run, and the Worktree is the one directory this description grants
+    // that the account can be in.
+    if let Some(chdir) = rendering.chdir() {
+        probe.starting_in(chdir);
+    }
+
+    let output = off_a_console(&probe, b"").expect("a probe started as the session account");
     let said = String::from_utf8_lossy(&output.stdout).into_owned();
 
     assert!(
-        said.contains(REFUSED),
-        "a container should not reach {address}, and the probe said: {said:?} \
+        said.contains(REACHED),
+        "the session account should reach {address}, and the probe said: {said:?} \
          having complained: {}",
         String::from_utf8_lossy(&output.stderr)
     );

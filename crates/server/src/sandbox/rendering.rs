@@ -7,20 +7,21 @@
 //! handed and the directory it starts in. This is those four, said once, and it
 //! is what every renderer returns.
 //!
-//! **And a fifth on the platform whose boundary is not a wrapper.** A Linux
-//! rendering runs `bwrap` and a Mac's runs `sandbox-exec`, so what makes the
-//! boundary is in the vector; a Windows one runs the session's own program
-//! inside an AppContainer, which is an identity on its token rather than a word
-//! on its command line. So a rendering names the container it is started inside
-//! — see [`Rendering::inside`] — and the two platforms with a wrapper name
-//! none.
+//! **And a fifth on the platform whose boundary is not a wrapper: who the
+//! process is.** A Linux rendering runs `bwrap` and a Mac's runs `sandbox-exec`,
+//! so what makes the boundary is in the vector; a Windows one runs the session's
+//! own program as a **local account of Verkstead's own** rather than as the
+//! human (ADR-0014, *Amended: the Sandbox is an account*), which is an identity
+//! on its token rather than a word on its command line. So a rendering names the
+//! account it is started as — see [`Rendering::as_account`] — and the two
+//! platforms with a wrapper name none.
 //!
-//! **And a sixth, which is who the process is.** A Windows session runs as a
-//! local account of Verkstead's own rather than as the human (ADR-0014,
-//! *Amended: the Sandbox is an account*), so a rendering names the account it
-//! is started as — see [`Rendering::as_account`]. Both of the last two are
-//! Windows' alone, and both are fields rather than `cfg`s: a description is
-//! portable, so the suite builds and reads a Windows rendering on any machine.
+//! **And a sixth beside it**, which is how a process started as somebody else
+//! comes up on a console at all: the image whose launcher verb makes one on the
+//! far side of the boundary — see [`Rendering::launched_by`]. Both of the last
+//! two are Windows' alone, and both are fields rather than `cfg`s: a description
+//! is portable, so the suite builds and reads a Windows rendering on any
+//! machine.
 //!
 //! **A description rather than a way of spawning.** It used to be a
 //! `std::process::Command`, which is a description with a decision already
@@ -58,21 +59,13 @@ pub struct Rendering {
     /// to be in rather than the session.
     chdir: Option<PathBuf>,
 
-    /// The container it is started inside, as the SID that names one — see
-    /// [`Rendering::inside`].
+    /// The account it is started as, where it is not started as the account
+    /// the server is — see [`Rendering::as_account`].
     ///
     /// `None` everywhere but the Windows rendering, and a field rather than a
     /// `cfg` for the reason [`crate::platform::Platform`] is a value: a
     /// description is portable and only the boundary is not, so a Windows
     /// rendering is a thing the suite can build and read on any machine.
-    inside: Option<String>,
-
-    /// The account it is started as, where it is not started as the account
-    /// the server is — see [`Rendering::as_account`].
-    ///
-    /// `None` everywhere but the Windows rendering, and a field rather than a
-    /// `cfg` for the reason [`Rendering::inside`]'s is: a description is
-    /// portable and only the boundary is not.
     as_account: Option<Logon>,
 
     /// And the image whose launcher verb makes the console it comes up on,
@@ -88,7 +81,6 @@ impl Rendering {
             argv: Vec::new(),
             env: Vec::new(),
             chdir: None,
-            inside: None,
             as_account: None,
             launched_by: None,
         }
@@ -125,32 +117,17 @@ impl Rendering {
         self
     }
 
-    /// And the container it runs inside, named by the SID that *is* one — see
-    /// `sandbox::container::Container::sid`, which is where a session's
-    /// comes from.
-    ///
-    /// **The identity travels rather than the profile.** What a process is
-    /// started with is a SID and nothing else, and a rendering is a description
-    /// that is copied, compared and read on machines that have no such thing —
-    /// so what crosses the seam is the name of the identity, and what created
-    /// the profile goes on holding it for as long as the session runs.
-    pub fn inside(&mut self, container: impl Into<String>) -> &mut Rendering {
-        self.inside = Some(container.into());
-
-        self
-    }
-
-    /// And the account it is started **as**, where that is not the account the
+    /// The account it is started **as**, where that is not the account the
     /// server itself is running as — see [`Logon`], which is the name and the
     /// password together.
     ///
-    /// The Windows rendering's own, and what stands where [`Rendering::inside`]
-    /// stood: a session is a local account of Verkstead's rather than an
-    /// identity on the server's own token (ADR-0014, *Amended: the Sandbox is
-    /// an account*). Starting a process as somebody else is
-    /// `CreateProcessWithLogonW`, so a rendering that names one cannot be
-    /// started by the standard library any more than one naming a container can
-    /// — see the [`TryFrom`] below, which refuses both.
+    /// The Windows rendering's own, and the whole of its boundary: a session is
+    /// a local account of Verkstead's rather than the human (ADR-0014,
+    /// *Amended: the Sandbox is an account*), and what it may reach is what that
+    /// account has been granted — see [`super::granting`]. Starting a process as
+    /// somebody else is `CreateProcessWithLogonW`, which is not a call the
+    /// standard library makes at all: see the [`TryFrom`] below, which refuses a
+    /// rendering that names one rather than quietly running it as the human.
     pub fn as_account(&mut self, logon: Logon) -> &mut Rendering {
         self.as_account = Some(logon);
 
@@ -200,13 +177,7 @@ impl Rendering {
         self.chdir.as_deref()
     }
 
-    /// The container it is started inside, and nothing where it is started
-    /// inside none — see [`Rendering::inside`].
-    pub fn container(&self) -> Option<&str> {
-        self.inside.as_deref()
-    }
-
-    /// And the account it is started as, and nothing where it is started as the
+    /// The account it is started as, and nothing where it is started as the
     /// account the server is — see [`Rendering::as_account`].
     pub fn account(&self) -> Option<&Logon> {
         self.as_account.as_ref()
@@ -227,20 +198,15 @@ impl Rendering {
 /// gets instead is [`crate::terminal::Terminal::spawn`], which decides
 /// differently on each platform and is the whole reason the description exists.
 ///
-/// **It can refuse, which is what the `Try` is for.** A rendering that names a
-/// container is a process to be started inside an AppContainer, and that is an
-/// attribute on a `CreateProcessW` — the one thing a `Command` has no way to
-/// carry. A conversion that quietly dropped it would hand back a command that
-/// starts the same session outside its boundary and says nothing, which is the
-/// one thing ADR-0014 refuses. So it is an error here, and what starts such a
-/// rendering is `sandbox::off_a_console` or the terminal's own spawn.
-///
-/// **And it refuses a rendering that names an account for the same reason.**
-/// Starting a process as somebody else is `CreateProcessWithLogonW`, which is
-/// not a call the standard library makes at all — and a conversion that dropped
-/// the account would hand back a command that runs the session as the *human*,
-/// which is precisely the identity the boundary exists to be other than. So
-/// both are refused, and both refusals name what was asked for.
+/// **It can refuse, which is what the `Try` is for.** A rendering that names an
+/// account is a process to be started as somebody else, which is
+/// `CreateProcessWithLogonW` — not a call the standard library makes at all. A
+/// conversion that quietly dropped the account would hand back a command that
+/// runs the same session as the *human*, which is precisely the identity the
+/// boundary exists to be other than, and it would say nothing about it — which
+/// is the one thing ADR-0014 refuses. So it is an error here, it names what was
+/// asked for, and what starts such a rendering is `sandbox::off_a_console` or
+/// the terminal's own spawn.
 impl TryFrom<&Rendering> for Command {
     type Error = std::io::Error;
 
@@ -250,13 +216,6 @@ impl TryFrom<&Rendering> for Command {
                 "this rendering runs as the local account {}, which the standard library has \
                  no way to start a process as — see `sandbox::off_a_console`",
                 logon.name(),
-            )));
-        }
-
-        if let Some(container) = rendering.container() {
-            return Err(std::io::Error::other(format!(
-                "this rendering runs inside the AppContainer {container}, which the standard \
-                 library has no way to start a process in — see `sandbox::off_a_console`"
             )));
         }
 
@@ -284,45 +243,27 @@ impl TryFrom<&Rendering> for Command {
 mod tests {
     use super::*;
 
-    /// The refusal at the seam, which is what says a boundary is never lost by
-    /// a conversion — see the [`TryFrom`] above.
-    ///
-    /// Asked on every platform, because the description is portable: a Windows
-    /// rendering built on a Linux machine names the same container, and what
-    /// the standard library will do with it is the same nothing.
+    /// A rendering naming none, which is every rendering on the platforms with
+    /// a wrapper to hide behind.
     #[test]
-    fn a_rendering_inside_a_container_is_not_a_command_the_standard_library_can_start() {
-        let mut rendering = Rendering::running("cmd.exe");
-        rendering.inside("S-1-15-2-1-2-3");
-
-        let refused = Command::try_from(&rendering)
-            .expect_err("a rendering naming a container should not convert to a command");
-
-        assert!(
-            refused.to_string().contains("S-1-15-2-1-2-3"),
-            "the refusal should say which container was asked for, and it said: {refused}"
-        );
-    }
-
-    /// And one naming none, which is every rendering on the platforms with a
-    /// wrapper to hide behind.
-    #[test]
-    fn a_rendering_outside_one_is_the_command_it_describes() {
+    fn a_rendering_as_nobody_in_particular_is_the_command_it_describes() {
         let mut rendering = Rendering::running("echo");
         rendering.arg("hello").set("HOME", "/nowhere");
 
-        let command = Command::try_from(&rendering).expect("a rendering with no container");
+        let command = Command::try_from(&rendering).expect("a rendering naming no account");
 
         assert_eq!(command.get_program(), "echo");
         assert_eq!(command.get_args().collect::<Vec<_>>(), ["hello"]);
     }
 
-    /// And the same refusal for the identity that replaced the container: a
-    /// rendering naming an account is a `CreateProcessWithLogonW`, which the
-    /// standard library has no vocabulary for at all.
+    /// And the refusal at the seam, which is what says a boundary is never lost
+    /// by a conversion — see the [`TryFrom`] above. A rendering naming an
+    /// account is a `CreateProcessWithLogonW`, which the standard library has
+    /// no vocabulary for at all.
     ///
-    /// Asked on every platform for the reason above it is: what is being
-    /// asserted is a property of the description rather than of the machine.
+    /// Asked on every platform, because the description is portable: a Windows
+    /// rendering built on a Linux machine names the same account, and what the
+    /// standard library will do with it is the same nothing.
     #[test]
     fn a_rendering_as_an_account_is_not_a_command_the_standard_library_can_start() {
         let mut rendering = Rendering::running("cmd.exe");
