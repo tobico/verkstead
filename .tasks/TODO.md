@@ -28,4 +28,4 @@ Roadmap stage: [04: The session account](docs/roadmaps/windows-sessions/04-sessi
 - [x] 03: Entries for an account, with a step through every ancestor — [details](03-entries-and-ancestors.md)
 - [x] 04: Windows sessions run as the account — [details](04-sessions-run-as-it.md)
 - [x] 05: sccache back on for Windows — [details](05-sccache-back-on.md)
-- [ ] 06: The docs and the viewer say what is true — [details](06-docs-say-what-is-true.md)
+- [x] 06: The docs and the viewer say what is true — [details](06-docs-say-what-is-true.md)

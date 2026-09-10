@@ -66,6 +66,19 @@ flowchart LR
   human's own directories rather than a mount or a policy, so a container is per
   Conversation, goes with the Worktree, and is swept at the next startup where a
   crash left one standing.)
+  (*revised 2026-09-10, windows sessions stage 04*: the mechanism changed and
+  the rendering stayed. An AppContainer cannot host the agent — it refuses a
+  path *resolution* however well the path is granted, and will not start msys2
+  at all — and a restricted SID list, a deny-only account SID and an integrity
+  ceiling each broke node, both PowerShells or `bash` when they were probed on
+  a real machine. So a Windows session runs as a **local account of
+  Verkstead's own**, which the machine finds nothing unusual about. Everything
+  above about entries on the human's own directories is unchanged; what changed
+  is whose SID they name. The costs are an elevated verb once at install, one
+  account for the whole installation rather than one per Conversation — so a
+  session can reach every live Conversation's Worktree, and not the human's
+  machine — and a launcher process that makes the pseudoconsole on the far side
+  of the boundary.)
 - **Single user, no app-level auth; the tailnet is the perimeter.** Unchanged
   from askance.
 - **Fresh database.** No import of askance history.
@@ -478,6 +491,17 @@ flowchart LR
     inside it exactly as elsewhere, because a directory is a directory. The
     settings page says which of the two kinds of *not cached* a server is in,
     so that a Windows one is not told to install something it could not use.
+    (*revised 2026-09-10, windows sessions stage 04*: back on, and the reason
+    for it went rather than the reasoning. A Windows session runs as an
+    ordinary local account now, which reaches the loopback the way everything
+    else on the machine does, and is handed a real profile the sccache client
+    finds its configuration in. So the server looks for an `sccache` on all
+    three platforms, sets `RUSTC_WRAPPER` where it finds one, and runs the
+    compile server as the same account a session is — a compile server started
+    as the human would be every dependency's proc macro running with the
+    database and the settings files in reach. The settings page's third answer
+    went with the third reason: what is left everywhere is *no sccache
+    installed*, which is something to go and do.)
   - Nix dev-shell autodetection kept (wrap in `nix develop` only when a shell
     attribute actually evaluates)
   - This drops today's blanket rw bind of all of `~/src`.

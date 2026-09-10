@@ -263,7 +263,7 @@ fn yaml<T: Serialize>(value: &T) -> std::io::Result<String> {
 ///
 /// **Reachable from the rest of the crate**, because the settings files are not
 /// the only thing under the Data Directory a half of would be worse than
-/// nothing. The record a Conversation's AppContainer is swept by is one: it is
+/// nothing. The record a Conversation's entries are swept by is one: it is
 /// read by a server that did not write it, and one that will not parse is a
 /// boundary nothing will ever take off the human's own directories — see
 /// [`crate::sandbox::granting::remembering`]. The Workbench Key is the other,

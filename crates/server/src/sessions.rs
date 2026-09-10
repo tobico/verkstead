@@ -1835,7 +1835,7 @@ impl Sessions {
         // either Unix.
         //
         // **And this is where a boundary that cannot be made refuses a
-        // session** — a Windows AppContainer that will not be created, or a
+        // session** — a Windows machine with no session account to run as, or a
         // grant on one of the paths the description names that will not be
         // written. Refused rather than started anyway, which is the whole of
         // ADR-0014's Q18: there is no unsandboxed session to fall back to, the
