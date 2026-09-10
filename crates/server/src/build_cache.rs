@@ -765,6 +765,14 @@ fn compile_server(
         // Conversation, because a Worktree made after this started would
         // otherwise be one this cannot see.
         .own(&worktrees, Reach::ReadWrite)
+        // Both of these stand for the installation rather than for this
+        // process — see [`sandbox::Surface::standing`]. The Worktrees directory
+        // and the cache are Verkstead's own, granted to Verkstead's own
+        // account, and a compile server that came and went taking them apart
+        // and putting them back is minutes of propagation for a grant that
+        // never differs.
+        .standing(&worktrees)
+        .standing(dir)
         // And the cache, which holds both what it reads — the dependency
         // sources under `CARGO_HOME` — and what it writes.
         .own(dir, Reach::ReadWrite)
@@ -845,7 +853,10 @@ fn compile_server(
             account.sid().text(),
         )?;
 
-        held.wrote(entries.clone(), cut.clone())?;
+        held.wrote(
+            sandbox::granting::written_down(&entries, surface.stands()),
+            cut.clone(),
+        )?;
 
         sandbox::granting::writing::write(&entries, account.sid().text(), &cut)?;
 

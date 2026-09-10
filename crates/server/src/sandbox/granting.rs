@@ -285,6 +285,71 @@ fn granted(path: impl Into<PathBuf>, reach: Reach) -> Entry {
     }
 }
 
+/// The installation's own grants as entries, so that the one thing which ever
+/// takes them off can — see [`super::standing`] for the three and
+/// [`super::account::machine::remove`] for the moment.
+///
+/// No steps among them, and none wanted: what [`writing::strip`] does with a
+/// grant is revoke every entry the trustee has on that directory, and the steps
+/// on the way to it are the same entry every boundary writes anyway. They go
+/// when the account does, which is what removes them from every list at once.
+pub(crate) fn standing(paths: &[(PathBuf, Reach)]) -> Vec<Entry> {
+    paths
+        .iter()
+        .map(|(path, reach)| granted(path, *reach))
+        .collect()
+}
+
+/// Of `entries`, the ones that are written down with the boundary — which is
+/// every one the installation does not already stand behind.
+///
+/// **The whole of what makes a standing grant standing.** Every entry here is
+/// written the same way (see [`writing::write`]); what a record decides is
+/// which of them is ever taken off again. A record is what the sweep reads and
+/// what a Conversation's ending strips — see
+/// [`super::entries::Entries::wrote`] and [`crate::boundaries`] — so an entry
+/// left out of it is one nothing will take off, and the next boundary to name
+/// that path finds the grant already there and propagates nothing.
+///
+/// **Which is what a boundary is for.** The entries that distinguish one
+/// Conversation from the next are exactly the ones worth remembering: the
+/// installation's three say the same thing for every session that ever runs,
+/// so a record naming them would be every Conversation writing down the same
+/// three lines and taking the same three trees apart on the way out.
+///
+/// **A record from an older build still names them**, and that is the right
+/// way round: the sweep takes them off once, the next boundary writes them
+/// back, and from then on no record mentions them again.
+pub(crate) fn written_down(entries: &[Entry], standing: &[PathBuf]) -> Vec<Entry> {
+    entries
+        .iter()
+        .filter(|entry| !stands(&entry.path, standing))
+        .cloned()
+        .collect()
+}
+
+/// Whether the entry on `path` is the **installation's** rather than one
+/// boundary's, `standing` being what the description said of it — see
+/// [`Surface::standing`], which is where the three are named and why.
+///
+/// **Two ways to be one.** The granted directory itself, which is the whole
+/// point; and any directory on the way to one, because a step through is what
+/// makes the grant beneath it resolve at all. A step taken off when a session
+/// ended would leave a standing grant on a path the account could no longer
+/// walk to — a boundary reaching into the installation's, which is the one
+/// thing the split is for. Steps cost nothing to leave: they inherit nowhere,
+/// grant a walk and an attribute read, and are the same entry every boundary
+/// would write anyway.
+///
+/// Case-folded through [`folded`], for [`beneath`]'s reason: what a description
+/// spells `C:\Users\Ada\.rustup` and what a record reads back as
+/// `C:\users\ada\.rustup` are one directory.
+pub(crate) fn stands(path: &Path, standing: &[PathBuf]) -> bool {
+    standing
+        .iter()
+        .any(|one| folded(one) == folded(path) || beneath(one, path))
+}
+
 /// Whether `path` is somewhere under `directory`, as this platform reads two
 /// paths.
 ///
@@ -421,6 +486,106 @@ mod tests {
             "every directory on the way to a granted path is stepped through \
              once, outermost first, and a path the description already names \
              is not stepped through at all",
+        );
+    }
+
+    /// What a boundary writes down, which is everything the installation does
+    /// not already stand behind.
+    ///
+    /// The whole of the mechanism is here: the same list is written either way,
+    /// and a record that does not name a path is a path nothing takes the grant
+    /// off — see [`written_down`].
+    #[test]
+    fn the_installations_own_grants_are_written_but_not_written_down() {
+        let rustup = PathBuf::from(r"C:\Users\ada\.rustup");
+        let cache = PathBuf::from(r"D:\cache");
+
+        let mut surface = Surface::starting_in(PathBuf::from(r"C:\repo"));
+
+        surface
+            .own(&rustup, Reach::ReadOnly)
+            .standing(&rustup)
+            .own(&cache, Reach::ReadWrite)
+            .standing(&cache)
+            .own(PathBuf::from(r"C:\repo"), Reach::ReadWrite)
+            .own(PathBuf::from(r"E:\work\repo"), Reach::ReadWrite);
+
+        let entries = entries(&surface, None);
+        let written_down = written_down(&entries, surface.stands());
+
+        assert!(
+            entries.iter().any(|entry| entry.path == rustup),
+            "a standing grant is written like any other: it is in the list the \
+             boundary hands to the machine",
+        );
+
+        assert!(
+            !written_down.iter().any(|entry| entry.path == rustup)
+                && !written_down.iter().any(|entry| entry.path == cache),
+            "and it is not in the record, which is what would take it off again",
+        );
+
+        assert!(
+            written_down
+                .iter()
+                .any(|entry| entry.path == PathBuf::from(r"C:\repo")),
+            "while the Worktree — which is this Conversation's and nobody \
+             else's — is written down as it always was",
+        );
+
+        assert!(
+            !written_down
+                .iter()
+                .any(|entry| entry.path == PathBuf::from(r"C:\Users\ada")),
+            "and neither is the way to a standing grant: a step taken off when \
+             a session ended would leave a grant on a path the account could no \
+             longer walk to",
+        );
+
+        assert!(
+            !written_down
+                .iter()
+                .any(|entry| entry.path == PathBuf::from(r"C:\")),
+            "a step that is on the way to a standing grant stays even where it \
+             is on the way to one of this boundary's too — the grant beneath it \
+             outlives the boundary, and what is left is a walk through a drive \
+             that lists nothing",
+        );
+
+        assert!(
+            written_down
+                .iter()
+                .any(|entry| entry.path == PathBuf::from(r"E:\work")),
+            "while a step on the way to nothing but this boundary's own is \
+             written down and comes off with it",
+        );
+    }
+
+    /// And the two ways a path is one the installation stands behind.
+    #[test]
+    fn a_standing_path_is_the_grant_itself_or_the_way_to_one() {
+        let standing = vec![PathBuf::from(r"C:\Users\ada\.rustup")];
+
+        assert!(
+            stands(Path::new(r"C:\Users\ada\.rustup"), &standing),
+            "the granted directory itself",
+        );
+
+        assert!(
+            stands(Path::new(r"C:\Users\ADA"), &standing),
+            "and a directory on the way to it, case-folded the way every other \
+             path here is read",
+        );
+
+        assert!(
+            !stands(Path::new(r"C:\Users\ada\.rustup\toolchains"), &standing),
+            "but not something under it, which no entry of its own is ever \
+             written on",
+        );
+
+        assert!(
+            !stands(Path::new(r"C:\Users\ada\.cargo"), &standing),
+            "and not a neighbour",
         );
     }
 

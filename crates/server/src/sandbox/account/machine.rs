@@ -343,6 +343,20 @@ pub fn remove(data_dir: &Path) -> Result<(String, Removed)> {
     let mut removed = Removed::default();
 
     if let Ok(sid) = sid_of(&name) {
+        // Before the account goes, because the entries name it: the grants that
+        // stand for the installation are the ones no boundary ever takes off —
+        // see [`super::super::Surface::standing`] — so the account being
+        // removed is the one moment there is to take them off, and after
+        // `NetUserDel` there is no SID left to say whose they were.
+        //
+        // Said and not insisted on, the way the rest of this verb is: an entry
+        // that would not come off is an entry naming an identity this machine
+        // is about to stop having, which grants nobody anything. What it costs
+        // is a line on somebody's directory list.
+        let standing = super::super::granting::standing(&super::super::standing_grants(data_dir));
+
+        super::super::granting::writing::strip(&standing, &[], sid.text());
+
         removed.profile = profile_deleted(&sid)?;
     }
 

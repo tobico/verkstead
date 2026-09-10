@@ -1494,8 +1494,53 @@ pub(crate) fn reaching(platform: Platform, path: &OsStr, home: &Path, surface: &
     }
 
     if let Some(toolchains) = toolchains(platform, path, home) {
-        surface.own(toolchains, Reach::ReadOnly);
+        // The installation's rather than this boundary's — see
+        // [`Surface::standing`]. It is the biggest tree anything here grants
+        // and the one least about which Conversation is running: the same
+        // read-only reach on the same rustup home for every session and the
+        // Compile Server alike.
+        surface
+            .own(&toolchains, Reach::ReadOnly)
+            .standing(toolchains);
     }
+}
+
+/// The three grants that stand for the installation, worked out from a Data
+/// Directory alone — see [`Surface::standing`], which is where each of them is
+/// said and why it is one.
+///
+/// **Said twice on purpose.** Every description names these as it builds its
+/// own surface, which is where they are granted; this is the same three read
+/// off the machine rather than off a description, and the one caller is
+/// [`account::machine::remove`] — the account going is the one moment anything
+/// takes a standing grant off, and there is no surface anywhere near it.
+///
+/// **A cache the human configured elsewhere is not found here**, because
+/// nothing but the command line said where it went and the account is being
+/// removed by a verb that was handed a Data Directory. What is left behind in
+/// that case is an entry naming a SID the machine no longer has, which is a
+/// tidiness rather than a reach: an entry for an identity that does not exist
+/// grants nobody anything.
+#[cfg(windows)]
+pub(crate) fn standing_grants(data_dir: &Path) -> Vec<(PathBuf, Reach)> {
+    let mut standing = vec![(crate::worktrees::directory(data_dir), Reach::ReadWrite)];
+
+    if let Some(cache) = crate::platform::cache_dir() {
+        standing.push((cache, Reach::ReadWrite));
+    }
+
+    // The same two steps the descriptions take to it — see [`reaching`], which
+    // is what grants it for a session and for the Compile Server alike.
+    let ours = own_bin(Platform::HERE, data_dir);
+    let searches = path(Platform::HERE, &ours);
+
+    if let Some(rustup) =
+        servers_home().and_then(|home| toolchains(Platform::HERE, &searches, home))
+    {
+        standing.push((rustup, Reach::ReadOnly));
+    }
+
+    standing
 }
 
 /// What a `rustup` on the `PATH` is the front of: the rustup home of whoever
@@ -3448,6 +3493,13 @@ struct Boundary<'a> {
     /// And what has to be written for the account, in the order the description
     /// said it.
     entries: Vec<granting::Entry>,
+
+    /// Of the paths those entries are on, the ones whose grant is the
+    /// installation's — see [`Surface::standing`]. Carried beside the entries
+    /// because it is what decides which of them go in the record: everything
+    /// here is written, and everything but these is written *down* — see
+    /// [`granting::written_down`].
+    standing: Vec<PathBuf>,
 }
 
 impl Sandbox {
@@ -3696,7 +3748,10 @@ impl Sandbox {
             // Conversation's entries rather than by the session: an entry is
             // this Conversation's and comes off when its work stops — see
             // [`entries::Entries::wrote`], which is also where the order is.
-            entries.wrote(boundary.entries.clone(), cut.clone())?;
+            entries.wrote(
+                granting::written_down(&boundary.entries, &boundary.standing),
+                cut.clone(),
+            )?;
 
             granting::writing::write(&boundary.entries, account.sid().text(), &cut)?;
 
@@ -3735,6 +3790,7 @@ impl Sandbox {
             data_dir: &self.data_dir,
             conversation: self.conversation,
             entries: granting::entries(surface, Some(&self.servers_home)),
+            standing: surface.stands().to_vec(),
         })
     }
 
@@ -3936,7 +3992,12 @@ impl Sandbox {
         // configured one — is inside it rather than wiped by it. See
         // [`crate::build_cache`].
         if let Some(cache) = &self.build_cache {
-            surface.own(cache.dir(), Reach::ReadWrite);
+            // Standing, for [`Surface::standing`]'s reason: one cache for the
+            // machine, written for the one account every session runs as, and
+            // the same grant whichever Conversation is behind it.
+            surface
+                .own(cache.dir(), Reach::ReadWrite)
+                .standing(cache.dir());
 
             if let Some(sccache) = cache.sccache() {
                 surface.elsewhere(sccache, self.sccache_inside(sccache), Reach::ReadOnly);
