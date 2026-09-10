@@ -23,13 +23,16 @@
 //! drawn by — see [`crate::stages`] — so the list the human is watching and the
 //! stage that starts next cannot come to disagree.
 //!
-//! **What is decided is where the branch goes**, and only that. Stages stack on
-//! the unmerged predecessor where the target repository records how, and
-//! Verkstead reads whether that block is there rather than carrying a stacking
-//! mechanism of its own: the session follows what the block says, because the
-//! mechanism is the repository's. Where there is no block there is no convention
-//! to invent, so the branch comes off the default branch and the Timeline says
-//! so.
+//! **What is decided is where the branch goes**, and only that — see [`Stands`],
+//! which is the whole of the rule. A stage stands on the branch the stage before
+//! it was worked on wherever the default branch does not already hold that work,
+//! because that is where the work this one builds on is; and it comes off the
+//! default branch where there is nothing left to stand on. Whether the
+//! repository records a stacking mechanism decides what the *session* does about
+//! the pull request rather than where the branch starts: Verkstead carries no
+//! mechanism of its own, and where the block is missing the pull request carries
+//! the stage before it until that one merges. The Timeline says which of the
+//! three happened.
 //!
 //! **And the companions come across with it.** A stage is given everything a
 //! human would have settled before pressing anything, and the parent
@@ -209,44 +212,49 @@ async fn start(
     }
 
     // Where the branch goes, which is the whole of what Verkstead decides about
-    // stacking. The predecessor's branch is the one this stage's work builds on,
-    // and its tip is where the branch starts.
-    let stacked_on = stacks.then(|| conversation.branch.clone());
+    // stacking. Off the runtime's threads: a fetch, and a handful of git reads
+    // against a local directory.
+    let stands = tokio::task::spawn_blocking({
+        let repo = repo.clone();
+        let default = conversation.repo.default_branch.clone();
+        let predecessor = conversation.branch.clone();
 
-    let from = match stacked_on.clone() {
-        // A stacked stage stands on the predecessor's branch, which is work on
-        // this machine and nowhere else: there is no remote copy of it to be
-        // behind, so there is nothing a fetch could freshen.
-        Some(predecessor) => predecessor,
+        move || standing(&repo, &default, &predecessor, stacks)
+    })
+    .await;
 
-        // An unstacked one comes off the default branch, and what that means is
-        // what origin is holding rather than wherever this checkout's copy of it
-        // was last left — so the remote-tracking refs are made current before
-        // anything reads them.
-        None => match fresh(&repo, &conversation.repo.default_branch).await {
-            Some(from) => from,
+    let stands = match stands {
+        Ok(Some(stands)) => stands,
 
-            // Nobody is at a button to refuse with: this runs at the end of an
-            // unattended run, so a fetch git would not make halts the stage with
-            // a notice naming it. Halted rather than carried on with, because a
-            // stage branched off refs nobody can vouch for is a whole stage of
-            // work starting from the wrong place.
-            None => {
-                return say(
-                    state,
-                    settled,
-                    &format!(
-                        "Stage {} of the `{}` roadmap is next, and git would not fetch from \
-                         this repository's remote — so what its branch would come off cannot \
-                         be trusted to be what origin is holding. Nothing was started, and \
-                         the server log says why the fetch failed.",
-                        stage.label, stage.roadmap,
-                    ),
-                )
-                .await;
-            }
-        },
+        // Nobody is at a button to refuse with: this runs at the end of an
+        // unattended run, so a fetch git would not make halts the stage with a
+        // notice naming it. Halted rather than carried on with, because a stage
+        // branched off refs nobody can vouch for is a whole stage of work
+        // starting from the wrong place — and which place that should be is a
+        // question this cannot answer without them either.
+        Ok(None) => {
+            return say(
+                state,
+                settled,
+                &format!(
+                    "Stage {} of the `{}` roadmap is next, and git would not fetch from \
+                     this repository's remote — so what its branch would come off cannot \
+                     be trusted to be what origin is holding. Nothing was started, and \
+                     the server log says why the fetch failed.",
+                    stage.label, stage.roadmap,
+                ),
+            )
+            .await;
+        }
+
+        Err(error) => {
+            tracing::error!(error = ?error, settled, "deciding where the next stage's branch goes failed");
+            return;
+        }
     };
+
+    let stacked_on = stands.stacked_on().map(str::to_owned);
+    let from = stands.from().to_owned();
 
     let started = store::start_conversation(&state.pool, conversation.repo.id, &branch).await;
 
@@ -403,12 +411,7 @@ async fn start(
     // What Verkstead decided, on both Timelines: on the stage's, because the
     // branch it is on was nobody's choice but this; and on the settled one,
     // because that is where the human was watching when it happened.
-    say(
-        state,
-        id,
-        &begun(&stage, &branch, stacked_on.as_deref(), &from),
-    )
-    .await;
+    say(state, id, &begun(&stage, &branch, &stands)).await;
     say(
         state,
         settled,
@@ -462,13 +465,147 @@ async fn start(
     ));
 }
 
+/// Where a stage's branch starts, and why it starts there.
+///
+/// Two questions decide it, in this order. The first is whether the repository
+/// records a way to stack a stage for review, and one that does gets what it
+/// records. The second is asked where it does not, and it is a fact about git
+/// rather than a convention: **is the stage before this one in the branch this
+/// one would otherwise come off?**
+///
+/// The second question is asked because the first cannot answer it. A repository
+/// that has written nothing down has said nothing about where a stage's work
+/// lives — and reading only the file, its every stage came off the default
+/// branch, including the ones whose predecessor was sitting unmerged on a pull
+/// request: a whole stage built without the stage it builds on. Where the branch
+/// starts was always Verkstead's to decide, and a base that does not hold the
+/// work being built on is the wrong one whatever a repository has written down.
+///
+/// What the block still decides is the half that was always the repository's:
+/// what the session does about the *pull request*. Where it is there the session
+/// stacks the review the way the block says; where it is not the session opens
+/// an ordinary pull request, which carries the stage before it until that one
+/// merges — and the Timeline says so, because a decision taken while nobody was
+/// looking is owed an account of itself.
+pub(crate) enum Stands {
+    /// The repository records a way to stack a stage for review, so this one
+    /// stands on the predecessor's branch and the session follows the block when
+    /// it opens the pull request.
+    Recorded {
+        /// The branch the stage before this one was worked on.
+        predecessor: String,
+    },
+
+    /// It records none, and the default branch does not hold the stage before
+    /// this one — so the branch stands on the predecessor's anyway, that being
+    /// where the work this stage builds on is.
+    Unrecorded {
+        /// The branch the stage before this one was worked on.
+        predecessor: String,
+
+        /// And the default branch that does not hold it, for saying which one
+        /// was asked.
+        default: String,
+    },
+
+    /// It records none and there is nothing left to stand on: the stage before
+    /// this one is already in the default branch, which is the ordinary
+    /// unstacked start.
+    Off {
+        /// The default branch, as origin is holding it.
+        default: String,
+    },
+}
+
+impl Stands {
+    /// The ref the branch is cut from.
+    fn from(&self) -> &str {
+        match self {
+            Self::Recorded { predecessor } | Self::Unrecorded { predecessor, .. } => predecessor,
+            Self::Off { default } => default,
+        }
+    }
+
+    /// The branch this stage stands on, where it stands on one — which is what
+    /// the record keeps, what a companion's own branch mirrors, and what the
+    /// session is told.
+    fn stacked_on(&self) -> Option<&str> {
+        match self {
+            Self::Recorded { predecessor } | Self::Unrecorded { predecessor, .. } => {
+                Some(predecessor)
+            }
+            Self::Off { .. } => None,
+        }
+    }
+}
+
+/// Ask git where the stage's branch starts — or `None` where it would not
+/// fetch, which is the one answer that starts nothing.
+///
+/// **A recorded stack asks git nothing.** It stands on the predecessor's branch,
+/// which is work on this machine and nowhere else: there is no remote copy of it
+/// to be behind, so there is nothing a fetch could freshen and nothing about the
+/// default branch that would change the answer.
+///
+/// **Everything else fetches first.** What the default branch *means* is what
+/// origin is holding rather than wherever this checkout's copy of it was last
+/// left, and both things asked of it here turn on that — the commit an unstacked
+/// stage comes off, and whether the stage before this one is in it. Without the
+/// fetch a machine that has not pulled for a week would start every stage a week
+/// behind, and would read a predecessor merged a week ago as still in flight.
+///
+/// **And what git will not say reads as unmerged**, which is the safe way round
+/// for the one thing it decides. Standing on a predecessor that had in fact
+/// merged costs a base behind the default branch, which the next merge carries
+/// forward; coming off the default branch when the predecessor is unmerged costs
+/// the whole of the work the stage was to build on. A predecessor that resolves
+/// to no commit is the exception, and not the same thing: there is no branch
+/// there to stand on, so the default branch is all there is.
+///
+/// Blocking, and called on a borrowed thread: a fetch has no deadline to answer
+/// within.
+fn standing(repo: &Path, default: &str, predecessor: &str, stacks: bool) -> Option<Stands> {
+    if stacks {
+        return Some(Stands::Recorded {
+            predecessor: predecessor.to_owned(),
+        });
+    }
+
+    if let worktrees::Fetched::Failed(said) = worktrees::fetch(repo) {
+        tracing::error!(
+            said,
+            repo = %repo.display(),
+            "fetching a Repo's remotes failed, so the next stage is not being started",
+        );
+
+        return None;
+    }
+
+    let default = worktrees::default_ref(repo, default);
+
+    let held = match worktrees::resolve(repo, predecessor) {
+        Some(tip) => worktrees::merged(repo, &tip, &default) == Some(true),
+        None => true,
+    };
+
+    Some(if held {
+        Stands::Off { default }
+    } else {
+        Stands::Unrecorded {
+            predecessor: predecessor.to_owned(),
+            default,
+        }
+    })
+}
+
 /// What the stage's own Timeline is told: which stage it is, and where its
 /// branch came from.
 ///
-/// Both halves said plainly, including the half that is an absence — a stage off
-/// the default branch because the repository records no way to stack one is a
-/// decision, and one the human may want to do something about.
-fn begun(stage: &Stage, branch: &str, stacked_on: Option<&str>, from: &str) -> String {
+/// All of it said plainly, including the half that is an absence — a stage
+/// standing on unmerged work in a repository that records no way to stack one
+/// for review is a decision, and one the human may want to do something about
+/// before the pull request is opened.
+fn begun(stage: &Stage, branch: &str, stands: &Stands) -> String {
     // The brief named rather than linked: it is a path in a Worktree the
     // workbench has no route to, and a link that went nowhere would be worse
     // than the path itself.
@@ -477,17 +614,26 @@ fn begun(stage: &Stage, branch: &str, stacked_on: Option<&str>, from: &str) -> S
         stage.label, stage.roadmap, stage.title, stage.brief_path,
     );
 
-    match stacked_on {
-        Some(predecessor) => format!(
+    match stands {
+        Stands::Recorded { predecessor } => format!(
             "{started} Its branch `{branch}` stacks on `{predecessor}`, the branch of the stage \
              before it, the way this repository's `{}` records.",
             stages::GIT_WORKFLOW,
         ),
-        None => format!(
-            "{started} Its branch `{branch}` came off `{from}`: this repository's `{}` records \
-             no way to stack a roadmap stage on the one before it, and there is no convention \
-             to invent.",
+        Stands::Unrecorded {
+            predecessor,
+            default,
+        } => format!(
+            "{started} Its branch `{branch}` stands on `{predecessor}`, the branch of the stage \
+             before it, because `{default}` does not hold that work yet — a stage off the \
+             default branch would be built without the stage it builds on. This repository's \
+             `{}` records no way to stack a stage for review, so the pull request this one ends \
+             on carries the stage before it until that one merges.",
             stages::GIT_WORKFLOW,
+        ),
+        Stands::Off { default } => format!(
+            "{started} Its branch `{branch}` came off `{default}`, which already holds the stage \
+             before it: there is nothing left to stand on.",
         ),
     }
 }
@@ -946,47 +1092,6 @@ async fn taken(repo: &Path, branch: &str) -> bool {
         })
 }
 
-/// The name an unstacked stage's branch comes off, with `repo`'s
-/// remote-tracking refs made current first — or `None` where git would not
-/// fetch.
-///
-/// The rule a grilling starts by, applied where nobody pressed anything: the
-/// default branch means what origin is holding, and a remote-tracking ref is
-/// only ever as fresh as the last fetch. Without this a stage comes off
-/// wherever the human's own copy of the default branch was last left, which on
-/// a machine that has not pulled for a week is a week of other people's work
-/// missing from every stage after it.
-///
-/// A repository with no remote has nothing to fetch and nothing to be stale
-/// against, so it comes off its own default branch and is never refused for it.
-/// A join that failed says nothing either way, and nothing either way is not
-/// permission to branch: it reads as a fetch that failed, which is the same way
-/// round [`taken`] falls.
-async fn fresh(repo: &Path, default: &str) -> Option<String> {
-    let repo = repo.to_owned();
-    let default = default.to_owned();
-
-    let read = tokio::task::spawn_blocking(move || {
-        if let worktrees::Fetched::Failed(said) = worktrees::fetch(&repo) {
-            tracing::error!(
-                said,
-                repo = %repo.display(),
-                "fetching a Repo's remotes failed, so the next stage is not being started",
-            );
-
-            return None;
-        }
-
-        Some(worktrees::default_ref(&repo, &default))
-    })
-    .await;
-
-    read.unwrap_or_else(|error| {
-        tracing::error!(error = ?error, "fetching before a stage started failed");
-        None
-    })
-}
-
 /// Put a notice on a Timeline.
 ///
 /// Nothing is refused for: by the time anything here has something to say, what
@@ -1016,5 +1121,247 @@ async fn load(state: &AppState, conversation_id: i64) -> Option<store::Conversat
             tracing::error!(error = ?error, conversation_id, "reading the Conversation that settled failed");
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::process::{Command, Stdio};
+
+    use super::*;
+
+    /// A repository with a default branch and a predecessor branch off it —
+    /// which is the shape every stage start reads, whatever it decides.
+    struct Repo {
+        dir: tempfile::TempDir,
+    }
+
+    impl Repo {
+        /// One commit on `main`, and a `predecessor` branch holding one commit
+        /// more: a stage that has finished and whose work `main` has not taken.
+        fn new() -> Repo {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path();
+
+            run(path, &["init", "--initial-branch", "main"]);
+            run(path, &["config", "user.email", "test@verkstead.invalid"]);
+            run(path, &["config", "user.name", "Verkstead Test"]);
+
+            write(path, "README.md", "# a repository\n");
+            run(path, &["add", "-A"]);
+            run(path, &["commit", "-m", "chore: what was here already"]);
+
+            let repo = Repo { dir };
+
+            run(repo.path(), &["checkout", "-q", "-b", "roadmap/01-first"]);
+            write(repo.path(), "01.md", "# the stage before this one\n");
+            run(repo.path(), &["add", "-A"]);
+            run(repo.path(), &["commit", "-m", "feat: the stage before"]);
+            run(repo.path(), &["checkout", "-q", "main"]);
+
+            repo
+        }
+
+        fn path(&self) -> &Path {
+            self.dir.path()
+        }
+
+        /// Take the predecessor into the default branch, which is the human
+        /// merging its pull request.
+        fn merge(&self) {
+            run(
+                self.path(),
+                &[
+                    "merge",
+                    "-q",
+                    "--no-ff",
+                    "-m",
+                    "merge it",
+                    "roadmap/01-first",
+                ],
+            );
+        }
+
+        /// Where the stage's branch starts, as [`start`] asks it.
+        fn stands(&self, stacks: bool) -> Stands {
+            standing(self.path(), "main", "roadmap/01-first", stacks)
+                .expect("a repository with no remote has nothing to fail to fetch")
+        }
+    }
+
+    /// An origin holding everything `repo` holds and one commit more, which
+    /// `repo` has heard nothing about — the state a machine that has not pulled
+    /// is in.
+    ///
+    /// A working clone rather than a bare one so that the extra commit can be
+    /// made straight on its default branch, and made there rather than pushed
+    /// from `repo`, being out of date about origin being the whole point.
+    ///
+    /// The caller keeps the directory alive: the fetch this sets up is against a
+    /// path, and a tempdir that had gone would look exactly like being offline.
+    fn behind_an_origin(repo: &Path, upstream: &Path) {
+        run(
+            upstream.parent().unwrap(),
+            &[
+                "clone",
+                "--quiet",
+                &repo.to_string_lossy(),
+                &upstream.to_string_lossy(),
+            ],
+        );
+        run(
+            upstream,
+            &["config", "user.email", "test@verkstead.invalid"],
+        );
+        run(upstream, &["config", "user.name", "Verkstead Test"]);
+
+        run(
+            repo,
+            &["remote", "add", "origin", &upstream.to_string_lossy()],
+        );
+        run(repo, &["fetch", "--quiet", "origin"]);
+
+        write(upstream, "ahead.md", "# origin moved on\n");
+        run(upstream, &["add", "-A"]);
+        run(upstream, &["commit", "-m", "docs: origin moves on"]);
+    }
+
+    fn write(dir: &Path, name: &str, contents: &str) {
+        std::fs::write(dir.join(name), contents).unwrap();
+    }
+
+    fn run(dir: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .expect("git should be on the PATH for these tests");
+
+        assert!(output.status.success(), "git {args:?} failed");
+
+        String::from_utf8(output.stdout).unwrap()
+    }
+
+    /// A repository that records a stacking mechanism gets what it records, and
+    /// git is asked nothing about it: the predecessor's branch is where the work
+    /// is whether or not the default branch has taken it.
+    #[test]
+    fn a_recorded_stack_stands_on_the_predecessor() {
+        let repo = Repo::new();
+
+        assert!(matches!(
+            repo.stands(true),
+            Stands::Recorded { predecessor } if predecessor == "roadmap/01-first",
+        ));
+
+        repo.merge();
+
+        assert!(
+            matches!(repo.stands(true), Stands::Recorded { .. }),
+            "and it is what the repository records rather than what git says",
+        );
+    }
+
+    /// The case this rule was written for: nothing recorded, and a predecessor
+    /// the default branch does not hold. The branch stands on it anyway, because
+    /// the alternative is a whole stage built without the stage it builds on.
+    #[test]
+    fn an_unrecorded_stack_stands_on_an_unmerged_predecessor() {
+        let repo = Repo::new();
+
+        let Stands::Unrecorded {
+            predecessor,
+            default,
+        } = repo.stands(false)
+        else {
+            panic!("a predecessor `main` does not hold is one to stand on");
+        };
+
+        assert_eq!(predecessor, "roadmap/01-first");
+        assert_eq!(
+            default, "main",
+            "and which branch was asked, for the notice"
+        );
+    }
+
+    /// And once the human has merged it there is nothing left to stand on, so
+    /// the branch comes off the default branch — the ordinary unstacked start,
+    /// which is what this always was for a roadmap whose stages land as they go.
+    #[test]
+    fn a_merged_predecessor_leaves_nothing_to_stand_on() {
+        let repo = Repo::new();
+        repo.merge();
+
+        assert!(matches!(
+            repo.stands(false),
+            Stands::Off { default } if default == "main",
+        ));
+    }
+
+    /// What the default branch *is* is what origin is holding, so the refs are
+    /// made current before either question is asked of them. A predecessor
+    /// merged on origin and not yet here reads as merged, and the branch that
+    /// comes off origin's tip has the work origin has.
+    #[test]
+    fn origin_is_fetched_before_the_default_branch_is_read() {
+        let repo = Repo::new();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let upstream = elsewhere.path().join("upstream");
+
+        behind_an_origin(repo.path(), &upstream);
+
+        // Merged over there and nowhere else, which is the state a human who
+        // pressed the button on GitHub leaves.
+        run(
+            &upstream,
+            &["fetch", "--quiet", "origin", "roadmap/01-first"],
+        );
+        run(
+            &upstream,
+            &["merge", "-q", "--no-ff", "-m", "merge it", "FETCH_HEAD"],
+        );
+
+        assert!(
+            matches!(
+                repo.stands(false),
+                Stands::Off { ref default } if default == "origin/main",
+            ),
+            "a fetch is what tells this the predecessor has landed: {:?}",
+            run(repo.path(), &["log", "--oneline", "-1", "main"]),
+        );
+    }
+
+    /// A repository git will not fetch from starts nothing. Where the branch
+    /// goes turns on refs nobody can vouch for, and a stage started off those is
+    /// a whole stage of work starting from the wrong place.
+    #[test]
+    fn a_fetch_git_will_not_make_starts_nothing() {
+        let repo = Repo::new();
+
+        run(
+            repo.path(),
+            &["remote", "add", "origin", "/verkstead/no/such/repository"],
+        );
+
+        assert!(standing(repo.path(), "main", "roadmap/01-first", false).is_none());
+
+        assert!(
+            standing(repo.path(), "main", "roadmap/01-first", true).is_some(),
+            "and a recorded stack is never refused for it, having asked for no fetch",
+        );
+    }
+
+    /// A predecessor branch that resolves to nothing is not a branch: there is
+    /// nothing to stand on, so the default branch is all there is.
+    #[test]
+    fn a_predecessor_that_resolves_to_nothing_is_not_stood_on() {
+        let repo = Repo::new();
+
+        assert!(matches!(
+            standing(repo.path(), "main", "roadmap/no-such-branch", false),
+            Some(Stands::Off { .. }),
+        ));
     }
 }

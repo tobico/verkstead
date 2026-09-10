@@ -345,8 +345,20 @@ flowchart LR
   2026-08-21, building stage 04*: per the mechanism that repo **records**, in
   the `### Stacking roadmap stages` block of its `docs/agents/git-workflow.md`.
   Verkstead reads whether the block is there and the session follows what it
-  says; a repo that records none gets a branch off the default branch, said on
-  the timeline, because there is no convention to invent on its behalf.
+  says. *Refined 2026-09-09, building stage-stands-on-its-predecessor*: the
+  block decides what the session does about the **pull request**, and no longer
+  where the branch starts. Where the branch starts is git's question — **is the
+  stage before this one in the branch this one would come off?** — and a stage
+  stands on its predecessor whenever the answer is no, block or no block,
+  because a base without the work being built on is the wrong base whatever a
+  repo has written down. Reading only the block, a repo that had written nothing
+  got every stage off the default branch, including the ones whose predecessor
+  was sitting unmerged on a pull request: a whole stage built without the stage
+  it builds on, found by the stage's own session a grilling round later. Where
+  no block is recorded the pull request carries the stage before it until that
+  one merges, and the timeline says so — still no convention invented on the
+  repo's behalf, because the one thing Verkstead decides here is the one thing
+  it always decided.
 - **The brief freezes at grill start.** A later round adds a new brief
   event rather than editing the old one. Until then it is edited where it
   stands, with no mode to enter and no Save to press (*settled 2026-08-24,

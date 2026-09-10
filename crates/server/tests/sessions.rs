@@ -15701,7 +15701,21 @@ async fn stop_pressed_with_nothing_running_halts_where_it_stands() {
 /// goes for review, written beside the roadmap by the session that stages it.
 /// Empty is a repository that records nothing, which is one of the two answers
 /// about where the next stage's branch goes.
-fn a_roadmap_then_wraps_up(planning: &Path, worked: &Path, stages: &str, workflow: &str) -> String {
+///
+/// `merging` is what the review session does to the default branch on its way
+/// out, and it is where the *other* answer comes from: a stage stands on its
+/// predecessor until the default branch holds that work, so a fixture wanting an
+/// unstacked stage has to land the predecessor first. The review is where it
+/// goes because the ordering there is the pipeline's own rather than a test's —
+/// every review runs before the wrap-up it belongs to settles, and settling is
+/// what starts the stage. See [`MERGES_THE_PREDECESSOR`].
+fn a_roadmap_then_wraps_up(
+    planning: &Path,
+    worked: &Path,
+    stages: &str,
+    workflow: &str,
+    merging: &str,
+) -> String {
     format!(
         r#"
 case "$2" in
@@ -15719,6 +15733,7 @@ case "$2" in
     sleep 300
     ;;
 *reviewing/SKILL.md*)
+{merging}
     printf 'I read the whole branch and found nothing worth raising\n'
     exit 0
     ;;
@@ -15747,6 +15762,22 @@ esac
         worked = quoted(worked),
     )
 }
+
+/// What the review session does to land the branch it has just read: a
+/// fast-forward of the repository's own default branch onto it, which is the
+/// human pressing Merge without a GitHub to press it on.
+///
+/// Which leaves nothing for the stage after it to stand on, that being the whole
+/// point — a stage stands on its predecessor only while the default branch does
+/// not hold that work.
+///
+/// The repository is found from the worktree the session is standing in rather
+/// than passed in, there being no way to pass one: `--git-common-dir` is the
+/// main checkout's git directory whichever linked worktree asks, and its parent
+/// is the repository. A fast-forward rather than a merge commit so that nothing
+/// here needs an author, and it is one the branch has by construction: it was
+/// cut from the default branch and the default branch has not moved since.
+const MERGES_THE_PREDECESSOR: &str = r#"    git -C "$(dirname "$(git rev-parse --git-common-dir)")" merge --quiet --ff-only "$(git rev-parse --abbrev-ref HEAD)""#;
 
 /// What a repository that records a way to stack a roadmap stage says, as the
 /// staging session writes it onto the branch.
@@ -15908,7 +15939,7 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
 
     let fixture = grilling_spilling(
         spill,
-        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING),
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING, ""),
         &gh_about(GREEN, "", ""),
     )
     .await;
@@ -16100,7 +16131,7 @@ async fn a_roadmap_moving_on_tells_the_devices_which_stage_started() {
 
     let fixture = grilling_spilling(
         spill,
-        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING),
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING, ""),
         &gh_about(GREEN, "", ""),
     )
     .await;
@@ -16160,21 +16191,28 @@ async fn a_roadmap_moving_on_tells_the_devices_which_stage_started() {
     );
 }
 
-/// A repository that records no way to stack a roadmap stage gets a branch off
-/// its default branch — and the Timeline says so plainly rather than Verkstead
-/// inventing a convention the repository never agreed to.
+/// A repository that records no way to stack a roadmap stage still stands its
+/// stage on the predecessor, because where the branch starts is not the file's
+/// question: the stage before this one is unmerged, so the default branch is a
+/// base without the work this stage builds on.
+///
+/// What the missing block changes is the pull request rather than the branch,
+/// and the Timeline says both — what Verkstead did, and what the repository had
+/// not written down.
 #[tokio::test]
-async fn a_repository_with_no_stacking_recorded_gets_a_stage_off_the_default_branch() {
+async fn a_repository_with_no_stacking_recorded_still_stands_its_stage_on_the_predecessor() {
     let spill = tempfile::tempdir().unwrap();
     let planning = spill.path().join("stage-prompts");
     let worked = spill.path().join("task-prompts");
 
     let fixture = grilling_spilling(
         spill,
-        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, ""),
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, "", ""),
         &gh_about(GREEN, "", ""),
     )
     .await;
+
+    let roadmap_branch = fixture.view().await.branch;
 
     staged_and_settled(&fixture).await;
 
@@ -16182,19 +16220,76 @@ async fn a_repository_with_no_stacking_recorded_gets_a_stage_off_the_default_bra
     let said = notices(&stage).join("\n");
 
     assert!(
-        said.contains("no way to stack"),
-        "what was missing is said rather than worked around: {said:?}",
+        said.contains(&format!("<code>{roadmap_branch}</code>")),
+        "the branch stands on the one the stage before it was worked on: {said:?}",
     );
     assert!(
-        said.contains("<code>main</code>"),
-        "and where the branch went instead: {said:?}",
+        said.contains("<code>main</code>") && said.contains("does not hold that work yet"),
+        "and why, which is a fact about git rather than about the file: {said:?}",
+    );
+    assert!(
+        said.contains("no way to stack"),
+        "what was missing is said rather than swallowed: {said:?}",
+    );
+    assert!(
+        said.contains("carries the stage before it"),
+        "and what that costs the pull request this stage ends on: {said:?}",
     );
 
     let worktree = PathBuf::from(stage.worktree.expect("a stage has a Worktree").path);
 
     assert!(
-        !git(&worktree, &["log", "--oneline"]).contains("docs: stage the rate-limiting roadmap"),
-        "the branch came off the default branch, so the roadmap is not under it",
+        git(&worktree, &["log", "--oneline"]).contains("docs: stage the rate-limiting roadmap"),
+        "and the work really is under it: a stage cannot build on a roadmap it cannot read",
+    );
+
+    let prompt = until_written(&planning).await;
+
+    assert!(
+        prompt.contains(&format!("stacks on `{roadmap_branch}`")),
+        "and the session is told that rather than left to guess: {prompt:?}",
+    );
+}
+
+/// And once the default branch holds the stage before it there is nothing left
+/// to stand on, so the branch comes off the default branch — the ordinary
+/// unstacked start, which is what a roadmap whose stages land as they go gets
+/// every time.
+#[tokio::test]
+async fn a_stage_whose_predecessor_has_landed_comes_off_the_default_branch() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, "", MERGES_THE_PREDECESSOR),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    let roadmap_branch = fixture.view().await.branch;
+
+    staged_and_settled(&fixture).await;
+
+    let stage = stage_of(&fixture).await;
+    let said = notices(&stage).join("\n");
+
+    assert!(
+        said.contains("<code>main</code>") && said.contains("already holds the stage before it"),
+        "the notice says where the branch came off and why there was nothing to stand on: \
+         {said:?}",
+    );
+    assert!(
+        !said.contains(&format!("stands on <code>{roadmap_branch}</code>")),
+        "and it does not stand on a branch whose work is already in the base: {said:?}",
+    );
+
+    let worktree = PathBuf::from(stage.worktree.expect("a stage has a Worktree").path);
+
+    assert!(
+        git(&worktree, &["log", "--oneline"]).contains("docs: stage the rate-limiting roadmap"),
+        "the roadmap is under it all the same, having come through the default branch",
     );
 
     let prompt = until_written(&planning).await;
@@ -16253,21 +16348,30 @@ fn behind_an_origin(repo: &Path, upstream: &Path) {
     git(upstream, &["commit", "-m", "docs: origin moves on"]);
 }
 
-/// An unstacked stage's branch comes off what origin is holding, not off
-/// wherever this checkout's copy of the default branch was last left.
+/// Origin is fetched before a stage start reads the default branch, whichever
+/// way the reading then goes.
 ///
-/// The rule a grilling starts by, at the other end of the pipeline: a machine
-/// that has not pulled for a week would otherwise start every stage of a
-/// roadmap a week behind the work, with nobody at a button to notice.
+/// The rule a grilling starts by, at the other end of the pipeline: what the
+/// default branch *is* is what origin is holding rather than wherever this
+/// checkout's copy of it was last left, and both things a stage start asks of it
+/// turn on that — the commit an unstacked stage comes off, and whether the stage
+/// before this one has landed in it. A machine that has not pulled for a week
+/// would otherwise start every stage a week behind the work and read a
+/// predecessor merged a week ago as still in flight, with nobody at a button to
+/// notice.
+///
+/// This one goes on to stand on its predecessor, that work being unmerged — so
+/// what origin has moved on to is deliberately not under the stage, and the
+/// fetch shows in the remote-tracking ref rather than in the checkout.
 #[tokio::test]
-async fn an_unstacked_stage_comes_off_origins_tip_rather_than_the_local_branch() {
+async fn a_stage_start_fetches_origin_before_it_reads_the_default_branch() {
     let spill = tempfile::tempdir().unwrap();
     let planning = spill.path().join("stage-prompts");
     let worked = spill.path().join("task-prompts");
 
     let fixture = grilling_spilling(
         spill,
-        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, ""),
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, "", ""),
         &gh_about(GREEN, "", ""),
     )
     .await;
@@ -16280,19 +16384,36 @@ async fn an_unstacked_stage_comes_off_origins_tip_rather_than_the_local_branch()
 
     let behind = git(&repo, &["rev-parse", "main"]).trim().to_owned();
 
+    assert_eq!(
+        git(&repo, &["rev-parse", "origin/main"]).trim(),
+        behind,
+        "nothing has heard about origin moving on yet",
+    );
+
     staged_and_settled(&fixture).await;
 
     let stage = stage_of(&fixture).await;
     let worktree = PathBuf::from(stage.worktree.expect("a stage has a Worktree").path);
 
-    assert!(
-        worktree.join("ahead.md").exists(),
-        "the stage should have come off what origin is holding now",
+    assert_ne!(
+        git(&repo, &["rev-parse", "origin/main"]).trim(),
+        behind,
+        "the stage start fetched: what the default branch means was asked of origin",
     );
 
     // The fetch moved the remote-tracking ref and nothing else: the human's own
     // branch is exactly where they left it.
     assert_eq!(git(&repo, &["rev-parse", "main"]).trim(), behind);
+
+    assert!(
+        !worktree.join("ahead.md").exists(),
+        "and the answer it gave was to stand on the predecessor, whose work origin \
+         has not taken — so origin's newer default branch is not under this stage",
+    );
+    assert!(
+        git(&worktree, &["log", "--oneline"]).contains("docs: stage the rate-limiting roadmap"),
+        "the work it builds on is",
+    );
 }
 
 /// Nobody is at a button when a stage starts, so a fetch git would not make
@@ -16309,7 +16430,7 @@ async fn a_stage_whose_fetch_fails_halts_with_a_notice_and_starts_nothing() {
 
     let fixture = grilling_spilling(
         spill,
-        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, ""),
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, "", ""),
         &gh_about(GREEN, "", ""),
     )
     .await;
@@ -16405,8 +16526,9 @@ fn moved_on(repo: &Path) -> String {
 /// Read-only comes across as it is and is detached at whatever its base resolves
 /// to *for this stage*; read-write cuts a branch of its own named after the
 /// stage's own branch, whatever the roadmap Conversation's row was called. This
-/// one does not stack, so both come off the configured base as it stands at the
-/// moment the stage starts.
+/// one does not stack — the review lands the predecessor on the default branch,
+/// which leaves nothing to stand on — so both come off the configured base as it
+/// stands at the moment the stage starts.
 #[tokio::test]
 async fn a_stage_inherits_the_companion_set_its_roadmap_was_grilled_with() {
     let spill = tempfile::tempdir().unwrap();
@@ -16415,7 +16537,7 @@ async fn a_stage_inherits_the_companion_set_its_roadmap_was_grilled_with() {
 
     let fixture = grilling_at_pace(
         spill,
-        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, ""),
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, "", MERGES_THE_PREDECESSOR),
         &gh_about(GREEN, "", ""),
         *BRISKLY,
         &[
@@ -16531,7 +16653,7 @@ async fn a_stacked_stage_cuts_its_companion_branch_from_the_predecessors() {
 
     let fixture = grilling_at_pace(
         spill,
-        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING),
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING, ""),
         &gh_about(GREEN, "", ""),
         *BRISKLY,
         &[
@@ -16599,7 +16721,7 @@ async fn a_stage_whose_companion_cannot_be_delivered_starts_nothing() {
 
     let fixture = grilling_at_pace(
         spill,
-        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, ""),
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, "", ""),
         &gh_about(GREEN, "", ""),
         *BRISKLY,
         &[("askance", CompanionMode::ReadWrite)],
@@ -16701,6 +16823,7 @@ async fn a_roadmap_with_every_stage_checked_starts_nothing_and_says_it_is_comple
             &worked,
             r#"- [x] 01: Count the requests — [brief](01-counter.md)\n- [x] 02: Refuse the rest — [brief](02-refusing.md)\n"#,
             RECORDS_STACKING,
+            "",
         ),
         &gh_about(GREEN, "", ""),
     )
@@ -26247,7 +26370,7 @@ async fn a_stage_inherits_the_no_review_its_roadmap_was_grilled_with() {
 
     let fixture = grilling_unreviewed(
         spill,
-        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, ""),
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, "", ""),
         &gh_about(GREEN, "", ""),
     )
     .await;

@@ -152,9 +152,13 @@ const STACKING: &str = "### Stacking roadmap stages";
 /// The question is only whether the block is *there*. What it says is the
 /// repository's own business and the session's to follow: Verkstead carries no
 /// stacking mechanism of its own, and one invented here would be a convention
-/// this repository never agreed to. Where the block is missing there is nothing
-/// to follow, so the stage branches off the default branch and the Timeline says
-/// which of the two happened.
+/// this repository never agreed to.
+///
+/// **What this does not decide is where the branch starts.** That is git's
+/// question rather than the file's — see [`crate::continuing::Stands`] — and a
+/// stage whose predecessor is unmerged stands on it whether or not there is a
+/// block to read. Where the block is missing what follows is a pull request
+/// carrying the stage before it until that one merges, and the Timeline says so.
 ///
 /// Read under `## Review process` rather than anywhere in the file, because that
 /// is where the section belongs and a file that mentioned stacking in passing —
