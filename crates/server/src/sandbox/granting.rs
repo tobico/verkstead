@@ -325,21 +325,6 @@ pub(crate) fn standing_of(surface: &Surface, profile: Option<&Path>) -> Vec<Path
     standing
 }
 
-/// The installation's own grants as entries, so that the one thing which ever
-/// takes them off can — see [`super::standing`] for the three and
-/// [`super::account::machine::remove`] for the moment.
-///
-/// No steps among them, and none wanted: what [`writing::strip`] does with a
-/// grant is revoke every entry the trustee has on that directory, and the steps
-/// on the way to it are the same entry every boundary writes anyway. They go
-/// when the account does, which is what removes them from every list at once.
-pub(crate) fn standing(paths: &[(PathBuf, Reach)]) -> Vec<Entry> {
-    paths
-        .iter()
-        .map(|(path, reach)| granted(path, *reach))
-        .collect()
-}
-
 /// Of `entries`, the ones that are written down with the boundary — which is
 /// every one the installation does not already stand behind.
 ///
@@ -376,10 +361,31 @@ pub(crate) fn standing(paths: &[(PathBuf, Reach)]) -> Vec<Entry> {
 pub(crate) fn written_down(entries: &[Entry], standing: &[PathBuf]) -> Vec<Entry> {
     entries
         .iter()
-        .filter(|entry| entry.wanted != Wanted::Stepped)
-        .filter(|entry| !stands(&entry.path, standing))
+        .filter(|entry| !the_installations(entry, standing))
         .cloned()
         .collect()
+}
+
+/// And the other half: the ones that stand for the installation, which is what
+/// the machine's own record holds so that removing the account can take them
+/// off — see [`remembering::standing_wrote`], and
+/// [`super::account::machine::remove`], which is the one thing that ever reads
+/// it.
+///
+/// **The complement of [`written_down`] exactly**, off the same predicate, so
+/// that no entry is in both records and none is in neither.
+pub(crate) fn standing_among(entries: &[Entry], standing: &[PathBuf]) -> Vec<Entry> {
+    entries
+        .iter()
+        .filter(|entry| the_installations(entry, standing))
+        .cloned()
+        .collect()
+}
+
+/// Whether one entry is the installation's — the one rule, read by both halves
+/// of the split above.
+fn the_installations(entry: &Entry, standing: &[PathBuf]) -> bool {
+    entry.wanted == Wanted::Stepped || stands(&entry.path, standing)
 }
 
 /// Whether the entry on `path` is the **installation's** rather than one

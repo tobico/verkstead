@@ -1505,44 +1505,6 @@ pub(crate) fn reaching(platform: Platform, path: &OsStr, home: &Path, surface: &
     }
 }
 
-/// The three grants that stand for the installation, worked out from a Data
-/// Directory alone — see [`Surface::standing`], which is where each of them is
-/// said and why it is one.
-///
-/// **Said twice on purpose.** Every description names these as it builds its
-/// own surface, which is where they are granted; this is the same three read
-/// off the machine rather than off a description, and the one caller is
-/// [`account::machine::remove`] — the account going is the one moment anything
-/// takes a standing grant off, and there is no surface anywhere near it.
-///
-/// **A cache the human configured elsewhere is not found here**, because
-/// nothing but the command line said where it went and the account is being
-/// removed by a verb that was handed a Data Directory. What is left behind in
-/// that case is an entry naming a SID the machine no longer has, which is a
-/// tidiness rather than a reach: an entry for an identity that does not exist
-/// grants nobody anything.
-#[cfg(windows)]
-pub(crate) fn standing_grants(data_dir: &Path) -> Vec<(PathBuf, Reach)> {
-    let mut standing = vec![(crate::worktrees::directory(data_dir), Reach::ReadWrite)];
-
-    if let Some(cache) = crate::platform::cache_dir() {
-        standing.push((cache, Reach::ReadWrite));
-    }
-
-    // The same two steps the descriptions take to it — see [`reaching`], which
-    // is what grants it for a session and for the Compile Server alike.
-    let ours = own_bin(Platform::HERE, data_dir);
-    let searches = path(Platform::HERE, &ours);
-
-    if let Some(rustup) =
-        servers_home().and_then(|home| toolchains(Platform::HERE, &searches, home))
-    {
-        standing.push((rustup, Reach::ReadOnly));
-    }
-
-    standing
-}
-
 /// What a `rustup` on the `PATH` is the front of: the rustup home of whoever
 /// runs the server, where there is one to grant.
 ///
@@ -3751,6 +3713,18 @@ impl Sandbox {
             entries.wrote(
                 granting::written_down(&boundary.entries, &boundary.standing),
                 cut.clone(),
+            )?;
+
+            // And the other half of the same list, in the machine's own record
+            // rather than this Conversation's: nothing sweeps a standing entry,
+            // so removing the account is the one thing that ever takes one off
+            // and this is what it reads — see
+            // [`granting::remembering::standing_wrote`].
+            granting::remembering::standing_wrote(
+                boundary.data_dir,
+                account.name(),
+                account.sid().text(),
+                &granting::standing_among(&boundary.entries, &boundary.standing),
             )?;
 
             granting::writing::write(&boundary.entries, account.sid().text(), &cut)?;

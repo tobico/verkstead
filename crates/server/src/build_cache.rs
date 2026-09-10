@@ -863,12 +863,20 @@ fn compile_server(
             account.sid().text(),
         )?;
 
+        let standing = sandbox::granting::standing_of(&surface, sandbox::servers_home());
+
         held.wrote(
-            sandbox::granting::written_down(
-                &entries,
-                &sandbox::granting::standing_of(&surface, sandbox::servers_home()),
-            ),
+            sandbox::granting::written_down(&entries, &standing),
             cut.clone(),
+        )?;
+
+        // And the machine's own half — see this call in `sandbox::command`,
+        // which is the same two records written for the same reason.
+        sandbox::granting::remembering::standing_wrote(
+            data_dir,
+            account.name(),
+            account.sid().text(),
+            &sandbox::granting::standing_among(&entries, &standing),
         )?;
 
         sandbox::granting::writing::write(&entries, account.sid().text(), &cut)?;
