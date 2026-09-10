@@ -64,9 +64,11 @@ use verkstead_render::{
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
-use verkstead_server::platform::Platform;
-use verkstead_server::sandbox::container;
+use verkstead_server::platform::{self, Platform};
+use verkstead_server::sandbox::account::Logon;
+use verkstead_server::sandbox::account::machine::Account;
 use verkstead_server::sandbox::{Executable, Homes, Reachable, SandboxConfig};
+
 use verkstead_server::settings::Settings;
 use verkstead_server::skills::Skills;
 use verkstead_server::terminal::COLUMNS;
@@ -108,7 +110,7 @@ const PATIENCE: Duration = Duration::from_secs(180);
 /// Short, because what it is waiting on is already over: what would have
 /// started a compile server starts it before it returns, so this is slack for a
 /// loaded runner rather than a race being sat out. See
-/// [`no_compile_server_comes_up_on_this_platform`].
+/// [`a_compile_server_comes_up_as_the_session_account`].
 const SETTLED: Duration = Duration::from_secs(5);
 
 /// What the stand-in is started as: Windows PowerShell, which every machine
@@ -141,13 +143,13 @@ const POWERSHELL: [&str; 4] = ["powershell.exe", "-NoProfile", "-ExecutionPolicy
 /// the session was started in, and `Waiting` is a pause.
 ///
 /// **Not one cmdlet in any of it**, which is a rule rather than a style and is
-/// the rule `tests/container_windows.rs` and `tests/sandbox_windows.rs` are
-/// already written under. A session runs inside an AppContainer from this stage
-/// on, and Windows PowerShell starting in there parses and runs what it is
-/// given without the commands it would ordinarily import from a module as it
-/// starts: the `windows-2025` job answered `CommandNotFoundException` for
-/// `Write-Output` the first time a probe of this shape ran inside one. So every
-/// stand-in here is the language and the framework and nothing else —
+/// the rule `tests/sandbox_windows.rs` is already written under. A session runs
+/// behind a boundary, and Windows PowerShell starting behind one parses and runs
+/// what it is given without the commands it would ordinarily import from a
+/// module as it starts: the `windows-2025` job answered
+/// `CommandNotFoundException` for `Write-Output` the first time a probe of this
+/// shape ran inside one. So every stand-in here is the language and the
+/// framework and nothing else —
 /// `[System.IO.Path]::Combine` rather than `Join-Path`, `[System.IO.File]`
 /// rather than `Set-Content` and `Get-Content`, a `Thread` rather than
 /// `Start-Sleep` — which is what a program has in there whatever the shell
@@ -247,6 +249,16 @@ static ROOM: LazyLock<Arc<tokio::sync::Semaphore>> = LazyLock::new(|| {
     Arc::new(tokio::sync::Semaphore::new((cores * 2).clamp(4, 16)))
 });
 
+/// And the two tests here that count sccache servers, one at a time.
+///
+/// **Because what they count is the machine's**, not this suite's: an sccache
+/// server is a process outside every Verkstead, so the only way to say *this
+/// one came up now* is to diff the list before against the list after. Two
+/// tests doing that at once each see the other's server as their own, which is
+/// a failure that depends on which of them is scheduled first. So they take
+/// turns, and each holds this for as long as its own diff is open.
+static COUNTING: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(|| tokio::sync::Mutex::new(()));
+
 /// The pace these sessions are driven at.
 ///
 /// **Every clock that ends a session is longer than any test in this file
@@ -278,14 +290,15 @@ static UNHURRIED: LazyLock<Pace> = LazyLock::new(|| Pace {
 /// Where every directory this suite makes goes: the machine's temporary
 /// directory, spelled the way the filesystem holds it.
 ///
-/// **Because a container cannot expand a short name.** The `windows-2025`
-/// runner hands `%TEMP%` out in its 8.3 spelling, the account `runneradmin`
-/// reached as `RUNNER~1` — and expanding one of those means listing `C:\Users`,
-/// which is the human's own profile and is exactly what a session inside an
-/// AppContainer is refused. So a program in there that hands .NET a path with a
-/// `~` in it is told the path is denied, which is the whole of what
+/// **Because a session cannot expand a short name.** The `windows-2025` runner
+/// hands `%TEMP%` out in its 8.3 spelling, the account `runneradmin` reached as
+/// `RUNNER~1` — and expanding one of those means *listing* `C:\Users`, which is
+/// the human's own profile and is exactly what a session is refused: a step
+/// through an ancestor is a walk rather than a listing, which is the whole of
+/// what a step is. So a program behind the boundary that hands .NET a path with
+/// a `~` in it is told the path is denied, which is the whole of what
 /// `[System.IO.Directory]::GetCurrentDirectory()` did the day this suite first
-/// ran inside one.
+/// ran behind one.
 ///
 /// **And nothing Verkstead composes is spelled that way.** A Data Directory is
 /// under `%LOCALAPPDATA%` and a Worktree under it, both of which the shell
@@ -585,14 +598,83 @@ impl Grilling {
 /// `$line`, `$named` and `$prompt` already read, and `Note`, `Say` and `Idle`
 /// to say things with.
 async fn grilling(script: &str) -> Grilling {
-    grilling_caching(script, None).await
+    grilling_caching(script, None, Builds::Nothing).await
 }
 
-/// The same, with a shared build cache behind it — which is what the test about
-/// the cache needs and what nothing else here wants: a cache is a `CARGO_HOME`
-/// and a granted directory in every session's environment, and every other test
-/// in this file is about a session that builds nothing.
-async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
+/// Where this machine's rustup keeps its toolchains, read the way rustup reads
+/// it: `%RUSTUP_HOME%` where the machine says one, and `%USERPROFILE%\.rustup`
+/// where it does not.
+///
+/// Read out here rather than asked of the server, for the reason [`listed`] is
+/// `icacls`: what a test compares against has to be something other than the
+/// answer under test.
+fn rustups() -> PathBuf {
+    if let Some(said) = std::env::var_os("RUSTUP_HOME") {
+        return PathBuf::from(said);
+    }
+
+    let profile = std::env::var_os("USERPROFILE").expect("every Windows account has a profile");
+
+    PathBuf::from(profile).join(".rustup")
+}
+
+/// `target` joined in at `name`, as a directory junction — which is what
+/// Verkstead's own rendering makes for a directory and needs no privilege.
+fn joined(target: &Path, name: &Path) {
+    assert!(
+        target.is_dir(),
+        "this machine has no rustup home at {}, so a session could not build \
+         Rust here whatever the boundary said: install rust with rustup, as the \
+         Windows job does",
+        target.display(),
+    );
+
+    let made = Command::new("cmd.exe")
+        .args(["/c", "mklink", "/J"])
+        .args([name, target])
+        .stdin(Stdio::null())
+        .output()
+        .expect("cmd.exe is part of Windows");
+
+    assert!(
+        made.status.success(),
+        "joining {} in at {} failed: {}",
+        target.display(),
+        name.display(),
+        String::from_utf8_lossy(&made.stdout),
+    );
+}
+
+/// And the same again in a Repo a session would build Rust in, which is what
+/// puts the Compile Server up: the session start asks the checkout for a
+/// manifest, and nothing else on this Timeline would ever want one.
+async fn grilling_building(script: &str, cache: Option<&Path>) -> Grilling {
+    grilling_caching(script, cache, Builds::Rust).await
+}
+
+/// What the Repo a fixture registers holds, which is the one thing about it a
+/// test here ever varies.
+///
+/// **A `Cargo.toml` at the root is what starts the Compile Server**, and
+/// nothing else does — see `build_cache::builds_rust`, which the session start
+/// asks of the checkout. So a fixture is asked which it is rather than every
+/// one of them paying for an sccache server it has nothing to compile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Builds {
+    /// A repository with a README and no manifest, which is every fixture here
+    /// but the one about building.
+    Nothing,
+
+    /// And one a session would build Rust in.
+    Rust,
+}
+
+/// The same, with a shared build cache behind it — which is what the tests
+/// about the cache need and what nothing else here wants: a cache is a
+/// `CARGO_HOME`, a `RUSTC_WRAPPER` and a granted directory in every session's
+/// environment, and every other test in this file is about a session that
+/// builds nothing.
+async fn grilling_caching(script: &str, cache: Option<&Path>, builds: Builds) -> Grilling {
     // Before the server exists, because what is worth reading is what it says
     // as it starts a session — see [`LOGGING`].
     LazyLock::force(&LOGGING);
@@ -612,7 +694,23 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
 
     std::fs::write(state.path().join("config.yaml"), THE_AUTHOR).unwrap();
 
+    // And the password of the account every session here runs as, written into
+    // this Data Directory's own secrets — the other half of running as the
+    // machine's account, whose name goes on the `Homes` below. See
+    // [`the_machines_account`].
+    let running_as = the_machines_account();
+    let settings = Settings::in_data_dir(state.path());
+
+    settings
+        .save_secrets(
+            &settings
+                .secrets()
+                .with_session_account_password(Some(running_as.password().to_owned())),
+        )
+        .expect("a secrets file to be writable under a temporary Data Directory");
+
     let database = state.path().join("verkstead.db");
+
     let pool = open_database(&database).await.unwrap();
 
     // The Agent Profile's account, made before the stand-in is written because
@@ -629,6 +727,19 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
     let humans = state.path().join("nobody");
     std::fs::create_dir_all(humans.join("Documents")).unwrap();
     std::fs::write(humans.join("Documents").join("private.txt"), THE_HUMANS).unwrap();
+
+    // And, where the fixture is about building Rust, the machine's own rustup
+    // home joined into that one — because a session finds its toolchain either
+    // where `%RUSTUP_HOME%` says or under the home of whoever runs the server,
+    // and this fixture's home is a temporary directory while a toolchain is
+    // gigabytes (see the server's `sandbox::toolchains`). A `cargo test` is
+    // itself started by a rustup shim, so the variable is usually set and this
+    // is the fallback being covered rather than the case; a junction rather
+    // than a copy either way, so that what is on the far side of it is the
+    // toolchain this machine really has.
+    if builds == Builds::Rust {
+        joined(&rustups(), &humans.join(".rustup"));
+    }
 
     let skills =
         Skills::installed(Platform::HERE, state.path()).expect("this binary carries skills");
@@ -671,19 +782,20 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
         // The server's own home, which this platform never hands a session:
         // every Conversation here gets one of its own under the Data
         // Directory. See `Homes::for_conversation`.
-        Homes::on(Platform::HERE, humans.clone(), state.path()),
+        Homes::on(Platform::HERE, humans.clone(), state.path())
+            .running_sessions_as(running_as.name()),
         Reachable::at(LISTENING),
         // The two directories this suite's own machinery lives in, configured
         // as binds the way a human configures a build cache.
         //
         // **They have to be said, and that is the stage landing rather than a
-        // fixture growing a wart.** A session runs inside an AppContainer now,
-        // which reaches what its identity has been granted and nothing else —
-        // so a stand-in script under the machine's temporary directory is a
-        // file a session cannot read, and an evidence directory beside it is
-        // one it cannot write. Both are outside the description a session gets,
-        // exactly as they should be; what puts them inside is the same thing
-        // that puts a human's build cache inside.
+        // fixture growing a wart.** A session runs as a local account of
+        // Verkstead's own now, which reaches what that account has been granted
+        // and nothing else — so a stand-in script under the machine's temporary
+        // directory is a file a session cannot read, and an evidence directory
+        // beside it is one it cannot write. Both are outside the description a
+        // session gets, exactly as they should be; what puts them inside is the
+        // same thing that puts a human's build cache inside.
         SandboxConfig::resolve(&[
             scripts.path().display().to_string(),
             evidence.path().display().to_string(),
@@ -691,7 +803,7 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
         .expect("two directories that are really there"),
         build_cache,
         skills,
-        Executable::of_the_server(state.path()),
+        Some(the_verkstead_binary(state.path())),
         Handoffs::under(state.path()),
         Attachments::under(state.path()),
         Settings::in_data_dir(state.path()),
@@ -711,7 +823,7 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
         ]),
     );
 
-    let repo = repository(repo);
+    let repo = repository(repo, builds);
     let registered: Registered =
         post(&app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
     assert!(matches!(registered, Registered::Added(_)));
@@ -778,6 +890,80 @@ async fn grilling_caching(script: &str, cache: Option<&Path>) -> Grilling {
         account,
         skills_inside,
         _room: room,
+    }
+}
+
+/// The Verkstead binary a session is equipped with, and which the launcher verb
+/// that makes its console is run out of.
+///
+/// **A real one rather than this test harness's own image**, which is what
+/// `Executable::of_the_server` would hand back here and what this suite used to
+/// pass. A Windows session comes up on a console made on the far side of the
+/// account boundary by `verkstead session-launcher` — see the server's
+/// `terminal::launcher` — so the image a description names has to be a build
+/// that understands that verb, and a test binary told to run it runs the test
+/// harness instead.
+///
+/// **Found beside the test binary rather than named**, because a server-crate
+/// test has no `CARGO_BIN_EXE_verkstead` to read: that is the CLI crate's, and
+/// this is not the CLI crate. What is here instead is where Cargo puts both —
+/// a test binary is in `deps` under the profile directory, and the workspace's
+/// binaries are in the profile directory itself.
+///
+/// A checkout where it has not been built fails here with the line that says
+/// so, rather than starting sessions that cannot come up on a console. The
+/// `windows-2025` job builds the whole workspace before it runs anything, and
+/// `cargo test --workspace` builds it for the CLI's own suites.
+fn the_verkstead_binary(data_dir: &Path) -> Executable {
+    let built = std::env::current_exe()
+        .expect("a test binary knows what it is running")
+        .parent()
+        .and_then(Path::parent)
+        .expect("a test binary is in `deps` under the profile directory")
+        .join("verkstead.exe");
+
+    Executable::at(Platform::HERE, built.clone(), data_dir).unwrap_or_else(|| {
+        panic!(
+            "this suite starts sessions on a console a launcher verb of Verkstead's own \
+             binary makes, and there is no such binary at {}. Build the workspace first: \
+             `cargo build --workspace --all-targets`.",
+            built.display(),
+        )
+    })
+}
+
+/// The local account this machine's Verkstead runs its sessions as, name and
+/// password both.
+///
+/// **A suite cannot make one and says so rather than passing** — the rule
+/// `tests/account_windows.rs` follows, and for its reason: creating a local
+/// account is an administrator's call, so a machine where the elevated verb has
+/// never been run fails here with the line that names it.
+///
+/// **Which is why it is the *machine's* Data Directory rather than this
+/// fixture's.** An account's name is a fingerprint of the Data Directory it
+/// belongs to (see the server's `sandbox::account`), and every fixture here runs
+/// against a temporary one — so the account it would be named after is one no
+/// elevated verb was ever run for. What a fixture runs as instead is the account
+/// the human really has, said outright on the `Homes` and with its password
+/// written into the fixture's own secrets.
+///
+/// Not to be confused with the **Agent Profile's** account below, which is a
+/// pair of files a session finds in its profile and has nothing to do with who
+/// the session is.
+fn the_machines_account() -> Logon {
+    let data_dir =
+        platform::data_dir(None).expect("this machine has somewhere for a Data Directory");
+    let settings = Settings::in_data_dir(&data_dir);
+
+    match Account::on_this_machine(&data_dir, &settings.secrets()) {
+        Ok(account) => Logon::of(account.name(), account.password()),
+        Err(missing) => panic!(
+            "this suite runs sessions as the session account and there is not one: {missing}\n\
+             \n\
+             The Data Directory it asked about is {}.",
+            data_dir.display(),
+        ),
     }
 }
 
@@ -863,14 +1049,30 @@ async fn profile(app: &Router, account: &Path, name: &str) -> i64 {
         .id
 }
 
-/// A git repository at `path`, with one commit on `main`.
-fn repository(path: PathBuf) -> PathBuf {
+/// A git repository at `path`, with one commit on `main` — and a manifest in it
+/// where `builds` says it is one a session would build Rust in.
+///
+/// The manifest is a real one rather than an empty file: what reads it is the
+/// session start, which asks only whether there is a `Cargo.toml` at the root,
+/// but a repository carrying something that is not a manifest under that name
+/// would be a fixture lying about what it is.
+fn repository(path: PathBuf, builds: Builds) -> PathBuf {
     std::fs::create_dir_all(&path).unwrap();
     git(&path, &["init", "--initial-branch", "main"]);
     git(&path, &["config", "user.email", "test@verkstead.invalid"]);
     git(&path, &["config", "user.name", "Verkstead Test"]);
     std::fs::write(path.join("README.md"), "# a repository\n").unwrap();
     git(&path, &["add", "README.md"]);
+
+    if builds == Builds::Rust {
+        std::fs::write(
+            path.join("Cargo.toml"),
+            "[package]\nname = \"probe\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        git(&path, &["add", "Cargo.toml"]);
+    }
+
     git(&path, &["commit", "-m", "first"]);
 
     path
@@ -931,6 +1133,34 @@ async fn until_there(path: &Path) {
         );
 
         pause(Duration::from_millis(25)).await;
+    }
+}
+
+/// And until there is anything at all under it, which is how a cache that has
+/// been compiled into is told from one that has not.
+///
+/// Waited rather than read once for the reason [`until_there`] is: what puts
+/// something there is a process outside this one, and the moment it does is not
+/// this test's to know.
+async fn until_something_in(directory: &Path) {
+    let deadline = Instant::now() + PATIENCE;
+
+    loop {
+        let anything = std::fs::read_dir(directory)
+            .map(|listing| listing.flatten().next().is_some())
+            .unwrap_or(false);
+
+        if anything {
+            return;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "nothing was ever written under {}",
+            directory.display(),
+        );
+
+        pause(Duration::from_millis(50)).await;
     }
 }
 
@@ -1402,18 +1632,14 @@ async fn force_stop_ends_a_session_where_it_stands() {
 /// Profile named is really there, joined in by the junction and the hard link
 /// the open rendering makes.
 ///
-/// **Two of the five are the value Verkstead composed and three of them are
-/// not.** Windows stamps its own `LOCALAPPDATA`, `TEMP` and `TMP` over what a
-/// process inside an AppContainer was handed: a container has a private folder
-/// of its own, at `Packages\<the profile's name>\AC` under whatever local half
-/// the process was started with, and it is told that folder for the local half
-/// and the `Temp` inside it for the other two. Which is all still inside this
-/// Conversation's own profile, and so still goes when the profile does — the
-/// fresh profile's whole claim, and where what a session throws away really
-/// lands, rather than the temporary directory the description makes beside it.
-/// It is asserted here rather than allowed for, because a container whose
-/// private folder landed in the human's own local half would be a different
-/// fact entirely.
+/// **All five are the value Verkstead composed**, which is one of the things
+/// that got simpler when the boundary stopped being an AppContainer: a session
+/// inside one was handed Windows' own `LOCALAPPDATA`, `TEMP` and `TMP` over the
+/// top of what the rendering said, pointing at a private folder of the
+/// container's under `Packages\<the profile's name>\AC`. A process started as an
+/// ordinary local account is handed the environment block it was given and
+/// nothing else, so what a session reads for each of these is what the
+/// description said — which is what the test below now asserts outright.
 #[tokio::test]
 async fn a_session_runs_in_a_profile_of_the_conversations_own() {
     let fixture = grilling(
@@ -1440,17 +1666,10 @@ async fn a_session_runs_in_a_profile_of_the_conversations_own() {
     let roaming = profile.join("AppData").join("Roaming");
     let local = profile.join("AppData").join("Local");
 
-    // And the container's own private folder inside that local half, which is
-    // what Windows tells a session `LOCALAPPDATA` is, with the temporary
-    // directory it is told about inside that — see this test's own
-    // documentation. Named off the same function the rendering makes the
-    // container under, because what the folder is called is what the profile is
-    // called.
-    let its_own = local
-        .join("Packages")
-        .join(container::profile(fixture.state.path(), fixture.id))
-        .join("AC");
-    let temporary = its_own.join("Temp");
+    // And the temporary directory the description makes inside that local half,
+    // which is where what a session throws away really lands — see
+    // `sandbox::windows_profile`, which is the three of them said once.
+    let temporary = local.join("Temp");
 
     // Compared as they are spelled rather than as the filesystem has them,
     // which is the stricter of the two here: every one of these is built out of
@@ -1460,7 +1679,7 @@ async fn a_session_runs_in_a_profile_of_the_conversations_own() {
         ("userprofile", profile.clone()),
         ("home", profile.clone()),
         ("appdata", roaming.clone()),
-        ("localappdata", its_own),
+        ("localappdata", local.clone()),
         ("temp", temporary.clone()),
         ("tmp", temporary.clone()),
     ] {
@@ -1605,9 +1824,11 @@ async fn a_session_reaches_what_the_description_names_and_is_refused_what_it_doe
 ///
 /// The Screen's own machinery pointed at a shell rather than at an agent
 /// (ADR 0013). There is no passwd database here to read a login shell out of,
-/// so what a terminal opens on is `pwsh` where somebody installed PowerShell 7
-/// and Windows PowerShell where nobody did — and which of those this machine is
-/// is asked of the machine, with `where.exe`, rather than written down here.
+/// so what a terminal opens on is Windows PowerShell — the one every Windows
+/// machine carries, and the one the session account can start. PowerShell 7 is
+/// not it however installed it is: see the server's `terminals::shell`, which
+/// says why a Store execution alias under the human's own profile is not a shell
+/// another account may run.
 #[tokio::test]
 async fn a_terminal_runs_powershell_in_the_conversations_worktree() {
     let fixture = grilling(
@@ -1644,36 +1865,27 @@ async fn a_terminal_runs_powershell_in_the_conversations_worktree() {
     // neither would print nothing at all.
     watcher.types("$PSVersionTable.PSEdition\r").await;
 
-    let showing = watcher
-        .until(|grid| grid.contains("Desktop") || grid.contains("Core"))
-        .await;
+    let showing = watcher.until(|grid| grid.contains("Desktop")).await;
 
     assert!(
-        showing
-            .iter()
-            .any(|row| row.contains("Desktop") || row.contains("Core")),
-        "a terminal here comes up on PowerShell, and it is showing: {showing:?}",
+        showing.iter().any(|row| row.contains("Desktop")),
+        "a terminal here comes up on Windows PowerShell — `Desktop` is that \
+         edition's own name for itself — and it is showing: {showing:?}",
     );
 
-    // And it is the one the machine has: `pwsh` where `where.exe` finds one,
-    // and Windows PowerShell where it finds none.
+    // And it is the one every Windows machine has, whether or not this one also
+    // has PowerShell 7.
     //
-    // Compared as files rather than as text where there is a path to compare.
-    // Both lookups walk the same `PATH`, and they part company over the
-    // extension alone: `where.exe` prints the name as the directory holds it,
-    // and the rendering's own appends whichever spelling `PATHEXT` carries —
-    // which on a Windows machine is `.EXE`. Two names for the one file, which
-    // is exactly the thing `the_same_file` is for.
+    // Compared as files rather than as text. Both lookups walk the same `PATH`,
+    // and they part company over the extension alone: `where.exe` prints the
+    // name as the directory holds it, and the rendering's own appends whichever
+    // spelling `PATHEXT` carries. Two names for the one file, which is exactly
+    // the thing `the_same_file` is for.
     let chosen = verkstead_server::terminals::shell::of_the_server();
+    let shipped =
+        on_the_path("powershell.exe").expect("every Windows machine has Windows PowerShell");
 
-    match on_the_path("pwsh") {
-        Some(pwsh) => the_same_file(Path::new(&chosen), Path::new(&pwsh)),
-        None => assert_eq!(
-            chosen, "powershell.exe",
-            "a machine with no PowerShell 7 on it opens its terminals on the \
-             PowerShell it does have, named rather than looked up",
-        ),
-    }
+    the_same_file(Path::new(&chosen), Path::new(&shipped));
 
     // And it is standing in the Conversation's Worktree, which is where a
     // Terminal is (ADR 0013).
@@ -1697,25 +1909,38 @@ async fn a_terminal_runs_powershell_in_the_conversations_worktree() {
     until_there(&worktree.join("stood-here.txt")).await;
 }
 
-/// No compile server comes up on this platform, however many sccaches are
-/// installed on it.
+/// A compile server comes up on this platform, and it comes up **as the session
+/// account** — which is the boundary on this one.
 ///
-/// **The runner has one**, which is what the workflow installs and what makes
-/// this worth asking: a machine with no sccache would start no compile server
+/// **The runner has an sccache**, which is what the workflow installs and what
+/// makes this worth asking: a machine with none would start no compile server
 /// for want of a binary, and would prove nothing at all about the rule under
-/// test. What is being proved is that a server which can see one still starts
-/// none, because a session inside an AppContainer is refused the loopback a
-/// client reaches it over — see
-/// [`verkstead_server::build_cache::compiles_through_an_sccache`].
+/// test.
 ///
-/// Asked of the machine rather than of Verkstead — the process ids `tasklist`
-/// can see — because what a rendering starts is a process outside this one, and
-/// the absence of one is the same question the other way round.
+/// This was the opposite assertion for as long as a session here ran inside an
+/// AppContainer: one is refused every connection to the local machine, so a
+/// client that could not reach a server was a `RUSTC_WRAPPER` that failed every
+/// build rather than one that missed a cache, and the switch was off — see
+/// [`verkstead_server::build_cache::compiles_through_an_sccache`], which is
+/// where the whole of that history is.
+///
+/// **And the identity is half of what is being proved**, because a compile
+/// server is what runs `rustc`, and `rustc` runs a proc macro of every
+/// dependency it compiles. One started as the human would be every Rust crate
+/// on the machine running with the database and the settings files in reach,
+/// which is the one thing the Sandbox exists not to be.
+///
+/// Asked of the machine rather than of Verkstead — the processes `tasklist` can
+/// see, and the account it says each is running as — because what a rendering
+/// starts is a process outside this one.
 #[tokio::test]
-async fn no_compile_server_comes_up_on_this_platform() {
+async fn a_compile_server_comes_up_as_the_session_account() {
     // The one test here that builds no fixture, and what the cache says as it
     // resolves is the whole of the reason — see [`LOGGING`].
     LazyLock::force(&LOGGING);
+
+    // And its turn at counting what the machine is running — see [`COUNTING`].
+    let _turn = COUNTING.lock().await;
 
     let state = somewhere();
     let cache = somewhere();
@@ -1731,64 +1956,138 @@ async fn no_compile_server_comes_up_on_this_platform() {
         BuildCache::resolve(Some(cache.path()), state.path()).expect("a cache to resolve");
 
     assert!(
-        !build_cache.caches_compiles(),
-        "an sccache is on this machine's PATH and the server still has none to \
-         hand out, because no session here could reach one",
+        build_cache.caches_compiles(),
+        "an sccache is on this machine's PATH, so the server has one to hand out \
+         and a session's compiles are cached like everybody else's",
     );
 
     let already = servers();
     let settings = Settings::in_data_dir(state.path()).config();
+    let running_as = the_machines_account();
 
-    build_cache.compiling(settings.rust_build_cache());
+    build_cache.compiling(settings.rust_build_cache(), Some(&running_as));
 
-    // Long enough that one which was going to come up has: `compiling` spawns
+    // Long enough that one which was going to come up has: `compiling` starts
     // the process before it returns, so anything after that moment is slack
     // rather than a race being waited out.
     pause(SETTLED).await;
 
-    let started: BTreeSet<u32> = servers().difference(&already).copied().collect();
+    let started: Vec<u32> = servers().difference(&already).copied().collect();
+
+    assert_eq!(
+        started.len(),
+        1,
+        "one compile server and no more: {already:?} were running before, and \
+         {started:?} are new",
+    );
+
+    let whose = whose(started[0]);
 
     assert!(
-        started.is_empty(),
-        "a compile server came up on a platform where nothing could reach it: \
-         {already:?} were running before, and {started:?} are new",
+        whose
+            .to_lowercase()
+            .ends_with(&running_as.name().to_lowercase()),
+        "the compile server runs as this installation's own local account \
+         {}, and the machine says it is running as {whose:?}",
+        running_as.name(),
+    );
+
+    // Dropped, which is what stops it: the Job it is in goes when the last
+    // handle to it does — see the server's `sandbox::outliving`.
+    drop(build_cache);
+
+    // And the entries it wrote, off the directories they were written on. This
+    // is the sweep's work done by hand: the suite is one process and its
+    // boundary is held in a static, so a test that left one standing would
+    // leave it on the machine this suite is running on.
+    verkstead_server::sandbox::entries::taken_back(
+        state.path(),
+        verkstead_server::sandbox::entries::NOBODYS,
     );
 }
 
-/// And a session in a Rust repo gets the shared cache and no wrapper: its
-/// downloads land in the one `CARGO_HOME` this machine shares, and nothing
-/// points its `rustc` at a server it could not talk to.
+/// Which account the machine says the process `pid` is running as, in whatever
+/// spelling `tasklist` writes one — `DESKTOP-XYZ\vk-…` on a machine with a
+/// name, and the bare account where it has none.
 ///
-/// **Both halves attempted rather than read.** That `RUSTC_WRAPPER` is unset is
-/// a variable the session prints, but that its `CARGO_HOME` is *writable* is
-/// only answered by writing there — the directory is granted to the container's
-/// identity like any other `Own`, and a grant that had not been written would
-/// look exactly the same from out here.
+/// `tasklist /v` rather than a token read of this suite's own, for the reason
+/// [`listed`] is `icacls`: what is wanted is what Windows really says, and a
+/// reader written here would be this file agreeing with itself.
+fn whose(pid: u32) -> String {
+    let listed = Command::new("tasklist.exe")
+        .args(["/v", "/fi", &format!("PID eq {pid}"), "/fo", "csv", "/nh"])
+        .stdin(Stdio::null())
+        .output()
+        .expect("tasklist is part of Windows");
+
+    let said = String::from_utf8_lossy(&listed.stdout);
+
+    // The seventh field of `tasklist /v`, which is the user name: image, pid,
+    // session name, session number, memory, status, user.
+    //
+    // Split on the quote-comma-quote between two fields rather than on the
+    // comma: every field is quoted and one of them is a memory figure written
+    // `"12,345 K"`, so a plain comma is as often inside a field as between two.
+    said.lines()
+        .next()
+        .map(|row| row.trim().trim_matches('"'))
+        .and_then(|row| row.split("\",\"").nth(6))
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("nothing tasklist would say about {pid}: {said}"))
+}
+
+/// And a session gets both halves of the shared cache: its downloads land in the
+/// one `CARGO_HOME` this machine shares, and its `RUSTC_WRAPPER` names an
+/// sccache it can really run.
 ///
-/// The cargo half is what the whole of the cache comes to on this platform:
-/// a crate is downloaded once for the machine, and compiled once per session.
+/// **Every half attempted rather than read.** That `RUSTC_WRAPPER` is set is a
+/// variable the session prints — but that the file it names is *reachable* is
+/// only answered by running it, and that `CARGO_HOME` is *writable* only by
+/// writing there. Each of those is a grant written for the session account on a
+/// real path, and a grant that had not been written would look exactly the same
+/// from out here.
+///
+/// The wrapper is the half that was missing for as long as a session ran inside
+/// an AppContainer — see
+/// [`verkstead_server::build_cache::compiles_through_an_sccache`].
 #[tokio::test]
-async fn a_session_gets_the_shared_cargo_home_and_no_compiler_wrapper() {
+async fn a_session_gets_the_shared_cargo_home_and_the_compiler_wrapper() {
     let cache = somewhere();
 
     let fixture = grilling_caching(
         r#"
         Note 'wrapper' $env:RUSTC_WRAPPER
         Note 'cargo-home' $env:CARGO_HOME
+        Note 'sccache-dir' $env:SCCACHE_DIR
+
+        # Run the thing it was pointed at, which is the only way to ask whether
+        # the boundary really lets a session open it.
+        $said = & $env:RUSTC_WRAPPER --version 2>&1 | Out-String
+        Note 'ran' "$LASTEXITCODE $said"
 
         [void][System.IO.Directory]::CreateDirectory($env:CARGO_HOME)
         [System.IO.File]::WriteAllText((Under $env:CARGO_HOME 'downloaded.crate'), 'here')
         "#,
         Some(cache.path()),
+        Builds::Nothing,
     )
     .await;
 
-    assert_eq!(
-        fixture.written("wrapper").await,
-        "",
-        "nothing on this platform compiles through an sccache, so a session is \
-         pointed at none: a RUSTC_WRAPPER here would be every Rust build inside \
-         failing rather than one running uncached",
+    let wrapper = fixture.written("wrapper").await;
+    let sccache = on_the_path("sccache").expect("this machine has an sccache to be pointed at");
+
+    assert!(
+        wrapper.eq_ignore_ascii_case(&sccache),
+        "a session compiles through the sccache the server found, at the path it \
+         really is: the server said {wrapper:?} and this machine says {sccache:?}",
+    );
+
+    let ran = fixture.written("ran").await;
+
+    assert!(
+        ran.starts_with('0') && ran.to_lowercase().contains("sccache"),
+        "and it is a file the session can open and run, which is the half a \
+         variable cannot answer. It said: {ran:?}",
     );
 
     // Spelled rather than resolved: `CARGO_HOME` is a directory the first
@@ -1802,6 +2101,13 @@ async fn a_session_gets_the_shared_cargo_home_and_no_compiler_wrapper() {
          given, which is what makes them shared",
     );
 
+    assert_eq!(
+        fixture.written("sccache-dir").await,
+        cache.path().join("sccache").display().to_string(),
+        "and its compiled objects go beside them, in the other half of the one \
+         directory",
+    );
+
     let downloaded = cache.path().join("cargo").join("downloaded.crate");
 
     until_there(&downloaded).await;
@@ -1809,7 +2115,109 @@ async fn a_session_gets_the_shared_cargo_home_and_no_compiler_wrapper() {
     assert_eq!(
         std::fs::read_to_string(&downloaded).unwrap().trim(),
         "here",
-        "and the session really wrote it, from inside its container",
+        "and the session really wrote it, from inside its boundary",
+    );
+}
+
+/// And a session in a Rust repository really compiles through the one Compile
+/// Server this machine runs, leaving the shared cache warmer than it found it.
+///
+/// **The whole chain in one press**, which is what this stage set out to turn
+/// back on: the Repo has a manifest, so the session start puts a compile server
+/// up before the session; the session is handed a `RUSTC_WRAPPER`; the client
+/// inside reaches the server outside over the loopback an AppContainer was
+/// refused; and what that server compiled is in the cache directory afterwards.
+///
+/// **One server and no more is how the reaching is proved.** An sccache client
+/// that cannot find a server starts one of its own, so a second one coming up
+/// during the session would be exactly the failure this is about — the client
+/// talking to a server inside nothing, rather than to Verkstead's. So the
+/// processes are counted rather than the connection watched.
+///
+/// **And the cache is the warmth.** Its compiled half is a directory of a
+/// temporary cache nobody has ever compiled into, so anything in it afterwards
+/// was put there by this build.
+#[tokio::test]
+async fn a_rust_session_compiles_through_the_compile_server() {
+    // Held for the whole of the diff below — see [`COUNTING`].
+    let _turn = COUNTING.lock().await;
+
+    let cache = somewhere();
+    let already = servers();
+
+    let fixture = grilling_building(
+        r#"
+        $probe = Under (Get-Location).Path 'probe.rs'
+        [System.IO.File]::WriteAllText($probe, 'pub fn probe() -> u32 { 41 + 1 }')
+
+        # The toolchain itself first, because everything after it stands on one:
+        # a rustup shim finds its install through RUSTUP_HOME, and a sandbox has
+        # a profile of its own for it to look in.
+        try { $plain = & rustc --version 2>&1 | Out-String } catch { $plain = "$_" }
+        Note 'toolchain' "$LASTEXITCODE $plain"
+
+        try {
+            $said = & $env:RUSTC_WRAPPER rustc --crate-name probe `
+                --crate-type lib --emit=link --out-dir . $probe 2>&1 | Out-String
+        } catch { $said = "$_" }
+        Note 'built' "$LASTEXITCODE $said"
+
+        try { $stats = & $env:RUSTC_WRAPPER --show-stats 2>&1 | Out-String } catch { $stats = "$_" }
+        Note 'stats' $stats
+        "#,
+        Some(cache.path()),
+    )
+    .await;
+
+    let toolchain = fixture.written("toolchain").await;
+
+    assert!(
+        toolchain.starts_with("0 rustc "),
+        "a session finds the machine's own Rust toolchain, which is what \
+         RUSTUP_HOME and the grant beside it are for. It said: {toolchain:?}{}",
+        fixture.reach(),
+    );
+
+    let built = fixture.written("built").await;
+
+    assert!(
+        built.starts_with('0'),
+        "and its rustc really ran through the wrapper it was given. It said: \
+         {built:?}",
+    );
+
+    // What the *server* answered, which is the half of this that cannot be
+    // read from out here: an sccache client prints the cache its server is
+    // writing into, and the only process that knows this directory is the one
+    // Verkstead started.
+    let stats = fixture.written("stats").await;
+
+    // Written the way sccache writes a path in that line, which is Rust's own
+    // debug spelling of one — so every separator in it is doubled.
+    let named = cache
+        .path()
+        .join("sccache")
+        .display()
+        .to_string()
+        .replace('\\', "\\\\");
+
+    assert!(
+        stats.contains(&named),
+        "the server the session's client reached is the one Verkstead started, \
+         writing into the cache this test handed it at {named}. It said: {stats}",
+    );
+
+    // And the cache is warmer than the empty directory it began as.
+    until_something_in(&cache.path().join("sccache")).await;
+
+    let started: Vec<u32> = servers().difference(&already).copied().collect();
+
+    assert_eq!(
+        started.len(),
+        1,
+        "one compile server served the session and the session started none of \
+         its own: {already:?} were running before, {started:?} are new, and it \
+         said {stats}",
     );
 }
 

@@ -47,9 +47,7 @@ use verkstead_render::{
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
-use crate::settings::{
-    Cleanup, CleanupStep, Config, GitAuthor, RuleTrouble, RustBuildCache, Secrets,
-};
+use crate::settings::{Cleanup, CleanupStep, Config, GitAuthor, RuleTrouble, RustBuildCache};
 use crate::{AppState, store};
 
 /// The viewer's routes, over the state the agent API is already holding: a
@@ -4181,10 +4179,15 @@ async fn save_settings(
             rules,
         ))?;
 
+        // On what the file already holds rather than on nothing: a save writes
+        // the whole of `secrets.yaml`, and the session account's password is in
+        // there beside the token on a Windows machine — see
+        // [`crate::settings::Settings::save_secrets`]. A page that has been
+        // told about one secret has no business rewriting the other.
         let verifying = match &edit.github_token {
             TokenEdit::Keep => None,
             TokenEdit::Set { token } => {
-                settings.save_secrets(&Secrets::of_token(Some(token.clone())))?;
+                settings.save_secrets(&settings.secrets().with_token(Some(token.clone())))?;
 
                 // Read back rather than taken from the request: a token that was
                 // only whitespace is nothing configured, and verifying what was
@@ -4193,7 +4196,7 @@ async fn save_settings(
                 settings.secrets().github_token().map(str::to_owned)
             }
             TokenEdit::Clear => {
-                settings.save_secrets(&Secrets::of_token(None))?;
+                settings.save_secrets(&settings.secrets().with_token(None))?;
 
                 None
             }
@@ -4256,24 +4259,19 @@ fn needed(scopes: &crate::github::Scopes) -> Vec<String> {
     }
 }
 
-/// Whether a session's compiling is cached, and where it is not, which of the
-/// two reasons it is — see [`CompileCaching`], which is why that is not one
-/// boolean.
+/// Whether a session's compiling is cached, and where it is not, why not — see
+/// [`CompileCaching`], which is why that is not one boolean even now that there
+/// are two answers rather than three.
 ///
-/// `cached` is whether this server found an sccache to hand out. It is already
-/// false everywhere a session could not reach one — see
+/// `cached` is whether this server found an sccache to hand out, which is
+/// already false everywhere a session could not reach one — see
 /// [`crate::build_cache::compiles_through_an_sccache`], which is what stops one
-/// being looked for at all — so what is left here is telling the two falses
-/// apart, and that is the platform's own answer read the way every other one
-/// is.
+/// being looked for at all. Every platform reaches one, so what is left is the
+/// machine: an sccache installed where the server can see it, or none.
 fn compile_caching(cached: bool) -> CompileCaching {
-    match (
-        cached,
-        crate::build_cache::compiles_through_an_sccache(crate::platform::Platform::HERE),
-    ) {
-        (true, _) => CompileCaching::Cached,
-        (false, true) => CompileCaching::NoSccache,
-        (false, false) => CompileCaching::NotThroughAContainer,
+    match cached {
+        true => CompileCaching::Cached,
+        false => CompileCaching::NoSccache,
     }
 }
 

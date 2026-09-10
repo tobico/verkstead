@@ -196,15 +196,18 @@ describe("the rows", () => {
     expect(sandbox.textContent).not.toContain("brew install");
   });
 
-  it("reads not applicable on Windows, in the wording the app already uses", () => {
+  /// Not applicable is not the same as nothing to do, which is the whole of
+  /// what this row has to get across on this platform: the boundary there is an
+  /// account rather than a program, so there is nothing to install and there is
+  /// still one elevated command to run before a session will start at all.
+  it("reads not applicable on Windows, and still names the elevated command", () => {
     const { container } = mount(WINDOWS);
     const sandbox = row(container, "Sandbox");
 
     expect(sandbox.dataset.state).toBe("NotApplicable");
     expect(sandbox.textContent).toContain("Not applicable");
-    expect(sandbox.textContent).toContain(
-      "There is nothing to install: it is how the sandbox works on Windows.",
-    );
+    expect(sandbox.textContent).toContain("there is nothing to install");
+    expect(sandbox.textContent).toContain("verkstead session-account create");
   });
 
   /// GitHub is a choice rather than a dependency, so its row is drawn like any

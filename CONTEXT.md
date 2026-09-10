@@ -205,12 +205,13 @@ beside the executable — that one is a client, and what it reaches is the
 the two platforms whose sessions can reach one, which is the Build Cache's own
 entry. The filesystem is the boundary and the network is not, because what
 stops a session doing harm is that there is nothing within reach to harm:
-inside, it is the host's own, whole and unfiltered — **except on Windows,
-where an identity is granted the internet and nothing else**, so this machine's
-own loopback and everything else on the network it sits on are refused a
-session there as surely as the human's Documents are. Which is not a boundary
-drawn on purpose but the narrowest thing an AppContainer can be given, and it
-is what the pipe below exists for. The `verkstead` a session asks with
+inside, it is the host's own, whole and unfiltered, and that is true of all
+three. It was not true of the third for a while — an identity granted the
+internet and nothing else is refused its own machine's loopback along with
+everything else on the network it sits on, which was never a boundary drawn on
+purpose — and what took the exception away is that a session there runs as an
+ordinary local account, reaching the network the way everything else on that
+machine does. The `verkstead` a session asks with
 is the running server's own image, first on the `PATH` inside, so the CLI a
 session asks with and the server it asks are one build and cannot disagree
 about a schema — with the libraries that image was packed with, where it was
@@ -219,16 +220,24 @@ else the session runs loads out of them. What
 it asks *through* is the loopback, scoped to the Conversation it is asking
 from — except on Windows, where it is a **named pipe** the server opens beside
 its socket and names in the session's environment, in the same
-Conversation-scoped shape. The pipe is there because the boundary that platform
-runs behind is refused the loopback interface and can be granted a pipe
-instead, and it is named after the **Data Directory**, so two Verksteads on one
-machine are two pipes.
+Conversation-scoped shape. The pipe was the one way in when the boundary that
+platform ran behind was refused the loopback interface and could be granted a
+pipe instead; it stays now that a session could dial the loopback, because it
+is landed and because it is the one transport no firewall on the human's
+machine has to agree with. It is named after the **Data Directory**, so two
+Verksteads on one machine are two pipes.
 **One description, rendered three times**: bubblewrap's flags on Linux, where
 the rest of the machine is not in the session's namespace at all; a seatbelt
 policy on a Mac, where the machine is in plain sight and refused; and on
-Windows an **AppContainer**, the platform's own deny-by-default identity, where
-every path the description names is a real path and reach is an access-control
-entry on it granting that identity. The third is the Mac's kind of boundary
+Windows a **local account of Verkstead's own**, where every path the
+description names is a real path and reach is an access-control entry on it
+granting that account. One account for the whole installation rather than one
+per Conversation, because creating a local account is an elevated step and one
+per Conversation would want elevation per Conversation — made once by a verb of
+Verkstead's own from an administrator's terminal, and only ever read after
+that. So what a session may reach that is not its own is every live
+Conversation's Worktree, and what it may not reach is the human's machine,
+which is the boundary this exists for. The third is the Mac's kind of boundary
 rather than Linux's, with one thing neither other platform has: the entries are
 written on the human's own directories, so they are per Conversation, they come
 off with the Worktree when it closes, and a server that stopped between the two
@@ -277,13 +286,14 @@ big its compiled half may grow, is the human's, in the workbench settings. The
 one control there that only ever *closes* a hole — the **Sandbox
 Configuration** beside it opens them, and does so only for what somebody typed.
 Without an sccache it is still a cache — the crate downloads are shared — and
-the composer says so on a repository that builds Rust. **On Windows it is only
-ever that half**: a session there runs inside an **AppContainer**, which is
-refused the loopback an sccache client reaches the **Compile Server** over, so
-nothing installed on that machine would be reached and none is looked for. A
-Windows session downloads a crate once for the machine like every other and
-compiles it once per session, which is a slower build rather than a broken one;
-the settings page says why rather than telling anybody to install something.
+the composer says so on a repository that builds Rust. **Both halves on all
+three platforms**, which was not always so: for a while Windows had only ever
+the downloads, a session there running behind a boundary refused the loopback
+an sccache client reaches the **Compile Server** over, so that nothing
+installed on that machine could be reached and none was looked for. A session
+there runs as a local account now and reaches the loopback like anything else,
+so there is one answer for every platform and the settings page has one fewer
+reason to give.
 _Avoid_: sccache, cargo cache, artifact cache, shared target dir
 
 **Compile Server**:
@@ -293,8 +303,9 @@ every Sandbox shares the host's network — so sessions left to start their own
 all reach for one port, and whichever lost the race has its compiles run inside
 another session's Sandbox, where its Worktree is not bound and the build fails.
 Started before the first session of a Conversation whose Repo builds Rust,
-never on a machine that builds none, and **never on Windows at all**, where no
-session inside an AppContainer could reach one. Its Sandbox holds the Worktrees
+never on a machine that builds none, and on all three platforms — the third only
+since a session there stopped running behind a boundary that could reach no such
+thing. Its Sandbox holds the Worktrees
 directory — all of it, so a Conversation grilled later is one it can already
 compile for — and the Build Cache, and nothing else Verkstead keeps: `rustc`
 runs proc macros while it compiles, so the database and the settings files stay
@@ -1071,10 +1082,12 @@ its working directory, under the implementation Profile's account and with
 everything a session gets. Which shell is the machine's answer rather than the
 word's: on a Unix the server user's login shell, `/bin/sh` where there is no
 usable one, inside the worktree's dev shell and inside the Conversation's
-Sandbox; on Windows `pwsh` where PowerShell 7 is installed and Windows
-PowerShell where nobody has installed one — no passwd database to read a login
-shell out of and no dev shell to enter, inside the Conversation's AppContainer
-the same way. Opened from the **Terminal icon on the Timeline's header** into a
+Sandbox; on Windows, Windows PowerShell — no passwd database to read a login
+shell out of and no dev shell to enter, as the session account and behind the
+Conversation's own entries the same way, and not `pwsh` even where somebody has
+installed PowerShell 7, that on most machines being a Store execution alias
+under the human's own profile and refused to any other account. Opened from the
+**Terminal icon on the Timeline's header** into a
 details pane of its own at `/terminal`, where each one is a tab: one opens when
 the pane loads with none live, plus opens another, a tab goes when its shell
 ends, and the pane never stands empty — the last tab going opens a fresh one,

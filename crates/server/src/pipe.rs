@@ -2,12 +2,15 @@
 //! what a sandboxed Windows session will have to ask through.
 //!
 //! **Why a pipe at all** ([ADR-0014](../../../docs/adr/0014-windows-sessions.md)).
-//! An AppContainer is refused the loopback interface, and the exemption is an
-//! elevated command per machine that an unsigned per-user install cannot ask
-//! for. So a session inside one cannot dial `127.0.0.1`, and what it asks
-//! through has to be something the container's own identity can be *granted*
-//! instead of routed to. A named pipe is that, and it is the one such thing
-//! this platform has.
+//! It was an AppContainer that could not dial `127.0.0.1`: a session inside one
+//! is refused the loopback interface, and the exemption is an elevated command
+//! per machine that an unsigned per-user install cannot ask for — so what a
+//! session asked through had to be something an identity could be *granted*
+//! rather than routed to, and a named pipe is the one such thing this platform
+//! has. A session runs as a local account now and can dial the loopback, so the
+//! pipe is no longer the only way in. It stays because it is landed, harmless,
+//! and the one transport no firewall on the human's machine has to agree with.
+
 //!
 //! **It is a listener like any other.** `axum::serve` takes anything
 //! implementing its own [`axum::serve::Listener`] — an `Io` that reads and
@@ -32,25 +35,30 @@
 //! is derived rather than configured: nothing outside reads the name except
 //! through what a session is handed.
 //!
-//! **The descriptor is a set that is added to.** The pipe is created granting
-//! the account the server runs as and nothing wider, and every identity beside
-//! that one is an AppContainer that was not on the machine when the pipe was
-//! opened: the server opens the pipe at startup, and a container is made per
-//! Conversation as that Conversation's first session starts. So what a pipe is
-//! opened against is a [`Grants`] rather than a list — a set each container
-//! puts its identity into as it is made and takes it out of as it goes — and
-//! putting one in writes the new descriptor onto the instance standing under
-//! the name there and then, as well as on to every instance made after it.
-//! That is the whole of how a session started an hour after the server is able
-//! to open this at all.
+//! **The descriptor is settled when the pipe is opened.** It grants the account
+//! the server runs as, and beside it the one identity a session of this
+//! installation runs as: the local account of Verkstead's own, which is on the
+//! machine before the server starts and is the same account for every
+//! Conversation (ADR-0014, *Amended: the Sandbox is an account*). So
+//! [`Listener::open`] is handed that identity and every instance it creates
+//! grants it, and there is nothing to add afterwards.
+//!
+//! It used to be a set that was added to, and only because the identity was
+//! not there yet: an AppContainer was made per Conversation as that
+//! Conversation's first session started, an hour after the pipe was opened. One
+//! account for the installation takes that whole mechanism away, which is a
+//! simplification rather than a retargeting.
+//!
+//! **A machine with no account opens a pipe granting nobody**, and there is
+//! nothing to handle about it here: a session with no account to run as is
+//! refused before it is started at all — see [`crate::sandbox::account`] — so
+//! nothing is ever inside to be refused the pipe.
 
 use std::ffi::{OsStr, c_void};
 use std::io;
 use std::os::windows::ffi::OsStrExt;
-use std::os::windows::io::AsRawHandle;
 use std::path::Path;
 use std::ptr;
-use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 use std::time::Duration;
 
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
@@ -59,8 +67,8 @@ use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
 };
 use windows_sys::Win32::Security::{
-    DACL_SECURITY_INFORMATION, GetTokenInformation, PSECURITY_DESCRIPTOR, PSID,
-    SECURITY_ATTRIBUTES, SetKernelObjectSecurity, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    GetTokenInformation, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
+    TokenUser,
 };
 use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
@@ -89,10 +97,10 @@ pub fn named(data_dir: &Path) -> String {
 /// What the pipe is called, with neither spelling's prefix on it.
 ///
 /// Reachable from the rest of the crate for one other thing this machine has to
-/// name after a Data Directory: the AppContainer a Conversation's sessions run
-/// inside — see [`crate::sandbox::container::Container::for_conversation`].
-/// Two Verksteads on one machine keep their containers apart the way they keep
-/// their pipes apart, and this is that fingerprint said once rather than twice.
+/// name after a Data Directory: what a Conversation's entries are held under
+/// while its work lasts — see [`crate::sandbox::entries`]. Two Verksteads on
+/// one machine keep those apart the way they keep their pipes apart, and this
+/// is that fingerprint said once rather than twice.
 pub(crate) fn bare(data_dir: &Path) -> String {
     // Through the resolved path rather than the one that was typed: `.` and the
     // absolute name of the same directory are one Data Directory, and two
@@ -129,212 +137,6 @@ fn fingerprint(path: &Path) -> u64 {
     hash
 }
 
-/// The identities a pipe grants beside the account the server runs as, and the
-/// whole of how one that was not on the machine when the pipe was opened comes
-/// to be granted on it.
-///
-/// **Because the pipe is opened before there is anything to grant.** The server
-/// opens it at startup; the identity a session runs under is an AppContainer of
-/// its Conversation's own, made as that Conversation's first session starts.
-/// So the identities are a set that is added to rather than an argument, and
-/// what puts one in is the container itself — see
-/// [`crate::sandbox::container::Container`], which does it as it is made and
-/// undoes it as it goes.
-///
-/// **An identity put in reaches the pipe that is already open.** A `Grants`
-/// holds the instance every pipe open on it is standing behind, so adding one
-/// writes the new descriptor onto those instances there and then — and every
-/// instance made after it is created from the set as it stands. Both, rather
-/// than either: which of the two Windows checks a client's open against is not
-/// a thing to depend on, and a session refused the pipe it was given is a
-/// session that cannot ask at all.
-///
-/// Cheap to clone and shared by every clone. The server's own is
-/// [`Grants::of_this_process`], which is the one every container puts itself
-/// into; [`Grants::none`] is one of a caller's own, which is what a test opens
-/// a pipe against so that what it asks about is its own identities and nobody
-/// else's.
-#[derive(Clone)]
-pub struct Grants(Arc<Mutex<Granted>>);
-
-/// What a [`Grants`] holds: who is granted, and what to write that onto.
-///
-/// One lock over both halves, because the two are written together — an
-/// identity put in is written onto the instance standing in the same breath,
-/// and an instance is created from the identities as they stand. Apart, the two
-/// would race into a pipe standing under the name granting a set nobody holds.
-#[derive(Default)]
-struct Granted {
-    /// The identities themselves, as a security descriptor spells one: the
-    /// string form of a SID.
-    identities: Vec<String>,
-
-    /// The instance each pipe open on these grants is waiting for a client on
-    /// right now — and nothing at all where none is, which is every container
-    /// made with no server behind it.
-    ///
-    /// A list rather than the one a running Verkstead has, because a set of
-    /// grants is a set of identities rather than a pipe's own property: the
-    /// suite stands two servers up against one process's containers, and an
-    /// identity has to reach both of their pipes or the second one stood up
-    /// would quietly take the first one's sessions away.
-    ///
-    /// Borrowed rather than owned: what holds an instance is a [`Listener`],
-    /// which takes its own out of here as it replaces it and as it goes — see
-    /// [`Grants::standing`] and the listener's [`Drop`] — so a handle that is
-    /// here is a handle that is open.
-    ///
-    /// As numbers rather than as `HANDLE`, which the bindings spell as a raw
-    /// pointer: what these are is the operating system's own handles rather
-    /// than addresses of anything, and a pointer here would make the whole of
-    /// [`Listener::accept`] un-`Send` — which the trait it implements requires
-    /// — for the sake of a spelling.
-    waiting: Vec<usize>,
-}
-
-/// The grants of this process's own pipe: the set every AppContainer made here
-/// puts its identity into, and the one the server opens its pipe against.
-///
-/// A static for the reason the profiles themselves are one — see
-/// [`crate::sandbox::container`]: there is one pipe per process and one set of
-/// containers per process, and a container made deep inside a session start has
-/// no other way of reaching either.
-static CONTAINERS: LazyLock<Grants> = LazyLock::new(Grants::none);
-
-impl Grants {
-    /// The grants of this process's own pipe — see [`CONTAINERS`].
-    pub fn of_this_process() -> Grants {
-        CONTAINERS.clone()
-    }
-
-    /// And a set of a caller's own with nothing in it, which is a pipe granting
-    /// the account the server runs as and nobody else.
-    pub fn none() -> Grants {
-        Grants(Arc::new(Mutex::new(Granted::default())))
-    }
-
-    /// One more identity granted: written onto the pipe standing under the name
-    /// right now, and remembered for every instance made after it.
-    ///
-    /// **It can refuse**, and a caller that cannot grant an identity has made a
-    /// container nothing inside can ask through — which is a session refused
-    /// rather than a session started behind a transport it cannot open
-    /// (ADR-0014, Q18). What did not go on is not remembered either: a set
-    /// holding an identity the pipe never got would be a lie told to every
-    /// instance after it.
-    pub fn to(&self, identity: &str) -> io::Result<()> {
-        let mut granted = self.held();
-
-        if granted.identities.iter().any(|held| held == identity) {
-            return Ok(());
-        }
-
-        granted.identities.push(identity.to_owned());
-
-        written(&granted).inspect_err(|_| {
-            granted.identities.pop();
-        })
-    }
-
-    /// And one no longer granted, which is a container that has gone.
-    ///
-    /// Nothing is reported and nothing can be done about it: what lets go of a
-    /// container is a `Drop`, which has nowhere to hand a refusal to. What a
-    /// pipe that would not take it back goes on granting is a SID whose profile
-    /// has been deleted, which resolves to nobody.
-    pub fn no_longer(&self, identity: &str) {
-        let mut granted = self.held();
-
-        granted.identities.retain(|held| held != identity);
-
-        if let Err(what) = written(&granted) {
-            tracing::warn!(
-                identity,
-                error = %what,
-                "the pipe would not take back the identity of a container that has gone"
-            );
-        }
-    }
-
-    /// The next instance of the pipe called `name`, created granting what this
-    /// holds — and taken as the instance standing under that name, in place of
-    /// `instead_of` where the caller had one already, so that an identity
-    /// arriving after it is written onto this one.
-    ///
-    /// Under the lock for the whole of it, which is what stops an identity
-    /// arriving mid-way from landing in neither the instance being created nor
-    /// the one it replaces.
-    fn standing(
-        &self,
-        name: &str,
-        first: bool,
-        instead_of: Option<usize>,
-    ) -> io::Result<NamedPipeServer> {
-        let mut granted = self.held();
-        let made = instance(name, &Descriptor::granting(&granted.identities)?, first)?;
-
-        // Taken out only where the new one was made, so that a listener whose
-        // next instance would not create goes on holding the one it has and
-        // goes round again — see [`Listener::accept`].
-        if let Some(gone) = instead_of {
-            granted.waiting.retain(|standing| *standing != gone);
-        }
-
-        granted.waiting.push(handle_of(&made));
-
-        Ok(made)
-    }
-
-    /// And `was` standing no longer, which is what a listener leaves behind as
-    /// it goes: a handle here is one that is open, and a closed one is a handle
-    /// Windows is free to hand to something else entirely.
-    fn nothing_standing(&self, was: usize) {
-        self.held().waiting.retain(|standing| *standing != was);
-    }
-
-    /// What is held, through a lock that a panicking holder does not take the
-    /// grants away with.
-    fn held(&self) -> MutexGuard<'_, Granted> {
-        self.0.lock().unwrap_or_else(|held| held.into_inner())
-    }
-}
-
-/// What `granted` says, written onto the instance each pipe open on it is
-/// standing behind — and nothing at all where none is open.
-///
-/// **Onto the instance rather than into a new one.** Replacing what is standing
-/// would leave the name momentarily behind two instances, and a client dialling
-/// in that window could land on the one that was on its way out and be refused
-/// for nothing at all. A descriptor written onto the handle is the same change
-/// with no such window.
-fn written(granted: &Granted) -> io::Result<()> {
-    if granted.waiting.is_empty() {
-        return Ok(());
-    }
-
-    let descriptor = Descriptor::granting(&granted.identities)?;
-
-    for waiting in &granted.waiting {
-        // SAFETY: the handle is an instance a listener is holding — see
-        // [`Granted::waiting`] — and the descriptor is read for the length of
-        // the call and freed after the loop.
-        let written = unsafe {
-            SetKernelObjectSecurity(*waiting as HANDLE, DACL_SECURITY_INFORMATION, descriptor.0)
-        };
-
-        if written == 0 {
-            return Err(io::Error::last_os_error());
-        }
-    }
-
-    Ok(())
-}
-
-/// The handle `pipe` is, as [`Granted::waiting`] keeps one.
-fn handle_of(pipe: &NamedPipeServer) -> usize {
-    pipe.as_raw_handle() as usize
-}
-
 /// The pipe half of the server's listening: the name, who it is created
 /// granting, and the instance waiting for the next client.
 ///
@@ -349,10 +151,14 @@ pub struct Listener {
     /// [`Listener::asked_through`], which is the whole of what it is for.
     asked_through: String,
 
-    /// Who each instance is created granting. Held for the listener's whole
-    /// life: an instance is made per connection, and each one is made granting
-    /// the set as it stands by then — see [`Grants`].
-    granting: Grants,
+    /// The one identity each instance is created granting beside the account
+    /// the server runs as, and nothing where there is none to grant.
+    ///
+    /// Held for the listener's whole life because an instance is made per
+    /// connection and every one of them is created granting it — see this
+    /// module's own documentation, where the whole of why it is one identity
+    /// and why it is settled here is.
+    granting: Option<String>,
 
     /// The instance created and waiting for a client. There is always one — see
     /// this module's own documentation.
@@ -363,24 +169,26 @@ impl Listener {
     /// Open the pipe a server against `data_dir` listens on, granting
     /// `granting` beside the account the server runs as.
     ///
-    /// The set rather than the identities in it: what a session runs under is a
-    /// container made long after this, and a [`Grants`] is what carries one of
-    /// those to a pipe that is already open. The server's own is
-    /// [`Grants::of_this_process`].
+    /// `granting` is the identity every session of this installation runs as —
+    /// the SID of the local account, resolved before the server comes up — and
+    /// `None` on a machine that has not got one, which is every machine that is
+    /// not a Windows one and every Windows one where the elevated verb has
+    /// never been run. A pipe granting nobody is not a case to handle here: a
+    /// session with no account is refused before anything is started.
     ///
     /// Refused where the name is already taken, which is a second server
     /// against one Data Directory: the first instance is created as the first
     /// instance, so the pipe answers that the way the socket answers a taken
     /// address.
-    pub fn open(data_dir: &Path, granting: &Grants) -> io::Result<Listener> {
+    pub fn open(data_dir: &Path, granting: Option<&str>) -> io::Result<Listener> {
         let bare = bare(data_dir);
         let name = format!("{PREFIX}{bare}");
-        let waiting = granting.standing(&name, true, None)?;
+        let waiting = instance(&name, &Descriptor::granting(granting)?, true)?;
 
         Ok(Listener {
             name,
             asked_through: format!("pipe://{bare}"),
-            granting: granting.clone(),
+            granting: granting.map(str::to_owned),
             waiting,
         })
     }
@@ -401,19 +209,6 @@ impl Listener {
     /// puts the prefix back on — `crates/cli/src/pipe.rs`.
     pub fn asked_through(&self) -> &str {
         &self.asked_through
-    }
-}
-
-impl Drop for Listener {
-    /// The grants stop pointing at an instance nothing holds any more.
-    ///
-    /// A handle in [`Granted::waiting`] is one a descriptor may be written onto
-    /// at any moment, and this is the last moment at which the instance it
-    /// names is still open: the field is dropped after this runs, and a handle
-    /// Windows has taken back is one it is free to hand to something else
-    /// entirely.
-    fn drop(&mut self) {
-        self.granting.nothing_standing(handle_of(&self.waiting));
     }
 }
 
@@ -438,14 +233,13 @@ impl axum::serve::Listener for Listener {
             // documentation describes: said, waited on, and gone round again
             // rather than an end to the server.
             //
-            // Created granting whoever is in the set by now rather than
-            // whoever was in it when the server started, which is what makes a
-            // Conversation that began an hour ago able to open this — see
-            // [`Grants`].
-            let standing = handle_of(&self.waiting);
-
+            // Created granting what this listener was opened granting, which is
+            // one identity and the same one for the life of the server — see
+            // this module's own documentation.
             let next = loop {
-                match self.granting.standing(&self.name, false, Some(standing)) {
+                match Descriptor::granting(self.granting.as_deref())
+                    .and_then(|granting| instance(&self.name, &granting, false))
+                {
                     Ok(next) => break next,
                     Err(what) => went_wrong(&what).await,
                 }
@@ -476,15 +270,9 @@ fn instance(name: &str, granting: &Descriptor, first: bool) -> io::Result<NamedP
     // it. Everything else about the pipe is the default: duplex, byte mode, and
     // remote clients refused.
     //
-    // `write_dac` is the one thing asked for beyond that, and it is what lets
-    // an identity granted later be written onto this instance rather than only
-    // onto the next one — see [`written`]. A handle's access is settled when it
-    // is opened, so it has to be asked for here; the descriptor grants the
-    // account the server runs as everything, which includes it.
     unsafe {
         ServerOptions::new()
             .first_pipe_instance(first)
-            .write_dac(true)
             .create_with_security_attributes_raw(name, ptr::from_mut(&mut attributes).cast())
     }
 }
@@ -502,23 +290,23 @@ async fn went_wrong(what: &io::Error) {
 /// hands back is a block this process is to free — and it is read again at
 /// every instance, so it is freed when the listener goes rather than after the
 /// first one.
-struct Descriptor(PSECURITY_DESCRIPTOR);
+pub(crate) struct Descriptor(PSECURITY_DESCRIPTOR);
 
 impl Descriptor {
     /// A descriptor granting the account the server runs as, and `also` beside
-    /// it — every identity a container has put into the pipe's [`Grants`], in
-    /// the order they were put there.
+    /// it — the one identity this installation's sessions run as, where there
+    /// is one to name.
     ///
     /// Written as SDDL, which is Windows' own spelling of a descriptor and the
     /// one a person can read: `D:P` is a DACL and nothing inherited into it,
     /// `A` is an entry that allows, `GA` is everything — the server's own
-    /// account needs it, because creating each further instance of the pipe and
-    /// writing this onto one are both accesses the descriptor either allows or
-    /// refuses — and `GRGW` is what a client needs and no more.
-    fn granting(also: &[String]) -> io::Result<Descriptor> {
+    /// account needs it, because creating each further instance of the pipe is
+    /// an access the descriptor either allows or refuses — and `GRGW` is what a
+    /// client needs and no more.
+    pub(crate) fn granting(also: Option<&str>) -> io::Result<Descriptor> {
         let mut sddl = format!("D:P(A;;GA;;;{})", the_server_runs_as()?);
 
-        for identity in also {
+        if let Some(identity) = also {
             sddl.push_str(&format!("(A;;GRGW;;;{identity})"));
         }
 
@@ -548,7 +336,7 @@ impl Descriptor {
     /// Made per call rather than held: it is a pointer to `self` and two
     /// numbers, and a struct holding a pointer to itself is not a thing to keep
     /// around.
-    fn attributes(&self) -> SECURITY_ATTRIBUTES {
+    pub(crate) fn attributes(&self) -> SECURITY_ATTRIBUTES {
         SECURITY_ATTRIBUTES {
             nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
             lpSecurityDescriptor: self.0,
@@ -668,8 +456,11 @@ unsafe fn from_wide(from: *const u16) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::os::windows::io::AsRawHandle;
+
     use tokio::net::windows::named_pipe::ClientOptions;
     use windows_sys::Win32::Foundation::HANDLE;
+
     use windows_sys::Win32::Security::Authorization::{
         ConvertSecurityDescriptorToStringSecurityDescriptorW, ConvertStringSidToSidW,
         SDDL_REVISION_1,
@@ -678,13 +469,13 @@ mod tests {
 
     use super::*;
 
-    /// An identity of the shape the container stage will pass: an AppContainer
-    /// SID, which is the one thing that would let a session inside one open the
-    /// pipe at all.
+    /// An identity of the shape a session account's is: a local account of this
+    /// machine's, which is the one thing beside the server's own that a pipe
+    /// grants.
     ///
     /// Nobody's, and it does not have to be: a descriptor names identities and
     /// never asks the machine whether it has heard of them.
-    const A_CONTAINER: &str = "S-1-15-2-1001-1002-1003-1004-1005-1006-1007-1008";
+    const THE_SESSION_ACCOUNT: &str = "S-1-5-21-1001-1002-1003-1004";
 
     /// Two Data Directories are two pipes, and one Data Directory is one pipe
     /// however many times it is asked about.
@@ -718,7 +509,7 @@ mod tests {
     #[tokio::test]
     async fn what_a_client_is_told_is_the_name_without_the_prefix() {
         let dir = tempfile::tempdir().unwrap();
-        let listener = Listener::open(dir.path(), &Grants::none()).unwrap();
+        let listener = Listener::open(dir.path(), None).unwrap();
 
         let bare = listener
             .name()
@@ -734,10 +525,9 @@ mod tests {
     #[tokio::test]
     async fn a_second_server_on_one_data_directory_is_refused() {
         let dir = tempfile::tempdir().unwrap();
-        let _first =
-            Listener::open(dir.path(), &Grants::none()).expect("nothing holds this name yet");
+        let _first = Listener::open(dir.path(), None).expect("nothing holds this name yet");
 
-        let second = Listener::open(dir.path(), &Grants::none());
+        let second = Listener::open(dir.path(), None);
 
         assert!(
             second.is_err(),
@@ -745,8 +535,8 @@ mod tests {
         );
     }
 
-    /// What the pipe is created granting: the account the server runs as, and
-    /// nothing else at all.
+    /// What a pipe opened granting nobody is created granting: the account the
+    /// server runs as, and nothing else at all.
     ///
     /// Read off the pipe itself rather than proved by connecting as somebody
     /// else — a runner has one account, so the descriptor is what there is to
@@ -754,7 +544,7 @@ mod tests {
     #[tokio::test]
     async fn the_pipe_grants_the_account_the_server_runs_as_and_nothing_wider() {
         let dir = tempfile::tempdir().unwrap();
-        let listener = Listener::open(dir.path(), &Grants::none()).unwrap();
+        let listener = Listener::open(dir.path(), None).unwrap();
 
         let granted = granted_by(&listener);
 
@@ -762,128 +552,35 @@ mod tests {
         assert_eq!(granted[0], the_server_runs_as().unwrap());
     }
 
-    /// And an identity already in the grants when the pipe is opened.
+    /// And the session account beside it, where the server was opened knowing
+    /// one — which is every Windows machine the elevated verb has been run on.
     #[tokio::test]
-    async fn a_further_identity_is_granted_beside_it() {
+    async fn the_session_account_is_granted_beside_it() {
         let dir = tempfile::tempdir().unwrap();
-        let grants = Grants::none();
-        grants
-            .to(A_CONTAINER)
-            .expect("no pipe is open on these yet");
-
-        let listener = Listener::open(dir.path(), &grants).unwrap();
+        let listener = Listener::open(dir.path(), Some(THE_SESSION_ACCOUNT)).unwrap();
 
         assert_eq!(
             granted_by(&listener),
-            vec![the_server_runs_as().unwrap(), A_CONTAINER.to_owned()],
-            "the account the server runs as, and the identity it was given"
+            vec![
+                the_server_runs_as().unwrap(),
+                THE_SESSION_ACCOUNT.to_owned()
+            ],
+            "the account the server runs as, and the one its sessions run as"
         );
     }
 
-    /// And one that arrives *after* the pipe is open, which is every container
-    /// there will ever be: the server opens its pipe at startup and a
-    /// Conversation's profile is made as its first session starts.
+    /// And so is every instance made behind a connection, rather than only the
+    /// one the server opened with.
     ///
-    /// Asked of the instance standing under the name rather than of the next
-    /// one, because that is the instance a client dialling this second would
-    /// land on.
+    /// Which is what makes the grant the *pipe's* rather than the first
+    /// client's: a session asking an hour in dials the instance made in place
+    /// of whichever one was taken by the ask before it.
     #[tokio::test]
-    async fn an_identity_granted_after_the_pipe_was_opened_reaches_it() {
-        let dir = tempfile::tempdir().unwrap();
-        let grants = Grants::none();
-        let listener = Listener::open(dir.path(), &grants).unwrap();
-
-        assert_eq!(
-            granted_by(&listener).len(),
-            1,
-            "nothing is granted beside the account until something asks for it"
-        );
-
-        grants
-            .to(A_CONTAINER)
-            .expect("an identity to be grantable on a pipe that is already open");
-
-        assert_eq!(
-            granted_by(&listener),
-            vec![the_server_runs_as().unwrap(), A_CONTAINER.to_owned()],
-            "the identity should have been written onto the instance standing"
-        );
-    }
-
-    /// And it goes again with the container that put it there — a pipe granting
-    /// a profile that has been deleted grants a SID that resolves to nobody.
-    #[tokio::test]
-    async fn an_identity_taken_back_is_no_longer_granted() {
-        let dir = tempfile::tempdir().unwrap();
-        let grants = Grants::none();
-        let listener = Listener::open(dir.path(), &grants).unwrap();
-
-        grants.to(A_CONTAINER).unwrap();
-        grants.no_longer(A_CONTAINER);
-
-        assert_eq!(
-            granted_by(&listener),
-            vec![the_server_runs_as().unwrap()],
-            "the account the server runs as, and nobody else again"
-        );
-    }
-
-    /// And it reaches every pipe open on the set rather than the last one
-    /// opened, which is what the suite stands two servers up on.
-    #[tokio::test]
-    async fn an_identity_reaches_every_pipe_open_on_the_grants() {
-        let one = tempfile::tempdir().unwrap();
-        let other = tempfile::tempdir().unwrap();
-        let grants = Grants::none();
-
-        let first = Listener::open(one.path(), &grants).unwrap();
-        let second = Listener::open(other.path(), &grants).unwrap();
-
-        grants.to(A_CONTAINER).unwrap();
-
-        for listener in [&first, &second] {
-            assert_eq!(
-                granted_by(listener),
-                vec![the_server_runs_as().unwrap(), A_CONTAINER.to_owned()],
-                "both pipes should grant it, and {} did not",
-                listener.name()
-            );
-        }
-    }
-
-    /// And a pipe that has gone is not one anything is written onto — which is
-    /// the whole reason a listener takes its instance back out of the set.
-    #[tokio::test]
-    async fn a_pipe_that_has_gone_is_no_longer_written_onto() {
-        let one = tempfile::tempdir().unwrap();
-        let other = tempfile::tempdir().unwrap();
-        let grants = Grants::none();
-
-        drop(Listener::open(one.path(), &grants).unwrap());
-        let standing = Listener::open(other.path(), &grants).unwrap();
-
-        grants
-            .to(A_CONTAINER)
-            .expect("a listener that has gone should not be written onto at all");
-
-        assert_eq!(granted_by(&standing).len(), 2);
-    }
-
-    /// And the instance made behind a connection is made granting the set as it
-    /// stands, rather than as it stood when the server started.
-    ///
-    /// Which is the other half of the same fact: a client that connects takes
-    /// the standing instance with it, and what a session asking a moment later
-    /// dials is the one made in its place.
-    #[tokio::test]
-    async fn the_instance_made_behind_a_connection_grants_what_the_set_holds() {
+    async fn the_instance_made_behind_a_connection_grants_it_too() {
         use axum::serve::Listener as _;
 
         let dir = tempfile::tempdir().unwrap();
-        let grants = Grants::none();
-        let mut listener = Listener::open(dir.path(), &grants).unwrap();
-
-        grants.to(A_CONTAINER).unwrap();
+        let mut listener = Listener::open(dir.path(), Some(THE_SESSION_ACCOUNT)).unwrap();
 
         let dialled = ClientOptions::new()
             .open(listener.name())
@@ -892,7 +589,10 @@ mod tests {
 
         assert_eq!(
             granted_by(&listener),
-            vec![the_server_runs_as().unwrap(), A_CONTAINER.to_owned()],
+            vec![
+                the_server_runs_as().unwrap(),
+                THE_SESSION_ACCOUNT.to_owned()
+            ],
             "the instance made behind that connection should grant it too"
         );
 
@@ -903,7 +603,7 @@ mod tests {
     /// Who `listener`'s pipe lets through, in the order its descriptor says it,
     /// asked of the pipe itself.
     fn granted_by(listener: &Listener) -> Vec<String> {
-        let dacl = dacl_of(handle_of(&listener.waiting) as HANDLE);
+        let dacl = dacl_of(listener.waiting.as_raw_handle() as HANDLE);
 
         dacl.split('(')
             .skip(1)

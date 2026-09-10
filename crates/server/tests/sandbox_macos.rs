@@ -2093,7 +2093,7 @@ async fn the_compile_server_holds_the_worktrees_and_none_of_the_data_directory()
     fixture.attach("wireframe.png", b"PNG");
 
     let cache = fixture.cache(true);
-    cache.compiling(&RustBuildCache::default());
+    cache.compiling(&RustBuildCache::default(), None);
 
     let reported = compile_server_report(&fixture);
 
@@ -2175,7 +2175,7 @@ async fn the_compile_server_is_kept_from_outliving_verkstead() {
     let fixture = grilling().await;
 
     let cache = fixture.cache(true);
-    cache.compiling(&RustBuildCache::default());
+    cache.compiling(&RustBuildCache::default(), None);
 
     let compiling = compile_server_report(&fixture)["pid"].clone();
 

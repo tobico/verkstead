@@ -26,6 +26,11 @@ mod client;
 #[cfg(feature = "desktop")]
 mod desktop;
 mod guide;
+/// The verb nobody types: the launcher a Windows session's console is made by,
+/// as the session account, because a console cannot be handed to a process
+/// started as somebody else. Windows' own, and hidden.
+#[cfg(windows)]
+mod launcher;
 /// The named pipe a Windows session asks through, from the end that dials it:
 /// the `pipe://` spelling `--server` takes, and the ureq transport that opens
 /// one. Read on every platform, so that a pipe named where there are none is
@@ -33,6 +38,11 @@ mod guide;
 mod pipe;
 pub mod repo;
 mod serve;
+/// The elevated pair that puts the local account a Windows session runs as on
+/// the machine, and takes it away again. Windows' own: there is no such account
+/// on the other platforms and nothing there for a verb to do.
+#[cfg(windows)]
+mod session_account;
 
 /// Where the server lives when nothing says otherwise. The tailnet is the
 /// perimeter, so the default stays on the loopback interface.
@@ -138,6 +148,25 @@ enum Command {
     #[cfg(feature = "desktop")]
     Desktop(verkstead_desktop::Desktop),
 
+    /// The local account this machine's Windows sessions run as: make it, or
+    /// take it away.
+    ///
+    /// The one thing about Verkstead that needs an elevated terminal, and it
+    /// needs one once: a Windows session runs as a local account of Verkstead's
+    /// own rather than as the human, and creating a local account is an
+    /// administrator's call (ADR-0014). The account holds a long random
+    /// password nobody types, kept beside the other secrets under the Data
+    /// Directory, and is a name to run as rather than one anybody signs in
+    /// with.
+    ///
+    /// Everything else Verkstead does is unprivileged, this included after the
+    /// first run: the server only ever reads the account.
+    #[cfg(windows)]
+    SessionAccount {
+        #[command(subcommand)]
+        what: session_account::What,
+    },
+
     /// Print the Guide: everything an agent needs in order to ask well.
     ///
     /// Markdown on stdout, exit 0. With no topic, the core Guide — the same
@@ -148,6 +177,16 @@ enum Command {
         /// Omit for the core Guide.
         topic: Option<String>,
     },
+
+    /// The launcher a Windows session's console is made by, as the session
+    /// account. Verkstead's own, and nobody's to type.
+    ///
+    /// Hidden, because it is internal surface rather than a verb: it takes the
+    /// two ends of a console as its standard handles, and run any other way it
+    /// refuses in words rather than doing anything.
+    #[cfg(windows)]
+    #[command(name = verkstead_server::terminal::launcher::VERB, hide = true)]
+    SessionLauncher(launcher::Launcher),
 }
 
 impl Cli {
@@ -162,6 +201,10 @@ impl Cli {
             Some(Command::Serve(config)) => serve::serve(config),
             #[cfg(feature = "desktop")]
             Some(Command::Desktop(app)) => desktop::desktop(app),
+            #[cfg(windows)]
+            Some(Command::SessionAccount { what }) => session_account::session_account(what),
+            #[cfg(windows)]
+            Some(Command::SessionLauncher(asked)) => launcher::launcher(asked),
             Some(Command::Guide { topic }) => guide::guide(topic.as_deref()),
             None => guide::guide(None),
         }

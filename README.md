@@ -41,11 +41,12 @@ want is [adoption](docs/adoption.md#getting-it-running).
 description of what a session may reach, rendered over the mechanism each
 platform has: bubblewrap on Linux, where the rest of the machine is not in the
 session's namespace at all; Apple's sandbox on a Mac, where the machine is in
-plain sight and refused; and an AppContainer on Windows, the platform's own
-deny-by-default identity, where reach is an access-control entry written on
-each real directory the description names. What is inside is the same on all
-three, and [adoption](docs/adoption.md) says what a session can and cannot get
-to on each. The daemon install is the NixOS module's.
+plain sight and refused; and a local account of Verkstead's own on Windows,
+where reach is an access-control entry written for that account on each real
+directory the description names. What is inside is the same on all three, and
+[adoption](docs/adoption.md) says what a session can and cannot get to on each
+— including the one elevated command a Windows machine wants once, to make
+that account. The daemon install is the NixOS module's.
 
 ## Where things are written down
 

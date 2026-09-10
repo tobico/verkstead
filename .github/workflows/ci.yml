@@ -205,12 +205,14 @@ jobs:
 
       # The one thing the sessions suite needs that the runner image has not
       # got, and it is here to prove a *negative*: no session on this platform
-      # compiles through an sccache, because the AppContainer it runs in is
-      # refused the loopback a client reaches its server over. A runner with no
-      # sccache would start no Compile Server for want of a binary and would
-      # prove nothing — so the two tests about it in
+      # compiles through an sccache yet — see the server's
+      # `build_cache::compiles_through_an_sccache`, which is where that switch is
+      # and where what is left to do about it is said. A runner with no sccache
+      # would start no Compile Server for want of a binary and would prove
+      # nothing — so the two tests about it in
       # `crates/server/tests/sessions_windows.rs` insist on one being installed
       # and say so by failing rather than by quietly passing.
+
       #
       # Pinned to a release like everything else here, unpacked, and put on the
       # `PATH`: that variable is what *installed* means on this platform, both
@@ -245,6 +247,23 @@ jobs:
       - name: Build
         run: cargo build --workspace --all-targets --features verkstead-desktop/shim
 
+      # **The session account, which no suite here can make for itself.** A
+      # Windows session runs as a local account of Verkstead's own (ADR-0014,
+      # amended), and creating one is an administrator's call — so every suite
+      # that starts a session asks for the account this machine's Data Directory
+      # already has, and fails with the line that names this verb where there is
+      # none. That is `sessions_windows.rs`, the two boundary suites,
+      # `account_windows.rs`, `launcher_windows.rs` and the granting tests
+      # inside the server crate. A runner is elevated, so this is the one place
+      # the verb can be run for them.
+
+      #
+      # The binary the step above built rather than a `cargo run`, so that
+      # nothing is compiled twice — and against no `--data-dir`, because the
+      # default is the one the suites resolve.
+      - name: Create the session account
+        run: target/debug/verkstead.exe session-account create
+
       # What is left out of the run is left out of the build above: a suite that
       # stands on a mount namespace or on Apple's sandbox is `cfg`-gated at its
       # own file, so this is the whole of what a Windows Verkstead has to say
@@ -258,12 +277,13 @@ jobs:
       #
       # **And the boundary suite is in it**, which is what this job is to
       # Windows that the `macOS sandbox` job above is to a Mac:
-      # `crates/server/tests/sandbox_windows.rs` builds a real AppContainer, has
-      # the description's entries written on real directories, and runs a probe
-      # inside that attempts each access and says what the machine said. It runs
-      # here rather than in a step of its own because this job already runs the
-      # whole workspace — a Windows build has no suite that has to be left out
-      # the way a Mac's does.
+      # `crates/server/tests/sandbox_windows.rs` has the description's entries
+      # written on real directories for the session account, and runs a probe as
+      # that account which attempts each access and says what the machine said.
+      # It runs here rather than in a step of its own because this job already
+      # runs the whole workspace — a Windows build has no suite that has to be
+      # left out the way a Mac's does.
+
       - name: Test
         run: cargo test --workspace --features verkstead-desktop/shim
 

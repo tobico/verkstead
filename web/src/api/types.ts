@@ -1087,15 +1087,24 @@ base_commit: string | null, };
 
 /**
  * Whether a session's compiling is cached, and where it is not, what would
- * have to change — which is not the same question twice.
+ * have to change.
  *
- * Two false answers rather than one, because they ask different things of the
- * reader. One is a machine missing a program, which the human fixes by
- * installing it; the other is a platform that cannot reach a compile server at
- * all, which nobody fixes and which a page telling them to install something
- * would be lying about.
+ * **It carried a third answer and does not any more.** There used to be a
+ * platform where no session compiled through an sccache whatever was
+ * installed: a Windows session ran inside an AppContainer, which is refused
+ * the loopback an sccache client reaches its server over. That was a thing
+ * nobody could fix and a page telling them to install something would have
+ * been lying about — so it was its own answer, drawn with its own sentence. A
+ * Windows session runs as a local account of Verkstead's own now and reaches
+ * the loopback like anything else, so the answer went with the reason for it.
+ *
+ * An enum rather than the boolean two answers come to, because what is being
+ * said is *why not* rather than *whether*: a platform that could not reach a
+ * compile server would be an answer here again, with its own true reason —
+ * see `build_cache::compiles_through_an_sccache` on the server, which is the
+ * one place a platform's answer is said.
  */
-export type CompileCaching = "Cached" | "NoSccache" | "NotThroughAContainer";
+export type CompileCaching = "Cached" | "NoSccache";
 
 /**
  * How a merge conflict between a pull request and its base branch is resolved.
@@ -1375,13 +1384,13 @@ ready_to_grill: boolean,
  * scratch every time, which is a slow build rather than a broken one — so
  * it is a note above the button, not a refusal on it.
  *
- * **And false where installing one would change nothing.** A Windows
- * session compiles through no sccache whatever the machine has, because
- * the AppContainer it runs in is refused the loopback the client reaches
- * its server over (ADR-0014) — so there is nothing here for the human to
- * go and do, and a note telling them to do it would be wrong. What is
- * standing rather than fixable is said on the settings page instead — see
- * [`crate::CompileCaching::NotThroughAContainer`].
+ * **Which is always something the human can go and do.** It was not
+ * always: a Windows session compiled through no sccache whatever the
+ * machine had, and a note telling somebody to install one would have been
+ * wrong there. Sessions on every platform reach the one Compile Server
+ * this machine runs now — see `build_cache::compiles_through_an_sccache`
+ * on the server — so the note above the button is an instruction again
+ * wherever it is drawn at all.
  *
  * The server's rule rather than three fields for the page to combine, for
  * the reason [`ConversationView::ready_to_grill`] is one: two of the three

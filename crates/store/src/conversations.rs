@@ -2003,23 +2003,25 @@ pub async fn recorded_worktrees(pool: &SqlitePool) -> Result<Vec<PathBuf>> {
 
 /// Every Conversation whose work has not stopped, by id.
 ///
-/// The keep-set the container sweep decides by, and the one place in the store
+/// The keep-set the boundary sweep decides by, and the one place in the store
 /// where Done and Closed are read as one thing. On the platform whose boundary
-/// is an identity, a Conversation's AppContainer is granted at its first
-/// session and lasts as long as the work does — so what a sweep is looking for
-/// is every profile whose Conversation has stopped, whether it stopped by
-/// finishing or by being closed (ADR-0014).
+/// is an identity, a Conversation's entries are written at its first session
+/// and last as long as the work does — so what a sweep is looking for is every
+/// Conversation that has stopped, whether it stopped by finishing or by being
+/// closed (ADR-0014).
 ///
 /// **Which is the other reading from [`recorded_worktrees`]'s**, deliberately.
 /// A Done Conversation keeps its checkout, because a Follow-up steer picks the
 /// work up there; it does not keep its boundary, because its next session
 /// grants what it needs again and what is left standing in the meantime is
-/// entries on the human's own directories naming an identity nothing is
-/// running under.
+/// entries on the human's own directories for work that has stopped — and the
+/// account they name is the one every other session on the machine is running
+/// as, so a stale one is reach nobody asked for rather than a name nobody
+/// holds.
 ///
 /// **A Conversation the record has lost is not in the keep-set either**, which
 /// is what a Cleanup's delete leaves behind on that platform: the rows gone,
-/// and a profile and its entries still on the machine.
+/// and its entries still on the machine.
 ///
 /// Every id there is rather than a page of them, for [`recorded_worktrees`]'s
 /// other reason: what asks is deciding what to take away, and a keep-set that

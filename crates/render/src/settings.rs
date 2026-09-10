@@ -238,13 +238,22 @@ pub struct BuildCacheView {
 }
 
 /// Whether a session's compiling is cached, and where it is not, what would
-/// have to change — which is not the same question twice.
+/// have to change.
 ///
-/// Two false answers rather than one, because they ask different things of the
-/// reader. One is a machine missing a program, which the human fixes by
-/// installing it; the other is a platform that cannot reach a compile server at
-/// all, which nobody fixes and which a page telling them to install something
-/// would be lying about.
+/// **It carried a third answer and does not any more.** There used to be a
+/// platform where no session compiled through an sccache whatever was
+/// installed: a Windows session ran inside an AppContainer, which is refused
+/// the loopback an sccache client reaches its server over. That was a thing
+/// nobody could fix and a page telling them to install something would have
+/// been lying about — so it was its own answer, drawn with its own sentence. A
+/// Windows session runs as a local account of Verkstead's own now and reaches
+/// the loopback like anything else, so the answer went with the reason for it.
+///
+/// An enum rather than the boolean two answers come to, because what is being
+/// said is *why not* rather than *whether*: a platform that could not reach a
+/// compile server would be an answer here again, with its own true reason —
+/// see `build_cache::compiles_through_an_sccache` on the server, which is the
+/// one place a platform's answer is said.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum CompileCaching {
@@ -256,13 +265,6 @@ pub enum CompileCaching {
     /// machine and compiles for itself. Installing sccache where the server can
     /// see it is the whole of what is missing.
     NoSccache,
-
-    /// And a platform where no session compiles through one whatever is
-    /// installed: a Windows session runs inside an AppContainer, which is
-    /// refused the loopback an sccache client reaches its server over
-    /// (ADR-0014). The shared `CARGO_HOME` is unaffected — a directory is a
-    /// directory — so the downloads are shared there like everywhere else.
-    NotThroughAContainer,
 }
 
 /// The Cleanup as the settings page draws it: the two things that happen to an

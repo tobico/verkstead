@@ -35,10 +35,19 @@
 //! the reasoning above survives the crossing: `/bin/sh` is not a path, and the
 //! roots every Sandbox binds are a fact about a mount namespace, so a Windows
 //! answer put through [`reachable`] would fall back for every shell there is.
-//! What a human at that machine opens instead is `pwsh` where somebody has
-//! installed PowerShell 7, and Windows PowerShell where nobody has — the one
-//! every Windows machine carries. See [`installed`], which is that whole
-//! choosing, and [`on_the_path`], which is its one call to the machine.
+//! What a Terminal opens there is **Windows PowerShell**, the one every Windows
+//! machine carries. See [`installed`], which is that whole choosing, and
+//! [`on_the_path`], which is its one call to the machine.
+//!
+//! **It used to prefer `pwsh` where somebody had installed PowerShell 7**, and
+//! that is what the account boundary took away (ADR-0014, *Amended: the Sandbox
+//! is an account*). A Terminal runs as the session account like every other
+//! session, and `pwsh` on most machines is a Store execution alias — a reparse
+//! point under the *human's* own `WindowsApps`, which is per-user by
+//! construction and which another account is refused with error 1920. So the
+//! shell every machine really has stops being the fallback and becomes the
+//! answer.
+
 //!
 //! One function with two arms rather than two notions: what a Terminal *is* is
 //! the same word on both platforms, and only the machine it asks differs.
@@ -67,20 +76,8 @@ use crate::platform::Platform;
 /// to: what a Windows machine falls back to is [`WINDOWS_POWERSHELL`].
 pub(crate) const FALLBACK: &str = "/bin/sh";
 
-/// What a Windows terminal opens on where somebody has installed it: PowerShell
-/// 7 and after, which is the one a human working on that machine has and the
-/// one every piece of advice written this decade is about.
-///
-/// A bare name rather than a path, because where its installer put it is not
-/// something to write down: it is on the `PATH` its installer added, and that is
-/// what makes it *installed* rather than merely present. Looked for with no
-/// extension on purpose — `PATHEXT` is what says which of `pwsh.exe` and a
-/// `pwsh.cmd` beside it is the one to start, and that is the machine's answer
-/// rather than this module's.
-const PWSH: &str = "pwsh";
-
-/// And what it opens on where nobody has: Windows PowerShell, which ships with
-/// the operating system and is in the system directory on every `PATH` there is.
+/// What a Windows terminal opens on: Windows PowerShell, which ships with the
+/// operating system and is in the system directory on every `PATH` there is.
 ///
 /// Named with its extension because that is its name — nothing has to be
 /// resolved to know it is an executable — and it is what a machine that somehow
@@ -175,27 +172,27 @@ fn reachable(shell: &str) -> bool {
     })
 }
 
-/// And the Windows rules: `pwsh` where the machine has one, and Windows
-/// PowerShell where it has not.
+/// And the Windows rule, which is one shell rather than a choice between two —
+/// see this module's own documentation for what took the choice away.
 ///
 /// `look` is the machine — [`on_the_path`] out here and a value in a test — so
 /// that what is asked about is each kind of Windows machine rather than
-/// whichever one happens to be running the suite. It is the same question both
-/// times, which is why there is one of it: *is this program on the server's
-/// `PATH`, by this platform's own rules for reading a name.*
+/// whichever one happens to be running the suite. The question is *is this
+/// program on the server's `PATH`, by this platform's own rules for reading a
+/// name.*
 ///
 /// **What comes back is where it was found**, so that `SHELL` inside names a
 /// real file the way the passwd arm's answer does, and so that the shell that
-/// was looked at is the shell that is started. Failing that — a machine that
-/// answers about neither, or a path that will not go into a `String` — the bare
-/// name of the one every Windows machine has, which the rendering resolves for
-/// itself when it starts it.
+/// was looked at is the shell that is started. Failing that — a machine whose
+/// `PATH` does not answer about it, or a path that will not go into a `String`
+/// — the bare name, which the rendering resolves for itself when it starts it
+/// and which every Windows machine resolves.
 ///
-/// Nothing here is a fallback in [`FALLBACK`]'s sense. Both of these are shells
-/// a human types into; which one they get is which one the machine has.
+/// Nothing here is a fallback in [`FALLBACK`]'s sense: this is the shell a
+/// human at that machine types into, rather than a plainer one stood in for a
+/// shell that could not be had.
 fn installed(look: impl Fn(&str) -> Option<PathBuf>) -> String {
-    look(PWSH)
-        .or_else(|| look(WINDOWS_POWERSHELL))
+    look(WINDOWS_POWERSHELL)
         .and_then(|found| found.into_os_string().into_string().ok())
         .unwrap_or_else(|| WINDOWS_POWERSHELL.to_owned())
 }
@@ -206,8 +203,8 @@ fn installed(look: impl Fn(&str) -> Option<PathBuf>) -> String {
 /// The rendering's own resolving, handed the server's environment rather than a
 /// session's description — see [`crate::sandbox::open::found`], which is where
 /// the rules are. `PATHEXT` is half of them: a name with no extension is not a
-/// file on this platform, so a walk of `PATH` alone would find `pwsh` nowhere
-/// it is actually installed.
+/// file on this platform, so a walk of `PATH` alone would find a shell nowhere
+/// at all.
 ///
 /// The server's own `PATH` because that is what *installed* means here, and
 /// because it is the `PATH` a Windows session is given — `started_with` in
@@ -384,23 +381,11 @@ mod tests {
         assert_eq!(usable(Some("bash"), on_the_machine), FALLBACK);
     }
 
-    /// Where PowerShell 7 was installed, that is what a Windows terminal opens
-    /// on — and what it opens on is where the lookup found it, so that the
-    /// shell that was looked at is the shell that is started.
+    /// Windows PowerShell is what a Windows terminal opens on — and what it
+    /// opens on is where the lookup found it, so that the shell that was looked
+    /// at is the shell that is started.
     #[test]
-    fn pwsh_is_what_a_windows_terminal_opens_on() {
-        const INSTALLED: &str = r"C:\Program Files\PowerShell\7\pwsh.exe";
-
-        assert_eq!(
-            installed(|program| (program == PWSH).then(|| PathBuf::from(INSTALLED))),
-            INSTALLED,
-        );
-    }
-
-    /// And where nobody installed it, Windows PowerShell — which every Windows
-    /// machine has, so a terminal there opens on a shell either way.
-    #[test]
-    fn a_machine_without_it_opens_on_windows_powershell() {
+    fn a_windows_terminal_opens_on_windows_powershell() {
         const SHIPPED: &str = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
 
         assert_eq!(
@@ -409,11 +394,29 @@ mod tests {
         );
     }
 
-    /// And a machine that answers about neither is told the name of the one it
-    /// has anyway, rather than a path this module made up: the rendering
-    /// resolves a name for itself when it starts it.
+    /// And a machine whose `PATH` does not answer about it is told the name
+    /// anyway, rather than a path this module made up: the rendering resolves a
+    /// name for itself when it starts it.
     #[test]
-    fn a_machine_that_answers_about_neither_gets_the_name() {
+    fn a_machine_that_does_not_answer_gets_the_name() {
         assert_eq!(installed(|_| None), WINDOWS_POWERSHELL);
+    }
+
+    /// And PowerShell 7 is not looked for at all, however installed it is —
+    /// which is the amendment rather than an oversight. See this module's own
+    /// documentation: a Terminal runs as the session account, and `pwsh` on most
+    /// machines is a Store execution alias under the human's own profile that
+    /// another account is refused.
+    #[test]
+    fn pwsh_is_not_what_a_windows_terminal_opens_on() {
+        const SHIPPED: &str = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
+
+        assert_eq!(
+            installed(|program| match program {
+                "pwsh" => Some(PathBuf::from(r"C:\Program Files\PowerShell\7\pwsh.exe")),
+                _ => Some(PathBuf::from(SHIPPED)),
+            }),
+            SHIPPED,
+        );
     }
 }

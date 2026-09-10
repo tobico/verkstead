@@ -154,13 +154,62 @@ pub(crate) fn keep(platform: Platform, sandbox: u32, server: u32) {
 /// Nothing is refused for, as nothing is for a keeper: a Job that could not be
 /// made is said in the log, and the Compile Server it was to have held goes on
 /// running.
-pub(crate) fn held(platform: Platform, child: &Child) -> Held {
+///
+/// `process` is whatever the platform's own way of starting one handed back —
+/// see [`InAJob`], which is the two things this needs of it and the reason
+/// this is not simply a `&Child`: on the platform that has a Job to make, the
+/// Compile Server is started as the session account, and a process started as
+/// somebody else is not a child the standard library made.
+pub(crate) fn held(platform: Platform, process: &impl InAJob) -> Held {
     match platform {
         // Whose lifetimes are the sandbox's own to say — `--die-with-parent`
         // on one and a keeper on the other.
         Platform::Linux | Platform::MacOs => Held::nothing(),
 
-        Platform::Windows => holding(child),
+        Platform::Windows => holding(process),
+    }
+}
+
+/// What a Job can be made about: a process this server started, however it was
+/// started.
+///
+/// **Two ways of starting one and one thing to hold it.** A rendering naming no
+/// account is a `std::process::Child`; one naming the session account is a
+/// `CreateProcessWithLogonW` and is not a child at all — see
+/// `sandbox::starting::Running`. What a Job wants of either is the same two
+/// things, so they are said here rather than at the call.
+///
+/// The handle is Windows' alone and so is the whole mechanism, which is why
+/// only that half is `cfg`-ed: the id is what goes in the log line on any
+/// machine, including the ones where the arm above holds nothing.
+pub(crate) trait InAJob {
+    /// What the machine calls it.
+    fn id(&self) -> u32;
+
+    /// And the handle a Job takes it by.
+    #[cfg(windows)]
+    fn handle(&self) -> std::os::windows::io::RawHandle;
+}
+
+impl InAJob for Child {
+    fn id(&self) -> u32 {
+        Child::id(self)
+    }
+
+    #[cfg(windows)]
+    fn handle(&self) -> std::os::windows::io::RawHandle {
+        std::os::windows::io::AsRawHandle::as_raw_handle(self)
+    }
+}
+
+#[cfg(windows)]
+impl InAJob for crate::sandbox::starting::Running {
+    fn id(&self) -> u32 {
+        crate::sandbox::starting::Running::id(self)
+    }
+
+    fn handle(&self) -> std::os::windows::io::RawHandle {
+        crate::sandbox::starting::Running::handle(self).cast()
     }
 }
 
@@ -193,20 +242,18 @@ impl Held {
     }
 }
 
-/// `child` in a Job of its own — see [`held`], which is the whole of the why.
+/// `process` in a Job of its own — see [`held`], which is the whole of the why.
 #[cfg(windows)]
-fn holding(child: &Child) -> Held {
-    use std::os::windows::io::AsRawHandle;
-
+fn holding(process: &impl InAJob) -> Held {
     let made = job::Job::killing_everything_in_it()
-        .and_then(|job| job.take(child.as_raw_handle().cast()).map(|()| job));
+        .and_then(|job| job.take(process.handle().cast()).map(|()| job));
 
     match made {
         Ok(job) => Held { job: Some(job) },
         Err(error) => {
             tracing::error!(
                 %error,
-                child = child.id(),
+                child = process.id(),
                 "no Job could be made for this process, so it would outlive the server",
             );
 
@@ -221,7 +268,7 @@ fn holding(child: &Child) -> Held {
 /// that is not one: there is no kernel object here to stand for the promise, so
 /// what it answers is that it holds nothing.
 #[cfg(not(windows))]
-fn holding(_child: &Child) -> Held {
+fn holding(_process: &impl InAJob) -> Held {
     Held::nothing()
 }
 

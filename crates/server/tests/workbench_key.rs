@@ -23,7 +23,7 @@ use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_server::key::{WorkbenchKey, login_link};
-use verkstead_server::settings::{Secrets, Settings};
+use verkstead_server::settings::Settings;
 use verkstead_server::{Embed, open_database, router_keyed_with_viewer, store};
 
 /// A site shaped like the one vite builds, which is what the workbench's own
@@ -429,14 +429,20 @@ fn clearing_the_github_token_leaves_the_key_where_it_was() {
     let dir = tempfile::tempdir().unwrap();
     let key = WorkbenchKey::issued(dir.path()).unwrap();
 
-    // Which is why it is a file of its own: clearing the token writes
-    // `secrets.yaml` empty, so a key kept in there would be destroyed by
-    // somebody tidying up a token they had finished with.
+    // Which is why it is a file of its own: a settings save writes the whole of
+    // `secrets.yaml`, so a key kept in there would be rewritten by somebody
+    // tidying up a token they had finished with — and this is the tidying up.
     let settings = Settings::in_data_dir(dir.path());
     settings
-        .save_secrets(&Secrets::of_token(Some("ghp_something".to_owned())))
+        .save_secrets(
+            &settings
+                .secrets()
+                .with_token(Some("ghp_something".to_owned())),
+        )
         .unwrap();
-    settings.save_secrets(&Secrets::of_token(None)).unwrap();
+    settings
+        .save_secrets(&settings.secrets().with_token(None))
+        .unwrap();
 
     assert_eq!(
         WorkbenchKey::issued(dir.path()).unwrap().secret(),

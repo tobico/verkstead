@@ -43,6 +43,12 @@ import type { Dependency, Distro } from "../api/types";
 /// A command, a link, or a note by itself — the sandbox row on macOS and on
 /// Windows is nothing to install, and *other Linux* has the generic list of
 /// what is needed where the five named distributions have a line to paste.
+///
+/// Nothing to install is not always nothing to do: the Windows sandbox row is
+/// an account rather than a program, and its note carries the one elevated
+/// command that makes one. A command field there would be a line to paste that
+/// fails in the terminal most people have open, which is worse than a sentence
+/// saying where to paste it.
 export type Instruction = {
   /// What to run, exactly, where this OS carries the program.
   command?: string;
@@ -247,9 +253,13 @@ export const GUIDES: Record<Distro, Guide> = {
     rows: {
       Sandbox: {
         note:
-          "Sessions on this machine run inside an AppContainer, under an " +
-          "identity Verkstead makes for each Conversation. There is nothing " +
-          "to install: it is how the sandbox works on Windows.",
+          "Sessions on this machine run as a local account of Verkstead's " +
+          "own, which is the sandbox on Windows: there is nothing to " +
+          "install. Making that account is the one thing here that wants an " +
+          "administrator, and it wants one once — verkstead session-account " +
+          "create, from a terminal opened with Run as administrator. Until " +
+          "it has been run, a session on this machine is refused rather " +
+          "than started without a boundary.",
       },
       Git: { command: "winget install --id Git.Git" },
       Claude: orElse(

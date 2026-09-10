@@ -392,6 +392,9 @@ round is to take the mark off before opening it instead: right-click the msi,
 **It installs into your own profile, and asks nobody for anything.** The app is
 unsigned, so an installer asking for administrator would be an unsigned program
 asking for the machine, and elevation buys a downloader nothing they wanted.
+There is one elevated step on this platform and it is below, after the install
+rather than inside it: a command you type once, having already decided to trust
+this, rather than a package you hand the machine to before you have seen it.
 Everything therefore lands in the profile: the two exes under
 `%LOCALAPPDATA%\Programs\Verkstead`, a **Verkstead** entry in your own Start
 menu, and the uninstall entry in **Installed apps** beside everything else you
@@ -403,6 +406,44 @@ download that is not the icon at all: `verkstead ask`, `verkstead guide` and
 the rest work in a terminal opened *after* the install. One that was already
 open never read the entry — closing it and opening another is the whole of the
 fix — and the uninstall takes the entry away with the files.
+
+**Then one command, once, as an administrator.** Sessions on this machine run
+as a local account of Verkstead's own rather than as you — which is what keeps
+an agent out of your Documents — and creating a local account is an
+administrator's call. So this is the one thing Verkstead has ever asked you to
+elevate for. Right-click the Start button, choose **Terminal (Admin)** or
+**Windows PowerShell (Admin)**, answer the **User Account Control** prompt, and
+run it there:
+
+```console
+$ verkstead session-account create
+account   = vk-3f9c1a2b7e04 created
+password  = written to C:\Users\you\AppData\Roaming\Verkstead\secrets.yaml
+next      = this Verkstead's Windows sessions will run as vk-3f9c1a2b7e04
+```
+
+The name is short because a local account name may be twenty characters and no
+more, and the digits after `vk-` come off the Data Directory — so two
+Verksteads on one machine keep their accounts apart the way they keep their
+pipes apart. The password is long, random and never typed by anybody: it lands
+beside your other secrets under `%APPDATA%\Verkstead`, which is where the
+server reads it from to start a session. Run the command a second time and it
+says the account was already there rather than failing. Run it in an ordinary
+terminal and it refuses with a line naming what it needs, which is this.
+
+**Everything after it is unprivileged**: the server only ever *reads* the
+account, and starting a session as it wants nothing of an administrator. Until
+the command has been run there is no account for a session to be, and a session
+is **refused** rather than started without a boundary — the log says which, the
+way it does on a Linux machine with no `bwrap`.
+
+**And `verkstead session-account remove`, elevated too, takes it back off**: the
+account, its password out of the secrets file, and the `C:\Users` directory
+Windows made for it the first time a session ran. Worth running before you
+uninstall, because the msi knows about none of the three — a machine that has
+run Verkstead and then had it taken off should look as it did. Nothing there is
+a failure for not having been found, so it is also how a half-finished install
+is tidied up.
 
 What is on the screen once **Verkstead** is opened from the Start menu is an
 icon in the notification area, and the menu on it is the Linux tray's four:
@@ -453,58 +494,63 @@ file is the whole account of the run; started from a terminal, whatever stops
 it is said there as well.
 
 **Sessions run on Windows**, and what one may reach is the same description as
-on Linux and a Mac rendered over an **AppContainer** — the platform's own
-deny-by-default identity, the one Windows runs its browsers' renderers inside.
-A session runs on a pseudoconsole Verkstead opens for it and inside a container
-of its Conversation's own: the Conversation's Worktree, the Repo's git
+on Linux and a Mac rendered over the **local account** the elevated command
+above made. A session runs on a pseudoconsole Verkstead opens for it, as that
+account rather than as you: the Conversation's Worktree, the Repo's git
 directory and the handoff directory writable, each Companion Repo at the mode
 it was set to, the Sandbox Configuration's entries, the Build Cache with the
 shared `CARGO_HOME` inside it, a profile of the Conversation's own with the
 Agent Profile's account joined into it, the Skills and the `verkstead` a
 session asks with read-only, Windows and Program Files read-only, a temporary
-directory of the session's own, the internet — and nothing else of the machine.
-Not your Documents, not the rest of your profile, and not another
-Conversation's Worktree.
+directory of the session's own, the network — and nothing else of the machine.
+Not your Documents and not the rest of your profile.
 
 **The boundary refuses rather than hides**, as a Mac's does and unlike Linux's:
 your home directory is in plain sight from inside a session and every byte of
-it is refused. `verkstead ask` goes through a **named pipe** the server opens
-beside its socket, because a container is refused every connection to this
-machine — including the loopback the CLI would otherwise ask over.
+it is refused — to reads as much as to writes, an account being granted your
+files no more than a stranger's is. `verkstead ask` goes through a **named
+pipe** the server opens beside its socket: that was the only way in behind the
+boundary this platform used to have, and it stays because it is the one
+transport no firewall on the machine has to agree with.
+
+**One account serves every Conversation**, which is the one place this
+boundary is weaker than the other two platforms', and it is worth being plain
+about: making a local account takes an administrator, so one per Conversation
+would take an administrator per Conversation. A session can therefore reach
+every *live* Conversation's Worktree — not a Closed one, whose entries came off
+with it. What it cannot reach is your machine: your profile, your Documents,
+and the checkouts your Repos were registered from — a Worktree being all a
+session ever sees of a repository, here as on the other two platforms. That is
+the boundary this exists for, and it is the one that is asserted rather than
+assumed: the Windows suite attempts your own files from inside a session and
+reads back the refusal.
 
 **What has no equivalent on either other platform is that the boundary is
-written on your own directories.** A container reaches what its identity has
-been granted and nothing else, so there is nothing to mount and no policy to
-hand a process: each real path the description names gets an access-control
-entry for that identity — a grant on the Worktree at the reach the description
-says, a grant on the Agent Profile's account, and an entry in front of the
-account's own skills that refuses them. Three things about those entries are
-worth knowing, because they are on directories of yours rather than on
-anything of Verkstead's:
+written on your own directories.** An account reaches what it has been granted
+and nothing else, so there is nothing to mount and no policy to hand a process:
+each real path the description names gets an access-control entry for that
+account — a grant on the Worktree at the reach the description says, a grant on
+the Agent Profile's account, an entry in front of the account's own skills that
+refuses them, and a step through each directory on the way to any of those, so
+that a path can be resolved without its parent becoming something to list. Two
+things about those entries are worth knowing, because they are on directories of
+yours rather than on anything of Verkstead's:
 
-- **They are per Conversation.** One AppContainer profile is made at a
-  Conversation's first session and shared by every session and terminal after
-  it, so an entry grants that Conversation's identity and no other's. Which is
-  what stops one session reaching another Conversation's Worktree, and it is
-  asserted rather than assumed: the Windows suite attempts it and reads back
-  the refusal.
-- **Closing takes them away.** A Conversation closing removes its container in
-  the same breath as its Worktree: every entry written for that identity comes
-  off the directory it was written on, and the profile is deleted. What that is
-  read off is a record Verkstead writes under its own Data Directory as each
-  container is made — the profile's name, its SID and every entry written for
-  it — because a Closed Conversation has no Worktree left to work the list out
-  from again.
+- **Closing takes them away.** A Conversation closing takes its entries off in
+  the same breath as its Worktree: every one written for it comes off the
+  directory it was written on. What that is read off is a record Verkstead
+  writes under its own Data Directory before anything is granted — the account
+  it is granting and every entry written — because a Closed Conversation has no
+  Worktree left to work the list out from again.
 - **A crash is swept up at the next startup.** A server that stopped between
   the two would leave entries on your directories, so the next one to start
-  reads those records and takes back every container whose Conversation is Done
-  or Closed or gone from the record altogether — entries off, profile deleted,
-  record removed.
+  reads those records and takes back the entries of every Conversation that is
+  Done or Closed or gone from the record altogether.
 
-**A container that cannot be made refuses the session**, the way a missing
-`bwrap` does on Linux: a profile that will not create, an entry that will not
-be written, a pipe that will not take the identity. There is no unsandboxed
-session to fall back to, and the log says which of the three it was.
+**A boundary that cannot be made refuses the session**, the way a missing
+`bwrap` does on Linux: no account on the machine, no password beside the
+secrets, or an entry that will not be written. There is no unsandboxed session
+to fall back to, and the log says which of the three it was.
 
 **The profile a session runs in is the Conversation's own**, under
 `%APPDATA%\Verkstead\homes`, emptied and made again as each of that
@@ -525,9 +571,12 @@ config — so a linked file the session replaced is written back over the
 account's own as the session ends, and the link is made fresh for the session
 after. Nothing a session wrote to its account is lost.
 
-**A Conversation Terminal opens on `pwsh`** where PowerShell 7 is installed and
-on Windows PowerShell where nobody has installed one, in the Worktree, on the
-same pseudoconsole a session runs on.
+**A Conversation Terminal opens on Windows PowerShell**, in the Worktree, on
+the same pseudoconsole a session runs on. Not `pwsh`, even where you have
+PowerShell 7: that on most machines is a Store execution alias living under
+your own profile, which is per-user by construction, and the account a terminal
+runs as is refused it. So the shell every Windows machine really has is the
+answer rather than the fallback.
 
 **The tools a session runs are the machine's**, as they are on a Mac: `git`,
 `node`, `cargo` and whatever else an agent reaches for are found on the `PATH`
@@ -536,20 +585,22 @@ it — so an agent npm installed as a `claude.cmd` starts as readily as an
 installer's `claude.exe`. Everything else there is what it is on the other two:
 the Repos, the Briefs, the Question Sets, the Timeline, the pull requests.
 
-**Rust builds share their downloads here and compile for themselves.** The
-Build Cache is a directory of Verkstead's own —
-`%LOCALAPPDATA%\Verkstead\Cache` unless you say otherwise — that a session
-reaches read-write with `CARGO_HOME` inside it, so a crate is downloaded once
-for the machine rather than once per Conversation, exactly as on the other two
-platforms. The other half of it, the compiled objects, is off on Windows and
-only on Windows: caching those needs an sccache client inside the session
-talking to a server outside it over the local machine's own loopback, and the
-boundary a Windows session runs behind is refused every connection to this
-machine ([ADR 0014](adr/0014-windows-sessions.md)). So a Rust session here
-compiles its dependencies once per session and downloads them never twice,
-which is a slower build rather than a broken one. Nothing about it is a
-setting: the workbench's build cache page says so rather than asking you to
-install anything.
+**Rust builds share both halves here, as they do everywhere.** The Build Cache
+is a directory of Verkstead's own — `%LOCALAPPDATA%\Verkstead\Cache` unless you
+say otherwise — that a session reaches read-write with `CARGO_HOME` inside it,
+so a crate is downloaded once for the machine rather than once per
+Conversation. The other half, the compiled objects, wants an `sccache` on the
+`PATH` the server was started from: with one there, every session's `rustc`
+goes through the single Compile Server Verkstead runs, and a dependency is
+compiled once for the machine too. The workbench's build cache page says which
+of the two you have.
+
+**The toolchain a session builds with is the one you installed.** `rustup`'s
+shims are on your `PATH` already, and the rustup home they resolve a toolchain
+out of is reached read-only beside them — so `cargo build` inside a session
+uses your default toolchain rather than one Verkstead brought. A machine
+without rustup is a machine where a session finds whatever else is on the
+`PATH`.
 
 Out of a checkout instead — the same server, told `--data-dir .` so that
 `verkstead.db` and the rest land in the checkout rather than in the platform

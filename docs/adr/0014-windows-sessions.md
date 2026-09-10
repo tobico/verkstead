@@ -8,6 +8,15 @@ a Windows Verkstead and a session, and they are decided separately because
 they land separately: the **pseudo-terminal**, which is ConPTY, and the
 **Sandbox**, which is an AppContainer.
 
+Amended (2026-09-09): **the Sandbox is a local account of Verkstead's own.** The
+container was built, and the first real session inside one refused every file it
+was given; three mechanisms were then asked the same questions on the same
+machine and only the last of them runs the agent. The terminal half of this
+decision is untouched. See *Amended: the Sandbox is an account*, and the two
+*What the probe answered* sections it rests on — the title of this ADR is left
+as it was written, being the record of what was decided rather than a summary of
+what stands.
+
 The order is the terminal first. A Windows session runs **unsandboxed** from
 the moment the terminal works until the container lands, and the workbench says
 so on every one — above **Start work** on the composer, beside the terminal on
@@ -112,6 +121,15 @@ session's work. Directories are not in it — a junction is a path rather than a
 file, and nothing replaces one.
 
 ## The Sandbox is an AppContainer
+
+Amended (2026-09-09): **it is not, and this section is kept as the record of a
+mechanism that did not survive the machine.** An AppContainer gives the
+boundary this section describes and cannot run the agent inside it — see *What
+the probe answered the second time*, below, and then *Amended: the Sandbox is an
+account*, which is what the boundary is now. Everything about the reach a
+session is granted survives the change almost word for word; what does not is
+the identity the grants are written for and the way a process is started under
+it.
 
 What a session may reach is one description rendered three times now:
 bubblewrap's flags on Linux, a seatbelt policy on a Mac, and on Windows an
@@ -232,6 +250,171 @@ And **sccache does not run inside a container as it stands**: its client panicke
 reading its own configuration before it ever reached the network. With loopback
 refused as well, this settles the switch this ADR left to the probe — **sccache
 is off for sandboxed Windows sessions**, and the shared `CARGO_HOME` stays.
+
+### What the probe answered the second time
+
+*(added 2026-09-08, after the first real session was run inside a container and
+refused every file it was given. The probe was extended with the two questions
+that session raised — whether an agent's own shell runs inside, and what node
+makes of a path inside — and everything below is again what the machine did.
+Nothing here is decided yet: this is what the decision above now has to answer
+to.)*
+
+**A path cannot be resolved inside a container at all.** `fs.realpathSync` and
+`fs.realpathSync.native` both fail with `EPERM` on *every* path asked about —
+a directory granted read-write, and `C:\Windows`, which every container reads
+with no entry at all. `lstat` on those same two paths succeeds, so this is
+resolution rather than reach: the JS walk starts at `C:\`, which no container
+may `lstat`, and the native call asks the operating system for a handle's final
+name and is refused as well. **The volume root cannot be granted**: the entries
+Windows itself writes on `C:\` and `C:\Users` for isolated apps name capability
+SIDs of the `S-1-15-3-65536-…` shape, and `CreateProcessW` refuses a token
+built with one — *The parameter is incorrect* — while writing an entry there
+for the container's own SID needs an elevation a per-user install has not got.
+
+That is what the first session failed on. An agent that checks a path is still
+what it was when permission was given calls one of those before every read, so
+Claude refused its own prompt file, its own Worktree and `C:\Windows` alike,
+with *its symlink resolution changed after permission was checked* — the same
+refusal for a path that was perfectly granted as for one that was not.
+
+**And an agent's shell does not start inside a container.** Git for Windows'
+`bash` — which is what Claude's shell tool runs on this platform — exits
+`0xc0000142`, a library refusing to start, granted or not. In a session it says
+what it is:
+`NtCreateDirectoryObject(\BaseNamedObjects\msys-2.0S5-…): 0xC0000022`.
+msys2 makes its shared objects under the machine's own `\BaseNamedObjects`,
+which an AppContainer is refused, so this is msys2 and the boundary rather than
+anything a grant reaches.
+
+**What does work is everything else this probe had already asked.** `node`,
+`git`, `pwsh` and Windows PowerShell all still run inside; a batch file in a
+granted directory runs through `cmd /d /c call` exactly as
+[`sandbox::open`](../../crates/server/src/sandbox/open.rs) runs one, so an
+npm-installed `claude.cmd` starts. The `npm` line's own failure is npm's script
+rather than the shell. PowerShell inside prints
+*InitializeDefaultDrives … failed* on every start, which is the same denied
+volume root seen from a different program.
+
+### And what the two probes after it answered
+
+*(added 2026-09-09. The container having failed, the two mechanisms this ADR
+had set aside were asked the same questions the same way —
+`crates/server/examples/restricted-token-probe.rs` and
+`crates/server/examples/session-account-probe.rs`. Again, everything here is
+what the machine did.)*
+
+**A restricted token gives the boundary and breaks the toolchain, three ways
+out of three.** A restricted SID list of the session's identity alone will not
+start a process at all; one holding `Everyone`, `Users` and `RESTRICTED` beside
+it starts a process, reaches what it is granted, refuses what it is not, and
+refuses the human's profile — and under it node dies initialising its random
+source, both PowerShells fail to load, and msys2 fails querying its own token.
+Widening the list by this logon's own SIDs changed nothing; writing entries on
+the token, the window station and the desktop changed nothing; the human's own
+SID turned **deny-only** gave the best boundary of the three — their profile
+refused to reads as well as writes — and broke the same three programs and the
+registry with them.
+
+**Only the integrity level leaves the toolchain standing, and it costs bash.**
+A token lowered to low integrity, with no list at all, runs node, both
+PowerShells and git; resolves paths; carries a console; reaches loopback; and a
+write lands only where Verkstead has written a mandatory label and is refused
+everywhere else including the human's own files. Their files stay *readable*,
+which is the weaker promise. And `bash` will not start: msys2 makes its shared
+objects under `\BaseNamedObjects`, which is labelled medium, and nothing
+standing lower may write there. Medium-low integrity behaves identically.
+
+**What all four have in common** is that the process is not quite the human — a
+stranger's identity, a second access check, a deny-only account, a ceiling —
+and node, msys2 and a managed runtime each need it to be an ordinary one.
+
+**A local account of Verkstead's own is an ordinary one, and everything works.**
+A directory granted to it is written and read, one not granted is refused, a
+junction is followed to its target, the human's own profile is refused to reads
+*and* writes, loopback connects, and `node`, `git`, Windows PowerShell and
+**`bash`** all run. Three things came with it:
+
+- **A console cannot be handed to a process started as another account.**
+  `CreateProcessWithLogonW` — the one call that starts a process as somebody
+  else without a privilege a per-user install has not got — refuses an extended
+  startup info with *The parameter is incorrect*. What works is a **launcher**:
+  a program of Verkstead's own, started as the account with the two pipes as its
+  plain standard handles, which calls `CreatePseudoConsole` over those and
+  starts the session on it with an ordinary `CreateProcessW`. The marker came
+  back off that console. Nothing is duplicated across the boundary — the
+  handles the console needs are the ones the launcher inherits.
+- **Ancestors need granting after all**, which reverses what the first probe
+  found for a container. *Reaching* a deep path needs no entry above it, because
+  an ordinary account holds the privilege to skip the traverse check — but
+  *resolving* one walks the prefixes and asks each for its attributes, and the
+  human's profile directory is on that walk. One `FILE_GENERIC_EXECUTE` entry,
+  not inherited, on each directory along the way is the whole of the fix, and it
+  says nothing about what is inside: the profile stayed unlistable in the same
+  run that resolved through it.
+- **`pwsh` is refused with error 1920.** It is a Store execution alias and those
+  are per-user, so the session account cannot resolve the human's. Windows
+  PowerShell runs, which is the fallback this ADR already names for a
+  Conversation Terminal — now the ordinary case rather than the exception.
+
+## Amended: the Sandbox is an account
+
+*(2026-09-09. This replaces *The Sandbox is an AppContainer* above, which is
+kept as the record of what was tried.)*
+
+**A Windows session runs as a local account of Verkstead's own.** It is still
+the Mac's kind of boundary — the machine is there and refused — and still one
+description rendered onto real paths: every path the Surface names is granted to
+that account's SID at the reach the description says, and what is not granted is
+not reachable. What changes is who the process is. An AppContainer identity, a
+restricted SID list, a deny-only SID and an integrity ceiling were each tried
+and each broke the agent; an ordinary account breaks nothing, because from the
+machine's point of view there is nothing unusual about it.
+
+**Which costs an elevated step, once, and this ADR reverses itself to pay it.**
+The loopback exemption was refused for being *one elevated command per machine,
+which the per-user install has no way to run* — and that refusal bought a named
+pipe, which was cheap. Refusing it here costs the shell, the human's files being
+unreadable, and per-Conversation isolation together, which is not. So the
+installer asks for elevation once and creates the account; everything after that
+is unprivileged, and a machine where the step was declined has no Windows
+sandbox and is told so in the words the unsandboxed note already uses.
+
+**One account for the installation, not one per Conversation** — reversing Q14
+along with it, and for the reason that makes it unavoidable: creating an account
+needs elevation, so one per Conversation would need elevation per Conversation.
+What that costs is what Q14 bought: a session can reach every *live*
+Conversation's Worktree, because they are all granted to the one account. What
+it does not cost is the boundary the Sandbox exists for — the human's own
+machine, their profile, their repositories outside the Watched Paths and their
+account's own skills are all still refused. The entries still go when a
+Conversation's Worktree does, so the reach is what is granted now rather than
+everything ever granted, and the record under the Data Directory still says what
+was written so a server that died can take it back.
+
+**The password is Verkstead's to keep.** `CreateProcessWithLogonW` needs one and
+there is no passwordless route to another account's token without a privilege
+only the operating system holds, so the installer generates a long random one
+and it is kept beside the other secrets under the Data Directory. The account is
+made with a password that does not expire and that it cannot change, and is
+denied interactive logon: it is a name to run as rather than one anybody signs
+in with.
+
+**The launcher is a verb of Verkstead's own binary**, which a session already
+has bound in read-only — see [`Executable`](../../crates/server/src/sandbox.rs).
+It makes the pseudoconsole, starts the agent on it, and is what the Job Object
+holds, so a server that dies still takes its sessions with it and an ended
+session still takes everything it started. Its standard handles are the
+console's two ends; resizing reaches it over the named pipe this ADR already
+has, whose descriptor grants the session account the way it was to have granted
+the container.
+
+**And two things the container had to do without come back.** Loopback works
+from the account, so `verkstead ask` would reach the TCP socket — the named
+pipe stays all the same, being landed, harmless and the one transport that
+needs no firewall to agree with it. And **sccache is back on**: its client
+reaches the Compile Server, so the switch this ADR left to the probe falls the
+other way from the container's answer.
 
 ## What stays as it was
 
