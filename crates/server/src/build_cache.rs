@@ -516,8 +516,17 @@ impl BuildCache {
             *running = None;
         }
 
+        // Timed because a session waits on it and says nothing while it does:
+        // the Compile Server is started before the first session that compiles
+        // Rust, so every second here is a second of a start that looks stuck —
+        // see [`crate::sandbox::granting::writing`], which is where the seconds
+        // have been.
+        let began = std::time::Instant::now();
+
         let started = compile_server(dir, sccache, data_dir, settings.size(), session_account)
             .and_then(|rendering| left_running(&rendering));
+
+        let took = began.elapsed();
 
         match started {
             Ok(server) => {
@@ -537,6 +546,7 @@ impl BuildCache {
                 tracing::info!(
                     cache = %dir.display(),
                     size = settings.size(),
+                    ?took,
                     "the shared compile server is up: every session's rustc goes through \
                      this one, in a sandbox holding the worktrees and the cache",
                 );
