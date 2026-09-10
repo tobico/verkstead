@@ -38,4 +38,4 @@ the sweep are the same work against a different identity.
 - [x] 01: The ConPTY terminal and unsandboxed sessions — [brief](01-conpty-terminal.md)
 - [x] 02: The named pipe — [brief](02-named-pipe.md)
 - [x] 03: The AppContainer — [brief](03-appcontainer.md) — landed, and replaced by 04
-- [ ] 04: The session account — [brief](04-session-account.md)
+- [x] 04: The session account — [brief](04-session-account.md)
