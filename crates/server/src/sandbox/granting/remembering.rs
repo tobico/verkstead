@@ -262,6 +262,134 @@ fn record(data_dir: &Path, conversation: i64) -> PathBuf {
     directory(data_dir).join(conversation.to_string())
 }
 
+/// What the machine's own record is called, beside the Conversations' in the
+/// same directory.
+///
+/// **A name no Conversation can have**, which is what keeps it out of the
+/// sweep: a candidate there is a file whose name reads as an id — see
+/// [`left_behind`], and the test that says so — and this one does not. Which
+/// is the whole of how a record that must never be swept sits next to the ones
+/// that must.
+const STANDING: &str = "standing";
+
+/// Where that is.
+fn standing_record(data_dir: &Path) -> PathBuf {
+    directory(data_dir).join(STANDING)
+}
+
+/// The entries that stand for the installation rather than for one
+/// Conversation — see [`super::written_down`], which is what decides between
+/// them.
+///
+/// **Why they are written down at all, when nothing sweeps them.** Precisely
+/// because nothing does: an entry no boundary takes off is one that would
+/// otherwise outlive every record there is, and the account it names is
+/// removable by a verb of Verkstead's own. So the machine keeps one list of
+/// what it has standing, and [`super::super::account::machine::remove`] reads
+/// it — the one moment anything takes a standing entry off, and the last
+/// moment there is a SID to name it by.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Standing {
+    /// What the account is called, for the log as the entries come off.
+    pub(crate) account: String,
+
+    /// And the identity every entry below names.
+    pub(crate) sid: String,
+
+    /// Those entries, in the order they were first written.
+    pub(crate) entries: Vec<Entry>,
+}
+
+/// What stands for the installation, added to what already stood.
+///
+/// **Added rather than replaced**, which is the opposite of [`wrote`] and is
+/// what the thing being remembered is: a Conversation describes its whole
+/// surface every time, so its record is that whole list; the installation's is
+/// built up a description at a time — a session's `PATH` names one directory,
+/// the Compile Server's another, a Worktree on another drive brings a step
+/// nothing had stepped through before — and each of them is an entry standing
+/// on the machine from the moment it is written.
+///
+/// **Except where the identity has changed**, in which case what is there is
+/// somebody else's and is replaced whole. Entries naming an account this
+/// machine no longer has are not this record's to carry: they grant nobody
+/// anything, and a list that mixed two identities would have
+/// [`super::super::account::machine::remove`] taking off entries for a SID it
+/// is not removing.
+pub(crate) fn standing_wrote(
+    data_dir: &Path,
+    account: &str,
+    sid: &str,
+    entries: &[Entry],
+) -> io::Result<()> {
+    let directory = directory(data_dir);
+
+    std::fs::create_dir_all(&directory)?;
+
+    let mut standing = match standing_read(data_dir) {
+        Some(standing) if standing.sid == sid => standing,
+        _ => Standing {
+            account: account.to_owned(),
+            sid: sid.to_owned(),
+            entries: Vec::new(),
+        },
+    };
+
+    for entry in entries {
+        if !standing.entries.contains(entry) {
+            standing.entries.push(entry.clone());
+        }
+    }
+
+    let written = Written {
+        account: standing.account,
+        sid: standing.sid,
+        entries: standing.entries.iter().map(Line::of).collect(),
+
+        // Nothing a refusal cut is ever in here: what stands is a grant or a
+        // step, and a refusal is a Conversation's own by definition — it
+        // covers the account's own skills from that Conversation's session.
+        cut: Vec::new(),
+    };
+
+    let body = serde_json::to_string_pretty(&written).map_err(io::Error::other)?;
+
+    crate::settings::write_atomically(
+        &standing_record(data_dir),
+        &body,
+        crate::settings::ORDINARY_MODE,
+    )
+}
+
+/// What this machine has standing, or nothing where it has never written one.
+pub(crate) fn standing_read(data_dir: &Path) -> Option<Standing> {
+    let path = standing_record(data_dir);
+    let remembered = at(&path, 0)?;
+
+    Some(Standing {
+        account: remembered.account,
+        sid: remembered.sid,
+        entries: remembered.entries,
+    })
+}
+
+/// And the record itself, gone — which is what removing the account does after
+/// it has taken every entry in it off.
+pub(crate) fn standing_forget(data_dir: &Path) {
+    let path = standing_record(data_dir);
+
+    if let Err(error) = std::fs::remove_file(&path)
+        && error.kind() != io::ErrorKind::NotFound
+    {
+        tracing::warn!(
+            error = ?error,
+            path = %path.display(),
+            "the record of what this installation had standing could not be taken away, so a \
+             later removal will read a list of entries that have already come off",
+        );
+    }
+}
+
 /// One record read off `path`, or nothing with the reason in the log.
 fn at(path: &Path, conversation: i64) -> Option<Remembered> {
     let body = match std::fs::read(path) {
@@ -431,6 +559,85 @@ mod tests {
 
         assert_eq!(read(held.path(), 7).as_ref(), Some(&written));
         assert_eq!(left_behind(held.path()), vec![written]);
+    }
+
+    /// What stands for the installation is added to rather than replaced, is
+    /// no candidate for the sweep, and goes when the account does.
+    #[test]
+    fn what_this_installation_has_standing_is_built_up_and_swept_by_nothing() {
+        let held = tempfile::tempdir().unwrap();
+        let sid = "S-1-5-21-1234567890-1234567890-1234567890-1001";
+
+        let step = |path: &str| Entry {
+            path: PathBuf::from(path),
+            wanted: Wanted::Stepped,
+        };
+
+        standing_wrote(held.path(), "vk-0123456789ab", sid, &[step(r"C:\Users")]).unwrap();
+
+        standing_wrote(
+            held.path(),
+            "vk-0123456789ab",
+            sid,
+            &[step(r"C:\Users"), step(r"D:\")],
+        )
+        .unwrap();
+
+        assert_eq!(
+            standing_read(held.path()).map(|standing| standing.entries),
+            Some(vec![step(r"C:\Users"), step(r"D:\")]),
+            "a second description adds what it names and says the rest again \
+             for nothing: the installation's list is built up a boundary at a \
+             time rather than rewritten by each",
+        );
+
+        assert_eq!(
+            left_behind(held.path()),
+            Vec::<Remembered>::new(),
+            "and no sweep ever sees it — its name is not one a Conversation \
+             could have, which is the whole of how it sits beside theirs",
+        );
+
+        standing_forget(held.path());
+
+        assert_eq!(
+            standing_read(held.path()),
+            None,
+            "and removing the account takes the record with the entries",
+        );
+    }
+
+    /// A record written for one identity is not added to for another: an
+    /// account made again is a new SID, and the entries the old one left are
+    /// not this one's to carry or to take off.
+    #[test]
+    fn what_stood_for_another_identity_is_replaced_rather_than_joined() {
+        let held = tempfile::tempdir().unwrap();
+
+        let step = |path: &str| Entry {
+            path: PathBuf::from(path),
+            wanted: Wanted::Stepped,
+        };
+
+        standing_wrote(
+            held.path(),
+            "vk-old",
+            "S-1-5-21-1-1-1-1001",
+            &[step(r"C:\Users")],
+        )
+        .unwrap();
+        standing_wrote(
+            held.path(),
+            "vk-new",
+            "S-1-5-21-1-1-1-1002",
+            &[step(r"D:\")],
+        )
+        .unwrap();
+
+        let standing = standing_read(held.path()).expect("a record for the account that is there");
+
+        assert_eq!(standing.sid, "S-1-5-21-1-1-1-1002");
+        assert_eq!(standing.entries, vec![step(r"D:\")]);
     }
 
     /// And a record that has gone is nothing, which is what a sweep finds after

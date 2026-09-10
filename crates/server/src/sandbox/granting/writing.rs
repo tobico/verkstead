@@ -87,6 +87,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::ptr;
 use std::sync::{LazyLock, Mutex, MutexGuard};
+use std::time::Duration;
 
 use windows_sys::Win32::Foundation::LocalFree;
 use windows_sys::Win32::Security::Authorization::{
@@ -299,11 +300,14 @@ pub(crate) fn write(entries: &[Entry], sid: &str, cut: &[PathBuf]) -> io::Result
     let _one = one_at_a_time();
 
     let (mut through, mut refused) = (0usize, 0usize);
+    let began = std::time::Instant::now();
 
     for entry in refusals_first(entries) {
         if !entry.path.exists() {
             continue;
         }
+
+        let one = std::time::Instant::now();
 
         let written = match entry.wanted {
             Wanted::Granted(reach) => grant(&sid, &entry.path, reach),
@@ -349,6 +353,8 @@ pub(crate) fn write(entries: &[Entry], sid: &str, cut: &[PathBuf]) -> io::Result
                 },
             ))
         })?;
+
+        slowly(&entry.path, entry.wanted, one);
     }
 
     tracing::debug!(
@@ -358,7 +364,58 @@ pub(crate) fn write(entries: &[Entry], sid: &str, cut: &[PathBuf]) -> io::Result
          this machine would have one",
     );
 
+    took(began, entries.len(), "written");
+
     Ok(())
+}
+
+/// How long a boundary is allowed to take before the log says so.
+///
+/// **Because a session that is starting looks exactly like one that is stuck.**
+/// Writing a grant that inherits makes Windows walk every path beneath it, and
+/// on a large tree that is seconds with nothing said anywhere — a start that
+/// sat for minutes was invisible in the log until somebody went at it with a
+/// process monitor. Anything quicker than this is the ordinary case and worth
+/// no line at all.
+const DAWDLING: Duration = Duration::from_millis(250);
+
+/// One entry that took longer than [`DAWDLING`], said with the path — which is
+/// the whole of what somebody reading a slow start needs, the cost being the
+/// size of the tree under that one directory.
+///
+/// **At `info`, and deliberately.** The thing this exists to make visible was
+/// invisible precisely because nothing said it at the level anybody reads, and
+/// an entry over the threshold is rare enough to be worth a line: on a machine
+/// where the boundary is doing what it should, there are none at all.
+fn slowly(path: &Path, wanted: Wanted, began: std::time::Instant) {
+    let took = began.elapsed();
+
+    if took < DAWDLING {
+        return;
+    }
+
+    tracing::info!(
+        path = %path.display(),
+        ?took,
+        ?wanted,
+        "an access-control entry took a while, which is Windows walking the tree under it",
+    );
+}
+
+/// And the whole of a boundary, where it was slow enough to be worth a line.
+fn took(began: std::time::Instant, entries: usize, what: &str) {
+    let took = began.elapsed();
+
+    if took < DAWDLING {
+        return;
+    }
+
+    tracing::info!(
+        ?took,
+        entries,
+        "a boundary's access-control entries were {what} — which of them took the time is \
+         in the lines beside this",
+    );
 }
 
 /// And every one of them taken back off the directories it was written on.
@@ -384,11 +441,14 @@ pub(crate) fn strip(entries: &[Entry], cut: &[PathBuf], sid: &str) {
     };
 
     let _one = one_at_a_time();
+    let began = std::time::Instant::now();
 
     for entry in grants_first(entries) {
         if !entry.path.exists() {
             continue;
         }
+
+        let one = std::time::Instant::now();
 
         // A refusal cut the inheritance on that directory as well as writing a
         // deny, so taking it back is more than taking an entry off — see
@@ -427,7 +487,11 @@ pub(crate) fn strip(entries: &[Entry], cut: &[PathBuf], sid: &str) {
                 );
             }
         }
+
+        slowly(&entry.path, entry.wanted, one);
     }
+
+    took(began, entries.len(), "taken off");
 }
 
 /// `entries` with every refusal in front of every grant, each half in the order

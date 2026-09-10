@@ -1494,7 +1494,14 @@ pub(crate) fn reaching(platform: Platform, path: &OsStr, home: &Path, surface: &
     }
 
     if let Some(toolchains) = toolchains(platform, path, home) {
-        surface.own(toolchains, Reach::ReadOnly);
+        // The installation's rather than this boundary's — see
+        // [`Surface::standing`]. It is the biggest tree anything here grants
+        // and the one least about which Conversation is running: the same
+        // read-only reach on the same rustup home for every session and the
+        // Compile Server alike.
+        surface
+            .own(&toolchains, Reach::ReadOnly)
+            .standing(toolchains);
     }
 }
 
@@ -3448,6 +3455,18 @@ struct Boundary<'a> {
     /// And what has to be written for the account, in the order the description
     /// said it.
     entries: Vec<granting::Entry>,
+
+    /// Of the paths those entries are on, the ones whose grant is the
+    /// installation's — see [`Surface::standing`]. Carried beside the entries
+    /// because it is what decides which of them go in the record: everything
+    /// here is written, and everything but these is written *down* — see
+    /// [`granting::written_down`].
+    ///
+    /// Said on every platform and read on one, for [`Sandbox::session_account`]'s
+    /// reason: what a description comes to is a fact about the description, and
+    /// only the writing of an entry is a call one platform has.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    standing: Vec<PathBuf>,
 }
 
 impl Sandbox {
@@ -3696,7 +3715,22 @@ impl Sandbox {
             // Conversation's entries rather than by the session: an entry is
             // this Conversation's and comes off when its work stops — see
             // [`entries::Entries::wrote`], which is also where the order is.
-            entries.wrote(boundary.entries.clone(), cut.clone())?;
+            entries.wrote(
+                granting::written_down(&boundary.entries, &boundary.standing),
+                cut.clone(),
+            )?;
+
+            // And the other half of the same list, in the machine's own record
+            // rather than this Conversation's: nothing sweeps a standing entry,
+            // so removing the account is the one thing that ever takes one off
+            // and this is what it reads — see
+            // [`granting::remembering::standing_wrote`].
+            granting::remembering::standing_wrote(
+                boundary.data_dir,
+                account.name(),
+                account.sid().text(),
+                &granting::standing_among(&boundary.entries, &boundary.standing),
+            )?;
 
             granting::writing::write(&boundary.entries, account.sid().text(), &cut)?;
 
@@ -3735,6 +3769,7 @@ impl Sandbox {
             data_dir: &self.data_dir,
             conversation: self.conversation,
             entries: granting::entries(surface, Some(&self.servers_home)),
+            standing: granting::standing_of(surface, Some(&self.servers_home)),
         })
     }
 
@@ -3926,6 +3961,15 @@ impl Sandbox {
         // whole of that is. Nothing about the `PATH` or the environment changes
         // either way, which is the point of its being a launcher.
         for (host, inside) in self.verkstead.binds() {
+            // **And deliberately not standing**, unlike the directory this is
+            // inside — see [`Surface::standing`], and [`granting::on_the_path`]
+            // for that directory, which is a `PATH` entry and is granted as
+            // one. What is here is the image *file*, and a file has no tree
+            // beneath it for an entry to be propagated through: writing one
+            // costs what writing one ought to cost, so there is nothing to buy
+            // by leaving it and a mark on the human's own binary to be paid for
+            // by leaving it. It comes off with the Conversation, which is what
+            // `sandbox_windows` asserts of every path a description grants.
             surface.elsewhere(host, inside, Reach::ReadOnly);
         }
 
@@ -3936,7 +3980,12 @@ impl Sandbox {
         // configured one — is inside it rather than wiped by it. See
         // [`crate::build_cache`].
         if let Some(cache) = &self.build_cache {
-            surface.own(cache.dir(), Reach::ReadWrite);
+            // Standing, for [`Surface::standing`]'s reason: one cache for the
+            // machine, written for the one account every session runs as, and
+            // the same grant whichever Conversation is behind it.
+            surface
+                .own(cache.dir(), Reach::ReadWrite)
+                .standing(cache.dir());
 
             if let Some(sccache) = cache.sccache() {
                 surface.elsewhere(sccache, self.sccache_inside(sccache), Reach::ReadOnly);

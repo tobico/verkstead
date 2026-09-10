@@ -102,6 +102,10 @@ pub(crate) struct Surface {
     /// runs inside is what the orchestrator built, and a shell between the two
     /// would be one more thing to quote for.
     argv: Vec<OsString>,
+
+    /// Of the paths above, the ones whose grant belongs to the installation
+    /// rather than to this boundary — see [`Surface::standing`].
+    standing: Vec<PathBuf>,
 }
 
 impl Surface {
@@ -112,7 +116,53 @@ impl Surface {
             env: Vec::new(),
             chdir,
             argv: Vec::new(),
+            standing: Vec::new(),
         }
+    }
+
+    /// Of a path this surface already names, that its grant is the
+    /// **installation's** rather than this boundary's.
+    ///
+    /// **Which is a thing about the grant rather than about the path.** Three
+    /// of the directories every description names are the same grant for the
+    /// same account whichever Conversation is running: the Worktrees directory,
+    /// the shared build cache, and the rustup home a toolchain is found under.
+    /// They say nothing about which piece of work is behind the boundary — and
+    /// what a boundary *is* on this platform is exactly the entries that do say
+    /// that (see [`super::granting`]). So they are written once for the machine
+    /// and never taken off, rather than written and taken off again by every
+    /// session, terminal and compile server that comes and goes.
+    ///
+    /// **Because propagation is what it costs.** A grant that inherits makes
+    /// Windows walk every path beneath it, and those three trees are the big
+    /// ones — a rustup home alone is tens of thousands of files. Written per
+    /// boundary they were walked on the way up and again on the way down, many
+    /// times over for one restart, which is minutes of a session start where
+    /// nothing at all is happening.
+    ///
+    /// A grant already on a directory is left alone — see
+    /// [`super::granting::writing`] — so saying this costs one read of the
+    /// directory's own list at every start after the first.
+    ///
+    /// **It is not a widening of what the account may reach**, only of *when*:
+    /// the same three directories, at the same reach, for the same account that
+    /// no session-less machine is running anything as. What it gives up is the
+    /// tidiness of a machine with nothing granted while nothing runs — see
+    /// [`super::account::machine::remove`], which is what takes them off when
+    /// the account itself goes.
+    ///
+    /// Said beside the grant rather than instead of it: the path is still an
+    /// ordinary reach, and the two platforms with a wrapper read it as one and
+    /// this as nothing at all.
+    pub(crate) fn standing(&mut self, path: impl Into<PathBuf>) -> &mut Surface {
+        self.standing.push(path.into());
+
+        self
+    }
+
+    /// The paths [`Surface::standing`] was said of.
+    pub(crate) fn stands(&self) -> &[PathBuf] {
+        &self.standing
     }
 
     /// A path of the host's, at its own place.

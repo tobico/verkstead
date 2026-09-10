@@ -516,8 +516,17 @@ impl BuildCache {
             *running = None;
         }
 
+        // Timed because a session waits on it and says nothing while it does:
+        // the Compile Server is started before the first session that compiles
+        // Rust, so every second here is a second of a start that looks stuck —
+        // see [`crate::sandbox::granting::writing`], which is where the seconds
+        // have been.
+        let began = std::time::Instant::now();
+
         let started = compile_server(dir, sccache, data_dir, settings.size(), session_account)
             .and_then(|rendering| left_running(&rendering));
+
+        let took = began.elapsed();
 
         match started {
             Ok(server) => {
@@ -537,6 +546,7 @@ impl BuildCache {
                 tracing::info!(
                     cache = %dir.display(),
                     size = settings.size(),
+                    ?took,
                     "the shared compile server is up: every session's rustc goes through \
                      this one, in a sandbox holding the worktrees and the cache",
                 );
@@ -765,6 +775,14 @@ fn compile_server(
         // Conversation, because a Worktree made after this started would
         // otherwise be one this cannot see.
         .own(&worktrees, Reach::ReadWrite)
+        // Both of these stand for the installation rather than for this
+        // process — see [`sandbox::Surface::standing`]. The Worktrees directory
+        // and the cache are Verkstead's own, granted to Verkstead's own
+        // account, and a compile server that came and went taking them apart
+        // and putting them back is minutes of propagation for a grant that
+        // never differs.
+        .standing(&worktrees)
+        .standing(dir)
         // And the cache, which holds both what it reads — the dependency
         // sources under `CARGO_HOME` — and what it writes.
         .own(dir, Reach::ReadWrite)
@@ -845,7 +863,21 @@ fn compile_server(
             account.sid().text(),
         )?;
 
-        held.wrote(entries.clone(), cut.clone())?;
+        let standing = sandbox::granting::standing_of(&surface, sandbox::servers_home());
+
+        held.wrote(
+            sandbox::granting::written_down(&entries, &standing),
+            cut.clone(),
+        )?;
+
+        // And the machine's own half — see this call in `sandbox::command`,
+        // which is the same two records written for the same reason.
+        sandbox::granting::remembering::standing_wrote(
+            data_dir,
+            account.name(),
+            account.sid().text(),
+            &sandbox::granting::standing_among(&entries, &standing),
+        )?;
 
         sandbox::granting::writing::write(&entries, account.sid().text(), &cut)?;
 

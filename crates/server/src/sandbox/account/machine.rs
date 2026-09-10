@@ -343,6 +343,40 @@ pub fn remove(data_dir: &Path) -> Result<(String, Removed)> {
     let mut removed = Removed::default();
 
     if let Ok(sid) = sid_of(&name) {
+        // Before the account goes, because the entries name it: the entries
+        // that stand for the installation are the ones no boundary ever takes
+        // off — see [`super::super::Surface::standing`] — so the account being
+        // removed is the one moment there is to take them off, and after
+        // `NetUserDel` there is no SID left to say whose they were.
+        //
+        // **Read rather than worked out.** What stands is a description's
+        // answer at the moment it was written — the `PATH` a session was given,
+        // the drives its Worktrees were on, the ancestors those implied — and
+        // none of that is derivable from a Data Directory afterwards. So the
+        // machine keeps a record of them and this reads it. See
+        // [`super::super::granting::remembering::standing_wrote`].
+        //
+        // Said and not insisted on, the way the rest of this verb is: an entry
+        // that would not come off is an entry naming an identity this machine
+        // is about to stop having, which grants nobody anything. What it costs
+        // is a line on somebody's directory list.
+        if let Some(standing) = super::super::granting::remembering::standing_read(data_dir) {
+            if standing.sid == sid.text() {
+                super::super::granting::writing::strip(&standing.entries, &[], sid.text());
+                super::super::granting::remembering::standing_forget(data_dir);
+            } else {
+                // A record for somebody else's identity, which is a machine
+                // whose account was made again since: those entries are the
+                // other SID's and are not this removal's to take off.
+                tracing::warn!(
+                    recorded = standing.sid,
+                    removing = sid.text(),
+                    "what this installation had standing was written for another identity, so \
+                     it is left where it is",
+                );
+            }
+        }
+
         removed.profile = profile_deleted(&sid)?;
     }
 

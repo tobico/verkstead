@@ -17,6 +17,13 @@ decision is untouched. See *Amended: the Sandbox is an account*, and the two
 as it was written, being the record of what was decided rather than a summary of
 what stands.
 
+Amended (2026-09-10): **what says nothing about a Conversation stands for the
+installation.** Writing an access-control entry walks the tree beneath it
+whether or not the entry inherits, so a boundary that wrote and unwrote the same
+big directories at every start cost minutes. The grants that are identical for
+every Conversation are now written once and left. See *Amended: what says
+nothing about a Conversation stands for the installation*.
+
 The order is the terminal first. A Windows session runs **unsandboxed** from
 the moment the terminal works until the container lands, and the workbench says
 so on every one — above **Start work** on the composer, beside the terminal on
@@ -415,6 +422,70 @@ pipe stays all the same, being landed, harmless and the one transport that
 needs no firewall to agree with it. And **sccache is back on**: its client
 reaches the Compile Server, so the switch this ADR left to the probe falls the
 other way from the container's answer.
+
+## Amended: what says nothing about a Conversation stands for the installation
+
+Amended (2026-09-10). *One profile per Conversation*, above, says a boundary is
+written at a session start and taken off when the Conversation's work stops,
+and that the sweep reads a record of it. That stays true of everything which
+distinguishes one Conversation from the next. It stopped being true of the rest,
+and the reason is arithmetic rather than taste.
+
+**Writing an entry on a directory makes Windows walk the tree beneath it.** Not
+because the entry inherits — because the system brings a container's children up
+to date on any change to its list. Measured on this machine, over a tree of
+66,000 files: adding an inheriting grant took 4.47s and removing it 4.41s;
+adding a **step**, which inherits nowhere, took 4.68s and removing it 4.53s. The
+same walk at the same price. The claim in `sandbox::granting` that a step "costs
+nothing" was simply wrong, and stood for as long as nothing measured it.
+
+**So a start paid for the same walks over and over.** Every boundary going up or
+coming down rewrote the same entries on the same big trees: the rustup home
+(66,000 files), the shared build cache (36,000), the Worktrees directory, the
+directory Verkstead's own binary is in — which on a machine running a build of
+its own is a `target\debug` inside a source tree. One restart with one session
+and two terminals came to about nineteen whole-tree passes, thirteen million
+metadata operations, and between three and four minutes in which the log said
+nothing at all and a session that was starting looked exactly like one that was
+stuck.
+
+**What changed.** An entry whose grant is the same for every boundary — the same
+account, the same reach, the same path, whichever Conversation is running — is
+the installation's rather than a boundary's. Four kinds of them: the Worktrees
+directory, the shared cache, the rustup home, and the `PATH` directories under
+the human's profile; and every **step**, which is by construction an entry on an
+ancestor rather than a statement about any piece of work. They are written
+exactly as before and left out of the Conversation's record — and the record is
+the whole of what the sweep reads and what an ending strips, so nothing takes
+them off and the next boundary finds them already there. A start went from
+3m30s to 2.25s.
+
+**What it gives up, said plainly.** The account keeps its reach to those
+directories between sessions as well as during them: read-only on the toolchains
+and the `PATH` directories, read-write on Verkstead's own two, and a traverse
+with an attribute read on the ancestors. It is the same reach for the same
+account that nothing is running as when no session is up, and a step grants
+nothing at all where no grant sits beneath it. What it is not is the tidiness of
+a machine with nothing granted while nothing runs. *One profile for the
+installation*, rejected above, is still rejected: what a session may reach that
+another may not — its Worktree, its profile, its handoffs, the refusal over the
+account's own skills — is still written per Conversation and still comes off
+with it.
+
+**And they are written down too**, in a record of the machine's own beside the
+Conversations' and under a name no Conversation can have, so the sweep never
+sees it. Nothing reads it but `session-account remove`: an entry no boundary
+takes off would otherwise outlive every record there is, and removing the
+account is the last moment at which there is a SID to name one by. What stands
+cannot be worked out again afterwards — it is a description's answer at the
+moment it was written, the `PATH` a session was given and the drives its
+Worktrees were on — which is the same reason a Conversation's entries are
+written down rather than recomputed.
+
+**And the log says how long.** An entry over a quarter of a second is a line
+naming the path, and a boundary is a line with its total. The stall was found
+with a process monitor and arithmetic over a metadata-operation counter, which
+is not a thing the next person should have to do.
 
 ## What stays as it was
 
