@@ -358,6 +358,10 @@ pub(crate) fn standing_of(surface: &Surface, profile: Option<&Path>) -> Vec<Path
 /// attribute read on a directory that stays unlistable, said of an ancestor
 /// because something under it is granted. It distinguishes no Conversation
 /// from any other, so it stands with them.
+/// Built on every platform and read on one, for this module's own reason: what
+/// a description comes to is a fact about the description, and only the
+/// writing of an entry is a call one platform has.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn written_down(entries: &[Entry], standing: &[PathBuf]) -> Vec<Entry> {
     entries
         .iter()
@@ -374,6 +378,10 @@ pub(crate) fn written_down(entries: &[Entry], standing: &[PathBuf]) -> Vec<Entry
 ///
 /// **The complement of [`written_down`] exactly**, off the same predicate, so
 /// that no entry is in both records and none is in neither.
+/// Built on every platform and read on one, for this module's own reason: what
+/// a description comes to is a fact about the description, and only the
+/// writing of an entry is a call one platform has.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn standing_among(entries: &[Entry], standing: &[PathBuf]) -> Vec<Entry> {
     entries
         .iter()
@@ -384,6 +392,10 @@ pub(crate) fn standing_among(entries: &[Entry], standing: &[PathBuf]) -> Vec<Ent
 
 /// Whether one entry is the installation's — the one rule, read by both halves
 /// of the split above.
+/// Built on every platform and read on one, for this module's own reason: what
+/// a description comes to is a fact about the description, and only the
+/// writing of an entry is a call one platform has.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn the_installations(entry: &Entry, standing: &[PathBuf]) -> bool {
     entry.wanted == Wanted::Stepped || stands(&entry.path, standing)
 }
@@ -407,6 +419,10 @@ fn the_installations(entry: &Entry, standing: &[PathBuf]) -> bool {
 /// Case-folded through [`folded`], for [`beneath`]'s reason: what a description
 /// spells `C:\Users\Ada\.rustup` and what a record reads back as
 /// `C:\users\ada\.rustup` are one directory.
+/// Built on every platform and read on one, for this module's own reason: what
+/// a description comes to is a fact about the description, and only the
+/// writing of an entry is a call one platform has.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn stands(path: &Path, standing: &[PathBuf]) -> bool {
     standing
         .iter()
@@ -591,7 +607,7 @@ mod tests {
         assert!(
             written_down
                 .iter()
-                .any(|entry| entry.path == PathBuf::from(r"C:\repo")),
+                .any(|entry| entry.path == Path::new(r"C:\repo")),
             "while the Worktree — which is this Conversation's and nobody \
              else's — is written down as it always was",
         );
@@ -599,7 +615,7 @@ mod tests {
         assert!(
             !written_down
                 .iter()
-                .any(|entry| entry.path == PathBuf::from(r"C:\Users\ada")),
+                .any(|entry| entry.path == Path::new(r"C:\Users\ada")),
             "and neither is the way to a standing grant: a step taken off when \
              a session ended would leave a grant on a path the account could no \
              longer walk to",
@@ -608,7 +624,7 @@ mod tests {
         assert!(
             !written_down
                 .iter()
-                .any(|entry| entry.path == PathBuf::from(r"C:\")),
+                .any(|entry| entry.path == Path::new(r"C:\")),
             "a step that is on the way to a standing grant stays even where it \
              is on the way to one of this boundary's too — the grant beneath it \
              outlives the boundary, and what is left is a walk through a drive \
@@ -618,7 +634,7 @@ mod tests {
         assert!(
             !written_down
                 .iter()
-                .any(|entry| entry.path == PathBuf::from(r"E:\work")),
+                .any(|entry| entry.path == Path::new(r"E:\work")),
             "and neither is a step on the way to nothing but this boundary's \
              own: writing one walks the tree beneath it exactly as a grant \
              does, so every step stands rather than being paid for twice per \

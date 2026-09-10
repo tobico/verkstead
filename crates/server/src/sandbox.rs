@@ -3461,6 +3461,11 @@ struct Boundary<'a> {
     /// because it is what decides which of them go in the record: everything
     /// here is written, and everything but these is written *down* — see
     /// [`granting::written_down`].
+    ///
+    /// Said on every platform and read on one, for [`Sandbox::session_account`]'s
+    /// reason: what a description comes to is a fact about the description, and
+    /// only the writing of an entry is a call one platform has.
+    #[cfg_attr(not(windows), allow(dead_code))]
     standing: Vec<PathBuf>,
 }
 
