@@ -137,9 +137,16 @@ pub(crate) struct Entry {
 ///
 /// **And the steps come last**, after every path the description names is in
 /// the list, because what a step is wanted on is what nothing else has spoken
-/// for — see [`stepping`]. Written last too, which costs nothing: a step
-/// inherits to nowhere, so no list below it is walked and no earlier entry is
+/// for — see [`stepping`]. Written last too, so that no earlier entry is
 /// disturbed.
+///
+/// **A step is not cheap, whatever its inheritance says.** This used to say
+/// that writing one costs nothing because it inherits to nowhere and so walks
+/// no list below it. That is wrong, and measurably: Windows brings a
+/// container's children up to date on *any* change to its list, so a step over
+/// 66,000 files took 4.68s where a grant over the same tree took 4.47s. What
+/// follows from it is that a step stands for the installation rather than for
+/// one boundary — see [`written_down`], which is where that is done and why.
 ///
 /// `profile` is the human's own — where the account running the server keeps
 /// its things — and is what the `PATH` rule above is measured against. `None`
@@ -320,9 +327,23 @@ pub(crate) fn standing(paths: &[(PathBuf, Reach)]) -> Vec<Entry> {
 /// **A record from an older build still names them**, and that is the right
 /// way round: the sweep takes them off once, the next boundary writes them
 /// back, and from then on no record mentions them again.
+/// **And every step is one**, which is measured rather than reasoned: writing
+/// an entry on a directory makes Windows walk the tree beneath it *whether or
+/// not the entry inherits*. On a tree of 66,000 files, adding a step took
+/// 4.68s and adding a grant 4.47s — the same walk, because what the walk is
+/// for is bringing the children's inherited entries up to date and the system
+/// does it on any change to a container's list. A step through
+/// `C:\Users\ada\src` therefore costs the whole of somebody's source
+/// directory, twice, for every boundary that comes and goes.
+///
+/// A step is also the same entry every boundary writes: a walk and an
+/// attribute read on a directory that stays unlistable, said of an ancestor
+/// because something under it is granted. It distinguishes no Conversation
+/// from any other, so it stands with them.
 pub(crate) fn written_down(entries: &[Entry], standing: &[PathBuf]) -> Vec<Entry> {
     entries
         .iter()
+        .filter(|entry| entry.wanted != Wanted::Stepped)
         .filter(|entry| !stands(&entry.path, standing))
         .cloned()
         .collect()
@@ -337,9 +358,12 @@ pub(crate) fn written_down(entries: &[Entry], standing: &[PathBuf]) -> Vec<Entry
 /// makes the grant beneath it resolve at all. A step taken off when a session
 /// ended would leave a standing grant on a path the account could no longer
 /// walk to — a boundary reaching into the installation's, which is the one
-/// thing the split is for. Steps cost nothing to leave: they inherit nowhere,
-/// grant a walk and an attribute read, and are the same entry every boundary
-/// would write anyway.
+/// thing the split is for.
+///
+/// This is the narrower of the two rules about steps and is kept for saying
+/// what it says: [`written_down`] stands *every* step, on the measurement
+/// there, so a step is already the installation's before this is asked. What
+/// this adds is the grant itself.
 ///
 /// Case-folded through [`folded`], for [`beneath`]'s reason: what a description
 /// spells `C:\Users\Ada\.rustup` and what a record reads back as
@@ -553,11 +577,20 @@ mod tests {
         );
 
         assert!(
-            written_down
+            !written_down
                 .iter()
                 .any(|entry| entry.path == PathBuf::from(r"E:\work")),
-            "while a step on the way to nothing but this boundary's own is \
-             written down and comes off with it",
+            "and neither is a step on the way to nothing but this boundary's \
+             own: writing one walks the tree beneath it exactly as a grant \
+             does, so every step stands rather than being paid for twice per \
+             boundary",
+        );
+
+        assert!(
+            written_down
+                .iter()
+                .all(|entry| entry.wanted != Wanted::Stepped),
+            "no step is written down at all",
         );
     }
 

@@ -3982,7 +3982,17 @@ impl Sandbox {
         // whole of that is. Nothing about the `PATH` or the environment changes
         // either way, which is the point of its being a launcher.
         for (host, inside) in self.verkstead.binds() {
-            surface.elsewhere(host, inside, Reach::ReadOnly);
+            // Standing, for [`Surface::standing`]'s reason and with a sharper
+            // edge than the rest: this is the directory Verkstead's own binary
+            // is in, which is one directory for the installation whichever
+            // Conversation asks with it. On a machine running a build of its
+            // own that directory is inside a source tree — a `target\debug`
+            // under somebody's `src` — so a boundary that wrote and unwrote it
+            // walked the whole of that tree twice for a grant on one file's
+            // directory that never differs.
+            surface
+                .elsewhere(host, inside, Reach::ReadOnly)
+                .standing(host);
         }
 
         // And the shared build cache: the directory writable at its own place,
