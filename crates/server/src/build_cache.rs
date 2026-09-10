@@ -864,7 +864,10 @@ fn compile_server(
         )?;
 
         held.wrote(
-            sandbox::granting::written_down(&entries, surface.stands()),
+            sandbox::granting::written_down(
+                &entries,
+                &sandbox::granting::standing_of(&surface, sandbox::servers_home()),
+            ),
             cut.clone(),
         )?;
 

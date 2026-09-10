@@ -3790,7 +3790,7 @@ impl Sandbox {
             data_dir: &self.data_dir,
             conversation: self.conversation,
             entries: granting::entries(surface, Some(&self.servers_home)),
-            standing: surface.stands().to_vec(),
+            standing: granting::standing_of(surface, Some(&self.servers_home)),
         })
     }
 

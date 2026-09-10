@@ -158,12 +158,8 @@ pub(crate) fn entries(surface: &Surface, profile: Option<&Path>) -> Vec<Entry> {
     // First, because these are the machine's floor rather than this session's:
     // a description that goes on to grant one of them at a wider reach is a
     // description whose word is the later one.
-    if let Some(profile) = profile {
-        for directory in super::open::looked_in(surface) {
-            if beneath(directory, profile) {
-                entries.push(granted(directory, Reach::ReadOnly));
-            }
-        }
+    for directory in on_the_path(surface, profile) {
+        entries.push(granted(directory, Reach::ReadOnly));
     }
 
     for access in surface.reaches() {
@@ -290,6 +286,43 @@ fn granted(path: impl Into<PathBuf>, reach: Reach) -> Entry {
         path: path.into(),
         wanted: Wanted::Granted(reach),
     }
+}
+
+/// The `PATH` directories under the human's own profile that `surface`
+/// implies, which every description grants read-only — see this module's own
+/// documentation for why a per-user tool install needs one and Program Files
+/// does not.
+///
+/// **The installation's rather than a boundary's**, and the same three
+/// sentences as the rest: it is one list for the machine, granted to the one
+/// account, saying nothing whatever about which Conversation is running.
+/// On a machine running a build of its own it is also the expensive one — the
+/// binary a session asks with sits in a `target\debug` under somebody's source
+/// tree, and an entry there walks the whole of it.
+pub(crate) fn on_the_path(surface: &Surface, profile: Option<&Path>) -> Vec<PathBuf> {
+    let Some(profile) = profile else {
+        return Vec::new();
+    };
+
+    super::open::looked_in(surface)
+        .filter(|directory| beneath(directory, profile))
+        .map(Path::to_path_buf)
+        .collect()
+}
+
+/// Everything about `surface` whose grant stands for the installation: what
+/// the description said of itself — see [`Surface::standing`] — and the
+/// `PATH` directories it implies, which no description says of itself because
+/// nothing names them until [`entries`] reads them off the environment.
+///
+/// What a caller hands [`written_down`], and the reason it is one function
+/// rather than two lines said in both places.
+pub(crate) fn standing_of(surface: &Surface, profile: Option<&Path>) -> Vec<PathBuf> {
+    let mut standing = surface.stands().to_vec();
+
+    standing.extend(on_the_path(surface, profile));
+
+    standing
 }
 
 /// The installation's own grants as entries, so that the one thing which ever
