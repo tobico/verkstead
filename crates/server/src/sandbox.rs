@@ -3961,17 +3961,16 @@ impl Sandbox {
         // whole of that is. Nothing about the `PATH` or the environment changes
         // either way, which is the point of its being a launcher.
         for (host, inside) in self.verkstead.binds() {
-            // Standing, for [`Surface::standing`]'s reason and with a sharper
-            // edge than the rest: this is the directory Verkstead's own binary
-            // is in, which is one directory for the installation whichever
-            // Conversation asks with it. On a machine running a build of its
-            // own that directory is inside a source tree — a `target\debug`
-            // under somebody's `src` — so a boundary that wrote and unwrote it
-            // walked the whole of that tree twice for a grant on one file's
-            // directory that never differs.
-            surface
-                .elsewhere(host, inside, Reach::ReadOnly)
-                .standing(host);
+            // **And deliberately not standing**, unlike the directory this is
+            // inside — see [`Surface::standing`], and [`granting::on_the_path`]
+            // for that directory, which is a `PATH` entry and is granted as
+            // one. What is here is the image *file*, and a file has no tree
+            // beneath it for an entry to be propagated through: writing one
+            // costs what writing one ought to cost, so there is nothing to buy
+            // by leaving it and a mark on the human's own binary to be paid for
+            // by leaving it. It comes off with the Conversation, which is what
+            // `sandbox_windows` asserts of every path a description grants.
+            surface.elsewhere(host, inside, Reach::ReadOnly);
         }
 
         // And the shared build cache: the directory writable at its own place,
