@@ -29,13 +29,22 @@
 //! the server itself, in a sandbox of its own that holds the Worktrees
 //! directory and this cache and nothing else of the Data Directory.
 //!
-//! **On the two platforms whose sandbox leaves the network alone**, which is
-//! this module's other platform arm — see [`compiles_through_an_sccache`]. The
-//! half of this that is directories works everywhere; the half that is a client
-//! talking to a server over the loopback does not work at all on Windows, where
-//! a session's boundary is an identity that is refused the local machine. So a
-//! Windows session gets the shared `CARGO_HOME` and no `RUSTC_WRAPPER`, and no
-//! compile server is started there for one to reach.
+//! **On every platform**, which it was not always — see
+//! [`compiles_through_an_sccache`]. The half of this that is directories has
+//! always worked everywhere; the half that is a client talking to a server over
+//! the loopback was off on Windows for as long as a session there ran inside an
+//! AppContainer, which is refused the local machine. A session runs as a local
+//! account of Verkstead's own now and an ordinary local account is refused
+//! nothing of the sort, so the arm is a `true` with a history rather than a
+//! difference between platforms.
+//!
+//! **And the server itself runs behind the boundary its platform has**, which
+//! on Windows is the same account a session runs as, with entries of its own
+//! written for the directories it compiles in — see [`compile_server`]. A
+//! compile server on the host would be every Rust dependency's proc macro
+//! running as whoever Verkstead runs as, which is the one thing this
+//! arrangement exists not to be, whichever of the three renderings is making
+//! the boundary.
 //!
 //! **Rust by name**, deliberately. Nothing here generalises over languages: a
 //! node or a python cache would want its own directory, its own variables and
@@ -47,8 +56,9 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 
 use crate::platform::Platform;
+use crate::sandbox::account::Logon;
 use crate::sandbox::outliving;
-use crate::sandbox::{self, Access, Reach};
+use crate::sandbox::{self, Access, Reach, Rendering};
 use crate::settings::RustBuildCache;
 
 /// What is looked for on the server's own `PATH`, and the name it is found
@@ -107,36 +117,38 @@ fn compiling_home(data_dir: &Path) -> PathBuf {
 /// is the whole of the difference between a cache of downloads and a cache of
 /// compiled objects, and the one place it is decided.
 ///
-/// **The two Unixes do and Windows does not** — and on Windows that is now a
-/// switch waiting to be turned back on rather than a boundary standing in the
-/// way. It was off because an sccache is a client and a server that talk over
-/// the loopback and a session there ran inside an AppContainer, which is refused
-/// the local machine: the probe's connections to `127.0.0.1` and to the
-/// machine's own address both timed out from inside one (ADR-0014, *What the
-/// probe answered*). A session runs as a local account of Verkstead's own now,
-/// and an ordinary local account reaches the loopback like anything else — which
-/// `crates/cli/tests/sandbox_windows.rs` attempts rather than assumes. What is
-/// left to do about it is a task of its own: an sccache client inside a session
-/// still has to be shown to work, the probe's own panicking on its configuration
-/// having been the second half of why this is off.
+/// **All three do**, and the third one did not for a while. An sccache is a
+/// client and a server that talk over the loopback, and while a Windows session
+/// ran inside an AppContainer there was no talking to be done: the probe's
+/// connections to `127.0.0.1` and to the machine's own address both timed out
+/// from inside one, and its client failed before the network at all, unable to
+/// find a configuration directory in a profile the container was refused
+/// (ADR-0014, *What the probe answered*). A session runs as a **local account
+/// of Verkstead's own** now. An ordinary local account reaches the loopback
+/// like anything else, and the profile a Windows session is handed is a real
+/// one made under the Data Directory — both halves of it, because a program
+/// asking the shell where its settings go is refused for a directory that is
+/// not there (see [`crate::sandbox::windows_profile`]). So the arm falls the
+/// other way from the container's answer, exactly as ADR-0014 said it would.
 ///
-/// The half of the cache that is directories was untouched by any of it, so a
-/// Windows session gets the shared `CARGO_HOME` and downloads a crate once for
-/// the machine like everybody else, exactly as it always did.
+/// Kept as a function rather than dissolved into the `true` it now is, because
+/// what it says is not *nothing here varies by platform*: it is where a
+/// platform that cannot reach a compile server would be said, and it is what
+/// every caller downstream is written against — the `PATH` walk below, the
+/// `RUSTC_WRAPPER` in a session's environment, and the workbench's own answer
+/// about whether compiles are cached.
 ///
-/// **Read before the server's own `PATH` is walked**, so an sccache installed
-/// on a Windows machine is one nothing here finds: a [`BuildCache`] with none
-/// is then the right answer to everything downstream already — no
-/// `RUSTC_WRAPPER` in a session's environment, no compile server started for
-/// one to reach, and the workbench saying compiles are not cached.
+/// **Read before the server's own `PATH` is walked**, which is what a platform
+/// answering `false` here would come to: a [`BuildCache`] with no sccache is
+/// the right answer to everything downstream already, whatever the machine has
+/// installed.
 ///
 /// A function of the platform rather than a `cfg!`, for the reason
-/// [`crate::platform::Platform`] is a value: the arm this machine will never
-/// run is still an arm its tests call.
+/// [`crate::platform::Platform`] is a value: an arm this machine will never run
+/// is still an arm its tests call.
 pub fn compiles_through_an_sccache(platform: Platform) -> bool {
     match platform {
-        Platform::Linux | Platform::MacOs => true,
-        Platform::Windows => false,
+        Platform::Linux | Platform::MacOs | Platform::Windows => true,
     }
 }
 
@@ -198,7 +210,7 @@ pub struct BuildCache {
 /// what makes the next session start the server again.
 #[derive(Debug)]
 struct Compiling {
-    server: Child,
+    server: Started,
     size: String,
 
     /// And what holds it to this server's life on the platform whose answer is
@@ -207,6 +219,77 @@ struct Compiling {
     /// answer is said elsewhere, and held rather than read either way: letting
     /// go of it is what ends the tree.
     _held: outliving::Held,
+}
+
+/// The Compile Server as a process this machine really started, whichever of
+/// the two ways it was started.
+///
+/// **Because the standard library cannot start it on every platform.** A
+/// rendering that names no account is an ordinary `Command` and hands back a
+/// `Child`; a Windows one names the session account, which is
+/// `CreateProcessWithLogonW` — see `sandbox::starting::left_running`, and
+/// [`Rendering`], whose conversion into a `Command` refuses rather than
+/// quietly starting a compile server as the human.
+///
+/// What [`Compiling`] does with one is the three things anybody does with a
+/// child: ask whether it is still up, end it, and wait for it to go.
+#[derive(Debug)]
+enum Started {
+    /// Started by the standard library, which is both of the platforms whose
+    /// boundary is a wrapper in front of the process.
+    Ordinarily(Child),
+
+    /// And started as the local account of Verkstead's own that is the boundary
+    /// on the third — see `sandbox::starting::Running`.
+    #[cfg(windows)]
+    AsTheAccount(sandbox::starting::Running),
+}
+
+impl Started {
+    /// Whether it has stopped, without waiting to find out.
+    fn stopped(&mut self) -> bool {
+        match self {
+            Started::Ordinarily(child) => !matches!(child.try_wait(), Ok(None)),
+
+            #[cfg(windows)]
+            Started::AsTheAccount(running) => !matches!(running.try_wait(), Ok(None)),
+        }
+    }
+
+    /// Ended, and waited for: what [`Compiling::drop`] is.
+    fn ended(&mut self) {
+        match self {
+            Started::Ordinarily(child) => {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+
+            #[cfg(windows)]
+            Started::AsTheAccount(running) => {
+                let _ = running.kill();
+                let _ = running.wait();
+            }
+        }
+    }
+}
+
+impl outliving::InAJob for Started {
+    fn id(&self) -> u32 {
+        match self {
+            Started::Ordinarily(child) => outliving::InAJob::id(child),
+
+            #[cfg(windows)]
+            Started::AsTheAccount(running) => outliving::InAJob::id(running),
+        }
+    }
+
+    #[cfg(windows)]
+    fn handle(&self) -> std::os::windows::io::RawHandle {
+        match self {
+            Started::Ordinarily(child) => outliving::InAJob::handle(child),
+            Started::AsTheAccount(running) => outliving::InAJob::handle(running),
+        }
+    }
 }
 
 impl Drop for Compiling {
@@ -222,8 +305,7 @@ impl Drop for Compiling {
     /// replaced while Verkstead carries on, and where nothing else would ever
     /// tell it to go.
     fn drop(&mut self) {
-        let _ = self.server.kill();
-        let _ = self.server.wait();
+        self.server.ended();
     }
 }
 
@@ -364,11 +446,11 @@ impl BuildCache {
     /// and this is false: the session will build, and it will build every
     /// dependency itself.
     ///
-    /// **False on Windows whatever is installed**, because no session there
-    /// compiles through an sccache — see [`compiles_through_an_sccache`], which
-    /// is what stops one ever being found. What the workbench says there is why
-    /// rather than telling somebody to install a thing that would not be
-    /// reached.
+    /// **The same question on all three platforms.** It was false on Windows
+    /// whatever was installed for as long as no session there could reach a
+    /// compile server; now what it turns on is the machine — see
+    /// [`compiles_through_an_sccache`], which is where a platform that could
+    /// not would still be said.
     pub fn caches_compiles(&self) -> bool {
         self.dir.is_some() && self.sccache.is_some()
     }
@@ -400,14 +482,17 @@ impl BuildCache {
     /// builds Rust never runs one, and the switch and the size are the human's,
     /// read at this moment like everything else a session is built from.
     ///
-    /// **And never on Windows**, which falls out of there being no sccache to
-    /// start one of — see [`compiles_through_an_sccache`], which is where the
-    /// switch is and where what is left to do about it is said.
+    /// **And on Windows it is started as the session account**, which is what a
+    /// boundary is on that platform: `session_account` is the local account of
+    /// Verkstead's own that every session there runs as, and a compile server
+    /// started as anybody else would be every Rust dependency's proc macro
+    /// running as the human. The two Unixes pass `None` and read it nowhere —
+    /// what makes their boundary is a wrapper in the vector.
     ///
     /// Nothing waits on it and nothing fails if it will not start: a session
     /// whose compile server is missing falls back to starting one of its own,
     /// which is what every session did before this existed.
-    pub fn compiling(&self, settings: &RustBuildCache) {
+    pub fn compiling(&self, settings: &RustBuildCache, session_account: Option<&Logon>) {
         let (Some(dir), Some(sccache), Some(data_dir)) = (&self.dir, &self.sccache, &self.data_dir)
         else {
             return;
@@ -423,9 +508,7 @@ impl BuildCache {
             // Still up and still the size the human asked for is nothing to do.
             // `try_wait` rather than a signal: a server that died is one to
             // start again, and asking is also what reaps it.
-            let stopped = !matches!(one.server.try_wait(), Ok(None));
-
-            if !stopped && one.size == settings.size() {
+            if !one.server.stopped() && one.size == settings.size() {
                 return;
             }
 
@@ -433,8 +516,8 @@ impl BuildCache {
             *running = None;
         }
 
-        let started = compile_server(dir, sccache, data_dir, settings.size())
-            .and_then(|mut compiling| compiling.spawn());
+        let started = compile_server(dir, sccache, data_dir, settings.size(), session_account)
+            .and_then(|rendering| left_running(&rendering));
 
         match started {
             Ok(server) => {
@@ -445,7 +528,11 @@ impl BuildCache {
                 // at all on Linux, where `--die-with-parent` is the whole of
                 // it, and nothing on Windows either, where what says it is the
                 // Job the [`Compiling`] below is holding.
-                outliving::keep(Platform::HERE, server.id(), std::process::id());
+                outliving::keep(
+                    Platform::HERE,
+                    outliving::InAJob::id(&server),
+                    std::process::id(),
+                );
 
                 tracing::info!(
                     cache = %dir.display(),
@@ -581,22 +668,37 @@ pub fn builds_rust(repo: &Path) -> bool {
 /// this is bubblewrap's flags on Linux and a deny-by-default policy on a Mac
 /// without a word here saying which — see [`crate::sandbox::rendered`].
 ///
-/// **Windows is not among them, because there is no compile server there** —
-/// see [`compiles_through_an_sccache`]. Nothing on that platform can reach one,
-/// so nothing on that platform starts one, and this is read by the two whose
-/// sessions compile through an sccache at all.
+/// **And Windows is among them, which is the third rendering and is not a
+/// wrapper at all**: what a description comes to there is an access-control
+/// entry on each real path it names, written for the local account of
+/// Verkstead's own that the process is then started as — see
+/// [`crate::sandbox::granting`]. So this writes a boundary as well as
+/// describing one, the way [`crate::sandbox::Sandbox::command`] does and for
+/// the same reason: the entries have to be on the machine before the process
+/// that runs behind them is started.
 ///
-/// What it gave up to be one is the hostname it used to be given inside. A name
-/// for the machine is something one of the two mechanisms can say and the other
-/// cannot, so it is no part of a description either of them answers — and what
-/// it was worth was telling this sandbox apart from a session's in a process
-/// listing.
+/// **The boundary is the Compile Server's own rather than any Conversation's.**
+/// It is held for as long as the server runs and it is written under a record
+/// of its own — see `sandbox::entries::Entries::of_the_compile_server` —
+/// because the thing it belongs to is this process rather than a piece of work:
+/// a compile server serves every Conversation and outlives each of them.
+/// Most of what it names is granted by every session's own description anyway
+/// — the cache, the sccache, the toolchain on the `PATH` — and an entry already
+/// there is left alone, so what this really adds is its own profile and the
+/// Worktrees directory whole.
+///
+/// What it gave up to be a [`crate::sandbox::Surface`] is the hostname it used
+/// to be given inside. A name for the machine is something one of the
+/// mechanisms can say and the others cannot, so it is no part of a description
+/// any of them answers — and what it was worth was telling this sandbox apart
+/// from a session's in a process listing.
 fn compile_server(
     dir: &Path,
     sccache: &Path,
     data_dir: &Path,
     size: &str,
-) -> std::io::Result<Command> {
+    session_account: Option<&Logon>,
+) -> std::io::Result<Rendering> {
     let worktrees = crate::worktrees::directory(data_dir);
     let home = compiling_home(data_dir);
 
@@ -619,6 +721,21 @@ fn compile_server(
 
     surface.made(Access::Empty(home.clone()));
 
+    // And the rest of the profile on the platform that has one, after the HOME
+    // that would otherwise empty them: a Windows program keeps its settings
+    // under `%APPDATA%` rather than in a dotfile, and asks the shell where that
+    // is — which refuses to answer at all for a directory that is not really
+    // there. Which is a thing an sccache does at its first instruction, and the
+    // second half of why compile caching was ever off on that platform: the
+    // probe's client failed before it reached the network, unable to find a
+    // configuration directory in a profile it was refused (ADR-0014). See
+    // [`crate::sandbox::windows_profile`], and the names beside it below.
+    if Platform::HERE == Platform::Windows {
+        for made in sandbox::windows_profile(&home) {
+            surface.made(made);
+        }
+    }
+
     // And everything that `PATH` names which this has to be granted as well as
     // told about — see [`crate::sandbox::reaching`], which is the same rule a
     // session's own description goes through. That list leads with the `PATH`
@@ -631,6 +748,16 @@ fn compile_server(
     if let Some(servers_home) = sandbox::servers_home() {
         sandbox::reaching(Platform::HERE, &searches, servers_home, &mut surface);
     }
+
+    // And where the toolchain it is about to run is, on a machine whose Rust is
+    // rustup's — see [`crate::sandbox::toolchains`]. **This is the process that
+    // really needs it**: an sccache client hands the server a command line, and
+    // what is on the front of that line is the human's `rustc`, which is a shim
+    // that has to find its own install. Granted a line above as part of what
+    // the `PATH` implies, and said here because a compile server has a profile
+    // of its own exactly as a session does.
+    let toolchains = sandbox::servers_home()
+        .and_then(|servers_home| sandbox::toolchains(Platform::HERE, &searches, servers_home));
 
     surface
         // Every Conversation's checkout, writable: a compile writes its output
@@ -658,21 +785,124 @@ fn compile_server(
         .set("SCCACHE_IDLE_TIMEOUT", "0")
         .running(&[&inside]);
 
+    if let Some(rustup) = &toolchains {
+        surface.set(sandbox::RUSTUP_HOME, rustup);
+    }
+
+    // And the names nothing on Windows runs without, which the two Unixes have
+    // no equivalent of: `USERPROFILE` and the two halves of the profile made
+    // above, and somewhere to write what it throws away. The whole point of
+    // saying them is that they point at the profile this description just made
+    // rather than at whatever the account the logon loaded happens to have
+    // under `C:\Users` — see [`crate::sandbox::windows_names`].
+    if Platform::HERE == Platform::Windows {
+        for (name, value) in sandbox::windows_names(&home) {
+            surface.set(name, value);
+        }
+    }
+
     // And nothing to close after it, which is the one caller of a rendering
     // that has none: what a closing sees to is a file a session replaced rather
     // than wrote in place — see [`crate::sandbox::Closing`] — and the one file
     // this joins in is the sccache it is running, read-only. A compile server
     // outlives every session anyway, so there is no ending here to hang one on.
-    let (rendering, _) = sandbox::rendered(Platform::HERE, &surface);
+    #[allow(unused_mut)]
+    let (mut rendering, _) = sandbox::rendered(Platform::HERE, &surface);
 
-    // Which is where this can refuse: a rendering naming an account to be
-    // started as is one the standard library cannot start — see
-    // [`crate::sandbox::off_a_console`], which is what starts such a thing. The
-    // compile server names none on any platform this runs on, and an error
-    // here is carried the way every other failure to start one is: said in the
-    // log, with each session starting a server of its own.
+    // And on the platform whose rendering is a description and nothing else,
+    // the boundary itself: the entries that make it true and the identity they
+    // are written for — see [`crate::sandbox::Sandbox::command`], which does
+    // the same three things in the same order for a session.
+    //
+    // **Which is where this can refuse.** On the two platforms with a wrapper
+    // there is nothing here to refuse; on the third, an account this machine
+    // has not got is a compile server that cannot be started at all, and it is
+    // carried the way every other failure to start one is — said in the log,
+    // with each session starting a server of its own.
+    #[cfg(windows)]
+    {
+        let entries = sandbox::granting::entries(&surface, sandbox::servers_home());
 
-    let mut compiling = Command::try_from(&rendering)?;
+        // Read before a word of it is written, for the reason a session's is:
+        // a refusal cuts the inheritance on the path it refuses, so this is the
+        // last moment at which the answer is the machine's own. The Compile
+        // Server refuses nothing — it has no agent account to cover — so what
+        // this comes back with is empty, and it is asked all the same rather
+        // than assumed.
+        let cut = sandbox::granting::writing::inheriting(&entries);
+
+        let account = the_session_account(session_account)?;
+
+        // Under a record of its own rather than a Conversation's: this boundary
+        // belongs to the process rather than to a piece of work, and it is held
+        // for as long as the server is up. The hold goes in the map that keeps
+        // one boundary per name, so a compile server started again for a size
+        // the human changed finds the entries it already has rather than
+        // writing them afresh.
+        let held = sandbox::entries::Entries::of_the_compile_server(
+            data_dir,
+            account.name(),
+            account.sid().text(),
+        )?;
+
+        held.wrote(entries.clone(), cut.clone())?;
+
+        sandbox::granting::writing::write(&entries, account.sid().text(), &cut)?;
+
+        rendering.as_account(sandbox::account::Logon::of(
+            account.name(),
+            account.password(),
+        ));
+    }
+
+    // Read by the block above and by nothing else, which the two platforms it
+    // is not compiled on have to be told.
+    let _ = session_account;
+
+    Ok(rendering)
+}
+
+/// The account this machine really has, out of the name and password a caller
+/// worked out — or a refusal saying which half of it is not there.
+///
+/// [`crate::sandbox::Sandbox::session_account`]'s question, asked for the
+/// process that is nobody's session: the name and the password come off a Data
+/// Directory and a settings file, and the SID every entry is written for is the
+/// machine's own answer about that name.
+#[cfg(windows)]
+fn the_session_account(
+    logon: Option<&Logon>,
+) -> std::io::Result<sandbox::account::machine::Account> {
+    let logon = logon.ok_or_else(|| {
+        std::io::Error::other(
+            "the shared compile server runs as this installation's own local account and \
+             nothing said which account that is",
+        )
+    })?;
+
+    sandbox::account::machine::Account::resolving(logon).map_err(|missing| {
+        std::io::Error::other(format!(
+            "the shared compile server runs as this installation's own local account and \
+             there is not one: {missing}",
+        ))
+    })
+}
+
+/// `rendering` started, and left running for as long as this server is.
+///
+/// The one place the Compile Server crosses from a description into a process,
+/// and it is two calls rather than one because the platforms start it two ways
+/// — see [`Started`]. A rendering naming no account is the standard library's
+/// own spawn, with the stdio and the process group a compile server wants said
+/// here; one naming an account is `sandbox::starting::left_running`, which
+/// says both for itself.
+fn left_running(rendering: &Rendering) -> std::io::Result<Started> {
+    #[cfg(windows)]
+    if let Some(logon) = rendering.account() {
+        return sandbox::starting::left_running(rendering, logon).map(Started::AsTheAccount);
+    }
+
+    let mut compiling = Command::try_from(rendering)?;
 
     // In a process group of its own where the platform needs one, which is what
     // a keeper ends when the server has gone — see
@@ -688,7 +918,7 @@ fn compile_server(
         .stdout(Stdio::null())
         .stderr(Stdio::inherit());
 
-    Ok(compiling)
+    compiling.spawn().map(Started::Ordinarily)
 }
 
 /// Where `program` is on the server's own `PATH`, or `None` where it is on none
@@ -827,7 +1057,7 @@ mod tests {
             PathBuf::from("/var/lib/verkstead"),
         );
 
-        cache.compiling(&RustBuildCache::of(false, None));
+        cache.compiling(&RustBuildCache::of(false, None), None);
 
         assert!(cache.held().is_none());
     }
@@ -843,21 +1073,26 @@ mod tests {
             PathBuf::from("/var/lib/verkstead"),
         );
 
-        cache.compiling(&RustBuildCache::default());
+        cache.compiling(&RustBuildCache::default(), None);
 
         assert!(cache.held().is_none());
     }
 
-    /// The two Unixes compile through an sccache and Windows does not, which is
-    /// the one place that is decided — see [`compiles_through_an_sccache`].
+    /// All three platforms compile through an sccache, which is the one place
+    /// that is decided — see [`compiles_through_an_sccache`].
+    ///
+    /// The third is the one worth asserting: it answered `false` for as long as
+    /// a session there ran inside an AppContainer, and what changed is the
+    /// boundary rather than anything about sccache.
     #[test]
-    fn only_the_two_unixes_compile_through_an_sccache() {
+    fn every_platform_compiles_through_an_sccache() {
         assert!(compiles_through_an_sccache(Platform::Linux));
         assert!(compiles_through_an_sccache(Platform::MacOs));
         assert!(
-            !compiles_through_an_sccache(Platform::Windows),
-            "compile caching is still off there — see the function's own \
-             documentation, which says what is left to do about it",
+            compiles_through_an_sccache(Platform::Windows),
+            "a session there runs as a local account of Verkstead's own, which \
+             reaches the loopback its sccache client talks to the Compile \
+             Server over",
         );
     }
 
@@ -866,9 +1101,9 @@ mod tests {
     /// an sccache the cache does not have.
     ///
     /// Asked of [`Platform::HERE`] rather than of a platform, because this is
-    /// the arm the constructors take — so the assertion means the opposite
-    /// thing on the Windows job from what it means on the other two, which is
-    /// the whole point of running the suite on both.
+    /// the arm the constructors take — so what it asserts is whatever the
+    /// machine running the suite really answers, which is the whole point of
+    /// running it on all three.
     #[test]
     fn an_sccache_is_only_kept_where_a_session_could_reach_one() {
         let cache = BuildCache::at(
@@ -888,6 +1123,34 @@ mod tests {
             here,
             "which is what puts a RUSTC_WRAPPER in a session's environment, or \
              leaves it out",
+        );
+    }
+
+    /// And on the platform whose boundary is an identity, a compile server with
+    /// no account to be started as is refused rather than started as the human.
+    ///
+    /// The one thing about the Windows arm that can be asked without an account
+    /// on the machine, and it is the thing that matters: what a refusal here
+    /// costs is a session starting an sccache server of its own, and what
+    /// starting it anyway would cost is every Rust dependency's proc macro
+    /// running as whoever Verkstead runs as.
+    #[test]
+    #[cfg(windows)]
+    fn a_compile_server_with_no_account_to_be_started_as_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let refused = compile_server(
+            dir.path(),
+            Path::new(r"C:\sccache\sccache.exe"),
+            dir.path(),
+            SIZE,
+            None,
+        )
+        .expect_err("a Windows compile server names the account it runs as");
+
+        assert!(
+            refused.to_string().contains("local account"),
+            "the refusal says which half of it is not there: {refused}",
         );
     }
 

@@ -41,6 +41,7 @@ use crate::handoffs::Handoffs;
 use crate::nudge::Nudges;
 use crate::platform::Platform;
 use crate::runner::Pace;
+use crate::sandbox::account;
 use crate::sandbox::outliving;
 use crate::sandbox::{Executable, Homes, Reachable, Sandbox, SandboxConfig, under_dev_shell};
 use crate::screen::Live;
@@ -298,6 +299,19 @@ impl Agents {
         let secrets = self.settings.secrets();
         let config = self.settings.config();
 
+        // The local account of Verkstead's own that everything behind a
+        // boundary on this platform runs as — a session, and the compile server
+        // below. Both halves off files rather than off the machine, and read
+        // here for the reason [`Sandbox::for_conversation`] reads them at every
+        // spawn: an account made an hour after the server started is one the
+        // next session runs as.
+        let session_account = (self.homes.platform() == Platform::Windows).then(|| {
+            account::Logon::of(
+                self.homes.session_account(),
+                secrets.session_account_password().unwrap_or_default(),
+            )
+        });
+
         // And the one sccache server this machine compiles through, up before
         // whatever will reach for it — see [`BuildCache::compiling`]. Here
         // rather than at startup and only for a Repo that builds Rust, because
@@ -305,7 +319,8 @@ impl Agents {
         // rather than once, because the switch, the size and whether the server
         // is still alive are all read at this moment.
         if build_cache::builds_rust(&conversation.repo.path) {
-            self.cache.compiling(config.rust_build_cache());
+            self.cache
+                .compiling(config.rust_build_cache(), session_account.as_ref());
         }
 
         let sandbox = Sandbox::for_conversation(

@@ -183,6 +183,13 @@ pub async fn swept(pool: &sqlx::SqlitePool, data_dir: &Path) {
 /// lost altogether is a Cleanup's delete, which takes every row and leaves a
 /// Windows machine carrying the entries — and that is as much an orphan as the
 /// other two.
+///
+/// **And one record is nobody's Conversation**: the Compile Server's, written
+/// under an id no Conversation can have — see `sandbox::entries::NOBODYS`. The
+/// rule takes it back unread, which is the right answer at the one moment this
+/// runs: no compile server is up when a server comes up, so a record under that
+/// id at startup is one the last server left behind. This one writes its own
+/// afterwards, when something first builds Rust.
 fn stopped(found: &[remembering::Remembered], kept: &[i64]) -> Vec<i64> {
     found
         .iter()

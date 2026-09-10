@@ -465,13 +465,13 @@ pub struct ConversationView {
     /// scratch every time, which is a slow build rather than a broken one — so
     /// it is a note above the button, not a refusal on it.
     ///
-    /// **And false where installing one would change nothing.** A Windows
-    /// session compiles through no sccache whatever the machine has, because
-    /// the AppContainer it runs in is refused the loopback the client reaches
-    /// its server over (ADR-0014) — so there is nothing here for the human to
-    /// go and do, and a note telling them to do it would be wrong. What is
-    /// standing rather than fixable is said on the settings page instead — see
-    /// [`crate::CompileCaching::NotThroughAContainer`].
+    /// **Which is always something the human can go and do.** It was not
+    /// always: a Windows session compiled through no sccache whatever the
+    /// machine had, and a note telling somebody to install one would have been
+    /// wrong there. Sessions on every platform reach the one Compile Server
+    /// this machine runs now — see `build_cache::compiles_through_an_sccache`
+    /// on the server — so the note above the button is an instruction again
+    /// wherever it is drawn at all.
     ///
     /// The server's rule rather than three fields for the page to combine, for
     /// the reason [`ConversationView::ready_to_grill`] is one: two of the three

@@ -112,35 +112,43 @@ One directory is made outside it: the **Build Cache**, at
 `CARGO_HOME` inside it, so a crate is downloaded once for the machine rather
 than once per Conversation; with `sccache` on the `PATH` the server was started
 from, every session is told to compile through it as `RUSTC_WRAPPER` and the
-compiling is cached too — on the two Unixes, and never on Windows, for the
-reason below. The dev shell carries one, so a checkout run gets the whole
-thing. It is on with nothing configured, and the settings page is where it is
-switched off or given a size.
+compiling is cached too, on all three platforms. The dev shell carries one, so a
+checkout run gets the whole thing. It is on with nothing configured, and the
+settings page is where it is switched off or given a size.
 
 The sccache **server** is Verkstead's own, not the sessions'. It comes up as a
 child of the running server the first time a session starts on a repo with a
 root `Cargo.toml`, in a sandbox holding `<data-dir>/worktrees` and the build
 cache and nothing else — so `ps` shows one more sandboxed child beside each
 session's, and it goes when the server does. That sandbox is described and
-rendered by the code a session's is, so it is `bwrap` on Linux and
-`sandbox-exec` on a Mac without either half saying which. Every session's
-`sccache` is only the client half reaching it. Sessions starting their own is
-what this replaces: they all bind one port, and the loser's compiles then run
-in the winner's sandbox where its worktree is not reachable.
+rendered by the code a session's is, so it is `bwrap` on Linux, `sandbox-exec`
+on a Mac and the session account on Windows without any half saying which.
+Every session's `sccache` is only the client half reaching it. Sessions starting
+their own is what this replaces: they all bind one port, and the loser's
+compiles then run in the winner's sandbox where its worktree is not reachable.
 
-**Windows has neither half, and that is deliberate rather than unfinished.** A
-session there runs inside an AppContainer, which is refused every connection to
-the local machine — the probe behind [ADR 0014](adr/0014-windows-sessions.md)
-timed out on `127.0.0.1` and on the machine's own LAN address alike, and the
-sccache client it ran panicked reading its own configuration before it got that
-far. A client that cannot reach a server is a `RUSTC_WRAPPER` that fails every
-build rather than one that misses a cache, so the server never looks for an
-sccache on that platform, never sets `RUSTC_WRAPPER`, and starts no compile
-server for one to reach. What a Windows session does get is the other half
-whole: the shared cache directory granted to its container read-write, with
-`CARGO_HOME` inside it, so a crate is still downloaded once for the machine and
-only the *compiling* is per session. The settings page says so where somebody
-would otherwise wonder why a Windows build is slower than a Linux one.
+**Windows had neither half for a while**, and the reason has gone. A session
+there ran inside an AppContainer, which is refused every connection to the local
+machine — the probe behind [ADR 0014](adr/0014-windows-sessions.md) timed out on
+`127.0.0.1` and on the machine's own LAN address alike, and the sccache client it
+ran panicked reading its own configuration before it got that far. A session
+runs as a local account of Verkstead's own now: an ordinary local account
+reaches the loopback like anything else, and the profile it is handed is a real
+one with both halves made, which is what that client was looking for. So the
+switch is on there like everywhere else, and the compile server on that platform
+runs as the same account a session does, behind entries of its own — a compile
+server started as the human would be every dependency's proc macro running with
+the database and the settings files in reach.
+
+**And a Windows session finds the machine's Rust through rustup.** There is no
+`/nix` on that platform for a toolchain to be on, so what a session runs is the
+human's own: `~/.cargo/bin` is on its `PATH` already, being under the home, and
+the rustup home those shims resolve their toolchain out of is granted read-only
+beside it with `RUSTUP_HOME` naming it — a sandbox has a profile of its own, so
+rustup left to resolve against that one answers *could not choose a version of
+rustc to run*. `RUSTUP_HOME` where the machine sets one, `~/.rustup` where it
+does not, and nothing at all where there is no rustup on the `PATH`, which is
+every nix machine.
 
 A session's GitHub auth and the author of its commits are two of those settings
 rather than anything found in a home directory. Put a token in `secrets.yaml`
@@ -240,10 +248,8 @@ fine-grained one GitHub named no scopes for at all. `"github_token"` is
 fields sends, and `"Clear"` to take it away. `"rust_build_cache"` is a pair of
 values rather than an action: an empty `"size"` is no size configured, which
 puts the default back, and `"compiles"` is read-only — `"Cached"` where the
-server found an `sccache`, `"NoSccache"` where it did not, and
-`"NotThroughAContainer"` on a Windows server, where no session could reach one
-however many are installed. Its own environment and its own platform rather
-than anybody's setting.
+server found an `sccache` and `"NoSccache"` where it did not. Its own
+environment rather than anybody's setting.
 
 `"sandbox_binds"` is the list `config.yaml` holds, sent as values in the grammar
 the flags use — so a Verkstead started with no flags at all gets its first bind
@@ -598,9 +604,12 @@ own, with a PowerShell script where claude goes — and
 `terminal.rs`, asking `mode con` what `stty` is asked there. Both are
 `cfg(windows)`, so a Linux or a Mac checkout compiles neither: the
 `windows-2025` job is where they run, and it installs an `sccache` on the
-runner for the two of them that are about the build cache — both of which prove
-a negative, that a machine which *has* one still starts no Compile Server and
-still hands a session no `RUSTC_WRAPPER`.
+runner for the three of them that are about the build cache — a Compile Server
+coming up as the session account, a session handed a `RUSTC_WRAPPER` it can
+run, and a Rust repository's session really compiling through that server. The
+last of those wants a rustup-installed Rust on the runner as well, which is what
+a Windows runner has: it runs the machine's own `rustc`, through the rustup home
+a session is granted.
 
 **And a Windows checkout needs the session account, once.** Every suite that
 starts a session starts it *as* that account — `sessions_windows.rs`, the two

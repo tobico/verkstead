@@ -510,12 +510,15 @@ pub const AGENT_TYPE: &str = "VERKSTEAD_AGENT";
 /// is why it is a function of where the Data Directory is rather than a name.
 /// See [`path`], [`Executable`] and [`crate::build_cache`].
 ///
-/// **Nothing on Windows reads this.** A session there leads its `PATH` with
+/// **No session on Windows reads this.** A session there leads its `PATH` with
 /// something else — nothing is bound and nothing is linked, so what a session
 /// asks with is the running image where it really is, see [`Executable::at`],
-/// and the directory holding *that* is what leads — and the compile server
-/// which is this function's other caller is not started on that platform at
-/// all, see [`crate::build_cache::compiles_through_an_sccache`].
+/// and the directory holding *that* is what leads. The compile server, which is
+/// this function's other caller, reads it on all three: it runs no `verkstead`
+/// and asks with none, so what it wants of this is a name to lead a `PATH`
+/// with that is Verkstead's own rather than the machine's — and a directory
+/// nothing put anything in is a `PATH` entry that answers to nothing, which is
+/// exactly what it should be there.
 pub(crate) fn own_bin(platform: Platform, data_dir: &Path) -> PathBuf {
     under(&own_directory(platform, data_dir), BIN)
 }
@@ -529,15 +532,14 @@ pub(crate) fn own_bin(platform: Platform, data_dir: &Path) -> PathBuf {
 /// a `RUSTC_WRAPPER` and what the compile server runs are the same file, and
 /// two readings of where it is would be two ways for them to disagree.
 ///
-/// **Windows joins in nothing here, and asks this nothing at all.** No session
-/// on that platform compiles through an sccache — see
-/// [`crate::build_cache::compiles_through_an_sccache`] — so neither of the two
-/// callers reaches this with a Windows platform in hand. The arm is what a name
-/// would mean there rather than a claim that anything asks: the boundary on
-/// that platform is a grant written on the real path, so nothing is joined in
-/// and the path outside *is* the path inside, and what the description then
-/// says of it collapses to nothing at all — a path bound onto itself is a path
-/// already where it is, see [`Surface::elsewhere`].
+/// **Windows joins in nothing here**, which is why its arm is the path itself.
+/// The boundary on that platform is a grant written on the real path rather
+/// than a mount in front of it, so nothing is joined in and the path outside
+/// *is* the path inside — and what the description then says of it collapses to
+/// nothing at all: a path bound onto itself is a path already where it is, see
+/// [`Surface::elsewhere`]. What a session is told to compile through is
+/// therefore where the sccache really is, which is a path the session account
+/// has been granted read-only like any other.
 pub(crate) fn sccache_inside(platform: Platform, ours: &Path, sccache: &Path) -> PathBuf {
     match platform {
         Platform::Linux | Platform::MacOs => ours.join(build_cache::SCCACHE),
@@ -1489,7 +1491,82 @@ pub(crate) fn reaching(platform: Platform, path: &OsStr, home: &Path, surface: &
     for directory in installs(platform, path, home) {
         surface.own(directory, Reach::ReadOnly);
     }
+
+    if let Some(toolchains) = toolchains(platform, path, home) {
+        surface.own(toolchains, Reach::ReadOnly);
+    }
 }
+
+/// What a `rustup` on the `PATH` is the front of: the rustup home of whoever
+/// runs the server, where there is one to grant.
+///
+/// **[`reaching`]'s third half, and the one that is not a directory the list
+/// names.** `~/.cargo/bin/rustc` is not a compiler — it is a rustup shim, which
+/// reads a settings file under the rustup home to decide which toolchain to run
+/// and then runs a `rustc` out of that toolchain. Neither the settings file nor
+/// the toolchain is under any directory the `PATH` holds, so a sandbox granted
+/// the shim and not the install is one where `rustc --version` answers *rustup
+/// could not choose a version of rustc to run*. Which is what a Windows session
+/// answered, and the compile server behind it: on that platform there is no
+/// floor of the machine's own for a toolchain to be on, so this is the whole of
+/// how a session finds one.
+///
+/// **And it is told as well as granted.** The other two halves are directories
+/// a `PATH` already names, so a sandbox that can open them is a sandbox that
+/// finds them; this one is found through `%USERPROFILE%` — and a sandbox's
+/// profile is a fresh directory of the Conversation's own, which is the very
+/// thing that makes rustup look in the wrong place. So each caller sets
+/// `RUSTUP_HOME` to what this answers, and the answer is worked out here for
+/// both — see [`Sandbox::surface`] and `build_cache::compile_server`.
+///
+/// **`RUSTUP_HOME` where the machine says one, and `~/.rustup` where it does
+/// not**, which is rustup's own rule read off the environment the server was
+/// started with — and the two are bounded differently, because they are found
+/// differently. A variable is the machine naming one directory on purpose, so
+/// what it names is granted wherever it is; the fallback is a guess, so it is
+/// taken only strictly under the home, which is [`per_user`]'s bound and is
+/// there for its reason.
+///
+/// **Only where rustup is on the `PATH` that was handed out**, and only for a
+/// directory that is really there. A machine whose toolchain is on the
+/// platform's own floor, which is every nix machine, has no rustup on the list
+/// and is granted nothing here.
+///
+/// **And the whole of it rather than the toolchain in use**, which is a real
+/// cost: an entry on this directory is one Windows propagates through every
+/// file of every toolchain under it, and a rustup home is gigabytes. Paid once
+/// per Conversation — a grant already there is left alone — and the narrower
+/// answer would be Verkstead reading rustup's settings file to work out which
+/// toolchain a checkout will pick, which is rustup's business and not this
+/// module's.
+pub(crate) fn toolchains(platform: Platform, path: &OsStr, home: &Path) -> Option<PathBuf> {
+    on_the_path(
+        platform,
+        RUSTUP,
+        Some(path),
+        std::env::var_os("PATHEXT").as_deref(),
+    )?;
+
+    let rustup = match std::env::var_os(RUSTUP_HOME) {
+        Some(said) if Path::new(&said).is_absolute() => PathBuf::from(said),
+
+        // The guess, which is inside the home because it is composed out of it:
+        // the bound is in the arithmetic rather than in a check after it.
+        _ => home.join(RUSTUP_INSIDE_HOME),
+    };
+
+    rustup.is_dir().then_some(rustup)
+}
+
+/// The program on a `PATH` that says a machine's Rust is rustup's.
+const RUSTUP: &str = "rustup";
+
+/// What it keeps its toolchains and its settings under, said by the machine.
+pub(crate) const RUSTUP_HOME: &str = "RUSTUP_HOME";
+
+/// And where that is where the machine says nothing, which is rustup's own
+/// default.
+const RUSTUP_INSIDE_HOME: &str = ".rustup";
 
 /// The home of whoever is running the server, as it was read at startup, or
 /// `None` on a machine that names none.
@@ -3939,6 +4016,16 @@ impl Sandbox {
             );
         }
 
+        // And where the toolchain that build runs is, on a machine whose Rust
+        // is rustup's — see [`toolchains`], which is where the rule is and
+        // which granted the directory a moment ago as part of what the `PATH`
+        // above implies. Said because it cannot be found: a sandbox has a
+        // profile of its own, and rustup resolving its default against that one
+        // is a `rustc` that will not choose a version to run.
+        if let Some(rustup) = toolchains(self.platform, &session_path, &self.servers_home) {
+            surface.set(RUSTUP_HOME, rustup);
+        }
+
         // Where a Rust build inside puts what it downloads and what it
         // compiles. Nothing but a Rust build ever reads any of them, which is
         // what makes them safe to set for every session whatever the repository
@@ -3964,12 +4051,13 @@ impl Sandbox {
             // — and a `RUSTC_WRAPPER` naming a path that is not inside would be
             // every Rust build inside failing rather than one running uncached.
             //
-            // Which is the whole of what a Windows session gets: there is never
-            // one to point at there — see
+            // Which used to be the whole of what a Windows session got, there
+            // never being one to point at there — see
             // [`crate::build_cache::compiles_through_an_sccache`], which is
-            // where that is decided and where the reason for it is. The
-            // `CARGO_HOME` above is a directory granted read-write like any
-            // other, and works on that platform exactly as it does here.
+            // where that is decided and where the history of it is. A session on
+            // that platform is pointed at one like any other now, at the path
+            // the sccache really is, granted read-only to the account the
+            // session runs as.
             //
             // What this reaches is the compile server Verkstead is running
             // outside, over the host's network — see
@@ -4662,6 +4750,28 @@ mod tests {
             per_user(Platform::Windows, local.as_os_str(), home.path()).is_empty(),
             "what a Windows session reaches is an access-control entry rather \
              than a bind, and the description carries none of it",
+        );
+    }
+
+    /// And a `PATH` with no rustup on it is a machine whose Rust is somewhere
+    /// else, so nothing is granted on rustup's account — see [`toolchains`].
+    ///
+    /// The half of that rule a test can ask on any machine. What the other half
+    /// answers turns on the environment the suite is running in — a `cargo
+    /// test` is itself started by a rustup shim, which sets `RUSTUP_HOME` for
+    /// everything under it — so the directory it lands on is asked of a real
+    /// session instead, in `tests/sessions_windows.rs`.
+    #[test]
+    fn a_path_with_no_rustup_on_it_is_granted_no_toolchains() {
+        let home = tempfile::tempdir().unwrap();
+        let empty = home.path().join("bin");
+        std::fs::create_dir_all(&empty).unwrap();
+
+        assert_eq!(
+            toolchains(Platform::HERE, empty.as_os_str(), home.path()),
+            None,
+            "a machine whose toolchain is on the platform's own floor has no \
+             rustup for this to be about",
         );
     }
 

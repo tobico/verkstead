@@ -72,6 +72,17 @@ use super::granting::{Entry, remembering, writing};
 static HELD: LazyLock<Mutex<HashMap<String, Arc<Entries>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// The id the one boundary that is nobody's Conversation is kept under: the
+/// Compile Server's — see [`Entries::of_the_compile_server`].
+///
+/// **Zero, which no Conversation is.** A Conversation's id is a SQLite row id
+/// and those begin at one, so this is a number the store cannot hand out rather
+/// than a number nobody has used yet. Which is what makes it safe to write a
+/// record under: the sweep reads every record there is and keeps the ones whose
+/// Conversation is still working, so a record under an id no Conversation has is
+/// one it always takes back — see [`crate::boundaries`].
+pub const NOBODYS: i64 = 0;
+
 /// One Conversation's entries, held.
 #[derive(Debug)]
 pub struct Entries {
@@ -184,6 +195,31 @@ impl Entries {
         holding.insert(name, entries.clone());
 
         Ok(entries)
+    }
+
+    /// And the same for the one boundary here that is not a Conversation's: the
+    /// Compile Server's, which is one process serving every Conversation and
+    /// belonging to none — see `build_cache::compile_server`.
+    ///
+    /// **Under a reserved id rather than a shape of its own**, because
+    /// everything about it is a Conversation's boundary read word for word:
+    /// entries written for the one account this installation's sessions run as,
+    /// held while the thing they are for is working, written down before
+    /// anything is granted, and taken back off that record by whichever server
+    /// finds them afterwards. A second record format would be a second sweep to
+    /// write and a second thing to get wrong.
+    ///
+    /// [`NOBODYS`] is that id, and it is not one any Conversation can have —
+    /// see its own documentation. So the sweep at startup takes these back by
+    /// the ordinary rule, which is the right answer for the only state they can
+    /// be found in at startup: left behind by a server that has gone, there
+    /// being no compile server running at the moment one comes up.
+    pub fn of_the_compile_server(
+        data_dir: &Path,
+        account: &str,
+        sid: &str,
+    ) -> io::Result<Arc<Entries>> {
+        Entries::of_conversation(data_dir, NOBODYS, account, sid)
     }
 
     /// The entries written for this identity, remembered so that they can be
