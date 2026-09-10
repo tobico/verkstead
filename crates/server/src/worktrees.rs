@@ -22,6 +22,7 @@ use std::time::Duration;
 
 use crate::repos::git;
 use crate::store;
+use crate::unseen::Unseen;
 
 /// The directory every Worktree goes under, inside `data`.
 ///
@@ -348,6 +349,7 @@ fn fetching(repo: &Path, limit: Option<Duration>) -> Fetched {
 
     command
         .args(["fetch", "--all", "--quiet"])
+        .unseen()
         .current_dir(repo)
         // A fetch that wants a password must fail rather than wait for one:
         // there is nobody at this terminal to type it, and an authentication
@@ -474,6 +476,7 @@ fn stop(fetch: u32) {
     let killed = Command::new("taskkill")
         .args(["/F", "/T", "/PID"])
         .arg(fetch.to_string())
+        .unseen()
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

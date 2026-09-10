@@ -43,6 +43,7 @@ use std::process::{Command, Stdio};
 
 use crate::github::{self, Gh, Trouble};
 use crate::settings::GitAuthor;
+use crate::unseen::Unseen;
 
 /// What became of a publish, in the server's own words — see
 /// [`verkstead_render::SharePublished`], which is this said to the workbench.
@@ -205,6 +206,7 @@ fn git(dir: &Path, token: &str, args: &[&str]) -> Result<(), String> {
         .args(["-c", "credential.helper=", "-c"])
         .arg(format!("credential.helper={HELPER}"))
         .args(args)
+        .unseen()
         .current_dir(dir)
         .env("GH_TOKEN", token)
         // Nothing here may stop to ask: a terminal prompt from a credential

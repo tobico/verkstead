@@ -216,6 +216,14 @@ mod transcript;
 /// nudge both go in as.
 mod typing;
 mod ui;
+/// Running a program without putting a window on the human's screen, which is
+/// Windows' question and nobody else's.
+///
+/// Public because the tray app spawns too, and it is the tray app that has no
+/// console for a child to inherit — see [`crate::remote::Elevate`], whose one
+/// graphical implementation lives in the desktop crate and runs the platform's
+/// own asking.
+pub mod unseen;
 mod updates;
 mod viewer;
 mod worktrees;

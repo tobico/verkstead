@@ -40,6 +40,7 @@ use serde::Deserialize;
 
 use crate::settings::Settings;
 use crate::store;
+use crate::unseen::Unseen;
 
 /// The host's `gh`, as Verkstead runs it.
 #[derive(Debug, Clone)]
@@ -169,6 +170,8 @@ impl Gh {
         command
             .args(before)
             .args(args)
+            // Nothing on the screen for it either — see [`crate::unseen`].
+            .unseen()
             // Nothing here is interactive: a `gh` that stopped to ask for a
             // password would be a server thread waiting on a terminal nobody is
             // at. A body to write is the one exception, and it is written and

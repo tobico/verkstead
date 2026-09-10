@@ -96,6 +96,7 @@ use verkstead_render::{
 use crate::github::Gh;
 use crate::platform::{Environment, Platform};
 use crate::settings::Settings;
+use crate::unseen::Unseen;
 use crate::{github, profiles, sandbox, sessions, store};
 
 /// Where a Linux machine says which distribution it is.
@@ -458,6 +459,7 @@ impl Machine {
         let git = self.found(sandbox::GIT)?;
         let run = Command::new(git)
             .args(["config", "--global", "--get", key])
+            .unseen()
             .stdin(Stdio::null())
             .output()
             .ok()?;
@@ -820,6 +822,7 @@ fn row(dependency: Dependency, state: DependencyState) -> DependencyView {
 fn trivially(bwrap: &Path) -> DependencyState {
     let run = Command::new(bwrap)
         .args(TRIVIALLY)
+        .unseen()
         .stdin(Stdio::null())
         .output();
 

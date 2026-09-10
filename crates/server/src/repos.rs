@@ -39,6 +39,7 @@ use crate::github::Gh;
 use crate::resolved::{Resolved, resolve};
 use crate::settings::GitAuthor;
 use crate::store;
+use crate::unseen::Unseen;
 
 /// Register the repository at `asked`, or say why not.
 ///
@@ -387,6 +388,7 @@ fn is_a_name(name: &str) -> bool {
 fn run(dir: &Path, args: &[&str]) -> Result<(), String> {
     let output = Command::new("git")
         .args(args)
+        .unseen()
         .current_dir(dir)
         .stdin(Stdio::null())
         .output()
@@ -630,6 +632,7 @@ pub(crate) fn accepting(dir: &Path, args: &[&str], ok: &[i32]) -> Option<String>
         // be working in this one right now.
         .arg("--no-optional-locks")
         .args(args)
+        .unseen()
         .current_dir(dir)
         .stdin(Stdio::null())
         .stderr(Stdio::null())
