@@ -178,6 +178,7 @@ use crate::settings::{Config, GitAuthor, Secrets};
 use crate::skills::{self, Skills};
 use crate::store;
 use crate::terminal;
+use crate::unseen::Unseen;
 
 /// The system directories a sandbox gets read-only on this machine, in the
 /// order they are said.
@@ -2705,7 +2706,7 @@ impl Executable {
     /// those being one directory seen from two places.
     fn probe(&self) -> anyhow::Result<()> {
         let mut command = Command::new(&self.path);
-        command.arg(GUIDE).env_clear().stdin(Stdio::null());
+        command.arg(GUIDE).env_clear().unseen().stdin(Stdio::null());
 
         if let Some(bundled) = &self.bundled {
             command.env(LD_LIBRARY_PATH, &bundled.libraries);
@@ -4285,6 +4286,7 @@ fn nix(dir: &Path, args: &[&str]) -> Option<String> {
     let output = Command::new("nix")
         .args(["--extra-experimental-features", "nix-command flakes"])
         .args(args)
+        .unseen()
         .current_dir(dir)
         .stdin(Stdio::null())
         .stderr(Stdio::null())

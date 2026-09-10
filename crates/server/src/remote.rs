@@ -70,6 +70,7 @@ use tokio::process::Command;
 use verkstead_render::{RemoteView, ServePress, ServeView};
 
 use crate::key::WorkbenchKey;
+use crate::unseen::Unseen;
 
 /// The tailscale on this machine, and the port a serve has to be pointing at
 /// for it to be this workbench's.
@@ -515,6 +516,7 @@ impl Tailscale {
         Command::new(program)
             .args(before)
             .args(arguments)
+            .unseen()
             .stdin(std::process::Stdio::null())
             .output()
             .await

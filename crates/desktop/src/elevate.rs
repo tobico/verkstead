@@ -37,6 +37,7 @@ use std::process::{Command, Output, Stdio};
 
 use verkstead_server::platform::Platform;
 use verkstead_server::remote::{Elevate, Raised};
+use verkstead_server::unseen::Unseen;
 
 /// The platform's own password dialog, in front of one command.
 #[derive(Debug, Clone, Copy)]
@@ -71,8 +72,13 @@ impl Elevate for Graphical {
             .split_first()
             .expect("every arm builds a command with a program to run");
 
+        // And nothing drawn for the asking itself: the dialog is the platform's,
+        // and the program that raises it is a console program this app would
+        // otherwise put a black window behind it — see
+        // [`verkstead_server::unseen`].
         let told = Command::new(program)
             .args(arguments)
+            .unseen()
             .stdin(Stdio::null())
             .output();
 

@@ -47,8 +47,8 @@ use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
     CREATE_UNICODE_ENVIRONMENT, CreateProcessWithLogonW, DeleteProcThreadAttributeList,
     GetExitCodeProcess, INFINITE, InitializeProcThreadAttributeList, LOGON_WITH_PROFILE,
-    LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOW,
-    TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
+    LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_INFORMATION, STARTF_USESHOWWINDOW, STARTF_USESTDHANDLES,
+    STARTUPINFOW, TerminateProcess, UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
 use super::account::{Logon, MAKE_IT};
@@ -356,6 +356,21 @@ fn over_pipes(rendering: &Rendering, logon: &Logon, typed: &[u8]) -> io::Result<
 /// every caller's are, whether they came from [`piped`] or from a terminal's
 /// own pipes.
 ///
+/// **And the console it makes comes up hidden**, which is
+/// [`STARTF_USESHOWWINDOW`] with [`HIDDEN`] under it. `CreateProcessWithLogonW`
+/// turns `CREATE_NEW_CONSOLE` on whatever the caller asked for — it is one of
+/// the three flags its documentation says are enabled by default — so a console
+/// is made here no matter what, and `CREATE_NO_WINDOW`, the flag that would
+/// otherwise say *one with no window*, is ignored beside it. What is left is
+/// saying how that console's window is to be shown, and the answer is *not*:
+/// everything started through here is a console program with nothing on it for
+/// a person to read — the Compile Server, a probe whose output is read back off
+/// a pipe, a session's launcher, whose console is the pseudoconsole it makes
+/// for itself and not this one. Without it each one puts an empty black window
+/// on the screen and leaves it there for as long as it runs, and the tray app
+/// has no console of its own to hand down instead — see
+/// `verkstead-desktop.exe`, which is the same thing said one level up.
+///
 /// `also` is whatever creation flags the caller wants beside the environment's:
 /// `CREATE_SUSPENDED` for a process that is to be in a Job before it has run an
 /// instruction, and nothing for one that is not. `what` is what is being
@@ -394,10 +409,11 @@ pub(crate) fn as_the_account(
 
     let mut startup: STARTUPINFOW = unsafe { std::mem::zeroed() };
     startup.cb = u32::try_from(size_of::<STARTUPINFOW>()).unwrap_or(u32::MAX);
-    startup.dwFlags = STARTF_USESTDHANDLES;
+    startup.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
     startup.hStdInput = standard[0];
     startup.hStdOutput = standard[1];
     startup.hStdError = standard[2];
+    startup.wShowWindow = HIDDEN;
 
     let name = wide(OsStr::new(logon.name()));
     let password = wide(OsStr::new(logon.password()));
@@ -453,6 +469,17 @@ pub(crate) fn as_the_account(
 
     unreachable!("the loop above returns on its last turn")
 }
+
+/// How the console's window is to be shown: `SW_HIDE`, which is not shown at
+/// all — see [`as_the_account`], which is the whole of why this is said.
+///
+/// Named here rather than taken from `windows-sys`, where it lives under
+/// `Win32_UI_WindowsAndMessaging`: this server draws no windows, and turning on
+/// a header's worth of them for one zero would say it did. It is also the value
+/// the field already holds in a zeroed `STARTUPINFOW`, which is exactly why it
+/// is written out — a zero that means something is one somebody would otherwise
+/// tidy away.
+const HIDDEN: u16 = 0;
 
 /// What the secondary logon service says when it is already busy with one of
 /// these: `ERROR_SERVICE_ALREADY_RUNNING`.

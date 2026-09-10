@@ -43,6 +43,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use super::account::Logon;
+use crate::unseen::Unseen;
 
 /// One process, as a rendering left it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -207,6 +208,10 @@ impl Rendering {
 /// is the one thing ADR-0014 refuses. So it is an error here, it names what was
 /// asked for, and what starts such a rendering is `sandbox::off_a_console` or
 /// the terminal's own spawn.
+///
+/// **And nothing is drawn for it**, which is [`crate::unseen`]: a process the
+/// server starts to read something back off has no window to put in front of
+/// the human, and on Windows it is given one unless it says otherwise.
 impl TryFrom<&Rendering> for Command {
     type Error = std::io::Error;
 
@@ -221,7 +226,7 @@ impl TryFrom<&Rendering> for Command {
 
         let mut command = Command::new(rendering.program());
 
-        command.args(rendering.argv());
+        command.args(rendering.argv()).unseen();
 
         // Nothing of the server's environment comes through — see this module's
         // own documentation.
