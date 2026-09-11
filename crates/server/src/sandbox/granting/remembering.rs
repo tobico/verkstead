@@ -478,6 +478,12 @@ enum Word {
     /// round: a step written and not remembered would sit on a directory of the
     /// human's naming an identity that has gone, and that is the one outcome
     /// this file exists to prevent.
+    ///
+    /// Which includes a step left out for saying nothing — see
+    /// [`super::worth_writing`], which is what leaves the drive root alone.
+    /// Remembered all the same, because what a description asked for is what a
+    /// record is; taking one off finds nothing of the account's on that
+    /// directory, and writes nothing there either.
     Stepped,
 
     Refused,

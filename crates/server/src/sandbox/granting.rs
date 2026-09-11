@@ -67,6 +67,12 @@
 //! own Worktree the moment it checks. One entry on each directory along the way
 //! answers that, and says nothing whatever about what is inside: the human's
 //! profile is walked through in the same breath as staying unlistable.
+//!
+//! **Except where the account can walk through already.** Most of the way to
+//! most paths is public — the drive, `C:\Users`, `C:\ProgramData` — and lets
+//! `Users` through, which the session account is one of. A step there says
+//! what the list already says, and on the drive root saying it is Windows
+//! walking the whole volume: see [`worth_writing`], which leaves those out.
 
 #[cfg(windows)]
 pub(crate) mod writing;
@@ -83,6 +89,13 @@ pub(crate) mod writing;
 
 #[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) mod remembering;
+
+// And a directory's list read as the bytes it is, for the one question a step
+// asks of the machine before it is written. Built everywhere, for this module's
+// own reason: the bytes are a fact about the list, and only fetching them off a
+// directory is a Win32 call.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) mod lists;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -242,6 +255,44 @@ fn stepping(entries: &[Entry]) -> Vec<Entry> {
     }
 
     stepping
+}
+
+/// Of `entries`, the ones worth writing: every one but a step the account can
+/// make already — `account` being its SID as the bytes a list holds for it, and
+/// `found` what the machine says a directory's list is.
+///
+/// **A step says again what a public directory's list already says**, and
+/// saying it is not free: writing an entry makes Windows walk the tree beneath
+/// the directory — see [`written_down`] for the measurement — and beneath the
+/// drive root that tree is the whole volume. A server that is not elevated is
+/// refused the write on `C:\`, counts it as an ancestor that will not take one
+/// and loses nothing, which is why no machine a human runs noticed; the
+/// `windows-2025` runner is elevated, the write went through, and it spent
+/// minutes of every boundary bringing the volume up to date. So where the
+/// account can walk through a directory and read its attributes already — see
+/// [`lists::steps_through`], which is the reading — nothing is written there at
+/// all.
+///
+/// **Everything else is as it was.** A grant and a refusal are handed on
+/// whatever any list says; and a step on a directory the account cannot walk
+/// through yet — the human's own profile, or one whose list would not read — is
+/// written, or refused by the machine as an answer rather than a fault, exactly
+/// as before.
+///
+/// A list is read for steps and for nothing else, a directory at a time.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn worth_writing(
+    entries: &[Entry],
+    account: &[u8],
+    found: impl Fn(&Path) -> lists::Found,
+) -> Vec<Entry> {
+    entries
+        .iter()
+        .filter(|entry| {
+            entry.wanted != Wanted::Stepped || !lists::steps_through(&found(&entry.path), account)
+        })
+        .cloned()
+        .collect()
 }
 
 /// Every directory on the way to `path`, outermost first and `path` itself not
@@ -697,6 +748,85 @@ mod tests {
             0,
             "a description that refuses one path and grants none is one step \
              through nothing at all",
+        );
+    }
+
+    /// And what a boundary under the drive root writes on the way to its
+    /// paths, asked of a machine whose lists are the ones Windows ships: no
+    /// step on the drive or on the public directories under it, and a step
+    /// through the human's own profile as there always was.
+    ///
+    /// **The drive root is the point.** Writing an entry there makes Windows
+    /// bring every list on the volume up to date, which an elevated server is
+    /// allowed to ask for — and the `windows-2025` runner, being elevated, paid
+    /// minutes of every boundary for it. See [`worth_writing`].
+    #[test]
+    fn a_step_is_written_only_where_the_account_cannot_already_walk_through() {
+        use super::lists::Found;
+        use super::lists::shipped::{
+            SESSIONS, drive_root, handed_down, profile, program_data, users,
+        };
+
+        let worktree = PathBuf::from(r"C:\Users\ada\AppData\Roaming\Verkstead\worktrees\repo-main");
+
+        let mut surface = Surface::starting_in(worktree.clone());
+        surface
+            .own(&worktree, Reach::ReadWrite)
+            .own(r"C:\ProgramData\verkstead\skills", Reach::ReadOnly)
+            .own(r"D:\cache", Reach::ReadWrite);
+
+        let machine = |path: &Path| match path.to_string_lossy().as_ref() {
+            r"C:\" => Found::Listed(drive_root()),
+            r"C:\Users" => Found::Listed(users()),
+            r"C:\ProgramData" => Found::Listed(program_data()),
+            r"C:\ProgramData\verkstead" => Found::Listed(handed_down(&program_data())),
+            r"C:\Users\ada" => Found::Listed(profile()),
+            under if under.starts_with(r"C:\Users\ada\") => Found::Listed(handed_down(&profile())),
+            // And a drive this machine will say nothing about, which is a step
+            // written as it always was.
+            _ => Found::Unread,
+        };
+
+        let entries = entries(&surface, None);
+        let written = worth_writing(&entries, SESSIONS, machine);
+
+        assert_eq!(
+            written
+                .iter()
+                .filter(|entry| entry.wanted == Wanted::Stepped)
+                .map(|entry| entry.path.clone())
+                .collect::<Vec<_>>(),
+            vec![
+                PathBuf::from(r"C:\Users\ada"),
+                PathBuf::from(r"C:\Users\ada\AppData"),
+                PathBuf::from(r"C:\Users\ada\AppData\Roaming"),
+                PathBuf::from(r"C:\Users\ada\AppData\Roaming\Verkstead"),
+                PathBuf::from(r"C:\Users\ada\AppData\Roaming\Verkstead\worktrees"),
+                PathBuf::from(r"D:\"),
+            ],
+            "a step goes through the human's own profile and everything under it on \
+             the way to the Worktree, and through a drive nothing could be read of — \
+             and not through `C:\\`, `C:\\Users`, `C:\\ProgramData` or what \
+             `C:\\ProgramData` hands down, every one of which lets `Users` through \
+             already",
+        );
+
+        assert!(
+            !written.iter().any(|entry| entry.path == Path::new(r"C:\")),
+            "no entry of any kind goes on the drive root",
+        );
+
+        assert_eq!(
+            written
+                .iter()
+                .filter(|entry| entry.wanted != Wanted::Stepped)
+                .collect::<Vec<_>>(),
+            entries
+                .iter()
+                .filter(|entry| entry.wanted != Wanted::Stepped)
+                .collect::<Vec<_>>(),
+            "and every grant is handed on whatever any list says: what a list is read \
+             for is whether a step says anything, and nothing else",
         );
     }
 

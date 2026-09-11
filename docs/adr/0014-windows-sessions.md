@@ -24,6 +24,11 @@ big directories at every start cost minutes. The grants that are identical for
 every Conversation are now written once and left. See *Amended: what says
 nothing about a Conversation stands for the installation*.
 
+Amended (2026-09-11): **a step is written only where it says something.** A
+directory the session account can already walk through — the drive root among
+them — takes no step, because writing one there walked the whole volume on an
+elevated machine. See the last paragraph of that same section.
+
 The order is the terminal first. A Windows session runs **unsandboxed** from
 the moment the terminal works until the container lands, and the workbench says
 so on every one — above **Start work** on the composer, beside the terminal on
@@ -486,6 +491,23 @@ written down rather than recomputed.
 naming the path, and a boundary is a line with its total. The stall was found
 with a process monitor and arithmetic over a metadata-operation counter, which
 is not a thing the next person should have to do.
+
+**And a step is written only where it says something** *(2026-09-11)*. Most of
+the directories on the way to a granted path are public — the drive root,
+`C:\Users`, `C:\ProgramData` — and their lists already let `Users` walk through
+and read attributes, which the session account is a member of. A step there
+says what the list already says, and beneath the drive root the walk that
+writing it costs is the whole volume. A server that is not elevated is refused
+that write, counts it as an ancestor that will not take an entry, and so no
+machine a human runs paid for it; the `windows-2025` runner is elevated, the
+write went through, and each boundary spent about 340s bringing `C:\` up to
+date, which was the bulk of a 36-minute job. So the list is read first, the way
+the machine's own access check reads it, and where the account itself, `Users`,
+`Authenticated Users` or `Everyone` already holds the three rights a step would
+grant, nothing is written. Taking a boundary down writes nothing on a directory
+holding no entry of the account's, for the same reason. A step through the
+human's own profile, which gives nobody else anything, is written as it always
+was.
 
 ## What stays as it was
 
