@@ -5609,6 +5609,10 @@ const WATCHING_IT = `/api/ui/conversations/${GRILLING.id}/screen/${OUTPUT.id}/at
 /// The repaint the fixture holds, as the socket sends one.
 const PAINTED: Shown = { Painted: SCREEN };
 
+/// The first line of that repaint, which is what a test that wants something
+/// selected on a grid selects.
+const FIRST_LINE = "Reading the brief.";
+
 /// A stand-in for the socket a live session's Screen is watched over.
 ///
 /// jsdom has a `WebSocket` and it would dial one, so this stands where it goes
@@ -6790,6 +6794,28 @@ describe("a session's output on the timeline", () => {
       `.${shell.detailsPane} .${attachedPane.screen} textarea`,
     );
     expect(typing.readOnly).toBe(true);
+
+    // The copy is the one keystroke it does answer, because the whole of what a
+    // grid like this is for is what is printed on it — and taking that off asks
+    // nothing of a session that has ended.
+    const written = theClipboard();
+    const left = theTerminal();
+
+    await waitFor(() => {
+      left.select(0, 0, FIRST_LINE.length);
+      expect(left.getSelection()).toBe(FIRST_LINE);
+    });
+
+    const survived = fireEvent.keyDown(typing, {
+      key: "C",
+      keyCode: 67,
+      which: 67,
+      ctrlKey: true,
+      shiftKey: true,
+    });
+
+    await waitFor(() => expect(written).toEqual([FIRST_LINE]));
+    expect(survived).toBe(false);
   });
 
   /// A Transcript is the whole of what a session said, and on a session that has
@@ -8005,10 +8031,6 @@ describe("putting something into a live session's screen", () => {
 
     return { container, socket };
   }
-
-  /// The first line of the repaint the fixture holds, which is what a test that
-  /// wants something selected selects.
-  const FIRST_LINE = "Reading the brief.";
 
   /// Typing goes up the socket as the bytes the terminal made of it. Nothing is
   /// drawn for it here: what the session makes of a keystroke comes back as what
@@ -17057,15 +17079,35 @@ describe("the terminal pane's tabs", () => {
       // Read-only: what is typed into it reaches nothing, there being nothing at
       // the other end to reach.
       const said = first.sent.length;
-
-      fireEvent.keyDown(
-        await drawn<HTMLTextAreaElement>(
-          container,
-          `.${shell.detailsPane} .${attachedPane.screen} .xterm-helper-textarea`,
-        ),
-        { key: "Enter", keyCode: 13, which: 13 },
+      const typing = await drawn<HTMLTextAreaElement>(
+        container,
+        `.${shell.detailsPane} .${attachedPane.screen} .xterm-helper-textarea`,
       );
 
+      fireEvent.keyDown(typing, { key: "Enter", keyCode: 13, which: 13 });
+
+      expect(first.sent).toHaveLength(said);
+
+      // The copy is the one of the three a grid like this still answers: what
+      // the shell left on it is exactly what somebody wants off it, and taking
+      // it asks nothing of the far end that has gone.
+      const written = theClipboard();
+      const left = theTerminal();
+
+      await waitFor(() => {
+        left.select(0, 0, FIRST_LINE.length);
+        expect(left.getSelection()).toBe(FIRST_LINE);
+      });
+
+      fireEvent.keyDown(typing, {
+        key: "C",
+        keyCode: 67,
+        which: 67,
+        ctrlKey: true,
+        shiftKey: true,
+      });
+
+      await waitFor(() => expect(written).toEqual([FIRST_LINE]));
       expect(first.sent).toHaveLength(said);
 
       // And nothing asked for another.
