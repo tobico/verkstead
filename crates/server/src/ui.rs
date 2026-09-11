@@ -4546,7 +4546,11 @@ async fn onboarding_install(
     State(state): State<AppState>,
     Json(press): Json<InstallPress>,
 ) -> HttpResponse {
-    match state.onboarding.install(press.dependencies).await {
+    match state
+        .onboarding
+        .install(&state.settings, press.dependencies)
+        .await
+    {
         Ok(()) => onboarding(State(state)).await,
         Err(Refusal::Over) => refused(
             StatusCode::CONFLICT,

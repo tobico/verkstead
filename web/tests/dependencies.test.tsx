@@ -53,7 +53,8 @@ const PART_WAY = partWay as OnboardingView;
 const INSTALLING = installing as OnboardingView;
 
 /// And a run over with nothing to show for it: the dialog was dismissed, so
-/// every row of that unit failed in the machine's own words.
+/// every row of that elevated unit failed in the machine's own words — with a
+/// vendor's own installer under them that would not run, failed in its.
 const FAILED = failed as OnboardingView;
 
 /// The two paths this step talks to.
@@ -547,14 +548,19 @@ describe("the hint screen", () => {
   });
 
   /// The password dialog dismissed: every row of that one elevated unit failed
-  /// in whatever the platform refused it in, so the hint screen is all of them.
-  it("draws every row of a unit the dialog refused, with what it said", () => {
+  /// in whatever the platform refused it in, so the hint screen is all of them
+  /// — and the vendor's own installer that ran after it is there beside them,
+  /// in the line it printed rather than in the dialog's.
+  it("draws every row a unit failed, with what each of them said", () => {
     const { container } = hinting(FAILED);
 
     expect(drawn(container)).toEqual(["Sandbox", "Git", "Claude"]);
     expect(
       row(container, "Sandbox").querySelector("[data-failed]")!.textContent,
     ).toBe("Error: (-128) User canceled.");
+    expect(
+      row(container, "Claude").querySelector("[data-failed]")!.textContent,
+    ).toBe("The installer could not reach the network.");
     expect(container.querySelector("[data-detected]")!.textContent).toBe(
       "0/3 detected",
     );

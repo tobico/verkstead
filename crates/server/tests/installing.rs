@@ -195,6 +195,35 @@ fn a_package_manager(dir: &Path) {
     );
 }
 
+/// A `curl` and a `bash` in that directory, where what the `curl` answers with
+/// is a script that fails.
+///
+/// **Stubs rather than the vendor's own, and that is the whole point of them.**
+/// What a ticked Claude row runs is `curl -fsSL https://claude.ai/install.sh |
+/// bash`, and a suite that ran that would install a harness on whoever's box it
+/// happened to be on, over a network it happened to have. A unit that runs as
+/// the user searches the machine's own `PATH` — see `onboarding::install` — so
+/// these two are what that line finds instead. `bash` is the machine's `sh`,
+/// what is being asked about here being the run rather than the shell.
+///
+/// Builtins only, both of them: the `PATH` this machine is stated with holds
+/// the stubs and nothing else, which is what makes the line's own reach the
+/// thing being asked about.
+fn an_installer_that_fails(dir: &Path) {
+    program(&bin(dir).join("bash"), "#!/bin/sh\nexec /bin/sh \"$@\"\n");
+    program(
+        &bin(dir).join("curl"),
+        &format!(
+            "#!/bin/sh\n\
+             printf '%s\\n' '{UNREACHABLE}' >&2\n\
+             printf '%s\\n' 'exit 1'\n"
+        ),
+    );
+}
+
+/// What that script says, which is the line the row it failed carries.
+const UNREACHABLE: &str = "The installer could not reach the network.";
+
 /// The platform's password dialog, stubbed: what it was handed, what it does
 /// with it, and what it answers.
 #[derive(Debug)]
@@ -552,6 +581,65 @@ fn started(dialog: &Dialog) -> String {
     path.to_owned()
 }
 
+/// A vendor's installer that exited non-zero fails its own row in the line it
+/// printed, and the rows of every other unit are untouched by it.
+///
+/// **And it was never elevated**: the dialog is handed the package manager and
+/// nothing else, the installer running as the user beside it — which is what
+/// keeps a harness that installs under `$HOME` out of root's home.
+#[tokio::test]
+async fn an_installer_that_failed_fails_its_own_row_and_no_other() {
+    let (dir, pool) = ready().await;
+    a_package_manager(dir.path());
+    an_installer_that_fails(dir.path());
+
+    let dialog = Dialog::answered(dir.path(), Answer::Typed);
+    let app = served(dir.path(), &pool, Some(dialog.clone()));
+
+    install(
+        &app,
+        &[Dependency::Sandbox, Dependency::Git, Dependency::Claude],
+    )
+    .await;
+
+    let landed = over(&app).await;
+
+    assert_eq!(
+        install_state(&landed, Dependency::Claude),
+        &InstallState::Failed {
+            why: UNREACHABLE.to_owned(),
+        },
+        "the row carries the first line the installer printed",
+    );
+    assert!(
+        !present(&landed, Dependency::Claude),
+        "and nothing was installed: {landed:?}",
+    );
+
+    for installed in [Dependency::Sandbox, Dependency::Git] {
+        assert!(present(&landed, installed), "{installed:?}: {landed:?}");
+        assert_eq!(
+            install_state(&landed, installed),
+            &InstallState::Idle,
+            "{installed:?} is another unit's row and the failure is not its",
+        );
+    }
+
+    assert_eq!(
+        landed.run.expect("the run").status,
+        "1 of 3 could not be installed",
+    );
+
+    assert_eq!(
+        dialog.line(),
+        format!(
+            ": > '{}' && apt-get install -y bubblewrap git",
+            started(&dialog),
+        ),
+        "one dialog, and the vendor's installer was not put behind it",
+    );
+}
+
 /// A dismissed dialog leaves every row of that unit failed, in the words the
 /// asking was refused in.
 #[tokio::test]
@@ -761,12 +849,13 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     held.store(true, Ordering::SeqCst);
     over(&app).await;
 
-    // And one that is over with two kinds of trouble on it: a dialog somebody
-    // dismissed, and a row this distribution has no package for at all. Which
-    // is the hint screen's own reading — the rows that were ticked and are
-    // still absent, each with a sentence under it.
+    // And one that is over with both kinds of trouble on it: a dialog somebody
+    // dismissed, and a vendor's own installer that would not run. Which is the
+    // hint screen's own reading — the rows that were ticked and are still
+    // absent, each with a sentence under it.
     let (dir, pool) = ready().await;
     a_package_manager(dir.path());
+    an_installer_that_fails(dir.path());
 
     let app = served(
         dir.path(),

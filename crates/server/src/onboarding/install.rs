@@ -23,9 +23,19 @@
 //!
 //! **A run is a sequence of units, and a unit is one command.** The elevated
 //! batch is the first of them, and a unit covers the rows it installs — so a
-//! refusal lands on every row of that unit and on nothing else, and a row no
-//! archive carries is failed before anything is raised, with a sentence saying
-//! so where the hint screen draws it.
+//! refusal lands on every row of that unit and on nothing else, and a row this
+//! machine has no command for is failed before anything is raised, with a
+//! sentence saying so where the hint screen draws it.
+//!
+//! **And the two rows that are not a package run as the user, after it.** Claude
+//! Code is Anthropic's own installer and Grok Build is xAI's — see [`CLAUDE`]
+//! and [`GROK`] — and each of them installs under the home of whoever ran it, so
+//! raising either behind the password dialog would leave a harness in root's
+//! home where no session could reach it. Neither needs the privilege in the
+//! first place. What they land in is written to `session_path` instead, which is
+//! what puts the row on the next probe and the program on the next session's
+//! `PATH` with no shell profile edited and nothing restarted — see
+//! [`crate::sandbox::installed_into`].
 //!
 //! **Nothing runs while nobody is looking.** A run is started by a press and
 //! ends by itself; between presses the wizard is the probe it always was — a
@@ -33,6 +43,7 @@
 //! installing has landed. There is no sweep here and nothing is written down: a
 //! run belongs to the life of this server, and a restart has none.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -43,6 +54,7 @@ use verkstead_render::{Dependency, Distro, InstallState, RunPhase, RunView};
 
 use super::{Machine, SHELL};
 use crate::remote::{Elevate, Raised};
+use crate::settings::Settings;
 
 /// Every row of the step, in the order the wizard draws them.
 ///
@@ -71,6 +83,37 @@ const NODE: &[&str] = &["nodejs", "npm"];
 
 /// What a skipped row reads.
 const CANCELLED: &str = "cancelled";
+
+/// Anthropic's own installer, which is what a ticked Claude row runs.
+///
+/// **The command the wizard already shows**, and the install that stays
+/// current: a distribution's `claude` can be too old to connect at all, which is
+/// why the tab leads with this one and why the npm package — `npm install -g
+/// @anthropic-ai/claude-code` — is not what the run installs. See
+/// `web/src/setup/instructions.ts`, where the same line is written for the human
+/// who has to type it on a machine Verkstead cannot install on.
+const CLAUDE: Vendor = Vendor {
+    who: "Anthropic",
+    line: "curl -fsSL https://claude.ai/install.sh | bash",
+    lands: ".local/bin",
+};
+
+/// And xAI's, which is what a ticked Grok Build row runs.
+///
+/// The line and the directory are the ones the script its install page serves
+/// really uses: `$HOME/.grok/bin` where `GROK_BIN_DIR` says nothing, with the
+/// binary linked from a downloads directory beside it. Anywhere outside that
+/// home is somewhere an unelevated run could not write in any case, which is why
+/// the directory under it is the one worth putting on a session's `PATH`.
+const GROK: Vendor = Vendor {
+    who: "xAI",
+    line: "curl -fsSL https://x.ai/cli/install.sh | bash",
+    lands: ".grok/bin",
+};
+
+/// What a unit that could not even be started says, a command with no output to
+/// quote being a row with nothing else to carry.
+const FAILED_SILENTLY: &str = "the installer failed and said nothing";
 
 /// What a server with no way to raise a dialog says on every ticked row.
 const NO_DIALOG: &str = "Verkstead has no way to ask this machine for a password: the desktop \
@@ -182,6 +225,70 @@ struct Unit {
 
     /// And what the status line says while it is running.
     doing: String,
+
+    /// Whether it goes behind the password dialog or runs as the user.
+    how: How,
+
+    /// And the directory whatever it installs lands in, where it is an installer
+    /// that has one of its own.
+    ///
+    /// Written to `session_path` once the unit has run and left something there,
+    /// which is what puts the row on the next probe — see [`landing`]. Nothing
+    /// for the elevated batch, a package manager installing onto the machine's
+    /// own floor, which every session's `PATH` already ends with.
+    lands: Option<PathBuf>,
+}
+
+/// How a unit is run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum How {
+    /// Behind the platform's own password dialog, which is where a package
+    /// manager writing into `/usr` has to go.
+    Raised,
+
+    /// Or as the user this server runs as, which is where an installer writing
+    /// under that user's home belongs — see [`Vendor`].
+    AsTheUser,
+}
+
+/// A vendor's own installer: the command a ticked row runs, and where it puts
+/// what it installs.
+///
+/// **Two of the seven rows are one of these rather than a package.** Neither
+/// Claude Code nor Grok Build is carried by a distribution under a name that is
+/// really the vendor's, so what a tick runs is the script the vendor publishes —
+/// the same one the hint screen tells a human to run where Verkstead cannot run
+/// it for them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Vendor {
+    /// Whose installer it is, which is the whole of what the status line says
+    /// while it runs: *Running Anthropic's installer*.
+    who: &'static str,
+
+    /// The line, as one shell command.
+    line: &'static str,
+
+    /// And where it lands what it installs, under the home it ran as.
+    lands: &'static str,
+}
+
+/// What a unit that runs as the user is given: the server's own environment,
+/// with the two values the machine is the word on put back.
+///
+/// Read off the machine at the press rather than out of the process, for the
+/// reason everything else here is: a stated machine's home is a test's own
+/// directory and its `PATH` a test's own list, and an installer run against this
+/// box's would be a suite installing a harness on whoever ran it.
+#[derive(Debug, Clone)]
+struct AsTheUser {
+    /// The home the installers land under — `None` on a machine that names
+    /// none, which is a machine no vendor installer is planned for at all.
+    home: Option<PathBuf>,
+
+    /// And the `PATH` a session searches, which is what the line reaches for:
+    /// the directories Verkstead has installed into lead it, so an installer
+    /// that looks for what it is upgrading finds what a session would.
+    path: OsString,
 }
 
 /// What a press comes to: the commands to raise, and the rows nothing here can
@@ -210,7 +317,15 @@ impl Installer {
     /// **Blocking, and briefly.** What happens here is a `PATH` walk for `npm`
     /// and a thread spawned; the waiting on a human reading a dialog is that
     /// thread's.
-    pub(crate) fn start(&self, machine: &Machine, ticked: &[Dependency]) -> Result<(), Refusal> {
+    ///
+    /// `settings` is what a unit that lands in a directory writes `session_path`
+    /// to — see [`landing`].
+    pub(crate) fn start(
+        &self,
+        machine: &Machine,
+        settings: &Settings,
+        ticked: &[Dependency],
+    ) -> Result<(), Refusal> {
         let mut held = self.run.lock().expect("the install run's lock");
 
         if held.as_ref().is_some_and(|run| run.going()) {
@@ -241,7 +356,10 @@ impl Installer {
             return Ok(());
         };
 
-        std::thread::spawn(move || work(&run, &plan, escalation.as_ref()));
+        let user = AsTheUser::of(machine);
+        let settings = settings.clone();
+
+        std::thread::spawn(move || work(&run, &plan, escalation.as_ref(), &settings, &user));
 
         Ok(())
     }
@@ -309,6 +427,14 @@ impl Run {
         going.phase = RunPhase::Asking;
         going.status = asking(&self.hostname);
         going.set(&unit.covers, Progress::Installing);
+    }
+
+    /// The rows of `unit` are this run's business now, and there is nothing to
+    /// wait for: it runs as the user, so there is no dialog between the press
+    /// and the install.
+    fn running(&self, unit: &Unit) {
+        self.held().set(&unit.covers, Progress::Installing);
+        self.installing(&unit.doing);
     }
 
     /// The dialog has been answered and the command is running.
@@ -384,6 +510,16 @@ impl Run {
     }
 }
 
+impl AsTheUser {
+    /// What `machine` says a unit running as the user is given.
+    fn of(machine: &Machine) -> AsTheUser {
+        AsTheUser {
+            home: machine.home().map(Path::to_owned),
+            path: machine.path().into_owned(),
+        }
+    }
+}
+
 impl Going {
     /// Every row in `covers` reads `progress`.
     fn set(&mut self, covers: &[Dependency], progress: Progress) {
@@ -412,13 +548,21 @@ impl Progress {
 
 /// Work through `plan`, one unit at a time.
 ///
-/// On a thread of its own, because the first thing every unit does is wait for
-/// somebody to read a password dialog, and how long that takes is theirs.
-fn work(run: &Arc<Run>, plan: &Plan, escalation: &dyn Elevate) {
+/// On a thread of its own, because the first thing the elevated unit does is
+/// wait for somebody to read a password dialog, and how long that takes is
+/// theirs.
+fn work(
+    run: &Arc<Run>,
+    plan: &Plan,
+    escalation: &dyn Elevate,
+    settings: &Settings,
+    user: &AsTheUser,
+) {
     // The one directory a run makes, and it goes when the run does: what is in
-    // it is the marker each unit touches, which is how the status line finds out
-    // the dialog was answered — see [`STARTED`]. A machine with nowhere to put
-    // one is a run whose status line stays on the dialog, and nothing worse.
+    // it is the marker each raised unit touches, which is how the status line
+    // finds out the dialog was answered — see [`STARTED`]. A machine with
+    // nowhere to put one is a run whose status line stays on the dialog, and
+    // nothing worse.
     let marking = tempfile::Builder::new()
         .prefix("verkstead-install")
         .tempdir()
@@ -432,33 +576,117 @@ fn work(run: &Arc<Run>, plan: &Plan, escalation: &dyn Elevate) {
             break;
         }
 
-        let marker = marking
-            .as_ref()
-            .map(|dir| dir.path().join(format!("{STARTED}-{number}")));
+        let landed = match unit.how {
+            How::Raised => {
+                let marker = marking
+                    .as_ref()
+                    .map(|dir| dir.path().join(format!("{STARTED}-{number}")));
 
-        run.asking(unit);
+                run.asking(unit);
+                raised(run, unit, marker.as_deref(), escalation)
+            }
 
-        let watching = marker
-            .clone()
-            .map(|marker| watch(run, marker, unit.doing.clone()));
+            How::AsTheUser => {
+                run.running(unit);
+                as_the_user(&unit.line, user)
+            }
+        };
 
-        let raised = escalation.raise(&raising(&unit.line, marker.as_deref()));
-
-        if let Some((over, watching)) = watching {
-            over.store(true, Ordering::SeqCst);
-            let _ = watching.join();
+        if landed == Progress::Installed {
+            landing(unit, settings);
         }
 
-        run.landed(
-            unit,
-            match raised {
-                Raised::Done => Progress::Installed,
-                Raised::Refused { why } => Progress::Failed(why),
-            },
-        );
+        run.landed(unit, landed);
     }
 
     run.over();
+}
+
+/// Put `unit` behind the platform's password dialog, moving the status line on
+/// where `marker` appears.
+fn raised(
+    run: &Arc<Run>,
+    unit: &Unit,
+    marker: Option<&Path>,
+    escalation: &dyn Elevate,
+) -> Progress {
+    let watching = marker.map(|marker| watch(run, marker.to_owned(), unit.doing.clone()));
+
+    let raised = escalation.raise(&raising(&unit.line, marker));
+
+    if let Some((over, watching)) = watching {
+        over.store(true, Ordering::SeqCst);
+        let _ = watching.join();
+    }
+
+    match raised {
+        Raised::Done => Progress::Installed,
+        Raised::Refused { why } => Progress::Failed(why),
+    }
+}
+
+/// And run `line` as the user this server runs as, which is what a vendor's own
+/// installer is.
+///
+/// **The server's own environment, with `HOME` and `PATH` as the machine reads
+/// them** — see [`AsTheUser`]. What it exited with is the whole of the verdict,
+/// and what it printed on standard error is what the row carries: an installer
+/// that could not reach the network has said why in one line, and a sentence of
+/// Verkstead's own over the top of it would be a worse account of the same
+/// thing.
+fn as_the_user(line: &str, user: &AsTheUser) -> Progress {
+    let mut running = std::process::Command::new(SHELL);
+
+    running.arg("-c").arg(line).env("PATH", &user.path);
+
+    if let Some(home) = &user.home {
+        running.env("HOME", home);
+    }
+
+    match running.output() {
+        Ok(told) if told.status.success() => Progress::Installed,
+        Ok(told) => Progress::Failed(first_line(&told.stderr)),
+        Err(error) => Progress::Failed(error.to_string()),
+    }
+}
+
+/// The directory `unit` installed into goes on `session_path`, where it really
+/// landed something.
+///
+/// **Which is what makes the row go present without a restart**: a session's
+/// `PATH` is composed with the list this grows, so the very next probe walks the
+/// directory the installer wrote into and finds the program there — no shell
+/// profile to edit, and no second start of the server. See
+/// [`crate::sandbox::installed_into`], which writes `config.yaml` and the held
+/// list together.
+///
+/// **Only a directory that is there**, because a command that exited zero and
+/// left nothing behind has installed nothing: writing its intended landing place
+/// down would be `config.yaml` carrying a directory nobody ever made.
+fn landing(unit: &Unit, settings: &Settings) {
+    let Some(directory) = unit.lands.as_deref().filter(|lands| lands.is_dir()) else {
+        return;
+    };
+
+    if let Err(error) = crate::sandbox::installed_into(settings, directory) {
+        tracing::warn!(
+            error = ?error,
+            directory = %directory.display(),
+            "an install landed in a directory that could not be written to \
+             `session_path` — a session's `PATH` will not name it until it is",
+        );
+    }
+}
+
+/// The first thing a command that failed printed on standard error, which is
+/// what its rows carry.
+fn first_line(stderr: &[u8]) -> String {
+    String::from_utf8_lossy(stderr)
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or(FAILED_SILENTLY)
+        .to_owned()
 }
 
 /// Watch for `marker` until the unit is over, moving the status line on where
@@ -501,17 +729,30 @@ fn plan(machine: &Machine, ticked: &[Dependency]) -> Plan {
     let mut packages: Vec<&str> = Vec::new();
     let mut from_npm: Vec<&str> = Vec::new();
     let mut covers: Vec<Dependency> = Vec::new();
+    let mut vendors: Vec<(Dependency, Vendor, PathBuf)> = Vec::new();
     let mut beyond: Vec<(Dependency, String)> = Vec::new();
 
     for row in ticked {
-        if let Some(package) = packager.package(*row) {
-            packages.push(package);
-            covers.push(*row);
-        } else if let Some(package) = npm_package(*row) {
-            from_npm.push(package);
-            covers.push(*row);
-        } else {
-            beyond.push((*row, not_packaged(*row)));
+        match installs(packager, *row) {
+            Installs::Package(package) => {
+                packages.push(package);
+                covers.push(*row);
+            }
+
+            Installs::FromNpm(package) => {
+                from_npm.push(package);
+                covers.push(*row);
+            }
+
+            // Where the installer would land it is under the home this server
+            // runs as, so a machine that names none is one neither of these can
+            // be planned for: what it installed would be somewhere nobody could
+            // say, and a directory nobody can name is one no session's `PATH`
+            // could be composed with.
+            Installs::Vendor(vendor) => match machine.home() {
+                Some(home) => vendors.push((*row, vendor, home.join(vendor.lands))),
+                None => beyond.push((*row, no_home(*row))),
+            },
         }
     }
 
@@ -541,21 +782,35 @@ fn plan(machine: &Machine, ticked: &[Dependency]) -> Plan {
     // Joined rather than raised apart, so that one press is one dialog — and
     // with `&&`, so that a package manager that failed is not followed by an
     // `npm` that was going to fail too.
-    let units = (!lines.is_empty())
-        .then(|| Unit {
-            line: lines.join(" && "),
-            covers,
-            doing: format!(
-                "Installing {}",
-                packages
-                    .iter()
-                    .chain(from_npm.iter())
-                    .copied()
-                    .collect::<Vec<&str>>()
-                    .join(", ")
-            ),
-        })
+    let batch = (!lines.is_empty()).then(|| Unit {
+        line: lines.join(" && "),
+        covers,
+        doing: format!(
+            "Installing {}",
+            packages
+                .iter()
+                .chain(from_npm.iter())
+                .copied()
+                .collect::<Vec<&str>>()
+                .join(", ")
+        ),
+        how: How::Raised,
+        lands: None,
+    });
+
+    // And the vendors' own installers after it, one unit apiece and none of them
+    // elevated: the dialog is the package manager's business, and a run that put
+    // a second one in front of a `curl | bash` writing under this user's home
+    // would be asking for a privilege to do something that needs none.
+    let units = batch
         .into_iter()
+        .chain(vendors.into_iter().map(|(row, vendor, lands)| Unit {
+            line: vendor.line.to_owned(),
+            covers: vec![row],
+            doing: format!("Running {}'s installer", vendor.who),
+            how: How::AsTheUser,
+            lands: Some(lands),
+        }))
         .collect();
 
     Plan { units, beyond }
@@ -586,18 +841,45 @@ struct Packager {
     gh: &'static str,
 }
 
-impl Packager {
-    /// What this archive calls the program one row is about, where it carries
-    /// one at all.
-    fn package(&self, dependency: Dependency) -> Option<&'static str> {
-        match dependency {
-            Dependency::Sandbox => Some("bubblewrap"),
-            Dependency::Git => Some("git"),
-            Dependency::Gh => Some(self.gh),
-            Dependency::Claude | Dependency::Codex | Dependency::Grok | Dependency::OpenCode => {
-                None
-            }
-        }
+/// How one row is installed on a machine whose package manager is known.
+///
+/// **Every row has one of the three**, which is what makes the hint screen a
+/// screen about machines rather than about rows: on a distribution Verkstead has
+/// a command for, nothing that was ticked is left with nowhere to go — see
+/// [`no_command`], which is the whole of the other arm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Installs {
+    /// A package this distribution carries, under the name it calls it.
+    Package(&'static str),
+
+    /// A package npm carries, installed globally under the node the elevated
+    /// batch has just made sure of.
+    FromNpm(&'static str),
+
+    /// Or the vendor's own installer, run as the user — see [`Vendor`].
+    Vendor(Vendor),
+}
+
+/// Which of the three one row is, on a machine whose `packager` is this one.
+///
+/// **Claude Code's npm package is not what a ticked row installs.** The native
+/// installer is the one that stays current, which is why the wizard's own tab
+/// leads with it and why the two npm harnesses here are the other two. And the
+/// `grok-cli` in nixpkgs and the one on npm are other people's projects rather
+/// than xAI's grok, so neither is a package this could name.
+fn installs(packager: Packager, dependency: Dependency) -> Installs {
+    match dependency {
+        // `bubblewrap`, `git`, `nodejs` and `npm` are the same word in all three
+        // archives; the GitHub CLI is the one they disagree about.
+        Dependency::Sandbox => Installs::Package("bubblewrap"),
+        Dependency::Git => Installs::Package("git"),
+        Dependency::Gh => Installs::Package(packager.gh),
+
+        Dependency::Codex => Installs::FromNpm("@openai/codex"),
+        Dependency::OpenCode => Installs::FromNpm("opencode-ai"),
+
+        Dependency::Claude => Installs::Vendor(CLAUDE),
+        Dependency::Grok => Installs::Vendor(GROK),
     }
 }
 
@@ -625,24 +907,6 @@ fn packager(distro: Distro) -> Option<Packager> {
     }
 }
 
-/// The npm package a harness is published as, for the two that are published as
-/// one.
-///
-/// Claude Code's npm package is not among them: what a ticked Claude row runs is
-/// Anthropic's own installer, which is the install that stays current — see the
-/// wizard's own tab, which leads with it for the same reason.
-fn npm_package(dependency: Dependency) -> Option<&'static str> {
-    match dependency {
-        Dependency::Codex => Some("@openai/codex"),
-        Dependency::OpenCode => Some("opencode-ai"),
-        Dependency::Sandbox
-        | Dependency::Git
-        | Dependency::Claude
-        | Dependency::Grok
-        | Dependency::Gh => None,
-    }
-}
-
 /// What goes under a row on a machine there is no command for at all.
 fn no_command(distro: Distro) -> String {
     match distro {
@@ -655,10 +919,16 @@ fn no_command(distro: Distro) -> String {
     .to_owned()
 }
 
-/// And what goes under one this distribution simply does not carry.
-fn not_packaged(dependency: Dependency) -> String {
+/// And what goes under a row whose installer would land under a home this
+/// machine does not name.
+///
+/// The two vendors' installers both write under `$HOME`, so a server started
+/// with none — a unit file's environment with the variable unset — has nowhere
+/// to put what they install and nothing to write to `session_path` afterwards.
+fn no_home(dependency: Dependency) -> String {
     format!(
-        "{} is not one of this distribution's packages.",
+        "{} installs under a home directory, and this server was started \
+         without one.",
         named(dependency)
     )
 }
@@ -732,6 +1002,10 @@ mod tests {
     /// other two, and a harness that comes off npm.
     const TICKED: &[Dependency] = &[Dependency::Sandbox, Dependency::Git, Dependency::Codex];
 
+    /// The home a stated machine runs under, which is what the two vendors'
+    /// installers land under.
+    const HOME: &str = "/home/you";
+
     /// A machine on `distro` with nothing on its `PATH`, which is a machine
     /// with no `npm`.
     fn machine(distro: Distro) -> Machine {
@@ -741,6 +1015,12 @@ mod tests {
     /// The same, searching `dir` — which is how a machine that *has* an `npm`
     /// is stated.
     fn stated(distro: Distro, dir: &Path) -> Machine {
+        under(distro, dir, Some(PathBuf::from(HOME)))
+    }
+
+    /// And the same again under `home`, which is `None` for the one machine
+    /// this asks about that names none.
+    fn under(distro: Distro, dir: &Path, home: Option<PathBuf>) -> Machine {
         let (platform, os_release) = match distro {
             Distro::MacOs => (Platform::MacOs, None),
             Distro::Windows => (Platform::Windows, None),
@@ -758,7 +1038,10 @@ mod tests {
             OsString::from(dir.as_os_str()),
             None,
             os_release.map(str::to_owned),
-            &Environment::default(),
+            &Environment {
+                home,
+                ..Environment::default()
+            },
         )
     }
 
@@ -769,6 +1052,21 @@ mod tests {
         };
 
         &unit.line
+    }
+
+    /// Nothing at all, which is what a run does on a machine it installs
+    /// nothing on: the two arms that use it never reach a unit.
+    fn as_nobody() -> AsTheUser {
+        AsTheUser {
+            home: None,
+            path: OsString::new(),
+        }
+    }
+
+    /// And a settings handle over a directory nothing here writes: the two
+    /// plans worked below have no unit that lands anywhere.
+    fn nowhere() -> Settings {
+        Settings::in_data_dir(Path::new("/nonexistent"))
     }
 
     /// Which rows a plan says nothing here can install.
@@ -873,19 +1171,55 @@ mod tests {
         );
     }
 
-    /// And a row this distribution does not carry is a row the run says so
-    /// about, the rest of the ticking going ahead without it.
+    /// The two rows that are not a package are a unit each, after the elevated
+    /// batch and run as the user, landing where the vendor's own installer puts
+    /// what it installs.
     #[test]
-    fn a_row_no_archive_carries_is_left_to_the_hint_screen() {
+    fn the_vendor_installers_are_their_own_units_after_the_batch() {
         let plan = plan(
             &machine(Distro::Ubuntu),
-            &[Dependency::Git, Dependency::Claude],
+            &[Dependency::Git, Dependency::Claude, Dependency::Grok],
+        );
+
+        assert!(plan.beyond.is_empty(), "{plan:?}");
+
+        let [batch, claude, grok] = plan.units.as_slice() else {
+            panic!("the batch and one unit per vendor: {plan:?}");
+        };
+
+        assert_eq!(batch.line, "apt-get install -y git");
+        assert_eq!(batch.how, How::Raised);
+        assert_eq!(batch.lands, None);
+
+        assert_eq!(
+            claude.line,
+            "curl -fsSL https://claude.ai/install.sh | bash"
+        );
+        assert_eq!(claude.how, How::AsTheUser);
+        assert_eq!(claude.doing, "Running Anthropic's installer");
+        assert_eq!(claude.covers, [Dependency::Claude]);
+        assert_eq!(claude.lands, Some(PathBuf::from(HOME).join(".local/bin")));
+
+        assert_eq!(grok.line, "curl -fsSL https://x.ai/cli/install.sh | bash");
+        assert_eq!(grok.how, How::AsTheUser);
+        assert_eq!(grok.doing, "Running xAI's installer");
+        assert_eq!(grok.lands, Some(PathBuf::from(HOME).join(".grok/bin")));
+    }
+
+    /// And on a machine that names no home there is nowhere for either of them
+    /// to land, so both are the hint screen's, the packages going ahead without
+    /// them.
+    #[test]
+    fn a_machine_with_no_home_installs_neither_of_them() {
+        let plan = plan(
+            &under(Distro::Ubuntu, &PathBuf::new(), None),
+            &[Dependency::Git, Dependency::Claude, Dependency::Grok],
         );
 
         assert_eq!(line(&plan), "apt-get install -y git");
-        assert_eq!(beyond(&plan), [Dependency::Claude]);
+        assert_eq!(beyond(&plan), [Dependency::Claude, Dependency::Grok]);
         assert!(
-            plan.beyond[0].1.contains("Claude Code"),
+            plan.beyond[0].1.contains("Claude Code") && plan.beyond[0].1.contains("home"),
             "the row is named in its own words: {:?}",
             plan.beyond[0].1,
         );
@@ -897,7 +1231,9 @@ mod tests {
     fn a_server_with_no_way_to_ask_installs_nothing() {
         let installer = Installer::raising(None);
 
-        installer.start(&machine(Distro::Ubuntu), TICKED).unwrap();
+        installer
+            .start(&machine(Distro::Ubuntu), &nowhere(), TICKED)
+            .unwrap();
 
         let (run, rows) = installer.reading().expect("a press makes a run");
 
@@ -935,7 +1271,7 @@ mod tests {
             cancel: run.clone(),
         };
 
-        work(&run, &plan, &escalation);
+        work(&run, &plan, &escalation, &nowhere(), &as_nobody());
 
         assert_eq!(
             escalation.raised.lock().unwrap().len(),
@@ -977,7 +1313,7 @@ mod tests {
         let plan = plan(&machine(Distro::Ubuntu), TICKED);
         let run = Arc::new(Run::of(&plan, "a-machine"));
 
-        work(&run, &plan, &Refusing);
+        work(&run, &plan, &Refusing, &nowhere(), &as_nobody());
 
         let (view, rows) = run.reading();
 
@@ -1015,12 +1351,14 @@ mod tests {
         );
     }
 
-    /// One unit installing one row.
+    /// One raised unit installing one row.
     fn unit(line: &str, covers: Dependency) -> Unit {
         Unit {
             line: line.to_owned(),
             covers: vec![covers],
             doing: format!("Installing {line}"),
+            how: How::Raised,
+            lands: None,
         }
     }
 

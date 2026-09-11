@@ -188,10 +188,11 @@ pub enum InstallState {
 
     /// Its unit is over, and the thing is not installed.
     Failed {
-        /// In the machine's own words: the first line the elevated run printed
-        /// on standard error, or whatever a dismissed password dialog was
-        /// refused in — and *cancelled* for a unit that was skipped rather than
-        /// run.
+        /// In the machine's own words: the first line the run printed on
+        /// standard error — the package manager's or the vendor installer's,
+        /// whichever unit this row was — or whatever a dismissed password
+        /// dialog was refused in, and *cancelled* for a unit that was skipped
+        /// rather than run.
         why: String,
     },
 }

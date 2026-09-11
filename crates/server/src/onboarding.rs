@@ -342,9 +342,29 @@ impl Machine {
         }
     }
 
+    /// The same, composing its `PATH` the way the machine this server is
+    /// running on does rather than holding the one it was stated.
+    ///
+    /// **What a test about an install *landing* needs.** A stated machine's
+    /// `PATH` is a test's own word and stands still, which is what every probe
+    /// suite wants; a machine a run has installed on has one that moves, the
+    /// directory the installer wrote into having been added to `session_path`
+    /// mid-run. This is the one and the other: a stated platform, distribution
+    /// and home, over the `PATH` [`sandbox::machine_path`] composes now. See
+    /// `tests/vendor_installers.rs`, the one caller.
+    pub fn composing(self) -> Machine {
+        Machine { path: None, ..self }
+    }
+
     /// What this machine calls itself.
     fn hostname(&self) -> &str {
         &self.hostname
+    }
+
+    /// And the home of whoever runs this server, which is where a vendor's own
+    /// installer lands what it installs — see [`install`].
+    fn home(&self) -> Option<&Path> {
+        self.home.as_deref()
     }
 
     /// And which of the wizard's eight tabs it is, which is also which package
@@ -753,7 +773,11 @@ impl Onboarding {
     ///
     /// **And while one is going**, which is the same press twice — see
     /// [`Refusal::Going`].
-    pub(crate) async fn install(&self, ticked: Vec<Dependency>) -> Result<(), Refusal> {
+    pub(crate) async fn install(
+        &self,
+        settings: &Settings,
+        ticked: Vec<Dependency>,
+    ) -> Result<(), Refusal> {
         if !self.wizarding() {
             return Err(Refusal::Over);
         }
@@ -763,8 +787,14 @@ impl Onboarding {
         // the other side of it is a human reading a dialog.
         let installing = self.clone();
 
+        // And the settings with it, because a unit that lands in a directory
+        // writes it to `session_path` — see [`install::Installer::start`].
+        let settings = settings.clone();
+
         tokio::task::spawn_blocking(move || {
-            installing.installer.start(&installing.machine, &ticked)
+            installing
+                .installer
+                .start(&installing.machine, &settings, &ticked)
         })
         .await
         .unwrap_or(Ok(()))
