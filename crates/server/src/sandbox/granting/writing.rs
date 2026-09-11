@@ -17,12 +17,14 @@
 //! which is the other half of what a session needs and is not a reach at all.
 //! It goes on the directories on the way to a granted path so that the path can
 //! be *resolved*, and it grants a walk and an attribute read and nothing else:
-//! the directory it is on stays unlistable, and no list under it is touched or
-//! even walked. And an ancestor that will not take one is not a session
-//! refused, which is the one place [`write`] carries on — the directories above
-//! a human's profile are the machine's own, they already let `Users` step
-//! through them, and how many were written and how many were refused goes in
-//! the log.
+//! the directory it is on stays unlistable, and no list under it is changed.
+//! **And it is written only where it says something.** The directories above a
+//! human's profile are the machine's own and already let `Users` step through
+//! them, so one whose list already lets the account through takes no step at
+//! all — see [`super::worth_writing`], which is the drive root not being walked
+//! for nothing. An ancestor that will not take one is not a session refused
+//! either, which is the one place [`write`] carries on, and how many were
+//! written, left alone and refused goes in the log.
 //!
 //! **A refusal is the one thing the probe could not settle from outside**, and
 //! what it found is why this is not simply a deny entry. A deny written under a
@@ -104,12 +106,12 @@ use windows_sys::Win32::Security::{
 };
 
 use windows_sys::Win32::Storage::FileSystem::{
-    DELETE, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_READ_ATTRIBUTES,
-    FILE_TRAVERSE, SYNCHRONIZE,
+    DELETE, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
 };
 
 use super::super::starting::wide;
 use super::super::surface::Reach;
+use super::lists::{ALLOWED, Found, INHERITED, STEP, THE_SID, inherited, mask, whose};
 use super::{Entry, Wanted};
 
 /// A SID read out of the spelling a person writes, freed when it is let go of.
@@ -144,6 +146,14 @@ impl Sid {
     /// has to be big enough for.
     pub(crate) fn length(&self) -> usize {
         usize::try_from(unsafe { GetLengthSid(self.0) }).unwrap_or(0)
+    }
+
+    /// And the bytes it is, which is what a list holds for it and what
+    /// [`super::lists`] reads an entry's identity by.
+    pub(crate) fn bytes(&self) -> &[u8] {
+        // Safety: a SID read this way is `length` bytes long and is freed only
+        // when this is let go of, which the slice cannot outlive.
+        unsafe { std::slice::from_raw_parts(self.0.cast::<u8>(), self.length()) }
     }
 
     /// And whether the bytes at `theirs` are this identity — which is how an
@@ -193,29 +203,6 @@ fn one_at_a_time() -> MutexGuard<'static, ()> {
 ///
 /// Win32's own `MAXDWORD`, which the bindings do not carry.
 const AT_THE_END: u32 = u32::MAX;
-
-/// The two ACE types whose SID is where this reads one.
-///
-/// An allow and a deny are the same shape — a header, a mask, and the SID after
-/// them — which is what makes [`whose`] one function rather than two. Anything
-/// else in a list is copied as it stands and never asked about: an object ACE
-/// carries two more fields before its SID and is a thing directories in Active
-/// Directory have rather than files on a disk.
-const ALLOWED: u8 = 0;
-const DENIED: u8 = 1;
-
-/// How far past an ACE's start its SID begins, on both of the types above: four
-/// bytes of header and four of mask.
-const THE_SID: usize = 8;
-
-/// And the one flag of a header this reads: the bit that says an entry is the
-/// parent's rather than this path's own.
-///
-/// Written here rather than taken from Win32's own `INHERITED_ACE`, which is
-/// the same bit in the flag *word* a call is handed: a header keeps its flags
-/// in one byte, and a constant that had to be narrowed at every use would be a
-/// conversion standing in front of a bit test.
-const INHERITED: u8 = 0x10;
 
 /// Which of the paths `entries` refuses are taking entries from above, read
 /// before a word of the description has been written.
@@ -293,6 +280,12 @@ pub(crate) fn inheriting(entries: &[Entry]) -> Vec<PathBuf> {
 /// a path said twice is already the second one by the time a description comes
 /// to entries at all — see [`super::super::Sandbox::surface`].
 ///
+/// **A step the account can already make is not written at all** — see
+/// [`super::worth_writing`], which is the drive root left alone rather than the
+/// whole volume walked. What a record says of it is unchanged, and so is what
+/// [`strip`] is handed: there is nothing of the account's there to take off,
+/// and nothing is written there either.
+///
 /// `cut` is what [`inheriting`] said of these same entries a moment ago, which
 /// is what a refusal needs and cannot ask for itself.
 pub(crate) fn write(entries: &[Entry], sid: &str, cut: &[PathBuf]) -> io::Result<()> {
@@ -302,7 +295,12 @@ pub(crate) fn write(entries: &[Entry], sid: &str, cut: &[PathBuf]) -> io::Result
     let (mut through, mut refused) = (0usize, 0usize);
     let began = std::time::Instant::now();
 
-    for entry in refusals_first(entries) {
+    // Read under the lock, so that what a list was found saying is still what
+    // it says when the rest of this is written.
+    let worth = super::worth_writing(entries, sid.bytes(), found);
+    let left_alone = entries.len() - worth.len();
+
+    for entry in refusals_first(&worth) {
         if !entry.path.exists() {
             continue;
         }
@@ -359,9 +357,11 @@ pub(crate) fn write(entries: &[Entry], sid: &str, cut: &[PathBuf]) -> io::Result
 
     tracing::debug!(
         written = through,
+        left_alone,
         refused,
         "the directories on the way to what this session may reach, stepped through where \
-         this machine would have one",
+         this machine would have one and left alone where the account could already walk \
+         through them",
     );
 
     took(began, entries.len(), "written");
@@ -468,7 +468,10 @@ pub(crate) fn strip(entries: &[Entry], cut: &[PathBuf], sid: &str) {
             // record before a word of it is written. So an ancestor Verkstead
             // could not write is one it now cannot take back, and there was
             // never anything there to take: that is a line for somebody
-            // reading the log on purpose rather than a warning.
+            // reading the log on purpose rather than a warning. One left alone
+            // for being walked through already never gets this far — see
+            // [`revoked`], which finds nothing of the account's on it and
+            // writes nothing.
             if entry.wanted == Wanted::Stepped {
                 tracing::debug!(
                     error = ?error,
@@ -550,7 +553,9 @@ fn grant(sid: &Sid, path: &Path, reach: Reach) -> io::Result<()> {
 /// And `path` stepped through on the way to somewhere else: its attributes
 /// asked for and a walk through it allowed, and nothing else at all.
 ///
-/// **The three rights a resolution takes.** `FILE_TRAVERSE` is the walk itself;
+/// **The three rights a resolution takes**, spelled once as [`STEP`] so that
+/// reading a list for whether they are there already asks after the same
+/// three. `FILE_TRAVERSE` is the walk itself;
 /// `FILE_READ_ATTRIBUTES` is what an agent asks a directory for before it opens
 /// what is under it; and `SYNCHRONIZE` is what `CreateFileW` adds to every
 /// desired access it is not handed `FILE_FLAG_OVERLAPPED` with, so a directory
@@ -572,7 +577,7 @@ fn grant(sid: &Sid, path: &Path, reach: Reach) -> io::Result<()> {
 /// its description. `GRANT_ACCESS` adds to what is there and can only ever
 /// widen.
 fn stepped(sid: &Sid, path: &Path) -> io::Result<()> {
-    let rights = FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE;
+    let rights = STEP;
 
     if already(sid, path, rights, NO_INHERITANCE)? {
         return Ok(());
@@ -775,13 +780,7 @@ fn uncopied(path: &Path) -> io::Result<()> {
     written(path, &only(&kept)?, DACL_SECURITY_INFORMATION)
 }
 
-/// Whether an entry is one the path was handed from above rather than one of
-/// its own.
-fn inherited(ace: &[u8]) -> bool {
-    ace.get(1).is_some_and(|flags| flags & INHERITED != 0)
-}
-
-/// And whether two entries say the same thing, which is every byte of them but
+/// Whether two entries say the same thing, which is every byte of them but
 /// the one bit that says where an entry came from.
 fn alike(one: &[u8], other: &[u8]) -> bool {
     one.len() == other.len()
@@ -911,7 +910,17 @@ fn already(sid: &Sid, path: &Path, rights: u32, how: u32) -> io::Result<bool> {
 /// `REVOKE_ACCESS` removes the trustee's allowed entries and its audit
 /// entries, and has nothing to say about a deny. The one deny a description
 /// ever writes comes off in [`undenied`], which is where the reason is.
+///
+/// **And nothing is written where there is nothing to take off.** Writing a
+/// list back makes Windows walk the tree beneath the directory, whatever the
+/// list says — so taking a boundary down paid that walk on every directory a
+/// record names and the account holds nothing on, which is every step
+/// [`write`] left alone, the drive root first among them.
 fn revoked(sid: &Sid, path: &Path) -> io::Result<()> {
+    if !holds_a_grant(sid, path)? {
+        return Ok(());
+    }
+
     let access = EXPLICIT_ACCESS_W {
         grfAccessPermissions: 0,
         grfAccessMode: REVOKE_ACCESS,
@@ -920,6 +929,26 @@ fn revoked(sid: &Sid, path: &Path) -> io::Result<()> {
     };
 
     merged(path, &access, DACL_SECURITY_INFORMATION)
+}
+
+/// Whether `path`'s own list holds an entry allowing `sid` anything — which is
+/// what `REVOKE_ACCESS` takes off, and the whole of what it takes off here.
+///
+/// An entry the directory inherits is not its own, and a revocation leaves one
+/// standing. A list that is there and would not read is taken to hold one, so
+/// that what it would have taken off is tried for all the same.
+fn holds_a_grant(sid: &Sid, path: &Path) -> io::Result<bool> {
+    let held = Held::of(path)?;
+
+    if held.dacl.is_null() {
+        return Ok(false);
+    }
+
+    Ok(held.list().is_none_or(|existing| {
+        existing.iter().any(|ace| {
+            whose(ace).is_some_and(|theirs| sid.is(theirs)) && ace[0] == ALLOWED && !inherited(ace)
+        })
+    }))
 }
 
 /// One entry merged into whatever `path`'s list already says, and the result
@@ -1006,18 +1035,23 @@ fn trustee(sid: &Sid) -> TRUSTEE_W {
     }
 }
 
-/// What one entry of a list allows or denies.
-fn mask(ace: &[u8]) -> u32 {
-    let mut bytes = [0u8; 4];
-    bytes.copy_from_slice(&ace[4..THE_SID]);
+/// What `path`'s list comes to, for [`super::worth_writing`] to read a step
+/// off.
+///
+/// **No list is told from a list that would not read**, because they are
+/// opposite answers and [`Held::list`] hands back nothing for both: the first
+/// is a directory everybody reaches, and the second is one nothing can be said
+/// about.
+fn found(path: &Path) -> Found {
+    let Ok(held) = Held::of(path) else {
+        return Found::Unread;
+    };
 
-    u32::from_le_bytes(bytes)
-}
+    if held.dacl.is_null() {
+        return Found::Open;
+    }
 
-/// And whose it is, where it is one of the two shapes whose SID is where this
-/// reads one — see [`ALLOWED`] and [`DENIED`].
-fn whose(ace: &[u8]) -> Option<&[u8]> {
-    (matches!(ace[0], ALLOWED | DENIED) && ace.len() > THE_SID).then(|| &ace[THE_SID..])
+    held.list().map_or(Found::Unread, Found::Listed)
 }
 
 /// A path's access-control list, read and held for as long as it is being read.
@@ -1137,6 +1171,12 @@ mod tests {
     use crate::sandbox::surface::Surface;
     use crate::settings::Settings;
 
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_READ_ATTRIBUTES, FILE_TRAVERSE, SYNCHRONIZE,
+    };
+
+    use super::super::lists::{AUTHENTICATED_USERS, DENIED, EVERYONE, USERS, steps_through};
+
     /// The account this machine's Verkstead runs its sessions as, or a failure
     /// saying what to run.
     ///
@@ -1185,20 +1225,70 @@ mod tests {
         ("TMP", r"C:\Windows\Temp"),
     ];
 
-    /// An entry's SID is read where an entry keeps one, which is the offset
-    /// every list built or read here turns on.
+    /// The step's rights and the three groups every session's token carries
+    /// are spelled as numbers in [`super::super::lists`], so that a list reads
+    /// the same on every platform — and checked here against what this
+    /// platform calls them, which is the one place both spellings are in reach.
     #[test]
-    fn an_entry_is_read_as_a_header_a_mask_and_a_sid() {
-        let mut ace = vec![ALLOWED, 3, 20, 0];
-        ace.extend_from_slice(&0x001f_01ffu32.to_le_bytes());
-        ace.extend_from_slice(&[1, 2, 3, 4]);
+    fn what_a_list_is_read_for_is_what_this_machine_calls_it() {
+        assert_eq!(
+            STEP,
+            FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+            "a list is read for the rights a step is written with",
+        );
 
-        assert_eq!(mask(&ace), 0x001f_01ff);
-        assert_eq!(whose(&ace), Some(&[1u8, 2, 3, 4][..]));
+        for (spelled, read) in [
+            ("S-1-1-0", EVERYONE),
+            ("S-1-5-11", AUTHENTICATED_USERS),
+            ("S-1-5-32-545", USERS),
+        ] {
+            assert_eq!(
+                Sid::of(spelled).expect("a well-known identity").bytes(),
+                read,
+                "{spelled} is the bytes a list holds for it",
+            );
+        }
+    }
 
-        // And an entry of a shape whose SID is somewhere else is one nothing
-        // here claims to know — see [`ALLOWED`].
-        assert_eq!(whose(&[5, 3, 8, 0, 0, 0, 0, 0, 9]), None);
+    /// And the machine this runs on, read the way a boundary reads it: its
+    /// drive root is one every account walks through already, so a step is
+    /// never written there, and the human's own profile is not, so a step
+    /// through it is written as it always was.
+    ///
+    /// **The drive root is the whole reason.** Writing an entry on it makes
+    /// Windows bring every list on the volume up to date, which an elevated
+    /// runner is allowed to ask for and paid minutes of every boundary for —
+    /// see [`super::super::worth_writing`].
+    ///
+    /// Asked for an identity that names nobody, which is the point rather than
+    /// a shortcut: what lets a session through the drive is the entry for
+    /// `Users`, and nothing written for any one account.
+    #[test]
+    fn this_machines_drive_root_takes_no_step_and_the_humans_profile_does() {
+        let nobody = Sid::of(NOBODY).expect("an identity that names nobody");
+
+        let root = PathBuf::from(format!(
+            "{}\\",
+            std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_owned()),
+        ));
+        let profile = PathBuf::from(
+            std::env::var_os("USERPROFILE").expect("every Windows account has a profile"),
+        );
+
+        assert!(
+            steps_through(&found(&root), nobody.bytes()),
+            "{} is walked through by every account already, and its list says: {}",
+            root.display(),
+            said_plainly(&root),
+        );
+
+        assert!(
+            !steps_through(&found(&profile), nobody.bytes()),
+            "and {} gives nobody but its own account anything, so a step through it is \
+             still written. Its list says: {}",
+            profile.display(),
+            said_plainly(&profile),
+        );
     }
 
     /// The inheritance a grant is written with, as a header keeps its flags:

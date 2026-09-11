@@ -1,0 +1,67 @@
+# How `cargo nextest run` runs this workspace, which is how the `Windows` job in
+# `.github/workflows/ci.yml` runs its suite. Nothing else reads this: the Linux
+# and macOS jobs, and a `cargo test` anywhere, go by libtest alone.
+#
+# **nextest runs every test in a process of its own, and tests out of every
+# binary at once** — which is the whole of what it is there for, and is also
+# what a suite written for `cargo test` cannot take for granted. There, one
+# binary ran after another and a binary's tests shared one process, so a lock
+# in a `static` was enough to keep them in order. Here it keeps nothing in
+# order: every test has a copy of its own. What those locks were guarding is
+# the machine's rather than the process's, so it is held here instead.
+
+[test-groups]
+session-account = { max-threads = 1 }
+run-key = { max-threads = 1 }
+
+# **The suites that start processes as the session account**, one test at a
+# time across all of them. Three things they share are the machine's, and each
+# was kept in order by a lock in the process:
+#
+# - An entry is written by reading a directory's list and writing the list back,
+#   and these write entries on directories in common — the profile every
+#   test's temporary directory is under, on the way to its own. Two writes at
+#   once lose one of the grants: see `ONE_AT_A_TIME` in
+#   `crates/server/src/sandbox/granting/writing.rs`.
+# - The secondary logon service performs one logon at a time, machine-wide, and
+#   what waits a collision out is a two-second retry: see `ONE_AT_A_TIME` in
+#   `crates/server/src/sandbox/starting.rs`.
+# - The two tests that count sccache servers do it by diffing the machine's
+#   process list: see `COUNTING` in `crates/server/tests/sessions_windows.rs`.
+#
+# Serial rather than a small number, because the first of those goes wrong
+# rather than slow: a session behind a narrower boundary than its description
+# is a test failing about the scheduler. The in-crate tests are the `writing`
+# module's alone — the rest of the server's own tests on this platform name
+# identities without logging on as one.
+[[profile.default.overrides]]
+filter = '''
+    binary_id(verkstead-server::sessions_windows)
+  | binary_id(verkstead-server::sandbox_windows)
+  | binary_id(verkstead-server::account_windows)
+  | binary_id(verkstead-cli::sandbox_windows)
+  | binary_id(verkstead-cli::launcher_windows)
+  | (binary_id(verkstead-server) & test(/^sandbox::granting::writing::tests::/))
+'''
+test-group = 'session-account'
+
+# **The Launch on Startup registry tests**, one at a time. Each writes
+# Verkstead's value under a key named for itself below
+# `HKCU\Software\net.tobico.Verkstead\tests`, and takes that key away again —
+# so none of them reads another's today. They take turns anyway: the registry is
+# the user's rather than the process's, these are the only tests that write to
+# it, and they are a handful of milliseconds between them.
+[[profile.default.overrides]]
+filter = 'binary_id(verkstead-desktop) & test(/^startup::(run_key::)?tests::/)'
+test-group = 'run-key'
+
+# **The one test that waits on a PowerShell to say something**, with nothing
+# else running beside it. A first `powershell.exe` on the runner is slow on its
+# own — this test took 24 seconds there under `cargo test`, its binary the only
+# thing running — and beside three other tests, one of them a session compiling
+# Rust, it spent the whole of its sixty seconds of `PATIENCE` with nothing
+# printed, every time. It shares nothing with another test, so it is not a
+# group: what it needs is the machine rather than a turn.
+[[profile.default.overrides]]
+filter = 'binary_id(verkstead-server::terminal_windows) & test(=a_child_that_is_dropped_takes_what_it_started_with_it)'
+threads-required = 'num-test-threads'

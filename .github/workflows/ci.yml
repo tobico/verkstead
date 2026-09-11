@@ -175,9 +175,31 @@ jobs:
   # them. The registry tests in `crates/desktop/src/startup/run_key.rs` run
   # nowhere else, and neither does `crates/desktop/tests/shim.rs` — the app
   # itself is `crates/cli/tests/desktop.rs`, which runs on every platform.
+  #
+  # **Two legs, each running half the suite**, because one was not enough to
+  # come near the `Rust` job's ten minutes or so. Measured on the pull request
+  # that brought nextest in: the job was 39–43 minutes before it, and with
+  # nextest it had passed 17 minutes (a 4½-minute build, then 11½ minutes of
+  # tests) with a quarter of the suite still to run. Those tests were using all
+  # four of the runner's cores the whole time, so there was nothing left to gain
+  # on one machine. A second leg costs a second cached build, and the repository
+  # is public, so the runner itself is free.
+  #
+  # `slice` partitioning deals the tests out one at a time across every binary,
+  # so each leg gets half of each suite rather than whole binaries, and
+  # `crates/server/tests/conversations.rs`, a third of the test time on its
+  # own, is split between them. What `.config/nextest.toml` holds serial is
+  # serial per leg, which is all it needs to be: each leg is a machine of its
+  # own, with a session account of its own.
   windows:
-    name: Windows
+    name: Windows (${{ matrix.partition }}/2)
     runs-on: windows-2025
+    strategy:
+      # A red leg does not cancel its sibling: what the other half of the suite
+      # says is worth having from the same run.
+      fail-fast: false
+      matrix:
+        partition: [1, 2]
     steps:
       # Before the checkout, because it is the checkout this is about. Git for
       # Windows converts line endings on the way out of the repository by
@@ -198,7 +220,7 @@ jobs:
 
       # A key of its own, as the macOS job has: this is a third dependency tree,
       # and one shared with either of the others would have them evicting each
-      # other.
+      # other. The two legs share it, because they build the same tree.
       - uses: Swatinem/rust-cache@v2.9.2
         with:
           key: windows
@@ -264,6 +286,28 @@ jobs:
       - name: Create the session account
         run: target/debug/verkstead.exe session-account create
 
+      # **The suite runs through nextest rather than `cargo test`.** `cargo test`
+      # runs the workspace's test binaries one after another, so the step took
+      # as long as every suite added together. nextest runs tests out of all of
+      # them at once. What must not run at once — the suites that start
+      # processes as the session account, and the registry tests — is held
+      # serial by `.config/nextest.toml`, which says why.
+      #
+      # Pinned to a release, unpacked and put on the `PATH`, the way sccache is
+      # above.
+      - name: Install cargo-nextest
+        shell: pwsh
+        run: |
+          $version = '0.9.144'
+          $release = "cargo-nextest-$version"
+          $archive = Join-Path $env:RUNNER_TEMP 'cargo-nextest.zip'
+          $into = Join-Path $env:RUNNER_TEMP 'cargo-nextest'
+
+          Invoke-WebRequest -Uri "https://github.com/nextest-rs/nextest/releases/download/$release/$release-x86_64-pc-windows-msvc.zip" -OutFile $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $into
+
+          Add-Content -Path $env:GITHUB_PATH -Value $into
+
       # What is left out of the run is left out of the build above: a suite that
       # stands on a mount namespace or on Apple's sandbox is `cfg`-gated at its
       # own file, so this is the whole of what a Windows Verkstead has to say
@@ -284,8 +328,23 @@ jobs:
       # runs the whole workspace — a Windows build has no suite that has to be
       # left out the way a Mac's does.
 
+      # **To the end, whatever fails on the way.** nextest stops at its first
+      # failure by default and leaves the rest of the leg unrun, which is a red
+      # check saying nothing about the tests it cancelled — the same reason the
+      # matrix above lets a red leg's sibling finish.
       - name: Test
-        run: cargo test --workspace --features verkstead-desktop/shim
+        run: >
+          cargo nextest run --workspace --features verkstead-desktop/shim
+          --partition slice:${{ matrix.partition }}/2 --no-fail-fast
+
+      # **And the doc-tests, which nextest does not run.** The workspace has
+      # none today, so this step costs little. It is here so that the first one
+      # somebody writes runs on this machine too, rather than being skipped
+      # without a word — the Linux job's `cargo test` runs them already. On the
+      # first leg alone: they are not partitioned, so both would run all of them.
+      - name: Doc-tests
+        if: matrix.partition == 1
+        run: cargo test --doc --workspace --features verkstead-desktop/shim
 
   # The viewer's own checks, on the viewer's own sources. Nothing here waits on
   # the Rust job and nothing there waits on this one: neither produces anything
