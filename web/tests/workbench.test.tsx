@@ -13,6 +13,7 @@
 //! typed and say in words what came back.
 
 import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import type { Terminal as XTerm } from "@xterm/xterm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -326,6 +327,62 @@ vi.mock("@xterm/addon-fit", () => ({
     }
   },
 }));
+
+/// Every xterm the panes have opened in this test, oldest first.
+///
+/// The real terminal, subclassed only to write itself down: a pane makes its own
+/// on its first repaint and hands it to nobody, and a selection is something
+/// only the terminal can be asked to make — there is no layout here for a drag
+/// across the grid to land on. So this is how a test reaches the one the pane
+/// is drawing into, and nothing about how it behaves is stood in for.
+const terminals = vi.hoisted(() => [] as XTerm[]);
+
+vi.mock("@xterm/xterm", async (asShipped) => {
+  const real = await asShipped<typeof import("@xterm/xterm")>();
+
+  return {
+    ...real,
+    Terminal: class extends real.Terminal {
+      constructor(...made: ConstructorParameters<typeof real.Terminal>) {
+        super(...made);
+        terminals.push(this);
+      }
+    },
+  };
+});
+
+/// The one a pane has just opened, which is the last one made.
+function theTerminal(): XTerm {
+  const made = terminals.at(-1);
+
+  if (!made) {
+    throw new Error("the pane should have opened a terminal");
+  }
+
+  return made;
+}
+
+/// A clipboard to write to, and what has been written to it. jsdom has none,
+/// and the real one is a permission away in a browser.
+///
+/// Here rather than beside either of the tests that wants one: the copy button
+/// and the terminal's copy are two presses about the same clipboard, and a
+/// second stub of it would be one to drift.
+function theClipboard(): string[] {
+  const written: string[] = [];
+
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: {
+      writeText: (said: string) => {
+        written.push(said);
+        return Promise.resolve();
+      },
+    },
+  });
+
+  return written;
+}
 
 const ABANDONED = abandoned as AbandonedRepo[];
 
@@ -5552,6 +5609,10 @@ const WATCHING_IT = `/api/ui/conversations/${GRILLING.id}/screen/${OUTPUT.id}/at
 /// The repaint the fixture holds, as the socket sends one.
 const PAINTED: Shown = { Painted: SCREEN };
 
+/// The first line of that repaint, which is what a test that wants something
+/// selected on a grid selects.
+const FIRST_LINE = "Reading the brief.";
+
 /// A stand-in for the socket a live session's Screen is watched over.
 ///
 /// jsdom has a `WebSocket` and it would dial one, so this stands where it goes
@@ -6733,6 +6794,28 @@ describe("a session's output on the timeline", () => {
       `.${shell.detailsPane} .${attachedPane.screen} textarea`,
     );
     expect(typing.readOnly).toBe(true);
+
+    // The copy is the one keystroke it does answer, because the whole of what a
+    // grid like this is for is what is printed on it — and taking that off asks
+    // nothing of a session that has ended.
+    const written = theClipboard();
+    const left = theTerminal();
+
+    await waitFor(() => {
+      left.select(0, 0, FIRST_LINE.length);
+      expect(left.getSelection()).toBe(FIRST_LINE);
+    });
+
+    const survived = fireEvent.keyDown(typing, {
+      key: "C",
+      keyCode: 67,
+      which: 67,
+      ctrlKey: true,
+      shiftKey: true,
+    });
+
+    await waitFor(() => expect(written).toEqual([FIRST_LINE]));
+    expect(survived).toBe(false);
   });
 
   /// A Transcript is the whole of what a session said, and on a session that has
@@ -7893,13 +7976,28 @@ describe("putting something into a live session's screen", () => {
   /// The terminal the pane drew, as the browser gives a keystroke to one: xterm
   /// takes typing through the hidden textarea it keeps focus in, and turns each
   /// keypress into the bytes a session expects before anything of ours sees it.
-  async function typeInto(container: ParentNode, key: string, code: number) {
+  ///
+  /// `held` is whatever modifiers were down with it, and what comes back is
+  /// whether the keystroke survived — `false` where something took it and called
+  /// `preventDefault`, which is what a browser reads to decide whether to answer
+  /// the shortcut itself.
+  async function typeInto(
+    container: ParentNode,
+    key: string,
+    code: number,
+    held: { shiftKey?: boolean; ctrlKey?: boolean } = {},
+  ): Promise<boolean> {
     const typing = await drawn<HTMLTextAreaElement>(
       container,
       `.${shell.detailsPane} .${attachedPane.screen} .xterm-helper-textarea`,
     );
 
-    fireEvent.keyDown(typing, { key, keyCode: code, which: code });
+    return fireEvent.keyDown(typing, {
+      key,
+      keyCode: code,
+      which: code,
+      ...held,
+    });
   }
 
   /// What a watcher said up the socket, of the kind named.
@@ -7917,6 +8015,7 @@ describe("putting something into a live session's screen", () => {
     socket: Attached;
   }> {
     Attached.opened = [];
+    terminals.length = 0;
     vi.stubGlobal("WebSocket", Attached);
     theGrillingOutput({ running: true });
 
@@ -7956,6 +8055,81 @@ describe("putting something into a live session's screen", () => {
 
     await waitFor(() => expect(said(socket, "PutIn")).toEqual(["\r"]));
     expect(grid.textContent).toBe(before);
+  });
+
+  /// And Shift with it is a newline inside whatever is running, rather than the
+  /// same Return again. `ESC` then `CR` is what Claude Code's own terminal setup
+  /// binds the key to, and what xterm already sends for Alt and Return — so one
+  /// keystroke reaches the far end, and it is a keystroke that was reaching it
+  /// before by another route.
+  it("sends Shift and Return as the newline the far end reads", async () => {
+    const { container, socket } = await watching();
+
+    await typeInto(container, "Enter", 13, { shiftKey: true });
+
+    await waitFor(() => expect(said(socket, "PutIn")).toEqual(["\x1b\r"]));
+  });
+
+  /// Ctrl+Shift+C copies what is selected on the grid and stops there: nothing
+  /// goes up the socket, because Ctrl+C is the interrupt and this is the key
+  /// that leaves it one. Swallowed as well, which is what keeps the browser
+  /// from answering it with the web inspector.
+  it("copies the selection on Ctrl+Shift+C, and sends nothing", async () => {
+    const written = theClipboard();
+    const { container, socket } = await watching();
+
+    const terminal = theTerminal();
+    await waitFor(() => {
+      terminal.select(0, 0, FIRST_LINE.length);
+      expect(terminal.getSelection()).toBe(FIRST_LINE);
+    });
+
+    const survived = await typeInto(container, "C", 67, {
+      ctrlKey: true,
+      shiftKey: true,
+    });
+
+    await waitFor(() => expect(written).toEqual([FIRST_LINE]));
+    expect(survived).toBe(false);
+    expect(said(socket, "PutIn")).toEqual([]);
+
+    // And the text stays selected, the way every terminal this borrows the key
+    // from leaves it: a copy is not a thing that undoes the selecting.
+    expect(terminal.getSelection()).toBe(FIRST_LINE);
+  });
+
+  /// With nothing selected there is nothing to copy — and the key is taken all
+  /// the same, because the point of answering it is that the browser does not
+  /// get to answer instead.
+  it("takes Ctrl+Shift+C with nothing selected, and does nothing with it", async () => {
+    const written = theClipboard();
+    const { container, socket } = await watching();
+
+    expect(theTerminal().hasSelection()).toBe(false);
+
+    const survived = await typeInto(container, "C", 67, {
+      ctrlKey: true,
+      shiftKey: true,
+    });
+
+    expect(survived).toBe(false);
+    expect(written).toEqual([]);
+    expect(said(socket, "PutIn")).toEqual([]);
+  });
+
+  /// Ctrl+Shift+V is nobody's here. The browser pastes it into the textarea
+  /// xterm keeps focus in, and it arrives as the paste below — so the keystroke
+  /// itself says nothing up the socket, and is left for the browser to answer.
+  it("leaves Ctrl+Shift+V to the browser", async () => {
+    const { container, socket } = await watching();
+
+    const survived = await typeInto(container, "V", 86, {
+      ctrlKey: true,
+      shiftKey: true,
+    });
+
+    expect(survived).toBe(true);
+    expect(said(socket, "PutIn")).toEqual([]);
   });
 
   /// A paste goes up the same way. It arrives at the terminal as an event of its
@@ -9299,16 +9473,7 @@ describe("the share pane", () => {
   /// changes nothing on the screen, and a press that looks like it did nothing
   /// gets pressed again.
   it("copies the viewer's link, and says it did", async () => {
-    const written: string[] = [];
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: {
-        writeText: (said: string) => {
-          written.push(said);
-          return Promise.resolve();
-        },
-      },
-    });
+    const written = theClipboard();
 
     theGrillingStanding({ shared: SHARED });
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -16912,17 +17077,45 @@ describe("the terminal pane's tabs", () => {
       expect(grid.textContent).toContain("Reading the brief");
 
       // Read-only: what is typed into it reaches nothing, there being nothing at
-      // the other end to reach.
+      // the other end to reach. Shift and Return as much as the plain one —
+      // that is the window's own keystroke rather than xterm's encoding, so it
+      // is the one that would have gone up a socket that has closed.
       const said = first.sent.length;
-
-      fireEvent.keyDown(
-        await drawn<HTMLTextAreaElement>(
-          container,
-          `.${shell.detailsPane} .${attachedPane.screen} .xterm-helper-textarea`,
-        ),
-        { key: "Enter", keyCode: 13, which: 13 },
+      const typing = await drawn<HTMLTextAreaElement>(
+        container,
+        `.${shell.detailsPane} .${attachedPane.screen} .xterm-helper-textarea`,
       );
 
+      fireEvent.keyDown(typing, { key: "Enter", keyCode: 13, which: 13 });
+      fireEvent.keyDown(typing, {
+        key: "Enter",
+        keyCode: 13,
+        which: 13,
+        shiftKey: true,
+      });
+
+      expect(first.sent).toHaveLength(said);
+
+      // The copy is the one of the three a grid like this still answers: what
+      // the shell left on it is exactly what somebody wants off it, and taking
+      // it asks nothing of the far end that has gone.
+      const written = theClipboard();
+      const left = theTerminal();
+
+      await waitFor(() => {
+        left.select(0, 0, FIRST_LINE.length);
+        expect(left.getSelection()).toBe(FIRST_LINE);
+      });
+
+      fireEvent.keyDown(typing, {
+        key: "C",
+        keyCode: 67,
+        which: 67,
+        ctrlKey: true,
+        shiftKey: true,
+      });
+
+      await waitFor(() => expect(written).toEqual([FIRST_LINE]));
       expect(first.sent).toHaveLength(said);
 
       // And nothing asked for another.

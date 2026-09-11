@@ -34,6 +34,28 @@
 //! a terminal's business is what it makes of a keystroke, and what it makes of
 //! one comes back down the socket like everything else it prints.
 //!
+//! **Three keystrokes are this window's rather than the terminal's**, because
+//! they are about the window rather than about what is running in it.
+//! **Shift+Enter** sends `ESC` then `CR`: Claude Code's own `/terminal-setup`
+//! binds it to exactly those bytes, and they are already what xterm sends for
+//! Alt+Enter, so the two become one keystroke and a shell that has never heard
+//! of either does nothing with it. Left alone, xterm drops the Shift and sends
+//! the `CR` that Enter sends — which is the prompt submitting when somebody
+//! meant to start a second line, and is the whole of the complaint. It is the
+//! one of the three a grid nobody can type into refuses, there being nothing at
+//! the far end of that one to read it.
+//! **Ctrl+Shift+C** copies what is selected and stops there, which is the Linux
+//! terminal's own convention and the only way to have a copy at all while
+//! Ctrl+C stays the interrupt it has to stay. The key is swallowed whether or
+//! not anything was selected, because what the browser does with it otherwise
+//! is open the web inspector over the grid. On every grid here and not only the
+//! live ones: a grid the shell has left, and one that was fetched rather than
+//! watched, are where the last of somebody's output is, and lifting it off asks
+//! nothing of a far end that has gone. **Ctrl+Shift+V** is deliberately
+//! not one of them: the browser pastes it into the hidden textarea xterm keeps
+//! focus in, which arrives as the paste below, and reading the clipboard from
+//! here instead would put a permission prompt in front of every paste.
+//!
 //! **And what the far end calls itself comes back out.** A shell sets a title
 //! the way it prints anything else, and xterm reads it out of the escape —
 //! which is the one thing a window learns about what is running on it. There is
@@ -226,6 +248,15 @@ export function Attached(props: {
       // those bytes are what goes up. And what the mouse does, which comes out
       // of the same callback and goes up as the same kind of thing.
       terminal.onData((input) => putIn?.({ PutIn: input }));
+
+      // And the three keystrokes this window answers before xterm does — see
+      // the note at the top. What Shift+Enter comes to goes up the same
+      // `putIn` the typing does rather than back through the terminal, so
+      // there stays one place that knows what the wire looks like.
+      const made = terminal;
+      made.attachCustomKeyEventHandler((event) =>
+        pressed(made, event, (said) => putIn?.(said)),
+      );
 
       // And what the shell calls itself, for whoever is drawing a name for this
       // window. On the terminal for the reason the typing is: it is xterm that
@@ -441,6 +472,13 @@ export function Standing(props: { painted: Painted; say: string }): JSX.Element 
     if (!terminal) {
       terminal = opened(painted, false, 0);
       terminal.open(host);
+
+      // And the copy, which is the one of the three keystrokes at the top of
+      // this file that a grid nothing can be typed into still answers: a
+      // Capture is read for what is printed on it, and there is no far end here
+      // for the other two to have meant anything to.
+      const made = terminal;
+      made.attachCustomKeyEventHandler((event) => pressed(made, event));
     } else {
       terminal.resize(painted.columns, painted.rows);
     }
@@ -458,6 +496,81 @@ export function Standing(props: { painted: Painted; say: string }): JSX.Element 
       <Note class={styles.note}>{props.say}</Note>
     </div>
   );
+}
+
+/// What this window makes of a keystroke before xterm does, which for all but
+/// three of them is nothing.
+///
+/// `false` is the whole of the answer where this window has taken the key:
+/// xterm stops with it, so nothing it would have encoded goes up as well. `true`
+/// is every other key, which xterm then turns into bytes exactly as it always
+/// has — the arrows, the control characters, Enter and Alt+Enter included.
+///
+/// The three are at the top of this file, with why each one is here.
+///
+/// `putIn` is where the one of them that says anything goes, and there is none
+/// on a grid with nowhere to say it — a [`Standing`] one, which was fetched
+/// rather than watched and never had a socket at all.
+function pressed(
+  terminal: Terminal,
+  event: KeyboardEvent,
+  putIn?: (said: Watching) => void,
+): boolean {
+  // xterm asks about the key going up and the character it made as well, and
+  // all three of these are about the key going down.
+  if (event.type !== "keydown") {
+    return true;
+  }
+
+  // Shift and Return, which is a newline inside the prompt rather than the
+  // prompt being sent. Not with Ctrl or Command held: those are somebody else's
+  // keystroke, and this one is Shift's alone.
+  //
+  // And not on a grid nobody can type into — a Screen that is over, a
+  // `Standing` grid — where there is nothing at the far end to read an
+  // `ESC`-`CR`, and xterm's own read-only handling is the right answer to it.
+  // This is the only one of the three that asks anything of the far end, so it
+  // is the only one that has to care whether there is one.
+  if (
+    event.key === "Enter" &&
+    event.shiftKey &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    terminal.options.disableStdin !== true
+  ) {
+    putIn?.({ PutIn: "\x1b\r" });
+    event.preventDefault();
+    return false;
+  }
+
+  // And Ctrl+Shift+C, which copies the selection and leaves it standing — the
+  // terminals this borrows from all keep it highlighted. Whether or not the
+  // grid takes typing, because a grid the shell has left is the one somebody
+  // most wants the last of the output off, and taking it asks nothing of
+  // anybody. Both spellings of the key, because what `key` holds depends on the
+  // Shift that is part of the shortcut.
+  if (
+    event.ctrlKey &&
+    event.shiftKey &&
+    (event.key === "C" || event.key === "c")
+  ) {
+    if (terminal.hasSelection()) {
+      // Failure says nothing, the way the copy button's does: the text is still
+      // selected on the grid, and a notice about a convenience is worse than
+      // the convenience not happening.
+      void navigator.clipboard
+        ?.writeText(terminal.getSelection())
+        .catch(() => {});
+    }
+
+    // Taken either way. With nothing selected there is nothing to copy and
+    // nothing to do, and the point of answering at all is that the browser does
+    // not get to answer instead.
+    event.preventDefault();
+    return false;
+  }
+
+  return true;
 }
 
 /// An xterm the size the repaint says.
