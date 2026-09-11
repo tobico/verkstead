@@ -16962,6 +16962,33 @@ async fn a_finished_roadmap_starts_no_stage_of_another_roadmap_on_the_branch() {
         .until(|view| (view.state == Lifecycle::Done).then_some(()))
         .await;
 
+    // The premise, held to rather than assumed: the branch really did touch both
+    // roadmaps, and the other one really does have a stage left in it. Without
+    // both, this test would pass on a Worktree where there was never anything
+    // for the alphabet to pick.
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("the work has a Worktree")
+            .path,
+    );
+    let other = worktree.join("docs/roadmaps/brain-chat-parity");
+
+    assert!(
+        std::fs::read_to_string(other.join("14-widget.md"))
+            .expect("the other effort's brief is checked out with the branch")
+            .contains("The widget waits on the counter."),
+        "the branch amended the other effort in passing",
+    );
+    assert!(
+        std::fs::read_to_string(other.join("ROADMAP.md"))
+            .unwrap()
+            .contains("- [ ] 14"),
+        "and that effort still has a stage to run, which is what used to be started",
+    );
+
     let said = said_by(&fixture).await;
 
     assert!(
@@ -17194,6 +17221,94 @@ async fn a_stage_from_before_the_record_starts_nothing_and_says_so() {
         1,
         "and nothing was started: there is no roadmap on the record to carry on into",
     );
+}
+
+/// And an ordinary Conversation that edited a roadmap in passing carries nothing
+/// on, silently.
+///
+/// A feature's backlog is not a stage of anything, however much of somebody
+/// else's roadmap its branch touched — a deferral retired, a decision corrected
+/// while the work was open. The old reading would have started stage 14 of the
+/// effort this branch amended; now the record says this Conversation is a stage
+/// of nothing, so nothing starts and nothing is said. There was never a roadmap
+/// of its own for the human to wonder about, and naming one it merely edited
+/// would invite exactly the confusion this removes.
+#[tokio::test]
+async fn an_ordinary_conversation_that_touched_a_roadmap_carries_nothing_on() {
+    let spill = tempfile::tempdir().unwrap();
+
+    let bench = bench(
+        spill,
+        &a_backlog_that_amends_a_roadmap(),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    another_effort_already_committed(&bench.repo);
+
+    let fixture = grilled_on(bench).await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let view = fixture.view().await;
+
+    // The premise, held to rather than assumed: this branch really did write to
+    // somebody else's roadmap, which is what used to make it look like a stage.
+    let worktree = PathBuf::from(view.worktree.clone().expect("the work has a Worktree").path);
+    let amended =
+        std::fs::read_to_string(worktree.join("docs/roadmaps/brain-chat-parity/14-widget.md"))
+            .expect("the roadmap the branch amended is checked out with it");
+
+    assert!(
+        amended.contains("The widget waits on the counter."),
+        "the branch amended the other effort's brief: {amended:?}",
+    );
+
+    let said = notices(&view).join("\n");
+
+    assert!(
+        !said.to_lowercase().contains("roadmap"),
+        "an ordinary Conversation is told nothing about a roadmap it touched: {said:?}",
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        1,
+        "and no stage of somebody else's effort was started",
+    );
+}
+
+/// The shortest whole backlog, on a branch that also amends a roadmap somebody
+/// else's effort is partway through.
+///
+/// Which is the ordinary reason a feature branch touches `docs/roadmaps/` at
+/// all, and under the reading this replaced it was enough to make the branch
+/// look like a stage of that effort.
+fn a_backlog_that_amends_a_roadmap() -> String {
+    format!(
+        r#"
+case "$1" in
+claude-grilling-5|gpt-5-codex-grilling)
+    printf 'grilling\n'
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    printf '\nThe widget waits on the counter.\n' >> docs/roadmaps/brain-chat-parity/14-widget.md
+    git add -A
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    sleep 300
+    ;;
+*)
+{A_BACKLOG_OF_ONE}
+    ;;
+esac
+"#
+    )
 }
 
 /// A roadmap committed on the repository's default branch, as the old tools or
