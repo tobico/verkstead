@@ -2084,6 +2084,18 @@ the Timeline for it — it is Verkstead speaking to an agent rather than anythin
 the work has got to — and the session's own Capture holds it, the same account
 the Rescue gives of itself.
 
+**And the same line is what a Blocking Ask falls back to when its wait is
+gone.** The wait is what delivers a blocking ask, and a wait is a shell command
+a harness is running in the background: a harness that stops one leaves a Set
+answered, a session alive and nothing between them — a Conversation nobody can
+move, which is the Rescue's own case and the one shape of it the Rescue cannot
+see, because there is something open on the Conversation. So a blocking ask
+answered and not collected is nudged like a stored one, after a window long
+enough that a wait merely reconnecting is never spoken over.
+
+What decides that is the **Delivery** and never the badge: *answered, with no
+Delivery* is the whole of the condition.
+
 The **folding** is the far end: when a session is started to build, every
 answered stored ask of that Conversation nobody has been told about goes into
 its prompt, oldest first, under the documents the prompt is built from — a
@@ -2266,8 +2278,27 @@ is reversible and about a list rather than about a Set), filed, history, log
 **Liveness**:
 Whether an agent is currently connected and waiting on a Question Set
 ("agent waiting" vs "agent disconnected"). Display state only — never causes
-automatic withdrawal.
+automatic withdrawal, and never stands in for a **Delivery**: an agent that
+took its Response and exited is as disconnected as one that was killed, and
+only the second is worth acting on.
 _Avoid_: connection status, presence
+
+**Delivery**:
+The moment a Set's Response was handed to a session — by the wait that was
+holding open for it, or by the fetch a session came back with. One per Set,
+however many times it is fetched afterwards: what is recorded is that the
+Answers reached somebody, not how often they were read.
+
+Written for every kind of ask, which is the half of this that earns its keep. A
+stored ask already says when its Answers went into a prompt — that is the
+folding — and a Blocking Ask has no such record, because a wait that ends is a
+wait that delivered. A wait that is *killed* is the case that made this a thing
+to write down: without it, a Set answered and collected and a Set answered and
+abandoned are the same record, and the second is a Conversation nobody can move.
+Read by the nudge and by nothing else.
+_Avoid_: receipt, acknowledgement, collection, read (that is a human and an
+Unseen Conversation), folding (that is a stored ask's Answers reaching a
+*later* session's prompt)
 
 **Nudge**:
 The data-free signal telling an open viewer page where the world moved — what

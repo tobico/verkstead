@@ -643,9 +643,22 @@ fn a_blocking_backend_reads_the_guide_it_always_read() {
          background shell call, got:\n{running}"
     );
     assert!(
-        !running.contains("verkstead answers"),
-        "and never sends a session that is already holding the Response to \
-         fetch it again, got:\n{running}"
+        running.contains("stopped or killed"),
+        "and says what a harness stopping that background command looks like, \
+         which is the one way a blocking session ends up with no Response and \
+         no wait, got:\n{running}"
+    );
+    assert!(
+        running.contains("verkstead answers"),
+        "and hands it the fetch for exactly that case: the Set is on the \
+         Timeline and answerable, and the id is the only thing the session \
+         needs to come back with, got:\n{running}"
+    );
+    assert!(
+        running.contains("Asking the same Set again"),
+        "and says not to put the same Questions a second time, which is what a \
+         session with no Response and no instruction otherwise will do, \
+         got:\n{running}"
     );
 }
 
@@ -683,9 +696,14 @@ fn opencode_reads_how_it_holds_an_ask_rather_than_how_claude_does() {
          feature it has not got, got:\n{running}"
     );
     assert!(
-        !running.contains("verkstead answers"),
-        "nor should one already holding the Response be sent to fetch it, \
-         got:\n{running}"
+        running.contains("outrunning its timeout"),
+        "and say what losing the wait looks like here, which is the timeout \
+         rather than a harness stopping a background command, got:\n{running}"
+    );
+    assert!(
+        running.contains("verkstead answers"),
+        "and hand it the fetch for that case, as every backend gets for its \
+         own way of losing a wait, got:\n{running}"
     );
     assert_ne!(
         running,

@@ -235,11 +235,58 @@ fn the_response_is_delivered_on_stdout_as_yaml() {
         !printed.contains("verkstead:"),
         "the CLI's own chatter belongs on stderr, got:\n{printed}"
     );
+    let said = stderr(&output);
     assert!(
-        stderr(&output).is_empty(),
-        "a wait that goes to plan says nothing at all: a harness that merges the \
-         two streams into one file is handed the Response alone, got:\n{}",
-        stderr(&output)
+        said.lines().all(|line| line.starts_with('#')),
+        "everything the CLI says on the way is a YAML comment, so a harness that \
+         merges the two streams into one file is still handed something that \
+         parses, got:\n{said}"
+    );
+    assert!(
+        Response::from_yaml(&format!("{said}{printed}")).is_ok(),
+        "and merged, the two streams are still the Response, got:\n{said}{printed}"
+    );
+}
+
+/// The id of the Set is said before the wait begins, and not after it ends.
+///
+/// **Because it is the one thing a killed wait leaves nothing of.** A harness
+/// may stop the background command holding the wait; the Set is on the Timeline
+/// all the same, and an agent with no id cannot name it to `verkstead answers`.
+/// Said at acceptance, it is already in the harness's output file by the time
+/// anything can go wrong with the waiting.
+#[test]
+fn a_killed_wait_leaves_behind_the_id_of_the_set_it_was_on() {
+    let tmp = tempfile::tempdir().unwrap();
+    let server = Server::start(tmp.path().join("verkstead.db"));
+
+    let mut waiting = ask(&server, tmp.path(), SET);
+    server.await_asked_set(1);
+
+    // What a harness does to a background command it decides to stop, and the
+    // whole of the case this is for: the Set is on the Timeline, answerable,
+    // and the process that could have named it is gone.
+    waiting.kill().unwrap();
+    let output = finished(waiting);
+
+    let said = stderr(&output);
+    assert!(
+        said.contains("Question Set 1 is open"),
+        "the wait names the Set it is on as it opens, so a kill cannot take the \
+         id with it, got:\n{said}"
+    );
+    assert!(
+        said.contains("verkstead answers 1"),
+        "and names what fetches its Answers, got:\n{said}"
+    );
+    assert!(
+        said.lines().all(|line| line.starts_with('#')),
+        "as YAML comments, like everything else the CLI says on the way, got:\n{said}"
+    );
+    assert!(
+        stdout(&output).is_empty(),
+        "and stdout stays the Response's alone, got:\n{}",
+        stdout(&output)
     );
 }
 
@@ -455,5 +502,54 @@ fn the_quickstart_delivers_the_example_response() {
         response,
         Response::from_yaml(&submitted).unwrap(),
         "the agent should get back exactly what the human submitted"
+    );
+}
+
+/// Prose left in a plain YAML scalar, which is the one way a well-formed Set
+/// most often fails to be well-formed YAML.
+const A_COLON_IN_AN_OPTION: &str = "
+title: How should a stopped wait be reported?
+questions:
+  - label: Q1
+    text: What should the CLI leave behind when its wait is killed?
+    options:
+      - n: 1
+        text: Nothing: the exit status is the whole of it
+      - n: 2
+        text: The id of the Set, and what fetches its Answers
+";
+
+/// The parser's complaint, and then the cause worth naming.
+///
+/// **Because the complaint on its own costs a round trip.** What a YAML parser
+/// says about a colon-space is that a mapping value is not allowed in this
+/// context, at a line and a column — true, and no help at all to a reader who
+/// has not met it before. The Guide says prose does not survive a plain scalar;
+/// this is that same sentence arriving at the moment it is needed rather than
+/// the moment it was read.
+#[test]
+fn a_colon_in_a_plain_scalar_is_refused_saying_what_it_usually_is() {
+    let tmp = tempfile::tempdir().unwrap();
+    let server = Server::start(tmp.path().join("verkstead.db"));
+
+    let output = finished(ask(&server, tmp.path(), A_COLON_IN_AN_OPTION));
+
+    assert!(
+        !output.status.success(),
+        "a Set that is not YAML should not be accepted"
+    );
+
+    let said = stderr(&output);
+    assert!(
+        said.contains("colon-space"),
+        "the refusal should name what it usually is, got:\n{said}"
+    );
+    assert!(
+        said.contains("block scalar"),
+        "and what to do about it, got:\n{said}"
+    );
+    assert!(
+        server.stored_set(1).is_none(),
+        "and nothing should have been sent"
     );
 }

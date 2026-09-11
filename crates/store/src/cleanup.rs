@@ -119,7 +119,13 @@ const EVENT_KEYED: &[&str] = &[
 /// A Set is only ever asked from a Conversation — `set_events` is the one way
 /// one is stored — so every Set reachable through this Conversation's Events is
 /// this Conversation's, and there is nobody else it could be left holding.
-const SET_KEYED: &[&str] = &["responses", "archivings", "deferrals", "endings"];
+const SET_KEYED: &[&str] = &[
+    "responses",
+    "archivings",
+    "deferrals",
+    "deliveries",
+    "endings",
+];
 
 /// And the tables keyed on the Conversation itself: the sidecars, and the three
 /// that name both it and an Event.

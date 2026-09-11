@@ -37,6 +37,7 @@ mod commits;
 mod companions;
 mod conversations;
 mod deferrals;
+mod deliveries;
 mod endings;
 mod migrations;
 mod pairings;
@@ -93,6 +94,7 @@ pub use conversations::{
     unfinished_conversations, waiting, work_on_repo,
 };
 pub use deferrals::{Ask, Unfolded, asked_as, record_folded, stored_on_timeline, unfolded};
+pub use deliveries::{delivered, record_delivery};
 pub use endings::{ended_on, nothing_else};
 pub use pairings::{RepoPairings, remembered_pairings};
 pub use pauses::Pause;
@@ -671,6 +673,12 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // Which Sets were asked deferred, and which of those have been folded into a
     // prompt. It hangs off a Set for a lock's reason, said again there.
     deferrals::apply_schema(pool).await?;
+
+    // And which Sets' Answers have reached a session at all, which the folding
+    // record cannot say of a Blocking Ask: it has no row there, because a wait
+    // that ends delivers what it was holding — and one that is killed does not.
+    // See [`deliveries`].
+    deliveries::apply_schema(pool).await?;
 
     // And which Responses said there was nothing else, which hangs off a Set for
     // that reason too — and for one of its own: what is kept here is deliberately

@@ -337,6 +337,13 @@ answering, and the fault is in what was sent. Fix the Set and send it again —
 the refusal names the Question at fault, and the server is local, so the round
 trip costs almost nothing.
 
+**An ask cut short after it has printed an id is not a failure of either kind.**
+The server had already taken that Set: it is on the Timeline, and the human can
+answer it whether or not anything is still waiting on it. So its Answers are
+fetched by that id rather than reported as lost, and the same Set is never asked
+a second time. What cuts an ask short on this backend, and the fetch that
+recovers it, are above.
+
 ## Reading the Response
 
 Stdout is the Response YAML and nothing else — all chatter goes to stderr — so
@@ -358,9 +365,9 @@ comment: |
 ```
 
 That holds wherever the two streams land in one file — a harness collecting a
-command it ran, a shell redirect: a run that goes to plan says nothing at all on
-stderr, and the little the CLI ever has to say there is written as a YAML
-comment. Hand the whole thing to a parser.
+command it ran, a shell redirect: everything the CLI ever says on stderr is
+written as a YAML comment, the id a blocking ask names as it opens its wait
+included. Hand the whole thing to a parser.
 
 Every Question and Sub-question the Set actually asked comes back exactly once,
 so there is never anything to infer about what the human passed over. A Heading

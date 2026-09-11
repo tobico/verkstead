@@ -30,11 +30,12 @@ use verkstead_store::{
     close_conversation, create_profile, deletable, delete_conversation, deleted_tables,
     load_conversation, load_response, lock_set, nothing_else, open_database, pick_direction,
     place_conversations, reclaim, record_addressed_comments, record_backlog, record_check_rollup,
-    record_commit, record_conflict_fix_attempt, record_fix_attempt, record_merging,
-    record_pull_request, record_share, record_share_comment, record_standing, register_repo,
-    save_brief, session_id, set_grilling_pairing, settle_wrap_up, skip_review, stamp_unseen,
-    start_capture, start_conversation, start_grilling, start_implementing, stop, submit_response,
-    timeline, transcript, trim_conversation, trimmable, trimmed, unarchive_conversation,
+    record_commit, record_conflict_fix_attempt, record_delivery, record_fix_attempt,
+    record_merging, record_pull_request, record_share, record_share_comment, record_standing,
+    register_repo, save_brief, session_id, set_grilling_pairing, settle_wrap_up, skip_review,
+    stamp_unseen, start_capture, start_conversation, start_grilling, start_implementing, stop,
+    submit_response, timeline, transcript, trim_conversation, trimmable, trimmed,
+    unarchive_conversation,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -569,6 +570,9 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
         nothing_else(pool, id).await.unwrap(),
         "the round is marked as over",
     );
+
+    // And handed over, which is the row saying its Answers reached a session.
+    record_delivery(pool, set).await.unwrap();
 
     ask(pool, id, &asked(), Ask::Deferred).await.unwrap();
 

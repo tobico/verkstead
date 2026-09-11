@@ -734,3 +734,62 @@ async fn a_response_stored_before_the_field_existed_still_reads() {
         "nothing was ever put on one, so there is nothing to fill in",
     );
 }
+
+/// The Delivery: the moment the Response was handed to a session, written where
+/// the handing over happens and read by nothing but the nudge.
+///
+/// A wait held on a Blocking Ask is one of the two doors it is written at, and
+/// the one that matters here: a blocking ask has no folding record at all, so
+/// before this there was nothing to tell a Set whose Answers were collected from
+/// one whose Answers were not.
+#[tokio::test]
+async fn handing_the_response_to_a_wait_records_the_delivery() {
+    let (_dir, pool, app) = fresh_app().await;
+    let id = post_set(&app, SET).await;
+
+    assert!(
+        !store::delivered(&pool, id).await.unwrap(),
+        "nothing has been handed over yet",
+    );
+
+    assert_eq!(
+        post_response(&app, id, COMPLETE).await.status(),
+        StatusCode::CREATED
+    );
+
+    assert!(
+        !store::delivered(&pool, id).await.unwrap(),
+        "and the human answering it is not the handing over",
+    );
+
+    assert_eq!(
+        wait_for_response(&app, id, 0).await.status(),
+        StatusCode::OK
+    );
+
+    assert!(
+        store::delivered(&pool, id).await.unwrap(),
+        "the wait took the Response, which is what a blocking ask is",
+    );
+}
+
+/// And the condition the nudge is looking for: answered, with nobody handed it.
+///
+/// Which is what a killed wait leaves behind — the Set on the Timeline, the
+/// human's Answers stored, and no request ever made for them.
+#[tokio::test]
+async fn a_response_nobody_came_back_for_has_no_delivery() {
+    let (_dir, pool, app) = fresh_app().await;
+    let id = post_set(&app, SET).await;
+
+    assert_eq!(
+        post_response(&app, id, COMPLETE).await.status(),
+        StatusCode::CREATED
+    );
+
+    assert_eq!(stored_response_count(&pool).await, 1);
+    assert!(
+        !store::delivered(&pool, id).await.unwrap(),
+        "the Answers are there and reached nobody, which is the whole condition",
+    );
+}

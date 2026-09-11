@@ -31,8 +31,20 @@ use crate::repo;
 pub fn ask(file: Option<&Path>, deferred: bool, server: &str) -> Result<()> {
     let yaml = read(file)?;
 
-    let mut set = QuestionSet::from_yaml(&yaml)
-        .map_err(|error| anyhow!("the Question Set is not well-formed YAML: {error}"))?;
+    // The parser's own complaint, and then the one cause worth naming. It is a
+    // guess rather than a diagnosis — which is why it is worded as one — but it
+    // is the guess that is right nearly every time: the Guide says prose does not
+    // survive a plain scalar, and a round trip is lost whenever that is read
+    // after the fact rather than before.
+    let mut set = QuestionSet::from_yaml(&yaml).map_err(|error| {
+        anyhow!(
+            "the Question Set is not well-formed YAML: {error}\n\n\
+             The usual cause is prose left in a plain scalar: a colon-space \
+             anywhere in a title, a Question's text, an Option's text or the \
+             Preface ends the scalar there. Put the text in a block scalar (`|`) \
+             and send it again."
+        )
+    })?;
 
     set.validate().map_err(|invalid| {
         let listed: Vec<String> = invalid
@@ -55,9 +67,10 @@ pub fn ask(file: Option<&Path>, deferred: bool, server: &str) -> Result<()> {
     set.project = derived.project;
     set.branch = derived.branch;
 
-    // A wait that goes to plan is silent. A harness runs this in the background
-    // and captures both streams into one file, so anything said here on the way
-    // would arrive ahead of the Response the agent came for.
+    // Everything this says on the way is a YAML comment on stderr. A harness
+    // runs this in the background and captures both streams into one file, so
+    // what arrives ahead of the Response the agent came for has to be something
+    // the file still parses with — see [`opened`] and [`Client::wait`].
     let client = Client::new(server)?;
     let created = client.submit(&set, deferred)?;
 
@@ -69,13 +82,41 @@ pub fn ask(file: Option<&Path>, deferred: bool, server: &str) -> Result<()> {
         true => created
             .to_yaml()
             .context("rendering the stored Question Set as YAML")?,
-        false => client
-            .wait(created.id)?
-            .to_yaml()
-            .context("rendering the Response as YAML")?,
+        false => {
+            opened(created.id);
+            client
+                .wait(created.id)?
+                .to_yaml()
+                .context("rendering the Response as YAML")?
+        }
     };
 
     deliver(yaml)
+}
+
+/// Say which Set the wait about to begin is on, and what fetches its Answers if
+/// this process does not live to print them.
+///
+/// **Because the id is the one thing a killed wait leaves nothing of.** A
+/// blocking ask prints its Response and nothing else, so an agent whose wait was
+/// stopped has no number to come back with — and `verkstead answers` is a
+/// command it cannot use without one. The Set is on the Timeline, answerable,
+/// with the agent that asked it unable to name it. So the id is said the moment
+/// the server accepts the Set, which is before anything can go wrong with the
+/// waiting.
+///
+/// On stderr and as a YAML comment, which is what everything the CLI says on the
+/// way is: a harness that collects the two streams into one file still hands its
+/// agent something that parses as the Response. A stored ask says none of this —
+/// its id goes to stdout as the whole of its output, which the agent is reading
+/// anyway.
+fn opened(id: i64) {
+    eprintln!(
+        "# verkstead: Question Set {id} is open, and this is the wait on it.\n\
+         # verkstead: If this command is stopped before the Response is printed, the Set is \
+         still there to be answered — fetch it with `verkstead answers {id}` rather than \
+         asking again."
+    );
 }
 
 /// The one thing the CLI ever writes on stdout, ending on the newline a YAML

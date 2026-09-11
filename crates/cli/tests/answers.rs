@@ -356,3 +356,70 @@ fn a_deferred_ask_is_refused_because_its_answers_are_the_next_prompts() {
          next session's prompt, which is the whole of what was promised"
     );
 }
+
+/// A blocking ask, left running: the wait this file's last test then kills.
+fn blocking(server: &Server, dir: &Path, set: &str) -> Child {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_verkstead"))
+        .arg("ask")
+        .env("VERKSTEAD_SERVER", server.url())
+        .current_dir(dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the verkstead binary should be built for its own tests");
+
+    let mut stdin = child.stdin.take().unwrap();
+    stdin.write_all(set.as_bytes()).unwrap();
+    drop(stdin);
+
+    child
+}
+
+/// The whole recovery, end to end: a blocking ask whose wait is killed is
+/// fetched by id like a stored one.
+///
+/// **The case this command grew a second reason for.** A blocking ask is
+/// delivered by the wait it holds open, so ordinarily nothing comes back here
+/// for one — but the wait is a shell command a harness runs in the background,
+/// and a harness may stop one. What is left is a Set on the Timeline that the
+/// human can still answer, and a session that has to be able to come and get it.
+/// Nothing about the Set is different, so nothing here has to know which of the
+/// two brought it: the id is the whole of what it asks for, and the ask printed
+/// the id as it opened the wait.
+#[test]
+fn a_blocking_ask_whose_wait_was_killed_is_fetched_like_a_stored_one() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    let server = Server::start(dir.join("verkstead.db"));
+
+    let mut waiting = blocking(&server, dir, SET);
+    server.await_asked_set(1);
+
+    // The harness stopping the background command, which is the failure this
+    // whole path exists for.
+    waiting.kill().unwrap();
+    let stopped = finished(waiting);
+    assert!(
+        stderr(&stopped).contains("verkstead answers 1"),
+        "the killed wait should have left the id and the command behind, got:\n{}",
+        stderr(&stopped)
+    );
+
+    // And the human answers it, knowing nothing about any of that.
+    server.answer(1, COMPLETE);
+
+    let output = finished(answers(&server, dir, 1));
+    assert!(
+        output.status.success(),
+        "the fetch should succeed, got {:?}\n{}",
+        output.status,
+        stderr(&output)
+    );
+
+    let printed = stdout(&output);
+    let response = Response::from_yaml(&printed)
+        .unwrap_or_else(|error| panic!("stdout should be a Response: {error}\n{printed}"));
+    assert_eq!(response.answers.len(), 1);
+    assert_eq!(response.answers[0].selected, Some(1));
+}
