@@ -175,9 +175,31 @@ jobs:
   # them. The registry tests in `crates/desktop/src/startup/run_key.rs` run
   # nowhere else, and neither does `crates/desktop/tests/shim.rs` — the app
   # itself is `crates/cli/tests/desktop.rs`, which runs on every platform.
+  #
+  # **Two legs, each running half the suite**, because one was not enough to
+  # come near the `Rust` job's ten minutes or so. Measured on the pull request
+  # that brought nextest in: the job was 39–43 minutes before it, and with
+  # nextest it had passed 17 minutes (a 4½-minute build, then 11½ minutes of
+  # tests) with a quarter of the suite still to run. Those tests were using all
+  # four of the runner's cores the whole time, so there was nothing left to gain
+  # on one machine. A second leg costs a second cached build, and the repository
+  # is public, so the runner itself is free.
+  #
+  # `slice` partitioning deals the tests out one at a time across every binary,
+  # so each leg gets half of each suite rather than whole binaries, and
+  # `crates/server/tests/conversations.rs`, a third of the test time on its
+  # own, is split between them. What `.config/nextest.toml` holds serial is
+  # serial per leg, which is all it needs to be: each leg is a machine of its
+  # own, with a session account of its own.
   windows:
-    name: Windows
+    name: Windows (${{ matrix.partition }}/2)
     runs-on: windows-2025
+    strategy:
+      # A red leg does not cancel its sibling: what the other half of the suite
+      # says is worth having from the same run.
+      fail-fast: false
+      matrix:
+        partition: [1, 2]
     steps:
       # **Defender is kept out of the tree the build and the suites write in.**
       # Real-time scanning reads every file as it is written, and this job
@@ -232,7 +254,7 @@ jobs:
 
       # A key of its own, as the macOS job has: this is a third dependency tree,
       # and one shared with either of the others would have them evicting each
-      # other.
+      # other. The two legs share it, because they build the same tree.
       - uses: Swatinem/rust-cache@v2.9.2
         with:
           key: windows
@@ -341,13 +363,17 @@ jobs:
       # left out the way a Mac's does.
 
       - name: Test
-        run: cargo nextest run --workspace --features verkstead-desktop/shim
+        run: >
+          cargo nextest run --workspace --features verkstead-desktop/shim
+          --partition slice:${{ matrix.partition }}/2
 
       # **And the doc-tests, which nextest does not run.** The workspace has
       # none today, so this step costs little. It is here so that the first one
       # somebody writes runs on this machine too, rather than being skipped
-      # without a word — the Linux job's `cargo test` runs them already.
+      # without a word — the Linux job's `cargo test` runs them already. On the
+      # first leg alone: they are not partitioned, so both would run all of them.
       - name: Doc-tests
+        if: matrix.partition == 1
         run: cargo test --doc --workspace --features verkstead-desktop/shim
 
   # The viewer's own checks, on the viewer's own sources. Nothing here waits on
