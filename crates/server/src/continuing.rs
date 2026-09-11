@@ -19,9 +19,19 @@
 //! its Brief, and it goes straight to Implementing: the grilling that would have
 //! settled the work already happened, and the brief is what it settled.
 //!
-//! **What is read is the Worktree**, by the same rule the pinned stage list is
-//! drawn by — see [`crate::stages`] — so the list the human is watching and the
-//! stage that starts next cannot come to disagree.
+//! **Which roadmap is read comes off the record**, written once when the stage
+//! started and never worked out from the branch again — see
+//! [`store::stage_roadmap`] and ADR-0017. A Conversation with no roadmap
+//! recorded against it carries nothing on, whatever its branch wrote to
+//! `docs/roadmaps/`: touching a roadmap is not what makes a Conversation a stage
+//! of it, and it used to be.
+//!
+//! **What that roadmap has left is read off the Worktree**, by the same rule the
+//! pinned stage list is drawn by — see [`crate::stages`] — so the boxes the
+//! human is watching and the stage that starts next cannot come to disagree. The
+//! pinned block draws every roadmap the branch touched, which is the wider
+//! question and stays that way: one of those cards is this Conversation's own
+//! effort and the rest are roadmaps it edited in passing.
 //!
 //! **What is decided is where the branch goes**, and only that — see [`Stands`],
 //! which is the whole of the rule. A stage stands on the branch the stage before

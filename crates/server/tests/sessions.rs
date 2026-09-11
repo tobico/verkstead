@@ -17766,9 +17766,10 @@ async fn resuming_a_stage_that_never_planned_runs_the_planning_again() {
 ///
 /// The plan commit is the piece the chain turns on, and it is written the way
 /// `/next-stage` writes one: `.tasks/`, plus the in-progress annotation naming
-/// the branch it is on. That annotation is what touches the roadmap — so the
-/// branch has written to `docs/roadmaps/` by the time the wrap-up settles, which
-/// is the only thing the carry-on path ever looks for.
+/// the branch it is on. That annotation is what keeps the carry-on off this
+/// stage's own box when the wrap-up settles — *which* roadmap is read comes off
+/// the record the stage was started with rather than off anything the branch
+/// wrote.
 ///
 /// Which stage it is planning it reads off the branch it is standing on, because
 /// that is the fact it has: a stage's branch is its brief's name, so the entry to
@@ -17823,11 +17824,16 @@ esac
 /// The join adoption rests on: an adopted stage that settles starts the stage
 /// after it, down the path a staged roadmap has always gone down.
 ///
-/// Nothing was changed to make that happen, and that is the whole claim. Adopting
-/// starts *one* stage; that stage's own plan commit writes the roadmap's
-/// annotation onto its branch, which is what the carry-on path reads when the
-/// wrap-up settles — so from the first stage onwards an adopted roadmap is a
-/// staged one, and the entry point is all adoption ever had to be.
+/// Adopting starts *one* stage, and what carries the rest is the roadmap the
+/// press wrote down against it: every wrap-up from here reads that name rather
+/// than working one out from the branch. So this is also what holds the adoption
+/// path to recording it at all — take the name away and the stage after this one
+/// never starts, which is the case
+/// [`a_stage_from_before_the_record_starts_nothing_and_says_so`] reads from the
+/// other side.
+///
+/// From the first stage onwards an adopted roadmap is a staged one, and the
+/// entry point is all adoption ever had to be.
 #[tokio::test]
 async fn an_adopted_stage_that_settles_starts_the_stage_after_it() {
     let spill = tempfile::tempdir().unwrap();
