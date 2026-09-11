@@ -115,6 +115,13 @@ const THERE: DependencyState = { state: "Present", at: null, target: null };
 
 /// One row as a run that installed it leaves it: on the machine, and with
 /// nothing left on it for the run to say.
+///
+/// **Which is the server's rule rather than this helper's convenience**, and
+/// the reason this is `Idle` even where the row is one the run *failed* and
+/// somebody then installed by hand: a row the probe finds is a row the reading
+/// carries nothing of the run on — see `installing` in
+/// `crates/server/src/onboarding.rs`. A fixture that put a refusal beside a
+/// present row would be this suite drawing a screen the server never sends.
 function landed(
   reading: OnboardingView,
   dependency: Dependency,

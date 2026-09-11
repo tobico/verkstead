@@ -1007,6 +1007,14 @@ impl Onboarding {
 /// asked a moment apart: the rows come off a probe of the machine and the run
 /// off what this server is doing to it. A row a run says nothing about is left
 /// exactly as the probe found it.
+///
+/// **And the probe is the one that wins.** A row the machine now has carries
+/// nothing of the run whatever the run made of it, because the run's word
+/// outlives the trouble it is about: what it holds is held for the life of this
+/// server, so a row it could not install would go on saying so long after
+/// somebody had installed the thing in the other window and watched the row
+/// tick. The two of them are one row on a screen, and *present with a refusal
+/// under it* is not a state this machine is ever in.
 fn installing(
     dependencies: Vec<DependencyView>,
     run: Option<(RunView, Vec<(Dependency, InstallState)>)>,
@@ -1019,11 +1027,19 @@ fn installing(
         .into_iter()
         .map(
             |row| match installing.iter().find(|(of, _)| *of == row.dependency) {
-                Some((_, install)) => DependencyView {
+                // And nothing at all over a row the machine now has. A run holds
+                // what each of its rows came to for the life of this server, so
+                // a row it could not install and somebody installed by hand
+                // would go on carrying the refusal underneath its own tick —
+                // see [`InstallState`], where a row that is present is a row
+                // with nothing under it. It is the rule the row's own `trouble`
+                // is drawn by as well: what the machine has is the answer, and
+                // what a run made of it is what happened on the way to it.
+                Some((_, install)) if !present(&row.state) => DependencyView {
                     install: install.clone(),
                     ..row
                 },
-                None => row,
+                _ => row,
             },
         )
         .collect();
@@ -1305,6 +1321,7 @@ fn shown(platform: Platform) -> verkstead_render::Platform {
 mod tests {
     use super::*;
     use crate::stand_ins::program;
+    use verkstead_render::RunPhase;
 
     /// A machine on `platform` whose `PATH` is `dir`, which says nothing about
     /// itself and whose home is `dir` as well.
@@ -2242,6 +2259,57 @@ echo {token}
             "a Windows machine the elevated verb has never been run on can run \
              no session, so the step it holds up is this one",
         );
+    }
+
+    /// A run's word about a row goes under the row until the machine has the
+    /// thing, and then it goes away.
+    ///
+    /// **Which is the one thing a run holding its rows for the life of a server
+    /// costs.** The row a dialog was dismissed over is the row somebody goes and
+    /// installs by hand off the hint screen, and it ticks there under the
+    /// counter a moment later — so a reading that carried the refusal with it
+    /// would draw a green tick with *user canceled* underneath, and go on doing
+    /// it for as long as this Verkstead is up.
+    #[test]
+    fn what_a_run_made_of_a_row_goes_when_the_machine_has_the_thing() {
+        let refused = || {
+            let failed = InstallState::Failed {
+                why: "Error: (-128) User canceled.".to_owned(),
+            };
+
+            Some((over(), vec![(Dependency::Sandbox, failed)]))
+        };
+
+        let (_, still_missing) = installing(vec![row(Dependency::Sandbox, NOT_THERE)], refused());
+
+        assert!(
+            matches!(
+                still_missing[0].install,
+                InstallState::Failed { .. },
+            ),
+            "a row the run could not install says so while it is still missing",
+        );
+
+        let (_, installed_by_hand) = installing(vec![row(Dependency::Sandbox, THERE)], refused());
+
+        assert_eq!(
+            installed_by_hand[0].install,
+            InstallState::Idle,
+            "and says nothing at all once the machine has it: the probe is the \
+             answer, and the run is what happened on the way to it",
+        );
+    }
+
+    /// A run that is over, for the reading above: what it says of itself is not
+    /// what is being asked about there.
+    fn over() -> RunView {
+        RunView {
+            phase: RunPhase::Done,
+            status: "1 of 1 could not be installed".to_owned(),
+            done: 1,
+            total: 1,
+            cancelling: false,
+        }
     }
 
     /// The two fields git asks for come off the machine's own global config,
