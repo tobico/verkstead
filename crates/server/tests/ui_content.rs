@@ -2983,7 +2983,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
     // And the row that fixes where the roadmap landed, as the backlog above has
     // one: the branch carries a roadmap from here, and the stage list is drawn
     // at that row as well as pinned.
-    store::record_roadmap(&pool, staged).await.unwrap();
+    store::record_roadmap(&pool, staged, None).await.unwrap();
 
     // And what Verkstead did on its own account: the roadmap's first stage
     // started as a Conversation of its own, said on the Timeline of the

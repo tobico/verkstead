@@ -742,6 +742,14 @@ async fn written_straight_in(pool: &SqlitePool, id: i64, companion: i64, event: 
         .await
         .unwrap();
 
+    sqlx::query(
+        "INSERT INTO stage_roadmaps (conversation_id, roadmap) VALUES (?, 'missing-roles')",
+    )
+    .bind(id)
+    .execute(pool)
+    .await
+    .unwrap();
+
     sqlx::query("INSERT INTO adoptions (conversation_id, roadmap) VALUES (?, 'missing-roles')")
         .bind(id)
         .execute(pool)

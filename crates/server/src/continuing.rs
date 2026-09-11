@@ -19,9 +19,19 @@
 //! its Brief, and it goes straight to Implementing: the grilling that would have
 //! settled the work already happened, and the brief is what it settled.
 //!
-//! **What is read is the Worktree**, by the same rule the pinned stage list is
-//! drawn by — see [`crate::stages`] — so the list the human is watching and the
-//! stage that starts next cannot come to disagree.
+//! **Which roadmap is read comes off the record**, written once when the stage
+//! started and never worked out from the branch again — see
+//! [`store::stage_roadmap`] and ADR-0017. A Conversation with no roadmap
+//! recorded against it carries nothing on, whatever its branch wrote to
+//! `docs/roadmaps/`: touching a roadmap is not what makes a Conversation a stage
+//! of it, and it used to be.
+//!
+//! **What that roadmap has left is read off the Worktree**, by the same rule the
+//! pinned stage list is drawn by — see [`crate::stages`] — so the boxes the
+//! human is watching and the stage that starts next cannot come to disagree. The
+//! pinned block draws every roadmap the branch touched, which is the wider
+//! question and stays that way: one of those cards is this Conversation's own
+//! effort and the rest are roadmaps it edited in passing.
 //!
 //! **What is decided is where the branch goes**, and only that — see [`Stands`],
 //! which is the whole of the rule. A stage stands on the branch the stage before
@@ -56,7 +66,7 @@
 
 use std::path::{Path, PathBuf};
 
-use verkstead_schema::Nudge;
+use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
 use crate::stages::{self, Next, Stage};
@@ -66,32 +76,48 @@ use crate::worktrees;
 /// Start the stage after `conversation_id`'s, where there is one.
 ///
 /// Called when a wrap-up settles, on every Conversation rather than on the ones
-/// somebody thought were roadmap stages: whether this is a stage of anything is
-/// read off the branch, and a Conversation whose branch has written to no roadmap
-/// quietly is not one.
+/// somebody thought were roadmap stages. Which roadmap this one is a stage of is
+/// **read out of the record** rather than off the branch — see
+/// [`store::stage_roadmap`] — so a Conversation that has none is one Verkstead
+/// never started a stage for, and nothing is carried on.
+///
+/// That is the whole of the change this module was rewritten for. The roadmap
+/// used to be worked out from git at every settle, and a branch that had touched
+/// two of them was walked in name order: a stage whose own roadmap ran out
+/// started a stage of somebody else's effort, which nobody had asked for.
+/// Adopting another roadmap is the human's act, from *Continue a roadmap*.
 pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
     let Some(conversation) = load(&state, conversation_id).await else {
         return;
     };
 
-    let (Some(worktree), Some(base)) = (
-        conversation.worktree.clone(),
-        conversation.base_commit.clone(),
-    ) else {
-        // No Worktree is a closed Conversation, and no base commit is one that
-        // never started grilling. Neither can have written to a roadmap.
+    let Some(worktree) = conversation.worktree.clone() else {
+        // A closed Conversation, with nothing left to read a roadmap off even
+        // where there is one recorded.
         return;
+    };
+
+    let recorded = match store::stage_roadmap(&state.pool, conversation_id).await {
+        Ok(recorded) => recorded,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading which roadmap this is a stage of failed");
+            return;
+        }
+    };
+
+    let Some(roadmap) = recorded else {
+        return unrecorded(&state, &conversation, conversation_id).await;
     };
 
     let branch = conversation.branch.clone();
 
-    // Both readings together, off the runtime's threads: a git read and a
-    // handful of file reads.
+    // Both readings together, off the runtime's threads: a handful of file
+    // reads.
     let read = tokio::task::spawn_blocking({
         let worktree = worktree.clone();
         move || {
             (
-                stages::next_stage(&worktree, &base, &branch),
+                stages::next_stage(&worktree, &roadmap, &branch),
                 stages::stacks(&worktree),
             )
         }
@@ -108,10 +134,6 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
 
     let stage = match next {
         Next::Stage(stage) => *stage,
-        // The ordinary Conversation: an inline run or a feature's backlog, whose
-        // branch touched no roadmap. Nothing to carry on and nothing to say —
-        // there was never a roadmap for the human to wonder about.
-        Next::NoRoadmap => return,
         Next::Complete { roadmap } => {
             tracing::info!(
                 conversation_id,
@@ -153,6 +175,69 @@ pub(crate) async fn carry_on(state: AppState, conversation_id: i64) {
     };
 
     start(&state, &conversation, conversation_id, stage, stacks).await;
+}
+
+/// What happens when a settling Conversation has no roadmap recorded against it:
+/// nothing starts, and what is said about it depends on what else is stored.
+///
+/// Three cases, told apart by the record and never by git — which is the point
+/// of the record. Reading the branch here is what used to start the wrong work.
+///
+/// - **A stage from before this was recorded.** It has a `stage_branches` row
+///   and no roadmap, because Verkstead started it when the roadmap was still
+///   worked out from git. There are few of them and they are said out loud:
+///   whoever is watching can continue the roadmap from the adoption menu, which
+///   is the manual act that records one.
+/// - **The Conversation that wrote a roadmap**, where the branch did not create
+///   exactly one. Nothing was recorded when the roadmap landed because there was
+///   nothing to prefer between two, or nothing created at all — see
+///   [`stages::created`] — so the Timeline says why no stage started.
+/// - **An ordinary Conversation.** An inline run or a feature's backlog, which
+///   may well have edited a roadmap in passing. Nothing to carry on and nothing
+///   to say: there was never a roadmap of its own for the human to wonder about,
+///   and a notice naming one it merely touched would invite exactly the
+///   confusion this change removes.
+async fn unrecorded(state: &AppState, conversation: &store::Conversation, id: i64) {
+    let staged = match store::stacks_on(&state.pool, id).await {
+        Ok(staged) => staged.is_some(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading whether this is a stage failed");
+            return;
+        }
+    };
+
+    if staged {
+        tracing::info!(
+            conversation_id = id,
+            "a stage with no roadmap recorded against it, so nothing was started",
+        );
+
+        return say(
+            state,
+            id,
+            "This stage was started before Verkstead recorded which roadmap a stage belongs \
+             to, so there is nothing on the record saying where to carry on. Nothing was \
+             started — continue the roadmap from *Continue a roadmap* to pick the next stage \
+             up.",
+        )
+        .await;
+    }
+
+    if conversation.direction == Some(Direction::Roadmap) {
+        tracing::info!(
+            conversation_id = id,
+            "the roadmap Conversation created no single roadmap, so nothing was started",
+        );
+
+        return say(
+            state,
+            id,
+            "This branch did not write exactly one roadmap, so there is none recorded against \
+             it and no stage was started. Start a roadmap's first stage from *Continue a \
+             roadmap*.",
+        )
+        .await;
+    }
 }
 
 /// Start `stage` as a Conversation of its own against the same Repo.
@@ -384,6 +469,7 @@ async fn start(
         },
         &path,
         stacked_on.as_deref(),
+        &stage.roadmap,
         &checkouts,
     )
     .await

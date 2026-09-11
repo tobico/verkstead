@@ -513,8 +513,61 @@ pub(crate) async fn backlog_landed(state: &AppState, id: i64) {
 /// And the row that says the roadmap landed, which is the same thing one level
 /// up: the staging session committed `docs/roadmaps/`, and the stages it names
 /// are what the effort is against from here.
-pub(crate) async fn roadmap_landed(state: &AppState, id: i64) {
-    landed(id, store::record_roadmap(&state.pool, id).await, "roadmap")
+///
+/// This is also where a roadmap Conversation's **own** roadmap is recorded, and
+/// it is the one moment there is to do it: writing the roadmap was the
+/// selection, so the name is settled the moment Verkstead sees it land. Recorded
+/// only where the branch created exactly one — see [`crate::stages::created`].
+/// A branch that created two planned two efforts in one go and there is nothing
+/// to prefer between them; a branch that created none amended somebody else's.
+/// Either way nothing is recorded and the wrap-up starts no stage, saying so.
+///
+/// `worktree` is `None` for a Conversation whose Worktree has gone, which is
+/// nowhere to read a branch off: the Timeline row is still stamped, because
+/// where the roadmap landed is a fact about the past.
+pub(crate) async fn roadmap_landed(state: &AppState, id: i64, worktree: Option<&Path>, base: &str) {
+    let wrote = match worktree {
+        Some(worktree) => {
+            let worktree = worktree.to_owned();
+            let base = base.to_owned();
+
+            // Off the runtime's threads: two git reads against a checkout.
+            match tokio::task::spawn_blocking(move || crate::stages::created(&worktree, &base))
+                .await
+            {
+                Ok(created) => only(created),
+                Err(error) => {
+                    tracing::error!(error = ?error, conversation_id = id, "reading which roadmap a branch wrote failed");
+                    None
+                }
+            }
+        }
+        None => None,
+    };
+
+    if wrote.is_none() {
+        tracing::info!(
+            conversation_id = id,
+            "the branch did not write exactly one roadmap, so none was recorded against it",
+        );
+    }
+
+    landed(
+        id,
+        store::record_roadmap(&state.pool, id, wrote.as_deref()).await,
+        "roadmap",
+    )
+}
+
+/// The one thing in a set, or `None` where there is not exactly one.
+///
+/// Two roadmaps written in one go are two efforts planned together, and nothing
+/// here gets to pick between them: picking the first in name order is the bug
+/// this whole change is about, stored rather than re-derived.
+fn only(created: std::collections::BTreeSet<String>) -> Option<String> {
+    let mut created = created.into_iter();
+
+    created.next().filter(|_| created.next().is_none())
 }
 
 /// What the two above do with what the store answered, which is the same thing
@@ -1899,7 +1952,20 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
         named: Some(&named),
     };
 
-    match store::start_stage(pool, id, base, &path, stacks_on.as_deref(), &checkouts).await? {
+    // The roadmap goes in with it, which is what makes this adoption stick: the
+    // human picked it here, and every wrap-up from here reads that name rather
+    // than working one out from the branch.
+    match store::start_stage(
+        pool,
+        id,
+        base,
+        &path,
+        stacks_on.as_deref(),
+        &stage.roadmap,
+        &checkouts,
+    )
+    .await?
+    {
         store::Staged::Started => {}
         store::Staged::NoSuchConversation => return Ok(Adopted::NoSuchConversation),
         store::Staged::NotDrafting => return Ok(Adopted::NotDrafting),

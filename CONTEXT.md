@@ -1001,11 +1001,18 @@ gate summary (the gate is gone), changelog entry
 **Notice**:
 The one kind of Event Verkstead writes on its own account: which Stage it
 started and where that Stage's branch went, that a roadmap has no Stage left to
-run, that a wrap-up is down to its checks, or — as a **stop Notice** — what
-stopped driving, why, and what the evidence was. No agent wrote it and nobody
-pressed anything for it. It is what running unattended owes the human: a
-decision made while nobody was watching is one they have to be able to read
-afterwards.
+run, that the roadmap on the record is not on the branch to read, that a branch
+wrote no single roadmap so no Stage was started, that a Stage predates the
+record of which roadmap it belongs to and is the human's to continue, that a
+wrap-up is down to its checks, or — as a **stop Notice** — what stopped driving,
+why, and what the evidence was. No agent wrote it and nobody pressed anything
+for it. It is what running unattended owes the human: a decision made while
+nobody was watching is one they have to be able to read afterwards.
+
+The three about a roadmap that was not carried on all report the same outcome:
+**nothing was started**, with the reason it was not. None of them is a thing to
+answer — the way a roadmap is picked up again is *Continue a roadmap*, which is
+the human's act, and Verkstead never picks one on their behalf.
 
 Nothing to do about one, however much it says. A Notice is written after the
 fact and stays on the record for ever; what a stopped run is waiting on is that
@@ -1430,6 +1437,14 @@ Done when its box in `ROADMAP.md` is ticked, which is the roadmap's own score
 and is kept one Stage behind: the tick rides in the plan commit of the Stage
 after it, so a Stage whose work has settled is still the box that says *in
 progress* on this branch.
+
+**Which roadmap it belongs to is written down** when the Stage starts, and it is
+the only roadmap its wrap-up ever reads. A Worktree may hold any number of
+roadmaps and a branch touches a second one for ordinary reasons — a deferral
+retired, a decision corrected in passing — so the effort a Stage belongs to is
+Verkstead's own record rather than something worked out from the branch. A
+roadmap that runs out is the roadmap complete, whatever else is in the Worktree
+with work left in it; taking up another one is **Adopt**. See ADR-0017.
 _Avoid_: phase, milestone, epic, step (that is a backlog's)
 
 **Adopt**:

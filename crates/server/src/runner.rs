@@ -868,7 +868,8 @@ async fn roadmap_again(state: AppState, conversation_id: i64, working_in: &Path,
         // the roadmap stopped before anything saw it out, so the row it never
         // got is written now. A second sighting writes nothing — see
         // [`store::record_roadmap`].
-        crate::conversations::roadmap_landed(&state, conversation_id).await;
+        crate::conversations::roadmap_landed(&state, conversation_id, Some(working_in), &base)
+            .await;
 
         return to_a_pull_request(&state, conversation_id, None).await;
     }
@@ -2253,14 +2254,24 @@ async fn follow_roadmap(
     session: Session,
     _driving: Driving,
 ) {
-    let Some(writing) = see_out(&state, conversation_id, Step::Staging(base), session).await else {
+    let Some(writing) = see_out(
+        &state,
+        conversation_id,
+        Step::Staging(base.clone()),
+        session,
+    )
+    .await
+    else {
         return;
     };
 
     // The roadmap is on the branch, so the record says where that happened —
     // before the pull request the same session went on to open, which is the
-    // order the two happened in.
-    crate::conversations::roadmap_landed(&state, conversation_id).await;
+    // order the two happened in. Which roadmap this Conversation wrote is
+    // settled in the same call, off the Worktree it was written in.
+    let worktree = worktree(&state, conversation_id).await;
+
+    crate::conversations::roadmap_landed(&state, conversation_id, worktree.as_deref(), &base).await;
 
     to_a_pull_request(&state, conversation_id, Some(writing)).await;
 }
