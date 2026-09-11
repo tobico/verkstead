@@ -461,7 +461,7 @@ above the rows on every platform, a session's `PATH` being the server's own
 rather than anything the wizard could write down.
 
 **The verdict is reached once, at startup**, and the mode stays on until the
-wizard's last Continue takes it off. There is no skip and no re-entry: nothing
+wizard's last Next takes it off. There is no skip and no re-entry: nothing
 inside a run puts it back on, so deleting the last Profile mid-run is the
 settings page's own empty state to say rather than a first-run page thrown over
 work somebody has, and finishing the wizard is the one thing that ends it. What
@@ -481,12 +481,26 @@ the one that can be too old to connect — and says once above the rows that the
 `PATH` was read at startup, so a directory an install has just made wants
 Verkstead started again from a shell that names it; the second offers
 the agent accounts already in the server's home as Profiles and holds its
-Continue until there is one, because a step that walked past a Profile would
+Next until there is one, because a step that walked past a Profile would
 clear the mode onto the empty state a skip was rejected for; the third asks for
 the git author over fields prefilled with whatever the machine could say for
 itself, each labelled with where it was found. Which step is open is a fact
 about the browser in front of you and is kept on the device, never on the wire.
-The last Continue clears the mode and lands on the compose page.
+The last Next clears the mode and lands on the compose page.
+
+**The first step installs what it names** (2026-09-11). An absent row carries
+a checkbox where its tick would be, the gating rows ticked by default, and Next
+installs what is ticked: one elevated package-manager run through the platform
+dialog the desktop app hands the server — a server with no way to ask sends
+every ticked row to the hint screen without asking — then the vendor installers
+as the user. A directory Verkstead installs into is written to `session_path`
+in `config.yaml` and composed ahead of the server's own `PATH`, the one thing
+added that the `PATH` did not name. Three screens: the checkboxes, an install
+screen with a progress bar and a status line that moves on by itself, and a
+**hint screen** drawing only the ticked rows still absent with their
+instructions, its Next held with an *n/m detected* counter until every one is
+there. On Windows the sandbox row is the session account, probed and gating,
+made by the elevated verb when ticked.
 
 **Not the compose page's setup card**, which is a draft's own row of pickers —
 the Repo, the branch and base, the companions, the three Pairings — and was here
