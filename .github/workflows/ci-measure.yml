@@ -1,0 +1,91 @@
+# Throwaway: times the Windows test step under several runners side by side, for
+# task 04 of windows-ci-speedup. Lives only on the `windows-ci-measure` branch.
+name: CI measure
+
+on:
+  push:
+    branches: [windows-ci-measure]
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows (${{ matrix.leg }})
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - leg: cargo-test
+            test: cargo test --workspace --features verkstead-desktop/shim --no-fail-fast
+          - leg: nextest-4
+            test: cargo nextest run --workspace --features verkstead-desktop/shim --no-fail-fast
+          - leg: nextest-2
+            test: cargo nextest run --workspace --features verkstead-desktop/shim --no-fail-fast --test-threads 2
+          - leg: slice-1of2
+            test: cargo nextest run --workspace --features verkstead-desktop/shim --no-fail-fast --partition slice:1/2
+          - leg: slice-2of2
+            test: cargo nextest run --workspace --features verkstead-desktop/shim --no-fail-fast --partition slice:2/2
+    steps:
+      - name: Keep Defender out of the build tree
+        shell: pwsh
+        run: |
+          $paths = @(
+            $env:GITHUB_WORKSPACE
+            ($env:CARGO_HOME ?? (Join-Path $HOME '.cargo'))
+            $env:RUNNER_TEMP
+            $env:TEMP
+            (Join-Path $env:APPDATA 'Verkstead')
+            (Join-Path $env:LOCALAPPDATA 'Verkstead')
+          )
+          Add-MpPreference -ExclusionPath $paths
+
+      - name: Check the repository out as it was committed
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v7.0.1
+
+      - name: Install Rust 1.91.1
+        uses: dtolnay/rust-toolchain@1.91.1
+
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          key: windows
+          save-if: false
+
+      - name: Install sccache
+        shell: pwsh
+        run: |
+          $version = 'v0.12.0'
+          $release = "sccache-$version-x86_64-pc-windows-msvc"
+          $archive = Join-Path $env:RUNNER_TEMP 'sccache.zip'
+          $into = Join-Path $env:RUNNER_TEMP 'sccache'
+          Invoke-WebRequest -Uri "https://github.com/mozilla/sccache/releases/download/$version/$release.zip" -OutFile $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $into
+          Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $into $release)
+
+      - name: Build
+        run: cargo build --workspace --all-targets --features verkstead-desktop/shim
+
+      - name: Create the session account
+        run: target/debug/verkstead.exe session-account create
+
+      - name: Install cargo-nextest
+        shell: pwsh
+        run: |
+          $version = '0.9.144'
+          $release = "cargo-nextest-$version"
+          $archive = Join-Path $env:RUNNER_TEMP 'cargo-nextest.zip'
+          $into = Join-Path $env:RUNNER_TEMP 'cargo-nextest'
+          Invoke-WebRequest -Uri "https://github.com/nextest-rs/nextest/releases/download/$release/$release-x86_64-pc-windows-msvc.zip" -OutFile $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $into
+          Add-Content -Path $env:GITHUB_PATH -Value $into
+
+      - name: Processors
+        shell: pwsh
+        run: Get-CimInstance Win32_Processor | Format-List Name, NumberOfCores, NumberOfLogicalProcessors
+
+      - name: Test
+        continue-on-error: true
+        run: ${{ matrix.test }}
