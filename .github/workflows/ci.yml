@@ -328,10 +328,14 @@ jobs:
       # runs the whole workspace — a Windows build has no suite that has to be
       # left out the way a Mac's does.
 
+      # **To the end, whatever fails on the way.** nextest stops at its first
+      # failure by default and leaves the rest of the leg unrun, which is a red
+      # check saying nothing about the tests it cancelled — the same reason the
+      # matrix above lets a red leg's sibling finish.
       - name: Test
         run: >
           cargo nextest run --workspace --features verkstead-desktop/shim
-          --partition slice:${{ matrix.partition }}/2
+          --partition slice:${{ matrix.partition }}/2 --no-fail-fast
 
       # **And the doc-tests, which nextest does not run.** The workspace has
       # none today, so this step costs little. It is here so that the first one
