@@ -36,10 +36,27 @@ const MARKER: &str = "stand-in";
 /// beside its own image for [`MARKER`]'s reason.
 const RECORDED: &str = "started-with";
 
+/// What this file is called as one test, which is how nextest counts it.
+const THE_TEST: &str = "the shim holds";
+
 fn main() {
     // Before anything else, because a stand-in is not a test run: it is this
     // binary being the app the shim went looking for.
     stand_in();
+
+    // **nextest asks a test binary what is in it before it runs anything**, the
+    // way libtest answers `--list`: a line per test, and another asking for the
+    // ignored ones alone. The Windows job runs the workspace through nextest,
+    // so this file answers as one test and none ignored. Whatever else it is
+    // started with is a run of that one test, which is what `cargo test` does
+    // with no arguments at all.
+    let asked: Vec<String> = std::env::args().skip(1).collect();
+    if asked.iter().any(|arg| arg == "--list") {
+        if !asked.iter().any(|arg| arg == "--ignored") {
+            println!("{THE_TEST}: test");
+        }
+        return;
+    }
 
     the_shim_is_a_windows_subsystem_exe();
     the_shim_starts_the_verkstead_beside_it_and_not_the_one_on_the_path();

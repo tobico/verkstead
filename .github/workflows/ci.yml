@@ -298,6 +298,28 @@ jobs:
       - name: Create the session account
         run: target/debug/verkstead.exe session-account create
 
+      # **The suite runs through nextest rather than `cargo test`.** `cargo test`
+      # runs the workspace's test binaries one after another, so the step took
+      # as long as every suite added together. nextest runs tests out of all of
+      # them at once. What must not run at once — the suites that start
+      # processes as the session account, and the registry tests — is held
+      # serial by `.config/nextest.toml`, which says why.
+      #
+      # Pinned to a release, unpacked and put on the `PATH`, the way sccache is
+      # above.
+      - name: Install cargo-nextest
+        shell: pwsh
+        run: |
+          $version = '0.9.144'
+          $release = "cargo-nextest-$version"
+          $archive = Join-Path $env:RUNNER_TEMP 'cargo-nextest.zip'
+          $into = Join-Path $env:RUNNER_TEMP 'cargo-nextest'
+
+          Invoke-WebRequest -Uri "https://github.com/nextest-rs/nextest/releases/download/$release/$release-x86_64-pc-windows-msvc.zip" -OutFile $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $into
+
+          Add-Content -Path $env:GITHUB_PATH -Value $into
+
       # What is left out of the run is left out of the build above: a suite that
       # stands on a mount namespace or on Apple's sandbox is `cfg`-gated at its
       # own file, so this is the whole of what a Windows Verkstead has to say
@@ -319,7 +341,14 @@ jobs:
       # left out the way a Mac's does.
 
       - name: Test
-        run: cargo test --workspace --features verkstead-desktop/shim
+        run: cargo nextest run --workspace --features verkstead-desktop/shim
+
+      # **And the doc-tests, which nextest does not run.** The workspace has
+      # none today, so this step costs little. It is here so that the first one
+      # somebody writes runs on this machine too, rather than being skipped
+      # without a word — the Linux job's `cargo test` runs them already.
+      - name: Doc-tests
+        run: cargo test --doc --workspace --features verkstead-desktop/shim
 
   # The viewer's own checks, on the viewer's own sources. Nothing here waits on
   # the Rust job and nothing there waits on this one: neither produces anything
