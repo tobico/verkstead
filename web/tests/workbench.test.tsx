@@ -17077,7 +17077,9 @@ describe("the terminal pane's tabs", () => {
       expect(grid.textContent).toContain("Reading the brief");
 
       // Read-only: what is typed into it reaches nothing, there being nothing at
-      // the other end to reach.
+      // the other end to reach. Shift and Return as much as the plain one —
+      // that is the window's own keystroke rather than xterm's encoding, so it
+      // is the one that would have gone up a socket that has closed.
       const said = first.sent.length;
       const typing = await drawn<HTMLTextAreaElement>(
         container,
@@ -17085,6 +17087,12 @@ describe("the terminal pane's tabs", () => {
       );
 
       fireEvent.keyDown(typing, { key: "Enter", keyCode: 13, which: 13 });
+      fireEvent.keyDown(typing, {
+        key: "Enter",
+        keyCode: 13,
+        which: 13,
+        shiftKey: true,
+      });
 
       expect(first.sent).toHaveLength(said);
 
