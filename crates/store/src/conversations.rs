@@ -1112,6 +1112,33 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .await
     .context("creating the stage branches table")?;
 
+    // And which roadmap that stage belongs to. Beside the branch it stands on
+    // rather than a column on it, for the reason that table is beside
+    // `conversations`: there is no migration machinery here, and a database
+    // written before this arrives with the table empty — which is every stage
+    // started before Verkstead recorded the fact, and those are read as having
+    // none rather than backfilled from anything.
+    //
+    // Verkstead's own decision, exactly as the branch it stacks on is. *Which
+    // roadmap this Conversation is a stage of* was settled once — by the human
+    // adopting it, by the stage before it carrying on, or by the branch that
+    // wrote the roadmap — and the repository never records it. Written by
+    // [`start_stage`] and by [`record_roadmap`], each once per Conversation,
+    // so it cannot come to disagree with itself; what that roadmap *says* is
+    // still the repository's, read back off the Worktree wherever it is wanted.
+    //
+    // The directory name under `docs/roadmaps/` and nothing else, which is the
+    // whole of what [`adopting`] keeps and for the same reason.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS stage_roadmaps (
+             conversation_id INTEGER PRIMARY KEY REFERENCES conversations(id),
+             roadmap         TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(pool)
+    .await
+    .context("creating the stage roadmaps table")?;
+
     // The model half of a Conversation's Pairings, one row per role. A
     // table of its own for the reason the direction is one: there is no
     // migration machinery here and `conversations` is STRICT and left alone —
@@ -4618,8 +4645,42 @@ pub async fn record_backlog(pool: &SqlitePool, id: i64) -> Result<Landed> {
 
 /// And the roadmap landed: the staging session committed `docs/roadmaps/`, and
 /// the stages it names are what the effort is now against.
-pub async fn record_roadmap(pool: &SqlitePool, id: i64) -> Result<Landed> {
-    landed(pool, id, Event::StageList).await
+///
+/// `wrote` is the roadmap this branch *created*, where it created exactly one,
+/// and it is the moment that Conversation's own roadmap is settled: writing a
+/// roadmap is choosing it, and the stage that starts when this branch's pull
+/// request settles is stage 01 of what it wrote. `None` where the branch
+/// created none or created several — there is nothing to prefer between two
+/// roadmaps somebody planned in one go, and guessing would be Verkstead
+/// choosing the work. Whichever of the two, the caller is the one that can see
+/// the branch; this only writes it down.
+///
+/// `INSERT OR IGNORE`, so the second sighting of a landing writes nothing: a
+/// run taken up again sees the same roadmap on the same branch, and the name is
+/// settled once — see [`Landed::Already`], which says the same thing about the
+/// Timeline row beside it.
+pub async fn record_roadmap(pool: &SqlitePool, id: i64, wrote: Option<&str>) -> Result<Landed> {
+    let landed = landed(pool, id, Event::StageList).await?;
+
+    // Nothing to hang a roadmap off. Written after the landing rather than
+    // before it for that reason: the row above is what says there is a
+    // Conversation here at all.
+    if landed == Landed::NoSuchConversation {
+        return Ok(landed);
+    }
+
+    if let Some(roadmap) = wrote {
+        sqlx::query(
+            "INSERT OR IGNORE INTO stage_roadmaps (conversation_id, roadmap) VALUES (?, ?)",
+        )
+        .bind(id)
+        .bind(roadmap)
+        .execute(pool)
+        .await
+        .with_context(|| format!("recording the roadmap Conversation {id} wrote"))?;
+    }
+
+    Ok(landed)
 }
 
 /// Start a roadmap stage's Conversation working: its base commit, its worktree,
@@ -4648,6 +4709,14 @@ pub async fn record_roadmap(pool: &SqlitePool, id: i64) -> Result<Landed> {
 /// transaction that makes the Conversation a stage, and read back by whatever
 /// starts a session in it — the first one, and any the human asks for again.
 ///
+/// `roadmap` is the one this stage belongs to, by its directory name under
+/// `docs/roadmaps/`. Written in this transaction for the reason `stacks_on` is:
+/// it is Verkstead's own decision, taken once at the moment the stage starts —
+/// by a human adopting the roadmap or by the stage before it carrying on — and
+/// it is what the wrap-up reads to know where to carry on to. A stage that said
+/// it was under way without saying whose roadmap it was would be one nothing
+/// could continue.
+///
 /// `companions` is where the stage's inherited companion repos were checked
 /// out, written in this transaction for [`start_grilling`]'s reason: a stage
 /// that said it was implementing with companions nothing had checked out would
@@ -4659,6 +4728,7 @@ pub async fn start_stage<'a>(
     base: impl Into<Base<'a>>,
     worktree: &Path,
     stacks_on: Option<&str>,
+    roadmap: &str,
     companions: &[super::CompanionWorktree],
 ) -> Result<Staged> {
     let base = base.into();
@@ -4712,6 +4782,13 @@ pub async fn start_stage<'a>(
         .execute(&mut *tx)
         .await
         .with_context(|| format!("recording what the branch of Conversation {id} stands on"))?;
+
+    sqlx::query("INSERT INTO stage_roadmaps (conversation_id, roadmap) VALUES (?, ?)")
+        .bind(id)
+        .bind(roadmap)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("recording which roadmap Conversation {id} is a stage of"))?;
 
     super::companions::record_worktrees(&mut tx, id, companions).await?;
 
@@ -4818,6 +4895,29 @@ pub async fn stacks_on(pool: &SqlitePool, id: i64) -> Result<Option<Option<Strin
             .with_context(|| format!("reading what the branch of Conversation {id} stands on"))?;
 
     Ok(row.map(|(stacks_on,)| stacks_on))
+}
+
+/// Which roadmap a Conversation is a stage of, where Verkstead recorded one.
+///
+/// A read of its own beside the row for [`adopting`]'s reason, and the one the
+/// wrap-up asks before it carries anything on: the answer decides which roadmap
+/// is read, and nothing else is.
+///
+/// `None` means three different things and the caller tells them apart from
+/// what is stored beside this — see [`stacks_on`], which says whether this is a
+/// stage at all, and [`Conversation::direction`], which says whether it is the
+/// Conversation that wrote a roadmap. A stage started before this was recorded
+/// answers `None` and is not backfilled from the branch: a name guessed off a
+/// branch is the guess this table exists to stop.
+pub async fn stage_roadmap(pool: &SqlitePool, id: i64) -> Result<Option<String>> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT roadmap FROM stage_roadmaps WHERE conversation_id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| format!("reading which roadmap Conversation {id} is a stage of"))?;
+
+    Ok(row.map(|(roadmap,)| roadmap))
 }
 
 /// Put a move on a Conversation's Timeline.

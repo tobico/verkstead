@@ -15,7 +15,7 @@ use std::path::Path;
 use sqlx::SqlitePool;
 use verkstead_store::{
     Event, Landed, open_database, record_backlog, record_roadmap, register_repo, save_brief,
-    start_conversation, start_grilling, timeline,
+    stage_roadmap, start_conversation, start_grilling, timeline,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -95,7 +95,10 @@ async fn a_roadmap_landing_is_stamped_beside_it() {
     let (_dir, pool) = fresh_pool().await;
     let id = grilling(&pool).await;
 
-    assert_eq!(record_roadmap(&pool, id).await.unwrap(), Landed::Stamped);
+    assert_eq!(
+        record_roadmap(&pool, id, None).await.unwrap(),
+        Landed::Stamped
+    );
     assert_eq!(record_backlog(&pool, id).await.unwrap(), Landed::Stamped);
 
     let events = events(&pool, id).await;
@@ -123,8 +126,14 @@ async fn a_second_landing_writes_nothing() {
         Landed::Already,
         "the second sighting of the same landing",
     );
-    assert_eq!(record_roadmap(&pool, id).await.unwrap(), Landed::Stamped);
-    assert_eq!(record_roadmap(&pool, id).await.unwrap(), Landed::Already);
+    assert_eq!(
+        record_roadmap(&pool, id, None).await.unwrap(),
+        Landed::Stamped
+    );
+    assert_eq!(
+        record_roadmap(&pool, id, None).await.unwrap(),
+        Landed::Already
+    );
 
     assert_eq!(
         events(&pool, id)
@@ -148,7 +157,91 @@ async fn there_is_nothing_to_stamp_on_a_conversation_that_is_not_there() {
         Landed::NoSuchConversation,
     );
     assert_eq!(
-        record_roadmap(&pool, 404).await.unwrap(),
+        record_roadmap(&pool, 404, None).await.unwrap(),
         Landed::NoSuchConversation,
     );
+}
+
+/// The roadmap a branch wrote is recorded with the landing, and that name is
+/// what every wrap-up from here carries the effort on into.
+///
+/// Writing a roadmap is choosing it — there is no other moment at which this
+/// Conversation's roadmap is settled — so the name arrives with the row saying
+/// the roadmap landed.
+#[tokio::test]
+async fn the_roadmap_a_branch_wrote_is_recorded_with_the_landing() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    assert_eq!(
+        stage_roadmap(&pool, id).await.unwrap(),
+        None,
+        "nothing is recorded before the roadmap lands",
+    );
+
+    assert_eq!(
+        record_roadmap(&pool, id, Some("mvp")).await.unwrap(),
+        Landed::Stamped,
+    );
+
+    assert_eq!(
+        stage_roadmap(&pool, id).await.unwrap().as_deref(),
+        Some("mvp")
+    );
+}
+
+/// A branch that wrote no roadmap of its own — or wrote two, which is two
+/// efforts planned in one go — has none recorded, and the landing is stamped
+/// all the same.
+///
+/// Which of the two it was is the caller's reading of the branch. What reaches
+/// here either way is nothing to record, and the wrap-up starts no stage.
+#[tokio::test]
+async fn a_landing_with_no_single_roadmap_records_no_name() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    assert_eq!(
+        record_roadmap(&pool, id, None).await.unwrap(),
+        Landed::Stamped,
+    );
+
+    assert_eq!(stage_roadmap(&pool, id).await.unwrap(), None);
+}
+
+/// And the name is settled once. A run taken up again sees the same roadmap on
+/// the same branch, and what is stored does not move.
+#[tokio::test]
+async fn a_second_landing_leaves_the_recorded_roadmap_alone() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    record_roadmap(&pool, id, Some("mvp")).await.unwrap();
+
+    assert_eq!(
+        record_roadmap(&pool, id, Some("public-release"))
+            .await
+            .unwrap(),
+        Landed::Already,
+    );
+
+    assert_eq!(
+        stage_roadmap(&pool, id).await.unwrap().as_deref(),
+        Some("mvp"),
+        "the first sighting is the one that settled it",
+    );
+}
+
+/// A Conversation that is not there has nothing to record a roadmap against,
+/// and the refusal is the landing's own.
+#[tokio::test]
+async fn a_roadmap_is_not_recorded_against_a_conversation_that_is_not_there() {
+    let (_dir, pool) = fresh_pool().await;
+
+    assert_eq!(
+        record_roadmap(&pool, 404, Some("mvp")).await.unwrap(),
+        Landed::NoSuchConversation,
+    );
+
+    assert_eq!(stage_roadmap(&pool, 404).await.unwrap(), None);
 }
