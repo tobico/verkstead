@@ -1805,7 +1805,20 @@ seen: Seen | null, } | { "state": "NotApplicable" };
  * One row of the dependencies step: a thing a session needs, and whether this
  * machine has it.
  */
-export type DependencyView = { dependency: Dependency, state: DependencyState, };
+export type DependencyView = { dependency: Dependency, state: DependencyState, 
+/**
+ * And what the install run has made of it, where one has been started at
+ * all — see [`InstallState`], which is *installing*, *failed with why*, or
+ * nothing.
+ *
+ * Beside the state above rather than folded into it, because the two are
+ * different questions asked at the same moment: whether this machine has
+ * the thing is probed on every read, and whether Verkstead is in the
+ * middle of putting it there is what the run says. A row that is
+ * installing is a row that was absent — which is why it could be ticked —
+ * and the same row a moment later is present with nothing under it.
+ */
+install: InstallState, };
 
 /**
  * The Diff as the browser receives it: the HTML the server rendered, and the
@@ -1954,6 +1967,37 @@ export type IgnoreRule = { author: string, body: string, };
  * showed anybody.
  */
 export type IgnoredCommentsEdit = "Keep" | { "Set": { rules: Array<IgnoreRule>, } };
+
+/**
+ * The press that starts one: the rows that were ticked.
+ *
+ * Every one of them is a row the reading said was absent. A row that is
+ * present is not offered a checkbox to tick, and one this machine cannot
+ * install is not known in advance — what cannot be done is reported by the run
+ * rather than refused at the door, because what Verkstead can install is a fact
+ * about the distribution rather than about the row.
+ */
+export type InstallPress = { 
+/**
+ * What to install, in any order: the run puts them in its own.
+ */
+dependencies: Array<Dependency>, };
+
+/**
+ * What the install run has made of one row.
+ *
+ * Flat on the wire — `{"install": "Failed", "why": "…"}` — the way
+ * [`DependencyState`] is, so the viewer narrows on a field rather than
+ * unwrapping a variant name.
+ */
+export type InstallState = { "install": "Idle" } | { "install": "Installing" } | { "install": "Failed", 
+/**
+ * In the machine's own words: the first line the elevated run printed
+ * on standard error, or whatever a dismissed password dialog was
+ * refused in — and *cancelled* for a unit that was skipped rather than
+ * run.
+ */
+why: string, };
 
 /**
  * Where a Conversation has got to.
@@ -2180,7 +2224,15 @@ accounts: Array<AccountView>,
 /**
  * And whether each of the three steps stands met, at this moment.
  */
-steps: StepsView, };
+steps: StepsView, 
+/**
+ * And the install run, where one has been started in this server's life —
+ * going, or over and the last thing that happened here. See [`RunView`].
+ *
+ * Nothing until the first Next is pressed on the dependencies step, which
+ * is every reading a wizard nobody has pressed anything on draws.
+ */
+run: RunView | null, };
 
 /**
  * One open pull request, as a row of that level draws it.
@@ -3251,6 +3303,62 @@ field: RuleField | null,
  * field, and the engine's message is a diagram across three or four.
  */
 why: string, };
+
+/**
+ * What the status line is about.
+ */
+export type RunPhase = "Asking" | "Installing" | "Done";
+
+/**
+ * The install run as a whole: what it is doing, and how far it has got.
+ *
+ * **One run at a time, and it is this server's.** The wizard's first step is
+ * ticked and pressed, and what that press starts is a sequence of commands —
+ * the elevated batch that installs this distribution's packages, and a vendor
+ * installer for each row no package manager carries. This is what the install
+ * screen is drawn from while they run: a status line, a bar, and the Cancel
+ * beside it.
+ *
+ * **The rows say the rest.** Which row is installing and which one failed is
+ * on the row — see [`InstallState`] — because that is where the human is
+ * looking for it. What is here is the run's own half: what it is about at this
+ * moment, and how much of it is behind.
+ */
+export type RunView = { 
+/**
+ * What the status line is about — see [`RunPhase`].
+ */
+phase: RunPhase, 
+/**
+ * And the line itself, in words: *Waiting for the password dialog on
+ * ada-box*, *Installing bubblewrap, git*, and what the run came to once it
+ * is over.
+ *
+ * Written by the server rather than composed by the viewer, unlike every
+ * other sentence about this step: the words name this machine and the
+ * packages this distribution calls them, neither of which the viewer
+ * knows.
+ */
+status: string, 
+/**
+ * How many of the ticked rows are behind the run, whether they were
+ * installed, refused or skipped.
+ */
+done: number, 
+/**
+ * And how many were ticked, which is what `done` is out of.
+ */
+total: number, 
+/**
+ * Whether Cancel has been pressed and the unit under way has not finished
+ * yet.
+ *
+ * A press cannot stop a package manager that is already running — a
+ * half-installed machine is worse than a fully installed one — so what
+ * Cancel does is skip what has not started. This is the window between the
+ * press and the run reaching that point.
+ */
+cancelling: boolean, };
 
 /**
  * One session's Screen: the grid its Capture leaves on a terminal.

@@ -62,8 +62,8 @@ pub use conversations::{
     unreadable_set_event,
 };
 pub use onboarding::{
-    AccountView, Dependency, DependencyState, DependencyView, Distro, OnboardingView, Platform,
-    PrefillView, Prefilled, Seen, Source, StepsView,
+    AccountView, Dependency, DependencyState, DependencyView, Distro, InstallPress, InstallState,
+    OnboardingView, Platform, PrefillView, Prefilled, RunPhase, RunView, Seen, Source, StepsView,
 };
 pub use profiles::{
     AgentType, Broken, PairingView, PickedView, ProfileAccount, ProfileChoice, ProfileChosen,

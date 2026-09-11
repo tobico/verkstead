@@ -1,39 +1,42 @@
 {
-  "mode": false,
+  "mode": true,
   "platform": "Linux",
   "distro": "Ubuntu",
   "dependencies": [
     {
       "dependency": "Sandbox",
       "state": {
-        "state": "Present",
-        "at": "/machine/bin/bwrap",
-        "target": null
+        "state": "Absent",
+        "trouble": null,
+        "seen": null
       },
       "install": {
-        "install": "Idle"
+        "install": "Failed",
+        "why": "Error: (-128) User canceled."
       }
     },
     {
       "dependency": "Git",
       "state": {
-        "state": "Present",
-        "at": "/machine/bin/git",
-        "target": null
+        "state": "Absent",
+        "trouble": null,
+        "seen": null
       },
       "install": {
-        "install": "Idle"
+        "install": "Failed",
+        "why": "Error: (-128) User canceled."
       }
     },
     {
       "dependency": "Claude",
       "state": {
-        "state": "Present",
-        "at": "/machine/bin/claude",
-        "target": null
+        "state": "Absent",
+        "trouble": null,
+        "seen": null
       },
       "install": {
-        "install": "Idle"
+        "install": "Failed",
+        "why": "Claude Code is not one of this distribution's packages."
       }
     },
     {
@@ -86,9 +89,15 @@
   ],
   "accounts": [],
   "steps": {
-    "dependencies": true,
-    "accounts": true,
-    "git": true
+    "dependencies": false,
+    "accounts": false,
+    "git": false
   },
-  "run": null
+  "run": {
+    "phase": "Done",
+    "status": "3 of 3 could not be installed",
+    "done": 3,
+    "total": 3,
+    "cancelling": false
+  }
 }

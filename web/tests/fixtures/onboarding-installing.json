@@ -1,36 +1,36 @@
 {
-  "mode": false,
+  "mode": true,
   "platform": "Linux",
   "distro": "Ubuntu",
   "dependencies": [
     {
       "dependency": "Sandbox",
       "state": {
-        "state": "Present",
-        "at": "/machine/bin/bwrap",
-        "target": null
+        "state": "Absent",
+        "trouble": null,
+        "seen": null
       },
       "install": {
-        "install": "Idle"
+        "install": "Installing"
       }
     },
     {
       "dependency": "Git",
       "state": {
-        "state": "Present",
-        "at": "/machine/bin/git",
-        "target": null
+        "state": "Absent",
+        "trouble": null,
+        "seen": null
       },
       "install": {
-        "install": "Idle"
+        "install": "Installing"
       }
     },
     {
       "dependency": "Claude",
       "state": {
-        "state": "Present",
-        "at": "/machine/bin/claude",
-        "target": null
+        "state": "Absent",
+        "trouble": null,
+        "seen": null
       },
       "install": {
         "install": "Idle"
@@ -44,7 +44,7 @@
         "seen": null
       },
       "install": {
-        "install": "Idle"
+        "install": "Installing"
       }
     },
     {
@@ -86,9 +86,15 @@
   ],
   "accounts": [],
   "steps": {
-    "dependencies": true,
-    "accounts": true,
-    "git": true
+    "dependencies": false,
+    "accounts": false,
+    "git": false
   },
-  "run": null
+  "run": {
+    "phase": "Asking",
+    "status": "Waiting for the password dialog on ada-box",
+    "done": 0,
+    "total": 3,
+    "cancelling": false
+  }
 }

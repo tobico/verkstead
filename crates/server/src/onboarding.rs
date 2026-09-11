@@ -74,6 +74,15 @@
 //! somebody waits for an install, and a token is not something to hand a page
 //! that is drawing a sidebar.
 //!
+//! **And one thing here is done rather than read**: installing what the first
+//! step is missing. The human ticks the absent rows they want and presses Next
+//! once, and what that starts is a sequence of commands raised through the
+//! [`crate::remote::Elevate`] handle the desktop app hands the server — see
+//! [`install`], which is the whole of the run. It is still nothing written
+//! down: a run belongs to the life of this server, and the rows under it go on
+//! being probed at every read, which is what says a row that was installing has
+//! landed.
+//!
 //! **All of it follows [`crate::platform`]'s discipline**: the platform is a
 //! value rather than a `cfg`, and the machine is a set of values read at the
 //! edge and passed down — see [`Machine`]. That is what leaves every arm,
@@ -90,15 +99,20 @@ use anyhow::Result;
 use sqlx::SqlitePool;
 use tokio::sync::OnceCell;
 use verkstead_render::{
-    AccountView, Dependency, DependencyState, DependencyView, Distro, OnboardingView, PrefillView,
-    Prefilled, Seen, Source, StepsView,
+    AccountView, Dependency, DependencyState, DependencyView, Distro, InstallState, OnboardingView,
+    PrefillView, Prefilled, RunView, Seen, Source, StepsView,
 };
 
 use crate::github::Gh;
 use crate::platform::{Environment, Platform};
+use crate::remote::Elevate;
 use crate::settings::Settings;
 use crate::unseen::Unseen;
 use crate::{github, profiles, sandbox, sessions, store};
+
+mod install;
+
+pub(crate) use install::Refusal;
 
 /// Where a Linux machine says which distribution it is.
 ///
@@ -134,6 +148,33 @@ const SHELL: &str = "/bin/sh";
 
 /// The program the Linux sandbox row is about.
 const BWRAP: &str = "bwrap";
+
+/// What a machine calls itself when it will not say, and what a stated one is
+/// called until a test says otherwise — see [`Machine::called`].
+///
+/// The sentence it goes in is *waiting for the password dialog on …*, so what
+/// stands in for a name is the thing that sentence is pointing at.
+const NAMELESS: &str = "this machine";
+
+/// And what a stated machine is called, which is a name nobody's box has: what
+/// a test asserts about is what the server made of what it was told, and a
+/// hostname read off the box the suite is on would be a golden fixture nobody
+/// could commit.
+const STATED: &str = "a-machine";
+
+/// What this box calls itself, or [`NAMELESS`] where it will not say.
+///
+/// Read at the edge with everything else about the machine — see
+/// [`Machine::here`] — and never again: a hostname is a fact about the box
+/// rather than about a request, and the one sentence that needs it is written
+/// while somebody is waiting for a dialog.
+fn hostname() -> String {
+    hostname::get()
+        .ok()
+        .map(|name| name.to_string_lossy().into_owned())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| NAMELESS.to_owned())
+}
 
 /// Which harness row is which agent's, so that the name each is probed under is
 /// the program a session of that type is launched as.
@@ -207,6 +248,15 @@ pub struct Machine {
     /// is a unit test rather than a process environment a suite has to mutate.
     gh_token: Option<String>,
     github_token: Option<String>,
+
+    /// And what this box calls itself, which is the one thing here that is
+    /// neither a probe nor a setting: it is what the install run's status line
+    /// names while a password dialog is up — see [`install`].
+    ///
+    /// Stated like everything else rather than read where it is wanted, and for
+    /// the same reason: a status line that had this box's own hostname in it
+    /// would be a golden fixture that read differently on every machine.
+    hostname: String,
 }
 
 impl Machine {
@@ -225,6 +275,7 @@ impl Machine {
             std::env::var_os("PATHEXT"),
             std::fs::read_to_string(OS_RELEASE).ok(),
             &Environment::of_the_process(),
+            hostname(),
         )
     }
 
@@ -244,11 +295,27 @@ impl Machine {
         os_release: Option<String>,
         env: &Environment,
     ) -> Machine {
-        Machine::of(platform, Some(path), servers, pathext, os_release, env)
+        Machine::of(
+            platform,
+            Some(path),
+            servers,
+            pathext,
+            os_release,
+            env,
+            STATED.to_owned(),
+        )
+    }
+
+    /// The same, called something in particular — which is what the one
+    /// sentence that names this machine reads: the status line of an install
+    /// run, while a password dialog is up on its screen.
+    pub fn called(self, hostname: String) -> Machine {
+        Machine { hostname, ..self }
     }
 
     /// The two ways of making one, said once: a `PATH` a caller stated, or none
     /// at all for the machine that composes its own.
+    #[allow(clippy::too_many_arguments)]
     fn of(
         platform: Platform,
         path: Option<OsString>,
@@ -256,6 +323,7 @@ impl Machine {
         pathext: Option<OsString>,
         os_release: Option<String>,
         env: &Environment,
+        hostname: String,
     ) -> Machine {
         Machine {
             platform,
@@ -270,7 +338,19 @@ impl Machine {
             home: crate::platform::home_dir(platform, env),
             gh_token: env.gh_token.clone(),
             github_token: env.github_token.clone(),
+            hostname,
         }
+    }
+
+    /// What this machine calls itself.
+    fn hostname(&self) -> &str {
+        &self.hostname
+    }
+
+    /// And which of the wizard's eight tabs it is, which is also which package
+    /// manager an install run raises — see [`install`].
+    fn distro(&self) -> Distro {
+        distro(self.platform, self.os_release.as_deref())
     }
 
     /// Everything a reading of this machine asks it, made in one hop off the
@@ -581,6 +661,14 @@ struct Probed {
 pub struct Onboarding {
     machine: Machine,
     mode: Arc<Mode>,
+
+    /// And the install run, which is the one thing the wizard *does* to this
+    /// machine rather than reads off it — see [`install`].
+    ///
+    /// Held beside the mode for the same reason the mode is held: a run belongs
+    /// to the life of this server, so what is here is what has happened since it
+    /// came up, and a restart has none of it.
+    installer: Arc<install::Installer>,
 }
 
 /// Whether the wizard is the only page there is, held for the length of a run.
@@ -605,11 +693,17 @@ struct Mode {
 }
 
 impl Onboarding {
-    /// A server that probes `machine`.
-    pub fn probing(machine: Machine) -> Onboarding {
+    /// A server that probes `machine`, and installs what its wizard is missing
+    /// by raising a command through `escalation`.
+    ///
+    /// `None` is a server nothing handed a way to ask: it probes and draws
+    /// exactly as the other does, and a run started on it installs nothing and
+    /// says why on every ticked row — see [`install`].
+    pub fn probing(machine: Machine, escalation: Option<Arc<dyn Elevate>>) -> Onboarding {
         Onboarding {
             machine,
             mode: Arc::new(Mode::default()),
+            installer: Arc::new(install::Installer::raising(escalation)),
         }
     }
 
@@ -632,15 +726,58 @@ impl Onboarding {
 
         let steps = steps(&probed.dependencies, pool, settings).await?;
 
+        // And the run over the top of them, where one has been started: what the
+        // probe answers is whether the machine has the thing, and what the run
+        // answers is whether Verkstead is in the middle of putting it there.
+        let (run, dependencies) = installing(probed.dependencies, self.installer.reading());
+
         Ok(OnboardingView {
             mode: self.mode(steps).await,
             platform: shown(self.machine.platform),
-            distro: distro(self.machine.platform, self.machine.os_release.as_deref()),
-            dependencies: probed.dependencies,
+            distro: self.machine.distro(),
+            dependencies,
             path: probed.path,
             accounts: probed.accounts,
             steps,
+            run,
         })
+    }
+
+    /// Start an install run over `ticked`, and answer as soon as it is going.
+    ///
+    /// **Refused while the wizard is not the page there is.** A run installs
+    /// software on the machine this server is on, behind a password dialog, and
+    /// the one thing that says somebody asked for it is the wizard being up:
+    /// see [`Refusal::Over`], which is a Verkstead that came up with the
+    /// objective met or one whose wizard has already finished.
+    ///
+    /// **And while one is going**, which is the same press twice — see
+    /// [`Refusal::Going`].
+    pub(crate) async fn install(&self, ticked: Vec<Dependency>) -> Result<(), Refusal> {
+        if !self.wizarding() {
+            return Err(Refusal::Over);
+        }
+
+        // Off the runtime, being a `PATH` walk and a thread spawned. It answers
+        // as soon as the run is going rather than when it is over: what is on
+        // the other side of it is a human reading a dialog.
+        let installing = self.clone();
+
+        tokio::task::spawn_blocking(move || {
+            installing.installer.start(&installing.machine, &ticked)
+        })
+        .await
+        .unwrap_or(Ok(()))
+    }
+
+    /// Cancel whatever is going: the unit under way finishes, and the units
+    /// after it are skipped.
+    ///
+    /// Nothing where nothing is going, and refused for nothing: a press that
+    /// stops something is not one to hold up over whether the wizard is still
+    /// the page.
+    pub(crate) fn cancel(&self) {
+        self.installer.cancel();
     }
 
     /// What this machine can offer the git step, for whatever Verkstead has
@@ -698,6 +835,50 @@ impl Onboarding {
 
         *unmet && !self.mode.finished.load(Ordering::SeqCst)
     }
+
+    /// The same question asked without a reading in hand, which is what a press
+    /// has: whether this server is still the wizard.
+    ///
+    /// **A verdict nothing has settled yet reads as the wizard.** The startup
+    /// read settles it within a moment of the server coming up — see
+    /// [`at_startup`] — so what this is about is the sliver before that, and a
+    /// press inside it came from a page that is drawing the wizard. Refusing it
+    /// would be refusing the one thing the human is there to do.
+    fn wizarding(&self) -> bool {
+        self.mode.settled.get().copied().unwrap_or(true)
+            && !self.mode.finished.load(Ordering::SeqCst)
+    }
+}
+
+/// The rows with whatever a run has made of them written over the top, and the
+/// run itself.
+///
+/// Two lists rather than one, because they are answers to different questions
+/// asked a moment apart: the rows come off a probe of the machine and the run
+/// off what this server is doing to it. A row a run says nothing about is left
+/// exactly as the probe found it.
+fn installing(
+    dependencies: Vec<DependencyView>,
+    run: Option<(RunView, Vec<(Dependency, InstallState)>)>,
+) -> (Option<RunView>, Vec<DependencyView>) {
+    let Some((run, installing)) = run else {
+        return (None, dependencies);
+    };
+
+    let dependencies = dependencies
+        .into_iter()
+        .map(
+            |row| match installing.iter().find(|(of, _)| *of == row.dependency) {
+                Some((_, install)) => DependencyView {
+                    install: install.clone(),
+                    ..row
+                },
+                None => row,
+            },
+        )
+        .collect();
+
+    (Some(run), dependencies)
 }
 
 /// Settle the verdict, as early in a run as there is a runtime to settle it on.
@@ -843,9 +1024,14 @@ fn said<'a>(os_release: &'a str, key: &str) -> Option<&'a str> {
         .map(|(_, value)| value.trim().trim_matches(['"', '\'']))
 }
 
-/// One row.
+/// One row, as the probe alone answers it: whatever an install run has made of
+/// it is written over the top afterwards — see [`installing`].
 fn row(dependency: Dependency, state: DependencyState) -> DependencyView {
-    DependencyView { dependency, state }
+    DependencyView {
+        dependency,
+        state,
+        install: InstallState::Idle,
+    }
 }
 
 /// What `bwrap` at this path made of the most trivial sandbox there is.
@@ -1981,14 +2167,17 @@ echo {token}
             git: true,
         };
 
-        let onboarding = Onboarding::probing(Machine::stated(
-            Platform::Linux,
-            OsString::new(),
-            OsString::new(),
+        let onboarding = Onboarding::probing(
+            Machine::stated(
+                Platform::Linux,
+                OsString::new(),
+                OsString::new(),
+                None,
+                None,
+                &Environment::default(),
+            ),
             None,
-            None,
-            &Environment::default(),
-        ));
+        );
 
         assert!(onboarding.mode(unmet).await, "the objective was not met");
         assert!(
@@ -2007,14 +2196,17 @@ echo {token}
             git: false,
         };
 
-        let onboarding = Onboarding::probing(Machine::stated(
-            Platform::Linux,
-            OsString::new(),
-            OsString::new(),
+        let onboarding = Onboarding::probing(
+            Machine::stated(
+                Platform::Linux,
+                OsString::new(),
+                OsString::new(),
+                None,
+                None,
+                &Environment::default(),
+            ),
             None,
-            None,
-            &Environment::default(),
-        ));
+        );
 
         assert!(onboarding.mode(unmet).await);
 

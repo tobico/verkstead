@@ -595,6 +595,7 @@ pub fn router(pool: SqlitePool) -> Router {
         tailnet(),
         key::Gate::open(),
         onboarding::Machine::here(),
+        None,
     )
 }
 
@@ -614,6 +615,7 @@ pub fn router_keeping(pool: SqlitePool, data_dir: PathBuf) -> Router {
         tailnet(),
         key::Gate::open(),
         onboarding::Machine::here(),
+        None,
     )
 }
 
@@ -640,6 +642,7 @@ pub fn router_installed(
         tailnet(),
         key::Gate::open(),
         onboarding::Machine::here(),
+        None,
     )
 }
 
@@ -671,6 +674,7 @@ pub fn router_running_sessions(
         tailnet(),
         key::Gate::open(),
         onboarding::Machine::here(),
+        None,
     )
 }
 
@@ -692,6 +696,7 @@ pub fn router_asking_github(pool: SqlitePool, data_dir: PathBuf, gh: Gh) -> Rout
         tailnet(),
         key::Gate::open(),
         onboarding::Machine::here(),
+        None,
     )
 }
 
@@ -735,6 +740,28 @@ pub fn router_onboarding_asking_github(
     machine: onboarding::Machine,
     gh: Gh,
 ) -> Router {
+    router_onboarding_elevating(pool, data_dir, machine, gh, None)
+}
+
+/// And the same again, raising the wizard's install run through `escalation`.
+///
+/// What the installer's own suite is stood up over, and a parameter for the
+/// reason the machine above is one: what a press does is put a password dialog
+/// on somebody's screen and run a package manager behind it, and neither of
+/// those is a thing to do to the box a suite happens to be running on. A stub
+/// records the command it was handed and answers for the human — see
+/// [`remote::Elevate`], which is the same seam the desktop app hands the served
+/// router.
+///
+/// `None` is the arm every other server is: nothing to ask with, so a run
+/// installs nothing and every ticked row says why.
+pub fn router_onboarding_elevating(
+    pool: SqlitePool,
+    data_dir: PathBuf,
+    machine: onboarding::Machine,
+    gh: Gh,
+    escalation: Option<Arc<dyn remote::Elevate>>,
+) -> Router {
     routed(
         pool,
         updates::Updates::nothing_learned(),
@@ -745,6 +772,7 @@ pub fn router_onboarding_asking_github(
         tailnet(),
         key::Gate::open(),
         machine,
+        escalation,
     )
 }
 
@@ -767,6 +795,7 @@ pub fn router_reading_tailscale(pool: SqlitePool, remote: remote::Tailscale) -> 
         remote,
         key::Gate::open(),
         onboarding::Machine::here(),
+        None,
     )
 }
 
@@ -795,6 +824,7 @@ pub fn router_reading_tailscale_keyed(
         remote,
         key::Gate::keyed(key),
         onboarding::Machine::here(),
+        None,
     )
 }
 
@@ -861,12 +891,13 @@ pub fn router_checking_updates(pool: SqlitePool, releases: Option<&str>) -> Rout
         tailnet(),
         key::Gate::open(),
         onboarding::Machine::here(),
+        None,
     )
 }
 
-/// Nine, because the state a router holds is what a router is built out of:
-/// each of these is one thing the served router was given and every other one
-/// stands in for. A struct of them would be this list with a name on it.
+/// Ten, because the state a router holds is what a router is built out of: each
+/// of these is one thing the served router was given and every other one stands
+/// in for. A struct of them would be this list with a name on it.
 #[allow(clippy::too_many_arguments)]
 fn routed(
     pool: SqlitePool,
@@ -878,6 +909,7 @@ fn routed(
     remote: remote::Tailscale,
     gate: key::Gate,
     machine: onboarding::Machine,
+    escalation: Option<Arc<dyn remote::Elevate>>,
 ) -> Router {
     let state = AppState {
         pool,
@@ -912,8 +944,10 @@ fn routed(
         key: gate.held(),
 
         // And the machine the onboarding probes are made against, held with the
-        // verdict they settle at startup — see [`onboarding`].
-        onboarding: onboarding::Onboarding::probing(machine),
+        // verdict they settle at startup and with the way this process asks for
+        // a privilege — which is what the wizard's install run raises one
+        // command through. See [`onboarding`], and [`remote::Elevate`].
+        onboarding: onboarding::Onboarding::probing(machine, escalation),
 
         data_dir,
         checkouts: Arc::new(tokio::sync::Mutex::new(())),
@@ -1030,6 +1064,14 @@ async fn health() -> &'static str {
 /// served on, which is the one thing here that has to be told where the server
 /// is listening: a serve is this workbench's when it proxies to that port — see
 /// [`remote`].
+///
+/// And `escalation` is how this process asks the machine for a privilege it has
+/// not got, where whatever started it handed a way over: the operator grant the
+/// Remote access pane takes, and the one elevated command the onboarding
+/// wizard's install run raises — see [`remote::Elevate`], which both of them go
+/// through. `None` is a server started from a shell or a unit file, with nobody
+/// at that machine to put a dialog in front of.
+#[allow(clippy::too_many_arguments)]
 pub fn router_with_ui(
     pool: SqlitePool,
     releases: Option<&str>,
@@ -1038,6 +1080,7 @@ pub fn router_with_ui(
     gh: Gh,
     remote: remote::Tailscale,
     key: key::WorkbenchKey,
+    escalation: Option<Arc<dyn remote::Elevate>>,
 ) -> Router {
     // Off the agents, for the reason [`router_running_sessions`] takes it off
     // them: one configured set, said once.
@@ -1054,6 +1097,7 @@ pub fn router_with_ui(
         remote,
         gate.clone(),
         onboarding::Machine::here(),
+        escalation,
     )
     .fallback_service(guarded_viewer::<viewer::Built>(&gate))
 }
@@ -1080,6 +1124,7 @@ pub fn router_keyed(pool: SqlitePool, key: key::WorkbenchKey) -> Router {
         tailnet().keyed(key.clone()),
         key::Gate::keyed(key),
         onboarding::Machine::here(),
+        None,
     )
 }
 
@@ -1372,10 +1417,15 @@ pub async fn run_on_keyed(
         // install told to listen somewhere else is one whose serve has to point
         // somewhere else too — see [`remote`]. With whatever this process was
         // started with a way to escalate through, where it was started with one.
-        tailnet_over(config.listen.port(), escalation, key.clone()),
+        tailnet_over(config.listen.port(), escalation.clone(), key.clone()),
         // And the key this Data Directory holds, which is what the workbench
         // and the viewer's own namespace are behind.
         key,
+        // And that same way of escalating again, for the other thing that takes
+        // one: the elevated command the onboarding wizard's install run raises
+        // — see [`onboarding::install`]. One handle rather than two, because it
+        // is one dialog on one machine.
+        escalation,
     );
 
     // Two listeners over one router here, so that everything a request can ask

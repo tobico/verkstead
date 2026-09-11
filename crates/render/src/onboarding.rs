@@ -42,6 +42,13 @@
 //! cannot use it — where it was seen. See [`Seen`], which is the difference
 //! between a program to install and a `PATH` to fix.
 //!
+//! **And the install run is the one thing here that is neither.** What the
+//! wizard's first step does about a missing row is install it, and a run of
+//! that is a thing that is happening rather than a thing that was read — see
+//! [`RunView`] and [`InstallState`]. It is still not a setting: a run belongs
+//! to this server's life and nothing about it is written down, so a Verkstead
+//! that was restarted has none.
+//!
 //! **And where a session looks is the list itself.** A session's `PATH` is
 //! composed out of the one the server was started with, behind the directories
 //! Verkstead has itself installed into, so which directories those are is a fact
@@ -93,6 +100,13 @@ pub struct OnboardingView {
 
     /// And whether each of the three steps stands met, at this moment.
     pub steps: StepsView,
+
+    /// And the install run, where one has been started in this server's life —
+    /// going, or over and the last thing that happened here. See [`RunView`].
+    ///
+    /// Nothing until the first Next is pressed on the dependencies step, which
+    /// is every reading a wizard nobody has pressed anything on draws.
+    pub run: Option<RunView>,
 }
 
 /// The three platforms, as the viewer receives one.
@@ -138,6 +152,48 @@ pub enum Distro {
 pub struct DependencyView {
     pub dependency: Dependency,
     pub state: DependencyState,
+
+    /// And what the install run has made of it, where one has been started at
+    /// all — see [`InstallState`], which is *installing*, *failed with why*, or
+    /// nothing.
+    ///
+    /// Beside the state above rather than folded into it, because the two are
+    /// different questions asked at the same moment: whether this machine has
+    /// the thing is probed on every read, and whether Verkstead is in the
+    /// middle of putting it there is what the run says. A row that is
+    /// installing is a row that was absent — which is why it could be ticked —
+    /// and the same row a moment later is present with nothing under it.
+    pub install: InstallState,
+}
+
+/// What the install run has made of one row.
+///
+/// Flat on the wire — `{"install": "Failed", "why": "…"}` — the way
+/// [`DependencyState`] is, so the viewer narrows on a field rather than
+/// unwrapping a variant name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "install")]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum InstallState {
+    /// Nothing. No run has been started, or this row was not ticked, or its
+    /// unit has landed and the state beside this is what says how that went.
+    ///
+    /// A row still waiting for a unit further down the run reads this too: how
+    /// far the run has got is the bar's question — see [`RunView::done`] — and
+    /// a row saying *queued* would be a second answer to it.
+    Idle,
+
+    /// Its unit is running now.
+    Installing,
+
+    /// Its unit is over, and the thing is not installed.
+    Failed {
+        /// In the machine's own words: the first line the elevated run printed
+        /// on standard error, or whatever a dismissed password dialog was
+        /// refused in — and *cancelled* for a unit that was skipped rather than
+        /// run.
+        why: String,
+    },
 }
 
 /// What a row is about.
@@ -298,6 +354,87 @@ pub struct StepsView {
     /// And a git author: both halves of one, because that is what git asks for.
     /// The GitHub token is not in this — see ADR-0016.
     pub git: bool,
+}
+
+/// The install run as a whole: what it is doing, and how far it has got.
+///
+/// **One run at a time, and it is this server's.** The wizard's first step is
+/// ticked and pressed, and what that press starts is a sequence of commands —
+/// the elevated batch that installs this distribution's packages, and a vendor
+/// installer for each row no package manager carries. This is what the install
+/// screen is drawn from while they run: a status line, a bar, and the Cancel
+/// beside it.
+///
+/// **The rows say the rest.** Which row is installing and which one failed is
+/// on the row — see [`InstallState`] — because that is where the human is
+/// looking for it. What is here is the run's own half: what it is about at this
+/// moment, and how much of it is behind.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct RunView {
+    /// What the status line is about — see [`RunPhase`].
+    pub phase: RunPhase,
+
+    /// And the line itself, in words: *Waiting for the password dialog on
+    /// ada-box*, *Installing bubblewrap, git*, and what the run came to once it
+    /// is over.
+    ///
+    /// Written by the server rather than composed by the viewer, unlike every
+    /// other sentence about this step: the words name this machine and the
+    /// packages this distribution calls them, neither of which the viewer
+    /// knows.
+    pub status: String,
+
+    /// How many of the ticked rows are behind the run, whether they were
+    /// installed, refused or skipped.
+    pub done: u32,
+
+    /// And how many were ticked, which is what `done` is out of.
+    pub total: u32,
+
+    /// Whether Cancel has been pressed and the unit under way has not finished
+    /// yet.
+    ///
+    /// A press cannot stop a package manager that is already running — a
+    /// half-installed machine is worse than a fully installed one — so what
+    /// Cancel does is skip what has not started. This is the window between the
+    /// press and the run reaching that point.
+    pub cancelling: bool,
+}
+
+/// What the status line is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum RunPhase {
+    /// A password dialog is up on the machine Verkstead is running on, and
+    /// nothing else can happen until somebody answers it.
+    ///
+    /// Its own phase because of who is reading it: the human may be on a phone
+    /// on the tailnet, and a wizard that sat saying *installing* while a dialog
+    /// waited on a screen in another room would be a wizard that looked stuck.
+    /// The status line names the machine for that reason.
+    Asking,
+
+    /// Something is being installed.
+    Installing,
+
+    /// The run is over: everything ticked is either installed or on the hint
+    /// screen with a reason under it.
+    Done,
+}
+
+/// The press that starts one: the rows that were ticked.
+///
+/// Every one of them is a row the reading said was absent. A row that is
+/// present is not offered a checkbox to tick, and one this machine cannot
+/// install is not known in advance — what cannot be done is reported by the run
+/// rather than refused at the door, because what Verkstead can install is a fact
+/// about the distribution rather than about the row.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct InstallPress {
+    /// What to install, in any order: the run puts them in its own.
+    pub dependencies: Vec<Dependency>,
 }
 
 /// What this machine can offer the git step, for each field Verkstead has not
