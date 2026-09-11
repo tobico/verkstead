@@ -1775,8 +1775,8 @@ export type DependencyState = { "state": "Present",
  * was found in with the name on the end of it.
  *
  * Nothing on the sandbox row of the two platforms where a sandbox is
- * no program to find — Apple's own, and the identity a Windows session
- * runs under. Every other present row has one.
+ * no program to find — Apple's own, and the account a Windows session
+ * runs as. Every other present row has one.
  */
 at: string | null, 
 /**
@@ -1799,7 +1799,7 @@ trouble: string | null,
  * cannot use it — see [`Seen`]. Nothing where it is on no `PATH` at
  * all, which is a row with nothing to say beyond *install one*.
  */
-seen: Seen | null, } | { "state": "NotApplicable" };
+seen: Seen | null, };
 
 /**
  * One row of the dependencies step: a thing a session needs, and whether this
@@ -1992,10 +1992,11 @@ dependencies: Array<Dependency>, };
  */
 export type InstallState = { "install": "Idle" } | { "install": "Installing" } | { "install": "Failed", 
 /**
- * In the machine's own words: the first line the elevated run printed
- * on standard error, or whatever a dismissed password dialog was
- * refused in — and *cancelled* for a unit that was skipped rather than
- * run.
+ * In the machine's own words: the first line the run printed on
+ * standard error — the package manager's or the vendor installer's,
+ * whichever unit this row was — or whatever a dismissed password
+ * dialog was refused in, and *cancelled* for a unit that was skipped
+ * rather than run.
  */
 why: string, };
 

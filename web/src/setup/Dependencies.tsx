@@ -117,10 +117,6 @@ const WHY: Record<Dependency, string> = {
   Gh: "Optional: pull requests and reviews",
 };
 
-/// And what a row reads instead, where this platform has no such thing to have:
-/// the Windows sandbox row, whose whole answer is the note under it.
-const MOOT = "Not applicable";
-
 /// What the list of directories above the hint screen's rows is.
 ///
 /// The server's own, rather than a sentence about where a session looks on this
@@ -519,9 +515,14 @@ function Installing(props: {
 }): JSX.Element {
   return (
     <>
+      {/* What a machine raises and how often is the machine's own — one dialog
+          for the whole batch where a package manager takes a list of names, one
+          per install where it does not, and none at all on a Mac — so the line
+          says what is happening rather than how many dialogs to expect. The
+          status line under it is what names the one that is up. */}
       <p class={styles.standing}>
-        Verkstead is installing what you ticked. One password dialog covers the
-        packages this machine's own package manager carries.
+        Verkstead is installing what you ticked, on the machine it is running
+        on. Answer any password prompt that appears there.
       </p>
 
       <div
@@ -736,9 +737,7 @@ function Row(props: {
         />
         {NAMES[props.row.dependency]}
       </span>
-      <span class={styles.why}>
-        {state().state === "NotApplicable" ? MOOT : WHY[props.row.dependency]}
-      </span>
+      <span class={styles.why}>{WHY[props.row.dependency]}</span>
     </>
   );
 
@@ -912,12 +911,5 @@ function Instructed(props: { of: Instruction }): JSX.Element {
 
 /// How a row's state stands, as the mark beside its name.
 function standing(state: DependencyState): Standing {
-  switch (state.state) {
-    case "Present":
-      return "met";
-    case "NotApplicable":
-      return "moot";
-    default:
-      return "waiting";
-  }
+  return state.state === "Present" ? "met" : "waiting";
 }

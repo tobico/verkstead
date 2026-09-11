@@ -62,9 +62,11 @@
 //! `bwrap` that is installed is not yet a `bwrap` that works: unprivileged user
 //! namespaces can be switched off, and an AppImage cannot carry one. So the row
 //! runs the most trivial sandbox there is and keeps what the failure said. On
-//! macOS `sandbox-exec` is on every Mac and the row ticks; on Windows a
-//! session's boundary is an identity rather than something to install, and the
-//! row is not applicable at all.
+//! macOS `sandbox-exec` is on every Mac and the row ticks; and on Windows a
+//! session's boundary is an identity rather than a program, so the row is the
+//! local account this Data Directory's sessions run as — resolved on the
+//! machine at every read, and gating the step, because a server without one
+//! starts no session at all. See [`Machine::session_account`].
 //!
 //! **The git step's prefills are a read apart.** What `git config --global`
 //! says the machine commits as, and whatever GitHub token it is already
@@ -263,6 +265,28 @@ pub struct Machine {
     /// the same reason: a status line that had this box's own hostname in it
     /// would be a golden fixture that read differently on every machine.
     hostname: String,
+
+    /// The Data Directory this server keeps, which is what the account a
+    /// Windows session runs as is named after — see
+    /// [`sandbox::account::named`], and [`Machine::session_account`], which is
+    /// the sandbox row on that platform.
+    ///
+    /// Put on here rather than read where it is wanted because it is the same
+    /// directory twice over: the name the row is probed under, and the
+    /// `--data-dir` the elevated verb that makes one is run with. `None` is a
+    /// machine nothing told, which is every stated one a suite has not pointed
+    /// at a directory.
+    data_dir: Option<PathBuf>,
+
+    /// And the image this server is running, which is the program that verb is
+    /// a verb of.
+    ///
+    /// Read off the process on the machine this server is on and stated
+    /// otherwise, for the reason the hostname is: a command a suite asserts the
+    /// words of cannot have the test harness's own path in it. `None` is a
+    /// process that cannot say what it is running, which is a machine the
+    /// account cannot be made on from here.
+    verkstead: Option<PathBuf>,
 }
 
 impl Machine {
@@ -283,6 +307,12 @@ impl Machine {
             &Environment::of_the_process(),
             hostname(),
         )
+        // And the image this process is running, which is the program the
+        // elevated verb that makes a Windows session account belongs to — see
+        // [`Machine::verkstead`]. `None` where the process cannot say, which
+        // [`crate::sandbox::Executable::of_the_server`] logs about at startup
+        // for the other thing it costs.
+        .running(std::env::current_exe().ok())
     }
 
     /// A machine stated rather than read, which is what a test stands a server
@@ -319,6 +349,26 @@ impl Machine {
         Machine { hostname, ..self }
     }
 
+    /// And the same again, keeping its Data Directory at `data_dir`.
+    ///
+    /// Said here rather than passed to [`Machine::here`], because the directory
+    /// is settled where a router is built and the machine is read before that —
+    /// see [`crate::routed`], which is the one caller that is not a suite. What
+    /// it answers is the Windows sandbox row: an account is named after the
+    /// Data Directory whose sessions run as it.
+    pub fn against(self, data_dir: &Path) -> Machine {
+        Machine {
+            data_dir: Some(data_dir.to_owned()),
+            ..self
+        }
+    }
+
+    /// And running `verkstead`, which is the image the elevated verb that makes
+    /// that account is a verb of — see [`Machine::verkstead`].
+    pub fn running(self, verkstead: Option<PathBuf>) -> Machine {
+        Machine { verkstead, ..self }
+    }
+
     /// The two ways of making one, said once: a `PATH` a caller stated, or none
     /// at all for the machine that composes its own.
     #[allow(clippy::too_many_arguments)]
@@ -346,6 +396,8 @@ impl Machine {
             gh_token: env.gh_token.clone(),
             github_token: env.github_token.clone(),
             hostname,
+            data_dir: None,
+            verkstead: None,
         }
     }
 
@@ -381,6 +433,17 @@ impl Machine {
         self.user.as_deref()
     }
 
+    /// And the Data Directory whose sessions the Windows account belongs to —
+    /// see the field, and [`install`], which runs the verb that makes one.
+    fn data_dir(&self) -> Option<&Path> {
+        self.data_dir.as_deref()
+    }
+
+    /// And the image that verb is a verb of.
+    fn verkstead(&self) -> Option<&Path> {
+        self.verkstead.as_deref()
+    }
+
     /// And which of the wizard's eight tabs it is, which is also which package
     /// manager an install run raises — see [`install`].
     fn distro(&self) -> Distro {
@@ -404,7 +467,14 @@ impl Machine {
     /// sandbox, `git`, the four harnesses, and `gh`.
     ///
     /// Blocks: a `PATH` walk apiece, and one `bwrap` run.
-    fn rows(&self) -> Vec<DependencyView> {
+    ///
+    /// Reachable from outside the crate because one row is a question about the
+    /// machine that no router can be stood up to ask: the Windows sandbox row
+    /// is the account a Data Directory's sessions run as, and the Data
+    /// Directory a suite wants to ask about is the machine's real one — which
+    /// is not a directory to stand a server over. See
+    /// `tests/account_windows.rs`.
+    pub fn rows(&self) -> Vec<DependencyView> {
         let mut rows = vec![row(Dependency::Sandbox, self.sandbox())];
 
         rows.push(row(Dependency::Git, self.installed(sandbox::GIT)));
@@ -565,10 +635,11 @@ impl Machine {
                 target: None,
             },
 
-            // And on Windows there is no sandbox to have: what holds a session
-            // to its own work there is the identity it runs as, which Verkstead
-            // makes for itself.
-            Platform::Windows => DependencyState::NotApplicable,
+            // And on Windows what holds a session to its own work is the
+            // identity it runs as: the local account of Verkstead's own, which
+            // is a thing to have rather than a thing to install — see
+            // [`Machine::session_account`].
+            Platform::Windows => self.session_account(),
 
             Platform::Linux => match self.found(BWRAP) {
                 Some(bwrap) => trivially(&bwrap),
@@ -577,6 +648,41 @@ impl Machine {
                     seen: None,
                 },
             },
+        }
+    }
+
+    /// And what that comes to on Windows: whether the local account this Data
+    /// Directory's sessions run as is on this machine.
+    ///
+    /// **Which is the sandbox row there** (ADR-0014, *Amended: the Sandbox is
+    /// an account*). A Windows session is held to its own work by the identity
+    /// it runs as rather than by a namespace, so what the row is about is an
+    /// account rather than a program — and it **gates the step**, because a
+    /// server without one starts no session at all: every spawn is refused in
+    /// the words [`sandbox::account::Missing`] says it in.
+    ///
+    /// **Read and never made.** Making one is an administrator's call and is
+    /// the elevated verb's — see [`install`], which is what a ticked row runs.
+    /// All this does is resolve the name to a SID, which is nobody's privilege
+    /// and is the same call a session start makes.
+    ///
+    /// A machine nothing pointed at a Data Directory has no name to ask about,
+    /// and a build with no account database has nothing to ask — the second
+    /// being every platform that is not Windows, which only a suite ever
+    /// reaches with a stated machine.
+    fn session_account(&self) -> DependencyState {
+        let Some(data_dir) = self.data_dir() else {
+            return no_account(NO_DATA_DIRECTORY.to_owned());
+        };
+
+        match resolving(&sandbox::account::named(data_dir)) {
+            // No file to name: an account is not one, which is why the row's
+            // own `at` is nothing here the way the Mac's is.
+            Ok(()) => DependencyState::Present {
+                at: None,
+                target: None,
+            },
+            Err(why) => no_account(why),
         }
     }
 
@@ -999,13 +1105,15 @@ fn there(dependencies: &[DependencyView], dependency: Dependency) -> bool {
         .any(|row| row.dependency == dependency && present(&row.state))
 }
 
-/// Whether a row is one the objective can be met with: it is there, or it is
-/// nothing this platform has to have.
+/// Whether a row is one the objective can be met with, which is that the
+/// machine has the thing.
+///
+/// Every row on every platform: the two that are not a program to find — Apple's
+/// seatbelt, and the account a Windows session runs as — are a fact about the
+/// machine the same way, and the one of those that can be missing gates the
+/// step like any other row. See [`Machine::sandbox`].
 fn present(state: &DependencyState) -> bool {
-    matches!(
-        state,
-        DependencyState::Present { .. } | DependencyState::NotApplicable
-    )
+    matches!(state, DependencyState::Present { .. })
 }
 
 /// Which of the wizard's eight tabs this machine is.
@@ -1112,6 +1220,50 @@ fn trivially(bwrap: &Path) -> DependencyState {
             trouble: Some(trouble.to_string()),
             seen: None,
         },
+    }
+}
+
+/// What the Windows sandbox row says on a machine nothing told which Data
+/// Directory it keeps.
+///
+/// A server always says — see [`crate::routed`] — so this is a stated machine a
+/// suite pointed at no directory, and the honest answer is that there is no
+/// name to ask about rather than that the account is missing.
+const NO_DATA_DIRECTORY: &str = "this server was not told which Data Directory it keeps, so there is no account name to \
+     ask this machine about";
+
+/// And what it says where there is no account database to ask at all, which is
+/// every build that is not a Windows one.
+#[cfg(not(windows))]
+const NO_ACCOUNT_DATABASE: &str =
+    "this Verkstead was not built for Windows, so it has no account database to ask";
+
+/// Whether the local account called `name` is on this machine, and what the
+/// machine said where it is not.
+///
+/// The same resolution a session start makes — see
+/// [`sandbox::account::machine::sid_of`] — so the row and the spawn cannot come
+/// to disagree about whether there is an account.
+#[cfg(windows)]
+fn resolving(name: &str) -> Result<(), String> {
+    sandbox::account::machine::sid_of(name).map(|_| ())
+}
+
+/// And nowhere else. The account database is Windows', so a stated Windows
+/// machine on another platform — which is the only way this arm is reached — is
+/// one this cannot answer for, and says so rather than claiming the account is
+/// missing.
+#[cfg(not(windows))]
+fn resolving(_: &str) -> Result<(), String> {
+    Err(NO_ACCOUNT_DATABASE.to_owned())
+}
+
+/// A sandbox row that is not there because the account is not, in the machine's
+/// own words.
+fn no_account(why: String) -> DependencyState {
+    DependencyState::Absent {
+        trouble: Some(why),
+        seen: None,
     }
 }
 
@@ -1764,10 +1916,10 @@ echo {token}
         );
     }
 
-    /// The sandbox row on a Mac ticks and on Windows is not a thing to have,
-    /// whatever is on either machine's `PATH`.
+    /// The sandbox row on a Mac ticks whatever is on that machine's `PATH`:
+    /// `sandbox-exec` is Apple's own and there is nothing to find.
     #[test]
-    fn the_sandbox_row_is_answered_by_the_platform_where_it_is_not_a_program() {
+    fn the_sandbox_row_on_a_mac_is_answered_by_the_platform() {
         let dir = tempfile::tempdir().unwrap();
 
         assert_eq!(
@@ -1779,10 +1931,29 @@ echo {token}
             "every Mac has `sandbox-exec`, so there is nothing to install and no \
              file the row had to go and find",
         );
-        assert_eq!(
-            state(&machine(Platform::Windows, dir.path()), Dependency::Sandbox),
-            DependencyState::NotApplicable,
-            "and on Windows a session's boundary is an identity rather than a program",
+    }
+
+    /// And on Windows it is the account this Data Directory's sessions run as,
+    /// which is a thing to have rather than a program to find — so a machine
+    /// nobody pointed at a Data Directory is a row with no name to ask about.
+    ///
+    /// Whether the account is really there is the machine's answer, and this
+    /// runner has no account database to give one: what the two arms come to on
+    /// a Windows box is `tests/account_windows.rs`.
+    #[test]
+    fn the_sandbox_row_on_windows_is_the_session_account() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let DependencyState::Absent { trouble, seen } =
+            state(&machine(Platform::Windows, dir.path()), Dependency::Sandbox)
+        else {
+            panic!("a machine with no Data Directory has no account to have");
+        };
+
+        assert_eq!(seen, None, "an account is nowhere on a `PATH`");
+        assert!(
+            trouble.is_some_and(|why| why.contains("Data Directory")),
+            "the row says why it could not answer",
         );
     }
 
@@ -2052,18 +2223,25 @@ echo {token}
         );
     }
 
-    /// A sandbox row that is *not applicable* is a step that stands met: there
-    /// is nothing on Windows to install, so a row that never ticks must not be
-    /// a row that holds the wizard.
+    /// And the sandbox row holds the step on every platform, Windows' account
+    /// included: a machine with no account starts no session, so a row that
+    /// does not tick is a wizard that does not move on.
     #[test]
-    fn a_windows_sandbox_row_does_not_hold_the_step() {
-        let rows = vec![
-            row(Dependency::Sandbox, DependencyState::NotApplicable),
-            row(Dependency::Git, THERE),
-            row(Dependency::Claude, THERE),
-        ];
+    fn a_sandbox_row_that_is_not_there_holds_the_step() {
+        let met = |sandbox| {
+            dependencies_met(&[
+                row(Dependency::Sandbox, sandbox),
+                row(Dependency::Git, THERE),
+                row(Dependency::Claude, THERE),
+            ])
+        };
 
-        assert!(dependencies_met(&rows));
+        assert!(met(THERE));
+        assert!(
+            !met(no_account("there is no such account".to_owned())),
+            "a Windows machine the elevated verb has never been run on can run \
+             no session, so the step it holds up is this one",
+        );
     }
 
     /// The two fields git asks for come off the machine's own global config,

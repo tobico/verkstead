@@ -18,7 +18,7 @@
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
@@ -82,6 +82,10 @@ struct Standing {
     pool: SqlitePool,
     pipe: String,
     socket: SocketAddr,
+
+    /// And who the pipe grants, which is the one thing about a served listener
+    /// that can be moved from outside it — see [`pipe::Regranting`].
+    regranting: pipe::Regranting,
 }
 
 /// One server, listening on a pipe named after a Data Directory of its own and
@@ -96,6 +100,7 @@ async fn standing() -> Standing {
 
     let pipe = pipe::Listener::open(dir.path(), None).expect("nothing holds this name yet");
     let named = pipe.name().to_owned();
+    let regranting = pipe.regranting();
 
     let socket = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
         .await
@@ -113,6 +118,7 @@ async fn standing() -> Standing {
         pool,
         pipe: named,
         socket: address,
+        regranting,
     }
 }
 
@@ -189,19 +195,48 @@ fn get(path: &str) -> String {
 
 /// `request` asked over the pipe called `named`.
 async fn over_the_pipe(named: &str, request: &str) -> Answered {
-    let mut pipe = ClientOptions::new()
-        .open(named)
-        .unwrap_or_else(|what| panic!("opening {named}: {what}"));
+    asked(named, request)
+        .await
+        .unwrap_or_else(|what| panic!("asking {named}: {what}"))
+}
 
-    pipe.write_all(request.as_bytes()).await.unwrap();
+/// The same, and what went wrong where something did — which is what a client
+/// that has to dial again reads.
+async fn asked(named: &str, request: &str) -> std::io::Result<Answered> {
+    let mut pipe = ClientOptions::new().open(named)?;
+
+    pipe.write_all(request.as_bytes()).await?;
 
     let mut said = Vec::new();
     tokio::time::timeout(PATIENCE, pipe.read_to_end(&mut said))
         .await
-        .expect("the pipe should answer")
-        .unwrap();
+        .expect("the pipe should answer")?;
 
-    answered(&said)
+    Ok(answered(&said))
+}
+
+/// And the same asked until it is answered, which is what a client dialling
+/// across a re-open does.
+///
+/// **A re-open is the object closing and coming back** — see
+/// `verkstead_server::pipe` — so a client that dialled in that instant is
+/// refused, or has its connection closed under it, exactly as it would be by a
+/// server that is restarting. It dials again, which is what the CLI's own
+/// client does about the same thing.
+async fn over_the_pipe_until_answered(named: &str, request: &str) -> Answered {
+    let giving_up = Instant::now() + PATIENCE;
+
+    loop {
+        match asked(named, request).await {
+            Ok(answered) => return answered,
+            Err(what) => assert!(
+                Instant::now() < giving_up,
+                "the pipe never answered across the re-open: {what}",
+            ),
+        }
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 }
 
 /// And over the socket, which is the same request down the transport this is
@@ -247,6 +282,38 @@ async fn the_health_check_answers_the_same_over_either() {
     );
     assert_eq!(over_a_pipe.body, "ok");
     assert_eq!(over_a_pipe, over_a_socket);
+}
+
+/// And it goes on answering when the account it should be granting turns up,
+/// which is the wizard having made one while the server is up.
+///
+/// **A server that came up on a machine with no session account opened its pipe
+/// granting nobody**, and the wizard's install run is what makes one — an hour
+/// later, with this listener already handed to `axum::serve`. So the grant is
+/// moved from outside it and the pipe is opened again behind that: what is
+/// asked here is that the request after it is answered, with nothing restarted.
+/// Which identity the re-opened pipe names is the pipe module's own test, read
+/// off a real descriptor.
+///
+/// Asked until it is answered, because a re-open is the object closing and
+/// coming back: a client dialling in that instant is refused and dials again —
+/// see [`over_the_pipe_until_answered`].
+#[tokio::test]
+async fn a_pipe_regranted_while_it_is_serving_goes_on_answering() {
+    let standing = standing().await;
+
+    // A local account of the shape the elevated verb leaves behind. Nobody's,
+    // and it does not have to be: a descriptor names identities and never asks
+    // the machine whether it has heard of them.
+    standing.regranting.to("S-1-5-21-1001-1002-1003-1004");
+
+    let over_a_pipe = over_the_pipe_until_answered(&standing.pipe, &get("/api/v1/health")).await;
+
+    assert!(
+        over_a_pipe.status.contains("200"),
+        "the pipe should go on answering across a re-grant, got {over_a_pipe:?}"
+    );
+    assert_eq!(over_a_pipe.body, "ok");
 }
 
 /// And the endpoints under a Conversation's own base, which are the whole of

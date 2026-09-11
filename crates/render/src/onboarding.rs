@@ -206,7 +206,9 @@ pub enum InstallState {
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Dependency {
     /// What a session is run inside: `bwrap` on Linux, the seatbelt on macOS,
-    /// and nothing at all on Windows.
+    /// and on Windows the local account of Verkstead's own that a session runs
+    /// as — a boundary that is an identity rather than a program, and one the
+    /// wizard can make.
     Sandbox,
 
     /// Which is not optional: every Conversation is a branch and a worktree.
@@ -241,8 +243,8 @@ pub enum DependencyState {
         /// was found in with the name on the end of it.
         ///
         /// Nothing on the sandbox row of the two platforms where a sandbox is
-        /// no program to find — Apple's own, and the identity a Windows session
-        /// runs under. Every other present row has one.
+        /// no program to find — Apple's own, and the account a Windows session
+        /// runs as. Every other present row has one.
         at: Option<String>,
 
         /// And the file that path finally lands on, where it is a link and the
@@ -266,10 +268,6 @@ pub enum DependencyState {
         /// all, which is a row with nothing to say beyond *install one*.
         seen: Option<Seen>,
     },
-
-    /// It is not a thing on this platform: the Windows sandbox row, where a
-    /// session's boundary is an identity rather than something to install.
-    NotApplicable,
 }
 
 /// Where a program was seen that a session still cannot run.

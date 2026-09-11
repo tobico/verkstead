@@ -393,8 +393,8 @@ round is to take the mark off before opening it instead: right-click the msi,
 unsigned, so an installer asking for administrator would be an unsigned program
 asking for the machine, and elevation buys a downloader nothing they wanted.
 There is one elevated step on this platform and it is below, after the install
-rather than inside it: a command you type once, having already decided to trust
-this, rather than a package you hand the machine to before you have seen it.
+rather than inside it: one you take once, having already decided to trust this,
+rather than a package you hand the machine to before you have seen it.
 Everything therefore lands in the profile: the two exes under
 `%LOCALAPPDATA%\Programs\Verkstead`, a **Verkstead** entry in your own Start
 menu, and the uninstall entry in **Installed apps** beside everything else you
@@ -407,13 +407,20 @@ the rest work in a terminal opened *after* the install. One that was already
 open never read the entry — closing it and opening another is the whole of the
 fix — and the uninstall takes the entry away with the files.
 
-**Then one command, once, as an administrator.** Sessions on this machine run
-as a local account of Verkstead's own rather than as you — which is what keeps
-an agent out of your Documents — and creating a local account is an
-administrator's call. So this is the one thing Verkstead has ever asked you to
-elevate for. Right-click the Start button, choose **Terminal (Admin)** or
-**Windows PowerShell (Admin)**, answer the **User Account Control** prompt, and
-run it there:
+**Then one elevated step, once — and the wizard takes it for you.** Sessions on
+this machine run as a local account of Verkstead's own rather than as you —
+which is what keeps an agent out of your Documents — and creating a local
+account is an administrator's call. The setup wizard's first step is where that
+happens: the sandbox row reads absent until there is an account, ticking it and
+pressing **Next** runs the command below behind a **User Account Control**
+prompt, and the row goes present without anything being restarted. That is the
+one thing Verkstead has ever asked you to elevate for, and it asks once.
+
+**By hand, where the wizard could not.** A Verkstead started from a terminal
+rather than from its icon has no screen to put a UAC prompt on, and sends the
+row to the wizard's last screen with this line on it instead. Right-click the
+Start button, choose **Terminal (Admin)** or **Windows PowerShell (Admin)**,
+answer the prompt, and run it there:
 
 ```console
 $ verkstead session-account create

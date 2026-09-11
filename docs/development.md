@@ -614,10 +614,12 @@ a session is granted.
 **And a Windows checkout needs the session account, once.** Every suite that
 starts a session starts it *as* that account — `sessions_windows.rs`, the two
 boundary suites, `account_windows.rs`, `launcher_windows.rs`, and the
-`sandbox::granting::writing` tests inside the server crate — and none of them
-can make an account, that being an administrator's call. So a machine that has
-never run the verb fails there with the line naming it rather than passing
-quietly, and the verb is run once from an elevated terminal:
+`sandbox::granting::writing` tests inside the server crate — and the wizard's
+sandbox row at the foot of `account_windows.rs` asks whether there is one at
+all. None of them can make an account, that being an administrator's call. So a
+machine that has never run the verb fails there with the line naming it rather
+than passing quietly, and the verb is run once from an elevated terminal — which
+is also what the wizard's first step now does for whoever is at the app:
 
 ```console
 $ verkstead session-account create   # elevated, once per Data Directory

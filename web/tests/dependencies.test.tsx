@@ -175,9 +175,14 @@ const A_MAC: OnboardingView = {
 };
 
 /// And a Windows machine, where a session's boundary is an identity rather than
-/// a program.
+/// a program: the sandbox row is the local account Verkstead's sessions run as,
+/// and this one has not got it.
 const WINDOWS: OnboardingView = {
-  ...stating(FRESH, "Sandbox", { state: "NotApplicable" }),
+  ...stating(FRESH, "Sandbox", {
+    state: "Absent",
+    trouble: "there is no local account vk-0123456789ab for this Data Directory",
+    seen: null,
+  }),
   platform: "Windows",
   distro: "Windows",
 };
@@ -339,16 +344,15 @@ describe("the checkbox screen", () => {
     expect(box(container, "Codex")!.checked).toBe(false);
   });
 
-  /// And a row this platform has no such thing to have keeps its dash: there is
-  /// nothing to install, so there is nothing to tick.
-  it("keeps the dash on a row that is not applicable", () => {
+  /// And the sandbox row on Windows is a box like any other: what it is about
+  /// there is the account a session runs as, which the wizard can make.
+  it("carries a box on the Windows sandbox row", () => {
     const { container } = mount(WINDOWS);
     const sandbox = row(container, "Sandbox");
 
-    expect(sandbox.dataset.state).toBe("NotApplicable");
-    expect(sandbox.textContent).toContain("Not applicable");
-    expect(sandbox.querySelector('[aria-label="not applicable"]')).not.toBeNull();
-    expect(box(container, "Sandbox")).toBeNull();
+    expect(sandbox.dataset.state).toBe("Absent");
+    expect(box(container, "Sandbox")!.checked).toBe(true);
+    expect(sandbox.textContent).toContain("there is no local account");
   });
 
   /// Everything this screen used to carry about installing something by hand is
@@ -975,14 +979,18 @@ describe("what each machine is told to run", () => {
     }
   });
 
-  /// The elevated command the Windows sandbox row is: there is nothing to
-  /// install for it, and there is still one thing to run.
+  /// The Windows sandbox row is an account rather than an install, and the
+  /// wizard makes one: what this tab carries is the same thing by hand, for
+  /// whoever is here because it could not.
   it("names the elevated command the Windows sandbox row is met by", () => {
-    expect(GUIDES.Windows.rows.Sandbox.note).toContain(
-      "there is nothing to install",
+    expect(GUIDES.Windows.rows.Sandbox.command).toBe(
+      "verkstead session-account create",
     );
     expect(GUIDES.Windows.rows.Sandbox.note).toContain(
-      "verkstead session-account",
+      "Ticking this row makes it for you",
+    );
+    expect(GUIDES.Windows.rows.Sandbox.note).toContain(
+      "Run as administrator",
     );
   });
 });

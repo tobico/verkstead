@@ -33,4 +33,4 @@ screen moves on by itself, and every button in the wizard reads Next.
 - [x] 03: The three screens — [details](03-screens.md)
 - [x] 04: The vendor installers as the user — [details](04-vendor-installers.md)
 - [x] 05: macOS — [details](05-macos.md)
-- [ ] 06: Windows — [details](06-windows.md)
+- [x] 06: Windows — [details](06-windows.md)

@@ -37,11 +37,10 @@
 //!
 //! **The descriptor is settled when the pipe is opened.** It grants the account
 //! the server runs as, and beside it the one identity a session of this
-//! installation runs as: the local account of Verkstead's own, which is on the
-//! machine before the server starts and is the same account for every
-//! Conversation (ADR-0014, *Amended: the Sandbox is an account*). So
-//! [`Listener::open`] is handed that identity and every instance it creates
-//! grants it, and there is nothing to add afterwards.
+//! installation runs as: the local account of Verkstead's own, which is the
+//! same account for every Conversation (ADR-0014, *Amended: the Sandbox is an
+//! account*). So [`Listener::open`] is handed that identity and every instance
+//! it creates grants it.
 //!
 //! It used to be a set that was added to, and only because the identity was
 //! not there yet: an AppContainer was made per Conversation as that
@@ -49,10 +48,27 @@
 //! account for the installation takes that whole mechanism away, which is a
 //! simplification rather than a retargeting.
 //!
-//! **A machine with no account opens a pipe granting nobody**, and there is
-//! nothing to handle about it here: a session with no account to run as is
-//! refused before it is started at all — see [`crate::sandbox::account`] — so
-//! nothing is ever inside to be refused the pipe.
+//! **A machine with no account opens a pipe granting nobody.** Which is a
+//! machine that starts no session either — a session with no account to run as
+//! is refused before anything is started, see [`crate::sandbox::account`] — so
+//! there is never anybody inside to be refused the pipe.
+//!
+//! **And the one thing that makes an account makes it while the server is
+//! up.** The onboarding wizard's install run is where an account comes from now
+//! (ADR-0016), and it runs an hour after this pipe was opened granting nobody.
+//! So the grant is a value the listener re-reads rather than one it was built
+//! with: [`hold_the_grant`] leaves the handle where that run can reach it, and
+//! [`granted`] moves it.
+//!
+//! **Which really re-opens the pipe.** The descriptor belongs to the pipe
+//! *object* rather than to an instance of it — it is the one the instance that
+//! created the object was given, and every instance after that is handed the
+//! object that is already there — so a wider descriptor on one more instance
+//! would change nothing at all. What moves the grant is the object going and
+//! coming back: the last instance closed and a first one created again. See
+//! [`Listener::regranted`], which [`Listener::accept`] reaches the moment the
+//! grant moves under it. A session started after that asks over the pipe with
+//! nothing restarted.
 
 use std::ffi::{OsStr, c_void};
 use std::io;
@@ -62,6 +78,7 @@ use std::ptr;
 use std::time::Duration;
 
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
+use tokio::sync::watch;
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, LocalFree};
 use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
@@ -83,6 +100,11 @@ const AGAIN: Duration = Duration::from_secs(1);
 /// What Win32 puts in front of every pipe name. The API's, rather than
 /// anybody's to type — see [`Listener::asked_through`].
 const PREFIX: &str = r"\\.\pipe\";
+
+/// What a listener without its waiting instance would be, said where the
+/// invariant is read — see [`Listener::waiting`], which is empty for the one
+/// instant a re-grant is closing the pipe and opening it again.
+const HELD: &str = "a listener holds an instance except while it is being re-opened";
 
 /// The named pipe a server keeping its Data Directory at `data_dir` listens on,
 /// as Win32 names one: the spelling `CreateNamedPipeW` takes and `CreateFileW`
@@ -154,15 +176,81 @@ pub struct Listener {
     /// The one identity each instance is created granting beside the account
     /// the server runs as, and nothing where there is none to grant.
     ///
-    /// Held for the listener's whole life because an instance is made per
-    /// connection and every one of them is created granting it — see this
-    /// module's own documentation, where the whole of why it is one identity
-    /// and why it is settled here is.
-    granting: Option<String>,
+    /// A **receiver** rather than a value because the identity can arrive
+    /// inside a run: the install run makes the account the wizard's first step
+    /// is missing, and says so here — which is what wakes an accept to open the
+    /// pipe again. See [`granted`], and this module's own documentation.
+    granting: watch::Receiver<Option<String>>,
+
+    /// And the end that moves it, kept so that a caller can be handed one after
+    /// the pipe is open — see [`Listener::regranting`].
+    regranting: Regranting,
 
     /// The instance created and waiting for a client. There is always one — see
     /// this module's own documentation.
-    waiting: NamedPipeServer,
+    ///
+    /// **An `Option` for one instant and no other.** A pipe object's descriptor
+    /// is the one the instance that *created* it was given, so moving the grant
+    /// means closing the last instance and creating a first one again: this is
+    /// empty between those two, and nowhere else — see [`Listener::regranted`].
+    waiting: Option<NamedPipeServer>,
+}
+
+/// Who the pipe grants, as the thing that makes an account holds it.
+///
+/// A handle rather than a call into the listener, because the listener is
+/// handed to `axum::serve` the moment it is open and nothing can reach it
+/// again: what crosses is this, and what it does is say the identity. Re-opening
+/// the pipe with it is the listener's own business — see
+/// [`Listener::regranted`].
+#[derive(Debug, Clone)]
+pub struct Regranting(watch::Sender<Option<String>>);
+
+impl Regranting {
+    /// Grant `identity` from here on.
+    ///
+    /// Nothing is re-opened here. What this does is say so; the listener does
+    /// the re-opening the moment it is next between clients, which is
+    /// immediately — an accept that is waiting on one wakes for this.
+    pub fn to(&self, identity: &str) {
+        // A receiver that has gone is a server that has stopped serving, which
+        // is nothing to report from here: what was going to ask over the pipe
+        // was going to ask a process that is not there.
+        let _ = self.0.send(Some(identity.to_owned()));
+    }
+}
+
+/// The grant of the one pipe this process opened, left where whatever makes an
+/// account while the server is up can reach it.
+///
+/// **Held rather than threaded**, the way `session_path` is — see
+/// [`crate::sandbox::hold_session_path`]. The pipe is opened as the server
+/// comes up and the install run is a press an hour later, and every router
+/// between them would otherwise carry a parameter about a platform most of them
+/// are not on.
+static GRANTING: std::sync::RwLock<Option<Regranting>> = std::sync::RwLock::new(None);
+
+/// Hold `regranting` for the rest of this run.
+///
+/// Called once as the server comes up, with the pipe it just opened — see
+/// [`crate::run_on_keyed`].
+pub fn hold_the_grant(regranting: Regranting) {
+    *GRANTING.write().unwrap_or_else(|held| held.into_inner()) = Some(regranting);
+}
+
+/// And the account this Data Directory's sessions run as has just been made:
+/// the pipe is opened again granting `identity`.
+///
+/// Nothing at all where no pipe was opened, which is every platform but this
+/// one and a server whose listener is not this process's.
+pub(crate) fn granted(identity: &str) {
+    if let Some(regranting) = GRANTING
+        .read()
+        .unwrap_or_else(|held| held.into_inner())
+        .as_ref()
+    {
+        regranting.to(identity);
+    }
 }
 
 impl Listener {
@@ -185,12 +273,76 @@ impl Listener {
         let name = format!("{PREFIX}{bare}");
         let waiting = instance(&name, &Descriptor::granting(granting)?, true)?;
 
+        // The sender goes to whoever is holding it and the receiver stays here:
+        // what moves the grant is an account made inside this run — see
+        // [`Listener::regranting`].
+        let (moving, granting) = watch::channel(granting.map(str::to_owned));
+
         Ok(Listener {
             name,
             asked_through: format!("pipe://{bare}"),
-            granting: granting.map(str::to_owned),
-            waiting,
+            granting,
+            regranting: Regranting(moving),
+            waiting: Some(waiting),
         })
+    }
+
+    /// The handle that moves who this pipe grants, for whatever makes an
+    /// account while the server is up — see [`hold_the_grant`], which is where
+    /// the one caller leaves it.
+    pub fn regranting(&self) -> Regranting {
+        self.regranting.clone()
+    }
+
+    /// Open the pipe again, granting whoever it grants now.
+    ///
+    /// **A pipe object's descriptor is the one the instance that made it was
+    /// given**, and every instance after that is handed the object that is
+    /// already there: a further instance created with a wider descriptor is a
+    /// handle on the old grant. So moving the grant is the object going and
+    /// coming back — the last instance closed, and a *first* instance created
+    /// again with the new descriptor. What a session dials next is that one.
+    ///
+    /// **Which wants nothing else holding the name.** A connection open at this
+    /// moment is a pipe object that outlives the close, and the first-instance
+    /// flag is refused for exactly that — so what is made then is an ordinary
+    /// instance and the pipe goes on serving on the grant it had, said in the
+    /// log because it is the one thing a caller cannot see. In practice there
+    /// is nothing to hold it: the account being made is what a session is
+    /// waiting for, so there is no session inside yet.
+    ///
+    /// Reached where the grant has moved and nowhere else, which is once in the
+    /// life of a server that came up without an account and never on one that
+    /// did.
+    fn regranted(&mut self) -> io::Result<()> {
+        let granting = self.granting.borrow_and_update().clone();
+        let descriptor = Descriptor::granting(granting.as_deref())?;
+
+        // Closed before the next is made, which is the whole of the mechanism —
+        // and is why the field is an `Option`: for this instant the name has
+        // nothing behind it, and a client dialling inside it is refused as it
+        // would be a moment before the server came up.
+        self.waiting = None;
+
+        match instance(&self.name, &descriptor, true) {
+            Ok(opened) => {
+                self.waiting = Some(opened);
+                Ok(())
+            }
+
+            Err(refused) => {
+                tracing::warn!(
+                    error = %refused,
+                    "the named pipe could not be opened again granting the account that was \
+                     just made — something is still connected to it, so it goes on granting \
+                     what it did until Verkstead is started again",
+                );
+
+                self.waiting = Some(instance(&self.name, &descriptor, false)?);
+
+                Ok(())
+            }
+        }
     }
 
     /// What the pipe is called as Win32 names one: the spelling every instance
@@ -222,9 +374,43 @@ impl axum::serve::Listener for Listener {
 
     async fn accept(&mut self) -> (Self::Io, Self::Addr) {
         loop {
-            if let Err(what) = self.waiting.connect().await {
-                went_wrong(&what).await;
-                continue;
+            // Two things can happen to an instance that is waiting: a client
+            // dials it, or the account it should have been granting turns up
+            // and the pipe is opened again — see [`Listener::regranted`].
+            // `connect` is cancel-safe, so the branch that loses has lost
+            // nothing.
+            //
+            // And the client wins where both are ready, because the re-open
+            // closes the instance it would have been answered on: a grant that
+            // waits for the next accept is a moment later, and a connection
+            // dropped for it is a request nobody answered.
+            tokio::select! {
+                biased;
+
+                connected = self.waiting.as_ref().expect(HELD).connect() => {
+                    if let Err(what) = connected {
+                        went_wrong(&what).await;
+                        continue;
+                    }
+                }
+
+                moved = self.granting.changed() => {
+                    // A sender that has gone is nobody left to move the grant,
+                    // which is a listener that goes on granting what it has.
+                    //
+                    // And round again until there is an instance, rather than
+                    // once: a re-open closes the one there was before it makes
+                    // the next, so a failure here is a name with nothing behind
+                    // it — which is the accept error the trait's own
+                    // documentation describes, and is waited out the same way.
+                    if moved.is_ok() {
+                        while let Err(what) = self.regranted() {
+                            went_wrong(&what).await;
+                        }
+                    }
+
+                    continue;
+                }
             }
 
             // The next instance before the connected one is handed over, so
@@ -233,11 +419,15 @@ impl axum::serve::Listener for Listener {
             // documentation describes: said, waited on, and gone round again
             // rather than an end to the server.
             //
-            // Created granting what this listener was opened granting, which is
-            // one identity and the same one for the life of the server — see
-            // this module's own documentation.
+            // Created granting whoever the pipe grants now, which is the
+            // descriptor the object already has: a grant that moved moved it by
+            // closing the object and making it again, so by here there is
+            // nothing left for an instance to differ about — see
+            // [`Listener::regranted`].
+            let granting = self.granting.borrow_and_update().clone();
+
             let next = loop {
-                match Descriptor::granting(self.granting.as_deref())
+                match Descriptor::granting(granting.as_deref())
                     .and_then(|granting| instance(&self.name, &granting, false))
                 {
                     Ok(next) => break next,
@@ -245,10 +435,7 @@ impl axum::serve::Listener for Listener {
                 }
             };
 
-            return (
-                std::mem::replace(&mut self.waiting, next),
-                self.name.clone(),
-            );
+            return (self.waiting.replace(next).expect(HELD), self.name.clone());
         }
     }
 
@@ -600,10 +787,73 @@ mod tests {
         drop(connected);
     }
 
+    /// And a pipe opened granting nobody grants the account the moment there is
+    /// one, which is the wizard's install run having made it.
+    ///
+    /// **Which has to be a re-open rather than one more instance.** A pipe
+    /// object's descriptor is the one the instance that made it was given, so a
+    /// further instance created with the account named in it would read back
+    /// exactly as this reads before the re-grant — which is what this asserts
+    /// against. See [`Listener::regranted`], and this module's own
+    /// documentation.
+    #[tokio::test]
+    async fn a_pipe_granting_nobody_grants_an_account_made_since() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut listener = Listener::open(dir.path(), None).unwrap();
+
+        assert_eq!(
+            granted_by(&listener),
+            vec![the_server_runs_as().unwrap()],
+            "a server that came up before the verb was run grants nobody else",
+        );
+
+        listener.regranting().to(THE_SESSION_ACCOUNT);
+        listener.regranted().expect("the pipe to be opened again");
+
+        assert_eq!(
+            granted_by(&listener),
+            vec![
+                the_server_runs_as().unwrap(),
+                THE_SESSION_ACCOUNT.to_owned()
+            ],
+            "the instance a session would dial should grant the account just made",
+        );
+    }
+
+    /// And every instance behind it grants it too, rather than only the one the
+    /// re-grant made.
+    #[tokio::test]
+    async fn an_instance_made_after_a_regrant_grants_it_too() {
+        use axum::serve::Listener as _;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut listener = Listener::open(dir.path(), None).unwrap();
+
+        listener.regranting().to(THE_SESSION_ACCOUNT);
+        listener.regranted().expect("the pipe to be opened again");
+
+        let dialled = ClientOptions::new()
+            .open(listener.name())
+            .expect("the account this test runs as to be granted its own pipe");
+        let (connected, _) = listener.accept().await;
+
+        assert_eq!(
+            granted_by(&listener),
+            vec![
+                the_server_runs_as().unwrap(),
+                THE_SESSION_ACCOUNT.to_owned()
+            ],
+            "the instance made behind that connection is made with the grant that moved",
+        );
+
+        drop(dialled);
+        drop(connected);
+    }
+
     /// Who `listener`'s pipe lets through, in the order its descriptor says it,
     /// asked of the pipe itself.
     fn granted_by(listener: &Listener) -> Vec<String> {
-        let dacl = dacl_of(listener.waiting.as_raw_handle() as HANDLE);
+        let dacl = dacl_of(listener.waiting.as_ref().expect(HELD).as_raw_handle() as HANDLE);
 
         dacl.split('(')
             .skip(1)

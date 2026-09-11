@@ -40,15 +40,15 @@ import type { Dependency, Distro } from "../api/types";
 
 /// One row's instruction, on one operating system.
 ///
-/// A command, a link, or a note by itself — the sandbox row on macOS and on
-/// Windows is nothing to install, and *other Linux* has the generic list of
-/// what is needed where the five named distributions have a line to paste.
+/// A command, a link, or a note by itself — the sandbox row on macOS is nothing
+/// to install, and *other Linux* has the generic list of what is needed where
+/// the five named distributions have a line to paste.
 ///
-/// Nothing to install is not always nothing to do: the Windows sandbox row is
-/// an account rather than a program, and its note carries the one elevated
-/// command that makes one. A command field there would be a line to paste that
-/// fails in the terminal most people have open, which is worse than a sentence
-/// saying where to paste it.
+/// The Windows sandbox row is neither of those: it is an account rather than a
+/// program, and the wizard makes one where it is ticked. What its command field
+/// carries is the same thing by hand, which is the line for whoever reaches
+/// this screen because Windows would not raise the dialog — and its note says
+/// which terminal that line has to be pasted into.
 export type Instruction = {
   /// What to run, exactly, where this OS carries the program.
   command?: string;
@@ -277,14 +277,15 @@ export const GUIDES: Record<Distro, Guide> = {
     title: "Windows",
     rows: {
       Sandbox: {
+        command: "verkstead session-account create",
         note:
           "Sessions on this machine run as a local account of Verkstead's " +
-          "own, which is the sandbox on Windows: there is nothing to " +
-          "install. Making that account is the one thing here that wants an " +
-          "administrator, and it wants one once — verkstead session-account " +
-          "create, from a terminal opened with Run as administrator. Until " +
-          "it has been run, a session on this machine is refused rather " +
-          "than started without a boundary.",
+          "own, which is the sandbox on Windows. Ticking this row makes it " +
+          "for you: making a local account wants an administrator, and the " +
+          "wizard asks Windows for one. This line is the same thing by hand, " +
+          "from a terminal opened with Run as administrator, and it wants " +
+          "running once. Until there is an account, a session on this " +
+          "machine is refused rather than started without a boundary.",
       },
       Git: { command: "winget install --id Git.Git" },
       Claude: orElse(

@@ -20,10 +20,17 @@
 //! path any account on the machine can already read — `cmd.exe` in the system
 //! directory, and the system directory itself to start in. So a refusal in this
 //! file is a refusal about the *logon*, which is what is being asked about.
+//!
+//! **And the wizard's row about the same account is at the foot of it**, that
+//! being the other thing this machine is the only one that can answer: the
+//! sandbox row on Windows is whether the local account is there (ADR-0016), and
+//! whether it is there is what this machine's own account database says.
 #![cfg(windows)]
 
 use std::path::PathBuf;
 
+use verkstead_render::{Dependency, DependencyState};
+use verkstead_server::onboarding::Machine;
 use verkstead_server::platform;
 use verkstead_server::sandbox::Rendering;
 use verkstead_server::sandbox::account::Logon;
@@ -206,6 +213,54 @@ fn an_account_with_no_password_is_refused_before_anything_starts() {
         refused.to_string().contains("the account end"),
         "the refusal should say which end of it this was, and it said: {refused}"
     );
+}
+
+/// And the wizard's own row about it: a Data Directory with no account is a
+/// sandbox row that is absent, and the machine's own — which the verb has been
+/// run for — is one that is present.
+///
+/// **Which is what holds the first step up on this platform.** A row that is
+/// not there is a step that is not met and a server that stays in onboarding
+/// mode, because a machine with no account starts no session: the two halves
+/// are one probe, and this is it asked of both directories.
+///
+/// The machine rather than a served router, because the Data Directory being
+/// asked about is the real one: a server stood up over that would sweep the
+/// worktrees of whatever is really running there.
+#[test]
+fn the_sandbox_row_is_this_data_directorys_account() {
+    let nowhere = tempfile::tempdir().expect("somewhere to put a Data Directory nothing made");
+
+    let DependencyState::Absent { trouble, .. } = sandbox_row(nowhere.path()) else {
+        panic!("a Data Directory the verb has never been run for has no account");
+    };
+
+    assert!(
+        trouble.is_some(),
+        "the row should carry what the machine said about the account",
+    );
+
+    let data_dir =
+        platform::data_dir(None).expect("this machine has somewhere for a Data Directory");
+
+    assert!(
+        matches!(sandbox_row(&data_dir), DependencyState::Present { .. }),
+        "this suite runs against the account of {}, and the sandbox row says there is \
+         not one — run `{}` from an elevated terminal",
+        data_dir.display(),
+        verkstead_server::sandbox::account::MAKE_IT,
+    );
+}
+
+/// The sandbox row of a machine keeping its Data Directory at `data_dir`.
+fn sandbox_row(data_dir: &std::path::Path) -> DependencyState {
+    Machine::here()
+        .against(data_dir)
+        .rows()
+        .into_iter()
+        .find(|row| row.dependency == Dependency::Sandbox)
+        .expect("the sandbox row, which is the first the step draws")
+        .state
 }
 
 /// What this test's own process is running as, for the assertion that a session

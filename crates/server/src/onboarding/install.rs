@@ -46,6 +46,18 @@
 //! [`Chain`], which is what makes a prefix nobody could make fail every `brew`
 //! line behind it rather than each of them separately.
 //!
+//! **And a Windows machine raises everything.** There the dialog is UAC and
+//! what is behind it is the same user with their administrator token, so
+//! `%USERPROFILE%` is still the human's own: a vendor's installer raised there
+//! lands where a session looks, which is what made the Unix arm keep those two
+//! out of the dialog in the first place. So every ticked row is one raised unit
+//! — `winget` for the packages, `npm install -g` for the two harnesses that
+//! come off npm, and the vendors' PowerShell installers — and the sandbox row is
+//! the one thing here that is not an install at all: it is the local account
+//! this Data Directory's sessions run as, made by Verkstead's own elevated verb
+//! and then granted on the named pipe without anything being restarted. See
+//! [`windows`], and [`crate::pipe::granted`].
+//!
 //! **Nothing runs while nobody is looking.** A run is started by a press and
 //! ends by itself; between presses the wizard is the probe it always was — a
 //! `PATH` walked and one `bwrap` run — which is also what says a row that was
@@ -59,9 +71,11 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+use base64::Engine;
 use verkstead_render::{Dependency, Distro, InstallState, RunPhase, RunView};
 
 use super::{Machine, SHELL};
+use crate::platform::Platform;
 use crate::remote::{Elevate, Raised};
 use crate::settings::Settings;
 
@@ -120,6 +134,54 @@ const GROK: Vendor = Vendor {
     lands: ".grok/bin",
 };
 
+/// Anthropic's installer on Windows, which is the PowerShell one.
+///
+/// The same install and the same landing place said the way this platform
+/// spells them: `%USERPROFILE%\.local\bin`, which is what a ticked row writes to
+/// `session_path`. The line is the one the wizard's own Windows tab shows — see
+/// `web/src/setup/instructions.ts`.
+const CLAUDE_ON_WINDOWS: Vendor = Vendor {
+    who: "Anthropic",
+    line: "irm https://claude.ai/install.ps1 | iex",
+    lands: r".local\bin",
+};
+
+/// And xAI's, which is the PowerShell one too.
+const GROK_ON_WINDOWS: Vendor = Vendor {
+    who: "xAI",
+    line: "irm https://x.ai/cli/install.ps1 | iex",
+    lands: r".grok\bin",
+};
+
+/// What installs a package on Windows: the word in front of every id, and what
+/// goes after it.
+///
+/// **Answering no questions**, which is the same rule the three Linux package
+/// managers' `-y` is here for: an install behind a password dialog has nobody
+/// at a terminal to say yes. `--exact` because `--id` is a substring match
+/// without it and two matches is a refusal; the two agreements because winget
+/// stops for the source's on its first run and for a package's whenever there
+/// is one; and `--silent` because an installer drawing its own windows on a
+/// machine nobody is looking at is an install that never finishes.
+///
+/// The hint screen's Windows tab shows the bare line instead — a human at a
+/// terminal is exactly who can answer what this has to answer in advance. See
+/// `web/src/setup/instructions.ts`.
+const WINGET: &str = "winget install --id";
+const UNATTENDED: &str = "--exact --silent --accept-package-agreements --accept-source-agreements";
+
+/// The node winget carries, which is what an npm harness is installed under
+/// where this machine has no `npm`.
+const NODE_ON_WINDOWS: &str = "OpenJS.NodeJS";
+
+/// And the verb that makes the account a Windows session runs as, which is the
+/// whole of what the sandbox row there installs.
+///
+/// Verkstead's own binary and an administrator's call (ADR-0014, *Amended: the
+/// Sandbox is an account*) — which is what the runas arm is: the elevated
+/// terminal the doc used to send somebody to, raised for them instead.
+const MAKE_THE_ACCOUNT: &str = "session-account create --data-dir";
+
 /// The program every install on a Mac goes through, and the name whose absence
 /// puts Homebrew's own two units in front of them.
 const BREW: &str = "brew";
@@ -160,6 +222,20 @@ const NO_DIALOG: &str = "Verkstead has no way to ask this machine for a password
 /// ticked row Homebrew would have installed.
 const NO_USER: &str = "Homebrew's prefix has to belong to somebody, and this server was started \
                        without a name for whoever is running it.";
+
+/// And what the Windows sandbox row says where this process cannot name the
+/// image the elevated verb is a verb of.
+///
+/// Which is a server that cannot say what it is running — see
+/// [`Machine::verkstead`]. The account is still Verkstead's own binary's to
+/// make, so the row goes to the hint screen with the command a human runs.
+const NO_IMAGE: &str = "Verkstead cannot say which program it is running, so it has no binary to \
+                        make the account with.";
+
+/// And where it does not know which Data Directory the account would belong to,
+/// which is a stated machine nobody pointed at one.
+const NO_DATA_DIRECTORY: &str = "Verkstead was not told which Data Directory it keeps, so it \
+                                 cannot say which account to make.";
 
 /// How often the marker is glanced at while a dialog is up — see [`STARTED`].
 const GLANCE: Duration = Duration::from_millis(200);
@@ -283,23 +359,40 @@ struct Unit {
     /// And what this unit is part of, where it is part of anything: a unit that
     /// fails takes every later unit of its own chain with it — see [`Chain`].
     chain: Option<Chain>,
+
+    /// And the local account it makes, where what it makes is one.
+    ///
+    /// **The Windows sandbox row and nothing else.** The named pipe a sandboxed
+    /// Windows session asks through is opened granting the account this Data
+    /// Directory's sessions run as, and a server that came up before there was
+    /// one is granting nobody — so the unit that makes the account says which
+    /// one it made, and the pipe is opened again granting it. See
+    /// [`crate::pipe::granted`], which is what makes a session started a minute
+    /// later able to ask without anything having restarted.
+    regrants: Option<String>,
 }
 
 /// A run of units that stand or fall together.
 ///
-/// **One thing on one platform, and it is Homebrew.** Every install on a Mac is
-/// a `brew install`, so a Mac without `brew` has two units in front of the
-/// ticked rows — the prefix, and the installer that fills it — and a row
-/// installed by a `brew` that was never installed is a command that would fail
-/// saying nothing anybody can act on. So the first of the chain that fails
-/// fails the rest of it, in the words it failed in, and nothing after it is
-/// run. A unit outside the chain is untouched: Grok Build's installer wants no
-/// Homebrew and is nobody's business but its own.
+/// **A unit that installs the program the units behind it are run with.** Every
+/// install on a Mac is a `brew install`, so a Mac without `brew` has two units
+/// in front of the ticked rows — the prefix, and the installer that fills it —
+/// and a row installed by a `brew` that was never installed is a command that
+/// would fail saying nothing anybody can act on. So the first of the chain that
+/// fails fails the rest of it, in the words it failed in, and nothing after it
+/// is run. A unit outside the chain is untouched: Grok Build's installer wants
+/// no Homebrew and is nobody's business but its own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Chain {
     /// Homebrew: the prefix, the installer, and every `brew install` after
     /// them.
     Homebrew,
+
+    /// And node on Windows: the `winget` that puts `npm` on this machine, and
+    /// every `npm install -g` behind it — which would otherwise each fail
+    /// saying the machine has no `npm`, which is the failure in front of them
+    /// said worse.
+    Node,
 }
 
 /// How a unit is run.
@@ -364,6 +457,11 @@ struct Plan {
     /// before anything is raised: a machine Verkstead has no command for is one
     /// to say so about rather than one to put a password dialog on.
     beyond: Vec<(Dependency, String)>,
+
+    /// And whose shell a unit's line is one of, which is the one thing about
+    /// running it that is not written on the unit: `/bin/sh` on the two Unixes
+    /// and PowerShell on Windows — see [`raising`].
+    platform: Platform,
 }
 
 impl Installer {
@@ -399,7 +497,7 @@ impl Installer {
 
         let plan = match self.escalation.as_ref() {
             Some(_) => plan(machine, &ticked),
-            None => nothing(&ticked, NO_DIALOG),
+            None => nothing(machine, &ticked, NO_DIALOG),
         };
 
         let run = Arc::new(Run::of(&plan, machine.hostname()));
@@ -661,7 +759,7 @@ fn work(
                     .map(|dir| dir.path().join(format!("{STARTED}-{number}")));
 
                 run.asking(unit);
-                raised(run, unit, marker.as_deref(), escalation)
+                raised(run, plan.platform, unit, marker.as_deref(), escalation)
             }
 
             How::AsTheUser => {
@@ -672,6 +770,7 @@ fn work(
 
         if landed == Progress::Installed {
             landing(unit, settings);
+            regranted(unit);
         }
 
         if let (Progress::Failed(why), Some(chain)) = (&landed, unit.chain) {
@@ -688,13 +787,14 @@ fn work(
 /// where `marker` appears.
 fn raised(
     run: &Arc<Run>,
+    platform: Platform,
     unit: &Unit,
     marker: Option<&Path>,
     escalation: &dyn Elevate,
 ) -> Progress {
     let watching = marker.map(|marker| watch(run, marker.to_owned(), unit.doing.clone()));
 
-    let raised = escalation.raise(&raising(&unit.line, marker));
+    let raised = escalation.raise(&raising(platform, &unit.line, marker));
 
     if let Some((over, watching)) = watching {
         over.store(true, Ordering::SeqCst);
@@ -760,6 +860,40 @@ fn landing(unit: &Unit, settings: &Settings) {
     }
 }
 
+/// And the named pipe is opened again granting the account `unit` made.
+///
+/// **Which is what makes the row worth pressing at all.** A Windows server that
+/// came up before there was an account opened its pipe granting nobody, and a
+/// session of the account just made would be refused by it — so the SID is
+/// resolved here, the moment the verb has run, and the listener opens the pipe
+/// again with it. Nothing is restarted and no session has started yet.
+///
+/// A name the machine will not resolve a moment after the verb reported making
+/// it is a log line and nothing else: the account is there, so the row ticks
+/// and sessions start, and it is the pipe alone that goes on granting nobody
+/// until this server is next started.
+#[cfg(windows)]
+fn regranted(unit: &Unit) {
+    let Some(account) = unit.regrants.as_deref() else {
+        return;
+    };
+
+    match crate::sandbox::account::machine::sid_of(account) {
+        Ok(sid) => crate::pipe::granted(sid.text()),
+        Err(why) => tracing::warn!(
+            account,
+            why,
+            "the session account was made and this machine will not say what its SID is, so \
+             the named pipe goes on granting nobody until Verkstead is started again",
+        ),
+    }
+}
+
+/// And nothing anywhere else: no other platform opens a pipe, and no other
+/// platform's plan makes an account.
+#[cfg(not(windows))]
+fn regranted(_: &Unit) {}
+
 /// The first thing a command that failed printed on standard error, which is
 /// what its rows carry.
 fn first_line(stderr: &[u8]) -> String {
@@ -802,10 +936,11 @@ fn watch(run: &Arc<Run>, marker: PathBuf, doing: String) -> (Arc<AtomicBool>, Jo
 /// What `ticked` comes to on this machine: the commands, and the rows nothing
 /// here installs.
 ///
-/// **Two shapes, and which one a machine is, is the platform's answer rather
+/// **Three shapes, and which one a machine is, is the platform's answer rather
 /// than a preference.** A Linux installs out of the archive its distribution
 /// carries, raised once; a Mac installs out of Homebrew, raised never — see
-/// [`homebrew`].
+/// [`homebrew`]; and a Windows raises every ticked row on its own — see
+/// [`windows`].
 fn plan(machine: &Machine, ticked: &[Dependency]) -> Plan {
     let distro = machine.distro();
 
@@ -813,8 +948,12 @@ fn plan(machine: &Machine, ticked: &[Dependency]) -> Plan {
         return homebrew(machine, ticked);
     }
 
+    if distro == Distro::Windows {
+        return windows(machine, ticked);
+    }
+
     let Some(packager) = packager(distro) else {
-        return nothing(ticked, &no_command(distro));
+        return nothing(machine, ticked, &no_command(distro));
     };
 
     packages(machine, ticked, packager)
@@ -894,6 +1033,7 @@ fn packages(machine: &Machine, ticked: &[Dependency], packager: Packager) -> Pla
         how: How::Raised,
         lands: None,
         chain: None,
+        regrants: None,
     });
 
     // And the vendors' own installers after it, one unit apiece and none of them
@@ -909,7 +1049,11 @@ fn packages(machine: &Machine, ticked: &[Dependency], packager: Packager) -> Pla
         )
         .collect();
 
-    Plan { units, beyond }
+    Plan {
+        units,
+        beyond,
+        platform: machine.platform,
+    }
 }
 
 /// One unit running `vendor`'s own installer for `row`, as the user, landing in
@@ -926,6 +1070,7 @@ fn vendors_own(row: Dependency, vendor: Vendor, lands: PathBuf) -> Unit {
         how: How::AsTheUser,
         lands: Some(lands),
         chain: None,
+        regrants: None,
     }
 }
 
@@ -977,7 +1122,11 @@ fn homebrew(machine: &Machine, ticked: &[Dependency]) -> Plan {
         units.splice(0..0, first);
     }
 
-    Plan { units, beyond }
+    Plan {
+        units,
+        beyond,
+        platform: machine.platform,
+    }
 }
 
 /// What a `brew install` on this machine wants before it would work.
@@ -1031,6 +1180,7 @@ fn getting(machine: &Machine, ticked: &[Dependency]) -> Getting {
             how: How::Raised,
             lands: None,
             chain: Some(Chain::Homebrew),
+            regrants: None,
         },
         Unit {
             line: HOMEBREW.to_owned(),
@@ -1039,6 +1189,7 @@ fn getting(machine: &Machine, ticked: &[Dependency]) -> Getting {
             how: How::AsTheUser,
             lands: None,
             chain: Some(Chain::Homebrew),
+            regrants: None,
         },
     ])
 }
@@ -1072,6 +1223,7 @@ impl Brew {
             // [`homebrew`].
             lands: None,
             chain: Some(Chain::Homebrew),
+            regrants: None,
         }
     }
 }
@@ -1129,15 +1281,203 @@ fn on_a_mac(dependency: Dependency) -> OnAMac {
     }
 }
 
+/// And every ticked row on a Windows machine, which is one raised unit apiece.
+///
+/// **Everything goes behind the dialog here**, which is the other way up from
+/// both Unixes and is what that dialog is: `Start-Process -Verb RunAs` raises
+/// the *same* user with their administrator token, so `%USERPROFILE%` on the
+/// far side of it is still the human's own. A vendor's installer raised there
+/// lands where a session looks, which is the whole of what kept those two out
+/// of the dialog on a Linux — see [`vendors_own`]. And a package manager
+/// needs it: `winget` writing into Program Files is an administrator's call.
+///
+/// **One unit each rather than one batch.** `winget` takes one id at a time,
+/// and the two harnesses that come off npm are their own line apiece, so
+/// there is no batch to be made: what one press comes to is a dialog per
+/// ticked row, which is what this platform has instead.
+///
+/// **And node in front of the npm rows** where this machine has no `npm`,
+/// chained to them so that a `winget` nobody allowed fails them in its own
+/// words rather than leaving each to fail for want of a program — see
+/// [`Chain::Node`].
+///
+/// **The sandbox row is not an install at all.** It is the local account this
+/// Data Directory's sessions run as, and what it runs is Verkstead's own
+/// elevated verb — see [`the_account`]. A machine this server cannot name
+/// itself on, or one it was never told the Data Directory of, is a row for the
+/// hint screen with the line a human runs instead.
+fn windows(machine: &Machine, ticked: &[Dependency]) -> Plan {
+    let mut units: Vec<Unit> = Vec::new();
+    let mut beyond: Vec<(Dependency, String)> = Vec::new();
+    let mut from_npm = false;
+
+    for row in ticked {
+        match on_windows(*row) {
+            OnWindows::Account => match the_account(machine) {
+                Ok(unit) => units.push(unit),
+                Err(why) => beyond.push((*row, why)),
+            },
+
+            OnWindows::Winget(id) => units.push(winget(vec![*row], id, None)),
+
+            OnWindows::FromNpm(package) => {
+                from_npm = true;
+
+                units.push(Unit {
+                    line: format!("{NPM} install -g {package}"),
+                    covers: vec![*row],
+                    doing: format!("Installing {package}"),
+                    how: How::Raised,
+                    lands: None,
+                    chain: Some(Chain::Node),
+                    regrants: None,
+                });
+            }
+
+            // Under the home this machine names, which is `%USERPROFILE%` —
+            // see [`crate::platform::home_dir`]. A server started without one
+            // is a machine neither installer has anywhere to land in, exactly
+            // as it is on a Linux.
+            OnWindows::Vendor(vendor) => match machine.home() {
+                Some(home) => units.push(Unit {
+                    how: How::Raised,
+                    ..vendors_own(*row, vendor, home.join(vendor.lands))
+                }),
+                None => beyond.push((*row, no_home(*row))),
+            },
+        }
+    }
+
+    // The node winget carries, where an npm harness was ticked and this machine
+    // has no `npm`. In front of every ticked row rather than only in front of
+    // those two, which is where Homebrew's own units go and for the same
+    // reason: what is being installed first is what the rest is installed with.
+    //
+    // A row of nobody's, like Homebrew's two: what a session runs is the
+    // harness, and a row for the plumbing under it would be a row about
+    // plumbing.
+    if from_npm && machine.found(NPM).is_none() {
+        units.insert(0, winget(Vec::new(), NODE_ON_WINDOWS, Some(Chain::Node)));
+    }
+
+    Plan {
+        units,
+        beyond,
+        platform: machine.platform,
+    }
+}
+
+/// One `winget install` of `id`, for the rows it installs.
+///
+/// `covers` is empty for the one that installs node, which is a unit nobody's
+/// row is about.
+fn winget(covers: Vec<Dependency>, id: &str, chain: Option<Chain>) -> Unit {
+    Unit {
+        line: format!("{WINGET} {id} {UNATTENDED}"),
+        covers,
+        doing: format!("Installing {id}"),
+        how: How::Raised,
+
+        // A winget install lands on the machine's own floor, which every
+        // session's `PATH` already ends with — so there is nothing here to
+        // write to `session_path`.
+        lands: None,
+        chain,
+        regrants: None,
+    }
+}
+
+/// And the unit that makes the account a Windows session runs as, which is what
+/// the sandbox row installs.
+///
+/// **Verkstead's own verb, raised.** Creating a local account is an
+/// administrator's call (ADR-0014, *Amended: the Sandbox is an account*), which
+/// is why it was a line to type in an elevated terminal — and the runas arm is
+/// that terminal, opened for the human by the press. The Data Directory is said
+/// outright rather than left to the environment, the account's name being a
+/// fingerprint of it: a verb that resolved a different directory would make a
+/// different account.
+///
+/// And it says which account it made, so that the named pipe is re-opened
+/// granting it — see [`Unit::regrants`].
+fn the_account(machine: &Machine) -> Result<Unit, String> {
+    let Some(verkstead) = machine.verkstead() else {
+        return Err(NO_IMAGE.to_owned());
+    };
+
+    let Some(data_dir) = machine.data_dir() else {
+        return Err(NO_DATA_DIRECTORY.to_owned());
+    };
+
+    let account = crate::sandbox::account::named(data_dir);
+
+    Ok(Unit {
+        line: format!(
+            "& {} {MAKE_THE_ACCOUNT} {}",
+            said(&verkstead.to_string_lossy()),
+            said(&data_dir.to_string_lossy()),
+        ),
+        covers: vec![Dependency::Sandbox],
+        doing: format!("Making the local account {account} sessions run as"),
+        how: How::Raised,
+        lands: None,
+        chain: None,
+        regrants: Some(account),
+    })
+}
+
+/// How one row is installed on Windows: the account itself, a package winget
+/// carries, a package npm carries, or the vendor's own installer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OnWindows {
+    /// The sandbox row, which on this platform is the local account this Data
+    /// Directory's sessions run as — see [`the_account`].
+    Account,
+
+    /// A package winget carries, under the id it carries it as — the same ids
+    /// the hint screen's Windows tab shows.
+    Winget(&'static str),
+
+    /// A package npm carries, installed globally under the node the unit in
+    /// front of it made sure of.
+    FromNpm(&'static str),
+
+    /// Or the vendor's own installer, which is the PowerShell one here — see
+    /// [`CLAUDE_ON_WINDOWS`] and [`GROK_ON_WINDOWS`].
+    Vendor(Vendor),
+}
+
+/// Which of the four one row is.
+///
+/// **The same three-way split the other platforms have, with the account in
+/// front of it.** Claude Code is the native installer here as it is on a Linux
+/// — winget carries no Anthropic package — and the two npm harnesses are npm's
+/// for want of anything else that is really theirs.
+fn on_windows(dependency: Dependency) -> OnWindows {
+    match dependency {
+        Dependency::Sandbox => OnWindows::Account,
+
+        Dependency::Git => OnWindows::Winget("Git.Git"),
+        Dependency::Gh => OnWindows::Winget("GitHub.cli"),
+
+        Dependency::Codex => OnWindows::FromNpm("@openai/codex"),
+        Dependency::OpenCode => OnWindows::FromNpm("opencode-ai"),
+
+        Dependency::Claude => OnWindows::Vendor(CLAUDE_ON_WINDOWS),
+        Dependency::Grok => OnWindows::Vendor(GROK_ON_WINDOWS),
+    }
+}
+
 /// A plan that installs nothing, every ticked row failed with the same
 /// sentence.
-fn nothing(ticked: &[Dependency], why: &str) -> Plan {
+fn nothing(machine: &Machine, ticked: &[Dependency], why: &str) -> Plan {
     Plan {
         units: Vec::new(),
         beyond: ticked
             .iter()
             .map(|dependency| (*dependency, why.to_owned()))
             .collect(),
+        platform: machine.platform,
     }
 }
 
@@ -1264,8 +1604,14 @@ fn named(dependency: Dependency) -> &'static str {
 /// anything else it does.
 ///
 /// One shell line rather than an argument vector, because the elevated batch is
-/// two commands joined and the marker is a third — see [`STARTED`].
-fn raising(line: &str, marker: Option<&Path>) -> Vec<String> {
+/// two commands joined and the marker is a third — see [`STARTED`]. Whose shell
+/// is the platform's: `/bin/sh` on the two Unixes, and PowerShell on the one
+/// whose installers are written in it.
+fn raising(platform: Platform, line: &str, marker: Option<&Path>) -> Vec<String> {
+    if platform == Platform::Windows {
+        return powershell(line, marker);
+    }
+
     let line = match marker {
         Some(marker) => format!(": > {} && {line}", quoted(&marker.to_string_lossy())),
         None => line.to_owned(),
@@ -1274,9 +1620,60 @@ fn raising(line: &str, marker: Option<&Path>) -> Vec<String> {
     vec![SHELL.to_owned(), "-c".to_owned(), line]
 }
 
+/// And the same line as PowerShell takes one: encoded, and in one word.
+///
+/// **Encoded because of what raises it.** The runas arm hands the command to
+/// `Start-Process -ArgumentList`, which joins its arguments with spaces and
+/// quotes none of them — so a script with a space in it would arrive as a
+/// dozen arguments. `-EncodedCommand` takes base64 of UTF-16, which is one word
+/// with nothing in it a command line has an opinion about. See
+/// `verkstead_desktop::elevate`, which is the arm this is for.
+///
+/// **`Stop` because a cmdlet that fails is not a shell that failed.** A failing
+/// native command sets `$LASTEXITCODE` and a failing cmdlet — which is what
+/// `irm` is — writes an error and carries on, so without this an installer that
+/// could not reach the network would be a unit that reported success. With it
+/// the error is terminating, PowerShell exits non-zero, and the row fails.
+fn powershell(line: &str, marker: Option<&Path>) -> Vec<String> {
+    let mut script = String::from("$ErrorActionPreference = 'Stop'; ");
+
+    if let Some(marker) = marker {
+        script.push_str(&format!(
+            "New-Item -Force -ItemType File -Path {} | Out-Null; ",
+            said(&marker.to_string_lossy()),
+        ));
+    }
+
+    // And out with what the line exited with, `Start-Process -PassThru` on the
+    // other side of the dialog reporting the exit code of *this* process. A
+    // line that ran no native command leaves `$LASTEXITCODE` unset, which exits
+    // nought: nothing failed, and a cmdlet that did would have thrown above.
+    script.push_str(line);
+    script.push_str("; exit $LASTEXITCODE");
+
+    let utf16: Vec<u8> = script
+        .encode_utf16()
+        .flat_map(|unit| unit.to_le_bytes())
+        .collect();
+
+    vec![
+        "powershell".to_owned(),
+        "-NoProfile".to_owned(),
+        "-NonInteractive".to_owned(),
+        "-EncodedCommand".to_owned(),
+        base64::engine::general_purpose::STANDARD.encode(utf16),
+    ]
+}
+
 /// `word` as one word of a shell line.
 fn quoted(word: &str) -> String {
     format!("'{}'", word.replace('\'', r"'\''"))
+}
+
+/// And as one word of a PowerShell line, where the character that ends a
+/// literal string is written twice to mean itself.
+fn said(word: &str) -> String {
+    format!("'{}'", word.replace('\'', "''"))
 }
 
 /// What the status line says while a dialog is up.
@@ -1354,18 +1751,62 @@ mod tests {
             Distro::OtherLinux => (Platform::Linux, None),
         };
 
+        // Whichever variable this platform keeps a home in, so that a stated
+        // Windows machine names one the way a stated Linux does — see
+        // [`crate::platform::home_dir`].
+        let environment = match platform {
+            Platform::Windows => Environment {
+                userprofile: home,
+                user,
+                ..Environment::default()
+            },
+            Platform::Linux | Platform::MacOs => Environment {
+                home,
+                user,
+                ..Environment::default()
+            },
+        };
+
         Machine::stated(
             platform,
             OsString::from(dir.as_os_str()),
             OsString::from(dir.as_os_str()),
             None,
             os_release.map(str::to_owned),
+            &environment,
+        )
+    }
+
+    /// The profile a stated Windows machine runs under, which is where its
+    /// vendors' installers land.
+    const PROFILE: &str = r"C:\Users\ada";
+
+    /// And the Data Directory it keeps, and the image it is running: the two
+    /// the account row wants, and the two only the Windows arm asks for.
+    const DATA_DIR: &str = r"C:\ProgramData\verkstead";
+    const VERKSTEAD: &str = r"C:\Program Files\Verkstead\verkstead.exe";
+
+    /// And what it calls a program, which is the one thing on this platform
+    /// that says a name on the `PATH` is one: `npm` is `npm.cmd` here, so a
+    /// machine asked whether it has one has to be told the extensions.
+    const PATHEXT: &str = ".COM;.EXE;.BAT;.CMD";
+
+    /// A stated Windows machine that knows all of them, searching `dir`.
+    fn windows_machine(dir: &Path) -> Machine {
+        Machine::stated(
+            Platform::Windows,
+            OsString::from(dir.as_os_str()),
+            OsString::from(dir.as_os_str()),
+            Some(OsString::from(PATHEXT)),
+            None,
             &Environment {
-                home,
-                user,
+                userprofile: Some(PathBuf::from(PROFILE)),
+                user: Some(USER.to_owned()),
                 ..Environment::default()
             },
         )
+        .against(Path::new(DATA_DIR))
+        .running(Some(PathBuf::from(VERKSTEAD)))
     }
 
     /// The one command a plan of one unit raises.
@@ -1718,6 +2159,192 @@ mod tests {
         );
     }
 
+    /// A Windows machine raises a unit per ticked row, with the node winget
+    /// carries in front of the npm ones where it has no `npm`.
+    ///
+    /// Which is this task's own criterion: git and Codex ticked is `winget` for
+    /// git, `winget` for node, and the `npm install -g` — every one of them
+    /// behind the dialog.
+    #[test]
+    fn a_windows_machine_raises_a_unit_for_every_ticked_row() {
+        let plan = plan(
+            &windows_machine(&PathBuf::new()),
+            &[Dependency::Git, Dependency::Codex],
+        );
+
+        assert!(plan.beyond.is_empty(), "{plan:?}");
+
+        let [node, git, codex] = plan.units.as_slice() else {
+            panic!("node, and a unit per ticked row: {plan:?}");
+        };
+
+        assert_eq!(
+            node.line,
+            format!("winget install --id OpenJS.NodeJS {UNATTENDED}")
+        );
+        assert!(node.covers.is_empty(), "node is nobody's row");
+
+        assert_eq!(
+            git.line,
+            format!("winget install --id Git.Git {UNATTENDED}")
+        );
+        assert_eq!(git.covers, [Dependency::Git]);
+        assert_eq!(git.lands, None, "winget installs onto the machine's floor");
+        assert_eq!(git.chain, None, "git wants no node");
+
+        assert_eq!(codex.line, "npm install -g @openai/codex");
+        assert_eq!(codex.covers, [Dependency::Codex]);
+
+        for unit in [node, git, codex] {
+            assert_eq!(
+                unit.how,
+                How::Raised,
+                "every Windows install goes through the runas arm: {unit:?}",
+            );
+        }
+
+        // And the two that stand together: a node nobody allowed fails the
+        // `npm` line in its own words rather than leaving it to fail for want
+        // of a program.
+        assert_eq!(node.chain, Some(Chain::Node));
+        assert_eq!(codex.chain, Some(Chain::Node));
+    }
+
+    /// And node stays out where the machine has `npm`, the way it does on a
+    /// Linux.
+    #[test]
+    fn a_windows_machine_with_npm_installs_no_node() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::stand_ins::program(&dir.path().join("npm.CMD"), "@exit 0\n");
+
+        let plan = plan(&windows_machine(dir.path()), &[Dependency::OpenCode]);
+
+        assert_eq!(line(&plan), "npm install -g opencode-ai");
+    }
+
+    /// The sandbox row there is the account this Data Directory's sessions run
+    /// as, and what it runs is Verkstead's own elevated verb — said with the
+    /// directory outright, the account's name being a fingerprint of it.
+    #[test]
+    fn the_windows_sandbox_row_makes_the_session_account() {
+        let plan = plan(&windows_machine(&PathBuf::new()), &[Dependency::Sandbox]);
+
+        let [account] = plan.units.as_slice() else {
+            panic!("the one row, and one unit for it: {plan:?}");
+        };
+
+        assert_eq!(
+            account.line,
+            format!(
+                "& 'C:\\Program Files\\Verkstead\\verkstead.exe' session-account create \
+                 --data-dir '{DATA_DIR}'"
+            ),
+        );
+        assert_eq!(account.how, How::Raised);
+        assert_eq!(account.covers, [Dependency::Sandbox]);
+        assert_eq!(account.lands, None, "an account lands on no `PATH`");
+
+        // And it says which account it made, which is what the named pipe is
+        // re-opened granting — see [`regranted`].
+        assert_eq!(
+            account.regrants.as_deref(),
+            Some(crate::sandbox::account::named(Path::new(DATA_DIR)).as_str()),
+        );
+    }
+
+    /// And a server that cannot name the image it is running has no binary to
+    /// make one with, so that row is the hint screen's and the rest goes ahead.
+    #[test]
+    fn a_windows_machine_that_cannot_name_itself_makes_no_account() {
+        let plan = plan(
+            &windows_machine(&PathBuf::new()).running(None),
+            &[Dependency::Sandbox, Dependency::Git],
+        );
+
+        assert_eq!(
+            line(&plan),
+            format!("winget install --id Git.Git {UNATTENDED}")
+        );
+        assert_eq!(beyond(&plan), [Dependency::Sandbox]);
+        assert!(
+            plan.beyond[0].1.contains("which program it is running"),
+            "the row says what could not be done: {:?}",
+            plan.beyond[0].1,
+        );
+    }
+
+    /// The two vendors' installers are the PowerShell ones there, raised with
+    /// everything else and landing under the profile.
+    ///
+    /// **Raised is right here and wrong on a Linux**, and the difference is
+    /// what the dialog does: UAC raises the same user with their administrator
+    /// token, so `%USERPROFILE%` on the far side of it is still the human's.
+    #[test]
+    fn the_windows_vendor_installers_are_raised_and_land_under_the_profile() {
+        let plan = plan(
+            &windows_machine(&PathBuf::new()),
+            &[Dependency::Claude, Dependency::Grok],
+        );
+
+        let [claude, grok] = plan.units.as_slice() else {
+            panic!("a unit per vendor: {plan:?}");
+        };
+
+        assert_eq!(claude.line, "irm https://claude.ai/install.ps1 | iex");
+        assert_eq!(claude.how, How::Raised);
+        assert_eq!(claude.doing, "Running Anthropic's installer");
+        assert_eq!(
+            claude.lands,
+            Some(PathBuf::from(PROFILE).join(r".local\bin")),
+            "which is what goes on `session_path`, so the row ticks off the next probe",
+        );
+
+        assert_eq!(grok.line, "irm https://x.ai/cli/install.ps1 | iex");
+        assert_eq!(grok.how, How::Raised);
+        assert_eq!(grok.lands, Some(PathBuf::from(PROFILE).join(r".grok\bin")));
+    }
+
+    /// And a Windows command crosses as one encoded word, because what raises
+    /// it joins its arguments with spaces and quotes none of them.
+    #[test]
+    fn a_windows_command_is_one_encoded_word() {
+        let raised = raising(
+            Platform::Windows,
+            "winget install --id Git.Git",
+            Some(Path::new(r"C:\Temp\run\started")),
+        );
+
+        let [program, profile, interactive, encoded, script] = raised.as_slice() else {
+            panic!("PowerShell, its switches and the script: {raised:?}");
+        };
+
+        assert_eq!(program, "powershell");
+        assert_eq!(profile, "-NoProfile");
+        assert_eq!(interactive, "-NonInteractive");
+        assert_eq!(encoded, "-EncodedCommand");
+
+        assert_eq!(
+            decoded(script),
+            "$ErrorActionPreference = 'Stop'; \
+             New-Item -Force -ItemType File -Path 'C:\\Temp\\run\\started' | Out-Null; \
+             winget install --id Git.Git; exit $LASTEXITCODE",
+        );
+    }
+
+    /// What `-EncodedCommand` was handed, read back: base64 of UTF-16.
+    fn decoded(encoded: &str) -> String {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .expect("base64, which is what that switch takes");
+
+        let utf16: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .collect();
+
+        String::from_utf16(&utf16).expect("UTF-16, which is what that switch takes")
+    }
+
     /// A press on a server with nothing to raise a dialog with installs
     /// nothing, asks nothing, and every ticked row says why.
     #[test]
@@ -1752,6 +2379,7 @@ mod tests {
                 unit("third", Dependency::Gh),
             ],
             beyond: Vec::new(),
+            platform: Platform::Linux,
         };
 
         let run = Arc::new(Run::of(&plan, "a-machine"));
@@ -1830,6 +2458,7 @@ mod tests {
     #[test]
     fn the_command_says_it_has_started_before_it_starts() {
         let raised = raising(
+            Platform::Linux,
             "apt-get install -y git",
             Some(Path::new("/tmp/run/started")),
         );
@@ -1853,6 +2482,7 @@ mod tests {
             how: How::Raised,
             lands: None,
             chain: None,
+            regrants: None,
         }
     }
 

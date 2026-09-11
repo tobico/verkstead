@@ -947,7 +947,13 @@ fn routed(
         // verdict they settle at startup and with the way this process asks for
         // a privilege — which is what the wizard's install run raises one
         // command through. See [`onboarding`], and [`remote::Elevate`].
-        onboarding: onboarding::Onboarding::probing(machine, escalation),
+        //
+        // Pointed at this server's Data Directory here rather than where it was
+        // read, that being the one thing about the machine only a router knows:
+        // the account a Windows session runs as is named after it, and the
+        // sandbox row is whether this machine has one — see
+        // [`onboarding::Machine::against`].
+        onboarding: onboarding::Onboarding::probing(machine.against(&data_dir), escalation),
 
         data_dir,
         checkouts: Arc::new(tokio::sync::Mutex::new(())),
@@ -1350,6 +1356,13 @@ pub async fn run_on_keyed(
         session_account.as_ref().ok().map(|sid| sid.text()),
     )
     .context("opening the named pipe a Windows session asks through")?;
+
+    // And the grant left where the wizard's install run can reach it, which is
+    // the one thing that makes an account while a server is up: a machine that
+    // came up granting nobody re-opens the pipe behind that verb rather than
+    // waiting for a restart — see [`pipe::granted`], and [`onboarding::install`].
+    #[cfg(windows)]
+    pipe::hold_the_grant(pipe.regranting());
 
     // The one line an operator reads as Verkstead comes up, and so the daemon's
     // whole way of handing the login link over: the address with the key on it,
