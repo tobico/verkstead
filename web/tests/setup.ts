@@ -1,10 +1,25 @@
-import { cleanup } from "@solidjs/testing-library";
+import { cleanup, configure } from "@solidjs/testing-library";
 import { afterEach } from "vitest";
 
 // The library cleans up after itself only when vitest's globals are on, and
 // they are not: an uncleaned render leaves the last test's DOM in the document
 // for the next one's queries to find two of everything.
 afterEach(cleanup);
+
+// How long a wait is given, which is a budget on the machine rather than on the
+// code — the same thing `testTimeout` in `vite.config.ts` is, and said here
+// because testing-library keeps its own clock. Left alone the two disagree by a
+// factor of thirty: vitest allows a test thirty seconds, and every `waitFor`
+// inside it one. So under `nix flake check`, where the suite runs beside the
+// Rust build and the VM test on a two-core runner, a starved wait is reported as
+// the thing it was waiting for never arriving rather than as the clock running
+// out — which is the one kind of red that teaches nobody anything.
+//
+// Five seconds, because every wait here is for something already in flight: a
+// reading the stub has answered, a repaint the test itself pushed down a socket.
+// The number covers a stall on a busy machine and nothing else, and a test that
+// has genuinely hung is still ended by `testTimeout` long before the run is.
+configure({ asyncUtilTimeout: 5_000 });
 
 // jsdom has no `matchMedia`, and xterm.js asks for one the moment a terminal is
 // opened: it watches the device pixel ratio so it can redraw when a window moves
