@@ -16886,6 +16886,316 @@ async fn a_roadmap_with_every_stage_checked_starts_nothing_and_says_it_is_comple
     assert_eq!(finished["project"], before.repo.name);
 }
 
+/// Start a Conversation on a bench that has already been seeded, write it a
+/// Brief and press Grill.
+///
+/// [`grilling_spilling`] builds the bench and starts the Conversation in one
+/// go, which leaves nowhere to put a commit that has to be on the default
+/// branch *before* the branch is cut. The tests about which roadmap a branch
+/// wrote need exactly that seam: a roadmap that was there already is one this
+/// branch can only amend.
+async fn grilled_on(bench: Bench) -> Grilling {
+    let started: Started = post(
+        &bench.app,
+        "/api/ui/conversations",
+        &serde_json::json!({ "repo_id": bench.repo_id }),
+    )
+    .await;
+    let Started::Started { id } = started else {
+        panic!("expected the Conversation to start, got {started:?}");
+    };
+
+    bench.under_every_pairing(id).await;
+
+    let saved: BriefSaved = post(
+        &bench.app,
+        &format!("/api/ui/conversations/{id}/brief"),
+        &serde_json::json!({ "markdown": BRIEF }),
+    )
+    .await;
+    assert_eq!(saved, BriefSaved::Saved);
+
+    let grilling: GrillingStarted = post(
+        &bench.app,
+        &format!("/api/ui/conversations/{id}/grill"),
+        &serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(grilling, GrillingStarted::Started);
+
+    bench.holding(id)
+}
+
+/// And a roadmap running out starts nothing of the *other* roadmap on the
+/// branch, however much work that one has left in it.
+///
+/// This is the bug, at the size the human met it. The Worktree holds two
+/// roadmaps: `brain-chat-parity`, which somebody else's effort is partway
+/// through and which this branch only amended, and `rate-limiting`, which this
+/// branch wrote and has finished. The reading used to walk everything the
+/// branch had touched in name order, so the alphabet picked `brain-chat-parity`
+/// and a stage of an effort nobody had selected started with nobody watching.
+///
+/// What settles it now is the record: the roadmap this Conversation wrote is
+/// the one written down when it landed, and it is the only one read. Adopting
+/// the other one is the human's act, from *Continue a roadmap*.
+#[tokio::test]
+async fn a_finished_roadmap_starts_no_stage_of_another_roadmap_on_the_branch() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let bench = bench(
+        spill,
+        &a_roadmap_beside_another(&planning, &worked),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    another_effort_already_committed(&bench.repo);
+
+    let fixture = grilled_on(bench).await;
+
+    staged(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let said = said_by(&fixture).await;
+
+    assert!(
+        said.contains("rate-limiting") && said.contains("complete"),
+        "the roadmap this branch wrote is the one reported finished: {said:?}",
+    );
+    assert!(
+        !said.contains("brain-chat-parity"),
+        "and the other effort on the branch is not mentioned at all: {said:?}",
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        1,
+        "nothing was started: the roadmap this Conversation belongs to has no stage left",
+    );
+    assert!(
+        !planning.exists(),
+        "so no planning session was launched into somebody else's effort either",
+    );
+}
+
+/// A second roadmap, committed on the default branch before this Conversation
+/// starts: somebody else's effort, partway through, with a stage left to run.
+///
+/// Named to sort before `rate-limiting`, which is what makes the assertion
+/// worth making — under the walk it replaces, name order is what chose it.
+fn another_effort_already_committed(repo: &Path) {
+    let directory = repo.join("docs/roadmaps/brain-chat-parity");
+    std::fs::create_dir_all(&directory).unwrap();
+
+    std::fs::write(
+        directory.join("ROADMAP.md"),
+        "# Brain chat parity roadmap\n\n## Stages\n\n\
+         - [x] 13: The agent chat — [brief](13-agent-chat.md)\n\
+         - [ ] 14: The widget — [brief](14-widget.md)\n",
+    )
+    .unwrap();
+    std::fs::write(directory.join("13-agent-chat.md"), "# 13. The agent chat\n").unwrap();
+    std::fs::write(directory.join("14-widget.md"), "# 14. The widget\n").unwrap();
+
+    git(repo, &["add", "-A"]);
+    git(repo, &["commit", "-m", "docs: somebody else's roadmap"]);
+}
+
+/// A staging session that writes a finished roadmap of its own and amends the
+/// one that was there already — a deferral retired in passing, which is the
+/// ordinary reason a branch touches two roadmaps.
+fn a_roadmap_beside_another(planning: &Path, worked: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*grilling/SKILL.md*)
+    printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+    printf 'the handoff is written\n'
+    mkdir -p docs/roadmaps/rate-limiting
+    printf '# Rate limiting roadmap\n\n## Stages\n\n- [x] 01: Count the requests — [brief](01-counter.md)\n- [x] 02: Refuse the rest — [brief](02-refusing.md)\n' > docs/roadmaps/rate-limiting/ROADMAP.md
+    printf '# 01. Count the requests\n' > docs/roadmaps/rate-limiting/01-counter.md
+    printf '# 02. Refuse the rest\n' > docs/roadmaps/rate-limiting/02-refusing.md
+    printf '\nThe widget waits on the counter.\n' >> docs/roadmaps/brain-chat-parity/14-widget.md
+    git add -A
+    git commit --quiet -m 'docs: stage the rate-limiting roadmap'
+    printf 'pushed, and the pull request is open\n'
+    sleep 300
+    ;;
+*reviewing/SKILL.md*)
+    printf 'I read the whole branch and found nothing worth raising\n'
+    exit 0
+    ;;
+*next-stage/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {planning}
+    sleep 300
+    ;;
+*next-task/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {worked}
+    sleep 300
+    ;;
+*)
+    sleep 300
+    ;;
+esac
+"#,
+        planning = quoted(planning),
+        worked = quoted(worked),
+    )
+}
+
+/// A branch that wrote two roadmaps chose neither, so nothing is started and
+/// the Timeline says why.
+///
+/// Two roadmaps written in one go are two efforts planned together, and there is
+/// nothing to prefer between them — picking the first in name order is the walk
+/// this replaced. So the record gets no roadmap, the wrap-up starts no stage,
+/// and the human is told to start one from the adoption menu.
+#[tokio::test]
+async fn a_branch_that_wrote_two_roadmaps_starts_nothing_and_says_why() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &two_roadmaps_then_wraps_up(&planning, &worked),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    staged(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let said = said_by(&fixture).await;
+
+    assert!(
+        said.contains("did not write exactly one roadmap"),
+        "the Timeline says why nothing started: {said:?}",
+    );
+    assert!(
+        said.contains("Continue a roadmap"),
+        "and where the human starts one by hand: {said:?}",
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        1,
+        "and neither of the two was picked between",
+    );
+    assert!(
+        !planning.exists(),
+        "so no planning session ran for either of them",
+    );
+}
+
+/// A staging session that plans two efforts in one go — both of them new, both
+/// of them with a stage left to run.
+fn two_roadmaps_then_wraps_up(planning: &Path, worked: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*grilling/SKILL.md*)
+    printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+    printf 'the handoff is written\n'
+    mkdir -p docs/roadmaps/rate-limiting docs/roadmaps/brain-chat-parity
+    printf '# Rate limiting roadmap\n\n## Stages\n\n- [ ] 01: Count the requests — [brief](01-counter.md)\n' > docs/roadmaps/rate-limiting/ROADMAP.md
+    printf '# 01. Count the requests\n' > docs/roadmaps/rate-limiting/01-counter.md
+    printf '# Brain chat parity roadmap\n\n## Stages\n\n- [ ] 14: The widget — [brief](14-widget.md)\n' > docs/roadmaps/brain-chat-parity/ROADMAP.md
+    printf '# 14. The widget\n' > docs/roadmaps/brain-chat-parity/14-widget.md
+    git add -A
+    git commit --quiet -m 'docs: stage two roadmaps'
+    printf 'pushed, and the pull request is open\n'
+    sleep 300
+    ;;
+*reviewing/SKILL.md*)
+    printf 'I read the whole branch and found nothing worth raising\n'
+    exit 0
+    ;;
+*next-stage/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {planning}
+    sleep 300
+    ;;
+*next-task/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {worked}
+    sleep 300
+    ;;
+*)
+    sleep 300
+    ;;
+esac
+"#,
+        planning = quoted(planning),
+        worked = quoted(worked),
+    )
+}
+
+/// A stage Verkstead started before it recorded which roadmap a stage belongs to
+/// starts nothing, and says so.
+///
+/// There are few of these and they are the human's to continue by hand: the
+/// record has a `stage_branches` row and no roadmap, which is a stage rather
+/// than an ordinary Conversation and is exactly what the old reading would have
+/// guessed at. Guessing is what this change stopped doing, so the Timeline says
+/// what happened and points at the menu that records one.
+///
+/// The row is taken away rather than an old database stood up, which is the same
+/// state read from the other side: what a stage from before this looks like is a
+/// stage with no roadmap against it.
+#[tokio::test]
+async fn a_stage_from_before_the_record_starts_nothing_and_says_so() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+
+    let fixture = adopting_asking(
+        spill,
+        &a_stage_planned_and_worked_to_a_finish(&planning),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    // Straight after the press, which is the only write there is: the row is put
+    // down when the stage starts and nothing moves it afterwards.
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    sqlx::query("DELETE FROM stage_roadmaps WHERE conversation_id = ?")
+        .bind(fixture.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let said = fixture
+        .until(|view| {
+            let said = notices(view).join("\n");
+
+            said.contains("before Verkstead recorded").then_some(said)
+        })
+        .await;
+
+    assert!(
+        said.contains("Continue a roadmap"),
+        "the line says where the human picks the roadmap up by hand: {said:?}",
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        1,
+        "and nothing was started: there is no roadmap on the record to carry on into",
+    );
+}
+
 /// A roadmap committed on the repository's default branch, as the old tools or
 /// a human left it: two stages, neither of them ticked, and a brief for each.
 ///
