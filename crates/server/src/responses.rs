@@ -267,17 +267,31 @@ impl Drop for Watched {
 /// afterwards, so a session that read its Answers and then died still counts as
 /// having read them.
 ///
-/// Nothing to write for a Blocking Ask, which has no folding record at all, and
-/// nothing is refused for a write that fails: the cost of one is the human's
-/// Answers arriving twice, which is worse than losing the Response they were.
+/// Nothing for the folding to write for a Blocking Ask, which has no folding
+/// record at all, and nothing is refused for a write that fails: the cost of one
+/// is the human's Answers arriving twice, which is worse than losing the
+/// Response they were.
 ///
 /// Never reached for a Deferred Ask, which is refused above rather than handed
 /// anything — see [`deferred`]. Which is what leaves a Deferred Ask's folding
 /// its own: it is spent by the prompt that carried the Answers, and by nothing
 /// else.
+///
+/// **And the delivery itself is written for every kind**, which is the half a
+/// Blocking Ask does have — see [`store::record_delivery`]. The folding record
+/// answers *have these Answers gone into a prompt*; this one answers *have they
+/// reached anybody at all*, and only the second is a question worth asking of a
+/// wait, because a wait that is killed leaves a Set answered and nobody handed
+/// it. What reads it is [`crate::nudging`]. A failed write costs a session a
+/// line typed at it saying to fetch what it already has, which is the harmless
+/// direction for this one to fail in.
 async fn delivered(state: &AppState, id: i64) {
     if let Err(error) = store::record_folded(&state.pool, &[id]).await {
         tracing::error!(error = ?error, set_id = id, "recording a fetched Question Set as folded failed");
+    }
+
+    if let Err(error) = store::record_delivery(&state.pool, id).await {
+        tracing::error!(error = ?error, set_id = id, "recording a Question Set's Response as delivered failed");
     }
 }
 

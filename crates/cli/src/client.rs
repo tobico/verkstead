@@ -150,7 +150,8 @@ impl Client {
             ),
             404 => bail!(
                 "this Conversation has no Question Set {id} — check the id the ask \
-                 that stored it printed"
+                 printed, on stdout where it stored the Set and on stderr where it \
+                 opened a wait on it"
             ),
             409 => bail!(
                 "Question Set {id} was sent with `--deferred`, so its Answers are not \
