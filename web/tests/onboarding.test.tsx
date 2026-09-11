@@ -21,6 +21,7 @@ import styles from "../src/setup/SetupPage.module.css";
 import { SETUP_STEP, STEPS, TITLES } from "../src/setup/steps";
 import { askedFor, json, serving, whenever } from "./serving";
 import fresh from "./fixtures/onboarding-fresh.json" with { type: "json" };
+import installing from "./fixtures/onboarding-installing.json" with { type: "json" };
 import partWay from "./fixtures/onboarding-part-way.json" with { type: "json" };
 
 /// The one path this page talks to.
@@ -33,6 +34,10 @@ const FRESH = fresh as OnboardingView;
 /// And one part way through: what a session needs is on it, and the two steps
 /// after that are still to do.
 const PART_WAY = partWay as OnboardingView;
+
+/// And one with an install of Verkstead's own going on it, which is the step
+/// asking to be read faster than the frame would have read it.
+const INSTALLING = installing as OnboardingView;
 
 /// The wizard alone, over a machine that stands as `machine` says.
 ///
@@ -204,6 +209,20 @@ describe("how often the machine is read again", () => {
 
     await vi.advanceTimersByTimeAsync(60_000);
     expect(askedFor(fetching, ONBOARDING)).toBe(1);
+  });
+
+  /// And faster where the open step asks for it: the dependencies step is
+  /// drawing a run of Verkstead's own, and how often that screen moves at all is
+  /// how often the machine is read.
+  it("reads at the cadence the open step asks for", async () => {
+    const { fetching } = mount(INSTALLING);
+    await waitFor(() => expect(askedFor(fetching, ONBOARDING)).toBe(1));
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(askedFor(fetching, ONBOARDING)).toBe(2);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(askedFor(fetching, ONBOARDING)).toBe(3);
   });
 
   /// What the stopped interval lets go is covered by the re-read the app makes

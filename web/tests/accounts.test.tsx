@@ -11,7 +11,7 @@
 //! the step on its own, handed a reading. **What a press does** is asked of the
 //! whole page, because the answer involves the server: a Profile is written and
 //! the wizard is read again, and it is that second reading that releases
-//! Continue.
+//! Next.
 
 import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
@@ -109,7 +109,7 @@ function naming(container: ParentNode): HTMLButtonElement | undefined {
 /// The press onwards, found by its own words the way the step before it is.
 function onwards(container: ParentNode): HTMLButtonElement {
   return [...container.querySelectorAll("button")].find(
-    (button) => button.textContent === "Continue",
+    (button) => button.textContent === "Next",
   )!;
 }
 

@@ -14,7 +14,7 @@
 //! and a prefill somebody confirms is still telling. So the fields open with
 //! whatever `git config --global` and the server's own environment could offer,
 //! each labelled with where it was found, and **nothing is written until
-//! Continue**. A field the server found nothing for opens empty, and one
+//! Next**. A field the server found nothing for opens empty, and one
 //! Verkstead already holds a value for shows that value rather than a prefill:
 //! see `loadGitPrefill` in `../api/client.ts`.
 //!
@@ -28,10 +28,10 @@
 //! **Which is why a token stops the wizard for one more press.** A save that
 //! verified something has something to be read — the login, a scope GitHub did
 //! not give it, or why GitHub would not answer — so the step stays up with the
-//! answer on it and Continue closes the wizard next time. A save with no token
+//! answer on it and Next closes the wizard next time. A save with no token
 //! to verify has nothing to stop for and goes straight on.
 //!
-//! **And the last Continue takes the mode off for this run.** Nothing is
+//! **And the last Next takes the mode off for this run.** Nothing is
 //! written by it: the author went through the save a moment before, and the
 //! mode is a fact about this process — see `crates/server/src/onboarding.rs`.
 //! What comes back is the machine read again with the mode off, which is what
@@ -228,7 +228,7 @@ export function Git(): JSX.Element {
     },
   }));
 
-  /// What Continue does: save what is in the fields, or — where that has been
+  /// What Next does: save what is in the fields, or — where that has been
   /// done and there was an answer about the token to read — close the wizard.
   const onwards = () => {
     if (saved()) {
@@ -362,7 +362,7 @@ export function Git(): JSX.Element {
             {(why) => (
               <ErrorLine class={styles.unverified}>
                 It is saved, but GitHub would not say whose it is: {why()}.
-                Correct it above, or press Continue again to go on without it
+                Correct it above, or press Next again to go on without it
                 working.
               </ErrorLine>
             )}
@@ -372,11 +372,11 @@ export function Git(): JSX.Element {
         <div class={styles.onwards}>
           <button
             type="button"
-            class={styles.continue}
+            class={styles.next}
             disabled={!authored() || working()}
             onClick={onwards}
           >
-            Continue
+            Next
           </button>
 
           <Show when={!authored()}>

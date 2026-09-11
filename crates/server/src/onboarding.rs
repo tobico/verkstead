@@ -679,7 +679,7 @@ pub struct Onboarding {
 /// beat the startup task to it would reach the same answer off the same
 /// machine, so there is no window in which two callers could disagree.
 ///
-/// **And cleared once.** The wizard's last Continue is the one thing inside a
+/// **And cleared once.** The wizard's last Next is the one thing inside a
 /// run that takes the mode off, and it is a flag beside the verdict rather than
 /// a rewrite of it: the verdict is what was true at startup and stays said,
 /// while this is what has happened since.
@@ -814,7 +814,7 @@ impl Onboarding {
 
     /// The wizard is over: the mode is off for the rest of this run.
     ///
-    /// Pressed by the wizard's last Continue, which is the one thing inside a
+    /// Pressed by the wizard's last Next, which is the one thing inside a
     /// run that takes the mode off.
     ///
     /// Nothing about the verdict is rewritten and nothing is written down —

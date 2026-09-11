@@ -34,6 +34,7 @@ import type {
   ConversationUnarchived,
   ConversationView,
   Created,
+  Dependency,
   DirectoryListing,
   GrillingStarted,
   OnboardingView,
@@ -1169,7 +1170,29 @@ export function loadGitPrefill(): Promise<PrefillView> {
   return get<PrefillView>("/api/ui/onboarding/git");
 }
 
-/// The wizard's last Continue: onboarding mode is off for the rest of this run.
+/// The wizard's first Next: install the rows that were ticked.
+///
+/// It answers as soon as the run is going — the machine read again, with the
+/// run on it at nothing done of however many were ticked — because what is on
+/// the other side of the press is a password dialog somebody has to read and a
+/// package manager that takes as long as it takes. The install screen is drawn
+/// from that reading and from the ones the interval takes after it.
+export function startInstall(
+  dependencies: Dependency[],
+): Promise<OnboardingView> {
+  return post<OnboardingView>("/api/ui/onboarding/install", { dependencies });
+}
+
+/// And the press that stops it where it can be stopped: the unit under way
+/// finishes and the ones after it are skipped.
+///
+/// Answered with the reading either way, a press about a run that ended while
+/// it was in flight having changed nothing.
+export function cancelInstall(): Promise<OnboardingView> {
+  return post<OnboardingView>("/api/ui/onboarding/install/cancel");
+}
+
+/// The wizard's last Next: onboarding mode is off for the rest of this run.
 ///
 /// It writes nothing — the author and the token went through the settings save
 /// a moment before — and what comes back is the machine read again with the

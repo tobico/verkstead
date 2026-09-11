@@ -1,10 +1,12 @@
 /* The dependencies step — see `Dependencies.tsx`.
 
-   A column inside the step's card: the line that says what a session needs, the
-   strip that says which machine the commands are for, the seven rows, and the
-   press onwards. Nothing is a grid: a row is read down on a phone as often as
-   it is scanned on a desktop, and what a row has to show is a name, a mark and
-   sometimes a command wider than either. */
+   A column inside the step's card, and the same column on each of the three
+   screens: a line saying where the step has got to, whatever that screen is
+   about — the rows to tick, the run's own bar, or the rows and the commands
+   that put them right — and the presses at the foot of it. Nothing is a grid: a
+   row is read down on a phone as often as it is scanned on a desktop, and what
+   a row has to show is a name, a mark and sometimes a command wider than
+   either. */
 
 .step {
   display: flex;
@@ -110,7 +112,9 @@
 }
 
 /* The name and the mark on one line, with what the row is for at the end of it
-   — and under the name on a narrow window, where the two would not fit. */
+   — and under the name on a narrow window, where the two would not fit. On the
+   checkbox screen the mark's place is the box's, and the whole head is the
+   label that names it. */
 .head {
   display: flex;
   flex-wrap: wrap;
@@ -241,14 +245,70 @@
   word-break: break-all;
 }
 
+/* What the run made of a row, in the machine's own words: a dismissed dialog, a
+   package manager's refusal, or a row no archive here carries. Quiet rather
+   than alarming — the screen it is drawn on is the one that says what to do
+   about it. */
+.failed {
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+/* How far the run has got: the bar and the count beside it, which say the same
+   thing for the eye and for the reader. */
+.run {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.bar {
+  flex: 1;
+  width: 100%;
+  height: 0.6rem;
+  accent-color: var(--accent);
+}
+
+.count {
+  flex: none;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+}
+
+/* And what it is doing at this moment, in the server's words: it names this
+   machine and the packages this distribution calls them, so nothing written
+   here could stand in for it. */
+.status {
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* The presses at the foot of a screen, with whatever stands beside them — the
+   note under an unmet checkbox screen, and the count on the hint screen. */
 .onwards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
   margin-top: 0.3rem;
 }
 
+/* The note and the refusal are lines of their own rather than something beside
+   the press, so they take the whole row under it. */
+.onwards > p,
+.failure {
+  flex-basis: 100%;
+  margin: 0;
+}
+
 /* The press onwards, drawn as the app draws every act that saves or starts
-   something. Refused while the step is unmet, and refused in the way a
-   disabled control is everywhere else here. */
-.continue {
+   something. Refused while the machine the press would leave behind is still
+   short of what a session needs, and refused in the way a disabled control is
+   everywhere else here. */
+.next {
   padding: 0.5rem 1.1rem;
   font: inherit;
   font-weight: 600;
@@ -259,9 +319,36 @@
   cursor: pointer;
 }
 
-.continue:disabled {
+.next:disabled {
   cursor: not-allowed;
   opacity: 0.65;
+}
+
+/* The two presses that are not the way onwards — back to the ticks, and the
+   stop on a run under way — drawn as the quiet control they are. */
+.back,
+.cancel {
+  padding: 0.5rem 1.1rem;
+  font: inherit;
+  color: var(--ink);
+  background: none;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.cancel:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* How many of the rows the hint screen is about have since been found, beside
+   the press they release: a count rather than a sentence, because it moves
+   while somebody is reading it. */
+.counter {
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
 }
 
 @media (hover: hover) {
@@ -274,8 +361,13 @@
     border-color: var(--accent);
   }
 
-  .continue:not(:disabled):hover {
+  .next:not(:disabled):hover {
     background: var(--accent-deep);
     border-color: var(--accent-deep);
+  }
+
+  .back:hover,
+  .cancel:not(:disabled):hover {
+    border-color: var(--accent);
   }
 }

@@ -612,8 +612,15 @@ directory — is [development.md](development.md#quickstart).
 yet is in **Onboarding Mode**, and opens on the wizard at `/setup` rather than
 on the workbench. It walks three steps. **What a session needs** names every
 dependency it could not find — a sandbox, `git`, one of the four coding agents,
-and `gh` as an optional row — with this distro's own install command and where
-the binary has to land, and it re-probes while you are away, so an
+and `gh` as an optional row — with a checkbox where a missing row's tick would
+be: the sandbox and `git` start ticked, and Next installs everything you leave
+ticked. One password dialog on the machine Verkstead is running on covers the
+packages this distribution carries, the vendor installers run after it as you,
+and a progress bar and a status line say how far it has got. Only what could
+not be installed here — a NixOS, a server with no way to raise a dialog, a name
+no archive carries — reaches a screen of instructions afterwards, with this
+distro's own command and where the binary has to land; that screen holds Next,
+counting the rows detected, and it re-probes while you are away, so an
 `apt install bubblewrap` finishing in another window ticks the row within ten
 seconds. **Agent Profiles** offers the agent accounts already logged in under
 the server's home; each one you leave ticked is saved as a Profile with no name
@@ -621,7 +628,7 @@ and every model this build knows for that agent — and there is a form under th
 for an account elsewhere. **Who the work is committed as** asks for the git
 author, prefilled from `git config --global`, with the GitHub token optional and
 prefilled from `GH_TOKEN`, `GITHUB_TOKEN` or the host `gh`'s own login, each
-field labelled with where its value came from. The last Continue takes the mode
+field labelled with where its value came from. The last Next takes the mode
 off and lands you on the compose page. There is no skip and no going back
 through it: the verdict is reached once, at startup, so a machine that already
 has all three opens the workbench and never sees the wizard. What it does not do

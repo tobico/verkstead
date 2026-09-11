@@ -4576,7 +4576,7 @@ async fn onboarding_install_cancel(State(state): State<AppState>) -> HttpRespons
     onboarding(State(state)).await
 }
 
-/// `POST /api/ui/onboarding/finished` — the wizard's last Continue: onboarding
+/// `POST /api/ui/onboarding/finished` — the wizard's last Next: onboarding
 /// mode is off for the rest of this run.
 ///
 /// **It writes nothing.** The author and the token were saved through the
