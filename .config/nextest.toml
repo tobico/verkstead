@@ -54,3 +54,14 @@ test-group = 'session-account'
 [[profile.default.overrides]]
 filter = 'binary_id(verkstead-desktop) & test(/^startup::(run_key::)?tests::/)'
 test-group = 'run-key'
+
+# **The one test that waits on a PowerShell to say something**, with nothing
+# else running beside it. A first `powershell.exe` on the runner is slow on its
+# own — this test took 24 seconds there under `cargo test`, its binary the only
+# thing running — and beside three other tests, one of them a session compiling
+# Rust, it spent the whole of its sixty seconds of `PATIENCE` with nothing
+# printed, every time. It shares nothing with another test, so it is not a
+# group: what it needs is the machine rather than a turn.
+[[profile.default.overrides]]
+filter = 'binary_id(verkstead-server::terminal_windows) & test(=a_child_that_is_dropped_takes_what_it_started_with_it)'
+threads-required = 'num-test-threads'
