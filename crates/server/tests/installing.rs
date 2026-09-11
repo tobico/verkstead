@@ -172,6 +172,22 @@ fn program(path: &Path, script: &str) {
 /// installed nothing would be a run that reported success over rows that stayed
 /// absent — which is precisely the failure worth catching.
 fn a_package_manager(dir: &Path) {
+    package_manager(dir, REFRESHED);
+}
+
+/// What a stub `apt-get update` exits with where the archive answered, and
+/// where one of its sources did not.
+///
+/// **Which is the ordinary desktop rather than a broken one.** `apt-get update`
+/// exits non-zero for a single unreachable source, and a machine carrying a
+/// third-party list that has gone away is exactly that — so the batch joins the
+/// refresh to the install with `;` rather than `&&`, and this is the pair that
+/// holds it to it.
+const REFRESHED: i32 = 0;
+const ONE_SOURCE_GONE: i32 = 1;
+
+/// The same, where the refresh in front of the install exits with `refresh`.
+fn package_manager(dir: &Path, refresh: i32) {
     let into = bin(dir).to_string_lossy().into_owned();
 
     // Outside the `PATH` the machine searches, and deliberately: a machine that
@@ -202,6 +218,7 @@ fn a_package_manager(dir: &Path) {
         &bin(dir).join("apt-get"),
         &format!(
             "#!/bin/sh\n\
+             test \"$1\" = update && exit {refresh}\n\
              test \"$1 $2\" = 'install -y' || exit 2\n\
              shift 2\n\
              for package in \"$@\"; do\n\
@@ -613,11 +630,12 @@ async fn ticking_three_rows_raises_one_command_and_the_rows_go_present() {
     assert_eq!(
         dialog.line(),
         format!(
-            ": > '{}' && apt-get install -y bubblewrap git nodejs npm && \
+            ": > '{}' && apt-get update; apt-get install -y bubblewrap git nodejs npm && \
              npm install -g @openai/codex",
             started(&dialog),
         ),
-        "one command, naming every package and the npm install on the same line",
+        "one command, naming every package and the npm install on the same line, \
+         with this archive's list brought up to date in front of it",
     );
 
     held.store(true, Ordering::SeqCst);
@@ -766,10 +784,49 @@ async fn an_installer_that_failed_fails_its_own_row_and_no_other() {
     assert_eq!(
         dialog.line(),
         format!(
-            ": > '{}' && apt-get install -y bubblewrap git",
+            ": > '{}' && apt-get update; apt-get install -y bubblewrap git",
             started(&dialog),
         ),
         "one dialog, and the vendor's installer was not put behind it",
+    );
+}
+
+/// A refresh that could not reach everything still leaves the install behind it
+/// running.
+///
+/// **Which is the ordinary desktop.** `apt-get update` exits non-zero for one
+/// unreachable source, and a machine carrying a third-party list that has gone
+/// away is exactly that — so a refresh joined to the install with `&&` would
+/// have refused, over one dead list, an install of packages the machine's own
+/// archive still carries. It is joined with `;` instead, and the archive being
+/// out of date is what the refresh is there for rather than what it is
+/// permission for.
+#[tokio::test]
+async fn a_refresh_that_could_not_reach_everything_installs_anyway() {
+    let (dir, pool) = ready().await;
+    package_manager(dir.path(), ONE_SOURCE_GONE);
+
+    let app = served(
+        dir.path(),
+        &pool,
+        Some(Dialog::answered(dir.path(), Answer::Typed)),
+    );
+
+    install(&app, TICKED).await;
+
+    let landed = over(&app).await;
+
+    for ticked in TICKED {
+        assert!(
+            present(&landed, *ticked),
+            "{ticked:?} should have been installed over a refresh that only \
+             half worked: {landed:?}",
+        );
+    }
+
+    assert_eq!(
+        landed.run.expect("the run").status,
+        "Everything that was ticked is installed",
     );
 }
 

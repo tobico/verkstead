@@ -296,6 +296,7 @@ fn a_package_manager(bin: &Path, borrowed: &Borrowed, installed: &Path) {
         &bin.join("apt-get"),
         &format!(
             "#!/bin/sh\n\
+             test \"$1\" = update && exit 0\n\
              test \"$1 $2\" = 'install -y' || exit 2\n\
              shift 2\n\
              for package in \"$@\"; do\n\

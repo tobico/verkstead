@@ -125,7 +125,13 @@ ask — the NixOS service, a headless `verkstead serve`, the app over SSH —
 sends every ticked row to the hint screen without asking. **One dialog per
 Next**: the distribution's package manager run directly, naming every ticked
 package, with `nodejs` and `npm` added where an npm harness is ticked and the
-`npm install -g` joined onto the same line. The vendor installers run after it
+`npm install -g` joined onto the same line. `apt` has its list brought up to
+date in front of that install and joined to it with `;` — a stale list is an
+install that fails fetching a version the pool has dropped, and there is no
+second dialog to retry on, while a refresh that could not reach one source is
+no reason to refuse the packages the archive still carries. `dnf` refreshes
+itself and `pacman`'s refresh is Arch's own `-Syu`, which is more than a press
+of Next asked for. The vendor installers run after it
 **as the user**, never elevated: Anthropic's for Claude Code, xAI's for Grok
 Build, and Homebrew's where a Mac has no `brew`, after one elevated step makes
 its prefix. Every Windows install goes through the runas arm. A run is a

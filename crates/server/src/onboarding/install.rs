@@ -8,11 +8,14 @@
 //! Next once, and Verkstead installs them.
 //!
 //! **One press is one dialog.** Every package this distribution carries goes
-//! into one command — `apt-get install -y bubblewrap git nodejs npm`, with the
-//! `npm install -g` for a ticked npm harness joined onto the same shell line —
-//! raised once through the [`Elevate`] handle whatever started this server
-//! handed over. A second password dialog for a second package would be a wizard
-//! nobody finishes.
+//! into one command — `apt-get update; apt-get install -y bubblewrap git nodejs
+//! npm`, with the `npm install -g` for a ticked npm harness joined onto the
+//! same shell line — raised once through the [`Elevate`] handle whatever
+//! started this server handed over. A second password dialog for a second
+//! package would be a wizard nobody finishes, which is also why the one thing
+//! in front of the install is there: an archive list a few weeks old is an
+//! install that fails fetching a version the pool has dropped, and there is no
+//! second dialog to try again on. See [`Packager::refresh`].
 //!
 //! **The privilege is the app's rather than this server's.** Nothing here runs
 //! `sudo` and nothing here is installed setuid: the handle is the platform's own
@@ -1004,11 +1007,15 @@ fn packages(machine: &Machine, ticked: &[Dependency], packager: Packager) -> Pla
     let mut lines: Vec<String> = Vec::new();
 
     if !packages.is_empty() {
-        lines.push(format!(
-            "{} {}",
-            packager.install.join(" "),
-            packages.join(" ")
-        ));
+        let installing = format!("{} {}", packager.install.join(" "), packages.join(" "));
+
+        // With this archive's list brought up to date in front of it where it
+        // keeps one — see [`Packager::refresh`], where both the `;` and which
+        // package managers get one are argued.
+        lines.push(match packager.refresh {
+            Some(refresh) => format!("{}; {installing}", refresh.join(" ")),
+            None => installing,
+        });
     }
 
     if !from_npm.is_empty() {
@@ -1489,6 +1496,28 @@ struct Packager {
     /// install behind a password dialog has nobody at a terminal to say yes.
     install: &'static [&'static str],
 
+    /// And what brings its list of what the archive holds up to date first,
+    /// where this one keeps such a list and will not fetch it for itself.
+    ///
+    /// **Which is `apt` and nothing else here.** A Debian or an Ubuntu whose
+    /// lists are a few weeks old is asking the archive for a version the pool
+    /// has already dropped, and the install fails fetching it — on the one
+    /// dialog this whole design allows, taking every ticked row with it and
+    /// landing the human on a hint screen whose line would fail the same way.
+    /// `dnf` refreshes metadata it considers expired without being asked, and
+    /// `pacman`'s refresh is the thing Arch itself says not to do on its own:
+    /// `-Sy` in front of an install is the partial upgrade that breaks a
+    /// machine, and `-Syu` is a whole system upgrade, which is a great deal
+    /// more than anybody pressed Next for.
+    ///
+    /// **Best effort, and joined with `;` rather than `&&`.** A refresh exits
+    /// non-zero for one unreachable source, and a desktop carrying a third-party
+    /// list that has gone away is the ordinary case of that — so a refresh that
+    /// could not reach everything is not a reason to refuse an install of
+    /// packages the machine's own archive still carries. What it is for is the
+    /// install's chances rather than its permission.
+    refresh: Option<&'static [&'static str]>,
+
     /// What the GitHub CLI is called in this archive. `bubblewrap`, `git`,
     /// `nodejs` and `npm` are the same word on all three.
     gh: &'static str,
@@ -1547,14 +1576,17 @@ fn packager(distro: Distro) -> Option<Packager> {
     match distro {
         Distro::Ubuntu | Distro::Debian => Some(Packager {
             install: &["apt-get", "install", "-y"],
+            refresh: Some(&["apt-get", "update"]),
             gh: "gh",
         }),
         Distro::Fedora => Some(Packager {
             install: &["dnf", "install", "-y"],
+            refresh: None,
             gh: "gh",
         }),
         Distro::Arch => Some(Packager {
             install: &["pacman", "-S", "--noconfirm"],
+            refresh: None,
             gh: "github-cli",
         }),
         Distro::NixOs | Distro::OtherLinux | Distro::MacOs | Distro::Windows => None,
@@ -1861,12 +1893,14 @@ mod tests {
     fn one_command_per_distribution_names_every_ticked_package() {
         assert_eq!(
             line(&plan(&machine(Distro::Ubuntu), TICKED)),
-            "apt-get install -y bubblewrap git nodejs npm && npm install -g @openai/codex",
+            "apt-get update; apt-get install -y bubblewrap git nodejs npm && \
+             npm install -g @openai/codex",
         );
 
         assert_eq!(
             line(&plan(&machine(Distro::Debian), TICKED)),
-            "apt-get install -y bubblewrap git nodejs npm && npm install -g @openai/codex",
+            "apt-get update; apt-get install -y bubblewrap git nodejs npm && \
+             npm install -g @openai/codex",
         );
 
         assert_eq!(
@@ -1887,7 +1921,7 @@ mod tests {
 
         assert_eq!(
             line(&plan(&machine(Distro::Ubuntu), ticked)),
-            "apt-get install -y gh",
+            "apt-get update; apt-get install -y gh",
         );
 
         assert_eq!(
@@ -1905,14 +1939,15 @@ mod tests {
 
         assert_eq!(
             line(&plan(&stated(Distro::Ubuntu, dir.path()), TICKED)),
-            "apt-get install -y bubblewrap git && npm install -g @openai/codex",
+            "apt-get update; apt-get install -y bubblewrap git && \
+             npm install -g @openai/codex",
         );
 
         // And nothing about node where no npm harness was ticked, whatever the
         // machine has: what it is there for is the line beside it.
         assert_eq!(
             line(&plan(&machine(Distro::Ubuntu), &[Dependency::Git])),
-            "apt-get install -y git",
+            "apt-get update; apt-get install -y git",
         );
     }
 
@@ -1951,7 +1986,7 @@ mod tests {
             panic!("the batch and one unit per vendor: {plan:?}");
         };
 
-        assert_eq!(batch.line, "apt-get install -y git");
+        assert_eq!(batch.line, "apt-get update; apt-get install -y git");
         assert_eq!(batch.how, How::Raised);
         assert_eq!(batch.lands, None);
 
@@ -1980,7 +2015,7 @@ mod tests {
             &[Dependency::Git, Dependency::Claude, Dependency::Grok],
         );
 
-        assert_eq!(line(&plan), "apt-get install -y git");
+        assert_eq!(line(&plan), "apt-get update; apt-get install -y git");
         assert_eq!(beyond(&plan), [Dependency::Claude, Dependency::Grok]);
         assert!(
             plan.beyond[0].1.contains("Claude Code") && plan.beyond[0].1.contains("home"),
