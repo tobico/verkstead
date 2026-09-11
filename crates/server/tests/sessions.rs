@@ -1752,6 +1752,7 @@ async fn grilling_on_codex(stub: &str) -> Grilling {
         NOTHING_ATTACHED,
         Pickers::GrillingOnCodex,
         Origin::None,
+        Seeded::Nothing,
         None,
     )
     .await
@@ -1770,6 +1771,7 @@ async fn grilling_spilling_on_codex(spill: tempfile::TempDir, stub: &str, gh: &s
         NOTHING_ATTACHED,
         Pickers::EverythingOnCodex,
         Origin::None,
+        Seeded::Nothing,
         None,
     )
     .await
@@ -1798,6 +1800,7 @@ async fn grilling_drawing(stub: &str, signature: &str) -> Grilling {
         NOTHING_ATTACHED,
         Pickers::EverythingOnCodex,
         Origin::None,
+        Seeded::Nothing,
         Some(signature),
     )
     .await
@@ -1821,6 +1824,7 @@ async fn grilling_at_work(stub: &str) -> Grilling {
         NOTHING_ATTACHED,
         Pickers::EverythingOnCodex,
         Origin::None,
+        Seeded::Nothing,
         None,
     )
     .await
@@ -1843,6 +1847,7 @@ async fn grilling_on_grok(stub: &str) -> Grilling {
         NOTHING_ATTACHED,
         Pickers::EverythingOnGrok,
         Origin::None,
+        Seeded::Nothing,
         None,
     )
     .await
@@ -1866,6 +1871,7 @@ async fn grilling_on_opencode(stub: &str) -> Grilling {
         NOTHING_ATTACHED,
         Pickers::EverythingOnOpenCode,
         Origin::None,
+        Seeded::Nothing,
         None,
     )
     .await
@@ -1885,6 +1891,7 @@ async fn grilling_spilling_on_opencode(spill: tempfile::TempDir, stub: &str) -> 
         NOTHING_ATTACHED,
         Pickers::EverythingOnOpenCode,
         Origin::None,
+        Seeded::Nothing,
         None,
     )
     .await
@@ -1953,6 +1960,7 @@ async fn grilling_with_a_file_attached(stub: &str, name: &str, contents: &str) -
         &[(name, contents)],
         Pickers::UnderEveryPairing,
         Origin::None,
+        Seeded::Nothing,
         None,
     )
     .await
@@ -2030,6 +2038,33 @@ async fn grilling_spilling(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gr
     grilling_at_pace(spill, stub, gh, *BRISKLY, &[]).await
 }
 
+/// The same over a repository `seed` has committed into before the Conversation
+/// is started — see [`Seeded`], which is where the moment is explained.
+///
+/// What wants it is a test about which roadmap a branch *wrote*: a roadmap the
+/// branch can only amend has to be on the default branch the branch is cut from,
+/// and there is nowhere else to put that commit.
+async fn grilling_seeded(
+    spill: tempfile::TempDir,
+    stub: &str,
+    gh: &str,
+    seed: fn(&Path),
+) -> Grilling {
+    grilling_however_started(
+        spill,
+        stub,
+        gh,
+        *BRISKLY,
+        &[],
+        NOTHING_ATTACHED,
+        Pickers::UnderEveryPairing,
+        Origin::None,
+        Seeded::By(seed),
+        None,
+    )
+    .await
+}
+
 /// And the same with the Review picker moved off its Pairing and onto the row
 /// that runs nothing, which is the Conversation that wraps up without a review.
 async fn grilling_unreviewed(spill: tempfile::TempDir, stub: &str, gh: &str) -> Grilling {
@@ -2042,6 +2077,7 @@ async fn grilling_unreviewed(spill: tempfile::TempDir, stub: &str, gh: &str) -> 
         NOTHING_ATTACHED,
         Pickers::Unreviewed,
         Origin::None,
+        Seeded::Nothing,
         None,
     )
     .await
@@ -2060,6 +2096,7 @@ async fn building_ungrilled(spill: tempfile::TempDir, stub: &str, gh: &str) -> G
         NOTHING_ATTACHED,
         Pickers::Ungrilled,
         Origin::None,
+        Seeded::Nothing,
         None,
     )
     .await
@@ -2136,6 +2173,7 @@ async fn grilling_at_pace(
         NOTHING_ATTACHED,
         Pickers::UnderEveryPairing,
         Origin::None,
+        Seeded::Nothing,
         None,
     )
     .await
@@ -2157,6 +2195,7 @@ async fn grilling_pushing(spill: tempfile::TempDir, stub: &str, gh: &str) -> Gri
         NOTHING_ATTACHED,
         Pickers::UnderEveryPairing,
         Origin::Cloned,
+        Seeded::Nothing,
         None,
     )
     .await
@@ -2174,6 +2213,31 @@ enum Origin {
 
     /// A bare clone to push to, at `upstream` inside the spill directory.
     Cloned,
+}
+
+/// What a fixture's repository is given on its default branch before the
+/// Conversation is started.
+///
+/// The moment is the whole of it. A Conversation's branch is cut from the
+/// default branch at the press, so anything that has to be *behind* the work
+/// rather than on it has to land before then — and after [`bench`] has stood the
+/// repository up, so there is something to commit into. That is the seam the
+/// tests about which roadmap a branch *wrote* need: a roadmap this branch can
+/// only amend is a roadmap that was committed first.
+///
+/// Alongside [`Origin`] rather than inside it, because the two are different
+/// facts about the same moment — what the repository has a remote at, and what
+/// it already holds.
+///
+/// Matched rather than compared, so no `PartialEq`: two function pointers
+/// comparing equal says nothing, the same function having no one address.
+#[derive(Debug, Clone, Copy)]
+enum Seeded {
+    /// Nothing beyond what [`bench`] committed standing the repository up.
+    Nothing,
+
+    /// And whatever this writes and commits, given where the repository is.
+    By(fn(&Path)),
 }
 
 /// Give a bench's repository a remote: a bare clone of it at `upstream` inside
@@ -2217,6 +2281,7 @@ async fn grilling_however_started(
     attaching: &[(&str, &str)],
     pickers: Pickers,
     origin: Origin,
+    seeded: Seeded,
     signature: Option<&str>,
 ) -> Grilling {
     let bench = bench_at_pace(spill, stub, gh, pace, signature).await;
@@ -2227,6 +2292,14 @@ async fn grilling_however_started(
     // what it shares is where a remote lives.
     if origin == Origin::Cloned {
         cloned(&bench);
+    }
+
+    // And whatever the default branch is to be holding by the time the branch is
+    // cut off it, for [`Seeded`]'s reason: a commit the work can only amend has
+    // to be behind the work, and the press is what puts the two on either side
+    // of that line.
+    if let Seeded::By(seed) = seeded {
+        seed(&bench.repo);
     }
 
     let started: Started = post(
@@ -16886,46 +16959,6 @@ async fn a_roadmap_with_every_stage_checked_starts_nothing_and_says_it_is_comple
     assert_eq!(finished["project"], before.repo.name);
 }
 
-/// Start a Conversation on a bench that has already been seeded, write it a
-/// Brief and press Grill.
-///
-/// [`grilling_spilling`] builds the bench and starts the Conversation in one
-/// go, which leaves nowhere to put a commit that has to be on the default
-/// branch *before* the branch is cut. The tests about which roadmap a branch
-/// wrote need exactly that seam: a roadmap that was there already is one this
-/// branch can only amend.
-async fn grilled_on(bench: Bench) -> Grilling {
-    let started: Started = post(
-        &bench.app,
-        "/api/ui/conversations",
-        &serde_json::json!({ "repo_id": bench.repo_id }),
-    )
-    .await;
-    let Started::Started { id } = started else {
-        panic!("expected the Conversation to start, got {started:?}");
-    };
-
-    bench.under_every_pairing(id).await;
-
-    let saved: BriefSaved = post(
-        &bench.app,
-        &format!("/api/ui/conversations/{id}/brief"),
-        &serde_json::json!({ "markdown": BRIEF }),
-    )
-    .await;
-    assert_eq!(saved, BriefSaved::Saved);
-
-    let grilling: GrillingStarted = post(
-        &bench.app,
-        &format!("/api/ui/conversations/{id}/grill"),
-        &serde_json::json!({}),
-    )
-    .await;
-    assert_eq!(grilling, GrillingStarted::Started);
-
-    bench.holding(id)
-}
-
 /// And a roadmap running out starts nothing of the *other* roadmap on the
 /// branch, however much work that one has left in it.
 ///
@@ -16945,16 +16978,13 @@ async fn a_finished_roadmap_starts_no_stage_of_another_roadmap_on_the_branch() {
     let planning = spill.path().join("stage-prompts");
     let worked = spill.path().join("task-prompts");
 
-    let bench = bench(
+    let fixture = grilling_seeded(
         spill,
         &a_roadmap_beside_another(&planning, &worked),
         &gh_about(GREEN, "", ""),
+        another_effort_already_committed,
     )
     .await;
-
-    another_effort_already_committed(&bench.repo);
-
-    let fixture = grilled_on(bench).await;
 
     staged(&fixture).await;
 
@@ -17237,16 +17267,13 @@ async fn a_stage_from_before_the_record_starts_nothing_and_says_so() {
 async fn an_ordinary_conversation_that_touched_a_roadmap_carries_nothing_on() {
     let spill = tempfile::tempdir().unwrap();
 
-    let bench = bench(
+    let fixture = grilling_seeded(
         spill,
         &a_backlog_that_amends_a_roadmap(),
         &gh_about(GREEN, "", ""),
+        another_effort_already_committed,
     )
     .await;
-
-    another_effort_already_committed(&bench.repo);
-
-    let fixture = grilled_on(bench).await;
 
     worked_to_empty(&fixture).await;
 
