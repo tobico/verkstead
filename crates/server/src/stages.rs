@@ -21,7 +21,7 @@
 //! for — so which of them a Conversation is a stage of has to come from
 //! somewhere. It comes from the record: written once, when the stage starts or
 //! when the branch that wrote a roadmap is seen to have written it, and read
-//! back by name from then on. See `store::stage_roadmap`, and ADR 0017 for why
+//! back by name from then on. See `store::stage_roadmap`, and ADR-0017 for why
 //! this one fact is stored when nothing else about a roadmap is: it is
 //! Verkstead's own decision rather than the repository's, taken once, on the
 //! same grounds `stage_branches` already gives for which branch a stage stacks
