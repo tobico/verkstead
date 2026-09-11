@@ -79,7 +79,8 @@
 //! edge and passed down — see [`Machine`]. That is what leaves every arm,
 //! including the two this runner will never be, a unit test on this one.
 
-use std::ffi::OsString;
+use std::borrow::Cow;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -165,7 +166,14 @@ pub struct Machine {
 
     /// The `PATH` a session resolves its binaries on — the machine's own half
     /// of it, which is the half a human installs anything into.
-    path: OsString,
+    ///
+    /// **`None` on the machine this server is running on**, where it is
+    /// composed afresh at every read instead: an install that landed inside
+    /// this run has grown `session_path` — see [`sandbox::installed_into`] —
+    /// and a value held here since startup would be the wizard going on saying
+    /// a row is absent after the install that filled it. A stated machine is a
+    /// test's own word and holds whatever it was told.
+    path: Option<OsString>,
 
     /// And the `PATH` the server itself was started with, which the one above
     /// was composed out of.
@@ -204,10 +212,15 @@ pub struct Machine {
 impl Machine {
     /// The machine this server is running on: the one read of it, made where a
     /// router is stood up and passed down from there.
+    ///
+    /// **With no `PATH` of its own held**, which is the one thing this has that
+    /// a stated machine has not: what a session searches is composed at every
+    /// read instead, so that a directory an install landed in inside this run
+    /// is on the very next probe — see [`Machine::path`].
     pub fn here() -> Machine {
-        Machine::stated(
+        Machine::of(
             Platform::HERE,
-            sandbox::machine_path(Platform::HERE),
+            None,
             sandbox::servers_path(),
             std::env::var_os("PATHEXT"),
             std::fs::read_to_string(OS_RELEASE).ok(),
@@ -226,6 +239,19 @@ impl Machine {
     pub fn stated(
         platform: Platform,
         path: OsString,
+        servers: OsString,
+        pathext: Option<OsString>,
+        os_release: Option<String>,
+        env: &Environment,
+    ) -> Machine {
+        Machine::of(platform, Some(path), servers, pathext, os_release, env)
+    }
+
+    /// The two ways of making one, said once: a `PATH` a caller stated, or none
+    /// at all for the machine that composes its own.
+    fn of(
+        platform: Platform,
+        path: Option<OsString>,
         servers: OsString,
         pathext: Option<OsString>,
         os_release: Option<String>,
@@ -344,6 +370,17 @@ impl Machine {
         }
     }
 
+    /// The `PATH` a session searches, which on the machine this server is
+    /// running on is composed now rather than read off a field — see
+    /// [`Machine::path`] for why that one has none held, and
+    /// [`sandbox::machine_path`], which is the value a session is really given.
+    fn path(&self) -> Cow<'_, OsStr> {
+        match &self.path {
+            Some(stated) => Cow::Borrowed(stated.as_os_str()),
+            None => Cow::Owned(sandbox::machine_path(self.platform)),
+        }
+    }
+
     /// Where `program` really is for a session: resolved on the `PATH` a
     /// session gets and followed into whatever it links into — see
     /// [`sandbox::standing`], which is the rule and is the same one the sandbox
@@ -361,7 +398,7 @@ impl Machine {
         sandbox::standing(
             self.platform,
             program,
-            Some(self.path.as_os_str()),
+            Some(&self.path()),
             Some(self.servers.as_os_str()),
             self.pathext.as_deref(),
             self.home.as_deref(),
@@ -371,7 +408,7 @@ impl Machine {
     /// And where a session looks, in the order it looks: a session's own `PATH`
     /// as the directories it names.
     fn looks_in(&self) -> Vec<String> {
-        sandbox::entries(self.platform, &self.path)
+        sandbox::entries(self.platform, &self.path())
             .iter()
             .map(|directory| shown_path(directory))
             .collect()
@@ -396,7 +433,7 @@ impl Machine {
         sandbox::on_the_path(
             self.platform,
             program,
-            Some(self.path.as_os_str()),
+            Some(&self.path()),
             self.pathext.as_deref(),
         )
     }
@@ -1414,6 +1451,7 @@ echo {token}
 
         let path = sandbox::composed(
             Platform::Linux,
+            &[],
             &OsString::from(format!("{}:/usr/bin", local.display())),
             Some(servers_home.path()),
         );

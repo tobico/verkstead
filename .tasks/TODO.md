@@ -28,7 +28,7 @@ screen moves on by itself, and every button in the wizard reads Next.
 
 ## Tasks
 
-- [ ] 01: A directory Verkstead installs into stays on the session PATH — [details](01-session-path.md)
+- [x] 01: A directory Verkstead installs into stays on the session PATH — [details](01-session-path.md)
 - [ ] 02: The run: distro packages through the elevated seam — [details](02-elevated-run.md)
 - [ ] 03: The three screens — [details](03-screens.md)
 - [ ] 04: The vendor installers as the user — [details](04-vendor-installers.md)

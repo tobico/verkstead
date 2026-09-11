@@ -4143,41 +4143,48 @@ async fn save_settings(
             });
         }
 
-        settings.save_config(&Config::of(
-            GitAuthor::of(Some(edit.git_author.name), Some(edit.git_author.email)),
-            // The size as it was typed, and an empty field as nothing
-            // configured: clearing it is how the human asks for the default
-            // back, and a size of nothing is not a size.
-            RustBuildCache::of(
-                edit.rust_build_cache.enabled,
-                Some(edit.rust_build_cache.size),
-            ),
-            // And the Cleanup's two rows, each a switch and a duration as it
-            // was typed — an empty field is the default asked for back, and so
-            // is anything that is not a whole number of days. Nothing here is
-            // refused, a delete sooner than the trim included: the two clocks
-            // run from the archiving independently.
-            Cleanup::of(
-                CleanupStep::of(edit.cleanup.trim.enabled, Some(edit.cleanup.trim.days)),
-                CleanupStep::of(edit.cleanup.delete.enabled, Some(edit.cleanup.delete.days)),
-            ),
-            // And how a conflict is resolved where the Repo it is in says
-            // nothing, which is one of two words and never absent: there is no
-            // third state for a page to send.
-            crate::repos::stored(edit.conflict_resolution),
-            // And whether Done shares the record to the pull request, which is
-            // a switch: two answers, and the save says which of them this is.
-            edit.share_on_done,
-            // And the binds as values too: what is sent is what the file holds
-            // afterwards, so a row taken off the page is a row taken out of the
-            // file. Only the settings' own — the installation's are the unit's
-            // word, they are not in this file, and nothing here could rewrite
-            // them if they were.
-            edit.sandbox_binds,
-            // And the rules, decided above: either what was already written down
-            // or the whole list the page sent, in the order it sent it.
-            rules,
-        ))?;
+        settings.save_config(
+            &Config::of(
+                GitAuthor::of(Some(edit.git_author.name), Some(edit.git_author.email)),
+                // The size as it was typed, and an empty field as nothing
+                // configured: clearing it is how the human asks for the default
+                // back, and a size of nothing is not a size.
+                RustBuildCache::of(
+                    edit.rust_build_cache.enabled,
+                    Some(edit.rust_build_cache.size),
+                ),
+                // And the Cleanup's two rows, each a switch and a duration as it
+                // was typed — an empty field is the default asked for back, and so
+                // is anything that is not a whole number of days. Nothing here is
+                // refused, a delete sooner than the trim included: the two clocks
+                // run from the archiving independently.
+                Cleanup::of(
+                    CleanupStep::of(edit.cleanup.trim.enabled, Some(edit.cleanup.trim.days)),
+                    CleanupStep::of(edit.cleanup.delete.enabled, Some(edit.cleanup.delete.days)),
+                ),
+                // And how a conflict is resolved where the Repo it is in says
+                // nothing, which is one of two words and never absent: there is no
+                // third state for a page to send.
+                crate::repos::stored(edit.conflict_resolution),
+                // And whether Done shares the record to the pull request, which is
+                // a switch: two answers, and the save says which of them this is.
+                edit.share_on_done,
+                // And the binds as values too: what is sent is what the file holds
+                // afterwards, so a row taken off the page is a row taken out of the
+                // file. Only the settings' own — the installation's are the unit's
+                // word, they are not in this file, and nothing here could rewrite
+                // them if they were.
+                edit.sandbox_binds,
+                // And the rules, decided above: either what was already written down
+                // or the whole list the page sent, in the order it sent it.
+                rules,
+            )
+            // On what the file already holds, for the reason the secrets below are
+            // written that way: `session_path` is the one key in this file the page
+            // has no field for — an install writes it and a hand-edit changes it —
+            // and a save built out of what the page sent would take it away.
+            .keeping_session_path(&settings.config()),
+        )?;
 
         // On what the file already holds rather than on nothing: a save writes
         // the whole of `secrets.yaml`, and the session account's password is in

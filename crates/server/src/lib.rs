@@ -1250,6 +1250,15 @@ pub async fn run_on_keyed(
     // through the settings page applies without a restart — see [`settings`].
     let settings = settings::Settings::in_data_dir(&data_dir);
 
+    // With one exception, read here and held for the run: the directories
+    // Verkstead has installed into, which a session's `PATH` leads with. It is
+    // a startup value because the `PATH` it composes with is one — see
+    // [`sandbox::machine_path`] — and the one thing that moves it afterwards is
+    // an install landing in a directory, which appends to both the held list and
+    // the file at once. Before the router below, whose probes read what this
+    // held.
+    sandbox::hold_session_path(&settings);
+
     let pool = open_database(&database(&data_dir)).await?;
 
     listener

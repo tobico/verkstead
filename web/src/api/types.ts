@@ -2160,12 +2160,12 @@ dependencies: Array<DependencyView>,
  * `PATH` a session is given, as this server composed it out of its own.
  *
  * **The list rather than a sentence about one.** What a session searches
- * is the server's own `PATH` ahead of the platform's floor — see
- * `sandbox::composed` — so which directories those are is a fact about
- * *this* machine rather than about the platform, and a tab of written-down
- * prose could not say it. A wizard telling somebody where to put a binary
- * has to name the directories a session really looks in, which is the
- * whole of why this is on the wire.
+ * is what Verkstead installed into ahead of the server's own `PATH`, and
+ * that ahead of the platform's floor — see `sandbox::composed` — so which
+ * directories those are is a fact about *this* machine rather than about
+ * the platform, and a tab of written-down prose could not say it. A wizard
+ * telling somebody where to put a binary has to name the directories a
+ * session really looks in, which is the whole of why this is on the wire.
  *
  * Verkstead's own directory is not on it, that being the one entry
  * holding nothing a human installs.
