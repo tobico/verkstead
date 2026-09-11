@@ -113,9 +113,22 @@ fn an_ask_over_the_pipe_prints_what_the_same_ask_over_the_url_prints() {
         stdout(&over_the_url),
         "the pipe is the same ask, so what it prints is what the URL prints",
     );
+    // A wait says one thing on the way, whichever transport it is held over:
+    // the id of the Set it is on, so that a wait something stops leaves the
+    // agent able to name it — see `ask.rs`. The two runs asked two Sets, so what
+    // the pipe has to match here is the shape of that rather than the words.
+    for said in [stderr(&over_the_pipe), stderr(&over_the_url)] {
+        assert!(
+            said.lines().all(|line| line.starts_with('#')),
+            "everything the CLI says on the way is a YAML comment, so a harness \
+             merging the two streams into one file is still handed something \
+             that parses, got:\n{said}",
+        );
+    }
+
     assert!(
-        stderr(&over_the_pipe).is_empty(),
-        "a wait that goes to plan says nothing at all, got:\n{}",
+        stderr(&over_the_pipe).contains("verkstead answers 1"),
+        "and a wait held over the pipe names its own Set, got:\n{}",
         stderr(&over_the_pipe),
     );
 }
