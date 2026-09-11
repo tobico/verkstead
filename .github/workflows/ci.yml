@@ -179,6 +179,40 @@ jobs:
     name: Windows
     runs-on: windows-2025
     steps:
+      # **Defender is kept out of the tree the build and the suites write in.**
+      # Real-time scanning reads every file as it is written, and this job
+      # writes a great many: the checkout, the cache it restores, a debug build
+      # of the workspace, and the suites' own scratch directories. The runner is
+      # a throwaway VM whose only job is this suite, so exercising the code
+      # under an antivirus buys no fidelity worth the minutes it costs.
+      #
+      # Scoped to those paths rather than real-time protection switched off: the
+      # workspace (the `target` directory is inside it), the cargo home the
+      # dependency sources are unpacked into, both temporary directories —
+      # `RUNNER_TEMP`, and the account's own `TEMP` that every `tempdir` in the
+      # suites is made under — and the default Data Directory and cache, which
+      # the suites that start sessions as the session account resolve, and
+      # which is where those sessions' homes and temporary directories are.
+      #
+      # First, because the checkout and the cache restore are writes too. The
+      # status is printed around it so that a run says whether scanning was on
+      # at all, which is what decides whether this step is earning its place.
+      - name: Keep Defender out of the build tree
+        shell: pwsh
+        run: |
+          $paths = @(
+            $env:GITHUB_WORKSPACE
+            ($env:CARGO_HOME ?? (Join-Path $HOME '.cargo'))
+            $env:RUNNER_TEMP
+            $env:TEMP
+            (Join-Path $env:APPDATA 'Verkstead')
+            (Join-Path $env:LOCALAPPDATA 'Verkstead')
+          )
+
+          Get-MpComputerStatus | Format-List AMRunningMode, RealTimeProtectionEnabled
+          Add-MpPreference -ExclusionPath $paths
+          (Get-MpPreference).ExclusionPath
+
       # Before the checkout, because it is the checkout this is about. Git for
       # Windows converts line endings on the way out of the repository by
       # default, and half of what this suite asserts is text: a fixture, a

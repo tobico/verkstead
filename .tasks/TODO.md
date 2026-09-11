@@ -23,6 +23,6 @@ belongs in its own reviewable commit.
 ## Tasks
 
 - [x] 01: Skip a boundary step the account can already make — [details](01-skip-redundant-step.md)
-- [ ] 02: Keep Defender out of the CI build tree — [details](02-defender-exclusions.md)
+- [x] 02: Keep Defender out of the CI build tree — [details](02-defender-exclusions.md)
 - [ ] 03: Run the Windows suite through cargo-nextest — [details](03-nextest.md)
 - [ ] 04: Measure against Linux parity, shard only if needed — [details](04-measure-and-shard.md)
