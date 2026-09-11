@@ -33,7 +33,7 @@ import type {
 } from "../src/api/types";
 import { Dependencies } from "../src/setup/Dependencies";
 import { SetupPage } from "../src/setup/SetupPage";
-import { DISTROS, GUIDES } from "../src/setup/instructions";
+import { DISTROS, GUIDES, instructionFor } from "../src/setup/instructions";
 import { SETUP_SCREEN, SETUP_STEP } from "../src/setup/steps";
 import { json, serving, whenever } from "./serving";
 import failed from "./fixtures/onboarding-failed.json" with { type: "json" };
@@ -998,6 +998,41 @@ describe("what each machine is told to run", () => {
     );
     expect(GUIDES.Windows.rows.Sandbox.note).toContain(
       "Run as administrator",
+    );
+  });
+
+  /// And it names the Data Directory this server keeps, which is the one line
+  /// on any of the eight tabs that is about this machine rather than about an
+  /// operating system.
+  ///
+  /// **Because the verb resolves the platform's default without it.** An
+  /// account is named after the directory whose sessions run as it, so a bare
+  /// line pasted on a server keeping one of its own makes an account of a
+  /// different name, leaves the row absent and says nothing about why — and the
+  /// row gates the step, so that is the wizard stuck. Which is a server started
+  /// from a terminal or a unit file, and that is precisely the one that reaches
+  /// this screen: it had no way to raise the dialog.
+  it("names this server's Data Directory in the Windows sandbox line", () => {
+    expect(
+      instructionFor("Windows", "Sandbox", "C:\\ProgramData\\verkstead")
+        .command,
+    ).toBe(
+      'verkstead session-account create --data-dir "C:\\ProgramData\\verkstead"',
+    );
+
+    // And the bare line where the reading names no directory, that being the
+    // best there is to offer rather than a reason to draw nothing.
+    expect(instructionFor("Windows", "Sandbox", null).command).toBe(
+      "verkstead session-account create",
+    );
+
+    // Every other row on that tab, and the same row on every other tab, is the
+    // written-down answer and nothing to do with this server.
+    expect(instructionFor("Windows", "Git", "C:\\elsewhere")).toEqual(
+      GUIDES.Windows.rows.Git,
+    );
+    expect(instructionFor("Ubuntu", "Sandbox", "/var/lib/verkstead")).toEqual(
+      GUIDES.Ubuntu.rows.Sandbox,
     );
   });
 });

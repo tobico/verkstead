@@ -90,5 +90,6 @@
     "accounts": false,
     "git": false
   },
-  "run": null
+  "run": null,
+  "data_directory": "/machine"
 }

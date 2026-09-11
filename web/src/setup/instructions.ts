@@ -412,3 +412,43 @@ export const GUIDES: Record<Distro, Guide> = {
     },
   },
 };
+
+/// What the Windows sandbox row's line is, on the machine this reading is of.
+///
+/// **The one instruction that is about this server rather than about this
+/// operating system.** Every other line on every tab is the same wherever it is
+/// read; this one makes a local account named after a Data Directory, and the
+/// verb resolves the platform's own default where nothing says otherwise — so a
+/// line pasted without the directory makes an account of a different name,
+/// leaves the row absent and says nothing about why. The row gates the step, so
+/// that is the wizard stuck rather than advice that missed.
+///
+/// Which bites on exactly the machines this screen is for: a server that could
+/// not raise a dialog is one started from a terminal or a unit file, and that is
+/// the one most likely to have been pointed somewhere of its own.
+///
+/// `null` for a reading that names no directory, where the bare line is the best
+/// there is to offer — see [`OnboardingView::data_directory`].
+function theAccount(directory: string | null): Instruction {
+  const bare = GUIDES.Windows.rows.Sandbox;
+
+  if (directory === null) {
+    return bare;
+  }
+
+  return { ...bare, command: `${bare.command} --data-dir "${directory}"` };
+}
+
+/// The instruction for one row on one tab, as this machine reads it.
+///
+/// The written-down answer for every row but one — see [`theAccount`], which is
+/// the row this server has a word about.
+export function instructionFor(
+  distro: Distro,
+  dependency: Dependency,
+  directory: string | null,
+): Instruction {
+  return distro === "Windows" && dependency === "Sandbox"
+    ? theAccount(directory)
+    : GUIDES[distro].rows[dependency];
+}

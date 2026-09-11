@@ -880,6 +880,11 @@ impl Onboarding {
             accounts: probed.accounts,
             steps,
             run,
+
+            // And the directory the Windows sandbox row's own instruction is
+            // about — see [`OnboardingView::data_directory`], which is the one
+            // line on that screen this machine is the word on.
+            data_directory: self.machine.data_dir().map(shown_path),
         })
     }
 
@@ -2283,10 +2288,7 @@ echo {token}
         let (_, still_missing) = installing(vec![row(Dependency::Sandbox, NOT_THERE)], refused());
 
         assert!(
-            matches!(
-                still_missing[0].install,
-                InstallState::Failed { .. },
-            ),
+            matches!(still_missing[0].install, InstallState::Failed { .. }),
             "a row the run could not install says so while it is still missing",
         );
 

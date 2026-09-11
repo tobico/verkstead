@@ -150,7 +150,11 @@ and passed; it is now probed, present when the local account this Data
 Directory's sessions run as exists, and it gates the step, since no session
 starts without it. A ticked row runs `verkstead session-account create`
 elevated, and the pipe is re-opened granting the new account, so nothing
-restarts.
+restarts. The by-hand line on the hint screen names this server's Data
+Directory, which is why the reading carries it: an account is named after the
+directory whose sessions run as it, and a bare line resolves the platform's
+default instead — a different account, on a row that gates the step, and on the
+one screen a server with a Data Directory of its own is most likely to reach.
 
 **Three screens.** The checkboxes; then an install screen with a progress bar
 of one unit per ticked row and a status line naming the phase and the machine

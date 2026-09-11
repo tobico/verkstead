@@ -107,6 +107,30 @@ pub struct OnboardingView {
     /// Nothing until the first Next is pressed on the dependencies step, which
     /// is every reading a wizard nobody has pressed anything on draws.
     pub run: Option<RunView>,
+
+    /// And the Data Directory this server keeps, for the one instruction that
+    /// is about it.
+    ///
+    /// **The Windows sandbox row, and nothing else on the page.** What that row
+    /// is, is the local account this Data Directory's sessions run as, and the
+    /// verb that makes one takes the directory as an argument — so the line the
+    /// hint screen hands somebody to run in an elevated terminal has to name
+    /// the directory *this* server keeps. A `verkstead session-account create`
+    /// with nothing after it resolves the platform's default, which makes an
+    /// account of a different name, leaves the row absent and says nothing
+    /// about why.
+    ///
+    /// Which matters on exactly the machines that screen is for. A server
+    /// started from a terminal or a unit file is the one that could not raise a
+    /// dialog and so sent the row here, and it is also the one most likely to
+    /// have been pointed at a Data Directory of its own.
+    ///
+    /// On the wire for the reason [`OnboardingView::path`] is: a wizard telling
+    /// somebody what to run has to name the directory this machine really
+    /// keeps, and no prose written in the viewer could say which that is.
+    /// `None` is a machine nothing told, which is a stated one no suite pointed
+    /// at a directory.
+    pub data_directory: Option<String>,
 }
 
 /// The three platforms, as the viewer receives one.

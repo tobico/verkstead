@@ -99,5 +99,6 @@
     "done": 3,
     "total": 3,
     "cancelling": false
-  }
+  },
+  "data_directory": "/machine"
 }

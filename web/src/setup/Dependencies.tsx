@@ -81,7 +81,12 @@ import type {
 } from "../api/types";
 import { ErrorLine, Note } from "../notices";
 import { Mark, type Standing } from "./Mark";
-import { DISTROS, GUIDES, type Instruction } from "./instructions";
+import {
+  DISTROS,
+  GUIDES,
+  instructionFor,
+  type Instruction,
+} from "./instructions";
 import {
   PROBE,
   RUNNING,
@@ -579,6 +584,15 @@ function Hints(props: {
 
   const guide = () => GUIDES[showing()];
 
+  /// What one row is told to run on the tab that is open.
+  ///
+  /// Asked of `instructions.ts` rather than read off the guide, because one row
+  /// is about this server rather than about the tab: the Windows sandbox row
+  /// makes an account named after a Data Directory, and the line has to name the
+  /// one this machine keeps.
+  const instruction = (row: DependencyView): Instruction =>
+    instructionFor(showing(), row.dependency, props.reading.data_directory);
+
   /// Whether every row this screen is about has since been found.
   const met = (): boolean => props.detected === props.rows.length;
 
@@ -641,7 +655,7 @@ function Hints(props: {
       <ul class={styles.rows}>
         <For each={props.rows}>
           {(row) => (
-            <Row row={row} instruction={guide().rows[row.dependency]} />
+            <Row row={row} instruction={instruction(row)} />
           )}
         </For>
       </ul>
