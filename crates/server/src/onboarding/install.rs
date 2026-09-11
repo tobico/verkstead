@@ -1760,6 +1760,16 @@ mod tests {
 
     /// The same, searching `dir` — which is how a machine that *has* one of
     /// them is stated.
+    ///
+    /// **Unix only, and that is what `dir` is.** A stated Unix machine's `PATH`
+    /// is a Unix `PATH` wherever it is read — [`crate::sandbox::on_the_path`]
+    /// splits one on `:` on every host, deliberately, because the value it is
+    /// splitting is that platform's rather than the runner's. So a directory
+    /// this suite really put a stub in can only be named on a host whose
+    /// directories are nameable that way: on Windows the temp directory is
+    /// `C:\…`, which splits into a drive letter and a path on no drive, and the
+    /// stub is found nowhere. Every caller carries the `cfg`, and the machines
+    /// stated with nothing on their `PATH` — [`machine`] — need none of it.
     fn stated(distro: Distro, dir: &Path) -> Machine {
         under(distro, dir, Some(PathBuf::from(HOME)))
     }
@@ -1930,10 +1940,17 @@ mod tests {
         );
     }
 
-    /// Node goes in where an npm harness was ticked and the machine has no
-    /// `npm`, and stays out where it has one.
+    /// Node stays out of the batch where the machine already has `npm`.
+    ///
+    /// Unix only, for [`stated`]'s reason: what says this machine has one is a
+    /// stub on a `PATH` written the Unix way, and a Windows host has no
+    /// directory that can be named on one. The other direction — a machine with
+    /// no `npm` and an npm harness ticked, which is where node goes *in* — is
+    /// [`one_command_per_distribution_names_every_ticked_package`], stated with
+    /// nothing on its `PATH` and asked about on every runner.
+    #[cfg(unix)]
     #[test]
-    fn node_is_installed_only_where_it_is_missing() {
+    fn node_is_installed_only_where_the_machine_has_no_npm() {
         let dir = tempfile::tempdir().unwrap();
         crate::stand_ins::program(&dir.path().join(NPM), "#!/bin/sh\nexit 0\n");
 
@@ -1942,9 +1959,12 @@ mod tests {
             "apt-get update; apt-get install -y bubblewrap git && \
              npm install -g @openai/codex",
         );
+    }
 
-        // And nothing about node where no npm harness was ticked, whatever the
-        // machine has: what it is there for is the line beside it.
+    /// And nothing about node where no npm harness was ticked, whatever the
+    /// machine has: what it is there for is the line beside it.
+    #[test]
+    fn node_stays_out_where_no_npm_harness_was_ticked() {
         assert_eq!(
             line(&plan(&machine(Distro::Ubuntu), &[Dependency::Git])),
             "apt-get update; apt-get install -y git",
@@ -2029,6 +2049,13 @@ mod tests {
     ///
     /// The sandbox row is neither a unit nor a sentence: `sandbox-exec` is on
     /// every Mac, so a press that named it has nothing to do about it.
+    ///
+    /// Unix only, for [`stated`]'s reason: what says this machine has `brew` is
+    /// a stub on a `PATH` written the Unix way, and a Windows host has no
+    /// directory that can be named on one. The Mac that has *no* `brew` is
+    /// [`a_mac_without_homebrew_installs_it_before_anything_else`], stated with
+    /// nothing on its `PATH` and asked about on every runner.
+    #[cfg(unix)]
     #[test]
     fn a_mac_with_homebrew_installs_every_ticked_row_with_it() {
         let dir = tempfile::tempdir().unwrap();
