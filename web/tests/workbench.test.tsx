@@ -362,6 +362,28 @@ function theTerminal(): XTerm {
   return made;
 }
 
+/// A clipboard to write to, and what has been written to it. jsdom has none,
+/// and the real one is a permission away in a browser.
+///
+/// Here rather than beside either of the tests that wants one: the copy button
+/// and the terminal's copy are two presses about the same clipboard, and a
+/// second stub of it would be one to drift.
+function theClipboard(): string[] {
+  const written: string[] = [];
+
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: {
+      writeText: (said: string) => {
+        written.push(said);
+        return Promise.resolve();
+      },
+    },
+  });
+
+  return written;
+}
+
 const ABANDONED = abandoned as AbandonedRepo[];
 
 /// The conversation that clicking one of those roadmaps made: a draft adopting
@@ -7952,24 +7974,6 @@ describe("putting something into a live session's screen", () => {
     });
   }
 
-  /// A clipboard to write to, and what has been written to it. jsdom has none,
-  /// and the real one is a permission away in a browser.
-  function theClipboard(): string[] {
-    const written: string[] = [];
-
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: {
-        writeText: (said: string) => {
-          written.push(said);
-          return Promise.resolve();
-        },
-      },
-    });
-
-    return written;
-  }
-
   /// What a watcher said up the socket, of the kind named.
   function said(socket: Attached, kind: "PutIn" | "Resized"): unknown[] {
     return socket.sent
@@ -9447,16 +9451,7 @@ describe("the share pane", () => {
   /// changes nothing on the screen, and a press that looks like it did nothing
   /// gets pressed again.
   it("copies the viewer's link, and says it did", async () => {
-    const written: string[] = [];
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: {
-        writeText: (said: string) => {
-          written.push(said);
-          return Promise.resolve();
-        },
-      },
-    });
+    const written = theClipboard();
 
     theGrillingStanding({ shared: SHARED });
     const { container } = mount(`/conversations/${GRILLING.id}`);
