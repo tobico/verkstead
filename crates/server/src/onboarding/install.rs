@@ -37,6 +37,15 @@
 //! `PATH` with no shell profile edited and nothing restarted — see
 //! [`crate::sandbox::installed_into`].
 //!
+//! **A Mac is Homebrew's, and Homebrew refuses to run as root.** So there the
+//! order is the other way up: every ticked row is a `brew install` of its own,
+//! run as the user, and the one thing that is ever raised is the step that
+//! makes Homebrew's prefix on a Mac that has no `brew` yet. That is the whole of
+//! what Homebrew's own installer would have called `sudo` for, so the installer
+//! after it runs as the user too and asks for nothing — see [`homebrew`], and
+//! [`Chain`], which is what makes a prefix nobody could make fail every `brew`
+//! line behind it rather than each of them separately.
+//!
 //! **Nothing runs while nobody is looking.** A run is started by a press and
 //! ends by itself; between presses the wizard is the probe it always was — a
 //! `PATH` walked and one `bwrap` run — which is also what says a row that was
@@ -111,6 +120,34 @@ const GROK: Vendor = Vendor {
     lands: ".grok/bin",
 };
 
+/// The program every install on a Mac goes through, and the name whose absence
+/// puts Homebrew's own two units in front of them.
+const BREW: &str = "brew";
+
+/// Where Homebrew installs, worked out by the machine the line runs on.
+///
+/// **Which prefix it is, is that machine's own word.** `/opt/homebrew` is Apple
+/// silicon's and `/usr/local` is Intel's, and nothing on this side of the dialog
+/// knows which Mac it is talking to: a server built for one architecture may be
+/// the one running under Rosetta on the other. So the line asks `uname` where it
+/// lands, which is what Homebrew's own installer does.
+const WHERE: &str = "prefix=/usr/local; [ \"$(uname -m)\" = arm64 ] && prefix=/opt/homebrew";
+
+/// And Homebrew's own installer, run as the user over the prefix the step in
+/// front of it made.
+///
+/// `NONINTERACTIVE=1` because there is nobody at that machine to press return:
+/// the human who pressed Next is on a phone on the tailnet, and the one thing
+/// the installer would stop to ask about — the `sudo` for its prefix — has been
+/// answered by the step in front of it.
+///
+/// The same script the hint screen's macOS tab hands a human to run, where this
+/// could not be run for them — with the interactive line Homebrew publishes, a
+/// human at a terminal being who that one is for. See
+/// `web/src/setup/instructions.ts`.
+const HOMEBREW: &str = "NONINTERACTIVE=1 bash -c \"$(curl -fsSL \
+                        https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"";
+
 /// What a unit that could not even be started says, a command with no output to
 /// quote being a row with nothing else to carry.
 const FAILED_SILENTLY: &str = "the installer failed and said nothing";
@@ -118,6 +155,11 @@ const FAILED_SILENTLY: &str = "the installer failed and said nothing";
 /// What a server with no way to raise a dialog says on every ticked row.
 const NO_DIALOG: &str = "Verkstead has no way to ask this machine for a password: the desktop \
                          app is what raises the dialog, and this server was not started by it.";
+
+/// And what a Mac with no Homebrew and nobody to hand a prefix to says on every
+/// ticked row Homebrew would have installed.
+const NO_USER: &str = "Homebrew's prefix has to belong to somebody, and this server was started \
+                       without a name for whoever is running it.";
 
 /// How often the marker is glanced at while a dialog is up — see [`STARTED`].
 const GLANCE: Duration = Duration::from_millis(200);
@@ -237,6 +279,27 @@ struct Unit {
     /// for the elevated batch, a package manager installing onto the machine's
     /// own floor, which every session's `PATH` already ends with.
     lands: Option<PathBuf>,
+
+    /// And what this unit is part of, where it is part of anything: a unit that
+    /// fails takes every later unit of its own chain with it — see [`Chain`].
+    chain: Option<Chain>,
+}
+
+/// A run of units that stand or fall together.
+///
+/// **One thing on one platform, and it is Homebrew.** Every install on a Mac is
+/// a `brew install`, so a Mac without `brew` has two units in front of the
+/// ticked rows — the prefix, and the installer that fills it — and a row
+/// installed by a `brew` that was never installed is a command that would fail
+/// saying nothing anybody can act on. So the first of the chain that fails
+/// fails the rest of it, in the words it failed in, and nothing after it is
+/// run. A unit outside the chain is untouched: Grok Build's installer wants no
+/// Homebrew and is nobody's business but its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Chain {
+    /// Homebrew: the prefix, the installer, and every `brew install` after
+    /// them.
+    Homebrew,
 }
 
 /// How a unit is run.
@@ -568,12 +631,27 @@ fn work(
         .tempdir()
         .ok();
 
+    // The chain that has already failed, and what it failed with: every unit of
+    // it after this is that failure's too — see [`Chain`].
+    let mut broken: Option<(Chain, String)> = None;
+
     for (number, unit) in plan.units.iter().enumerate() {
         // Between units and never inside one: a package manager that is already
         // running is left to finish, a machine half way through an unpack being
         // worse than one that finished the unpack nobody wanted.
         if run.cancelled.load(Ordering::SeqCst) {
             break;
+        }
+
+        // And a unit whose chain is broken is not run at all: what it needed was
+        // the unit that failed, so what it would say is the first failure said
+        // better.
+        if let Some((_, why)) = broken
+            .as_ref()
+            .filter(|(chain, _)| unit.chain == Some(*chain))
+        {
+            run.landed(unit, Progress::Failed(why.clone()));
+            continue;
         }
 
         let landed = match unit.how {
@@ -594,6 +672,10 @@ fn work(
 
         if landed == Progress::Installed {
             landing(unit, settings);
+        }
+
+        if let (Progress::Failed(why), Some(chain)) = (&landed, unit.chain) {
+            broken = Some((chain, why.clone()));
         }
 
         run.landed(unit, landed);
@@ -719,13 +801,28 @@ fn watch(run: &Arc<Run>, marker: PathBuf, doing: String) -> (Arc<AtomicBool>, Jo
 
 /// What `ticked` comes to on this machine: the commands, and the rows nothing
 /// here installs.
+///
+/// **Two shapes, and which one a machine is, is the platform's answer rather
+/// than a preference.** A Linux installs out of the archive its distribution
+/// carries, raised once; a Mac installs out of Homebrew, raised never — see
+/// [`homebrew`].
 fn plan(machine: &Machine, ticked: &[Dependency]) -> Plan {
     let distro = machine.distro();
+
+    if distro == Distro::MacOs {
+        return homebrew(machine, ticked);
+    }
 
     let Some(packager) = packager(distro) else {
         return nothing(ticked, &no_command(distro));
     };
 
+    packages(machine, ticked, packager)
+}
+
+/// Every ticked row on a machine whose archive carries what it is asking for:
+/// the one raised command, and the vendors' own installers after it.
+fn packages(machine: &Machine, ticked: &[Dependency], packager: Packager) -> Plan {
     let mut packages: Vec<&str> = Vec::new();
     let mut from_npm: Vec<&str> = Vec::new();
     let mut covers: Vec<Dependency> = Vec::new();
@@ -796,6 +893,7 @@ fn plan(machine: &Machine, ticked: &[Dependency]) -> Plan {
         ),
         how: How::Raised,
         lands: None,
+        chain: None,
     });
 
     // And the vendors' own installers after it, one unit apiece and none of them
@@ -804,16 +902,231 @@ fn plan(machine: &Machine, ticked: &[Dependency]) -> Plan {
     // would be asking for a privilege to do something that needs none.
     let units = batch
         .into_iter()
-        .chain(vendors.into_iter().map(|(row, vendor, lands)| Unit {
-            line: vendor.line.to_owned(),
-            covers: vec![row],
-            doing: format!("Running {}'s installer", vendor.who),
-            how: How::AsTheUser,
-            lands: Some(lands),
-        }))
+        .chain(
+            vendors
+                .into_iter()
+                .map(|(row, vendor, lands)| vendors_own(row, vendor, lands)),
+        )
         .collect();
 
     Plan { units, beyond }
+}
+
+/// One unit running `vendor`'s own installer for `row`, as the user, landing in
+/// `lands`.
+///
+/// The same unit on every platform that has one: what a vendor's installer is
+/// is a line to run under this user's home, and neither the archive beside it
+/// nor the Homebrew beside it has anything to say about that.
+fn vendors_own(row: Dependency, vendor: Vendor, lands: PathBuf) -> Unit {
+    Unit {
+        line: vendor.line.to_owned(),
+        covers: vec![row],
+        doing: format!("Running {}'s installer", vendor.who),
+        how: How::AsTheUser,
+        lands: Some(lands),
+        chain: None,
+    }
+}
+
+/// And every ticked row on a Mac, which is Homebrew's.
+///
+/// **One unit per row, and each of them as the user**, Homebrew refusing to run
+/// as root at all. Nothing lands anywhere worth writing down: both prefixes are
+/// on the floor a Mac session's `PATH` is composed from — see
+/// `sandbox::APPLE_PATH` — so the row goes present off the very next probe
+/// without `session_path` being touched.
+///
+/// **And where there is no `brew` yet, two units in front of them.** The
+/// elevated one makes the prefix and hands it over, which is the whole of what
+/// Homebrew's installer would have raised a dialog for; the installer itself
+/// runs as the user over a prefix it finds writable. Both are the same [`Chain`]
+/// as the `brew` lines behind them, so a prefix nobody could make fails every
+/// ticked row at once, in the words it failed in, and no installer is run at
+/// all.
+///
+/// **The sandbox row is neither.** `sandbox-exec` is Apple's own and on every
+/// Mac, so the row is ticked by the probe rather than by anybody — and a press
+/// that named it anyway has nothing to install and nothing to say about it.
+fn homebrew(machine: &Machine, ticked: &[Dependency]) -> Plan {
+    let getting = getting(machine, ticked);
+
+    let mut units: Vec<Unit> = Vec::new();
+    let mut beyond: Vec<(Dependency, String)> = Vec::new();
+
+    for row in ticked {
+        match on_a_mac(*row) {
+            OnAMac::Nothing => {}
+
+            OnAMac::Brew(brew) => match &getting {
+                Getting::Beyond(why) => beyond.push((*row, why.clone())),
+                _ => units.push(brew.unit(*row)),
+            },
+
+            // The one row here that is not Homebrew's, and it is the one row
+            // Homebrew has no cask for: xAI's own installer, under this user's
+            // home the way it is on a Linux — see [`GROK`].
+            OnAMac::Vendor(vendor) => match machine.home() {
+                Some(home) => units.push(vendors_own(*row, vendor, home.join(vendor.lands))),
+                None => beyond.push((*row, no_home(*row))),
+            },
+        }
+    }
+
+    if let Getting::First(first) = getting {
+        units.splice(0..0, first);
+    }
+
+    Plan { units, beyond }
+}
+
+/// What a `brew install` on this machine wants before it would work.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Getting {
+    /// Nothing: `brew` is there.
+    Nothing,
+
+    /// The prefix and the installer, in that order, in front of everything
+    /// ticked.
+    First(Vec<Unit>),
+
+    /// Or nothing doing, in the words of why — which every ticked `brew` row
+    /// carries to the hint screen instead.
+    Beyond(String),
+}
+
+/// Which of the three this machine is.
+///
+/// Asked once per press rather than per row: what it comes to is a `PATH` walk
+/// for `brew`, and seven walks for one answer would be six too many.
+fn getting(machine: &Machine, ticked: &[Dependency]) -> Getting {
+    // A press with no `brew` line in it wants no Homebrew: a ticked Grok Build
+    // by itself is xAI's installer and nothing else, and a Mac that has never
+    // heard of Homebrew is not a machine to install one on over it.
+    if machine.found(BREW).is_some()
+        || !ticked
+            .iter()
+            .any(|row| matches!(on_a_mac(*row), OnAMac::Brew(_)))
+    {
+        return Getting::Nothing;
+    }
+
+    // The prefix is made as root and handed to somebody, so a machine whose
+    // environment names nobody is one there is no handing it to: a prefix left
+    // owned by root is a Homebrew that asks for a password at every install,
+    // from a server that has nobody to ask.
+    let Some(user) = machine.user() else {
+        return Getting::Beyond(NO_USER.to_owned());
+    };
+
+    Getting::First(vec![
+        Unit {
+            line: format!(
+                "{WHERE}; mkdir -p \"$prefix\" && chmod ug=rwx \"$prefix\" && \
+                 chgrp admin \"$prefix\" && chown {} \"$prefix\"",
+                quoted(user),
+            ),
+            covers: Vec::new(),
+            doing: "Making Homebrew's prefix".to_owned(),
+            how: How::Raised,
+            lands: None,
+            chain: Some(Chain::Homebrew),
+        },
+        Unit {
+            line: HOMEBREW.to_owned(),
+            covers: Vec::new(),
+            doing: "Installing Homebrew".to_owned(),
+            how: How::AsTheUser,
+            lands: None,
+            chain: Some(Chain::Homebrew),
+        },
+    ])
+}
+
+/// What Homebrew calls one row, and which of its two shelves it is on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Brew {
+    /// The name to install.
+    name: &'static str,
+
+    /// And whether it is a cask — an application rather than a formula, which
+    /// is how Homebrew carries the two harnesses that ship as one.
+    cask: bool,
+}
+
+impl Brew {
+    /// The unit that installs it for `row`.
+    fn unit(&self, row: Dependency) -> Unit {
+        Unit {
+            line: format!(
+                "{BREW} install {}{}",
+                if self.cask { "--cask " } else { "" },
+                self.name,
+            ),
+            covers: vec![row],
+            doing: format!("Installing {}", self.name),
+            how: How::AsTheUser,
+
+            // Both Homebrew prefixes are on a Mac session's floor already, so
+            // there is nothing here to write to `session_path` — see
+            // [`homebrew`].
+            lands: None,
+            chain: Some(Chain::Homebrew),
+        }
+    }
+}
+
+/// How one row is installed on a Mac: Homebrew's, the vendor's own, or nothing
+/// at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OnAMac {
+    /// The sandbox row, and only it: `sandbox-exec` is Apple's own.
+    Nothing,
+
+    /// A formula or a cask — the same names the hint screen's macOS tab shows,
+    /// which is where the human who has to type one reads them.
+    Brew(Brew),
+
+    /// Or the vendor's own installer, there being no Homebrew name that is
+    /// really xAI's grok — see [`GROK`].
+    Vendor(Vendor),
+}
+
+/// Which of the three one row is.
+fn on_a_mac(dependency: Dependency) -> OnAMac {
+    match dependency {
+        Dependency::Sandbox => OnAMac::Nothing,
+
+        Dependency::Git => OnAMac::Brew(Brew {
+            name: "git",
+            cask: false,
+        }),
+        Dependency::OpenCode => OnAMac::Brew(Brew {
+            name: "opencode",
+            cask: false,
+        }),
+        Dependency::Gh => OnAMac::Brew(Brew {
+            name: "gh",
+            cask: false,
+        }),
+
+        // The two that ship as applications rather than as formulae. Claude
+        // Code's cask is the install a Mac session finds whichever way
+        // Verkstead was started, which is why it is the row here and the
+        // native installer is not: an app started from the Dock has launchd's
+        // `PATH` rather than a shell's, and that one never names
+        // `~/.local/bin`.
+        Dependency::Claude => OnAMac::Brew(Brew {
+            name: "claude-code",
+            cask: true,
+        }),
+        Dependency::Codex => OnAMac::Brew(Brew {
+            name: "codex",
+            cask: true,
+        }),
+
+        Dependency::Grok => OnAMac::Vendor(GROK),
+    }
 }
 
 /// A plan that installs nothing, every ticked row failed with the same
@@ -887,8 +1200,9 @@ fn installs(packager: Packager, dependency: Dependency) -> Installs {
 ///
 /// The three Linux families whose command is written down, and nothing for the
 /// rest: NixOS installs from its configuration rather than from a command, a
-/// Linux naming none of the five is one no line here would be right on, and the
-/// two other platforms are their own tasks.
+/// Linux naming none of the five is one no line here would be right on, a Mac
+/// never reaches this at all — Homebrew is no archive of the machine's and has
+/// its own arm, see [`homebrew`] — and Windows is its own task.
 fn packager(distro: Distro) -> Option<Packager> {
     match distro {
         Distro::Ubuntu | Distro::Debian => Some(Packager {
@@ -1006,14 +1320,17 @@ mod tests {
     /// installers land under.
     const HOME: &str = "/home/you";
 
+    /// And who it runs as, which is who a Mac hands Homebrew's prefix to.
+    const USER: &str = "ada";
+
     /// A machine on `distro` with nothing on its `PATH`, which is a machine
-    /// with no `npm`.
+    /// with no `npm` and no `brew`.
     fn machine(distro: Distro) -> Machine {
         stated(distro, &PathBuf::new())
     }
 
-    /// The same, searching `dir` — which is how a machine that *has* an `npm`
-    /// is stated.
+    /// The same, searching `dir` — which is how a machine that *has* one of
+    /// them is stated.
     fn stated(distro: Distro, dir: &Path) -> Machine {
         under(distro, dir, Some(PathBuf::from(HOME)))
     }
@@ -1021,6 +1338,11 @@ mod tests {
     /// And the same again under `home`, which is `None` for the one machine
     /// this asks about that names none.
     fn under(distro: Distro, dir: &Path, home: Option<PathBuf>) -> Machine {
+        named(distro, dir, home, Some(USER.to_owned()))
+    }
+
+    /// And the whole of it, for the other machine that names nobody.
+    fn named(distro: Distro, dir: &Path, home: Option<PathBuf>, user: Option<String>) -> Machine {
         let (platform, os_release) = match distro {
             Distro::MacOs => (Platform::MacOs, None),
             Distro::Windows => (Platform::Windows, None),
@@ -1040,6 +1362,7 @@ mod tests {
             os_release.map(str::to_owned),
             &Environment {
                 home,
+                user,
                 ..Environment::default()
             },
         )
@@ -1225,6 +1548,176 @@ mod tests {
         );
     }
 
+    /// A Mac with Homebrew is one `brew` line per ticked row, every one of them
+    /// run as the user and nothing raised at all.
+    ///
+    /// The sandbox row is neither a unit nor a sentence: `sandbox-exec` is on
+    /// every Mac, so a press that named it has nothing to do about it.
+    #[test]
+    fn a_mac_with_homebrew_installs_every_ticked_row_with_it() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::stand_ins::program(&dir.path().join(BREW), "#!/bin/sh\nexit 0\n");
+
+        let plan = plan(
+            &stated(Distro::MacOs, dir.path()),
+            &[
+                Dependency::Sandbox,
+                Dependency::Git,
+                Dependency::Claude,
+                Dependency::Grok,
+            ],
+        );
+
+        assert!(plan.beyond.is_empty(), "{plan:?}");
+
+        let [git, claude, grok] = plan.units.as_slice() else {
+            panic!("one unit per ticked row, and none for the sandbox: {plan:?}");
+        };
+
+        assert_eq!(git.line, "brew install git");
+        assert_eq!(git.how, How::AsTheUser);
+        assert_eq!(git.covers, [Dependency::Git]);
+        assert_eq!(git.lands, None, "Homebrew's prefix is on the Apple floor");
+
+        // A cask rather than a formula, which is the install a Mac session
+        // finds whichever way Verkstead was started.
+        assert_eq!(claude.line, "brew install --cask claude-code");
+        assert_eq!(claude.how, How::AsTheUser);
+
+        // And the one row Homebrew has no name for is xAI's own installer,
+        // under this user's home the way it is everywhere else.
+        assert_eq!(grok.line, "curl -fsSL https://x.ai/cli/install.sh | bash");
+        assert_eq!(grok.lands, Some(PathBuf::from(HOME).join(".grok/bin")));
+        assert_eq!(grok.chain, None, "xAI's installer wants no Homebrew");
+    }
+
+    /// And a Mac without it makes Homebrew's prefix and installs Homebrew
+    /// first: one raised unit and one as the user, in front of every `brew`
+    /// line and in the same chain as them.
+    #[test]
+    fn a_mac_without_homebrew_installs_it_before_anything_else() {
+        let plan = plan(
+            &machine(Distro::MacOs),
+            &[Dependency::Git, Dependency::Grok, Dependency::Gh],
+        );
+
+        assert!(plan.beyond.is_empty(), "{plan:?}");
+
+        let [prefix, installing, git, grok, gh] = plan.units.as_slice() else {
+            panic!("the prefix, Homebrew, and a unit per ticked row: {plan:?}");
+        };
+
+        // The one thing a Mac ever raises, and it is a directory made and
+        // handed over rather than an install.
+        assert_eq!(prefix.how, How::Raised);
+        assert!(prefix.covers.is_empty(), "a prefix is nobody's row");
+        assert_eq!(
+            prefix.line,
+            "prefix=/usr/local; [ \"$(uname -m)\" = arm64 ] && prefix=/opt/homebrew; \
+             mkdir -p \"$prefix\" && chmod ug=rwx \"$prefix\" && chgrp admin \"$prefix\" && \
+             chown 'ada' \"$prefix\"",
+            "both prefixes, told apart by the machine it runs on, and handed to the user",
+        );
+
+        assert_eq!(
+            installing.how,
+            How::AsTheUser,
+            "Homebrew refuses to be root"
+        );
+        assert_eq!(installing.line, HOMEBREW);
+        assert!(installing.covers.is_empty());
+
+        assert_eq!(git.line, "brew install git");
+        assert_eq!(gh.line, "brew install gh");
+
+        for unit in [prefix, installing, git, gh] {
+            assert_eq!(
+                unit.chain,
+                Some(Chain::Homebrew),
+                "every one of them stands on the prefix: {unit:?}",
+            );
+        }
+
+        assert_eq!(grok.chain, None, "and xAI's installer does not");
+    }
+
+    /// A refused prefix fails every row Homebrew would have installed, in the
+    /// words the dialog was refused in, and nothing behind it is run.
+    #[test]
+    fn a_refused_prefix_fails_every_brew_row_and_runs_no_installer() {
+        let dir = tempfile::tempdir().unwrap();
+        let ran = dir.path().join("the-installer-ran");
+
+        // The one program Homebrew's own line reaches for, as a stub that
+        // leaves a mark: what is being asked is whether it is ever run.
+        crate::stand_ins::program(
+            &dir.path().join("bash"),
+            &format!("#!/bin/sh\n: > '{}'\n", ran.display()),
+        );
+
+        let plan = plan(&machine(Distro::MacOs), &[Dependency::Git, Dependency::Gh]);
+        let run = Arc::new(Run::of(&plan, "a-mac"));
+
+        work(
+            &run,
+            &plan,
+            &Refusing,
+            &nowhere(),
+            &AsTheUser {
+                home: None,
+                path: OsString::from(dir.path().as_os_str()),
+            },
+        );
+
+        let (view, rows) = run.reading();
+
+        assert_eq!(view.phase, RunPhase::Done);
+        assert_eq!(view.status, "2 of 2 could not be installed");
+
+        for (dependency, state) in rows {
+            assert_eq!(
+                state,
+                InstallState::Failed {
+                    why: DISMISSED.to_owned(),
+                },
+                "{dependency:?} stands on the prefix that was refused",
+            );
+        }
+
+        assert!(
+            !ran.exists(),
+            "a prefix nobody made is a Homebrew nobody installs",
+        );
+    }
+
+    /// And a Mac whose environment names nobody has nobody to hand a prefix to,
+    /// so every `brew` row is the hint screen's and nothing is raised.
+    #[test]
+    fn a_mac_that_names_nobody_installs_nothing_with_brew() {
+        let plan = plan(
+            &named(
+                Distro::MacOs,
+                &PathBuf::new(),
+                Some(PathBuf::from(HOME)),
+                None,
+            ),
+            &[Dependency::Git, Dependency::Grok, Dependency::Gh],
+        );
+
+        assert_eq!(
+            line(&plan),
+            "curl -fsSL https://x.ai/cli/install.sh | bash",
+            "the one row that is not Homebrew's goes ahead",
+        );
+
+        assert_eq!(beyond(&plan), [Dependency::Git, Dependency::Gh]);
+        assert!(
+            plan.beyond[0].1.contains("Homebrew"),
+            "the row says what could not be done: {:?}",
+            plan.beyond[0].1,
+        );
+    }
+
     /// A press on a server with nothing to raise a dialog with installs
     /// nothing, asks nothing, and every ticked row says why.
     #[test]
@@ -1359,6 +1852,7 @@ mod tests {
             doing: format!("Installing {line}"),
             how: How::Raised,
             lands: None,
+            chain: None,
         }
     }
 

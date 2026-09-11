@@ -242,6 +242,12 @@ pub struct Machine {
     /// none, which is a machine with no account to be found.
     home: Option<PathBuf>,
 
+    /// And what whoever is running this server is called, which is the one
+    /// thing an install run needs that is neither a directory nor a program:
+    /// Homebrew's prefix is made by an elevated step and handed to this name —
+    /// see [`install`].
+    user: Option<String>,
+
     /// And the two variables a GitHub token is prefilled out of, in the order
     /// `gh` itself reads them: `GH_TOKEN` and then `GITHUB_TOKEN`. Read at the
     /// edge with everything else here, so the arm that prefers one to the other
@@ -336,6 +342,7 @@ impl Machine {
             // a Windows machine was set by somebody's shell, and the account
             // the wizard is looking for is under the profile.
             home: crate::platform::home_dir(platform, env),
+            user: env.user.clone(),
             gh_token: env.gh_token.clone(),
             github_token: env.github_token.clone(),
             hostname,
@@ -365,6 +372,13 @@ impl Machine {
     /// installer lands what it installs — see [`install`].
     fn home(&self) -> Option<&Path> {
         self.home.as_deref()
+    }
+
+    /// And what that user is called, which is who an elevated step hands
+    /// Homebrew's prefix to — `None` on a machine whose environment names
+    /// nobody.
+    fn user(&self) -> Option<&str> {
+        self.user.as_deref()
     }
 
     /// And which of the wizard's eight tabs it is, which is also which package

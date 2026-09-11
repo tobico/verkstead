@@ -141,6 +141,10 @@ const RESTART =
   "since — the one a new install landed in — is one no session has until " +
   "Verkstead is started again from a shell whose PATH names it.";
 
+/// And the word over the one install a whole tab stands on — the Mac's
+/// Homebrew, which is what every command under it is run with.
+const FIRST = "What every command below is run with:";
+
 /// Which rows are a harness, so that the row wears the same mark the rest of the
 /// app draws that backend with.
 const HARNESSES: Partial<Record<Dependency, AgentType>> = {
@@ -620,6 +624,18 @@ function Hints(props: {
       </Show>
 
       <Note class={styles.restart}>{RESTART}</Note>
+
+      {/* What every command on this tab wants first, where they all want the
+          same thing: the Mac's Homebrew, drawn once above the rows rather than
+          under each of the five that are a `brew install`. */}
+      <Show when={guide().before}>
+        {(first) => (
+          <div class={styles.before} data-before>
+            <p class={styles.firstly}>{FIRST}</p>
+            <Instructed of={first()} />
+          </div>
+        )}
+      </Show>
 
       <ul class={styles.rows}>
         <For each={props.rows}>

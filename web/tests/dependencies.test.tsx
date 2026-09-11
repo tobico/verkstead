@@ -589,6 +589,27 @@ describe("the hint screen", () => {
     expect(row(container, "Codex").textContent).toContain("npm install -g");
   });
 
+  /// Every command on the Mac's tab is a `brew install`, so a Mac that reached
+  /// this screen because Homebrew could not be installed needs the one line
+  /// that gets it — drawn once above the rows rather than under each of the
+  /// five that are one.
+  it("draws the Mac's Homebrew above the rows, and no other tab's", () => {
+    const { container } = hinting(ONE_FAILED);
+
+    expect(container.querySelector("[data-before]")).toBeNull();
+
+    fireEvent.click(
+      tabs(container).find((tab) => tab.dataset.distro === "MacOs")!,
+    );
+
+    const before = container.querySelector("[data-before]")!;
+
+    expect(before.textContent).toContain(
+      "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh",
+    );
+    expect(before.textContent).toContain("Every command below is Homebrew's");
+  });
+
   /// A PATH read at startup is a PATH that does not have the directory this
   /// morning's install landed in, and the list itself is the server's own
   /// rather than a sentence about one: both are facts about this machine, so
@@ -921,6 +942,23 @@ describe("what each machine is told to run", () => {
     expect(claude.alternative).toBeUndefined();
     expect(claude.note).toContain("Dock");
     expect(claude.note).toContain("launchd");
+  });
+
+  /// The Mac is the one tab whose every command wants the same thing first,
+  /// and Homebrew is a thing Verkstead installs rather than a thing it assumes:
+  /// a Mac reaches this screen at all when that install is what failed.
+  it("names Homebrew's own line on the Mac's tab and on no other", () => {
+    expect(GUIDES.MacOs.before?.command).toBe(
+      '/bin/bash -c "$(curl -fsSL ' +
+        'https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
+    );
+    expect(GUIDES.MacOs.before?.note).toContain("/opt/homebrew");
+
+    for (const distro of DISTROS) {
+      if (distro === "MacOs") continue;
+
+      expect(GUIDES[distro].before).toBeUndefined();
+    }
   });
 
   /// The sentence this step used to carry on all eight tabs, which said the

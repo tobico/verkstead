@@ -618,9 +618,15 @@ ticked. One password dialog on the machine Verkstead is running on covers the
 packages this distribution carries, the vendor installers run after it as you —
 Anthropic's for Claude Code and xAI's for Grok Build, landing in `~/.local/bin`
 and `~/.grok/bin`, which Verkstead then puts on every session's `PATH` for you —
-and a progress bar and a status line say how far it has got. Only what could
-not be installed here — a NixOS, a server with no way to raise a dialog, an
-installer that would not run — reaches a screen of instructions afterwards, with this
+and a progress bar and a status line say how far it has got. **On a Mac it is
+Homebrew's instead**, and there is usually no dialog at all: every ticked row is
+a `brew install` of its own, run as you, Homebrew refusing to run as root. A Mac
+with no `brew` yet raises one thing and one only — the step that makes
+Homebrew's prefix and hands it to you, which is what Homebrew's installer would
+have asked for a password for — and Homebrew installs itself after it, as you.
+Only what could not be installed here — a NixOS, a server with no way to raise
+a dialog, an installer that would not run, a Homebrew that could not be
+installed — reaches a screen of instructions afterwards, with this
 distro's own command and where the binary has to land; that screen holds Next,
 counting the rows detected, and it re-probes while you are away, so an
 `apt install bubblewrap` finishing in another window ticks the row within ten

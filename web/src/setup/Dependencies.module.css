@@ -371,3 +371,25 @@
     border-color: var(--accent);
   }
 }
+
+/* The one install a whole tab stands on — the Mac's Homebrew, above the rows
+   and under the note about the PATH. Boxed the way the PATH list is: it is a
+   fact about the tab rather than about any one row, and a row is what it would
+   read as under the rule below. */
+.before {
+  padding: 0.6rem 0.7rem;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.5rem;
+}
+
+.firstly {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* Its own instruction sits straight under that word. */
+.before .instruction {
+  margin-top: 0.4rem;
+}

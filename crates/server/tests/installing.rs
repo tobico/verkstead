@@ -48,6 +48,9 @@ use verkstead_server::{open_database, router_onboarding_elevating};
 /// that is a fact about the box.
 const HOSTNAME: &str = "ada-box";
 
+/// And who it runs as, which is who a Mac hands Homebrew's prefix to.
+const USER: &str = "ada";
+
 /// What a dismissed password dialog says, which is the line every row of the
 /// refused unit carries.
 const DISMISSED: &str = "Error: (-128) User canceled.";
@@ -91,14 +94,38 @@ fn served_on(
     os_release: &str,
     dialog: Option<Arc<Dialog>>,
 ) -> Router {
-    let machine = Machine::stated(
+    stood_up(
+        dir,
+        pool,
         Platform::Linux,
+        Some(os_release.to_owned()),
+        dialog,
+    )
+}
+
+/// And a stated Mac, which says nothing about itself: there is no
+/// `/etc/os-release` on one, and the platform is the whole of the answer.
+fn served_mac(dir: &Path, pool: &SqlitePool, dialog: Option<Arc<Dialog>>) -> Router {
+    stood_up(dir, pool, Platform::MacOs, None, dialog)
+}
+
+/// A server over a machine stated whichever way, raising through `dialog`.
+fn stood_up(
+    dir: &Path,
+    pool: &SqlitePool,
+    platform: Platform,
+    os_release: Option<String>,
+    dialog: Option<Arc<Dialog>>,
+) -> Router {
+    let machine = Machine::stated(
+        platform,
         OsString::from(bin(dir).as_os_str()),
         OsString::from(bin(dir).as_os_str()),
         None,
-        Some(os_release.to_owned()),
+        os_release,
         &Environment {
             home: Some(home(dir)),
+            user: Some(USER.to_owned()),
             ..Environment::default()
         },
     )
@@ -193,6 +220,51 @@ fn a_package_manager(dir: &Path) {
             once_installed.display(),
         ),
     );
+}
+
+/// And a stub `brew` in it, which installs what it is named the way the real
+/// one does: a program in the prefix's own `bin`, which is the directory this
+/// machine searches.
+///
+/// **The same reason the package managers above are scripts.** What makes a Mac
+/// row go present is a `PATH` walk finding a program under Homebrew's prefix, so
+/// a `brew` that installed nothing would be a run reporting success over rows
+/// that stayed absent.
+fn a_homebrew(dir: &Path) {
+    // What a formula leaves behind, and the `cp` that puts it there named in
+    // full: a unit that runs as the user is handed the machine's own `PATH`,
+    // which here is the prefix's `bin` and nothing else — so a stub that has a
+    // file to copy names the program that copies it.
+    let installed = dir.join("what-a-formula-lands");
+    program(&installed, "#!/bin/sh\nexit 0\n");
+
+    program(
+        &bin(dir).join("brew"),
+        &format!(
+            "#!/bin/sh\n\
+             test \"$1\" = install || exit 2\n\
+             shift\n\
+             if [ \"$1\" = --cask ]; then shift; fi\n\
+             for formula in \"$@\"; do\n\
+             case \"$formula\" in\n\
+             claude-code) name=claude;;\n\
+             *) name=$formula;;\n\
+             esac\n\
+             '{cp}' '{installed}' '{into}'/$name\n\
+             done\n",
+            cp = found("cp").display(),
+            installed = installed.display(),
+            into = bin(dir).display(),
+        ),
+    );
+}
+
+/// Where `program` is on the `PATH` this suite is running with.
+fn found(program: &str) -> PathBuf {
+    std::env::split_paths(&std::env::var_os("PATH").expect("a `PATH` to run with"))
+        .map(|directory| directory.join(program))
+        .find(|at| at.is_file())
+        .unwrap_or_else(|| panic!("{program} on the suite's own `PATH`"))
 }
 
 /// A `curl` and a `bash` in that directory, where what the `curl` answers with
@@ -579,6 +651,67 @@ fn started(dialog: &Dialog) -> String {
     let (path, _) = rest.split_once('\'').expect("a marker in the line");
 
     path.to_owned()
+}
+
+/// Ticking git and Claude Code on a Mac with Homebrew runs a `brew` line
+/// apiece, as the user, and the rows go present under the prefix.
+///
+/// **Nothing is raised at all.** Every install on a Mac is Homebrew's, Homebrew
+/// refuses to run as root, and the prefix it installs into is already this
+/// user's — so there is nothing here for a password dialog to be in front of,
+/// and a run that put one there would be asking for a privilege to do something
+/// that wants none.
+#[tokio::test]
+async fn a_mac_installs_what_was_ticked_with_homebrew_and_raises_nothing() {
+    let (dir, pool) = ready().await;
+    a_homebrew(dir.path());
+
+    let dialog = Dialog::answered(dir.path(), Answer::Typed);
+    let app = served_mac(dir.path(), &pool, Some(dialog.clone()));
+
+    let ticked = [Dependency::Git, Dependency::Claude];
+
+    let pressed = install(&app, &ticked).await;
+    let run = pressed.run.expect("a press makes a run");
+
+    assert_eq!(run.total, 2, "one unit per ticked row: {run:?}");
+
+    let landed = over(&app).await;
+    let run = landed.run.clone().expect("the run it was started with");
+
+    assert_eq!(run.done, 2);
+    assert_eq!(run.status, "Everything that was ticked is installed");
+
+    assert!(
+        dialog.commands().is_empty(),
+        "a Mac raises nothing: {:?}",
+        dialog.commands(),
+    );
+
+    for ticked in ticked {
+        assert_eq!(install_state(&landed, ticked), &InstallState::Idle);
+        assert_eq!(
+            row(&landed, ticked).state,
+            DependencyState::Present {
+                at: Some(
+                    bin(dir.path())
+                        .join(match ticked {
+                            Dependency::Git => "git",
+                            _ => "claude",
+                        })
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
+                target: None,
+            },
+            "{ticked:?} is there, under the prefix `brew` installed into",
+        );
+    }
+
+    assert!(
+        landed.steps.dependencies,
+        "the step the wizard was held on is met by what the run installed",
+    );
 }
 
 /// A vendor's installer that exited non-zero fails its own row in the line it

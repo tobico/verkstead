@@ -84,6 +84,16 @@ export type Guide = {
   /// One instruction per row. Every row, on every OS: a tab with a gap in it is
   /// a row somebody is left staring at.
   rows: Record<Dependency, Instruction>;
+
+  /// And what every command on this tab wants first, where they all want the
+  /// same thing.
+  ///
+  /// One tab has one: the Mac's, where every line is `brew install` and a Mac
+  /// without Homebrew has nothing to run them with. It is drawn above the rows
+  /// rather than repeated under each of them, because it is one install for the
+  /// whole tab — and it is here at all because a run that could not install
+  /// Homebrew is exactly how somebody reaches this screen on a Mac.
+  before?: Instruction;
 };
 
 /// The eight tabs, in the order they are drawn — the order
@@ -216,6 +226,21 @@ function nixos(attribute: string, note?: string): Instruction {
 export const GUIDES: Record<Distro, Guide> = {
   MacOs: {
     title: "macOS",
+
+    // Homebrew's own line, as Homebrew publishes it. Verkstead installs it for
+    // you where it can — the prefix made behind the password dialog and the
+    // installer run as you — so this is what to paste on the Mac where that
+    // could not be done: it asks for your password once, for the same prefix.
+    before: {
+      command:
+        '/bin/bash -c "$(curl -fsSL ' +
+        'https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
+      note:
+        "Every command below is Homebrew's, and a Mac without Homebrew has " +
+        "nothing to run them with. It installs into /opt/homebrew on Apple " +
+        "silicon and /usr/local on Intel, and a session looks in both.",
+    },
+
     rows: {
       Sandbox: {
         note:
