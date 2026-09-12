@@ -36,6 +36,8 @@
 //! sandbox_binds:
 //!   - /var/cache/verkstead-node
 //!   - verkstead=/var/cache/verkstead-cargo
+//! session_path:
+//!   - /home/you/.local/bin
 //! ignored_comments:
 //!   - author: coderabbitai
 //!     body: billing
@@ -561,6 +563,27 @@ pub struct Config {
     )]
     sandbox_binds: Vec<String>,
 
+    /// And the directories a session's `PATH` is composed with **ahead of the
+    /// server's own entries**: where Verkstead has installed something, so that
+    /// a harness it put in `~/.local/bin` is the one a session finds rather than
+    /// whatever older copy the distribution's packages hold.
+    ///
+    /// Read at startup beside the server's own `PATH` and held for the run, and
+    /// by the same three rules — see [`crate::sandbox::composed`]. The one key
+    /// in this file Verkstead writes for itself: an install that lands in a
+    /// directory appends it here, and the next probe and the next session both
+    /// see it without a restart.
+    ///
+    /// **Not a field on the settings page**, which is the settings module's
+    /// *told, not found* rule kept rather than broken: what is written here is
+    /// a directory the human ticked an install into, or one they typed by hand.
+    #[serde(
+        default,
+        deserialize_with = "rows_written",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    session_path: Vec<String>,
+
     /// And the comments Wrapping is never to address: a list of rules, each an
     /// optional regex over the author's login and an optional regex over the
     /// comment's body, matched anywhere in either.
@@ -613,6 +636,7 @@ impl Config {
             conflict_resolution: config.conflict_resolution,
             share_on_done: config.share_on_done,
             sandbox_binds: entries_written(config.sandbox_binds),
+            session_path: entries_written(config.session_path),
             ignored_comments: rules_kept(config.ignored_comments),
         })
     }
@@ -648,6 +672,13 @@ impl Config {
             // And the switch beside it, for the reason above it.
             share_on_done: Some(share_on_done),
             sandbox_binds: entries_written(sandbox_binds),
+            // And nothing at all for the key the page has no field for. What
+            // keeps a save from taking it away is [`Config::keeping_session_path`],
+            // said at the endpoint over what the file already holds — the same
+            // shape [`Secrets::with_token`] keeps for the password beside the
+            // token, and for the same reason: a page told about one thing has no
+            // business rewriting another.
+            session_path: Vec::new(),
             // Whole, and not put through the reading half's own drop above: what
             // reaches here has already been through [`IgnoreRule::trouble`] at
             // the endpoint, which refuses the rule the reading merely skips —
@@ -699,6 +730,43 @@ impl Config {
     /// installation configured and nothing beside it.
     pub fn sandbox_binds(&self) -> &[String] {
         &self.sandbox_binds
+    }
+
+    /// And the directories a session's `PATH` leads with, in the order they
+    /// were written down. An empty list where nothing has been installed and
+    /// nobody has typed one, which is a session's `PATH` composed out of the
+    /// server's own and nothing else.
+    pub fn session_path(&self) -> &[String] {
+        &self.session_path
+    }
+
+    /// The same config with `session_path` as it already stands.
+    ///
+    /// What a save from the settings page goes through, that page having no
+    /// field for the key: a config built out of what was sent would write the
+    /// file with this key gone, and what it named is where a harness Verkstead
+    /// installed actually is.
+    pub fn keeping_session_path(mut self, kept: &Config) -> Config {
+        self.session_path = kept.session_path.clone();
+
+        self
+    }
+
+    /// And the same config with `directory` on the end of that list, which is
+    /// what an install landing in one writes — see
+    /// [`crate::sandbox::installed_into`], the one caller.
+    ///
+    /// A directory already written down is not written twice: an install run a
+    /// second time is the same directory, and a list holding it twice would be
+    /// a `PATH` entry searched twice.
+    pub fn with_session_path(mut self, directory: &Path) -> Config {
+        let directory = directory.to_string_lossy().into_owned();
+
+        if !self.session_path.contains(&directory) {
+            self.session_path.push(directory);
+        }
+
+        self
     }
 
     /// And the comments nothing is ever to be dispatched about, in the order
@@ -1127,6 +1195,8 @@ fn blank_is_nothing(value: String) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::{
         Cleanup, CleanupStep, Config, ConflictResolution, GitAuthor, IgnoreRule, RuleTrouble,
         RustBuildCache, Secrets, Settings,
@@ -2095,6 +2165,101 @@ mod tests {
             .unwrap();
 
         assert!(settings.config().sandbox_binds().is_empty());
+    }
+
+    /// `session_path` is read the way every other list here is: in the order it
+    /// was written, blanks dropped and the rest trimmed.
+    #[test]
+    fn the_session_path_is_what_the_config_file_says_in_the_order_it_says_it() {
+        let config = Config::read(
+            "session_path:\n  - /home/you/.local/bin\n  - ''\n  \
+             - '  /home/you/.grok/bin  '\n  -\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.session_path(),
+            ["/home/you/.local/bin", "/home/you/.grok/bin"],
+        );
+    }
+
+    /// And a key nothing can make a list of says what an absent one says, which
+    /// is what every other key in this file says of a value it cannot read.
+    #[test]
+    fn a_file_with_no_session_path_in_it_or_a_malformed_one_configures_none() {
+        assert!(
+            Config::read("git_author:\n  name: Ada\n")
+                .unwrap()
+                .session_path()
+                .is_empty()
+        );
+        assert!(Config::read("").unwrap().session_path().is_empty());
+
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+        std::fs::write(settings.config_path(), "session_path: 5\n").unwrap();
+
+        assert!(
+            settings.config().session_path().is_empty(),
+            "a file Verkstead cannot read is nothing configured, logged — and \
+             not a `PATH` half-composed out of what parsed",
+        );
+    }
+
+    /// A directory an install landed in goes on the end of the list, and a
+    /// second install into the same one does not write it twice.
+    #[test]
+    fn an_install_appends_the_directory_it_landed_in_and_never_twice() {
+        let config = Config::default()
+            .with_session_path(Path::new("/home/you/.local/bin"))
+            .with_session_path(Path::new("/home/you/.grok/bin"))
+            .with_session_path(Path::new("/home/you/.local/bin"));
+
+        assert_eq!(
+            config.session_path(),
+            ["/home/you/.local/bin", "/home/you/.grok/bin"],
+            "a `PATH` entry written twice is one searched twice, and the second \
+             install is the same directory as the first",
+        );
+    }
+
+    /// And a save from the settings page keeps it: that page has no field for
+    /// the key, so a config built out of what it sent would take away the
+    /// directory a harness Verkstead installed is really in.
+    #[test]
+    fn a_save_from_the_settings_page_keeps_the_session_path_it_was_not_told_about() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings
+            .save_config(&Config::default().with_session_path(Path::new("/home/you/.local/bin")))
+            .unwrap();
+
+        let page = Config::of(
+            GitAuthor::of(Some("Ada".to_owned()), Some("ada@example.com".to_owned())),
+            RustBuildCache::default(),
+            Cleanup::default(),
+            ConflictResolution::Merge,
+            false,
+            vec![],
+            vec![],
+        );
+
+        settings
+            .save_config(&page.keeping_session_path(&settings.config()))
+            .unwrap();
+
+        assert_eq!(
+            settings.config().session_path(),
+            ["/home/you/.local/bin"],
+            "the page said nothing about it, so the save said nothing about it \
+             either",
+        );
+        assert_eq!(
+            settings.config().git_author().name(),
+            Some("Ada"),
+            "and what the page did send is what the file holds",
+        );
     }
 
     #[test]

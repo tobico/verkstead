@@ -15,6 +15,11 @@
 //! the server's model of onboarding is the objective and the mode, and where
 //! somebody has got to in reading it is not part of either.
 //!
+//! **And the first step's three screens are kept the same way** — what to
+//! install, the run installing it, and what is left to do by hand. Which of
+//! them is open is a fact about this device exactly as the open step is, so it
+//! sits beside it under [`SETUP_SCREEN`] rather than on the wire.
+//!
 //! The order is the order a machine is set up in, and it is not a choice the
 //! human has: a Profile is an account under a harness that has to be installed
 //! first, and there is nothing to commit as until there is something to commit.
@@ -81,4 +86,47 @@ export function openStep(): Step {
 /// Remember which step is open, so that reopening the wizard opens it.
 export function keepStep(step: Step): void {
   write(SETUP_STEP, step);
+}
+
+/// How often the page asks the machine again while something is still to land,
+/// in milliseconds.
+///
+/// ADR-0016's own number. The probes are a `PATH` walked and one trivial
+/// `bwrap`, so this costs the machine nothing worth counting — and what it buys
+/// is that `apt install bubblewrap` finishing in another window is a tick here
+/// without anybody touching the page.
+export const PROBE = 10_000;
+
+/// And how often it asks while an install run of Verkstead's own is going.
+///
+/// Faster, because what is being watched is no longer somebody else's terminal:
+/// the bar and the status line on the install screen are drawn from the
+/// reading, so the interval is how often that screen moves at all. Two seconds
+/// is short enough to read as a run going on rather than as a page updating.
+export const RUNNING = 2_000;
+
+/// The dependencies step's three screens, in the order a press moves through
+/// them: what to install, the run installing it, and what is left to do by
+/// hand.
+export const SCREENS = ["choosing", "installing", "hints"] as const;
+
+/// One of them.
+export type Screen = (typeof SCREENS)[number];
+
+/// Where this device's open screen is kept, beside the open step and for the
+/// same reason: which screen somebody is on is a fact about the tab in front of
+/// them, and the server's model of onboarding is the objective and the mode.
+export const SETUP_SCREEN = "verkstead.setup-screen";
+
+/// Which screen this device was left on — the first of the three where it has
+/// never had one, and where what is under the key is not a screen this build
+/// has.
+export function openScreen(): Screen {
+  const held = read(SETUP_SCREEN);
+  return SCREENS.find((screen) => screen === held) ?? SCREENS[0];
+}
+
+/// Remember which screen is open, so that a reload opens it again.
+export function keepScreen(screen: Screen): void {
+  write(SETUP_SCREEN, screen);
 }

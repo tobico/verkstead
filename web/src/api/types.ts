@@ -1775,8 +1775,8 @@ export type DependencyState = { "state": "Present",
  * was found in with the name on the end of it.
  *
  * Nothing on the sandbox row of the two platforms where a sandbox is
- * no program to find — Apple's own, and the identity a Windows session
- * runs under. Every other present row has one.
+ * no program to find — Apple's own, and the account a Windows session
+ * runs as. Every other present row has one.
  */
 at: string | null, 
 /**
@@ -1799,13 +1799,26 @@ trouble: string | null,
  * cannot use it — see [`Seen`]. Nothing where it is on no `PATH` at
  * all, which is a row with nothing to say beyond *install one*.
  */
-seen: Seen | null, } | { "state": "NotApplicable" };
+seen: Seen | null, };
 
 /**
  * One row of the dependencies step: a thing a session needs, and whether this
  * machine has it.
  */
-export type DependencyView = { dependency: Dependency, state: DependencyState, };
+export type DependencyView = { dependency: Dependency, state: DependencyState, 
+/**
+ * And what the install run has made of it, where one has been started at
+ * all — see [`InstallState`], which is *installing*, *failed with why*, or
+ * nothing.
+ *
+ * Beside the state above rather than folded into it, because the two are
+ * different questions asked at the same moment: whether this machine has
+ * the thing is probed on every read, and whether Verkstead is in the
+ * middle of putting it there is what the run says. A row that is
+ * installing is a row that was absent — which is why it could be ticked —
+ * and the same row a moment later is present with nothing under it.
+ */
+install: InstallState, };
 
 /**
  * The Diff as the browser receives it: the HTML the server rendered, and the
@@ -1954,6 +1967,38 @@ export type IgnoreRule = { author: string, body: string, };
  * showed anybody.
  */
 export type IgnoredCommentsEdit = "Keep" | { "Set": { rules: Array<IgnoreRule>, } };
+
+/**
+ * The press that starts one: the rows that were ticked.
+ *
+ * Every one of them is a row the reading said was absent. A row that is
+ * present is not offered a checkbox to tick, and one this machine cannot
+ * install is not known in advance — what cannot be done is reported by the run
+ * rather than refused at the door, because what Verkstead can install is a fact
+ * about the distribution rather than about the row.
+ */
+export type InstallPress = { 
+/**
+ * What to install, in any order: the run puts them in its own.
+ */
+dependencies: Array<Dependency>, };
+
+/**
+ * What the install run has made of one row.
+ *
+ * Flat on the wire — `{"install": "Failed", "why": "…"}` — the way
+ * [`DependencyState`] is, so the viewer narrows on a field rather than
+ * unwrapping a variant name.
+ */
+export type InstallState = { "install": "Idle" } | { "install": "Installing" } | { "install": "Failed", 
+/**
+ * In the machine's own words: the first line the run printed on
+ * standard error — the package manager's or the vendor installer's,
+ * whichever unit this row was — or whatever a dismissed password
+ * dialog was refused in, and *cancelled* for a unit that was skipped
+ * rather than run.
+ */
+why: string, };
 
 /**
  * Where a Conversation has got to.
@@ -2160,12 +2205,12 @@ dependencies: Array<DependencyView>,
  * `PATH` a session is given, as this server composed it out of its own.
  *
  * **The list rather than a sentence about one.** What a session searches
- * is the server's own `PATH` ahead of the platform's floor — see
- * `sandbox::composed` — so which directories those are is a fact about
- * *this* machine rather than about the platform, and a tab of written-down
- * prose could not say it. A wizard telling somebody where to put a binary
- * has to name the directories a session really looks in, which is the
- * whole of why this is on the wire.
+ * is what Verkstead installed into ahead of the server's own `PATH`, and
+ * that ahead of the platform's floor — see `sandbox::composed` — so which
+ * directories those are is a fact about *this* machine rather than about
+ * the platform, and a tab of written-down prose could not say it. A wizard
+ * telling somebody where to put a binary has to name the directories a
+ * session really looks in, which is the whole of why this is on the wire.
  *
  * Verkstead's own directory is not on it, that being the one entry
  * holding nothing a human installs.
@@ -2180,7 +2225,40 @@ accounts: Array<AccountView>,
 /**
  * And whether each of the three steps stands met, at this moment.
  */
-steps: StepsView, };
+steps: StepsView, 
+/**
+ * And the install run, where one has been started in this server's life —
+ * going, or over and the last thing that happened here. See [`RunView`].
+ *
+ * Nothing until the first Next is pressed on the dependencies step, which
+ * is every reading a wizard nobody has pressed anything on draws.
+ */
+run: RunView | null, 
+/**
+ * And the Data Directory this server keeps, for the one instruction that
+ * is about it.
+ *
+ * **The Windows sandbox row, and nothing else on the page.** What that row
+ * is, is the local account this Data Directory's sessions run as, and the
+ * verb that makes one takes the directory as an argument — so the line the
+ * hint screen hands somebody to run in an elevated terminal has to name
+ * the directory *this* server keeps. A `verkstead session-account create`
+ * with nothing after it resolves the platform's default, which makes an
+ * account of a different name, leaves the row absent and says nothing
+ * about why.
+ *
+ * Which matters on exactly the machines that screen is for. A server
+ * started from a terminal or a unit file is the one that could not raise a
+ * dialog and so sent the row here, and it is also the one most likely to
+ * have been pointed at a Data Directory of its own.
+ *
+ * On the wire for the reason [`OnboardingView::path`] is: a wizard telling
+ * somebody what to run has to name the directory this machine really
+ * keeps, and no prose written in the viewer could say which that is.
+ * `None` is a machine nothing told, which is a stated one no suite pointed
+ * at a directory.
+ */
+data_directory: string | null, };
 
 /**
  * One open pull request, as a row of that level draws it.
@@ -3251,6 +3329,62 @@ field: RuleField | null,
  * field, and the engine's message is a diagram across three or four.
  */
 why: string, };
+
+/**
+ * What the status line is about.
+ */
+export type RunPhase = "Asking" | "Installing" | "Done";
+
+/**
+ * The install run as a whole: what it is doing, and how far it has got.
+ *
+ * **One run at a time, and it is this server's.** The wizard's first step is
+ * ticked and pressed, and what that press starts is a sequence of commands —
+ * the elevated batch that installs this distribution's packages, and a vendor
+ * installer for each row no package manager carries. This is what the install
+ * screen is drawn from while they run: a status line, a bar, and the Cancel
+ * beside it.
+ *
+ * **The rows say the rest.** Which row is installing and which one failed is
+ * on the row — see [`InstallState`] — because that is where the human is
+ * looking for it. What is here is the run's own half: what it is about at this
+ * moment, and how much of it is behind.
+ */
+export type RunView = { 
+/**
+ * What the status line is about — see [`RunPhase`].
+ */
+phase: RunPhase, 
+/**
+ * And the line itself, in words: *Waiting for the password dialog on
+ * ada-box*, *Installing bubblewrap, git*, and what the run came to once it
+ * is over.
+ *
+ * Written by the server rather than composed by the viewer, unlike every
+ * other sentence about this step: the words name this machine and the
+ * packages this distribution calls them, neither of which the viewer
+ * knows.
+ */
+status: string, 
+/**
+ * How many of the ticked rows are behind the run, whether they were
+ * installed, refused or skipped.
+ */
+done: number, 
+/**
+ * And how many were ticked, which is what `done` is out of.
+ */
+total: number, 
+/**
+ * Whether Cancel has been pressed and the unit under way has not finished
+ * yet.
+ *
+ * A press cannot stop a package manager that is already running — a
+ * half-installed machine is worse than a fully installed one — so what
+ * Cancel does is skip what has not started. This is the window between the
+ * press and the run reaching that point.
+ */
+cancelling: boolean, };
 
 /**
  * One session's Screen: the grid its Capture leaves on a terminal.

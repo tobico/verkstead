@@ -7,7 +7,7 @@
 //!
 //! Two shapes of test, as the two steps before it have. **What is drawn** is
 //! asked of the step on its own. **What a press does** is asked of the whole
-//! app, because the answer is which app there is: the last Continue takes
+//! app, because the answer is which app there is: the last Next takes
 //! onboarding mode off, and what that means is the workbench standing at
 //! `/compose` where the wizard was.
 
@@ -121,7 +121,7 @@ function source(container: ParentNode, id: string): string | undefined {
 /// The press onwards, found by its own words the way the steps before it are.
 function onwards(container: ParentNode): HTMLButtonElement {
   return [...container.querySelectorAll("button")].find(
-    (button) => button.textContent === "Continue",
+    (button) => button.textContent === "Next",
   )!;
 }
 
@@ -199,8 +199,8 @@ describe("what the fields open with", () => {
   });
 
   /// git refuses a commit with no author, so both halves are required — which
-  /// is the one thing that holds this step's Continue.
-  it("refuses Continue until both halves of the author are there", async () => {
+  /// is the one thing that holds this step's Next.
+  it("refuses Next until both halves of the author are there", async () => {
     const { container } = mount(NOTHING);
 
     await waitFor(() => expect(onwards(container).disabled).toBe(true));
@@ -217,7 +217,7 @@ describe("what the fields open with", () => {
   });
 });
 
-describe("what Continue saves", () => {
+describe("what Next saves", () => {
   /// Nothing is written until it is pressed: a prefill is a proposal, and the
   /// press is the human telling Verkstead it is right.
   it("writes nothing until it is pressed", async () => {
@@ -376,7 +376,7 @@ describe("what the save answers", () => {
   });
 });
 
-describe("the last Continue", () => {
+describe("the last Next", () => {
   /// Which is the whole wizard ending: the mode goes off for this run and the
   /// app lands on the compose page. Driven through the gate, because what is
   /// being asked is which of the two apps the browser is holding — see

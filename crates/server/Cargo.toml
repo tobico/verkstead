@@ -24,6 +24,13 @@ base64.workspace = true
 clap.workspace = true
 # The random half of a Conversation's prefilled branch name.
 getrandom.workspace = true
+# What this machine calls itself, for the one sentence that has to name it: the
+# install run's status line, which says whose screen the password dialog is on.
+# The reader may be on a phone on the tailnet, so *this machine* would name
+# nothing. A crate rather than a syscall because the call is a different one on
+# each platform and the answer is one string — `set` is off, nothing here
+# renames anything.
+hostname = { version = "0.4", default-features = false }
 # The request `web-push-native` builds is an `http::Request`, and this is the
 # crate that type comes from — shared with reqwest and axum, so it is the same
 # request all the way out.

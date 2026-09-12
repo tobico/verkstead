@@ -393,8 +393,8 @@ round is to take the mark off before opening it instead: right-click the msi,
 unsigned, so an installer asking for administrator would be an unsigned program
 asking for the machine, and elevation buys a downloader nothing they wanted.
 There is one elevated step on this platform and it is below, after the install
-rather than inside it: a command you type once, having already decided to trust
-this, rather than a package you hand the machine to before you have seen it.
+rather than inside it: one you take once, having already decided to trust this,
+rather than a package you hand the machine to before you have seen it.
 Everything therefore lands in the profile: the two exes under
 `%LOCALAPPDATA%\Programs\Verkstead`, a **Verkstead** entry in your own Start
 menu, and the uninstall entry in **Installed apps** beside everything else you
@@ -407,13 +407,20 @@ the rest work in a terminal opened *after* the install. One that was already
 open never read the entry — closing it and opening another is the whole of the
 fix — and the uninstall takes the entry away with the files.
 
-**Then one command, once, as an administrator.** Sessions on this machine run
-as a local account of Verkstead's own rather than as you — which is what keeps
-an agent out of your Documents — and creating a local account is an
-administrator's call. So this is the one thing Verkstead has ever asked you to
-elevate for. Right-click the Start button, choose **Terminal (Admin)** or
-**Windows PowerShell (Admin)**, answer the **User Account Control** prompt, and
-run it there:
+**Then one elevated step, once — and the wizard takes it for you.** Sessions on
+this machine run as a local account of Verkstead's own rather than as you —
+which is what keeps an agent out of your Documents — and creating a local
+account is an administrator's call. The setup wizard's first step is where that
+happens: the sandbox row reads absent until there is an account, ticking it and
+pressing **Next** runs the command below behind a **User Account Control**
+prompt, and the row goes present without anything being restarted. That is the
+one thing Verkstead has ever asked you to elevate for, and it asks once.
+
+**By hand, where the wizard could not.** A Verkstead started from a terminal
+rather than from its icon has no screen to put a UAC prompt on, and sends the
+row to the wizard's last screen with this line on it instead. Right-click the
+Start button, choose **Terminal (Admin)** or **Windows PowerShell (Admin)**,
+answer the prompt, and run it there:
 
 ```console
 $ verkstead session-account create
@@ -612,8 +619,23 @@ directory — is [development.md](development.md#quickstart).
 yet is in **Onboarding Mode**, and opens on the wizard at `/setup` rather than
 on the workbench. It walks three steps. **What a session needs** names every
 dependency it could not find — a sandbox, `git`, one of the four coding agents,
-and `gh` as an optional row — with this distro's own install command and where
-the binary has to land, and it re-probes while you are away, so an
+and `gh` as an optional row — with a checkbox where a missing row's tick would
+be: the sandbox and `git` start ticked, and Next installs everything you leave
+ticked. One password dialog on the machine Verkstead is running on covers the
+packages this distribution carries, the vendor installers run after it as you —
+Anthropic's for Claude Code and xAI's for Grok Build, landing in `~/.local/bin`
+and `~/.grok/bin`, which Verkstead then puts on every session's `PATH` for you —
+and a progress bar and a status line say how far it has got. **On a Mac it is
+Homebrew's instead**, and there is usually no dialog at all: every ticked row is
+a `brew install` of its own, run as you, Homebrew refusing to run as root. A Mac
+with no `brew` yet raises one thing and one only — the step that makes
+Homebrew's prefix and hands it to you, which is what Homebrew's installer would
+have asked for a password for — and Homebrew installs itself after it, as you.
+Only what could not be installed here — a NixOS, a server with no way to raise
+a dialog, an installer that would not run, a Homebrew that could not be
+installed — reaches a screen of instructions afterwards, with this
+distro's own command and where the binary has to land; that screen holds Next,
+counting the rows detected, and it re-probes while you are away, so an
 `apt install bubblewrap` finishing in another window ticks the row within ten
 seconds. **Agent Profiles** offers the agent accounts already logged in under
 the server's home; each one you leave ticked is saved as a Profile with no name
@@ -621,7 +643,7 @@ and every model this build knows for that agent — and there is a form under th
 for an account elsewhere. **Who the work is committed as** asks for the git
 author, prefilled from `git config --global`, with the GitHub token optional and
 prefilled from `GH_TOKEN`, `GITHUB_TOKEN` or the host `gh`'s own login, each
-field labelled with where its value came from. The last Continue takes the mode
+field labelled with where its value came from. The last Next takes the mode
 off and lands you on the compose page. There is no skip and no going back
 through it: the verdict is reached once, at startup, so a machine that already
 has all three opens the workbench and never sees the wizard. What it does not do

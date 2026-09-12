@@ -108,6 +108,64 @@ login, each labelled with where it was found and none saved until Continue.
 The GitHub login is shown from verifying the token, never typed. Saving goes
 through the settings save the page already has, verification included.
 
+## Installing what is missing
+
+*Amended 2026-09-11.* The dependency step drew every missing dependency's
+install command and waited for it to be pasted into a terminal on the server
+machine. Now **an absent row carries a checkbox** where its tick would be, the
+gating rows ticked by default and the rest not, and **Next installs what is
+ticked** — pressable once the present rows plus the ticked ones would meet the
+objective. Nothing says in advance which rows cannot be installed here.
+
+**The privilege comes through the `Elevate` seam the Remote access pane
+already uses**: the desktop app with a screen hands the server the platform's
+own password dialog, and a server started any other way is handed none. So the
+dialog appears on the machine running Verkstead, and a server with no way to
+ask — the NixOS service, a headless `verkstead serve`, the app over SSH —
+sends every ticked row to the hint screen without asking. **One dialog per
+Next**: the distribution's package manager run directly, naming every ticked
+package, with `nodejs` and `npm` added where an npm harness is ticked and the
+`npm install -g` joined onto the same line. `apt` has its list brought up to
+date in front of that install and joined to it with `;` — a stale list is an
+install that fails fetching a version the pool has dropped, and there is no
+second dialog to retry on, while a refresh that could not reach one source is
+no reason to refuse the packages the archive still carries. `dnf` refreshes
+itself and `pacman`'s refresh is Arch's own `-Syu`, which is more than a press
+of Next asked for. The vendor installers run after it
+**as the user**, never elevated: Anthropic's for Claude Code, xAI's for Grok
+Build, and Homebrew's where a Mac has no `brew`, after one elevated step makes
+its prefix. Every Windows install goes through the runas arm. A run is a
+sequence of units, one command each; cancel finishes the unit under way and
+skips the rest.
+
+**A directory Verkstead installs into is `session_path`**, a list in
+`config.yaml` composed ahead of the server's own `PATH` entries under the same
+rules, read at startup and grown mid-run when an install lands. This is the
+one amendment to *nothing is added the `PATH` did not name*: an install the
+human ticked is a directory they were told about, which is the settings
+module's *told, not found* rather than the guess that rule refused.
+
+**The Windows sandbox row is the session account.** It read *not applicable*
+and passed; it is now probed, present when the local account this Data
+Directory's sessions run as exists, and it gates the step, since no session
+starts without it. A ticked row runs `verkstead session-account create`
+elevated, and the pipe is re-opened granting the new account, so nothing
+restarts. The by-hand line on the hint screen names this server's Data
+Directory, which is why the reading carries it: an account is named after the
+directory whose sessions run as it, and a bare line resolves the platform's
+default instead — a different account, on a row that gates the step, and on the
+one screen a server with a Data Directory of its own is most likely to reach.
+
+**Three screens.** The checkboxes; then an install screen with a progress bar
+of one unit per ticked row and a status line naming the phase and the machine
+the dialog is on, which moves on by itself when the run ends — to the next step
+when every ticked row is present, to the hint screen otherwise; and the hint
+screen, drawing only the ticked rows still absent with the failure under each,
+the OS tabs, the PATH list and the restart note, its Next held with a counter
+beside it until every ticked row is detected, and Back to the checkboxes. The
+page polls every two seconds while a run is going. The install endpoint answers
+only while onboarding mode is on, and every button in the wizard reads Next.
+
 ## The zero state
 
 The wizard ends on the compose page, and the compose page has a **zero
@@ -179,3 +237,20 @@ page does. Either way the Repo is registered and becomes the draft's.
   base.
 - **A projects-directory setting** in place of the paths step. Rejected: the
   modal asks for a parent directory, and nothing else needed one.
+- **A password field in the wizard**, so a phone could drive a headless
+  server through `sudo`. Rejected: a password typed into the workbench is a
+  secret on the wire the seam already avoids, and the machines with nobody at
+  them are the machines whose instructions the hint screen keeps.
+- **One dialog per ticked row.** Rejected: the packages are one package-manager
+  command, and a dialog per row is the same password typed five times.
+- **Claude's packaged install under elevation**, landing in `/usr/local/bin`
+  where no PATH question arises. Rejected: the packaged one is the one that
+  goes stale, which is why the tab leads with the native installer.
+- **Holding the installed-into directory for this run only**, or in the
+  database. Rejected: the next start would lose it, and a directory the human
+  cannot see is one they cannot correct.
+- **A restart after the session account is made.** Rejected: the pipe can be
+  re-opened with the grant, and a wizard that asks for a restart mid-step is
+  the terminal it was replacing.
+- **Saying in advance which rows need a step by hand.** Rejected as clutter
+  on the checkbox screen; the hint screen says it where it matters.

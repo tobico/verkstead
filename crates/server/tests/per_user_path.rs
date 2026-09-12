@@ -17,6 +17,14 @@
 //! because a plain file would prove the grant a real machine does not have: what
 //! has to run inside is the link *and* what it lands on.
 //!
+//! **And a directory Verkstead installed into, which is on no `PATH` the server
+//! was started with.** `session_path` in `config.yaml` is the whole of what puts
+//! one in front of a session — see `tests/session_path.rs`, which is that key's
+//! own suite — and a directory told about and not granted is a name a session
+//! finds and cannot start. So the second harness here is run by name too, and
+//! read the same way round: on the list ahead of the system directories, and
+//! read-only inside.
+//!
 //! **One test per machine, in a binary of its own, and that is the whole design
 //! of this file.** The `PATH` and the home a session composes from are the
 //! *process's* own — read once at startup, held for the run — so the only way
@@ -79,6 +87,17 @@ const NATIVE_VERSION: &str = ".local/share/claude/versions/0.0.0";
 const ABOVE_THE_VERSIONS: &str = ".local/share/claude";
 const BESIDE_THE_VERSIONS: &str = ".local/share/claude/what-the-human-keeps-there";
 
+/// And where *Verkstead* installed one, which is on no `PATH` the server was
+/// started with: `session_path` in `config.yaml` is the whole of what puts it in
+/// front of a session — see `tests/session_path.rs`, which is that key's own
+/// suite. Here to be run and read, which is what a list of directories is worth
+/// nothing without.
+const VERKSTEAD_INSTALL: &str = ".verkstead/bin";
+
+/// The `codex` it put there, and what it says when it runs.
+const A_CODEX: &str = "#!/bin/sh\nprintf '%s\\n' 'the harness Verkstead installed'\n";
+const CODEX_SAYS: &str = "the harness Verkstead installed";
+
 /// The `claude` that install left there, and what it says when it runs.
 ///
 /// A script rather than a binary, for the reason every stub in these suites is
@@ -117,6 +136,10 @@ struct Standing {
     /// the platform's own floor — which the composing drops, and which nothing
     /// here binds.
     outside: PathBuf,
+
+    /// And where Verkstead's own install went, which `session_path` is the
+    /// whole of the reason a session ever looks in.
+    installed: PathBuf,
 
     conversation: store::Conversation,
     profile: store::Profile,
@@ -184,6 +207,13 @@ async fn standing() -> Standing {
     let outside = elsewhere.path().join("opt/bin");
     std::fs::create_dir_all(&outside).unwrap();
 
+    // And what Verkstead installed for the human, which goes on no `PATH` the
+    // server was started with: `session_path` is the whole of what a session
+    // ever hears about it.
+    let installed = home.path().join(VERKSTEAD_INSTALL);
+    std::fs::create_dir_all(&installed).unwrap();
+    program(&installed.join("codex"), A_CODEX);
+
     // The machine's own `PATH` stays on the end of it: what the *server*
     // process runs — git, and the wrapper a session is rendered behind — is
     // found on this one, and only a session's is composed from it.
@@ -201,6 +231,17 @@ async fn standing() -> Standing {
         std::env::set_var("HOME", home.path());
         std::env::set_var("PATH", path);
     }
+
+    // And what this Data Directory was told, read the way a server coming up
+    // reads it: the directory Verkstead installed into, which a session's `PATH`
+    // is composed with ahead of everything above.
+    let settings = Settings::in_data_dir(state.path());
+    std::fs::write(
+        settings.config_path(),
+        format!("session_path:\n  - {}\n", installed.display()),
+    )
+    .unwrap();
+    verkstead_server::sandbox::hold_session_path(&settings);
 
     let repo = repository(elsewhere.path().join("verkstead"));
 
@@ -283,7 +324,6 @@ async fn standing() -> Standing {
         Skills::installed(Platform::HERE, state.path()).expect("this binary carries skills");
     let handoffs = Handoffs::under(state.path());
     let attachments = Attachments::under(state.path());
-    let settings = Settings::in_data_dir(state.path());
 
     let image = state.path().join("image/verkstead");
     std::fs::create_dir_all(image.parent().unwrap()).unwrap();
@@ -298,6 +338,7 @@ async fn standing() -> Standing {
         install,
         version,
         outside,
+        installed,
         conversation,
         profile,
         skills,
@@ -441,6 +482,25 @@ async fn the_harness_under_the_servers_home_is_what_a_linux_session_runs() {
         "and what ran was that install rather than something else of the name",
     );
 
+    // And the harness Verkstead installed, which is on the list for the one
+    // reason `session_path` says so — run by name here too, a directory told
+    // about and not granted being a name a session finds and cannot start.
+    let (rendering, _closing) = sandbox
+        .command(&["codex"])
+        .expect("a rendering on a platform with no identity to make");
+    let output = started(&rendering);
+
+    assert!(
+        output.status.success(),
+        "the harness Verkstead installed did not run inside a session: {}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        CODEX_SAYS,
+        "and what ran was that install rather than something else of the name",
+    );
+
     let reported = probe(
         &sandbox,
         &format!(
@@ -451,6 +511,7 @@ async fn the_harness_under_the_servers_home_is_what_a_linux_session_runs() {
             dir {version} version
             file {beside} beside-the-versions
             dir {outside} outside
+            dir {installed} installed
             file "$HOME/.claude/skills/the-accounts-own/SKILL.md" the-accounts-own
             dir "$HOME/.claude/skills" account-skills
             "#,
@@ -458,7 +519,24 @@ async fn the_harness_under_the_servers_home_is_what_a_linux_session_runs() {
             version = quoted(&standing.version),
             beside = quoted(&standing.home.path().join(BESIDE_THE_VERSIONS)),
             outside = quoted(&standing.outside),
+            installed = quoted(&standing.installed),
         ),
+    );
+
+    assert_eq!(
+        reported["installed"], "read",
+        "the directory `session_path` named is read-only inside, exactly as a \
+         directory the server's own `PATH` named is: what put it on the list is \
+         no reason for a session to be able to write there",
+    );
+    assert!(
+        reported["path"]
+            .split(':')
+            .take_while(|entry| *entry != "/usr/bin")
+            .any(|entry| entry == standing.installed.to_string_lossy()),
+        "and it is ahead of the system directories on the `PATH` a session \
+         really gets, which is what the whole key is for: {}",
+        reported["path"],
     );
 
     assert_eq!(
@@ -538,6 +616,20 @@ async fn the_harness_under_the_servers_home_is_read_and_run_by_a_macs_policy() {
         !policy.contains(&in_policy(&real(&standing.outside))),
         "while a `PATH` entry under neither the home nor the machine's own \
          floor is in no rule at all:\n{policy}",
+    );
+
+    let installed = in_policy(&real(&standing.installed));
+
+    assert!(
+        policy.contains(&format!(
+            "(allow file-read* file-map-executable process-exec* (subpath {installed}))"
+        )),
+        "and the directory `session_path` named is read and run the same way, \
+         what put it on the list being no reason to grant it differently:\n{policy}",
+    );
+    assert!(
+        !policy.contains(&format!("(allow file-write* (subpath {installed}))")),
+        "read-only there too:\n{policy}",
     );
 
     let version = in_policy(&real(&standing.version));

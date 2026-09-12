@@ -136,7 +136,22 @@ pub struct Environment {
     /// And `$GITHUB_TOKEN`, which is the other variable `gh` itself reads and
     /// the second place the prefill looks.
     pub github_token: Option<String>,
+
+    /// And what this machine's own user is called, which is the other value
+    /// here that is no directory: an install run on a Mac hands Homebrew's
+    /// prefix to it, the elevated step that makes that prefix having made it as
+    /// root — see [`crate::onboarding`].
+    ///
+    /// Read at the edge with everything else, out of the three names
+    /// [`crate::remote`] reads for the Tailscale operator grant: `USER` and
+    /// `LOGNAME` are the Unix ones, and `USERNAME` is the one Windows sets
+    /// instead.
+    pub user: Option<String>,
 }
+
+/// The three names a platform may be keeping that user under, in the order they
+/// are read.
+const USER: &[&str] = &["USER", "LOGNAME", "USERNAME"];
 
 impl Environment {
     /// What this process was started with — the one read of the real
@@ -152,6 +167,10 @@ impl Environment {
             xdg_cache_home: std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from),
             gh_token: std::env::var("GH_TOKEN").ok(),
             github_token: std::env::var("GITHUB_TOKEN").ok(),
+            user: USER
+                .iter()
+                .filter_map(|named| std::env::var(named).ok())
+                .find(|user| !user.is_empty()),
         }
     }
 }

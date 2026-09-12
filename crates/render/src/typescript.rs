@@ -23,12 +23,12 @@ use crate::{
     CompanionModeChoice, CompanionModeChosen, CompanionRemoved, ConflictResolutionEdit,
     ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
     ConversationStopped, ConversationUnarchived, ConversationView, Created, Creation,
-    DirectoryListing, GrillingStarted, Locked, NewAdoption, NewCompanion, NewConversation,
-    NewOrder, NewPullRequestAdoption, OnboardingView, OpenPullRequestRepo, PrefillView,
-    ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved,
-    PullRequestDetails, PushKey, Registered, Registration, RemoteBanner, RemoteView, RepoChoice,
-    RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed,
-    RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress, SetReading, SettingsEdit,
+    DirectoryListing, GrillingStarted, InstallPress, Locked, NewAdoption, NewCompanion,
+    NewConversation, NewOrder, NewPullRequestAdoption, OnboardingView, OpenPullRequestRepo,
+    PrefillView, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
+    ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RemoteBanner, RemoteView,
+    RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved,
+    Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress, SetReading, SettingsEdit,
     SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
     ShowingArchived, Shown, Started, SteerOpened, SteerSubmission, Submitted, Subscribed,
     Subscription, TakenUp, TerminalOpened, TerminalsView, TranscriptView, Unsubscribe,
@@ -338,8 +338,14 @@ fn the_viewers_types_are_written_from_these() {
 
     // And whether a fresh Verkstead can do anything yet: the mode the wizard
     // runs in, the machine it is standing on, and what is missing from it. It
-    // writes the rows and the three steps' met-ness with it.
+    // writes the rows and the three steps' met-ness with it, and the install run
+    // where one is going.
     OnboardingView::export_all(&config).unwrap();
+
+    // And the one thing that step is pressed for: the rows that were ticked,
+    // which is what the run installs. The reading above already carries what
+    // comes back of it.
+    InstallPress::export_all(&config).unwrap();
 
     // And what that machine can offer the wizard's last step, which is a read
     // of its own: the git author it commits as and a GitHub token it is

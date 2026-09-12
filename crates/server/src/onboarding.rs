@@ -62,9 +62,11 @@
 //! `bwrap` that is installed is not yet a `bwrap` that works: unprivileged user
 //! namespaces can be switched off, and an AppImage cannot carry one. So the row
 //! runs the most trivial sandbox there is and keeps what the failure said. On
-//! macOS `sandbox-exec` is on every Mac and the row ticks; on Windows a
-//! session's boundary is an identity rather than something to install, and the
-//! row is not applicable at all.
+//! macOS `sandbox-exec` is on every Mac and the row ticks; and on Windows a
+//! session's boundary is an identity rather than a program, so the row is the
+//! local account this Data Directory's sessions run as — resolved on the
+//! machine at every read, and gating the step, because a server without one
+//! starts no session at all. See [`Machine::session_account`].
 //!
 //! **The git step's prefills are a read apart.** What `git config --global`
 //! says the machine commits as, and whatever GitHub token it is already
@@ -74,12 +76,22 @@
 //! somebody waits for an install, and a token is not something to hand a page
 //! that is drawing a sidebar.
 //!
+//! **And one thing here is done rather than read**: installing what the first
+//! step is missing. The human ticks the absent rows they want and presses Next
+//! once, and what that starts is a sequence of commands raised through the
+//! [`crate::remote::Elevate`] handle the desktop app hands the server — see
+//! [`install`], which is the whole of the run. It is still nothing written
+//! down: a run belongs to the life of this server, and the rows under it go on
+//! being probed at every read, which is what says a row that was installing has
+//! landed.
+//!
 //! **All of it follows [`crate::platform`]'s discipline**: the platform is a
 //! value rather than a `cfg`, and the machine is a set of values read at the
 //! edge and passed down — see [`Machine`]. That is what leaves every arm,
 //! including the two this runner will never be, a unit test on this one.
 
-use std::ffi::OsString;
+use std::borrow::Cow;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -89,15 +101,20 @@ use anyhow::Result;
 use sqlx::SqlitePool;
 use tokio::sync::OnceCell;
 use verkstead_render::{
-    AccountView, Dependency, DependencyState, DependencyView, Distro, OnboardingView, PrefillView,
-    Prefilled, Seen, Source, StepsView,
+    AccountView, Dependency, DependencyState, DependencyView, Distro, InstallState, OnboardingView,
+    PrefillView, Prefilled, RunView, Seen, Source, StepsView,
 };
 
 use crate::github::Gh;
 use crate::platform::{Environment, Platform};
+use crate::remote::Elevate;
 use crate::settings::Settings;
 use crate::unseen::Unseen;
 use crate::{github, profiles, sandbox, sessions, store};
+
+mod install;
+
+pub(crate) use install::Refusal;
 
 /// Where a Linux machine says which distribution it is.
 ///
@@ -134,6 +151,33 @@ const SHELL: &str = "/bin/sh";
 /// The program the Linux sandbox row is about.
 const BWRAP: &str = "bwrap";
 
+/// What a machine calls itself when it will not say, and what a stated one is
+/// called until a test says otherwise — see [`Machine::called`].
+///
+/// The sentence it goes in is *waiting for the password dialog on …*, so what
+/// stands in for a name is the thing that sentence is pointing at.
+const NAMELESS: &str = "this machine";
+
+/// And what a stated machine is called, which is a name nobody's box has: what
+/// a test asserts about is what the server made of what it was told, and a
+/// hostname read off the box the suite is on would be a golden fixture nobody
+/// could commit.
+const STATED: &str = "a-machine";
+
+/// What this box calls itself, or [`NAMELESS`] where it will not say.
+///
+/// Read at the edge with everything else about the machine — see
+/// [`Machine::here`] — and never again: a hostname is a fact about the box
+/// rather than about a request, and the one sentence that needs it is written
+/// while somebody is waiting for a dialog.
+fn hostname() -> String {
+    hostname::get()
+        .ok()
+        .map(|name| name.to_string_lossy().into_owned())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| NAMELESS.to_owned())
+}
+
 /// Which harness row is which agent's, so that the name each is probed under is
 /// the program a session of that type is launched as.
 ///
@@ -165,7 +209,14 @@ pub struct Machine {
 
     /// The `PATH` a session resolves its binaries on — the machine's own half
     /// of it, which is the half a human installs anything into.
-    path: OsString,
+    ///
+    /// **`None` on the machine this server is running on**, where it is
+    /// composed afresh at every read instead: an install that landed inside
+    /// this run has grown `session_path` — see [`sandbox::installed_into`] —
+    /// and a value held here since startup would be the wizard going on saying
+    /// a row is absent after the install that filled it. A stated machine is a
+    /// test's own word and holds whatever it was told.
+    path: Option<OsString>,
 
     /// And the `PATH` the server itself was started with, which the one above
     /// was composed out of.
@@ -193,26 +244,75 @@ pub struct Machine {
     /// none, which is a machine with no account to be found.
     home: Option<PathBuf>,
 
+    /// And what whoever is running this server is called, which is the one
+    /// thing an install run needs that is neither a directory nor a program:
+    /// Homebrew's prefix is made by an elevated step and handed to this name —
+    /// see [`install`].
+    user: Option<String>,
+
     /// And the two variables a GitHub token is prefilled out of, in the order
     /// `gh` itself reads them: `GH_TOKEN` and then `GITHUB_TOKEN`. Read at the
     /// edge with everything else here, so the arm that prefers one to the other
     /// is a unit test rather than a process environment a suite has to mutate.
     gh_token: Option<String>,
     github_token: Option<String>,
+
+    /// And what this box calls itself, which is the one thing here that is
+    /// neither a probe nor a setting: it is what the install run's status line
+    /// names while a password dialog is up — see [`install`].
+    ///
+    /// Stated like everything else rather than read where it is wanted, and for
+    /// the same reason: a status line that had this box's own hostname in it
+    /// would be a golden fixture that read differently on every machine.
+    hostname: String,
+
+    /// The Data Directory this server keeps, which is what the account a
+    /// Windows session runs as is named after — see
+    /// [`sandbox::account::named`], and [`Machine::session_account`], which is
+    /// the sandbox row on that platform.
+    ///
+    /// Put on here rather than read where it is wanted because it is the same
+    /// directory twice over: the name the row is probed under, and the
+    /// `--data-dir` the elevated verb that makes one is run with. `None` is a
+    /// machine nothing told, which is every stated one a suite has not pointed
+    /// at a directory.
+    data_dir: Option<PathBuf>,
+
+    /// And the image this server is running, which is the program that verb is
+    /// a verb of.
+    ///
+    /// Read off the process on the machine this server is on and stated
+    /// otherwise, for the reason the hostname is: a command a suite asserts the
+    /// words of cannot have the test harness's own path in it. `None` is a
+    /// process that cannot say what it is running, which is a machine the
+    /// account cannot be made on from here.
+    verkstead: Option<PathBuf>,
 }
 
 impl Machine {
     /// The machine this server is running on: the one read of it, made where a
     /// router is stood up and passed down from there.
+    ///
+    /// **With no `PATH` of its own held**, which is the one thing this has that
+    /// a stated machine has not: what a session searches is composed at every
+    /// read instead, so that a directory an install landed in inside this run
+    /// is on the very next probe — see [`Machine::path`].
     pub fn here() -> Machine {
-        Machine::stated(
+        Machine::of(
             Platform::HERE,
-            sandbox::machine_path(Platform::HERE),
+            None,
             sandbox::servers_path(),
             std::env::var_os("PATHEXT"),
             std::fs::read_to_string(OS_RELEASE).ok(),
             &Environment::of_the_process(),
+            hostname(),
         )
+        // And the image this process is running, which is the program the
+        // elevated verb that makes a Windows session account belongs to — see
+        // [`Machine::verkstead`]. `None` where the process cannot say, which
+        // [`crate::sandbox::Executable::of_the_server`] logs about at startup
+        // for the other thing it costs.
+        .running(std::env::current_exe().ok())
     }
 
     /// A machine stated rather than read, which is what a test stands a server
@@ -231,6 +331,56 @@ impl Machine {
         os_release: Option<String>,
         env: &Environment,
     ) -> Machine {
+        Machine::of(
+            platform,
+            Some(path),
+            servers,
+            pathext,
+            os_release,
+            env,
+            STATED.to_owned(),
+        )
+    }
+
+    /// The same, called something in particular — which is what the one
+    /// sentence that names this machine reads: the status line of an install
+    /// run, while a password dialog is up on its screen.
+    pub fn called(self, hostname: String) -> Machine {
+        Machine { hostname, ..self }
+    }
+
+    /// And the same again, keeping its Data Directory at `data_dir`.
+    ///
+    /// Said here rather than passed to [`Machine::here`], because the directory
+    /// is settled where a router is built and the machine is read before that —
+    /// see [`crate::routed`], which is the one caller that is not a suite. What
+    /// it answers is the Windows sandbox row: an account is named after the
+    /// Data Directory whose sessions run as it.
+    pub fn against(self, data_dir: &Path) -> Machine {
+        Machine {
+            data_dir: Some(data_dir.to_owned()),
+            ..self
+        }
+    }
+
+    /// And running `verkstead`, which is the image the elevated verb that makes
+    /// that account is a verb of — see [`Machine::verkstead`].
+    pub fn running(self, verkstead: Option<PathBuf>) -> Machine {
+        Machine { verkstead, ..self }
+    }
+
+    /// The two ways of making one, said once: a `PATH` a caller stated, or none
+    /// at all for the machine that composes its own.
+    #[allow(clippy::too_many_arguments)]
+    fn of(
+        platform: Platform,
+        path: Option<OsString>,
+        servers: OsString,
+        pathext: Option<OsString>,
+        os_release: Option<String>,
+        env: &Environment,
+        hostname: String,
+    ) -> Machine {
         Machine {
             platform,
             path,
@@ -242,9 +392,62 @@ impl Machine {
             // a Windows machine was set by somebody's shell, and the account
             // the wizard is looking for is under the profile.
             home: crate::platform::home_dir(platform, env),
+            user: env.user.clone(),
             gh_token: env.gh_token.clone(),
             github_token: env.github_token.clone(),
+            hostname,
+            data_dir: None,
+            verkstead: None,
         }
+    }
+
+    /// The same, composing its `PATH` the way the machine this server is
+    /// running on does rather than holding the one it was stated.
+    ///
+    /// **What a test about an install *landing* needs.** A stated machine's
+    /// `PATH` is a test's own word and stands still, which is what every probe
+    /// suite wants; a machine a run has installed on has one that moves, the
+    /// directory the installer wrote into having been added to `session_path`
+    /// mid-run. This is the one and the other: a stated platform, distribution
+    /// and home, over the `PATH` [`sandbox::machine_path`] composes now. See
+    /// `tests/vendor_installers.rs`, the one caller.
+    pub fn composing(self) -> Machine {
+        Machine { path: None, ..self }
+    }
+
+    /// What this machine calls itself.
+    fn hostname(&self) -> &str {
+        &self.hostname
+    }
+
+    /// And the home of whoever runs this server, which is where a vendor's own
+    /// installer lands what it installs — see [`install`].
+    fn home(&self) -> Option<&Path> {
+        self.home.as_deref()
+    }
+
+    /// And what that user is called, which is who an elevated step hands
+    /// Homebrew's prefix to — `None` on a machine whose environment names
+    /// nobody.
+    fn user(&self) -> Option<&str> {
+        self.user.as_deref()
+    }
+
+    /// And the Data Directory whose sessions the Windows account belongs to —
+    /// see the field, and [`install`], which runs the verb that makes one.
+    fn data_dir(&self) -> Option<&Path> {
+        self.data_dir.as_deref()
+    }
+
+    /// And the image that verb is a verb of.
+    fn verkstead(&self) -> Option<&Path> {
+        self.verkstead.as_deref()
+    }
+
+    /// And which of the wizard's eight tabs it is, which is also which package
+    /// manager an install run raises — see [`install`].
+    fn distro(&self) -> Distro {
+        distro(self.platform, self.os_release.as_deref())
     }
 
     /// Everything a reading of this machine asks it, made in one hop off the
@@ -264,7 +467,14 @@ impl Machine {
     /// sandbox, `git`, the four harnesses, and `gh`.
     ///
     /// Blocks: a `PATH` walk apiece, and one `bwrap` run.
-    fn rows(&self) -> Vec<DependencyView> {
+    ///
+    /// Reachable from outside the crate because one row is a question about the
+    /// machine that no router can be stood up to ask: the Windows sandbox row
+    /// is the account a Data Directory's sessions run as, and the Data
+    /// Directory a suite wants to ask about is the machine's real one — which
+    /// is not a directory to stand a server over. See
+    /// `tests/account_windows.rs`.
+    pub fn rows(&self) -> Vec<DependencyView> {
         let mut rows = vec![row(Dependency::Sandbox, self.sandbox())];
 
         rows.push(row(Dependency::Git, self.installed(sandbox::GIT)));
@@ -344,6 +554,17 @@ impl Machine {
         }
     }
 
+    /// The `PATH` a session searches, which on the machine this server is
+    /// running on is composed now rather than read off a field — see
+    /// [`Machine::path`] for why that one has none held, and
+    /// [`sandbox::machine_path`], which is the value a session is really given.
+    fn path(&self) -> Cow<'_, OsStr> {
+        match &self.path {
+            Some(stated) => Cow::Borrowed(stated.as_os_str()),
+            None => Cow::Owned(sandbox::machine_path(self.platform)),
+        }
+    }
+
     /// Where `program` really is for a session: resolved on the `PATH` a
     /// session gets and followed into whatever it links into — see
     /// [`sandbox::standing`], which is the rule and is the same one the sandbox
@@ -361,7 +582,7 @@ impl Machine {
         sandbox::standing(
             self.platform,
             program,
-            Some(self.path.as_os_str()),
+            Some(&self.path()),
             Some(self.servers.as_os_str()),
             self.pathext.as_deref(),
             self.home.as_deref(),
@@ -371,7 +592,7 @@ impl Machine {
     /// And where a session looks, in the order it looks: a session's own `PATH`
     /// as the directories it names.
     fn looks_in(&self) -> Vec<String> {
-        sandbox::entries(self.platform, &self.path)
+        sandbox::entries(self.platform, &self.path())
             .iter()
             .map(|directory| shown_path(directory))
             .collect()
@@ -396,7 +617,7 @@ impl Machine {
         sandbox::on_the_path(
             self.platform,
             program,
-            Some(self.path.as_os_str()),
+            Some(&self.path()),
             self.pathext.as_deref(),
         )
     }
@@ -414,10 +635,11 @@ impl Machine {
                 target: None,
             },
 
-            // And on Windows there is no sandbox to have: what holds a session
-            // to its own work there is the identity it runs as, which Verkstead
-            // makes for itself.
-            Platform::Windows => DependencyState::NotApplicable,
+            // And on Windows what holds a session to its own work is the
+            // identity it runs as: the local account of Verkstead's own, which
+            // is a thing to have rather than a thing to install — see
+            // [`Machine::session_account`].
+            Platform::Windows => self.session_account(),
 
             Platform::Linux => match self.found(BWRAP) {
                 Some(bwrap) => trivially(&bwrap),
@@ -426,6 +648,41 @@ impl Machine {
                     seen: None,
                 },
             },
+        }
+    }
+
+    /// And what that comes to on Windows: whether the local account this Data
+    /// Directory's sessions run as is on this machine.
+    ///
+    /// **Which is the sandbox row there** (ADR-0014, *Amended: the Sandbox is
+    /// an account*). A Windows session is held to its own work by the identity
+    /// it runs as rather than by a namespace, so what the row is about is an
+    /// account rather than a program — and it **gates the step**, because a
+    /// server without one starts no session at all: every spawn is refused in
+    /// the words [`sandbox::account::Missing`] says it in.
+    ///
+    /// **Read and never made.** Making one is an administrator's call and is
+    /// the elevated verb's — see [`install`], which is what a ticked row runs.
+    /// All this does is resolve the name to a SID, which is nobody's privilege
+    /// and is the same call a session start makes.
+    ///
+    /// A machine nothing pointed at a Data Directory has no name to ask about,
+    /// and a build with no account database has nothing to ask — the second
+    /// being every platform that is not Windows, which only a suite ever
+    /// reaches with a stated machine.
+    fn session_account(&self) -> DependencyState {
+        let Some(data_dir) = self.data_dir() else {
+            return no_account(NO_DATA_DIRECTORY.to_owned());
+        };
+
+        match resolving(&sandbox::account::named(data_dir)) {
+            // No file to name: an account is not one, which is why the row's
+            // own `at` is nothing here the way the Mac's is.
+            Ok(()) => DependencyState::Present {
+                at: None,
+                target: None,
+            },
+            Err(why) => no_account(why),
         }
     }
 
@@ -544,6 +801,14 @@ struct Probed {
 pub struct Onboarding {
     machine: Machine,
     mode: Arc<Mode>,
+
+    /// And the install run, which is the one thing the wizard *does* to this
+    /// machine rather than reads off it — see [`install`].
+    ///
+    /// Held beside the mode for the same reason the mode is held: a run belongs
+    /// to the life of this server, so what is here is what has happened since it
+    /// came up, and a restart has none of it.
+    installer: Arc<install::Installer>,
 }
 
 /// Whether the wizard is the only page there is, held for the length of a run.
@@ -554,7 +819,7 @@ pub struct Onboarding {
 /// beat the startup task to it would reach the same answer off the same
 /// machine, so there is no window in which two callers could disagree.
 ///
-/// **And cleared once.** The wizard's last Continue is the one thing inside a
+/// **And cleared once.** The wizard's last Next is the one thing inside a
 /// run that takes the mode off, and it is a flag beside the verdict rather than
 /// a rewrite of it: the verdict is what was true at startup and stays said,
 /// while this is what has happened since.
@@ -568,11 +833,17 @@ struct Mode {
 }
 
 impl Onboarding {
-    /// A server that probes `machine`.
-    pub fn probing(machine: Machine) -> Onboarding {
+    /// A server that probes `machine`, and installs what its wizard is missing
+    /// by raising a command through `escalation`.
+    ///
+    /// `None` is a server nothing handed a way to ask: it probes and draws
+    /// exactly as the other does, and a run started on it installs nothing and
+    /// says why on every ticked row — see [`install`].
+    pub fn probing(machine: Machine, escalation: Option<Arc<dyn Elevate>>) -> Onboarding {
         Onboarding {
             machine,
             mode: Arc::new(Mode::default()),
+            installer: Arc::new(install::Installer::raising(escalation)),
         }
     }
 
@@ -595,15 +866,73 @@ impl Onboarding {
 
         let steps = steps(&probed.dependencies, pool, settings).await?;
 
+        // And the run over the top of them, where one has been started: what the
+        // probe answers is whether the machine has the thing, and what the run
+        // answers is whether Verkstead is in the middle of putting it there.
+        let (run, dependencies) = installing(probed.dependencies, self.installer.reading());
+
         Ok(OnboardingView {
             mode: self.mode(steps).await,
             platform: shown(self.machine.platform),
-            distro: distro(self.machine.platform, self.machine.os_release.as_deref()),
-            dependencies: probed.dependencies,
+            distro: self.machine.distro(),
+            dependencies,
             path: probed.path,
             accounts: probed.accounts,
             steps,
+            run,
+
+            // And the directory the Windows sandbox row's own instruction is
+            // about — see [`OnboardingView::data_directory`], which is the one
+            // line on that screen this machine is the word on.
+            data_directory: self.machine.data_dir().map(shown_path),
         })
+    }
+
+    /// Start an install run over `ticked`, and answer as soon as it is going.
+    ///
+    /// **Refused while the wizard is not the page there is.** A run installs
+    /// software on the machine this server is on, behind a password dialog, and
+    /// the one thing that says somebody asked for it is the wizard being up:
+    /// see [`Refusal::Over`], which is a Verkstead that came up with the
+    /// objective met or one whose wizard has already finished.
+    ///
+    /// **And while one is going**, which is the same press twice — see
+    /// [`Refusal::Going`].
+    pub(crate) async fn install(
+        &self,
+        settings: &Settings,
+        ticked: Vec<Dependency>,
+    ) -> Result<(), Refusal> {
+        if !self.wizarding() {
+            return Err(Refusal::Over);
+        }
+
+        // Off the runtime, being a `PATH` walk and a thread spawned. It answers
+        // as soon as the run is going rather than when it is over: what is on
+        // the other side of it is a human reading a dialog.
+        let installing = self.clone();
+
+        // And the settings with it, because a unit that lands in a directory
+        // writes it to `session_path` — see [`install::Installer::start`].
+        let settings = settings.clone();
+
+        tokio::task::spawn_blocking(move || {
+            installing
+                .installer
+                .start(&installing.machine, &settings, &ticked)
+        })
+        .await
+        .unwrap_or(Ok(()))
+    }
+
+    /// Cancel whatever is going: the unit under way finishes, and the units
+    /// after it are skipped.
+    ///
+    /// Nothing where nothing is going, and refused for nothing: a press that
+    /// stops something is not one to hold up over whether the wizard is still
+    /// the page.
+    pub(crate) fn cancel(&self) {
+        self.installer.cancel();
     }
 
     /// What this machine can offer the git step, for whatever Verkstead has
@@ -640,7 +969,7 @@ impl Onboarding {
 
     /// The wizard is over: the mode is off for the rest of this run.
     ///
-    /// Pressed by the wizard's last Continue, which is the one thing inside a
+    /// Pressed by the wizard's last Next, which is the one thing inside a
     /// run that takes the mode off.
     ///
     /// Nothing about the verdict is rewritten and nothing is written down —
@@ -661,6 +990,66 @@ impl Onboarding {
 
         *unmet && !self.mode.finished.load(Ordering::SeqCst)
     }
+
+    /// The same question asked without a reading in hand, which is what a press
+    /// has: whether this server is still the wizard.
+    ///
+    /// **A verdict nothing has settled yet reads as the wizard.** The startup
+    /// read settles it within a moment of the server coming up — see
+    /// [`at_startup`] — so what this is about is the sliver before that, and a
+    /// press inside it came from a page that is drawing the wizard. Refusing it
+    /// would be refusing the one thing the human is there to do.
+    fn wizarding(&self) -> bool {
+        self.mode.settled.get().copied().unwrap_or(true)
+            && !self.mode.finished.load(Ordering::SeqCst)
+    }
+}
+
+/// The rows with whatever a run has made of them written over the top, and the
+/// run itself.
+///
+/// Two lists rather than one, because they are answers to different questions
+/// asked a moment apart: the rows come off a probe of the machine and the run
+/// off what this server is doing to it. A row a run says nothing about is left
+/// exactly as the probe found it.
+///
+/// **And the probe is the one that wins.** A row the machine now has carries
+/// nothing of the run whatever the run made of it, because the run's word
+/// outlives the trouble it is about: what it holds is held for the life of this
+/// server, so a row it could not install would go on saying so long after
+/// somebody had installed the thing in the other window and watched the row
+/// tick. The two of them are one row on a screen, and *present with a refusal
+/// under it* is not a state this machine is ever in.
+fn installing(
+    dependencies: Vec<DependencyView>,
+    run: Option<(RunView, Vec<(Dependency, InstallState)>)>,
+) -> (Option<RunView>, Vec<DependencyView>) {
+    let Some((run, installing)) = run else {
+        return (None, dependencies);
+    };
+
+    let dependencies = dependencies
+        .into_iter()
+        .map(
+            |row| match installing.iter().find(|(of, _)| *of == row.dependency) {
+                // And nothing at all over a row the machine now has. A run holds
+                // what each of its rows came to for the life of this server, so
+                // a row it could not install and somebody installed by hand
+                // would go on carrying the refusal underneath its own tick —
+                // see [`InstallState`], where a row that is present is a row
+                // with nothing under it. It is the rule the row's own `trouble`
+                // is drawn by as well: what the machine has is the answer, and
+                // what a run made of it is what happened on the way to it.
+                Some((_, install)) if !present(&row.state) => DependencyView {
+                    install: install.clone(),
+                    ..row
+                },
+                _ => row,
+            },
+        )
+        .collect();
+
+    (Some(run), dependencies)
 }
 
 /// Settle the verdict, as early in a run as there is a runtime to settle it on.
@@ -737,13 +1126,15 @@ fn there(dependencies: &[DependencyView], dependency: Dependency) -> bool {
         .any(|row| row.dependency == dependency && present(&row.state))
 }
 
-/// Whether a row is one the objective can be met with: it is there, or it is
-/// nothing this platform has to have.
+/// Whether a row is one the objective can be met with, which is that the
+/// machine has the thing.
+///
+/// Every row on every platform: the two that are not a program to find — Apple's
+/// seatbelt, and the account a Windows session runs as — are a fact about the
+/// machine the same way, and the one of those that can be missing gates the
+/// step like any other row. See [`Machine::sandbox`].
 fn present(state: &DependencyState) -> bool {
-    matches!(
-        state,
-        DependencyState::Present { .. } | DependencyState::NotApplicable
-    )
+    matches!(state, DependencyState::Present { .. })
 }
 
 /// Which of the wizard's eight tabs this machine is.
@@ -806,9 +1197,14 @@ fn said<'a>(os_release: &'a str, key: &str) -> Option<&'a str> {
         .map(|(_, value)| value.trim().trim_matches(['"', '\'']))
 }
 
-/// One row.
+/// One row, as the probe alone answers it: whatever an install run has made of
+/// it is written over the top afterwards — see [`installing`].
 fn row(dependency: Dependency, state: DependencyState) -> DependencyView {
-    DependencyView { dependency, state }
+    DependencyView {
+        dependency,
+        state,
+        install: InstallState::Idle,
+    }
 }
 
 /// What `bwrap` at this path made of the most trivial sandbox there is.
@@ -845,6 +1241,50 @@ fn trivially(bwrap: &Path) -> DependencyState {
             trouble: Some(trouble.to_string()),
             seen: None,
         },
+    }
+}
+
+/// What the Windows sandbox row says on a machine nothing told which Data
+/// Directory it keeps.
+///
+/// A server always says — see [`crate::routed`] — so this is a stated machine a
+/// suite pointed at no directory, and the honest answer is that there is no
+/// name to ask about rather than that the account is missing.
+const NO_DATA_DIRECTORY: &str = "this server was not told which Data Directory it keeps, so there is no account name to \
+     ask this machine about";
+
+/// And what it says where there is no account database to ask at all, which is
+/// every build that is not a Windows one.
+#[cfg(not(windows))]
+const NO_ACCOUNT_DATABASE: &str =
+    "this Verkstead was not built for Windows, so it has no account database to ask";
+
+/// Whether the local account called `name` is on this machine, and what the
+/// machine said where it is not.
+///
+/// The same resolution a session start makes — see
+/// [`sandbox::account::machine::sid_of`] — so the row and the spawn cannot come
+/// to disagree about whether there is an account.
+#[cfg(windows)]
+fn resolving(name: &str) -> Result<(), String> {
+    sandbox::account::machine::sid_of(name).map(|_| ())
+}
+
+/// And nowhere else. The account database is Windows', so a stated Windows
+/// machine on another platform — which is the only way this arm is reached — is
+/// one this cannot answer for, and says so rather than claiming the account is
+/// missing.
+#[cfg(not(windows))]
+fn resolving(_: &str) -> Result<(), String> {
+    Err(NO_ACCOUNT_DATABASE.to_owned())
+}
+
+/// A sandbox row that is not there because the account is not, in the machine's
+/// own words.
+fn no_account(why: String) -> DependencyState {
+    DependencyState::Absent {
+        trouble: Some(why),
+        seen: None,
     }
 }
 
@@ -886,6 +1326,7 @@ fn shown(platform: Platform) -> verkstead_render::Platform {
 mod tests {
     use super::*;
     use crate::stand_ins::program;
+    use verkstead_render::RunPhase;
 
     /// A machine on `platform` whose `PATH` is `dir`, which says nothing about
     /// itself and whose home is `dir` as well.
@@ -1414,6 +1855,7 @@ echo {token}
 
         let path = sandbox::composed(
             Platform::Linux,
+            &[],
             &OsString::from(format!("{}:/usr/bin", local.display())),
             Some(servers_home.path()),
         );
@@ -1496,10 +1938,10 @@ echo {token}
         );
     }
 
-    /// The sandbox row on a Mac ticks and on Windows is not a thing to have,
-    /// whatever is on either machine's `PATH`.
+    /// The sandbox row on a Mac ticks whatever is on that machine's `PATH`:
+    /// `sandbox-exec` is Apple's own and there is nothing to find.
     #[test]
-    fn the_sandbox_row_is_answered_by_the_platform_where_it_is_not_a_program() {
+    fn the_sandbox_row_on_a_mac_is_answered_by_the_platform() {
         let dir = tempfile::tempdir().unwrap();
 
         assert_eq!(
@@ -1511,10 +1953,29 @@ echo {token}
             "every Mac has `sandbox-exec`, so there is nothing to install and no \
              file the row had to go and find",
         );
-        assert_eq!(
-            state(&machine(Platform::Windows, dir.path()), Dependency::Sandbox),
-            DependencyState::NotApplicable,
-            "and on Windows a session's boundary is an identity rather than a program",
+    }
+
+    /// And on Windows it is the account this Data Directory's sessions run as,
+    /// which is a thing to have rather than a program to find — so a machine
+    /// nobody pointed at a Data Directory is a row with no name to ask about.
+    ///
+    /// Whether the account is really there is the machine's answer, and this
+    /// runner has no account database to give one: what the two arms come to on
+    /// a Windows box is `tests/account_windows.rs`.
+    #[test]
+    fn the_sandbox_row_on_windows_is_the_session_account() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let DependencyState::Absent { trouble, seen } =
+            state(&machine(Platform::Windows, dir.path()), Dependency::Sandbox)
+        else {
+            panic!("a machine with no Data Directory has no account to have");
+        };
+
+        assert_eq!(seen, None, "an account is nowhere on a `PATH`");
+        assert!(
+            trouble.is_some_and(|why| why.contains("Data Directory")),
+            "the row says why it could not answer",
         );
     }
 
@@ -1784,18 +2245,73 @@ echo {token}
         );
     }
 
-    /// A sandbox row that is *not applicable* is a step that stands met: there
-    /// is nothing on Windows to install, so a row that never ticks must not be
-    /// a row that holds the wizard.
+    /// And the sandbox row holds the step on every platform, Windows' account
+    /// included: a machine with no account starts no session, so a row that
+    /// does not tick is a wizard that does not move on.
     #[test]
-    fn a_windows_sandbox_row_does_not_hold_the_step() {
-        let rows = vec![
-            row(Dependency::Sandbox, DependencyState::NotApplicable),
-            row(Dependency::Git, THERE),
-            row(Dependency::Claude, THERE),
-        ];
+    fn a_sandbox_row_that_is_not_there_holds_the_step() {
+        let met = |sandbox| {
+            dependencies_met(&[
+                row(Dependency::Sandbox, sandbox),
+                row(Dependency::Git, THERE),
+                row(Dependency::Claude, THERE),
+            ])
+        };
 
-        assert!(dependencies_met(&rows));
+        assert!(met(THERE));
+        assert!(
+            !met(no_account("there is no such account".to_owned())),
+            "a Windows machine the elevated verb has never been run on can run \
+             no session, so the step it holds up is this one",
+        );
+    }
+
+    /// A run's word about a row goes under the row until the machine has the
+    /// thing, and then it goes away.
+    ///
+    /// **Which is the one thing a run holding its rows for the life of a server
+    /// costs.** The row a dialog was dismissed over is the row somebody goes and
+    /// installs by hand off the hint screen, and it ticks there under the
+    /// counter a moment later — so a reading that carried the refusal with it
+    /// would draw a green tick with *user canceled* underneath, and go on doing
+    /// it for as long as this Verkstead is up.
+    #[test]
+    fn what_a_run_made_of_a_row_goes_when_the_machine_has_the_thing() {
+        let refused = || {
+            let failed = InstallState::Failed {
+                why: "Error: (-128) User canceled.".to_owned(),
+            };
+
+            Some((over(), vec![(Dependency::Sandbox, failed)]))
+        };
+
+        let (_, still_missing) = installing(vec![row(Dependency::Sandbox, NOT_THERE)], refused());
+
+        assert!(
+            matches!(still_missing[0].install, InstallState::Failed { .. }),
+            "a row the run could not install says so while it is still missing",
+        );
+
+        let (_, installed_by_hand) = installing(vec![row(Dependency::Sandbox, THERE)], refused());
+
+        assert_eq!(
+            installed_by_hand[0].install,
+            InstallState::Idle,
+            "and says nothing at all once the machine has it: the probe is the \
+             answer, and the run is what happened on the way to it",
+        );
+    }
+
+    /// A run that is over, for the reading above: what it says of itself is not
+    /// what is being asked about there.
+    fn over() -> RunView {
+        RunView {
+            phase: RunPhase::Done,
+            status: "1 of 1 could not be installed".to_owned(),
+            done: 1,
+            total: 1,
+            cancelling: false,
+        }
     }
 
     /// The two fields git asks for come off the machine's own global config,
@@ -1943,14 +2459,17 @@ echo {token}
             git: true,
         };
 
-        let onboarding = Onboarding::probing(Machine::stated(
-            Platform::Linux,
-            OsString::new(),
-            OsString::new(),
+        let onboarding = Onboarding::probing(
+            Machine::stated(
+                Platform::Linux,
+                OsString::new(),
+                OsString::new(),
+                None,
+                None,
+                &Environment::default(),
+            ),
             None,
-            None,
-            &Environment::default(),
-        ));
+        );
 
         assert!(onboarding.mode(unmet).await, "the objective was not met");
         assert!(
@@ -1969,14 +2488,17 @@ echo {token}
             git: false,
         };
 
-        let onboarding = Onboarding::probing(Machine::stated(
-            Platform::Linux,
-            OsString::new(),
-            OsString::new(),
+        let onboarding = Onboarding::probing(
+            Machine::stated(
+                Platform::Linux,
+                OsString::new(),
+                OsString::new(),
+                None,
+                None,
+                &Environment::default(),
+            ),
             None,
-            None,
-            &Environment::default(),
-        ));
+        );
 
         assert!(onboarding.mode(unmet).await);
 

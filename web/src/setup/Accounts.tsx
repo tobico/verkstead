@@ -17,7 +17,7 @@
 //! here asks anybody to type either, because an account found in a home is one
 //! account and needs no name to tell it from another.
 //!
-//! **Continue needs at least one Profile** — ticked here, or made in the form
+//! **Next needs at least one Profile** — ticked here, or made in the form
 //! under the rows. It is one of the three things the objective is and the only
 //! one a step could walk past: clearing the mode with nothing saved would land
 //! somebody on exactly the empty state a skip was rejected for, until the next
@@ -31,7 +31,7 @@
 //! **That form is behind a link.** Naming an account by hand is the way in for
 //! a machine whose accounts are kept somewhere other than this server's home,
 //! which is the uncommon one: the ordinary machine ticks a row and presses
-//! Continue, and a form of paths and models standing open under those rows
+//! Next, and a form of paths and models standing open under those rows
 //! reads as work the step is asking for. So the section starts as its own
 //! heading drawn as a link, and a press puts the whole of it — heading,
 //! explainer and form — where the link stood. It never shuts again: nothing on
@@ -87,7 +87,7 @@ export function Accounts(props: {
   /// How this machine stands, as the server last said.
   reading: OnboardingView;
 
-  /// And the step after this one, opened by Continue once there is a Profile.
+  /// And the step after this one, opened by Next once there is a Profile.
   onwards: () => void;
 }): JSX.Element {
   const queries = useQueryClient();
@@ -129,10 +129,10 @@ export function Accounts(props: {
   const ticked = (found: AccountView): boolean =>
     found.harness && (chosen()[agent(found)] ?? true);
 
-  /// The rows a press of Continue would save.
+  /// The rows a press of Next would save.
   const taking = (): AccountView[] => props.reading.accounts.filter(ticked);
 
-  /// Whether Continue is pressable: a Profile is saved already, or this press
+  /// Whether Next is pressable: a Profile is saved already, or this press
   /// would save one.
   const ready = (): boolean =>
     props.reading.steps.accounts || taking().length > 0;
@@ -164,7 +164,7 @@ export function Accounts(props: {
     },
   }));
 
-  /// What Continue does: save whatever is ticked, and go on once it is written
+  /// What Next does: save whatever is ticked, and go on once it is written
   /// down. A step reopened with everything already saved has nothing to save
   /// and goes straight on.
   const onwards = () => {
@@ -219,11 +219,11 @@ export function Accounts(props: {
       <div class={styles.onwards}>
         <button
           type="button"
-          class={styles.continue}
+          class={styles.next}
           disabled={!ready() || save.isPending}
           onClick={onwards}
         >
-          Continue
+          Next
         </button>
 
         <Show when={!ready()}>

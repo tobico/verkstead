@@ -36,17 +36,18 @@ use verkstead_render::{
     CompanionRemoved, CompanionView, CompileCaching, ConflictResolutionEdit, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, Creation, Cursor, GrillingStarted, IgnoreRule,
-    IgnoredCommentsEdit, Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion,
-    NewConversation, NewOrder, NewPullRequestAdoption, ProfileChoice, ProfileEdit, ProfileEntry,
-    PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved,
-    Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress, SetReading, SetView,
-    SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit,
-    SharedConversation, ShowArchived, ShowingArchived, Standing, SteerOpened, SteerSubmission,
-    Submitted, Subscribed, Subscription, TakenUp, TerminalOpened, TimelineEvent, TokenEdit,
-    TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    IgnoredCommentsEdit, InstallPress, Lifecycle, Locked, Merging, MissedOut, NewAdoption,
+    NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption, ProfileChoice, ProfileEdit,
+    ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
+    RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress,
+    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
+    SharedCommit, SharedConversation, ShowArchived, ShowingArchived, Standing, SteerOpened,
+    SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalOpened, TimelineEvent,
+    TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
+use crate::onboarding::Refusal;
 use crate::settings::{Cleanup, CleanupStep, Config, GitAuthor, RuleTrouble, RustBuildCache};
 use crate::{AppState, store};
 
@@ -444,6 +445,18 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // the workbench's gate at every start, and neither wants any of that —
         // see [`crate::onboarding::Onboarding::prefill`].
         .route("/api/ui/onboarding/git", get(onboarding_git))
+        // And the one thing the first step is pressed for: installing the rows
+        // that were ticked. A press rather than a save, like the serve switch
+        // and for the same reason — what it changes is the machine — and it
+        // answers with the reading, the run now on it.
+        .route("/api/ui/onboarding/install", post(onboarding_install))
+        // And stopping one, which is its own route rather than a body on the
+        // press above: what it does is not start anything, and a run is
+        // cancelled by a button that has nothing to say about what was ticked.
+        .route(
+            "/api/ui/onboarding/install/cancel",
+            post(onboarding_install_cancel),
+        )
         // And the wizard finishing, which is the one thing inside a run that
         // takes the mode off. A press rather than a save: what it writes is
         // nothing at all — the author and the token went through the settings
@@ -4143,41 +4156,48 @@ async fn save_settings(
             });
         }
 
-        settings.save_config(&Config::of(
-            GitAuthor::of(Some(edit.git_author.name), Some(edit.git_author.email)),
-            // The size as it was typed, and an empty field as nothing
-            // configured: clearing it is how the human asks for the default
-            // back, and a size of nothing is not a size.
-            RustBuildCache::of(
-                edit.rust_build_cache.enabled,
-                Some(edit.rust_build_cache.size),
-            ),
-            // And the Cleanup's two rows, each a switch and a duration as it
-            // was typed — an empty field is the default asked for back, and so
-            // is anything that is not a whole number of days. Nothing here is
-            // refused, a delete sooner than the trim included: the two clocks
-            // run from the archiving independently.
-            Cleanup::of(
-                CleanupStep::of(edit.cleanup.trim.enabled, Some(edit.cleanup.trim.days)),
-                CleanupStep::of(edit.cleanup.delete.enabled, Some(edit.cleanup.delete.days)),
-            ),
-            // And how a conflict is resolved where the Repo it is in says
-            // nothing, which is one of two words and never absent: there is no
-            // third state for a page to send.
-            crate::repos::stored(edit.conflict_resolution),
-            // And whether Done shares the record to the pull request, which is
-            // a switch: two answers, and the save says which of them this is.
-            edit.share_on_done,
-            // And the binds as values too: what is sent is what the file holds
-            // afterwards, so a row taken off the page is a row taken out of the
-            // file. Only the settings' own — the installation's are the unit's
-            // word, they are not in this file, and nothing here could rewrite
-            // them if they were.
-            edit.sandbox_binds,
-            // And the rules, decided above: either what was already written down
-            // or the whole list the page sent, in the order it sent it.
-            rules,
-        ))?;
+        settings.save_config(
+            &Config::of(
+                GitAuthor::of(Some(edit.git_author.name), Some(edit.git_author.email)),
+                // The size as it was typed, and an empty field as nothing
+                // configured: clearing it is how the human asks for the default
+                // back, and a size of nothing is not a size.
+                RustBuildCache::of(
+                    edit.rust_build_cache.enabled,
+                    Some(edit.rust_build_cache.size),
+                ),
+                // And the Cleanup's two rows, each a switch and a duration as it
+                // was typed — an empty field is the default asked for back, and so
+                // is anything that is not a whole number of days. Nothing here is
+                // refused, a delete sooner than the trim included: the two clocks
+                // run from the archiving independently.
+                Cleanup::of(
+                    CleanupStep::of(edit.cleanup.trim.enabled, Some(edit.cleanup.trim.days)),
+                    CleanupStep::of(edit.cleanup.delete.enabled, Some(edit.cleanup.delete.days)),
+                ),
+                // And how a conflict is resolved where the Repo it is in says
+                // nothing, which is one of two words and never absent: there is no
+                // third state for a page to send.
+                crate::repos::stored(edit.conflict_resolution),
+                // And whether Done shares the record to the pull request, which is
+                // a switch: two answers, and the save says which of them this is.
+                edit.share_on_done,
+                // And the binds as values too: what is sent is what the file holds
+                // afterwards, so a row taken off the page is a row taken out of the
+                // file. Only the settings' own — the installation's are the unit's
+                // word, they are not in this file, and nothing here could rewrite
+                // them if they were.
+                edit.sandbox_binds,
+                // And the rules, decided above: either what was already written down
+                // or the whole list the page sent, in the order it sent it.
+                rules,
+            )
+            // On what the file already holds, for the reason the secrets below are
+            // written that way: `session_path` is the one key in this file the page
+            // has no field for — an install writes it and a hand-edit changes it —
+            // and a save built out of what the page sent would take it away.
+            .keeping_session_path(&settings.config()),
+        )?;
 
         // On what the file already holds rather than on nothing: a save writes
         // the whole of `secrets.yaml`, and the session account's password is in
@@ -4507,7 +4527,60 @@ async fn onboarding_git(State(state): State<AppState>) -> HttpResponse {
     }
 }
 
-/// `POST /api/ui/onboarding/finished` — the wizard's last Continue: onboarding
+/// `POST /api/ui/onboarding/install` — install the ticked rows.
+///
+/// **It returns as soon as the run is going.** What is on the other side of the
+/// press is a password dialog somebody has to read and a package manager that
+/// takes as long as it takes, so what this answers with is the reading made
+/// again — the run on it, at nothing done of however many were ticked — and the
+/// install screen polls from there. See [`crate::onboarding::install`], where
+/// the run is.
+///
+/// **Refused in two ways, and both of them are 409.** A press when the wizard
+/// is not the page there is — a Verkstead that came up with the objective met,
+/// or one whose wizard has finished — is a press nobody made from a wizard, and
+/// what it would do is install software on somebody's machine behind a password
+/// dialog. And a press while a run is going is the same press twice: the run
+/// that is already there is the answer.
+async fn onboarding_install(
+    State(state): State<AppState>,
+    Json(press): Json<InstallPress>,
+) -> HttpResponse {
+    match state
+        .onboarding
+        .install(&state.settings, press.dependencies)
+        .await
+    {
+        Ok(()) => onboarding(State(state)).await,
+        Err(Refusal::Over) => refused(
+            StatusCode::CONFLICT,
+            ApiError::new("the setup wizard is over, so there is nothing here to install"),
+        ),
+        Err(Refusal::Going) => refused(
+            StatusCode::CONFLICT,
+            ApiError::new("an install is already running"),
+        ),
+    }
+}
+
+/// `POST /api/ui/onboarding/install/cancel` — stop the run where it can be
+/// stopped.
+///
+/// The unit under way finishes and the units after it are skipped, their rows
+/// reading *cancelled*: a package manager that is already unpacking is left to
+/// finish, because a machine half way through an install is worse than one that
+/// finished the install nobody wanted any more.
+///
+/// Refused for nothing, and it answers with the reading either way: a press
+/// about a run that ended while it was in flight changes nothing, and the
+/// reading is what says so.
+async fn onboarding_install_cancel(State(state): State<AppState>) -> HttpResponse {
+    state.onboarding.cancel();
+
+    onboarding(State(state)).await
+}
+
+/// `POST /api/ui/onboarding/finished` — the wizard's last Next: onboarding
 /// mode is off for the rest of this run.
 ///
 /// **It writes nothing.** The author and the token were saved through the

@@ -40,15 +40,15 @@ import type { Dependency, Distro } from "../api/types";
 
 /// One row's instruction, on one operating system.
 ///
-/// A command, a link, or a note by itself — the sandbox row on macOS and on
-/// Windows is nothing to install, and *other Linux* has the generic list of
-/// what is needed where the five named distributions have a line to paste.
+/// A command, a link, or a note by itself — the sandbox row on macOS is nothing
+/// to install, and *other Linux* has the generic list of what is needed where
+/// the five named distributions have a line to paste.
 ///
-/// Nothing to install is not always nothing to do: the Windows sandbox row is
-/// an account rather than a program, and its note carries the one elevated
-/// command that makes one. A command field there would be a line to paste that
-/// fails in the terminal most people have open, which is worse than a sentence
-/// saying where to paste it.
+/// The Windows sandbox row is neither of those: it is an account rather than a
+/// program, and the wizard makes one where it is ticked. What its command field
+/// carries is the same thing by hand, which is the line for whoever reaches
+/// this screen because Windows would not raise the dialog — and its note says
+/// which terminal that line has to be pasted into.
 export type Instruction = {
   /// What to run, exactly, where this OS carries the program.
   command?: string;
@@ -84,6 +84,16 @@ export type Guide = {
   /// One instruction per row. Every row, on every OS: a tab with a gap in it is
   /// a row somebody is left staring at.
   rows: Record<Dependency, Instruction>;
+
+  /// And what every command on this tab wants first, where they all want the
+  /// same thing.
+  ///
+  /// One tab has one: the Mac's, where every line is `brew install` and a Mac
+  /// without Homebrew has nothing to run them with. It is drawn above the rows
+  /// rather than repeated under each of them, because it is one install for the
+  /// whole tab — and it is here at all because a run that could not install
+  /// Homebrew is exactly how somebody reaches this screen on a Mac.
+  before?: Instruction;
 };
 
 /// The eight tabs, in the order they are drawn — the order
@@ -216,6 +226,21 @@ function nixos(attribute: string, note?: string): Instruction {
 export const GUIDES: Record<Distro, Guide> = {
   MacOs: {
     title: "macOS",
+
+    // Homebrew's own line, as Homebrew publishes it. Verkstead installs it for
+    // you where it can — the prefix made behind the password dialog and the
+    // installer run as you — so this is what to paste on the Mac where that
+    // could not be done: it asks for your password once, for the same prefix.
+    before: {
+      command:
+        '/bin/bash -c "$(curl -fsSL ' +
+        'https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
+      note:
+        "Every command below is Homebrew's, and a Mac without Homebrew has " +
+        "nothing to run them with. It installs into /opt/homebrew on Apple " +
+        "silicon and /usr/local on Intel, and a session looks in both.",
+    },
+
     rows: {
       Sandbox: {
         note:
@@ -252,14 +277,15 @@ export const GUIDES: Record<Distro, Guide> = {
     title: "Windows",
     rows: {
       Sandbox: {
+        command: "verkstead session-account create",
         note:
           "Sessions on this machine run as a local account of Verkstead's " +
-          "own, which is the sandbox on Windows: there is nothing to " +
-          "install. Making that account is the one thing here that wants an " +
-          "administrator, and it wants one once — verkstead session-account " +
-          "create, from a terminal opened with Run as administrator. Until " +
-          "it has been run, a session on this machine is refused rather " +
-          "than started without a boundary.",
+          "own, which is the sandbox on Windows. Ticking this row makes it " +
+          "for you: making a local account wants an administrator, and the " +
+          "wizard asks Windows for one. This line is the same thing by hand, " +
+          "from a terminal opened with Run as administrator, and it wants " +
+          "running once. Until there is an account, a session on this " +
+          "machine is refused rather than started without a boundary.",
       },
       Git: { command: "winget install --id Git.Git" },
       Claude: orElse(
@@ -386,3 +412,43 @@ export const GUIDES: Record<Distro, Guide> = {
     },
   },
 };
+
+/// What the Windows sandbox row's line is, on the machine this reading is of.
+///
+/// **The one instruction that is about this server rather than about this
+/// operating system.** Every other line on every tab is the same wherever it is
+/// read; this one makes a local account named after a Data Directory, and the
+/// verb resolves the platform's own default where nothing says otherwise — so a
+/// line pasted without the directory makes an account of a different name,
+/// leaves the row absent and says nothing about why. The row gates the step, so
+/// that is the wizard stuck rather than advice that missed.
+///
+/// Which bites on exactly the machines this screen is for: a server that could
+/// not raise a dialog is one started from a terminal or a unit file, and that is
+/// the one most likely to have been pointed somewhere of its own.
+///
+/// `null` for a reading that names no directory, where the bare line is the best
+/// there is to offer — see [`OnboardingView::data_directory`].
+function theAccount(directory: string | null): Instruction {
+  const bare = GUIDES.Windows.rows.Sandbox;
+
+  if (directory === null) {
+    return bare;
+  }
+
+  return { ...bare, command: `${bare.command} --data-dir "${directory}"` };
+}
+
+/// The instruction for one row on one tab, as this machine reads it.
+///
+/// The written-down answer for every row but one — see [`theAccount`], which is
+/// the row this server has a word about.
+export function instructionFor(
+  distro: Distro,
+  dependency: Dependency,
+  directory: string | null,
+): Instruction {
+  return distro === "Windows" && dependency === "Sandbox"
+    ? theAccount(directory)
+    : GUIDES[distro].rows[dependency];
+}

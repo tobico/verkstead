@@ -124,7 +124,7 @@
 /* The press onwards, drawn as the step before it draws its own. Refused until
    there is a Profile to run under, and refused the way every other disabled
    control here is. */
-.continue {
+.next {
   padding: 0.5rem 1.1rem;
   font: inherit;
   font-weight: 600;
@@ -135,7 +135,7 @@
   cursor: pointer;
 }
 
-.continue:disabled {
+.next:disabled {
   cursor: not-allowed;
   opacity: 0.65;
 }
@@ -184,7 +184,7 @@
    focus is moved there at all — see `named` in `Accounts.tsx`. */
 
 @media (hover: hover) {
-  .continue:not(:disabled):hover {
+  .next:not(:disabled):hover {
     background: var(--accent-deep);
     border-color: var(--accent-deep);
   }

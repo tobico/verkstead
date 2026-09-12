@@ -735,7 +735,118 @@ pub(crate) fn taken_back(data_dir: &Path, conversation: i64) {
 pub fn machine_path(platform: Platform) -> OsString {
     let started = started_with();
 
-    composed(platform, &started.path, started.home.as_deref())
+    composed(
+        platform,
+        &held_session_path(),
+        &started.path,
+        started.home.as_deref(),
+    )
+}
+
+/// The directories a session's `PATH` is composed with ahead of the server's
+/// own, held for the run — `session_path` in `config.yaml`, read at startup by
+/// [`hold_session_path`] and grown by [`installed_into`].
+///
+/// **The one value in this module that can move inside a run, and it moves one
+/// way**: an install that landed in a directory appends it, so the next probe
+/// and the next session are composed with it and nothing has to restart. The
+/// server's own `PATH` beside it is still what the process was started with —
+/// see [`started_with`], which is why *that* one is read once and never again.
+///
+/// Filtered on the way in rather than on the way out, which is what makes the
+/// log line worth having: an entry a session could not reach is the human's
+/// configuration being wrong, said once where it is read, rather than a warning
+/// repeated at every probe.
+static SESSION_PATH: std::sync::RwLock<Vec<PathBuf>> = std::sync::RwLock::new(Vec::new());
+
+/// Read `session_path` out of `settings` and hold it for the run.
+///
+/// Called once as the server comes up, before a router is built or a session is
+/// spawned — see [`crate::run_on_keyed`]. Everything that asks what a session's
+/// `PATH` is asks [`machine_path`], which reads what this held.
+pub fn hold_session_path(settings: &crate::settings::Settings) {
+    let configured = kept_entries(
+        Platform::HERE,
+        settings.config().session_path(),
+        started_with().home.as_deref(),
+    );
+
+    *SESSION_PATH
+        .write()
+        .unwrap_or_else(|held| held.into_inner()) = configured;
+}
+
+/// And an install that landed in `directory`: appended to the held list and
+/// written to `session_path`, so that the next probe and the next session both
+/// find what was just installed and the next start reads it back.
+///
+/// The file first and the held list after it, so that a write that failed is a
+/// run whose `PATH` still says what the file does. A directory already on the
+/// list is neither written twice nor searched twice — see
+/// [`crate::settings::Config::with_session_path`].
+///
+/// Blocks: it writes `config.yaml`.
+pub fn installed_into(
+    settings: &crate::settings::Settings,
+    directory: &Path,
+) -> std::io::Result<()> {
+    settings.save_config(&settings.config().with_session_path(directory))?;
+
+    hold_session_path(settings);
+
+    Ok(())
+}
+
+/// What is held now, which is what [`machine_path`] composes with.
+fn held_session_path() -> Vec<PathBuf> {
+    SESSION_PATH
+        .read()
+        .unwrap_or_else(|held| held.into_inner())
+        .clone()
+}
+
+/// The configured directories `platform` can really lead a session's `PATH`
+/// with, out of what `config.yaml` said — and a line in the log for each one it
+/// cannot.
+///
+/// The two Unixes read them by two of the three rules [`composed`] reads the
+/// server's own `PATH` by: **rooted**, because an entry measured from wherever
+/// a session is standing names a Worktree rather than an install, and
+/// **reachable**, because a directory under neither the server's home nor the
+/// platform's own floor is one no session is granted and no name would be found
+/// in. The third — first occurrence wins — is the composing's, there being
+/// nothing to deduplicate against until the server's own entries are beside
+/// these.
+///
+/// **Windows keeps whatever was written**, that platform having no floor to be
+/// under and no mount table to be outside of: what a session there reaches is
+/// decided by a grant written on the entry, exactly as it is for the server's
+/// own `PATH` — see [`composed`].
+fn kept_entries(platform: Platform, configured: &[String], home: Option<&Path>) -> Vec<PathBuf> {
+    configured
+        .iter()
+        .map(PathBuf::from)
+        .filter(|directory| {
+            let entry = directory.as_os_str();
+
+            if platform == Platform::Windows {
+                return true;
+            }
+
+            let keeping = rooted(entry) && reachable(platform, entry, home);
+
+            if !keeping {
+                tracing::warn!(
+                    directory = %directory.display(),
+                    "a `session_path` directory is not one a session could reach — it is \
+                     neither under the home Verkstead runs as nor on the machine's own floor \
+                     — so no session's `PATH` was composed with it",
+                );
+            }
+
+            keeping
+        })
+        .collect()
 }
 
 /// The `PATH` the server itself was started with, as it stands — the value
@@ -776,13 +887,21 @@ pub(crate) fn entries(platform: Platform, path: &OsStr) -> Vec<PathBuf> {
 /// the two this runner will never be, is then an ordinary unit test on
 /// whichever machine is running the suite.
 ///
-/// **The two Unixes lead with what the server was started with.** A harness
-/// installed the vendor's way lands in `~/.local/bin`, and a machine whose
-/// distribution packages one too old to connect has that install as its only
-/// current one — so the order the human wrote is the order a session searches,
-/// and the fixed list below is a floor under it rather than the whole of it.
-/// Three rules on the way through, each of them about an entry a session could
-/// not use:
+/// **`session` leads, and what the server was started with is under it.** Those
+/// are the directories Verkstead itself installed into — `session_path` in
+/// `config.yaml`, held for the run — and they go first for the reason the
+/// server's own entries go ahead of the floor: an install the human ticked is
+/// the current one, and a distribution's package of the same name is what a
+/// session would otherwise find. Everything below is read of the two halves
+/// alike.
+///
+/// **The two Unixes then take the server's own `PATH` in the order it was
+/// written.** A harness installed the vendor's way lands in `~/.local/bin`, and
+/// a machine whose distribution packages one too old to connect has that
+/// install as its only current one — so the order the human wrote is the order
+/// a session searches, and the fixed list below is a floor under it rather than
+/// the whole of it. Three rules on the way through, each of them about an entry
+/// a session could not use:
 ///
 /// - **The first occurrence of a directory wins**, which is how every shell
 ///   reads a `PATH` and is what keeps a `/usr/bin` written twice from being
@@ -801,22 +920,35 @@ pub(crate) fn entries(platform: Platform, path: &OsStr) -> Vec<PathBuf> {
 /// Then [`LINUX_PATH`] or [`APPLE_PATH`] under it, deduplicated against what is
 /// already there: a server started from a unit file with a `PATH` of two
 /// entries still reaches the machine's own toolchain. Nothing is added that the
-/// `PATH` did not name and the floor does not hold — a server whose `PATH` has
-/// no `~/.local/bin` gives a session none.
+/// `PATH` did not name, the floor does not hold and `session_path` does not say
+/// — a server whose `PATH` has no `~/.local/bin` and which has installed
+/// nothing gives a session none. That last is ADR-0016's one amendment to the
+/// rule, and it is the settings module's *told, not found*: a directory
+/// Verkstead installed into is one the human ticked rather than one a guess
+/// turned up.
 ///
-/// **Windows is the server's own `PATH` and nothing else**, which is what it
-/// has always been — see [`started_with`], where that is argued. There is no
-/// floor to add and nothing to drop: what a session there reaches is decided by
-/// a grant written on the entry rather than by a mount table, so an entry that
-/// is not the human's own is an entry a session finds nothing in.
-pub(crate) fn composed(platform: Platform, servers: &OsStr, home: Option<&Path>) -> OsString {
+/// **Windows is `session` and then the server's own `PATH` as it stands**,
+/// which is what it has always been with the one list in front of it — see
+/// [`started_with`], where that is argued. There is no floor to add and nothing
+/// to drop: what a session there reaches is decided by a grant written on the
+/// entry rather than by a mount table, so an entry that is not the human's own
+/// is an entry a session finds nothing in.
+pub(crate) fn composed(
+    platform: Platform,
+    session: &[PathBuf],
+    servers: &OsStr,
+    home: Option<&Path>,
+) -> OsString {
     let floor = match platform {
         Platform::Linux => LINUX_PATH,
         Platform::MacOs => APPLE_PATH,
-        Platform::Windows => return servers.to_owned(),
+        Platform::Windows => return windows_path(session, servers),
     };
 
-    let named = apart(servers)
+    let named = session
+        .iter()
+        .map(|directory| directory.as_os_str())
+        .chain(apart(servers))
         .filter(|entry| rooted(entry))
         .filter(|entry| reachable(platform, entry, home));
 
@@ -891,6 +1023,40 @@ fn joined(entries: &[&OsStr]) -> OsString {
         }
 
         path.push(entry);
+    }
+
+    path
+}
+
+/// And what [`composed`] comes to on Windows: the directories Verkstead
+/// installed into, and then the `PATH` the server was started with exactly as
+/// it stands.
+///
+/// Its own function rather than a fall-through, because the separator is that
+/// platform's own and there is nothing else to do: no floor to put underneath,
+/// no entry to drop and nothing to deduplicate — a name found twice on a
+/// Windows `PATH` is found in whichever directory was granted, and the grant is
+/// what decides there.
+fn windows_path(session: &[PathBuf], servers: &OsStr) -> OsString {
+    let mut path = OsString::new();
+
+    for directory in session {
+        if !path.is_empty() {
+            path.push(";");
+        }
+
+        path.push(directory);
+    }
+
+    // An empty entry means the working directory on that platform too, so a
+    // server started with no `PATH` at all is one these lead and nothing
+    // follows.
+    if !servers.is_empty() {
+        if !path.is_empty() {
+            path.push(";");
+        }
+
+        path.push(servers);
     }
 
     path
@@ -4352,6 +4518,15 @@ fn nix(dir: &Path, args: &[&str]) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// A machine Verkstead has installed nothing on: no `session_path` at all,
+    /// which is every machine until somebody ticks a row in the wizard.
+    ///
+    /// What the composing tests below are about is the server's own `PATH`, and
+    /// this is that question asked with the other half empty — see
+    /// `what_verkstead_installed_leads_a_sessions_path`, which is the other
+    /// half.
+    const NOTHING_INSTALLED: &[PathBuf] = &[];
+
     /// The file a session would run `program` from, or nothing at all.
     ///
     /// The last of what [`opened`] walks, which is the half of that answer
@@ -4537,6 +4712,7 @@ mod tests {
         assert_eq!(
             composed(
                 Platform::Windows,
+                NOTHING_INSTALLED,
                 &servers,
                 Some(Path::new(r"C:\Users\you"))
             ),
@@ -4557,7 +4733,7 @@ mod tests {
         let home = Path::new("/home/you");
         let servers = OsString::from("/home/you/.local/bin:/usr/bin:/mnt/c/Windows:/usr/bin::.");
 
-        let composed = composed(Platform::Linux, &servers, Some(home));
+        let composed = composed(Platform::Linux, NOTHING_INSTALLED, &servers, Some(home));
         let entries: Vec<&OsStr> = apart(&composed).collect();
 
         let floor: Vec<&OsStr> = apart(OsStr::new(LINUX_PATH))
@@ -4587,7 +4763,7 @@ mod tests {
         let servers =
             OsString::from("/Users/you/.local/bin:/opt/homebrew/bin:/opt/elsewhere/bin:/usr/bin");
 
-        let composed = composed(Platform::MacOs, &servers, Some(home));
+        let composed = composed(Platform::MacOs, NOTHING_INSTALLED, &servers, Some(home));
         let entries: Vec<&OsStr> = apart(&composed).collect();
 
         assert_eq!(
@@ -4614,13 +4790,134 @@ mod tests {
         }
     }
 
+    /// What Verkstead installed leads a session's `PATH`: ahead of the server's
+    /// own entries, which are ahead of the floor.
+    ///
+    /// Which is the whole point of the key. A distribution's `claude` in
+    /// `/usr/bin` and one the wizard installed into `~/.local/bin` are two
+    /// programs of one name, and the row ticks on whichever a session would
+    /// find first.
+    #[test]
+    fn what_verkstead_installed_leads_a_sessions_path() {
+        let home = Path::new("/home/you");
+        let installed = [PathBuf::from("/home/you/.local/bin")];
+        let servers = OsString::from("/home/you/bin:/usr/bin");
+
+        let composed = composed(Platform::Linux, &installed, &servers, Some(home));
+        let entries: Vec<&OsStr> = apart(&composed).collect();
+
+        assert_eq!(
+            entries.first(),
+            Some(&OsStr::new("/home/you/.local/bin")),
+            "the directory Verkstead installed into is the first place a session \
+             looks: {entries:?}",
+        );
+        assert_eq!(
+            entries.get(1),
+            Some(&OsStr::new("/home/you/bin")),
+            "and what the server was started with is under it, in the order it \
+             was written: {entries:?}",
+        );
+        assert!(
+            entries.contains(&OsStr::new("/usr/bin")),
+            "with the machine's own floor under that: {entries:?}",
+        );
+    }
+
+    /// And the same three rules, read of that half too: a directory written on
+    /// both lists is searched once, and one a session could not reach is on
+    /// neither.
+    #[test]
+    fn an_installed_directory_is_read_by_the_rules_every_entry_is() {
+        let home = Path::new("/home/you");
+        let installed = [
+            PathBuf::from("/home/you/.local/bin"),
+            PathBuf::from("/opt/foo/bin"),
+            PathBuf::from("relative/bin"),
+        ];
+        let servers = OsString::from("/usr/bin:/home/you/.local/bin");
+
+        let composed = composed(Platform::Linux, &installed, &servers, Some(home));
+        let entries: Vec<&OsStr> = apart(&composed).collect();
+
+        assert_eq!(
+            entries
+                .iter()
+                .filter(|entry| same(entry, OsStr::new("/home/you/.local/bin")))
+                .count(),
+            1,
+            "first occurrence wins, whichever list it was written on: {entries:?}",
+        );
+        assert!(
+            !entries.contains(&OsStr::new("/opt/foo/bin")),
+            "and a directory under neither the home nor the floor is one no \
+             session could reach: {entries:?}",
+        );
+        assert!(
+            !entries
+                .iter()
+                .any(|entry| ending(entry).ends_with(b"relative/bin")),
+            "as is one measured from wherever a session happens to be standing: \
+             {entries:?}",
+        );
+    }
+
+    /// The two Unixes drop what a session could not reach as the list is read,
+    /// and say so — because that is the human's configuration being wrong
+    /// rather than a fact about the machine.
+    ///
+    /// Windows keeps whatever was written: there is no floor to be under there
+    /// and no mount table to be outside of, so the rule has nothing to ask.
+    #[test]
+    fn what_is_kept_of_a_configured_list_is_what_a_session_could_reach() {
+        let configured = [
+            "/home/you/.local/bin".to_owned(),
+            "/opt/foo/bin".to_owned(),
+            "not/rooted".to_owned(),
+        ];
+        let home = Some(Path::new("/home/you"));
+
+        assert_eq!(
+            kept_entries(Platform::Linux, &configured, home),
+            [PathBuf::from("/home/you/.local/bin")],
+        );
+        assert_eq!(
+            kept_entries(Platform::MacOs, &configured, home),
+            [PathBuf::from("/home/you/.local/bin")],
+        );
+        assert_eq!(
+            kept_entries(Platform::Windows, &configured, home).len(),
+            configured.len(),
+            "and that platform keeps every one of them, reach there being a \
+             grant written on the directory rather than a mount table",
+        );
+    }
+
+    /// And on Windows the list leads the `PATH` the server was started with,
+    /// which is otherwise exactly what it has always been.
+    #[test]
+    fn a_windows_session_leads_with_what_verkstead_installed() {
+        let installed = [PathBuf::from(r"C:\Users\you\.local\bin")];
+        let servers = OsString::from(r"C:\Windows\System32");
+
+        assert_eq!(
+            composed(
+                Platform::Windows,
+                &installed,
+                &servers,
+                Some(Path::new(r"C:\Users\you"))
+            ),
+            OsString::from(r"C:\Users\you\.local\bin;C:\Windows\System32"),
+        );
+    }
+
     /// A machine that names no home keeps what the floor reaches and nothing
     /// else — there being nowhere for a per-user entry to be under.
     #[test]
     fn a_server_with_no_home_keeps_the_floor_alone() {
         let servers = OsString::from("/home/you/.local/bin:/usr/local/bin");
 
-        let composed = composed(Platform::Linux, &servers, None);
+        let composed = composed(Platform::Linux, NOTHING_INSTALLED, &servers, None);
         let entries: Vec<&OsStr> = apart(&composed).collect();
 
         assert!(
@@ -4646,7 +4943,12 @@ mod tests {
     fn a_server_started_with_no_path_still_reaches_the_machines_own() {
         for (platform, floor) in [(Platform::Linux, LINUX_PATH), (Platform::MacOs, APPLE_PATH)] {
             assert_eq!(
-                composed(platform, OsStr::new(""), Some(Path::new("/home/you"))),
+                composed(
+                    platform,
+                    NOTHING_INSTALLED,
+                    OsStr::new(""),
+                    Some(Path::new("/home/you"))
+                ),
                 OsString::from(floor),
                 "on {platform:?} an empty `PATH` composes to the floor and to \
                  nothing else"
@@ -4660,6 +4962,7 @@ mod tests {
     fn an_entry_is_one_directory_however_it_was_written() {
         let composed = composed(
             Platform::Linux,
+            NOTHING_INSTALLED,
             OsStr::new("/usr/bin/:/home/you/bin//:/home/you/bin"),
             Some(Path::new("/home/you/")),
         );
@@ -4758,7 +5061,12 @@ mod tests {
             "a `PATH` entry that is the home is a whole account read-only",
         );
 
-        let composed = composed(Platform::Linux, home.path().as_os_str(), Some(home.path()));
+        let composed = composed(
+            Platform::Linux,
+            NOTHING_INSTALLED,
+            home.path().as_os_str(),
+            Some(home.path()),
+        );
 
         assert!(
             !apart(&composed).any(|entry| same(entry, home.path().as_os_str())),

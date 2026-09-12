@@ -9,6 +9,9 @@
         "state": "Present",
         "at": "/machine/bin/bwrap",
         "target": null
+      },
+      "install": {
+        "install": "Idle"
       }
     },
     {
@@ -17,6 +20,9 @@
         "state": "Present",
         "at": "/machine/bin/git",
         "target": null
+      },
+      "install": {
+        "install": "Idle"
       }
     },
     {
@@ -25,6 +31,9 @@
         "state": "Present",
         "at": "/machine/bin/claude",
         "target": "/home/you/.local/share/claude/versions/0.0.0/claude"
+      },
+      "install": {
+        "install": "Idle"
       }
     },
     {
@@ -33,6 +42,9 @@
         "state": "Absent",
         "trouble": null,
         "seen": null
+      },
+      "install": {
+        "install": "Idle"
       }
     },
     {
@@ -41,6 +53,9 @@
         "state": "Absent",
         "trouble": null,
         "seen": null
+      },
+      "install": {
+        "install": "Idle"
       }
     },
     {
@@ -49,6 +64,9 @@
         "state": "Absent",
         "trouble": null,
         "seen": null
+      },
+      "install": {
+        "install": "Idle"
       }
     },
     {
@@ -57,6 +75,9 @@
         "state": "Absent",
         "trouble": null,
         "seen": null
+      },
+      "install": {
+        "install": "Idle"
       }
     }
   ],
@@ -84,5 +105,7 @@
     "dependencies": true,
     "accounts": false,
     "git": false
-  }
+  },
+  "run": null,
+  "data_directory": "/machine"
 }

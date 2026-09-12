@@ -21,11 +21,3 @@
   border: 2px solid var(--edge);
   border-radius: 50%;
 }
-
-/* And the one there is nothing to wait for, in the quiet the rest of a moot row
-   is drawn in: neither an outcome nor a thing anybody is going to do. */
-.moot {
-  flex: none;
-  width: 1em;
-  color: var(--ink-soft);
-}
