@@ -228,11 +228,37 @@ jobs:
       # still in this log.
       - name: The viewer is inside the binary
         run: |
+          # **The workbench is behind the Workbench Key**, which a request
+          # showing nothing is answered 401 to — see
+          # `crates/server/src/key.rs`. So the fetch below has to be let in
+          # first, or `--fail` reports a leg that was never admitted as a leg
+          # that served no viewer, which is a different failure entirely.
+          #
+          # The key is whatever the Data Directory holds, and a start adopts
+          # what is already there rather than inventing over it, so this leg
+          # states one rather than racing the server for the file it would
+          # otherwise have written. A cookie carrying it is the whole of being
+          # logged in: the `?key=` on a login link is a handshake that sets
+          # this and redirects, so this is what the browser would send.
+          # **Two shapes of the same path**, on the one leg of this matrix that
+          # needs them: `RUNNER_TEMP` is a Windows path there, the server is
+          # handed it as one below, and the shell writing the file is an MSYS
+          # one that wants the other spelling. `cygpath` is what turns the
+          # first into the second, and it is on that runner and no other — so
+          # the three legs that never needed it write what they were given.
+          key=the-key-this-leg-states
+          data="$RUNNER_TEMP"
+          if command -v cygpath > /dev/null; then
+            data=$(cygpath -u "$RUNNER_TEMP")
+          fi
+          printf '%s\n' "$key" > "$data/workbench.key"
+
           ./"$BINARY" serve --listen 127.0.0.1:8422 \
             --data-dir "$RUNNER_TEMP" > server.log 2>&1 &
           server=$!
           document=$(curl --fail --silent --show-error \
             --retry 10 --retry-delay 1 --retry-connrefused \
+            --cookie "workbench_key=$key" \
             http://127.0.0.1:8422/)
           kill -9 "$server"
           cat server.log
@@ -516,11 +542,20 @@ jobs:
           done
 
           log="$XDG_STATE_HOME/verkstead/verkstead.log"
+          # The Workbench Key, as in the matrix's serving assertion and for the
+          # reason said there: the app answers 401 to a request that has shown
+          # nothing, and a key written into the Data Directory before the start
+          # is the key the app adopts.
+          key=the-key-this-leg-states
+          mkdir -p "$RUNNER_TEMP/desktop"
+          printf '%s\n' "$key" > "$RUNNER_TEMP/desktop/workbench.key"
+
           dbus-run-session -- ./"$APPIMAGE" --no-open --listen 127.0.0.1:8422 \
             --data-dir "$RUNNER_TEMP/desktop" &
           app=$!
           document=$(curl --fail --silent --show-error \
             --retry 10 --retry-delay 1 --retry-connrefused \
+            --cookie "workbench_key=$key" \
             http://127.0.0.1:8422/)
 
           # The icon is raised on the main thread while the server comes up on
@@ -745,11 +780,20 @@ jobs:
           log="$HOME/Library/Logs/Verkstead/verkstead.log"
           rm -f "$log"
 
+          # The Workbench Key, as in the matrix's serving assertion and for the
+          # reason said there: the app answers 401 to a request that has shown
+          # nothing, and a key written into the Data Directory before the start
+          # is the key the app adopts.
+          key=the-key-this-leg-states
+          mkdir -p "$RUNNER_TEMP/desktop"
+          printf '%s\n' "$key" > "$RUNNER_TEMP/desktop/workbench.key"
+
           "$MOUNT/Verkstead.app/Contents/MacOS/Verkstead-launcher" --no-open \
             --listen 127.0.0.1:8422 --data-dir "$RUNNER_TEMP/desktop" &
           app=$!
           document=$(curl --fail --silent --show-error \
             --retry 10 --retry-delay 1 --retry-connrefused \
+            --cookie "workbench_key=$key" \
             http://127.0.0.1:8422/)
 
           # The icon is raised on the main thread while the server comes up on
@@ -796,7 +840,15 @@ jobs:
         if: always()
         run: |
           if hdiutil info | grep -qF "$PWD/$MOUNT"; then
-            hdiutil detach "$PWD/$MOUNT"
+            # Forced on the second try, because this step runs `always()` and
+            # the run it has to clean up after is the one where the assertion
+            # above failed: a leg that ended before its `kill` leaves the app
+            # running out of the mount, and a detach refused as busy would
+            # report that as a failure to unmount rather than as the failure
+            # it was. The first try is still the polite one, so a mount
+            # nothing is holding comes down the way it always did.
+            hdiutil detach "$PWD/$MOUNT" ||
+              hdiutil detach -force "$PWD/$MOUNT"
           fi
 
       # Under the `desktop-` artifact prefix, for the reason the AppImage's
@@ -945,6 +997,25 @@ jobs:
             tr -d '\r')
           if [ -z "$entry" ]; then
             echo "::error::Nothing under HKCU says Verkstead is installed."
+            # Where it went instead, because the two ways this claim can fail
+            # want different fixes and the message above tells them apart. A
+            # `HKLM` entry is an install that came out per-machine — the
+            # package asked for `perUser` and Windows Installer did something
+            # else with it, which is the msi's to answer for. Nothing anywhere
+            # is an install that registered nothing at all, which is the
+            # verbose log's. Both are printed rather than either guessed at.
+            echo "Under HKLM:"
+            powershell -NoProfile -Command \
+              "@(Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -EA SilentlyContinue | Where-Object DisplayName -eq 'Verkstead' | ForEach-Object { \$_.PSPath + ' ' + \$_.DisplayVersion }) -join [Environment]::NewLine" |
+              tr -d '\r'
+            echo "What the install said about its scope:"
+            if [ -f msiexec.log ]; then
+              grep -iE "ALLUSERS|MSIINSTALLPERUSER|Product registered" \
+                msiexec.log | head -n 40 ||
+                echo "The log says nothing about either."
+            else
+              echo "There is no msiexec.log to read."
+            fi
             exit 1
           fi
           echo "Apps & Features says: $entry"
@@ -1101,11 +1172,24 @@ jobs:
         run: |
           log="$(cygpath -u "$LOCALAPPDATA")/Verkstead/verkstead.log"
 
+          # The Workbench Key, as in the matrix's serving assertion and for the
+          # reason said there: the app answers 401 to a request that has shown
+          # nothing, and a key written into the Data Directory before the start
+          # is the key the app adopts.
+          # In the MSYS spelling, for the reason the comment above gives about
+          # the log: the app below is handed `RUNNER_TEMP` as Windows wrote it,
+          # and this shell wants the other shape of the same directory.
+          key=the-key-this-leg-states
+          data="$(cygpath -u "$RUNNER_TEMP")/desktop"
+          mkdir -p "$data"
+          printf '%s\n' "$key" > "$data/workbench.key"
+
           "$INSTALL/verkstead-desktop.exe" --no-open --listen 127.0.0.1:8422 \
             --data-dir "$RUNNER_TEMP/desktop" > app.log 2>&1 &
           shim=$!
           document=$(curl --fail --silent --show-error \
             --retry 10 --retry-delay 1 --retry-connrefused \
+            --cookie "workbench_key=$key" \
             http://127.0.0.1:8422/)
 
           # The icon is raised on the main thread while the server comes up on
