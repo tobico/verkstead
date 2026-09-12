@@ -964,18 +964,38 @@ jobs:
             code=$?
           if [ "$code" -ne 0 ]; then
             echo "::error::Windows Installer refused the msi (exit $code)."
-            tail -n 200 msiexec.log 2> /dev/null ||
+            # Through `tr`, because Windows Installer writes its verbose log as
+            # UTF-16: every other byte is a NUL, and a log printed without
+            # taking them out arrives as a column of single characters.
+            if [ -f msiexec.log ]; then
+              tr -d '\000' < msiexec.log | tail -n 200
+            else
               echo "It wrote no log either."
+            fi
             exit 1
           fi
 
       # **Per-user, which is the decision the whole package turns on**: the app
       # is unsigned, so an installer asking for administrator would be an
       # unsigned program asking for the machine, and elevation buys a
-      # downloader nothing they wanted. Two things say it landed that way — the
-      # binaries are in this user's profile, and the Apps & Features entry is
-      # under `HKCU`, where a per-machine install would have written `HKLM` and
-      # needed elevating to do it.
+      # downloader nothing they wanted.
+      #
+      # **The Uninstall key is not where Windows writes that down.** Windows
+      # Installer puts the Apps & Features entry under `HKLM` whichever context
+      # it installed in — the service that writes it is running as the machine
+      # either way — so a per-user product's entry sits in `HKLM` beside every
+      # machine-wide one, and its absence from `HKCU` says nothing at all about
+      # scope. What does say it is the registration underneath: a per-user
+      # install is listed in `HKCU\Software\Microsoft\Installer\Products`, a
+      # per-machine one in `HKLM\SOFTWARE\Classes\Installer\Products`, and a
+      # product is in one of the two and never both. So the claim is made
+      # there — present in the first, absent from the second — and the entry a
+      # human sees is asked for separately and only to exist, because somebody
+      # who installed this has to be able to find it again and remove it.
+      #
+      # Three things therefore say it landed the way the package asked: the
+      # binaries are in this user's profile, the product is registered to this
+      # user rather than to the machine, and Apps & Features can see it.
       #
       # Where they landed is then written down for the steps after this one,
       # because the last of them points `LOCALAPPDATA` at a directory of its
@@ -992,33 +1012,62 @@ jobs:
           done
           ls -l "$install"
 
-          entry=$(powershell -NoProfile -Command \
-            "@(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -EA SilentlyContinue | Where-Object DisplayName -eq 'Verkstead' | ForEach-Object { \$_.DisplayName + ' ' + \$_.DisplayVersion }) -join ' '" |
-            tr -d '\r')
-          if [ -z "$entry" ]; then
-            echo "::error::Nothing under HKCU says Verkstead is installed."
-            # Where it went instead, because the two ways this claim can fail
-            # want different fixes and the message above tells them apart. A
-            # `HKLM` entry is an install that came out per-machine — the
-            # package asked for `perUser` and Windows Installer did something
-            # else with it, which is the msi's to answer for. Nothing anywhere
-            # is an install that registered nothing at all, which is the
-            # verbose log's. Both are printed rather than either guessed at.
-            echo "Under HKLM:"
-            powershell -NoProfile -Command \
-              "@(Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -EA SilentlyContinue | Where-Object DisplayName -eq 'Verkstead' | ForEach-Object { \$_.PSPath + ' ' + \$_.DisplayVersion }) -join [Environment]::NewLine" |
-              tr -d '\r'
+          # All three asked for in one pass and printed whole, so that a leg
+          # which fails below shows what Windows actually recorded rather than
+          # only which of the three assertions tripped over it.
+          registration=$(powershell -NoProfile -Command "
+            \$user = @(Get-ChildItem 'HKCU:\Software\Microsoft\Installer\Products' -EA SilentlyContinue |
+              Where-Object { (Get-ItemProperty \$_.PSPath -EA SilentlyContinue).ProductName -eq 'Verkstead' })
+            \$machine = @(Get-ChildItem 'HKLM:\SOFTWARE\Classes\Installer\Products' -EA SilentlyContinue |
+              Where-Object { (Get-ItemProperty \$_.PSPath -EA SilentlyContinue).ProductName -eq 'Verkstead' })
+            \$arp = @(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' -EA SilentlyContinue |
+              Where-Object DisplayName -eq 'Verkstead')
+            'user=' + \$user.Count
+            'machine=' + \$machine.Count
+            'arp=' + ((\$arp | ForEach-Object { \$_.DisplayVersion + ' at ' + (\$_.PSPath -replace '^.*::','') }) -join '; ')
+          " | tr -d '\r')
+          echo "$registration"
+
+          user=$(printf '%s\n' "$registration" | sed -n 's/^user=//p')
+          machine=$(printf '%s\n' "$registration" | sed -n 's/^machine=//p')
+          entry=$(printf '%s\n' "$registration" | sed -n 's/^arp=//p')
+
+          if [ "$user" != 1 ] || [ "$machine" != 0 ]; then
+            echo "::error::Verkstead is registered $user time(s) to this user and $machine to the machine, and a per-user install is 1 and 0."
+            # What the installer decided and why, which is the one thing the
+            # registry cannot say. `ALLUSERS` is the property the context is
+            # chosen from and the log records every change to it; `Assignment`
+            # is the answer, and is 0 for per-user.
             echo "What the install said about its scope:"
             if [ -f msiexec.log ]; then
-              grep -iE "ALLUSERS|MSIINSTALLPERUSER|Product registered" \
-                msiexec.log | head -n 40 ||
-                echo "The log says nothing about either."
+              # Through `tr`, because Windows Installer writes its verbose log
+              # as UTF-16: every other byte is a NUL, and a `grep` for ASCII
+              # matches nothing in it at all.
+              #
+              # Held in a variable rather than printed straight out of the
+              # pipe: this step runs under `pipefail`, and both a `grep` that
+              # matched nothing and a `head` that closed the pipe on one that
+              # matched plenty fail the whole pipeline — so what was found has
+              # to be looked at rather than inferred from an exit code.
+              scope=$(tr -d '\000' < msiexec.log |
+                grep -aiE "ALLUSERS|MSIINSTALLPERUSER|Assignment=" |
+                head -n 40 || true)
+              if [ -n "$scope" ]; then
+                printf '%s\n' "$scope"
+              else
+                echo "The log says nothing about any of them."
+              fi
             else
               echo "There is no msiexec.log to read."
             fi
             exit 1
           fi
-          echo "Apps & Features says: $entry"
+
+          if [ -z "$entry" ]; then
+            echo "::error::Verkstead registered per-user, and nothing in Apps & Features can see it."
+            exit 1
+          fi
+          echo "Apps & Features says: Verkstead $entry"
 
           echo "INSTALL=$install" >> "$GITHUB_ENV"
 
@@ -1027,7 +1076,8 @@ jobs:
       # what it was built from:
       #
       # **There is an entry**, in this user's own Start menu — which is where a
-      # per-user install writes one, and the other half of the proof above.
+      # per-user install writes one, and says once more what the step above
+      # established.
       #
       # **It opens the app**: the shortcut names the shim, which is the file
       # that supplies the `desktop` verb a shortcut has nowhere to write.
