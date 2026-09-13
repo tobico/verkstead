@@ -163,8 +163,8 @@ async fn fix(state: &AppState, id: i64, base: &str) {
     }
 }
 
-/// Fill a new Conversation's two pickers with what its Repo was last grilled
-/// with.
+/// Fill a new Conversation's pickers with what its Repo was last grilled with —
+/// or, for a Repo never grilled, with what [`pairing_prefill`] offers instead.
 ///
 /// A default and not a lock: both are still the human's to change, and changing
 /// one before pressing Start Grilling is what the Repo remembers next — the
@@ -248,14 +248,79 @@ async fn remembered(state: &AppState, id: i64, repo_id: i64) -> Result<()> {
 /// is this module's: what a new Conversation on this Repo would arrive showing
 /// is the question, and a second reading of the memory somewhere else would be
 /// a second answer to it.
+///
+/// **A Repo that has never been grilled is prefilled all the same**, off the
+/// last Conversation to start work anywhere and, where that leaves a role
+/// empty, the platform default — see [`unremembered`]. Never been grilled is
+/// all three roles with nothing remembered, a skip being as much a memory as a
+/// Pairing: a Repo remembering even one role was grilled, and gets its memory
+/// and nothing else, exactly as before.
 pub(crate) async fn pairing_prefill(state: &AppState, repo_id: i64) -> Result<RepoPairingsView> {
     let remembered = store::remembered_pairings(&state.pool, repo_id).await?;
+
+    if !(remembered.grilling.picked()
+        || remembered.implementation.picked()
+        || remembered.review.picked())
+    {
+        return unremembered(state).await;
+    }
 
     Ok(RepoPairingsView {
         grilling: prefilled(remembered.grilling).await?,
         implementation: usable(remembered.implementation).await?,
         review: prefilled(remembered.review).await?,
     })
+}
+
+/// What a Repo with no memory of its own is prefilled with: the Pairings the
+/// last Conversation to start work anywhere started under, and the platform
+/// default for whatever that leaves unfilled.
+///
+/// A fresh Repo is most likely to be worked on the way the last piece of work
+/// was, which is why the last start comes first — and it is read as *started*
+/// rather than drafted, for the reason the memory is written at the press: a
+/// picker somebody left half-filled is not a choice anybody ran.
+///
+/// **Composed role by role.** Each of the three takes the last start's Pairing
+/// where it is still usable, and the platform default where it is not — and
+/// where there was no last start at all, or it left that role empty. A role it
+/// picked away is one of those: *No grilling* is a pick about that piece of
+/// work, and a brand-new Repo silently skipping its interview on the strength of
+/// another Repo's would be a surprise, so the skip is not carried across. The
+/// Repo's own memory carries skips as it always has; only this copy drops them.
+///
+/// Both candidates go through [`usable`], so neither is trusted any further than
+/// a remembered Pairing is. One candidate a source: a last start that does not
+/// survive the judging is not a reason to look further back through the history,
+/// and a default that does not is an empty picker.
+async fn unremembered(state: &AppState) -> Result<RepoPairingsView> {
+    let last = store::last_started_pairings(&state.pool).await?;
+    let profiles = store::profiles(&state.pool).await?;
+
+    let under = |pairing: Option<PairingView>| match pairing {
+        Some(pairing) => PickedView::Under(pairing),
+        None => PickedView::Nothing,
+    };
+
+    Ok(RepoPairingsView {
+        grilling: under(filled(last.grilling, &profiles, store::Role::Grilling).await?),
+        implementation: filled(last.implementation, &profiles, store::Role::Implementation).await?,
+        review: under(filled(last.review, &profiles, store::Role::Review).await?),
+    })
+}
+
+/// One role of [`unremembered`]: the last start's pick where it is a usable
+/// Pairing, and the platform default where it is anything else.
+async fn filled(
+    copied: store::Picked,
+    profiles: &[store::Profile],
+    role: store::Role,
+) -> Result<Option<PairingView>> {
+    if let Some(pairing) = usable(copied).await? {
+        return Ok(Some(pairing));
+    }
+
+    usable(crate::pairing_defaults::platform_default(profiles, role)).await
 }
 
 /// One role's memory as a picker would show it, for the two roles that can

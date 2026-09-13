@@ -16,12 +16,19 @@
 //! neither touches this table: what the read hands back is what was written,
 //! and whether it is still something to launch a session under is judged above
 //! the store, where the boundary and the Profile's list are both read.
+//!
+//! A Repo that has never been grilled has nothing here, and what fills its
+//! pickers instead is read without a table of its own: the Pairings of whatever
+//! Conversation last started work anywhere — see [`last_started_pairings`].
+//! Nothing is written for it. This table goes on saying what a Repo was last
+//! grilled with, and a row it held for a Repo nothing had grilled would be a
+//! memory of a grilling that never ran.
 
 use anyhow::{Context, Result};
 use sqlx::SqlitePool;
 
 use super::Picked;
-use super::conversations::Role;
+use super::conversations::{Event, Lifecycle, Role};
 
 /// What a Repo was last grilled with, as far as the store can still stand
 /// behind it.
@@ -212,5 +219,67 @@ async fn remembered(pool: &SqlitePool, repo_id: i64, role: Role) -> Result<Picke
             model: Some(model),
         }),
         None => Picked::Nothing,
+    })
+}
+
+/// What the Conversation whose work most recently started, anywhere in the
+/// workbench, was started with — the first place a Repo with no memory of its
+/// own looks for something to fill its pickers with.
+///
+/// *Started* rather than *created*, and the difference is the whole point of
+/// reading it this way: a Conversation's id and its `created_at` are the order
+/// the drafts were opened in, and an old draft started this morning is more
+/// recent work than a newer one started yesterday. Nothing on the row says when
+/// its work began, so the Timeline is asked instead. Every way out of Draft —
+/// a grill start, a start with no grilling, a stage, a take-up, a steer — writes
+/// a `moved` Event in the transaction that moves it, and Events are numbered in
+/// the order they were written; so a Conversation's *first* move is the moment
+/// its work started, and the latest first move is the last start. A first move
+/// to Closed is a draft closed without ever starting, which is no pairing
+/// anybody ran and is passed over.
+///
+/// Handed back as the store holds it, skips included, for the reason
+/// [`remembered_pairings`] hands back what was written: what a fresh Repo does
+/// with a role this Conversation picked away is decided above the store, beside
+/// the rest of the prefill's judging. The Implementation role has no row that
+/// runs nothing, so it is only ever a Pairing or [`Picked::Nothing`].
+///
+/// Everything [`Picked::Nothing`] where no Conversation has started at all,
+/// which is a workbench on its first day.
+pub async fn last_started_pairings(pool: &SqlitePool) -> Result<RepoPairings> {
+    let row: Option<(i64,)> = sqlx::query_as(
+        "SELECT e.conversation_id
+         FROM timeline_events e
+         WHERE e.kind = ?
+           AND e.body <> ?
+           AND NOT EXISTS (
+                 SELECT 1 FROM timeline_events earlier
+                 WHERE earlier.conversation_id = e.conversation_id
+                   AND earlier.kind = e.kind
+                   AND earlier.id < e.id
+               )
+         ORDER BY e.id DESC
+         LIMIT 1",
+    )
+    .bind(Event::Moved(Lifecycle::Closed).kind())
+    .bind(Lifecycle::Closed.stored())
+    .fetch_optional(pool)
+    .await
+    .context("finding the Conversation whose work most recently started")?;
+
+    let Some((id,)) = row else {
+        return Ok(RepoPairings::default());
+    };
+
+    let Some(conversation) = super::load_conversation(pool, id).await? else {
+        return Ok(RepoPairings::default());
+    };
+
+    Ok(RepoPairings {
+        grilling: conversation.grilling_pairing,
+        implementation: conversation
+            .implementation_pairing
+            .map_or(Picked::Nothing, Picked::Under),
+        review: conversation.review_pairing,
     })
 }

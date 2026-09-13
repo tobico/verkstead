@@ -99,6 +99,9 @@ mod nudging;
 /// it is a server stood up over a stated machine, which is a test standing
 /// where a start does.
 pub mod onboarding;
+/// What a Repo nothing has grilled arrives with in its pickers when there is no
+/// last start to copy: one account per harness order and a model per role.
+mod pairing_defaults;
 /// Every Sandbox Configuration bind as the settings page reads them: which of
 /// the two places said each one, and whether the server can see it.
 mod paths;

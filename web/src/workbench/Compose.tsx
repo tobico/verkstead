@@ -50,7 +50,8 @@
 //! uses, as one more field of the replay. See `src/holding.ts`.
 //!
 //! The one thing it reads that a saved composer has no need of is the repo's own
-//! memory of what it was last grilled with. A draft has that applied to it when
+//! memory of what it was last grilled with — or, for a repo nothing has grilled,
+//! what the server prefills in its place. A draft has that applied to it when
 //! it is created; this page has no draft yet, so it asks for the same answer and
 //! shows it — see `showing`, which is careful to show it rather than hold it.
 //!
@@ -342,8 +343,9 @@ function Compose(props: {
   const repo = (): RepoEntry | null =>
     (repos.data ?? []).find((entry) => entry.id === on(state())) ?? null;
 
-  // And what that repo was last grilled with, which is what a draft created on
-  // it would arrive showing. Read the moment one is picked and again whenever it
+  // And what that repo was last grilled with — or, where nothing has grilled it,
+  // what the server prefills instead — which is what a draft created on it
+  // would arrive showing. Read the moment one is picked and again whenever it
   // changes, the key carrying the repo: the memory is the repo's, so another
   // repo is another answer — and there is nothing to ask until one is picked.
   //
@@ -834,7 +836,8 @@ function Compose(props: {
             {/* And the three accounts, one trigger each — the same three
                 questions, asked before there is a record for an answer to be
                 about. Each of them stands on what the repo was last grilled
-                with until it is touched, which is what a created draft would
+                with (or its prefill, where nothing has grilled it) until it
+                is touched, which is what a created draft would
                 have arrived showing — and a picker left on it sends nothing
                 when this is created, so the server's own prefill stands. */}
             <ProfileChoices>

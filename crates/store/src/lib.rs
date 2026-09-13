@@ -96,7 +96,7 @@ pub use conversations::{
 pub use deferrals::{Ask, Unfolded, asked_as, record_folded, stored_on_timeline, unfolded};
 pub use deliveries::{delivered, record_delivery};
 pub use endings::{ended_on, nothing_else};
-pub use pairings::{RepoPairings, remembered_pairings};
+pub use pairings::{RepoPairings, last_started_pairings, remembered_pairings};
 pub use pauses::Pause;
 pub use placements::place_conversations;
 pub use profiles::{

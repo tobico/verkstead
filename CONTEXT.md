@@ -1309,7 +1309,29 @@ phone as readily as from a desk. A prefill and not a lock: it is the human's to
 change before pressing, and what they changed it to is what gets remembered
 next. A remembered Pairing whose Profile has broken, or which no longer lists
 the model, is silently not applied — an unchosen picker, exactly as a Repo with
-no memory gives.
+no memory would have given.
+
+**A Repo that has never been grilled is prefilled too** (2026-09-12) — one with
+nothing remembered for any of the three roles, a remembered skip counting as
+memory; a Repo remembering even one role gets its memory and nothing else. Its
+pickers take, role by role, the Pairings of the **last Conversation to start
+work** anywhere in the workbench — started rather than drafted, so a draft's
+half-filled pickers never count — and, where that role was left empty, picked
+away or no longer usable, the **platform default**. A skip is not carried to
+another Repo: a brand-new one silently skipping its interview on the strength
+of somebody else's work would be a surprise. The platform default is the one
+place Verkstead names a model on nobody's behalf: the first harness with a
+Profile saved, in the order Claude Code, Codex, Grok Build, OpenCode; that
+harness's unnamed Profile, or else the earliest saved; and the harness's
+frontier model for the grilling and its value model for implementation and
+review — Fable 5 and Opus 5 on Claude Code — or the first model the Profile
+lists where it does not list that one. Every candidate is judged as a
+remembered Pairing is and falls one step when it fails, down to the empty
+picker; nothing hunts further back through the history or across other
+Profiles. Read, never written: nothing lands in the Repo's memory until a
+Conversation on it actually starts, so the memory still says only what the
+Repo was grilled with. Opening or creating a repo, and every Repo registered
+before this, arrives the same way.
 
 **The compose page reads the same memory off the Repo**, so its three pickers
 stand on what a created draft would have arrived showing, before anything is

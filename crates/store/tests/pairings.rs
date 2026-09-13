@@ -9,10 +9,10 @@ use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Account, Deleting, Picked, Profile, ProfileFacts, Repo, create_profile, delete_profile,
-    open_database, register_repo, remembered_pairings, set_grilling_pairing,
-    set_implementation_pairing, set_review_pairing, skip_grilling, skip_review, start_building,
-    start_conversation, start_grilling, update_profile,
+    Account, Deleting, Picked, Profile, ProfileFacts, Repo, close_conversation, create_profile,
+    delete_profile, last_started_pairings, open_database, register_repo, remembered_pairings,
+    set_grilling_pairing, set_implementation_pairing, set_review_pairing, skip_grilling,
+    skip_review, start_building, start_conversation, start_grilling, update_profile,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -464,4 +464,131 @@ async fn no_grilling_started_after_a_pairing_replaces_it() {
         Picked::Skipped,
         "one answer rather than two to choose between",
     );
+}
+
+/// A Conversation on `repo` with every picker filled and nothing pressed — a
+/// draft, handed back by id so a test can press it later or never.
+async fn drafted(
+    pool: &SqlitePool,
+    repo: &Repo,
+    grilling: &Profile,
+    implementation: &Profile,
+    review: &Profile,
+) -> i64 {
+    let id = start_conversation(pool, repo.id, "amber-kestrel")
+        .await
+        .unwrap()
+        .unwrap();
+
+    set_grilling_pairing(pool, id, grilling.id, Some(MODEL))
+        .await
+        .unwrap();
+    set_implementation_pairing(pool, id, implementation.id, Some(MODEL))
+        .await
+        .unwrap();
+    set_review_pairing(pool, id, review.id, Some(MODEL))
+        .await
+        .unwrap();
+
+    id
+}
+
+async fn press(pool: &SqlitePool, id: i64) {
+    start_grilling(pool, id, "deadbeef", Path::new("/state/worktrees/x"), &[])
+        .await
+        .unwrap();
+}
+
+/// A workbench where nothing has started has no last start to copy, whatever
+/// its drafts have picked: a picker filled and left unpressed is not a Pairing
+/// anybody ran.
+#[tokio::test]
+async fn nothing_started_anywhere_offers_nothing_to_copy() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = repo(&pool, "verkstead").await;
+    let fable = saved(&pool, "fable").await;
+
+    drafted(&pool, &repo, &fable, &fable, &fable).await;
+
+    assert_eq!(
+        last_started_pairings(&pool).await.unwrap(),
+        Default::default()
+    );
+}
+
+/// *Last started*, not last created: an old draft started after a newer one is
+/// the more recent work, and a draft opened since either of them counts for
+/// nothing.
+#[tokio::test]
+async fn the_last_conversation_to_start_is_the_one_copied_whenever_it_was_created() {
+    let (_dir, pool) = fresh_pool().await;
+    let verkstead = repo(&pool, "verkstead").await;
+    let askance = repo(&pool, "askance").await;
+    let fable = saved(&pool, "fable").await;
+    let opus = saved(&pool, "opus").await;
+    let haiku = saved(&pool, "haiku").await;
+
+    let older = drafted(&pool, &verkstead, &fable, &opus, &haiku).await;
+    let newer = drafted(&pool, &askance, &opus, &opus, &opus).await;
+    drafted(&pool, &askance, &haiku, &haiku, &haiku).await;
+
+    press(&pool, newer).await;
+    press(&pool, older).await;
+
+    let copied = last_started_pairings(&pool).await.unwrap();
+
+    let grilling = copied.grilling.pairing().expect("the older one's grilling");
+    assert_eq!(grilling.profile.id, fable.id);
+    assert_eq!(grilling.model.as_deref(), Some(MODEL));
+    assert_eq!(copied.implementation.pairing().unwrap().profile.id, opus.id);
+    assert_eq!(copied.review.pairing().unwrap().profile.id, haiku.id);
+}
+
+/// A draft closed without its work ever starting moved out of Draft all the
+/// same, and is still no start; a Conversation closed *after* starting was one,
+/// and goes on counting.
+#[tokio::test]
+async fn a_draft_closed_unstarted_is_passed_over_and_a_started_one_closed_is_not() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = repo(&pool, "verkstead").await;
+    let fable = saved(&pool, "fable").await;
+    let opus = saved(&pool, "opus").await;
+
+    let started = drafted(&pool, &repo, &fable, &fable, &fable).await;
+    press(&pool, started).await;
+    close_conversation(&pool, started).await.unwrap();
+
+    let abandoned = drafted(&pool, &repo, &opus, &opus, &opus).await;
+    close_conversation(&pool, abandoned).await.unwrap();
+
+    assert_eq!(
+        last_started_pairings(&pool)
+            .await
+            .unwrap()
+            .grilling
+            .pairing()
+            .map(|pairing| pairing.profile.id),
+        Some(fable.id),
+    );
+}
+
+/// The rows that run nothing come back as themselves: whether a fresh Repo
+/// takes a skip across is decided above the store, which has to be told there
+/// was one to decide it.
+#[tokio::test]
+async fn the_last_start_hands_its_skips_back_as_written() {
+    let (_dir, pool) = fresh_pool().await;
+    let repo = repo(&pool, "verkstead").await;
+    let fable = saved(&pool, "fable").await;
+
+    ungrilled(&pool, &repo, &fable, &fable).await;
+    assert_eq!(
+        last_started_pairings(&pool).await.unwrap().grilling,
+        Picked::Skipped
+    );
+
+    unreviewed(&pool, &repo, &fable, &fable).await;
+    let copied = last_started_pairings(&pool).await.unwrap();
+    assert_eq!(copied.review, Picked::Skipped);
+    assert!(copied.grilling.pairing().is_some());
 }
