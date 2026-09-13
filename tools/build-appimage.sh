@@ -208,6 +208,11 @@ entry > "$APPDIR/$APP_ID.desktop"
 cp "packaging/icons/hicolor/256x256/apps/$APP_ID.png" "$APPDIR/$APP_ID.png"
 cp "$APPDIR/$APP_ID.png" "$APPDIR/.DirIcon"
 
+# The empty directory `AppRun` points GIO at, made after the check above rather
+# than beside the libraries it sits among: that check reads `usr/lib/*` and asks
+# `ldd` about each, and a directory is not a thing to ask.
+mkdir -p "$APPDIR/usr/lib/gio/modules"
+
 # What the runtime executes once it has mounted the image. Every path in it is
 # relative to `$APPDIR`, which the runtime sets to wherever it mounted this run
 # — the file the human actually has is `$APPIMAGE`, which is what the app reads
@@ -217,6 +222,22 @@ cp "$APPDIR/$APP_ID.png" "$APPDIR/.DirIcon"
 # `LD_LIBRARY_PATH` rather than an rpath rewritten into every copied library:
 # the loader reads it before the RUNPATH a library was built with, so the bundle
 # is what satisfies the bundle, and nothing here has to be patched.
+#
+# **GIO's loadable modules are said something about, and it is the machine that
+# is told rather than the bundle.** They are the one kind of plugin this process
+# loads that the *session* names: a desktop puts its dconf and its gvfs on
+# `GIO_EXTRA_MODULES`, and those are that machine's glib's, built against
+# whatever it has. This bundle carries a glib of its own and an older one — the
+# floor is the container the release is built in — and `LD_LIBRARY_PATH` above
+# is what makes the bundle's the one they are resolved against. What comes of
+# it is a module asking for a symbol that glib did not have yet, said to the
+# terminal at every startup, and once for each module the session named. So the
+# bundle answers for its own: a directory inside it is the only one GIO reads,
+# it is empty, and the session's list is dropped on the way in. Nothing here
+# wants either module — the app settles nothing through GSettings and opens no
+# file through gvfs — so what is lost by having neither is nothing, and the
+# memory backend GSettings falls back to is the same one it was already falling
+# back to when the load failed.
 #
 # Nothing is said about gdk-pixbuf's loadable modules, and deliberately: PNG is
 # compiled into that library itself, and the formats those modules add — TIFF,
@@ -242,6 +263,8 @@ APPDIR="${APPDIR:-$(dirname "$(readlink -f "$0")")}"
 export APPDIR
 export LD_LIBRARY_PATH="$APPDIR/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export XDG_DATA_DIRS="$APPDIR/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+export GIO_MODULE_DIR="$APPDIR/usr/lib/gio/modules"
+unset GIO_EXTRA_MODULES
 exec "$APPDIR/usr/bin/verkstead" desktop "$@"
 APPRUN
 chmod +x "$APPDIR/AppRun"
