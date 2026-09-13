@@ -53,6 +53,24 @@ pub fn run() {
     platform::run();
 }
 
+/// Run `work` on the loop's thread once the event being handled there has been
+/// let go of.
+///
+/// What a menu pick is handled through — see [`crate::tray::show`]. **The
+/// toolkit is still in the middle of the pick when it reports it**, and on
+/// Windows that middle is a borrow: `muda` holds the picked item mutably while
+/// its handler runs, so a handler that reads the item or ticks it is a
+/// `RefCell` panicking inside a window procedure, which is a process aborting.
+/// Launch on Startup does both. So the handling is put off until the dispatch
+/// it arrived in has returned, and it is the loop that runs it rather than the
+/// toolkit's own call stack.
+///
+/// GTK and AppKit report a pick with nothing of theirs still held, so there
+/// `work` runs at once and nothing about those two changes.
+pub fn later(work: impl FnOnce() + 'static) {
+    platform::later(work);
+}
+
 /// End the loop, from the thread it is running on.
 ///
 /// What **Exit** does: a menu item's handler runs on the loop's own thread, so
@@ -81,6 +99,12 @@ mod platform {
 
     pub(super) fn run() {
         gtk::main();
+    }
+
+    /// At once: a GTK `activate` handler is called with nothing of `muda`'s
+    /// borrowed.
+    pub(super) fn later(work: impl FnOnce()) {
+        work();
     }
 
     pub(super) fn stop() {
@@ -138,6 +162,12 @@ mod platform {
         };
 
         NSApplication::sharedApplication(main).run();
+    }
+
+    /// At once: an `NSMenuItem`'s action is called with nothing of `muda`'s
+    /// borrowed.
+    pub(super) fn later(work: impl FnOnce()) {
+        work();
     }
 
     pub(super) fn stop() {
@@ -209,6 +239,8 @@ mod platform {
 /// a queue — posted by the thread itself, or posted at it from outside.
 #[cfg(windows)]
 mod platform {
+    use std::cell::RefCell;
+    use std::collections::VecDeque;
     use std::ptr;
     use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -268,7 +300,49 @@ mod platform {
             while GetMessageW(&mut message, ptr::null_mut(), 0, 0) > 0 {
                 TranslateMessage(&message);
                 DispatchMessageW(&message);
+
+                // Out of the dispatch, so out of whatever it was holding: what
+                // a handler inside it put off is run here — see [`later`].
+                run_what_waited();
             }
+        }
+    }
+
+    thread_local! {
+        /// What [`later`] was handed during the dispatch in progress, in the
+        /// order it was handed over.
+        ///
+        /// On the thread because both ends are the loop's: a menu handler runs
+        /// inside the dispatch and [`run`] is what comes out of it.
+        static WAITING: RefCell<VecDeque<Box<dyn FnOnce()>>> = const {
+            RefCell::new(VecDeque::new())
+        };
+    }
+
+    /// Keep `work` until the dispatch in progress has returned to [`run`].
+    ///
+    /// Off the loop's thread there is no dispatch to be inside and no [`run`]
+    /// to come back to — the tray could not have raised an event there — so
+    /// `work` is run at once rather than kept for a loop that will never read
+    /// it.
+    pub(super) fn later(work: impl FnOnce() + 'static) {
+        if LOOP.load(Ordering::SeqCst) != us() {
+            work();
+            return;
+        }
+
+        WAITING.with(|waiting| waiting.borrow_mut().push_back(Box::new(work)));
+    }
+
+    /// Run everything [`later`] kept, first to last.
+    ///
+    /// Taken off the queue one at a time rather than drained under one borrow:
+    /// what runs may itself put something off — a dialog it raises dispatches
+    /// messages of its own while it is up — and that has to find the queue free
+    /// to be added to.
+    fn run_what_waited() {
+        while let Some(work) = WAITING.with(|waiting| waiting.borrow_mut().pop_front()) {
+            work();
         }
     }
 
@@ -309,11 +383,111 @@ mod platform {
         unsafe { PostThreadMessageW(loop_thread, WM_QUIT, 0, 0) };
     }
 
-    /// The thread asking, which is what each of the four above compares against
-    /// the one that was written down.
+    /// The thread asking, which is what each of the others above compares
+    /// against the one that was written down.
     fn us() -> u32 {
         // SAFETY: it asks the operating system about the calling thread and
         // hands back a number.
         unsafe { GetCurrentThreadId() }
+    }
+}
+
+/// Windows's, because it is the one arm where [`later`] puts anything off.
+///
+/// **What these drive is a real menu**, on a real window, picked the way Windows
+/// picks it: a `WM_COMMAND` dispatched through the loop. That is the whole of
+/// what makes the crash a Launch on Startup pick was, and a window that is never
+/// shown needs no screen to be made — so the suite can pick a check item without
+/// a tray icon appearing on whoever's machine is running it.
+#[cfg(all(test, windows))]
+mod tests {
+    use std::cell::{Cell, RefCell};
+    use std::ptr;
+
+    use tray_icon::menu::{CheckMenuItem, ContextMenu, Menu, MenuEvent};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DestroyWindow, GetMenuItemID, HWND_MESSAGE, PostMessageW, WM_COMMAND,
+    };
+
+    use super::*;
+
+    thread_local! {
+        /// The check item, where the handler can reach it — kept on the thread
+        /// for the reason [`crate::tray`] keeps its own there.
+        static ITEM: RefCell<Option<CheckMenuItem>> = const { RefCell::new(None) };
+        /// What the item was ticked to when the handling read it, or `None`
+        /// before it has.
+        static READ: Cell<Option<bool>> = const { Cell::new(None) };
+    }
+
+    /// A pick of a check item handled the way Launch on Startup handles one —
+    /// the tick read off the item and written back to it — which inside the
+    /// dispatch that reported it is a `RefCell` already borrowed, and once that
+    /// dispatch has returned is an ordinary read and write.
+    #[test]
+    fn a_picked_check_item_can_be_read_and_ticked_by_what_it_is_handed_to() {
+        start().unwrap();
+
+        let menu = Menu::new();
+        let item = CheckMenuItem::with_id("box", "Box", true, false, None);
+        menu.append(&item).unwrap();
+        ITEM.with(|kept| *kept.borrow_mut() = Some(item));
+
+        MenuEvent::set_event_handler(Some(|_: MenuEvent| {
+            later(|| {
+                ITEM.with(|item| {
+                    let item = item.borrow();
+                    let item = item.as_ref().unwrap();
+
+                    READ.with(|read| read.set(Some(item.is_checked())));
+                    item.set_checked(false);
+                });
+
+                stop();
+            });
+        }));
+
+        // SAFETY: a message-only window of the system's own `STATIC` class,
+        // made, spoken to and destroyed on this one thread; the menu it is
+        // subclassed for outlives it, being dropped at the end of the test.
+        unsafe {
+            let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
+            let window = CreateWindowExW(
+                0,
+                class.as_ptr(),
+                ptr::null(),
+                0,
+                0,
+                0,
+                0,
+                0,
+                HWND_MESSAGE,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                ptr::null(),
+            );
+            assert!(!window.is_null(), "a window to hang the menu off");
+
+            menu.attach_menu_subclass_for_hwnd(window as isize);
+
+            let picked = GetMenuItemID(menu.hpopupmenu() as _, 0);
+            assert!(PostMessageW(window, WM_COMMAND, picked as usize, 0) != 0);
+
+            run();
+
+            DestroyWindow(window);
+        }
+
+        MenuEvent::set_event_handler(None::<fn(MenuEvent)>);
+
+        assert_eq!(
+            READ.with(Cell::get),
+            Some(true),
+            "the handling should have read the tick the pick put on the item"
+        );
+        assert!(
+            !ITEM.with(|item| item.borrow().as_ref().unwrap().is_checked()),
+            "and ticking it back should have held"
+        );
     }
 }

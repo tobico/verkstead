@@ -39,7 +39,7 @@ use anyhow::{Context, Result, bail};
 use tray_icon::menu::{CheckMenuItem, IsMenuItem, Menu, MenuEvent, MenuId, MenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder, TrayIconEvent};
 
-use crate::APP_ID;
+use crate::{APP_ID, toolkit};
 
 /// The artwork, in the binary rather than beside it.
 ///
@@ -217,7 +217,12 @@ pub fn show(
 
         move |event: MenuEvent| {
             if let Some(picked) = Chosen::named(&event.id) {
-                chosen(picked);
+                // Once the toolkit has let go of the item, rather than while it
+                // is still holding it: on Windows the pick is reported from
+                // inside a borrow of the very item Launch on Startup reads and
+                // ticks — see [`toolkit::later`].
+                let chosen = Arc::clone(&chosen);
+                toolkit::later(move || chosen(picked));
             }
         }
     }));
