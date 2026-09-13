@@ -207,7 +207,7 @@ machine this file was made for as surely as you can.
 **A desktop with no tray host shows no icon, and nothing is wrong.** Vanilla
 GNOME is the case people meet — it draws no tray, and an AppIndicator extension
 is what gives it one. Verkstead cannot tell that from a tray that is drawing the
-icon, because the appindicator registers on the bus either way, so there is no
+icon, because the item registers on the bus either way, so there is no
 message it could honestly give you. What it does instead is what it does
 everywhere: serve, and open the viewer. The viewer is the whole interface — the
 tray holds those four items and nothing else — so what is lost is the icon

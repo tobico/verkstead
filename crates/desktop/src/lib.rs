@@ -273,10 +273,10 @@ fn escalation(screen: bool) -> Option<Arc<dyn verkstead_server::remote::Elevate>
 /// something about in the log. What is left in each case is the server and the
 /// viewer, which is the useful half of the app.
 ///
-/// A desktop with no tray host running is *not* one of them: an appindicator
-/// registers on the bus whether or not anything is drawing it, so an icon
-/// nobody shows is one this cannot tell from an icon somebody does. macOS has
-/// no such question — the menu bar is the session's own and always there.
+/// A desktop with no tray host running is *not* one of them: the item registers
+/// on the bus whether or not anything is drawing it, so an icon nobody shows is
+/// one this cannot tell from an icon somebody does. macOS has no such question
+/// — the menu bar is the session's own and always there.
 ///
 /// `listen` and `key` are where Open sends the browser: the same login link
 /// that was opened at startup, built again at each press rather than captured
@@ -368,8 +368,8 @@ fn raise(
             // saying nothing did. It is also what the release workflow's
             // desktop leg reads to know that the bundle it has just built can
             // raise a tray at all — a headless run reaches neither the toolkit
-            // nor the appindicator, so this line is the whole of what tells the
-            // two apart. See `.github/workflows/release.yml`.
+            // nor the bus item, so this line is the whole of what tells the two
+            // apart. See `.github/workflows/release.yml`.
             tracing::info!("Verkstead is in the tray");
             Some(icon)
         }

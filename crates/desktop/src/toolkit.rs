@@ -16,14 +16,18 @@
 //! own thread does, so the second of those has to ask rather than do — which is
 //! [`stop`] and [`stop_from_elsewhere`], one for each caller.
 //!
-//! **One toolkit for the whole binary on each platform**, which is what makes
-//! the dialogs [`crate::dialog`] draws the same toolkit's as the menu: GTK on
-//! Linux, which is also what `muda` draws the menu with, AppKit on macOS, which
-//! is what `tray-icon` puts the status item in, and Win32 itself on Windows,
-//! where the icon is a notification-area icon on a window of `tray-icon`'s own.
-//! A binary with two would be two answers to what a machine has to carry to
-//! build it, and a dialog that could not be raised from inside the loop's own
-//! dispatch.
+//! **One toolkit for the whole binary on each platform**: GTK on Linux, AppKit
+//! on macOS, which is what `tray-icon` puts the status item in, and Win32 itself
+//! on Windows, where the icon is a notification-area icon on a window of
+//! `tray-icon`'s own. A binary with two would be two answers to what a machine
+//! has to carry to build it, and a dialog that could not be raised from inside
+//! the loop's own dispatch.
+//!
+//! Linux is the one where the toolkit and the tray have come apart: the icon and
+//! its menu are published on the bus and drawn by the panel, so GTK here is the
+//! dialogs' and this loop's and nothing else's — see [`crate::tray`]. The loop
+//! is still what a pick is handled on, which is what [`crate::tray`] hops it
+//! back to.
 
 use anyhow::Result;
 
@@ -56,18 +60,34 @@ pub fn run() {
 /// Run `work` on the loop's thread once the event being handled there has been
 /// let go of.
 ///
-/// What a menu pick is handled through — see [`crate::tray::show`]. **The
-/// toolkit is still in the middle of the pick when it reports it**, and on
-/// Windows that middle is a borrow: `muda` holds the picked item mutably while
-/// its handler runs, so a handler that reads the item or ticks it is a
-/// `RefCell` panicking inside a window procedure, which is a process aborting.
-/// Launch on Startup does both. So the handling is put off until the dispatch
-/// it arrived in has returned, and it is the loop that runs it rather than the
-/// toolkit's own call stack.
+/// What a menu pick is handled through — see [`crate::tray::show`]. Two
+/// platforms report a pick somewhere it cannot be handled, and they are not the
+/// same somewhere.
 ///
-/// GTK and AppKit report a pick with nothing of theirs still held, so there
-/// `work` runs at once and nothing about those two changes.
-pub fn later(work: impl FnOnce() + 'static) {
+/// **Windows is still in the middle of the pick when it reports it**, and that
+/// middle is a borrow: `muda` holds the picked item mutably while its handler
+/// runs, so a handler that reads the item or ticks it is a `RefCell` panicking
+/// inside a window procedure, which is a process aborting. Launch on Startup
+/// does both. So the handling is put off until the dispatch it arrived in has
+/// returned, and it is the loop that runs it rather than the toolkit's own call
+/// stack.
+///
+/// **Linux reports it on the wrong thread**, which is what the tray stopped
+/// being GTK's cost: the StatusNotifierItem half runs on a thread of its own
+/// (see `crates/desktop/Cargo.toml`), and everything a pick leads to is the
+/// loop's — the dialogs are drawn with the GTK the loop is holding, Exit ends
+/// that loop, and the Launch on Startup item is the loop thread's to read and to
+/// tick. So the work is put on the loop's own list of things to do next, which
+/// is the one thing GTK may be asked for from another thread, and is what
+/// [`stop_from_elsewhere`] is built on as well.
+///
+/// AppKit reports a pick on the loop's thread with nothing of its own still
+/// held, so there `work` runs at once.
+///
+/// `Send` because of the Linux arm, and free everywhere it is called: the
+/// handler [`crate::tray::show`] is given is already `Send + Sync`, and a pick
+/// is a [`Copy`] of four words.
+pub fn later(work: impl FnOnce() + Send + 'static) {
     platform::later(work);
 }
 
@@ -88,7 +108,9 @@ pub fn stop_from_elsewhere() {
     platform::stop_from_elsewhere();
 }
 
-/// GTK: the toolkit on Linux, and the appindicator the icon is drawn as.
+/// GTK: the toolkit on Linux, which is the dialogs' and the loop's rather than
+/// the tray's — the icon and its menu are published on the bus and drawn by the
+/// panel, not by anything here. See [`crate::tray`].
 #[cfg(target_os = "linux")]
 mod platform {
     use anyhow::{Context, Result};
@@ -101,10 +123,11 @@ mod platform {
         gtk::main();
     }
 
-    /// At once: a GTK `activate` handler is called with nothing of `muda`'s
-    /// borrowed.
-    pub(super) fn later(work: impl FnOnce()) {
-        work();
+    /// Onto the loop's own list of things to do next, because the caller is not
+    /// the loop: the tray is published on the bus rather than drawn with this
+    /// toolkit, and it reports a pick from a thread of its own — see [`later`].
+    pub(super) fn later(work: impl FnOnce() + Send + 'static) {
+        gtk::glib::idle_add_once(work);
     }
 
     pub(super) fn stop() {
@@ -166,7 +189,7 @@ mod platform {
 
     /// At once: an `NSMenuItem`'s action is called with nothing of `muda`'s
     /// borrowed.
-    pub(super) fn later(work: impl FnOnce()) {
+    pub(super) fn later(work: impl FnOnce() + Send + 'static) {
         work();
     }
 
@@ -314,7 +337,7 @@ mod platform {
         ///
         /// On the thread because both ends are the loop's: a menu handler runs
         /// inside the dispatch and [`run`] is what comes out of it.
-        static WAITING: RefCell<VecDeque<Box<dyn FnOnce()>>> = const {
+        static WAITING: RefCell<VecDeque<Box<dyn FnOnce() + Send>>> = const {
             RefCell::new(VecDeque::new())
         };
     }
@@ -325,7 +348,7 @@ mod platform {
     /// to come back to — the tray could not have raised an event there — so
     /// `work` is run at once rather than kept for a loop that will never read
     /// it.
-    pub(super) fn later(work: impl FnOnce() + 'static) {
+    pub(super) fn later(work: impl FnOnce() + Send + 'static) {
         if LOOP.load(Ordering::SeqCst) != us() {
             work();
             return;

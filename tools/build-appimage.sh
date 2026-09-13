@@ -12,10 +12,11 @@
 # mounted image by path, saying a verb of its own.
 #
 # The released CLI is that same binary with the feature off — a static musl
-# one, which needs none of this. This is the artifact that links system
-# libraries — GTK3, and the appindicator the tray is drawn over (ADR-0012) —
-# and making *it* static is not on: the toolkit is not built that way. So it
-# stays dynamic and carries what it links, which is what an AppImage is for.
+# one, which needs none of this. This is the artifact that links a system
+# library — GTK3, which the two dialogs are drawn with and which holds the loop
+# (ADR-0012) — and making *it* static is not on: the toolkit is not built that
+# way. So it stays dynamic and carries what it links, which is what an AppImage
+# is for. The tray itself links nothing: it is spoken onto the session bus.
 #
 # Run it in the dev shell, or on a runner that has installed the two development
 # packages `ci.yml` installs to build `crates/desktop` at all. It takes
@@ -80,7 +81,7 @@ die() {
 [ -f web/dist/index.html ] ||
   die "web/dist is empty: build the viewer first, with (cd web && pnpm build)."
 
-for tool in cargo pkg-config ldd mksquashfs curl; do
+for tool in cargo ldd mksquashfs curl; do
   command -v "$tool" > /dev/null ||
     die "$tool is needed to build the AppImage and is not on the PATH."
 done
@@ -138,19 +139,12 @@ bundle() {
 say "Gathering what it links…"
 bundle "$APPDIR/usr/bin/$BINARY"
 
-# And the appindicator, which `ldd` knows nothing about: `libappindicator-sys`
-# opens it by name at runtime rather than linking it, so it is absent from the
-# binary's dependencies and would be absent from the bundle for the same reason
-# — leaving an AppImage that runs everywhere and draws a tray icon nowhere.
-#
-# Found through pkg-config, which is how the same library is found at build
-# time, so the dev shell and a runner both answer without either being written
-# down here. The name is the first one the crate asks the loader for.
-indicator="$(pkg-config --variable=libdir ayatana-appindicator3-0.1)/libayatana-appindicator3.so.1"
-[ -e "$indicator" ] ||
-  die "$indicator is not there: the tray would have nothing to draw itself on."
-cp -L "$indicator" "$APPDIR/usr/lib/libayatana-appindicator3.so.1"
-bundle "$indicator"
+# And nothing by hand beside it, which is what the tray stopped needing when it
+# stopped being an appindicator: the icon and its menu are spoken onto the
+# session bus by Rust of `tray-icon`'s own, so there is no library opened by name
+# at runtime for `ldd` to be silent about. What the binary links is the whole of
+# what it uses, and the loop above has already carried it — see
+# `crates/desktop/Cargo.toml` for the swap and why.
 
 # Writable again, so that copies out of a read-only prefix — a nix store path is
 # one — can be overwritten by the next run rather than refusing it.
@@ -160,8 +154,8 @@ chmod -R u+w "$APPDIR"
 # by the app or by anything it carries is either one of the files just copied
 # in, or one of the C-runtime names deliberately left out above. Anything else
 # is a library this build is borrowing from the machine that made it, and the
-# machine that runs it is where that would otherwise be discovered — which for
-# the appindicator means a tray icon that never appears, long after a release.
+# machine that runs it is where that would otherwise be discovered — long after
+# a release, and as an app that will not start at all.
 #
 # By name rather than by what the loader picks. `LD_LIBRARY_PATH` is what points
 # it at the bundle, and it loses to a dependency named as an absolute path —

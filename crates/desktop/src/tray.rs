@@ -19,12 +19,25 @@
 //! own tick rather than that reading over again, because the two can have come
 //! apart in between — see [`launch_on_startup_shows`].
 //!
-//! **Linux draws it as an appindicator**, which is a menu and nothing else: the
-//! panel opens the menu when the icon is clicked and reports no click of its
-//! own. So the icon's default action *is* [`Chosen::Open`], by being the first
-//! item on the menu the click opens. Where a platform reports a double-click of
-//! its own — macOS and Windows — [`show`] has it run that same action, so the
-//! icon and its menu never mean two different things.
+//! **Linux publishes it rather than drawing it**, which is the one platform
+//! where nothing of Verkstead's is on the screen at all: the app speaks the
+//! StatusNotifierItem specification onto the session bus — the icon as pixels,
+//! the menu as a description — and the panel draws both in its own process,
+//! however that desktop draws such things. See `crates/desktop/Cargo.toml` for
+//! why it is that and not the appindicator it used to be.
+//!
+//! What follows for this module is where a pick arrives: on a thread of the
+//! backend's own, rather than on the loop's. [`crate::toolkit::later`] is what
+//! puts it back, so that everything below and everything [`crate::Desktop`] does
+//! with a pick is still the loop thread's work — the same call that holds a pick
+//! out of `muda`'s borrow on Windows, answering here a question that is about
+//! threads rather than about borrows.
+//!
+//! The panel opens the menu when the icon is clicked and most report no click of
+//! their own, so the icon's default action *is* [`Chosen::Open`], by being the
+//! first item on the menu the click opens. Where a platform reports a
+//! double-click of its own — macOS and Windows — [`show`] has it run that same
+//! action, so the icon and its menu never mean two different things.
 //!
 //! **Windows is the one that has to be told which button is which**, because it
 //! is the one that reports every click: the menu is the right button's, and the
@@ -128,8 +141,9 @@ thread_local! {
     /// **On the thread rather than in the handler**, because the two ends will
     /// not meet any other way: muda's menu items are not `Send` and the handler
     /// it takes must be. They are the same thread anyway — the loop's, which is
-    /// where the events are raised and where everything drawn is spoken to —
-    /// which is the whole of why keeping it here works.
+    /// where the item is made and where a pick is handled, whether or not it was
+    /// raised there. On Linux it is not, and [`crate::toolkit::later`] is what
+    /// makes the second half of that true.
     static LAUNCH_ON_STARTUP: RefCell<Option<CheckMenuItem>> = const { RefCell::new(None) };
 }
 
@@ -217,10 +231,12 @@ pub fn show(
 
         move |event: MenuEvent| {
             if let Some(picked) = Chosen::named(&event.id) {
-                // Once the toolkit has let go of the item, rather than while it
-                // is still holding it: on Windows the pick is reported from
-                // inside a borrow of the very item Launch on Startup reads and
-                // ticks — see [`toolkit::later`].
+                // On the loop's thread and with nothing of the toolkit's still
+                // held, neither of which is true where this is raised: on
+                // Windows the pick is reported from inside a borrow of the very
+                // item Launch on Startup reads and ticks, and on Linux it is
+                // reported from a thread of the tray backend's own. See
+                // [`toolkit::later`], which is the one answer to both.
                 let chosen = Arc::clone(&chosen);
                 toolkit::later(move || chosen(picked));
             }
@@ -228,10 +244,12 @@ pub fn show(
     }));
 
     // The icon's own default action, where the platform has one to report. On
-    // Linux nothing ever arrives here — an appindicator hands the click to the
-    // menu and says nothing to the app — and this is still where the binding
-    // belongs: the default action is one thing, said once, whatever the panel
-    // underneath does with it.
+    // Linux that is now a panel's choice rather than nothing at all: a panel
+    // that opens the menu on a click reports none, and one that activates the
+    // item instead reports a single click, which is not the double-click this
+    // binds and so still leaves Open as the first item on the menu. Either way
+    // this is where the binding belongs: the default action is one thing, said
+    // once, whatever the panel underneath does with it.
     TrayIconEvent::set_event_handler(Some(move |event: TrayIconEvent| {
         if let TrayIconEvent::DoubleClick { .. } = event {
             chosen(Chosen::Open);
@@ -252,8 +270,9 @@ pub fn show(
     // double-click that never arrives because a menu is what took it. So the
     // menu is the right button's, which is where a Windows human reaches for
     // one, and the left button's two clicks are the default action this file
-    // already binds. Nothing changes on the other two: an appindicator has only
-    // a menu, and a Mac's status item is the same click either way.
+    // already binds. Nothing changes on the other two: a Linux panel decides
+    // for itself what a click does with the menu it was given, and a Mac's
+    // status item is the same click either way.
     #[cfg(windows)]
     let raising = raising.with_menu_on_left_click(false);
 
