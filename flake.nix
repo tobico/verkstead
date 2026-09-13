@@ -153,27 +153,18 @@
               pkg-config
             ]);
 
-          # The desktop app's toolkit, and the tray protocol drawn over it
-          # (ADR-0012). Build inputs rather than packages so that pkg-config is
-          # pointed at their development files: the tray and the app's dialogs
-          # compile against GTK3 headers, and a shell without them cannot build
-          # `crates/desktop` at all. The same two are what the AppImage carries.
+          # The desktop app's toolkit (ADR-0012). A build input rather than a
+          # package so that pkg-config is pointed at its development files: the
+          # app's dialogs compile against GTK3 headers, and a shell without them
+          # cannot build `crates/desktop` at all. It is what the AppImage
+          # carries, and it is now the only such library — the tray used to be
+          # drawn over an appindicator beside it, and is spoken onto the session
+          # bus in Rust instead. See `crates/desktop/Cargo.toml` for the swap,
+          # and note that nothing is needed at *run* time either: there is no
+          # longer a library opened by name with no rpath to find it by.
           buildInputs = with pkgs; [
             gtk3
-            libayatana-appindicator
           ];
-
-          # Where the appindicator is found at *run* time, which is a separate
-          # question from the one `buildInputs` answers: `libappindicator-sys`
-          # opens the library with `dlopen` under its bare name rather than
-          # linking it, so there is no dependency recorded for the loader to
-          # follow and no rpath written into the binary to follow it by. On a
-          # distribution the name is found in `/usr/lib` and nothing has to be
-          # said; here it is a store path, and this is what says it — without it
-          # `cargo run -- desktop` panics inside that crate before a tray icon
-          # is ever drawn. The AppImage answers the same question
-          # the same way over its own bundle — see tools/build-appimage.sh.
-          env.LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [ pkgs.libayatana-appindicator ];
 
           env.RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
         };

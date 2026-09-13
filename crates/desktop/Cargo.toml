@@ -65,23 +65,38 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # The icon in the tray and the menu on it (ADR-0012), and `muda` under it.
 # Default features off because both of them are Linux's — see the Linux table
 # below, which is where the backend is turned on.
-tray-icon = { version = "0.24", default-features = false }
+tray-icon = { version = "0.25", default-features = false }
 
-# The Linux half of the toolkit: GTK, which is what draws the icon, the menu on
-# it and the two dialogs — see `toolkit` and `dialog`.
+# The Linux half of the toolkit: GTK, which is what draws the two dialogs and
+# holds the loop they are drawn on — see `toolkit` and `dialog`. The tray is no
+# longer one of GTK's, which is what the `ksni` feature below says.
 [target.'cfg(target_os = "linux")'.dependencies]
 # The loop the tray lives on here, which wants the main thread — see
-# `Desktop::run`. The same 0.18 `muda` draws its menu with, so the build carries
-# one GTK crate rather than two, and the same one the two dialogs are drawn with
-# — see `dialog`, which has to draw on the loop's own thread and so cannot hand
-# the job to a toolkit somebody else started.
+# `Desktop::run` — and the toolkit the two dialogs are drawn with — see
+# `dialog`, which has to draw on the loop's own thread and so cannot hand the job
+# to a toolkit somebody else started. It is no longer what the menu is made of:
+# `muda` builds one out of plain data here and `tray-icon` publishes it, so the
+# GTK in this build is the dialogs' alone.
 gtk = "0.18"
-# The `gtk` feature is the Linux backend — an appindicator, drawn with the
-# toolkit `dialog` is already drawing with. The other default feature, `libxdo`,
-# stays off: `muda` wants it only for the accelerators on its predefined items,
-# this menu has neither, and carrying it would put a system library into CI, the
-# dev shell and the AppImage for nothing.
-tray-icon = { version = "0.24", default-features = false, features = ["gtk"] }
+# **The `ksni` feature rather than `gtk`**, which is this crate's other Linux
+# backend and a different thing underneath: Verkstead speaks the
+# StatusNotifierItem specification itself, in Rust, rather than through
+# libayatana-appindicator and the libdbusmenu-gtk beneath it. That stack is why
+# this was changed — it parses a GTK menu into a bus menu and, on a COSMIC
+# desktop, never turns the click that comes back into an activation, so every
+# item drew and none of them did anything. Nothing in Verkstead or in `muda` was
+# at fault: a bare GTK menu handed straight to libayatana-appindicator fails the
+# same way, and `muda` fires correctly when the widget is activated directly.
+#
+# Two things follow from the swap, and both are said where they matter in
+# `tray`: the icon goes over the bus as pixels rather than as a path to a file
+# the panel has to find for itself, and a pick arrives on a thread of the
+# backend's own rather than on the loop's.
+#
+# `muda-libxdo` stays off, as `libxdo` did: `muda` wants it only for the
+# accelerators on its predefined items, this menu has neither, and carrying it
+# would put a system library into CI, the dev shell and the AppImage for nothing.
+tray-icon = { version = "0.25", default-features = false, features = ["ksni"] }
 
 # And the macOS half: AppKit, reached through the `objc2` bindings `tray-icon`
 # already builds on this platform, so the two halves of the app speak to one set

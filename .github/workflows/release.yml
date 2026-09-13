@@ -368,9 +368,10 @@ jobs:
       # legs. No `sudo` anywhere in this job: a container step is already root,
       # and the image has no such command.
       #
-      # Then three groups of the leg's own. `libgtk-3-dev` and the appindicator
-      # are what `crates/desktop` links and what `ci.yml` installs to build the
-      # workspace at all — the toolkit, and the tray protocol over it.
+      # Then three groups of the leg's own. `libgtk-3-dev` is what
+      # `crates/desktop` links and what `ci.yml` installs to build the workspace
+      # at all — the toolkit the dialogs are drawn with. The tray is no longer
+      # one of its, and no longer a package here.
       # `squashfs-tools` and `fuse3` are the bundling's: `mksquashfs` makes the
       # filesystem an AppImage is, and `fusermount3` is what the runtime mounts
       # it back with, which is what lets the assertions run the artifact itself
@@ -386,7 +387,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y ca-certificates curl git build-essential \
-            pkg-config libgtk-3-dev libayatana-appindicator3-dev \
+            pkg-config libgtk-3-dev \
             squashfs-tools fuse3 xvfb dbus-x11
 
       - uses: actions/checkout@v7.0.1
@@ -498,12 +499,11 @@ jobs:
       # without one reads that as a session with nowhere to put an icon, serves
       # anyway, and never starts the toolkit — see `crates/desktop/src/screen.rs`.
       # Which would leave every library the bundle carries for the tray's sake
-      # unopened by this leg, the appindicator included: that one is loaded by
-      # name at runtime, so it is absent from `ldd` and is copied in by hand by
-      # `tools/build-appimage.sh`, and nothing but a run with a screen would ever
-      # find out whether the copy was the right file. So Xvfb is started and
+      # unopened by this leg, and nothing but a run with a screen would ever find
+      # out whether what was copied in was the right file. So Xvfb is started and
       # `$DISPLAY` points at it, and the app is run under a session bus of its
-      # own, which is where an appindicator registers itself.
+      # own, which is where the tray item registers itself — the bus half being
+      # the whole of the tray now rather than a library drawn over the toolkit.
       #
       # `--no-open` stays: a screen is not a browser, and there is still nothing
       # here to hand a URL to.
