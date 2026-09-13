@@ -349,10 +349,10 @@ mod platform {
     /// WM_QUIT into this thread's own queue, which is what `PostQuitMessage`
     /// is.
     ///
-    /// Called from a menu item's handler, which runs inside the dispatch
-    /// [`run`] is in — so the message is read at the top of the loop after the
-    /// handler has returned, and a menu that is still on the screen closes on
-    /// its own way out.
+    /// Called from a menu item's handling, which [`run`] runs once the dispatch
+    /// the pick arrived in has returned — see [`later`] — so the message is read
+    /// at the top of the loop after that handling, and whatever else it was
+    /// handed, has finished.
     pub(super) fn stop() {
         if LOOP.load(Ordering::SeqCst) != us() {
             // Not this thread's to end, so it is asked for rather than done —
