@@ -183,7 +183,9 @@ export function listBranches(repoId: number): Promise<string[]> {
 
 /// What one registered Repo was last grilled with, judged as something to fill
 /// a picker with: the three roles a Conversation started on it would arrive
-/// showing.
+/// showing. A Repo nothing has grilled answers too, with what the server
+/// prefills in place of a memory — the last start anywhere, then the platform
+/// default.
 ///
 /// For the page that asks those three questions before there is a Conversation
 /// to read the answers off. Read again whenever the repo changes, because the

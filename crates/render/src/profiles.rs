@@ -295,8 +295,12 @@ impl PickedView {
 ///
 /// Each of them is judged before it is handed over, exactly as creation judges
 /// it: a remembered Pairing whose Profile has broken, or whose Profile no
-/// longer lists the model it was remembered with, comes back as nothing picked
-/// — the same nothing a Repo with no memory at all comes back as.
+/// longer lists the model it was remembered with, comes back as nothing picked.
+///
+/// A Repo with no memory at all is not handed back empty: it is prefilled, role
+/// by role, off the last Conversation to start work anywhere and the platform
+/// default under that, each candidate judged the same way — so nothing picked
+/// is what a role gets only where neither of those survives.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct RepoPairingsView {
