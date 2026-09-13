@@ -1723,3 +1723,328 @@ async fn the_pairings_of_a_repo_that_is_not_there_are_refused() {
         assert_eq!(status, StatusCode::NOT_FOUND);
     }
 }
+
+/// Another repository registered beside whatever is there, by name, handed back
+/// as the Repo's id — a Repo nothing has been grilled on.
+async fn fresh_repo(app: &Router, root: &Path, name: &str) -> i64 {
+    let repo = repository(root.join(name));
+
+    let registered: Registered =
+        post(app, "/api/ui/repos", &serde_json::json!({ "path": repo })).await;
+    assert!(matches!(registered, Registered::Added(_)));
+
+    let repos: Vec<verkstead_render::RepoEntry> = get(app, "/api/ui/repos").await;
+    repos
+        .into_iter()
+        .find(|entry| entry.name == name)
+        .expect("the Repo just registered should be on the list")
+        .id
+}
+
+/// And a Conversation started on a Repo by id, the way the human starts one.
+async fn started_on(app: &Router, repo_id: i64) -> i64 {
+    let started: Started = post(
+        app,
+        "/api/ui/conversations",
+        &serde_json::json!({ "repo_id": repo_id }),
+    )
+    .await;
+
+    let Started::Started { id } = started else {
+        panic!("expected the Conversation to start, got {started:?}");
+    };
+
+    id
+}
+
+/// Which Profile and model a picker ended up on, for comparing a whole prefill
+/// at a glance.
+fn on(pairing: Option<&verkstead_render::PairingView>) -> Option<(i64, &str)> {
+    pairing.map(|pairing| (pairing.profile.id, pairing.model.as_deref().unwrap()))
+}
+
+/// A Repo nothing has grilled arrives filled with what the last work anywhere
+/// started under — offered on the compose page and applied to a Conversation
+/// created on it alike.
+#[tokio::test]
+async fn a_repo_never_grilled_is_offered_what_the_last_start_anywhere_ran_under() {
+    let (accounts, dir, app) = workbench().await;
+    let id = conversation(&app, accounts.path()).await;
+    let fable = saved(&app, accounts.path(), "fable").await;
+    let opus = saved(&app, accounts.path(), "opus").await;
+    let haiku = saved(&app, accounts.path(), "haiku").await;
+
+    choose_grilling(&app, id, opus.id, MODEL).await;
+    choose_implementation(&app, id, haiku.id, MODELS[0]).await;
+    choose_review(&app, id, fable.id, MODEL).await;
+    grill(dir.path(), id).await;
+
+    let askance = fresh_repo(&app, accounts.path(), "askance").await;
+    let offered = prefill(&app, askance).await;
+
+    assert_eq!(on(offered.grilling.pairing()), Some((opus.id, MODEL)));
+    assert_eq!(
+        on(offered.implementation.as_ref()),
+        Some((haiku.id, MODELS[0]))
+    );
+    assert_eq!(on(offered.review.pairing()), Some((fable.id, MODEL)));
+
+    let view = opened(&app, started_on(&app, askance).await).await;
+    assert_eq!(view.grilling_pairing, offered.grilling);
+    assert_eq!(view.implementation_pairing, offered.implementation);
+    assert_eq!(view.review_pairing, offered.review);
+}
+
+/// A draft is not a start, however recently its pickers were filled: the copy
+/// is of the last Conversation whose work began.
+#[tokio::test]
+async fn a_draft_filled_since_the_last_start_is_not_what_a_fresh_repo_copies() {
+    let (accounts, dir, app) = workbench().await;
+    let id = conversation(&app, accounts.path()).await;
+    let fable = saved(&app, accounts.path(), "fable").await;
+    let opus = saved(&app, accounts.path(), "opus").await;
+
+    choose_grilling(&app, id, opus.id, MODEL).await;
+    choose_implementation(&app, id, opus.id, MODEL).await;
+    choose_review(&app, id, opus.id, MODEL).await;
+    grill(dir.path(), id).await;
+
+    let draft = another(&app).await;
+    choose_grilling(&app, draft, fable.id, MODELS[0]).await;
+    choose_implementation(&app, draft, fable.id, MODELS[0]).await;
+    choose_review(&app, draft, fable.id, MODELS[0]).await;
+
+    let offered = prefill(&app, fresh_repo(&app, accounts.path(), "askance").await).await;
+    assert_eq!(on(offered.grilling.pairing()), Some((opus.id, MODEL)));
+    assert_eq!(on(offered.implementation.as_ref()), Some((opus.id, MODEL)));
+    assert_eq!(on(offered.review.pairing()), Some((opus.id, MODEL)));
+}
+
+/// A role the last start picked away is not picked away on a fresh Repo: it
+/// takes the platform default, as a role that start left empty does.
+#[tokio::test]
+async fn a_skip_on_the_last_start_is_not_carried_to_a_fresh_repo() {
+    let (accounts, dir, app) = workbench().await;
+    let id = conversation(&app, accounts.path()).await;
+    let fable = saved(&app, accounts.path(), "fable").await;
+    let opus = saved(&app, accounts.path(), "opus").await;
+
+    assert_eq!(no_grilling(&app, id).await, ProfileChosen::Chosen);
+    choose_implementation(&app, id, opus.id, MODEL).await;
+    assert_eq!(no_review(&app, id).await, ProfileChosen::Chosen);
+    build(dir.path(), id).await;
+
+    let offered = prefill(&app, fresh_repo(&app, accounts.path(), "askance").await).await;
+
+    // The default is the earliest Claude Profile, on the table's model per role —
+    // both of which that Profile lists.
+    assert_eq!(
+        on(offered.grilling.pairing()),
+        Some((fable.id, "claude-fable-5"))
+    );
+    assert_eq!(on(offered.implementation.as_ref()), Some((opus.id, MODEL)));
+    assert_eq!(
+        on(offered.review.pairing()),
+        Some((fable.id, "claude-opus-5"))
+    );
+}
+
+/// A Repo remembering anything at all — even one role, the others never picked
+/// when it was grilled — was grilled, and gets its memory and nothing else.
+#[tokio::test]
+async fn a_repo_with_partial_memory_is_not_filled_from_anywhere_else() {
+    let (accounts, dir, app) = workbench().await;
+    let id = conversation(&app, accounts.path()).await;
+    let fable = saved(&app, accounts.path(), "fable").await;
+
+    choose_grilling(&app, id, fable.id, MODEL).await;
+    grill(dir.path(), id).await;
+
+    let offered = prefill(&app, only_repo(&app).await).await;
+    assert_eq!(on(offered.grilling.pairing()), Some((fable.id, MODEL)));
+    assert_eq!(offered.implementation, None);
+    assert_eq!(offered.review, PickedView::Nothing);
+
+    let view = opened(&app, another(&app).await).await;
+    assert_eq!(view.implementation_pairing, None);
+    assert_eq!(view.review_pairing, PickedView::Nothing);
+}
+
+/// With nothing started anywhere, the platform default: Claude Code before any
+/// other harness whatever was saved first, and its unnamed Profile before a
+/// named one saved earlier.
+#[tokio::test]
+async fn the_platform_default_prefers_claude_code_and_its_unnamed_profile() {
+    let (accounts, _dir, app) = workbench().await;
+    let repo = fresh_repo(&app, accounts.path(), "verkstead").await;
+
+    let codex = home(accounts.path(), "codex");
+    assert_eq!(
+        save(&app, &codex_edit("codex", &codex, &["gpt-5-codex"])).await,
+        ProfileSaved::Saved
+    );
+    saved(&app, accounts.path(), "work").await;
+
+    let (claude_dir, config_file) = pair(accounts.path(), "default");
+    assert_eq!(
+        save(
+            &app,
+            &serde_json::json!({
+                "name": null,
+                "account": {
+                    "agent_type": "Claude",
+                    "claude_dir": claude_dir,
+                    "config_file": config_file,
+                },
+                "models": MODELS,
+            }),
+        )
+        .await,
+        ProfileSaved::Saved
+    );
+    let unnamed = listed(&app)
+        .await
+        .into_iter()
+        .find(|profile| profile.name.is_none())
+        .unwrap();
+
+    let offered = prefill(&app, repo).await;
+    assert_eq!(
+        on(offered.grilling.pairing()),
+        Some((unnamed.id, "claude-fable-5"))
+    );
+    assert_eq!(
+        on(offered.implementation.as_ref()),
+        Some((unnamed.id, "claude-opus-5"))
+    );
+    assert_eq!(
+        on(offered.review.pairing()),
+        Some((unnamed.id, "claude-opus-5"))
+    );
+}
+
+/// With no unnamed Profile on the harness, the earliest saved — by when it was
+/// saved rather than by its name.
+#[tokio::test]
+async fn the_platform_default_takes_the_earliest_named_profile() {
+    let (accounts, _dir, app) = workbench().await;
+    let repo = fresh_repo(&app, accounts.path(), "verkstead").await;
+    let zeta = saved(&app, accounts.path(), "zeta").await;
+    saved(&app, accounts.path(), "alpha").await;
+
+    let offered = prefill(&app, repo).await;
+    assert_eq!(
+        on(offered.grilling.pairing()),
+        Some((zeta.id, "claude-fable-5"))
+    );
+    assert_eq!(
+        on(offered.implementation.as_ref()),
+        Some((zeta.id, "claude-opus-5"))
+    );
+}
+
+/// Every harness has its own row in the table, and a Profile that does not list
+/// the row's model is run on the first model it does list.
+#[tokio::test]
+async fn the_platform_default_falls_to_the_first_listed_model_where_its_own_is_not_listed() {
+    let (accounts, _dir, app) = workbench().await;
+    let repo = fresh_repo(&app, accounts.path(), "verkstead").await;
+
+    let codex = home(accounts.path(), "codex");
+    assert_eq!(
+        save(
+            &app,
+            &codex_edit("codex", &codex, &["o4-mini", "gpt-5-codex"])
+        )
+        .await,
+        ProfileSaved::Saved
+    );
+
+    let offered = prefill(&app, repo).await;
+    assert_eq!(
+        offered
+            .implementation
+            .as_ref()
+            .and_then(|pairing| pairing.model.as_deref()),
+        Some("gpt-5-codex"),
+        "Codex's own model, which this Profile lists second",
+    );
+
+    let (claude_dir, config_file) = pair(accounts.path(), "work");
+    assert_eq!(
+        save(
+            &app,
+            &edit(
+                "work",
+                &claude_dir,
+                &config_file,
+                &["claude-sonnet-5", "claude-opus-5"]
+            ),
+        )
+        .await,
+        ProfileSaved::Saved
+    );
+
+    let offered = prefill(&app, repo).await;
+    assert_eq!(
+        offered
+            .grilling
+            .pairing()
+            .and_then(|pairing| pairing.model.as_deref()),
+        Some("claude-sonnet-5"),
+        "Fable 5 is not on the list, so the first model that is",
+    );
+    assert_eq!(
+        offered
+            .implementation
+            .as_ref()
+            .and_then(|pairing| pairing.model.as_deref()),
+        Some("claude-opus-5"),
+    );
+}
+
+/// Each candidate is judged, and one that fails falls through a step for that
+/// role alone: a last start's broken Profile to the platform default, and a
+/// broken default to the empty picker — never on to another Profile that would
+/// have passed.
+#[tokio::test]
+async fn an_unusable_candidate_falls_through_to_the_default_and_then_to_nothing() {
+    let (accounts, dir, app) = workbench().await;
+    let id = conversation(&app, accounts.path()).await;
+    let fable = saved(&app, accounts.path(), "fable").await;
+    let opus = saved(&app, accounts.path(), "opus").await;
+
+    let codex = home(accounts.path(), "codex");
+    assert_eq!(
+        save(&app, &codex_edit("codex", &codex, &["gpt-5-codex"])).await,
+        ProfileSaved::Saved
+    );
+
+    choose_grilling(&app, id, opus.id, MODEL).await;
+    choose_implementation(&app, id, fable.id, MODEL).await;
+    choose_review(&app, id, fable.id, MODEL).await;
+    grill(dir.path(), id).await;
+
+    let askance = fresh_repo(&app, accounts.path(), "askance").await;
+
+    std::fs::remove_file(accounts.path().join("opus/.claude.json")).unwrap();
+
+    let offered = prefill(&app, askance).await;
+    assert_eq!(
+        on(offered.grilling.pairing()),
+        Some((fable.id, "claude-fable-5")),
+        "the broken copy falls to the default",
+    );
+    assert_eq!(on(offered.implementation.as_ref()), Some((fable.id, MODEL)));
+
+    std::fs::remove_file(accounts.path().join("fable/.claude.json")).unwrap();
+
+    let offered = prefill(&app, askance).await;
+    assert_eq!(
+        offered.grilling,
+        PickedView::Nothing,
+        "the default is broken too, and the Codex Profile is not hunted for",
+    );
+    assert_eq!(offered.implementation, None);
+    assert_eq!(offered.review, PickedView::Nothing);
+}
