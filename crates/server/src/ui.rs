@@ -95,7 +95,8 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // the Conversation: the branches are the repository's, and two
         // Conversations against one Repo are looking at the same list.
         .route("/api/ui/repos/{id}/branches", get(branches))
-        // And what that Repo was last grilled with, which is what a page asking
+        // And what that Repo was last grilled with — or, for one nothing has
+        // grilled, what stands in for a memory — which is what a page asking
         // the three role questions fills its own pickers from before there is a
         // Conversation for the server to have prefilled. Under the Repo for the
         // branches' reason: the memory is the Repo's, and every page composing
@@ -772,7 +773,8 @@ async fn branches(State(state): State<AppState>, Path(id): Path<String>) -> Http
 }
 
 /// `GET /api/ui/repos/{id}/pairings` — what one registered Repo was last
-/// grilled with, judged as something to fill a picker with.
+/// grilled with, judged as something to fill a picker with, or what a Repo
+/// nothing has grilled is prefilled with in place of a memory.
 ///
 /// What a Conversation started on this Repo would arrive showing, answered
 /// before one is started: the compose page has three role questions to ask and
@@ -797,9 +799,9 @@ async fn pairings(State(state): State<AppState>, Path(id): Path<String>) -> Http
                 tracing::error!(
                     error = ?error,
                     repo_id = id,
-                    "reading what a Repo was last grilled with failed",
+                    "reading what a Repo's pickers would be prefilled with failed",
                 );
-                unavailable("the repo's remembered pairings could not be read")
+                unavailable("the repo's pairings could not be read")
             }
         },
         Err(error) => {
