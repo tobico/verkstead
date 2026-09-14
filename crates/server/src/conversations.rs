@@ -17,6 +17,18 @@
 //! checked out and its wrap-up started, the work on it being built already —
 //! see [`take_up`]. Closing is where all three are given back: the session
 //! ends, and then the worktree goes.
+//!
+//! **The two that cut a branch for new work clear the task list it inherited**
+//! before anything runs in it — [`start_grilling`] and [`adopt`], each through
+//! [`clearing`]. A `.tasks/` at the tip is what says a branch has planned, read
+//! off the tree rather than off the branch's history, so a branch cut from a
+//! base that was still carrying one arrives looking like a branch whose planning
+//! is already done: the session about to start in it would be ended before it
+//! had asked anything. The removal is a commit of its own on the fresh branch,
+//! by the configured git author — and both presses are refused by name where
+//! there is no author to make it as, whether or not the base turns out to carry
+//! a list. [`take_up`] does neither: what is in that checkout is work somebody
+//! has already done, rather than anything it inherited.
 
 use std::path::{Path, PathBuf};
 

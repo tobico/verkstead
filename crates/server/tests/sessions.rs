@@ -15938,6 +15938,35 @@ async fn said_by(fixture: &Grilling) -> String {
         .await
 }
 
+/// What a Conversation has said, once it has said the line the caller is waiting
+/// for.
+///
+/// [`said_by`] at a Conversation of the test's choosing, and waiting on one line
+/// rather than on the first: a stage says two things about itself one after the
+/// other, so a test that read the Timeline the moment it said anything would be
+/// reading it half written.
+async fn said_on(fixture: &Grilling, id: i64, awaiting: &str) -> String {
+    let deadline = Instant::now() + *PATIENCE;
+
+    loop {
+        let view: ConversationView =
+            get(&fixture.app, &format!("/api/ui/conversations/{id}")).await;
+
+        let said = notices(&view).join("\n");
+
+        if said.contains(awaiting) {
+            return said;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "nothing on that Timeline ever said {awaiting:?}. It says: {said:?}",
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
+}
+
 /// What Verkstead has said on a Timeline on its own account.
 /// The same, without the line a take-up writes about itself.
 ///
@@ -16532,6 +16561,220 @@ async fn a_stage_whose_fetch_fails_halts_with_a_notice_and_starts_nothing() {
     assert!(
         !planning.exists(),
         "so no session was launched inside the next-stage fork either",
+    );
+}
+
+/// What a review session does on its way out here: land the branch it has just
+/// read, and leave a task list on the default branch behind it.
+///
+/// [`MERGES_THE_PREDECESSOR`] with a second act, and the second act is what a
+/// stage is about to be cut from — a branch whose tip carries `.tasks/TODO.md`
+/// is a branch that has planned, whoever wrote the list, and that is the reading
+/// the watcher which ends a planning session makes.
+///
+/// Written into the repository's own checkout rather than into this worktree:
+/// a list *here* is what a review answered by splitting its findings out looks
+/// like, which is a different thing entirely and would send this Conversation
+/// back down the ladder rather than on to its settle.
+const LANDS_AND_LEAVES_A_LIST: &str = r#"    repo="$(dirname "$(git rev-parse --git-common-dir)")"
+    git -C "$repo" merge --quiet --ff-only "$(git rev-parse --abbrev-ref HEAD)"
+    mkdir -p "$repo/.tasks"
+    printf '# Leftover work\n\n## Tasks\n\n- [x] 01: the first task — [details](01-first.md)\n- [ ] 02: the second — [details](02-second.md)\n' > "$repo/.tasks/TODO.md"
+    printf '# 01. the first task\n' > "$repo/.tasks/01-first.md"
+    git -C "$repo" add -A
+    git -C "$repo" commit --quiet -m 'chore: somebody plans some other work'"#;
+
+/// A stage cut from a branch whose tip still carries a task list starts on a
+/// branch that no longer does, and the removal is a commit of its own by the
+/// configured git author.
+///
+/// The same step a start a human presses takes, at the door nobody is standing
+/// at — which is the door it matters at. A stage that arrived holding somebody
+/// else's plan would have its planning session ended the moment it began, and
+/// with nobody watching what is left is a stage sitting at *blocked on you*
+/// having asked nothing.
+///
+/// The list is on the default branch here, which is where an unstacked stage
+/// comes off: the review lands the predecessor, so there is nothing left to
+/// stand on — see [`LANDS_AND_LEAVES_A_LIST`].
+#[tokio::test]
+async fn a_stage_clears_the_task_list_the_branch_it_stands_on_carried() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, "", LANDS_AND_LEAVES_A_LIST),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    staged_and_settled(&fixture).await;
+
+    let stage = stage_of(&fixture).await;
+    let worktree = PathBuf::from(stage.worktree.clone().expect("a stage has a Worktree").path);
+
+    // Found in the log rather than read off the tip: the planning session is
+    // already running in here and writing a backlog of the stage's own, which is
+    // the thing the clearing was for.
+    let subject = "chore: clear the task list inherited from main";
+    let cleared = git(
+        &worktree,
+        &[
+            "log",
+            "-1",
+            "--format=%H",
+            &format!("--grep={subject}"),
+            "-F",
+        ],
+    )
+    .trim()
+    .to_owned();
+
+    assert!(
+        !cleared.is_empty(),
+        "the inherited list was never cleared: {:?}",
+        git(&worktree, &["log", "--oneline"]),
+    );
+    assert_eq!(
+        git(&worktree, &["log", "-1", "--format=%an%n%ae", &cleared])
+            .lines()
+            .collect::<Vec<_>>(),
+        ["Verkstead Test", "test@verkstead.invalid"],
+        "by the configured git author, said on the command line",
+    );
+    assert!(
+        !git(&worktree, &["ls-tree", "--name-only", &cleared])
+            .lines()
+            .any(|name| name == ".tasks"),
+        "and the tree it leaves behind has no backlog in it",
+    );
+    assert_eq!(
+        git(&worktree, &["rev-parse", &format!("{cleared}^")]).trim(),
+        git(&fixture.repo(), &["rev-parse", "main"]).trim(),
+        "as the first commit of the stage, straight off the branch it stands on",
+    );
+
+    // Which the stage is standing on rather than having rewritten: the list is
+    // still there, on somebody else's work.
+    assert!(
+        git(&fixture.repo(), &["ls-tree", "--name-only", "main"])
+            .lines()
+            .any(|name| name == ".tasks"),
+        "the branch it stands on keeps its own list: the clearing is the stage's",
+    );
+
+    // And the stage says what went, before it says anything about itself — a
+    // branch that quietly lost a file it was cut with is the one thing this must
+    // never look like.
+    let said = said_on(&fixture, stage.id, "carried a task list").await;
+
+    assert!(
+        said.contains("<code>main</code>") && said.contains("<strong>Leftover work</strong>"),
+        "which branch carried which list: {said:?}",
+    );
+    assert!(
+        said.contains("1 of 2 entries still open"),
+        "and how far through it was: {said:?}",
+    );
+
+    // The planning the clearing was for happens anyway, which is what says the
+    // stage was not read as one that had already planned.
+    let prompt = until_written(&planning).await;
+
+    assert!(
+        prompt.contains("/verkstead/skills/next-stage/SKILL.md"),
+        "the stage still plans: {prompt:?}",
+    );
+}
+
+/// With no git author configured there is nobody to commit that clearing as, so
+/// the stage is halted before anything is made — and the settled Conversation is
+/// told, on its Timeline and on the human's phone.
+///
+/// Refused whether or not the branch it would stand on carries a list — this one
+/// does not — because onboarding collects an author: a start without one is a
+/// misconfiguration to name rather than a case to work around. The phone is told
+/// because this is the moment an unattended roadmap stops moving, and a notice
+/// on a Timeline nobody has open reaches nobody.
+#[tokio::test]
+async fn a_settle_with_no_git_author_starts_no_stage_and_says_so() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING, ""),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    // The settings file with the author taken out of it, which is the human who
+    // never filled it in — or emptied it while the roadmap was being worked.
+    // The repository these fixtures make carries a git identity of its own, so
+    // the sessions still commit; what has gone is the one Verkstead would commit
+    // as.
+    std::fs::write(fixture.state.path().join("config.yaml"), "").unwrap();
+
+    staged(&fixture).await;
+
+    let (service, taken) = push_service().await;
+    let phone = Device::new(&service, "phone");
+    fixture.subscribe(&phone).await;
+
+    let roadmap = fixture.view().await;
+
+    let said = said_on(&fixture, fixture.id, "no git author is configured").await;
+
+    assert!(
+        said.contains("Stage 01") && said.contains("<code>rate-limiting</code>"),
+        "the notice names the stage that would have started: {said:?}",
+    );
+    assert!(
+        said.contains("Nothing was started") && said.contains("Set one in Settings"),
+        "and what the human does about it: {said:?}",
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        1,
+        "no stage was started",
+    );
+    assert!(
+        !git(
+            &fixture.repo(),
+            &["branch", "--list", "rate-limiting/01-counter"]
+        )
+        .contains("01-counter"),
+        "and no branch was cut for it",
+    );
+    assert_eq!(
+        git(&fixture.repo(), &["worktree", "list"]).lines().count(),
+        2,
+        "nor a worktree: the repository itself and the roadmap's own, and no more",
+    );
+    assert!(
+        !planning.exists(),
+        "so no session was launched inside the next-stage fork either",
+    );
+
+    // Three: the pull request the staging session opened, the roadmap
+    // Conversation reaching Done, and the stage that could not follow it.
+    let titles: Vec<String> = pushes(&taken, 3)
+        .await
+        .iter()
+        .map(|push| phone.read(push)["title"].as_str().unwrap().to_owned())
+        .collect();
+
+    assert!(
+        titles.contains(&"Stage 01 of the `rate-limiting` roadmap needs a git author".to_owned()),
+        "the phone is told what the roadmap has stopped for: {titles:?}",
+    );
+    assert!(
+        titles.contains(&format!("{} is done", roadmap.branch)),
+        "beside the Conversation that settled saying so: {titles:?}",
     );
 }
 

@@ -147,6 +147,17 @@ it and outright where git does not. Which is what reclaims the ones a close was
 refused over, and the ones a crash left behind. A Conversation that is Done
 keeps its checkouts like any other — Done is not Closed, and a Follow-up steer
 works in them.
+**A task list the checkout inherited is cleared at the cut.** Every cut for new
+work — a grilled start, an ungrilled build, Continue a roadmap, and a stage
+started by the one before it settling — removes a `.tasks/` that came with the
+base and commits the removal on the fresh branch, as the configured git author,
+before any session runs. What says a branch has planned is its tree rather than
+its history, so an inherited list reads as this branch's own plan and would end
+the planning session before it had asked anything. Every cut for new work
+therefore needs an author configured, and is refused by name — or halted with a
+notice, where nobody pressed anything — without one. A cut for work that already
+exists clears nothing: a steer's re-checkout and a taken-up pull request hold
+work somebody has already done.
 Named for the Repo and what the checkout holds — the branch, or the base a
 detached one stands at — and it lives in the Data Directory rather than beside
 the Repo it was made from: Verkstead made it, so it goes among Verkstead's own
