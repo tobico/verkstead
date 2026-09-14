@@ -3204,6 +3204,15 @@ pub enum GrillingStarted {
     /// Freezing an empty one would freeze nothing worth having.
     EmptyBrief,
 
+    /// No git author is configured, so there is nobody for Verkstead to commit
+    /// on the branch as — and the first thing it commits there is the clearing
+    /// of whatever task list the base was carrying.
+    ///
+    /// Refused whether or not the base carries one: onboarding collects an
+    /// author, so a start without one is a misconfiguration to name rather than
+    /// a case to work around.
+    NoGitAuthor,
+
     /// Git would not fetch from the Repo's remote, so what the work would come
     /// off cannot be trusted to be what the remote is holding. Refused rather
     /// than branched from refs that may be stale: being offline, or having lost
@@ -3892,6 +3901,12 @@ pub enum Adopted {
     /// A chosen Profile's pair is not where it was left, so there is no account
     /// to run the session under.
     ProfileBroken,
+
+    /// No git author is configured, so there is nobody for Verkstead to commit
+    /// the clearing of an inherited task list as — see
+    /// [`GrillingStarted::NoGitAuthor`], the same refusal at the other door and
+    /// for the same reason.
+    NoGitAuthor,
 
     /// Git would not fetch from the Repo's remote, so the roadmap at the base
     /// commit cannot be trusted to be the roadmap origin is holding. Refused
