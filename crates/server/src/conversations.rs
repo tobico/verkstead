@@ -27,8 +27,13 @@
 //! had asked anything. The removal is a commit of its own on the fresh branch,
 //! by the configured git author — and both presses are refused by name where
 //! there is no author to make it as, whether or not the base turns out to carry
-//! a list. [`take_up`] does neither: what is in that checkout is work somebody
-//! has already done, rather than anything it inherited.
+//! a list.
+//!
+//! **Where a press cuts nothing it clears nothing and refuses nothing**, which
+//! is the other half of the same rule: [`take_up`], and a [`start_grilling`]
+//! whose Conversation already has a Worktree. What is in those trees is work
+//! somebody has already done rather than anything they inherited, and there is
+//! no commit to want an author for.
 
 use std::path::{Path, PathBuf};
 
@@ -1238,18 +1243,16 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         return Ok(GrillingStarted::EmptyBrief);
     }
 
-    // And whoever the commit Verkstead makes on the fresh branch is by: the
+    // And whoever the commit Verkstead makes on a fresh branch is by: the
     // clearing of whatever task list the base was carrying — see
-    // [`crate::tasks::clear`]. Asked here, after the record and the Profiles and
-    // the Brief and before anything that costs a git call, which is where every
-    // other cheap refusal is asked; and asked whether or not there turns out to
-    // be a list, because a workbench with no author configured is a
-    // misconfiguration to name rather than a case to work around.
-    let config = state.settings.config();
-
-    let Some(author) = Author::configured(config.git_author()) else {
-        return Ok(GrillingStarted::NoGitAuthor);
-    };
+    // [`crate::tasks::clear`]. Read here, with the other answers that cost
+    // nothing, and *refused* below rather than here: only a press that cuts a
+    // branch commits anything, and a Conversation that already has a Worktree is
+    // one working where it has always worked. Whether there turns out to be a
+    // list makes no difference to the refusal, because a workbench with no
+    // author configured is a misconfiguration to name rather than a case to work
+    // around.
+    let author = Author::configured(state.settings.config().git_author());
 
     // What the work branches from, resolved here and nowhere earlier: what the
     // human picked is a branch, and what they meant by picking it is wherever it
@@ -1308,6 +1311,15 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
                     })
                     .ok_or(GrillingStarted::NoBaseCommit);
             }
+
+            // From here a branch is cut, and the first thing committed on it is
+            // the clearing of whatever list the base was carrying — so from here
+            // an author is wanted. Before the fetch, which is the first thing
+            // that costs anything, and before the name is chosen: nothing has
+            // been made yet, so the refusal leaves nothing behind.
+            let Some(author) = author else {
+                return Err(GrillingStarted::NoGitAuthor);
+            };
 
             // Before anything resolves, because a remote-tracking ref is only as
             // fresh as the last fetch — and a branch made off a stale one is
