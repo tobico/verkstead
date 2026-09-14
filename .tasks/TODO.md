@@ -17,6 +17,6 @@ planning session that died before committing can be mistaken for a plan.
 
 ## Tasks
 
-- [ ] 01: A deletion under `.tasks/` is not a plan written — [details](01-a-deletion-is-not-a-plan.md)
+- [x] 01: A deletion under `.tasks/` is not a plan written — [details](01-a-deletion-is-not-a-plan.md)
 - [ ] 02: A start a human presses clears the inherited list — [details](02-a-pressed-start-clears-the-list.md)
 - [ ] 03: An unattended stage start clears the same way, and the decision is written down — [details](03-a-stage-start-clears-the-same-way.md)
