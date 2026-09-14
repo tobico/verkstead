@@ -981,6 +981,48 @@ impl GitAuthor {
     }
 }
 
+/// A [`GitAuthor`] with both halves filled in, which is the only shape git will
+/// take one in.
+///
+/// Git wants an identity rather than half of one, and what it would say about
+/// the half that was missing is a sentence about git where the answer is about
+/// the settings page that has the field. So everything Verkstead commits on its
+/// own account asks for this first and refuses by name where the answer is
+/// `None`, rather than filling the missing half in: a created repository's
+/// README — see [`crate::repos`] — and the clearing of a task list a branch
+/// inherited from its base — see [`crate::tasks::clear`].
+///
+/// Here beside [`GitAuthor`] rather than in either of them, because it is the
+/// same identity under the same rule and one rule wants one place to live.
+pub(crate) struct Author {
+    name: String,
+    email: String,
+}
+
+impl Author {
+    /// The configured author, or `None` where either half of it is missing.
+    pub(crate) fn configured(author: &GitAuthor) -> Option<Author> {
+        let (Some(name), Some(email)) = (author.name(), author.email()) else {
+            return None;
+        };
+
+        Some(Author {
+            name: name.to_owned(),
+            email: email.to_owned(),
+        })
+    }
+
+    /// What the commit's `-c user.name=` is given.
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// And what its `-c user.email=` is.
+    pub(crate) fn email(&self) -> &str {
+        &self.email
+    }
+}
+
 /// One class of comment nobody wants addressed: a regex over who wrote it, a
 /// regex over what it says, or both.
 ///
@@ -1198,8 +1240,8 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        Cleanup, CleanupStep, Config, ConflictResolution, GitAuthor, IgnoreRule, RuleTrouble,
-        RustBuildCache, Secrets, Settings,
+        Author, Cleanup, CleanupStep, Config, ConflictResolution, GitAuthor, IgnoreRule,
+        RuleTrouble, RustBuildCache, Secrets, Settings,
     };
 
     #[test]
@@ -2005,6 +2047,24 @@ mod tests {
 
         assert_eq!(config.git_author().name(), Some("Tobias Cohen"));
         assert_eq!(config.git_author().email(), None);
+    }
+
+    /// And the shape git will take is both halves or nobody — the reading
+    /// everything Verkstead commits on its own account asks for.
+    #[test]
+    fn an_author_is_both_halves_or_nobody() {
+        let name = Some("Ada Lovelace".to_owned());
+        let email = Some("ada@example.com".to_owned());
+
+        let both = Author::configured(&GitAuthor::of(name.clone(), email.clone()))
+            .expect("both halves are there");
+
+        assert_eq!(both.name(), "Ada Lovelace");
+        assert_eq!(both.email(), "ada@example.com");
+
+        assert!(Author::configured(&GitAuthor::of(name, None)).is_none());
+        assert!(Author::configured(&GitAuthor::of(None, email)).is_none());
+        assert!(Author::configured(&GitAuthor::default()).is_none());
     }
 
     #[test]

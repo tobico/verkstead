@@ -193,6 +193,8 @@ const GRILL_REFUSAL: Record<
   ProfileBroken:
     "A chosen profile's claude pair is not where it was left, so there is no account to run under.",
   EmptyBrief: "Write the brief first — it is what the work starts from.",
+  NoGitAuthor:
+    "No git author is configured, so Verkstead cannot commit on the branch. Set one in Settings before starting work.",
   FetchFailed:
     "Git could not fetch from the repo's remote, so nothing was started. The server log says why.",
   NoBaseCommit: "The repo has nothing to branch from any more.",

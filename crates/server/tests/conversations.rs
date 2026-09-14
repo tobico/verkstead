@@ -53,7 +53,26 @@ async fn app_and_pool_keeping() -> (tempfile::TempDir, SqlitePool, Router) {
         .unwrap();
     let data_dir = dir.path().to_owned();
 
+    // An author, because every press that cuts a branch for new work is refused
+    // without one: what Verkstead commits there is the clearing of whatever task
+    // list the base was carrying. A workbench with nobody configured is what
+    // [`no_author`] makes, and what the refusals are tested against.
+    std::fs::write(dir.path().join(CONFIG), THE_AUTHOR).unwrap();
+
     (dir, pool.clone(), router_keeping(pool, data_dir))
+}
+
+/// Where the author a start commits as is written, under the Data Directory.
+const CONFIG: &str = "config.yaml";
+
+/// And who that author is, on every workbench here but the one that takes it
+/// away.
+const THE_AUTHOR: &str = "git_author:\n  name: Verkstead Test\n  email: test@verkstead.invalid\n";
+
+/// Take the author back off a workbench, leaving one configured the way a
+/// machine that skipped the settings page is.
+fn no_author(dir: &tempfile::TempDir) {
+    std::fs::remove_file(dir.path().join(CONFIG)).unwrap();
 }
 
 /// A git repository at `path`, with one commit on `main` so it has a branch to
@@ -2304,6 +2323,202 @@ async fn a_start_refused_over_a_companion_unmakes_the_checkouts_it_had_made() {
     assert!(
         made.is_empty(),
         "no directory should be left behind: {made:?}"
+    );
+}
+
+/// A task list a stage left part way through, committed on the branch a
+/// Conversation is about to be cut from.
+const INHERITED: &str = "\
+# Grant filters
+
+What the stage before this one was part way through.
+
+## Tasks
+
+- [x] 01: The first task — [details](01-the-first-task.md)
+- [ ] 02: The second task — [details](02-the-second-task.md)
+";
+
+/// Put `list` on `repo`'s checked-out branch, with the task file the entry that
+/// is done names — which is what a backlog somebody stopped working looks like.
+fn task_list(repo: &Path, list: &str) {
+    let tasks = repo.join(".tasks");
+
+    std::fs::create_dir_all(&tasks).unwrap();
+    std::fs::write(tasks.join("TODO.md"), list).unwrap();
+    std::fs::write(tasks.join("01-the-first-task.md"), "# 01. The first task\n").unwrap();
+
+    git(repo, &["add", "-A"]);
+    git(repo, &["commit", "-m", "chore: plan the work"]);
+}
+
+/// What a Worktree's branch has at its tip: the subject, and who the commit is
+/// by.
+fn tip(worktree: &Path) -> Vec<String> {
+    git(worktree, &["log", "-1", "--format=%s%n%an%n%ae"])
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// A branch cut from a base that already carries a task list arrives without
+/// one, and the removal is a commit of its own by the configured author.
+///
+/// The whole of what this is for: the watcher that ends a planning session
+/// checks that `.tasks/TODO.md` is at the tip and committed, and cannot tell an
+/// inherited list from one this branch wrote — so a session would be ended
+/// before it had asked anything.
+#[tokio::test]
+async fn starting_clears_the_task_list_the_base_carried() {
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    task_list(&repo, INHERITED);
+
+    let base = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+    let worktree = PathBuf::from(view.worktree.clone().expect("a start makes one").path);
+
+    assert!(
+        !worktree.join(".tasks").exists(),
+        "the inherited list is gone from the tree the session will work in",
+    );
+    assert_eq!(
+        tip(&worktree),
+        [
+            "chore: clear the task list inherited from main",
+            "Verkstead Test",
+            "test@verkstead.invalid",
+        ],
+        "as a commit of its own, by the configured git author",
+    );
+    assert_eq!(
+        git(&worktree, &["log", "--format=%H"]).lines().count(),
+        3,
+        "one commit on top of the base, and no more",
+    );
+    assert_eq!(
+        view.base_commit.as_deref(),
+        Some(base.as_str()),
+        "and the recorded base is still the commit the branch came off",
+    );
+    assert_eq!(
+        git(&repo, &["rev-parse", "refs/heads/main"]).trim(),
+        base,
+        "the base branch itself is untouched: the clearing is this branch's",
+    );
+
+    let said = notices(&view).join("\n");
+
+    assert!(
+        said.contains("<code>main</code>") && said.contains("<strong>Grant filters</strong>"),
+        "the Timeline says which base carried which list: {said:?}",
+    );
+    assert!(
+        said.contains("1 of 2 entries still open"),
+        "and how far through it was: {said:?}",
+    );
+}
+
+/// And an ungrilled build clears it the same way: the press is the same press,
+/// and what differs is only where it leaves the Conversation.
+#[tokio::test]
+async fn an_ungrilled_build_clears_the_inherited_list_too() {
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    task_list(&repo, INHERITED);
+
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+
+    assert_eq!(
+        no_grilling(&app, id).await,
+        verkstead_render::ProfileChosen::Chosen
+    );
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+    let worktree = PathBuf::from(view.worktree.clone().expect("a start makes one").path);
+
+    assert_eq!(view.state, Lifecycle::Implementing);
+    assert!(!worktree.join(".tasks").exists());
+    assert_eq!(
+        tip(&worktree)[0],
+        "chore: clear the task list inherited from main",
+    );
+    assert!(
+        notices(&view)
+            .join("\n")
+            .contains("<strong>Grant filters</strong>"),
+    );
+}
+
+/// A base carrying no list is started with nothing extra: no commit and no
+/// notice. The ordinary start is every start, and it must arrive holding
+/// exactly what its base held.
+#[tokio::test]
+async fn a_base_with_no_task_list_is_started_untouched() {
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+
+    let base = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let view = opened(&app, id).await;
+    let worktree = PathBuf::from(view.worktree.clone().expect("a start makes one").path);
+
+    assert_eq!(
+        git(&worktree, &["rev-parse", "HEAD"]).trim(),
+        base,
+        "the branch stands where it was cut",
+    );
+    assert_eq!(
+        notices(&view),
+        Vec::<String>::new(),
+        "and the Timeline has nothing to say about a list there never was",
+    );
+}
+
+/// With no git author configured there is nobody to commit the clearing as, so
+/// the press is refused by name before anything is made.
+///
+/// Refused whether or not the base carries a list — this one does not — because
+/// onboarding collects an author: a start without one is a misconfiguration to
+/// name rather than a case to work around.
+#[tokio::test]
+async fn starting_with_no_git_author_is_refused_by_name() {
+    let (elsewhere, dir, app, repo, repo_id) = workbench().await;
+    no_author(&dir);
+
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    let branch = opened(&app, id).await.branch;
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::NoGitAuthor);
+
+    assert_eq!(
+        no_grilling(&app, id).await,
+        verkstead_render::ProfileChosen::Chosen
+    );
+    assert_eq!(
+        grill(&app, id).await,
+        GrillingStarted::NoGitAuthor,
+        "and the ungrilled build behind the same button is refused the same way",
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Draft, "the press did not happen");
+    assert_eq!(view.worktree, None);
+    assert!(
+        !has_branch(&repo, &branch),
+        "and no branch was cut for it either",
+    );
+    assert_eq!(
+        worktrees(&repo).len(),
+        1,
+        "only the repository itself: {:?}",
+        worktrees(&repo),
     );
 }
 
@@ -7336,6 +7551,115 @@ async fn a_companion_adoption_cannot_deliver_refuses_the_press_by_name() {
         worktrees(&askance).len(),
         1,
         "only the companion repository itself",
+    );
+}
+
+/// A stage adopted from a base that carries a task list arrives without one —
+/// the same step a grill start takes, at the other door.
+///
+/// This is the press the whole feature is about: continuing a roadmap whose
+/// last stage stopped part way leaves the list that stage was working on the
+/// default branch, and the stage started next would be read as planned the
+/// moment its planning session launched.
+#[tokio::test]
+async fn adopting_clears_the_task_list_the_base_carried() {
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+    task_list(&repo, INHERITED);
+
+    let base = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
+
+    let view = opened(&app, id).await;
+    let worktree = PathBuf::from(view.worktree.clone().expect("a stage has one").path);
+
+    assert!(
+        !worktree.join(".tasks").exists(),
+        "the planning session about to run sees no plan",
+    );
+    assert_eq!(
+        tip(&worktree),
+        [
+            "chore: clear the task list inherited from main",
+            "Verkstead Test",
+            "test@verkstead.invalid",
+        ],
+    );
+    assert_eq!(
+        view.base_commit.as_deref(),
+        Some(base.as_str()),
+        "the recorded base is still the commit the stage branched off",
+    );
+
+    let said = notices(&view).join("\n");
+
+    assert!(
+        said.contains("<strong>Grant filters</strong>") && said.contains("1 of 2 entries"),
+        "the Timeline says what was cleared: {said:?}",
+    );
+    assert!(
+        said.contains("Stage 03"),
+        "beside what was adopted: {said:?}",
+    );
+}
+
+/// And adopting from a base with no list makes no commit and says nothing.
+#[tokio::test]
+async fn adopting_from_a_base_with_no_task_list_is_untouched() {
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    let base = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
+
+    let view = opened(&app, id).await;
+    let worktree = PathBuf::from(view.worktree.clone().expect("a stage has one").path);
+
+    assert_eq!(git(&worktree, &["rev-parse", "HEAD"]).trim(), base);
+    assert!(
+        !notices(&view).join("\n").contains("carried a task list"),
+        "nothing was cleared, so nothing is said about clearing",
+    );
+}
+
+/// And with no git author configured the press is refused by name, before the
+/// stage's branch or its worktree is made.
+#[tokio::test]
+async fn adopting_with_no_git_author_is_refused_by_name() {
+    let (elsewhere, dir, app, repo, repo_id) = workbench().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+    no_author(&dir);
+
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::NoGitAuthor);
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.worktree, None);
+    assert!(!has_branch(&repo, "mvp/03-implementation"));
+    assert_eq!(
+        worktrees(&repo).len(),
+        1,
+        "only the repository itself: {:?}",
+        worktrees(&repo),
     );
 }
 

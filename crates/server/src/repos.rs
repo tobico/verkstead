@@ -37,7 +37,7 @@ use verkstead_render::{ConflictResolution, Created, Registered, RepoEntry, RepoR
 
 use crate::github::Gh;
 use crate::resolved::{Resolved, resolve};
-use crate::settings::GitAuthor;
+use crate::settings::{Author, GitAuthor};
 use crate::store;
 use crate::unseen::Unseen;
 
@@ -147,16 +147,11 @@ pub(crate) async fn create(
     name: &str,
     github: bool,
 ) -> Result<Created> {
-    // Both halves or neither. Git wants an identity rather than half of one, and
-    // what it would say about the half that was missing is a sentence about git
-    // where the answer is about the settings page that has the field.
-    let (Some(who), Some(email)) = (author.name(), author.email()) else {
+    // Both halves or neither, which is the one shape git will take an identity
+    // in — see [`Author`], the rule everything Verkstead commits on its own
+    // account is made under.
+    let Some(author) = Author::configured(author) else {
         return Ok(Created::NoAuthor);
-    };
-
-    let author = Author {
-        name: who.to_owned(),
-        email: email.to_owned(),
     };
 
     let parent = PathBuf::from(parent);
@@ -230,13 +225,6 @@ pub(crate) async fn create(
             Created::Refused("the repository was registered but could not be read back".to_owned())
         }
     })
-}
-
-/// Who the first commit is by, which is both halves or the create does not
-/// happen — see [`create`].
-struct Author {
-    name: String,
-    email: String,
 }
 
 /// What the filesystem half can refuse with, which is every outcome of a create
@@ -340,9 +328,9 @@ fn filled(path: &Path, name: &str, author: &Author) -> Result<(), String> {
         path,
         &[
             "-c",
-            &format!("user.name={}", author.name),
+            &format!("user.name={}", author.name()),
             "-c",
-            &format!("user.email={}", author.email),
+            &format!("user.email={}", author.email()),
             "commit",
             "--quiet",
             "--message",
@@ -382,10 +370,16 @@ fn is_a_name(name: &str) -> bool {
 /// One git command in `dir`, or what it said about why not.
 ///
 /// Its own runner rather than [`git`] above, which is for the reads: what a read
-/// wants is the output or nothing at all, and what a create wants is the reason,
-/// which git writes on stderr. Read as one line the way a publish reads it — see
-/// [`crate::publishing::said`].
-fn run(dir: &Path, args: &[&str]) -> Result<(), String> {
+/// wants is the output or nothing at all, and what a *write* wants is the
+/// reason, which git writes on stderr. Read as one line the way a publish reads
+/// it — see [`crate::publishing::said`].
+///
+/// Which is why every git call Verkstead makes on its own account comes through
+/// here rather than through [`git`]: a create's first commit, and the clearing
+/// of an inherited task list in [`crate::tasks::clear`]. Both of them take the
+/// whole press back when they fail, and a refusal with no reason in the log is
+/// one nobody can do anything about.
+pub(crate) fn run(dir: &Path, args: &[&str]) -> Result<(), String> {
     let output = Command::new("git")
         .args(args)
         .unseen()

@@ -22,6 +22,12 @@
 //! written a document yet has not done the task, and a backlog half written
 //! would otherwise read as a backlog nearly finished.
 //!
+//! One thing here writes rather than reads, and it writes on a branch rather
+//! than into a record: a branch cut from a base that already carries a `.tasks/`
+//! has that list taken away before any session runs — see [`clear`]. An
+//! inherited list reads as a plan this branch wrote, which is a planning session
+//! ended before it has asked anything.
+//!
 //! Which is the reading a roadmap makes too — see [`crate::stages`], which
 //! reads the same lines off `ROADMAP.md` and takes the same box at its word.
 //!
@@ -36,6 +42,8 @@ use std::path::{Path, PathBuf};
 use verkstead_render::{BacklogPane, TaskEntry, TaskListEvent};
 
 use crate::checklist;
+use crate::repos::run;
+use crate::settings::Author;
 
 /// Where a Conversation's backlog lives inside its Worktree.
 pub(crate) const BACKLOG: &str = ".tasks";
@@ -258,6 +266,153 @@ pub(crate) fn numbered(name: &str) -> Option<u32> {
     }
 
     number.parse().ok()
+}
+
+/// What became of clearing the task list a fresh branch inherited from its base.
+///
+/// The counts and the heading are read off the list before it goes, because
+/// after the commit there is nothing left to read them off — and what they are
+/// for is the notice, which says what was taken away rather than that something
+/// was.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Clearing {
+    /// There was a list, and the branch now has a commit taking it away: what
+    /// it was called, how many entries it had, and how many of those were still
+    /// open.
+    Cleared {
+        /// `TODO.md`'s own heading, which is what the list called the work.
+        /// Empty where it had none.
+        heading: String,
+
+        /// The entries whose box is not ticked.
+        open: usize,
+
+        /// And how many entries there were altogether.
+        entries: usize,
+    },
+
+    /// The base carried none, so nothing was committed and there is nothing to
+    /// say.
+    Nothing,
+
+    /// There was one and git would not be rid of it. The reason is in the
+    /// server's log: what the press does about it is refuse, the way a worktree
+    /// git would not make already refuses.
+    Refused,
+}
+
+impl Clearing {
+    /// What the Timeline is told, or nothing where no list was cleared.
+    ///
+    /// Every time it happens rather than only where the list was worth
+    /// something: a branch that quietly lost a file it was cut with is the
+    /// thing this whole clearing must never look like, so the record says what
+    /// went and how far through it was.
+    ///
+    /// A list with no heading is said without one rather than with an empty
+    /// bold: `****` on a Timeline is markdown nobody wrote.
+    pub(crate) fn notice(&self, base: &str) -> Option<String> {
+        let Clearing::Cleared {
+            heading,
+            open,
+            entries,
+        } = self
+        else {
+            return None;
+        };
+
+        let called = match heading.is_empty() {
+            true => String::new(),
+            false => format!(" **{heading}**,"),
+        };
+
+        Some(format!(
+            "The base branch `{base}` carried a task list,{called} with {open} of {entries} \
+             entries still open. It was cleared before this work started.",
+        ))
+    }
+}
+
+/// Take the task list `worktree` inherited from `base` away, as a commit of its
+/// own by `author`.
+///
+/// A branch cut from a base that already carries a `.tasks/` reads as a branch
+/// that has planned: what says a planning session is finished is a `TODO.md` at
+/// the tip, and the watcher that ends one cannot tell an inherited list from a
+/// written one. So the list goes before any session runs, on the fresh branch
+/// rather than anywhere the base can see — the base is somebody else's work and
+/// nothing here writes into it.
+///
+/// **Said on the command line rather than written into the repository's
+/// config**, the way [`crate::repos`] commits a new repository's README and for
+/// its reason: it is the same fact either way and one of them leaves a file
+/// behind. No trailer either — the commit is Verkstead's own bookkeeping rather
+/// than a session's work.
+///
+/// **Through [`crate::repos::run`] rather than [`crate::repos::git`]**, for the
+/// reason a create's own commit goes through it: `git` is the runner for reads
+/// and throws git's stderr away, and a [`Clearing::Refused`] takes the whole
+/// press back — so the reason git gave is the only thing anybody could act on
+/// afterwards, and it has to reach the log.
+///
+/// Blocking from end to end, and called where the checkouts are made.
+pub(crate) fn clear(worktree: &Path, base: &str, author: &Author) -> Clearing {
+    let backlog = worktree.join(BACKLOG);
+
+    if !backlog.is_dir() {
+        return Clearing::Nothing;
+    }
+
+    // Read before it goes, for the notice — see [`Clearing`]. A `.tasks/` with no
+    // `TODO.md` in it still gets one, with the nothing it has: what the human
+    // needs to know is that a directory was taken away.
+    let list = std::fs::read_to_string(backlog.join(TODO)).unwrap_or_default();
+    let entries: Vec<_> = list.lines().filter_map(checklist::entry).collect();
+
+    let cleared = Clearing::Cleared {
+        heading: checklist::heading(&list),
+        open: entries.iter().filter(|entry| !entry.checked).count(),
+        entries: entries.len(),
+    };
+
+    // `--` rather than `--end-of-options`: what follows is a pathspec, which is
+    // git's own name for a path, and it is this module's constant rather than
+    // anything a human typed.
+    if let Err(said) = run(worktree, &["rm", "--quiet", "-r", "--", BACKLOG]) {
+        tracing::error!(
+            said,
+            worktree = %worktree.display(),
+            "the task list a branch inherited from its base could not be removed",
+        );
+
+        return Clearing::Refused;
+    }
+
+    let committed = run(
+        worktree,
+        &[
+            "-c",
+            &format!("user.name={}", author.name()),
+            "-c",
+            &format!("user.email={}", author.email()),
+            "commit",
+            "--quiet",
+            "--message",
+            &format!("chore: clear the task list inherited from {base}"),
+        ],
+    );
+
+    if let Err(said) = committed {
+        tracing::error!(
+            said,
+            worktree = %worktree.display(),
+            "the removal of an inherited task list could not be committed",
+        );
+
+        return Clearing::Refused;
+    }
+
+    cleared
 }
 
 #[cfg(test)]
@@ -562,5 +717,183 @@ Takes a Conversation from finished grilling to implemented work.
 
         let empty = documented("# Feature\n\nNothing broken down yet.\n", &[]);
         assert!(opened(empty.path()).is_none());
+    }
+
+    /// A repository with `list` committed on `main`, standing in for the base a
+    /// fresh branch is cut from — and a checkout of it is what a clearing works
+    /// in.
+    fn committed(list: Option<&str>) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+
+        run(path, &["init", "--initial-branch", "main"]);
+        run(path, &["config", "user.email", "base@verkstead.invalid"]);
+        run(path, &["config", "user.name", "Somebody Else"]);
+
+        std::fs::write(path.join("README.md"), "# a repository\n").unwrap();
+
+        if let Some(list) = list {
+            let tasks = path.join(BACKLOG);
+
+            std::fs::create_dir_all(&tasks).unwrap();
+            std::fs::write(tasks.join(TODO), list).unwrap();
+            std::fs::write(tasks.join("01-a-task.md"), "# 01. A task\n").unwrap();
+        }
+
+        run(path, &["add", "--all"]);
+        run(path, &["commit", "-m", "first"]);
+
+        dir
+    }
+
+    fn run(dir: &Path, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .output()
+            .expect("git should be on the PATH for these tests");
+
+        assert!(output.status.success(), "git {args:?} failed");
+
+        String::from_utf8(output.stdout).unwrap()
+    }
+
+    /// Who every clearing here is committed as.
+    fn author() -> Author {
+        Author::configured(&crate::settings::GitAuthor::of(
+            Some("Ada Lovelace".to_owned()),
+            Some("ada@example.com".to_owned()),
+        ))
+        .expect("both halves are there")
+    }
+
+    /// The list goes, and it goes as a commit rather than as a change nobody
+    /// took: the branch's tip is what the planning watcher reads, so a removal
+    /// left in the working tree would be no removal at all.
+    #[test]
+    fn clearing_commits_the_removal_of_the_list_the_base_carried() {
+        let dir = committed(Some(LIST));
+        let path = dir.path();
+
+        assert_eq!(
+            clear(path, "main", &author()),
+            Clearing::Cleared {
+                heading: "Implementation".to_owned(),
+                open: 1,
+                entries: 3,
+            },
+        );
+
+        assert!(!path.join(BACKLOG).exists(), "the directory is gone");
+        assert_eq!(
+            run(path, &["status", "--porcelain"]).trim(),
+            "",
+            "and nothing is left uncommitted",
+        );
+        assert_eq!(
+            run(path, &["log", "-1", "--format=%s%n%an%n%ae"])
+                .lines()
+                .collect::<Vec<_>>(),
+            [
+                "chore: clear the task list inherited from main",
+                "Ada Lovelace",
+                "ada@example.com",
+            ],
+            "by the configured author rather than by whoever the checkout's git is",
+        );
+        assert_eq!(
+            run(path, &["log", "--format=%H"]).lines().count(),
+            2,
+            "one commit on top of the base, and no more",
+        );
+    }
+
+    /// And the author is said on the command line rather than written into the
+    /// repository — a start that left a `user.name` behind would be a start that
+    /// changed the checkout it was given.
+    #[test]
+    fn clearing_writes_no_identity_into_the_repository() {
+        let dir = committed(Some(LIST));
+
+        clear(dir.path(), "main", &author());
+
+        let config = std::fs::read_to_string(dir.path().join(".git/config")).unwrap();
+
+        assert!(!config.contains("Ada Lovelace"), "{config}");
+        assert!(!config.contains("ada@example.com"), "{config}");
+    }
+
+    /// A base carrying no list is nothing to clear and nothing to commit: a
+    /// branch cut for new work is the ordinary case, and it must arrive holding
+    /// exactly what its base held.
+    #[test]
+    fn a_base_with_no_list_is_left_alone() {
+        let dir = committed(None);
+        let before = run(dir.path(), &["rev-parse", "HEAD"]);
+
+        assert_eq!(clear(dir.path(), "main", &author()), Clearing::Nothing);
+        assert_eq!(run(dir.path(), &["rev-parse", "HEAD"]), before);
+    }
+
+    /// What the Timeline is told: what the list was called, and how far through
+    /// it was when it went.
+    #[test]
+    fn the_notice_says_what_was_cleared_and_how_far_through_it_was() {
+        let dir = committed(Some(LIST));
+
+        assert_eq!(
+            clear(dir.path(), "origin/main", &author())
+                .notice("origin/main")
+                .as_deref(),
+            Some(
+                "The base branch `origin/main` carried a task list, **Implementation**, with 1 \
+                 of 3 entries still open. It was cleared before this work started."
+            ),
+        );
+    }
+
+    /// A list with no heading and no entries still gets one, with what it has:
+    /// what the human needs to know is that a directory was taken away.
+    #[test]
+    fn a_list_with_nothing_in_it_is_still_said() {
+        let dir = committed(Some("Nothing broken down yet.\n"));
+
+        assert_eq!(
+            clear(dir.path(), "main", &author())
+                .notice("main")
+                .as_deref(),
+            Some(
+                "The base branch `main` carried a task list, with 0 of 0 entries still open. It \
+                 was cleared before this work started."
+            ),
+        );
+    }
+
+    /// And nothing cleared is nothing said. A notice every start drew would be
+    /// one nobody read.
+    #[test]
+    fn a_start_that_cleared_nothing_says_nothing() {
+        assert_eq!(Clearing::Nothing.notice("main"), None);
+        assert_eq!(Clearing::Refused.notice("main"), None);
+    }
+
+    /// And a git that will not be rid of the list is a [`Clearing::Refused`],
+    /// with what git said about it in the log — which is the whole of what
+    /// anybody has to go on, the press it refuses taking every checkout back.
+    ///
+    /// A directory that is no repository at all, because what the `rm` is
+    /// refused for does not matter to what is done about it.
+    #[test]
+    fn a_git_that_will_not_be_rid_of_the_list_refuses_the_clearing() {
+        let dir = tempfile::tempdir().unwrap();
+        let tasks = dir.path().join(BACKLOG);
+
+        std::fs::create_dir_all(&tasks).unwrap();
+        std::fs::write(tasks.join(TODO), LIST).unwrap();
+
+        assert_eq!(clear(dir.path(), "main", &author()), Clearing::Refused);
+        assert!(tasks.is_dir(), "and the list is where it was");
     }
 }

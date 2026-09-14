@@ -53,6 +53,8 @@ export const ADOPT_REFUSAL: Record<
   NoReviewProfile: "Choose a review profile and model first, on the brief.",
   ProfileBroken:
     "A chosen profile's claude pair is not where it was left, so there is no account to run under.",
+  NoGitAuthor:
+    "No git author is configured, so Verkstead cannot commit on the branch. Set one in Settings before starting work.",
   FetchFailed:
     "Git could not fetch from the repo's remote, so nothing was started. The server log says why.",
   NoBaseCommit: "The repo has nothing to branch from any more.",

@@ -17,6 +17,23 @@
 //! checked out and its wrap-up started, the work on it being built already —
 //! see [`take_up`]. Closing is where all three are given back: the session
 //! ends, and then the worktree goes.
+//!
+//! **The two that cut a branch for new work clear the task list it inherited**
+//! before anything runs in it — [`start_grilling`] and [`adopt`], each through
+//! [`clearing`]. A `.tasks/` at the tip is what says a branch has planned, read
+//! off the tree rather than off the branch's history, so a branch cut from a
+//! base that was still carrying one arrives looking like a branch whose planning
+//! is already done: the session about to start in it would be ended before it
+//! had asked anything. The removal is a commit of its own on the fresh branch,
+//! by the configured git author — and both presses are refused by name where
+//! there is no author to make it as, whether or not the base turns out to carry
+//! a list.
+//!
+//! **Where a press cuts nothing it clears nothing and refuses nothing**, which
+//! is the other half of the same rule: [`take_up`], and a [`start_grilling`]
+//! whose Conversation already has a Worktree. What is in those trees is work
+//! somebody has already done rather than anything they inherited, and there is
+//! no commit to want an author for.
 
 use std::path::{Path, PathBuf};
 
@@ -36,9 +53,11 @@ use crate::boundaries;
 
 use crate::handoffs::Handoffs;
 use crate::repos::git;
+use crate::settings::Author;
 use crate::skills;
 use crate::stages::Startable;
 use crate::store;
+use crate::tasks::{self, Clearing};
 use crate::worktrees;
 
 /// Start a Conversation against a registered Repo, on a branch name nobody has
@@ -1225,6 +1244,17 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
         return Ok(GrillingStarted::EmptyBrief);
     }
 
+    // And whoever the commit Verkstead makes on a fresh branch is by: the
+    // clearing of whatever task list the base was carrying — see
+    // [`crate::tasks::clear`]. Read here, with the other answers that cost
+    // nothing, and *refused* below rather than here: only a press that cuts a
+    // branch commits anything, and a Conversation that already has a Worktree is
+    // one working where it has always worked. Whether there turns out to be a
+    // list makes no difference to the refusal, because a workbench with no
+    // author configured is a misconfiguration to name rather than a case to work
+    // around.
+    let author = Author::configured(state.settings.config().git_author());
+
     // What the work branches from, resolved here and nowhere earlier: what the
     // human picked is a branch, and what they meant by picking it is wherever it
     // stands at this moment. Without one it is the default branch, which is the
@@ -1266,10 +1296,31 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
             if let Some(path) = worked_in {
                 let named = picked.unwrap_or(default);
 
+                // And nothing is cleared: what `.tasks/` holds there is this
+                // Conversation's own work rather than anything it inherited.
                 return worktrees::resolve(&repo, &named)
-                    .map(|commit| (commit, named, path, branch, Vec::new(), None))
+                    .map(|commit| {
+                        (
+                            commit,
+                            named,
+                            path,
+                            branch,
+                            Vec::new(),
+                            Clearing::Nothing,
+                            None,
+                        )
+                    })
                     .ok_or(GrillingStarted::NoBaseCommit);
             }
+
+            // From here a branch is cut, and the first thing committed on it is
+            // the clearing of whatever list the base was carrying — so from here
+            // an author is wanted. Before the fetch, which is the first thing
+            // that costs anything, and before the name is chosen: nothing has
+            // been made yet, so the refusal leaves nothing behind.
+            let Some(author) = author else {
+                return Err(GrillingStarted::NoGitAuthor);
+            };
 
             // Before anything resolves, because a remote-tracking ref is only as
             // fresh as the last fetch — and a branch made off a stale one is
@@ -1354,12 +1405,19 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
 
             make(&planned).map_err(Unmade::grilling)?;
 
+            // And the list the base was carrying goes, as a commit of its own on
+            // the branch just cut — the step between the cut and the record
+            // moving, so that the session about to run is the first thing to see
+            // this worktree and sees no plan in it.
+            let cleared = clearing(&planned, &named, &author).map_err(Unmade::grilling)?;
+
             Ok((
                 commit,
                 named,
                 path,
                 branch,
                 recorded(&planned),
+                cleared,
                 Some(making),
             ))
         }
@@ -1369,7 +1427,7 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // `named` comes back out rather than being worked out again up here: what an
     // unpicked base resolved through is decided inside, after the fetch, and the
     // record is owed the branch the work actually came off.
-    let (commit, named, path, cut, checkouts, making) = match made {
+    let (commit, named, path, cut, checkouts, cleared, making) = match made {
         Ok(made) => made,
         Err(refusal) => return Ok(refusal),
     };
@@ -1407,6 +1465,21 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // release where the Conversation already had its checkouts — that made no
     // directory, so there was no window to hold.
     drop(making);
+
+    // And what the base was carrying and no longer is, said on the Timeline —
+    // every time it happens, because a branch quietly starting a file short is
+    // the one thing this clearing must never look like. Logged rather than
+    // raised: by here the branch is cut and the Conversation has moved, and
+    // answering the button with a failure would say that none of it happened.
+    if let Some(notice) = cleared.notice(&named)
+        && let Err(error) = store::note(pool, id, &notice).await
+    {
+        tracing::error!(
+            error = ?error,
+            conversation_id = id,
+            "recording what the cleared task list was failed",
+        );
+    }
 
     // From here the Conversation says it is being worked on, and the thing that
     // will say so is a session that does not exist yet. So a registration stands
@@ -1737,17 +1810,55 @@ fn make(planned: &[Checkout]) -> Result<(), Unmade> {
 
         // This one included, and first: an `add` that fell over may have made
         // the directory, or the branch, or neither, and what is being unwound is
-        // whatever it did get as far as. The rest newest first, which is the
-        // order they were made in reversed — nothing turns on it, no two of
-        // these being in one repository, but a list is undone backwards.
-        for done in planned[..=nth].iter().rev() {
-            worktrees::unmake(&done.repo, &done.path, done.holds.cut());
-        }
+        // whatever it did get as far as.
+        unmake(&planned[..=nth]);
 
         return Err(checkout.refused());
     }
 
     Ok(())
+}
+
+/// Take back every checkout of `made`, directory and branch together.
+///
+/// Newest first, which is the order they were made in reversed — nothing turns
+/// on it, no two of these being in one repository, but a list is undone
+/// backwards.
+fn unmake(made: &[Checkout]) {
+    for done in made.iter().rev() {
+        worktrees::unmake(&done.repo, &done.path, done.holds.cut());
+    }
+}
+
+/// Clear the task list the Conversation's own checkout inherited from `base`,
+/// or take the whole start back.
+///
+/// The step between the cut and the record moving, and the one the two presses
+/// that cut a branch for new work share — see [`crate::tasks::clear`] for what
+/// an inherited list does to the session that is about to run in here. The
+/// Conversation's own checkout alone: nothing reads `.tasks/` off a companion.
+///
+/// A git that would not be rid of the list refuses the whole start, unwinding
+/// every checkout exactly as a `worktree add` git refused does. Said to the
+/// human in those words too — [`Unmade::Own`] — because it is the same thing
+/// from where they are standing: a press that made nothing, with the reason in
+/// the server's log.
+fn clearing(planned: &[Checkout], base: &str, author: &Author) -> Result<Clearing, Unmade> {
+    // The Conversation's own is the first of the list, every list being built
+    // that way. A list with nothing in it is no start at all, and there is
+    // nothing to clear in one.
+    let Some(own) = planned.first() else {
+        return Ok(Clearing::Nothing);
+    };
+
+    match tasks::clear(&own.path, base, author) {
+        Clearing::Refused => {
+            unmake(planned);
+
+            Err(Unmade::Own)
+        }
+        cleared => Ok(cleared),
+    }
 }
 
 /// Where each companion of a start was checked out and what it was cut from,
@@ -1866,6 +1977,16 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
         return Ok(refusal.adopting());
     }
 
+    // And whoever the commit on the stage's fresh branch is by — the clearing of
+    // whatever task list the base was carrying. Asked here for the reason
+    // [`start_grilling`] asks it here: after the record and the Profiles, and
+    // before anything that costs a git call.
+    let config = state.settings.config();
+
+    let Some(author) = Author::configured(config.git_author()) else {
+        return Ok(Adopted::NoGitAuthor);
+    };
+
     // Where the stage branches from. The override where the human fixed one —
     // which is how an unmerged predecessor is stacked on, that being their move
     // rather than Verkstead's — and the default branch as origin holds it where
@@ -1962,6 +2083,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
         let path = path.clone();
         let branch = branch.clone();
         let commit = commit.clone();
+        let named = named.clone();
         let data_dir = state.data_dir.clone();
         let companions = conversation.companions.clone();
         let checkouts = state.checkouts.clone();
@@ -1992,12 +2114,17 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
 
             make(&planned).map_err(Unmade::adopting)?;
 
-            Ok((recorded(&planned), making))
+            // And the list the base was carrying goes with the same step a grill
+            // start takes: a stage whose branch arrives holding somebody else's
+            // plan is a planning session ended before it has asked anything.
+            let cleared = clearing(&planned, &named, &author).map_err(Unmade::adopting)?;
+
+            Ok((recorded(&planned), cleared, making))
         }
     })
     .await?;
 
-    let (checkouts, making) = match made {
+    let (checkouts, cleared, making) = match made {
         Ok(made) => made,
         Err(refusal) => return Ok(refusal),
     };
@@ -2039,6 +2166,21 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
     // Recorded, so the sweep would keep them. What follows is a Timeline and a
     // launch, and neither makes a directory.
     drop(making);
+
+    // What the base was carrying and no longer is, said before what was adopted:
+    // the clearing happened first, and a Timeline reads in the order things
+    // happened. Logged rather than raised, as everything from here is — the
+    // stage has started, and a notice that would not be written does not undo
+    // that.
+    if let Some(notice) = cleared.notice(&named)
+        && let Err(error) = store::note(pool, id, &notice).await
+    {
+        tracing::error!(
+            error = ?error,
+            conversation_id = id,
+            "recording what the cleared task list was failed",
+        );
+    }
 
     // What was adopted, from where, and where its branch came off — on the
     // Conversation's own Timeline, because that is the only Timeline there is:

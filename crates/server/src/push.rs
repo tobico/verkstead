@@ -4,7 +4,8 @@
 //! Set has arrived, driving has stopped on something Verkstead decided to stop
 //! for, or the account the run was spending ran out of window. And
 //! **milestones**: the work is on a pull request, a roadmap has moved on to its
-//! next stage or run out of stages, or a Conversation has reached Done. One push
+//! next stage — or could not, for want of a git author — or run out of stages, or
+//! a Conversation has reached Done. One push
 //! per subscribed device in every case,
 //! encrypted for that device's own keys and signed with the VAPID identity the
 //! store generated on first run. The body is small on purpose: enough for the
@@ -196,6 +197,13 @@ pub(crate) enum News {
     /// of its own — which is this one.
     StageStarted { label: String, roadmap: String },
 
+    /// The stage after the one that settled was not started, because Verkstead
+    /// has no git author to commit the clearing of an inherited task list as —
+    /// see [`crate::continuing`]. Told like a stage that started, because it is
+    /// the same fact with the answer reversed: the roadmap has stopped moving on
+    /// its own, and nobody is at a Timeline to read why.
+    StageNeedsAuthor { label: String, roadmap: String },
+
     /// A roadmap that has run out of stages: the one that settled was its last.
     RoadmapComplete { roadmap: String },
 
@@ -238,6 +246,12 @@ impl News {
             News::StageStarted { label, roadmap } => {
                 format!("Stage {label} of the `{roadmap}` roadmap has started")
             }
+            // What the human has to go and do rather than what stopped: the
+            // stage is waiting on one field in Settings, and a title saying so
+            // is one they can act on without opening anything.
+            News::StageNeedsAuthor { label, roadmap } => {
+                format!("Stage {label} of the `{roadmap}` roadmap needs a git author")
+            }
             News::RoadmapComplete { roadmap } => format!("The `{roadmap}` roadmap is complete"),
             News::Done => format!("{branch} is done"),
         }
@@ -250,6 +264,7 @@ impl News {
             News::OutOfWindow { .. } => "the stop for a window",
             News::OnAPullRequest { .. } => "the pull request",
             News::StageStarted { .. } => "the stage that started",
+            News::StageNeedsAuthor { .. } => "the stage that needs a git author",
             News::RoadmapComplete { .. } => "the roadmap that is finished",
             News::Done => "the work being done",
         }
@@ -512,6 +527,10 @@ mod tests {
             },
             News::OnAPullRequest { number: 41 },
             News::StageStarted {
+                label: "01".to_owned(),
+                roadmap: "rate-limiting".to_owned(),
+            },
+            News::StageNeedsAuthor {
                 label: "01".to_owned(),
                 roadmap: "rate-limiting".to_owned(),
             },

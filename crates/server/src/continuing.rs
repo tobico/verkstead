@@ -57,6 +57,27 @@
 //! that cannot be delivered starts nothing, the way everything else that stops a
 //! stage stops it.
 //!
+//! **And the branch is cleared of the task list it inherited** before the record
+//! moves, which is the one thing here that writes into a worktree rather than
+//! reading one — see [`crate::tasks::clear`]. What says a branch has planned is
+//! its tree rather than its history: `.tasks/TODO.md` at the tip and committed
+//! is the whole of the reading, so a stage cut off a branch that was still
+//! carrying a backlog is a stage whose planning session is ended the moment it
+//! starts. With nobody watching, what that leaves is a stage sitting at *blocked
+//! on you* having asked nothing, or one working a backlog that was never its
+//! own. The removal is a commit of its own on the stage's fresh branch, by the
+//! configured git author, and the stage's Timeline says what went and how far
+//! through it was.
+//!
+//! **Which is the one thing a stage is halted for before anything is made.** No
+//! git author configured is no author to commit that as, so the stage is stopped
+//! where it costs nothing — no Conversation, no branch, no worktree and no
+//! companions — with the notice on the settled Conversation's Timeline and the
+//! devices told, exactly as a stage that started tells them. Halted whether or
+//! not the branch it would stand on turns out to carry a list: onboarding
+//! collects an author, and a roadmap that stopped for a field in Settings is
+//! worth saying plainly.
+//!
 //! Nothing here is refused for and nothing is returned. It runs at the end of an
 //! unattended run with nobody watching, and what it has to say it says on the
 //! Timeline as a notice — which is what a decision taken while nobody was looking
@@ -69,8 +90,10 @@ use std::path::{Path, PathBuf};
 use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
+use crate::settings::Author;
 use crate::stages::{self, Next, Stage};
 use crate::store;
+use crate::tasks::{self, Clearing};
 use crate::worktrees;
 
 /// Start the stage after `conversation_id`'s, where there is one.
@@ -278,6 +301,47 @@ async fn start(
         .await;
     }
 
+    // And whoever the commit Verkstead makes on the stage's fresh branch is by:
+    // the clearing of whatever task list the branch it stands on was carrying —
+    // see [`crate::tasks::clear`]. Asked here, with the other answers that cost
+    // nothing and before anything is made, because that is the whole of what a
+    // halt has to promise: no branch, no worktree, no companions and no
+    // Conversation row for the human to find and wonder about.
+    //
+    // Asked whether or not there turns out to be a list, for the reason a press
+    // asks it whether or not there is one: onboarding collects an author, so a
+    // start without one is a misconfiguration to name rather than a case to work
+    // around — and naming it here, where nothing has been made, is cheaper for
+    // the human than naming it after a stage has half started.
+    let Some(author) = Author::configured(state.settings.config().git_author()) else {
+        say(
+            state,
+            settled,
+            &format!(
+                "Stage {} of the `{}` roadmap is next, and no git author is configured, so \
+                 Verkstead cannot commit on its branch. Nothing was started. Set one in \
+                 Settings and continue the roadmap from there.",
+                stage.label, stage.roadmap,
+            ),
+        )
+        .await;
+
+        // And the devices, exactly as a stage that started tells them: the
+        // roadmap has stopped moving on its own, which is the fact a human
+        // watching from a phone would otherwise learn by opening the sidebar
+        // some hours later and finding nothing new in it.
+        crate::push::told(
+            &state.pool,
+            settled,
+            crate::push::News::StageNeedsAuthor {
+                label: stage.label.clone(),
+                roadmap: stage.roadmap.clone(),
+            },
+        );
+
+        return;
+    };
+
     // A branch by that name already is a stage somebody — or some earlier run —
     // has started already. Refused rather than worked around: the alternative is
     // a second Conversation quietly doing a stage that is already under way, on a
@@ -442,12 +506,19 @@ async fn start(
 
             make(&planned)?;
 
-            Ok((commit, recorded(&planned), making))
+            // And the list the branch it stands on was carrying goes with the
+            // same step a press that cuts a branch takes — see [`clearing`]: a
+            // stage whose branch arrives holding somebody else's plan is a
+            // planning session ended before it has asked anything, which is
+            // what an unattended run has nobody to notice.
+            let cleared = clearing(&planned, &from, &author)?;
+
+            Ok((commit, recorded(&planned), cleared, making))
         }
     })
     .await;
 
-    let (commit, checkouts, making) = match made {
+    let (commit, checkouts, cleared, making) = match made {
         Ok(Ok(made)) => made,
         Ok(Err(halted)) => {
             gave_up(state, id).await;
@@ -493,6 +564,16 @@ async fn start(
     // Recorded, so the sweep would keep them. What follows says so on two
     // Timelines and launches a session, and none of it makes a directory.
     drop(making);
+
+    // What the branch it stands on was carrying and this one no longer is, said
+    // before what was decided about the branch: the clearing happened first, and
+    // a Timeline reads in the order things happened. Said every time it happens
+    // rather than only where the list was worth something — a branch that
+    // quietly lost a file it was cut with is the one thing this must never look
+    // like.
+    if let Some(notice) = cleared.notice(&from) {
+        say(state, id, &notice).await;
+    }
 
     // What Verkstead decided, on both Timelines: on the stage's, because the
     // branch it is on was nobody's choice but this; and on the settled one,
@@ -971,6 +1052,42 @@ fn make(planned: &[Checkout]) -> Result<(), Halted> {
     }
 
     Ok(())
+}
+
+/// Clear the task list the stage's own checkout inherited from `from`, or take
+/// the whole start back.
+///
+/// The step between the cut and the record moving, and the same one the presses
+/// that cut a branch for new work take — see [`crate::tasks::clear`] for what an
+/// inherited list does to the planning session that is about to run in here. A
+/// stage is the case it was written for: nobody is watching, so a planning
+/// session ended the moment it starts is a stage that sits at *blocked on you*
+/// having asked nothing, or works a backlog that was never its own.
+///
+/// The stage's own checkout alone, which is the first of the list: nothing reads
+/// `.tasks/` off a companion.
+///
+/// A git that would not be rid of the list halts the stage, unwinding every
+/// checkout exactly as a `worktree add` git refused unwinds them — and said to
+/// the human as [`Halted::Own`], because it is the same thing from where they
+/// are standing: a stage that made nothing, with the reason in the server's log.
+fn clearing(planned: &[Checkout], from: &str, author: &Author) -> Result<Clearing, Halted> {
+    let Some(own) = planned.first() else {
+        return Ok(Clearing::Nothing);
+    };
+
+    match tasks::clear(&own.path, from, author) {
+        Clearing::Refused => {
+            // Newest first, which is the order they were made in reversed —
+            // [`make`]'s own order when it unwinds what it got as far as.
+            for done in planned.iter().rev() {
+                worktrees::unmake(&done.repo, &done.path, done.branch.as_deref());
+            }
+
+            Err(Halted::Own)
+        }
+        cleared => Ok(cleared),
+    }
 }
 
 /// Where each companion of a start was checked out and what it came off, for the

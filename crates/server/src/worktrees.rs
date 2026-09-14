@@ -14,6 +14,32 @@
 //! this rather than checking a tree out by hand. Closing removes the worktree
 //! and leaves the branch: a branch is a name and a commit, and it may hold work
 //! worth reading; a worktree is a directory the human never asked to keep.
+//!
+//! **One thing is written into a worktree between cutting it and handing it to a
+//! session**: a `.tasks/` it inherited from the branch it was cut off is removed,
+//! as a commit of its own — see [`crate::tasks::clear`]. Every cut for new work
+//! does it, whoever asked for the cut: the presses in
+//! [`crate::conversations`], and the stage a settle starts with nobody watching
+//! in [`crate::continuing`].
+//!
+//! Verkstead otherwise writes nothing into a checkout it made — that is the
+//! session's to do — and the exception is here because of what reads the
+//! checkout back. **What says a branch has planned is the tree rather than the
+//! branch's history**: the watcher that ends a planning session asks whether
+//! `.tasks/TODO.md` is at the tip and committed, and a list that arrived with
+//! the cut is at the tip exactly as one the session wrote would be. So a branch
+//! cut off a base that was still carrying a backlog would have its planning
+//! session ended before it had asked anything, and nothing downstream could tell
+//! the two apart afterwards.
+//!
+//! **And the refusal that comes with it**: the commit needs an author, so a cut
+//! for new work is refused where no git author is configured — by name at a
+//! press, and as a halt with a notice where a stage was starting unattended.
+//! Refused whether or not the base turns out to carry a list, because onboarding
+//! collects an author and a workbench without one is a misconfiguration to name.
+//! A cut for work that already exists writes nothing and refuses nothing: a
+//! steer's re-checkout and a taken-up pull request hold somebody's work already,
+//! and what is in those trees is not inherited.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};

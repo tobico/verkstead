@@ -3080,11 +3080,20 @@ pub(crate) async fn wrote_a_backlog(worktree: &Path, base: Option<&str>) -> bool
 /// Whether this branch has written a backlog since `base`.
 ///
 /// Two questions, as [`crate::stages::touched`] asks two, because git answers
-/// them separately: what the history holds — every commit that touched
-/// `.tasks/`, the finish step's own deletion of it included — and what is in the
-/// Worktree that no commit has taken yet. A backlog that was written and then
-/// finished with is in the first; one a session wrote and died before committing
-/// is in the second. A stage that never planned is in neither.
+/// them separately: what the history holds — every commit since the base that
+/// added or changed a file under `.tasks/` — and what is in the Worktree that no
+/// commit has taken yet. A backlog that was written and then finished with is in
+/// the first, because the plan commit that added it is; one a session wrote and
+/// died before committing is in the second. A stage that never planned is in
+/// neither.
+///
+/// A deletion is not a writing, in either question. Verkstead clears a list a
+/// branch inherited from its base before any session runs, so a branch whose
+/// whole `.tasks/` story since the base is a removal has planned nothing — and
+/// reading that removal as a plan would leave a stage with a list nobody wrote,
+/// nothing to work, and no way ever to be planned again. So the history counts
+/// only commits that add or change a file there, and the Worktree counts only
+/// pending additions and modifications: a staged or unstaged deletion is neither.
 ///
 /// Since `base` rather than over the whole history, because a stage's branch is
 /// stacked on the branch of the stage before it: the predecessor's backlog and
@@ -3099,15 +3108,40 @@ fn backlog_written(worktree: &Path, base: &str) -> bool {
     // `--` rather than `--end-of-options`: what follows it is a pathspec, which
     // is git's own name for a path, and the base is a commit Verkstead resolved
     // itself rather than anything a human typed here.
-    let committed = git(worktree, &["log", "--format=%H", &since, "--", BACKLOG]);
+    let committed = git(
+        worktree,
+        &[
+            "log",
+            "--format=%H",
+            "--diff-filter=AM",
+            &since,
+            "--",
+            BACKLOG,
+        ],
+    );
+
     let uncommitted = git(worktree, &["status", "--porcelain", "--", BACKLOG]);
 
     match (committed, uncommitted) {
         (Some(committed), Some(uncommitted)) => {
-            !committed.trim().is_empty() || !uncommitted.trim().is_empty()
+            !committed.trim().is_empty() || uncommitted.lines().any(writes)
         }
         _ => true,
     }
+}
+
+/// Whether one `git status --porcelain` line is a file put there rather than
+/// taken away.
+///
+/// A line is `XY path`: what the index holds against the base, and what the
+/// working tree holds against the index. A deletion is a `D` in one of them, an
+/// untouched half is a space, and everything else — an addition, a modification,
+/// a rename, an untracked file's `?` — is something written that is still there
+/// to read. So a line counts wherever either letter is neither.
+fn writes(line: &str) -> bool {
+    line.bytes()
+        .take(2)
+        .any(|code| !matches!(code, b'D' | b' '))
 }
 
 /// Whether `.tasks/` has anything left in it to work.
@@ -3815,6 +3849,34 @@ mod tests {
         (dir, base)
     }
 
+    /// The other shape a branch is cut on: a base that still carries a `.tasks/`
+    /// of its own, which the new branch inherits and Verkstead clears.
+    ///
+    /// A stage whose predecessor stopped part way leaves exactly this — the list
+    /// it was working, committed, and nothing that finished with it.
+    fn inherited() -> (tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+
+        run(path, &["init", "--initial-branch", "main"]);
+        run(path, &["config", "user.email", "test@verkstead.invalid"]);
+        run(path, &["config", "user.name", "Verkstead Test"]);
+        std::fs::write(path.join("README.md"), "# a repository\n").unwrap();
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "-m", "first"]);
+
+        let backlog = path.join(BACKLOG);
+        std::fs::create_dir_all(&backlog).unwrap();
+        std::fs::write(backlog.join(TODO), "# Visibility\n").unwrap();
+        std::fs::write(backlog.join("01-first.md"), "# a task\n").unwrap();
+        run(path, &["add", "-A"]);
+        run(path, &["commit", "-m", "chore: plan Visibility tasks"]);
+
+        let base = run(path, &["rev-parse", "HEAD"]).trim().to_owned();
+
+        (dir, base)
+    }
+
     /// The reading the whole recovery turns on: a stage that was made and then
     /// lost its planning session has written no backlog, however much of one is
     /// behind it in the history it stacks on.
@@ -3848,6 +3910,45 @@ mod tests {
         run(path, &["commit", "-m", "chore: plan Pipeline tasks"]);
 
         assert!(backlog_written(path, &base), "written and committed");
+    }
+
+    /// And the shape the clearing commit leaves, which must not be read as a
+    /// plan: the branch inherited a list from its base and Verkstead took it
+    /// away, so the only `.tasks/` commit on this branch is a removal. A stage
+    /// read as planned here would have nothing to work and no way back.
+    #[test]
+    fn a_removal_is_not_a_backlog_this_branch_wrote() {
+        let (dir, base) = inherited();
+        let path = dir.path();
+
+        std::fs::remove_dir_all(path.join(BACKLOG)).unwrap();
+        run(path, &["add", "-A"]);
+        run(
+            path,
+            &["commit", "-m", "chore: clear the inherited task list"],
+        );
+
+        assert!(
+            !backlog_written(path, &base),
+            "the list this branch deleted belonged to the branch before it, and \
+             deleting one plans nothing",
+        );
+    }
+
+    /// The same thing before the clearing is committed: the removal is staged and
+    /// no commit on this branch has touched `.tasks/` at all. A pending deletion
+    /// is not a session mid-plan.
+    #[test]
+    fn a_staged_deletion_is_not_a_backlog_being_written() {
+        let (dir, base) = inherited();
+        let path = dir.path();
+
+        run(path, &["rm", "-r", "-q", "--", BACKLOG]);
+
+        assert!(
+            !backlog_written(path, &base),
+            "what is pending here is the list going away, not one arriving",
+        );
     }
 
     /// The case that must never be read as a stage to plan again: the backlog
