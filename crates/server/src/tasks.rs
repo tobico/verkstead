@@ -43,7 +43,7 @@ use verkstead_render::{BacklogPane, TaskEntry, TaskListEvent};
 
 use crate::checklist;
 use crate::repos::run;
-use crate::settings::GitAuthor;
+use crate::settings::Author;
 
 /// Where a Conversation's backlog lives inside its Worktree.
 pub(crate) const BACKLOG: &str = ".tasks";
@@ -268,38 +268,6 @@ pub(crate) fn numbered(name: &str) -> Option<u32> {
     number.parse().ok()
 }
 
-/// Who a clearing commit is by, which is both halves or there is no commit to
-/// make — see [`clear`].
-///
-/// Git wants an identity rather than half of one, and what it would say about
-/// the half that was missing is a sentence about git where the answer is about
-/// the settings page that has the field. The same rule [`crate::repos`] makes a
-/// repository's first commit under, for the same reason: a commit by
-/// `verkstead@localhost` is the one nobody notices.
-pub(crate) struct Author {
-    name: String,
-    email: String,
-}
-
-impl Author {
-    /// The configured author, or `None` where either half of it is missing.
-    ///
-    /// Every press that cuts a branch for new work asks this before it makes
-    /// anything, and refuses by name where the answer is `None`: onboarding
-    /// collects an author, so a start without one is a misconfiguration to name
-    /// rather than a case to work around.
-    pub(crate) fn configured(author: &GitAuthor) -> Option<Author> {
-        let (Some(name), Some(email)) = (author.name(), author.email()) else {
-            return None;
-        };
-
-        Some(Author {
-            name: name.to_owned(),
-            email: email.to_owned(),
-        })
-    }
-}
-
 /// What became of clearing the task list a fresh branch inherited from its base.
 ///
 /// The counts and the heading are read off the list before it goes, because
@@ -424,9 +392,9 @@ pub(crate) fn clear(worktree: &Path, base: &str, author: &Author) -> Clearing {
         worktree,
         &[
             "-c",
-            &format!("user.name={}", author.name),
+            &format!("user.name={}", author.name()),
             "-c",
-            &format!("user.email={}", author.email),
+            &format!("user.email={}", author.email()),
             "commit",
             "--quiet",
             "--message",
@@ -794,7 +762,7 @@ Takes a Conversation from finished grilling to implemented work.
 
     /// Who every clearing here is committed as.
     fn author() -> Author {
-        Author::configured(&GitAuthor::of(
+        Author::configured(&crate::settings::GitAuthor::of(
             Some("Ada Lovelace".to_owned()),
             Some("ada@example.com".to_owned()),
         ))
@@ -927,18 +895,5 @@ Takes a Conversation from finished grilling to implemented work.
 
         assert_eq!(clear(dir.path(), "main", &author()), Clearing::Refused);
         assert!(tasks.is_dir(), "and the list is where it was");
-    }
-
-    /// Both halves or no author at all — git wants an identity rather than half
-    /// of one.
-    #[test]
-    fn an_author_is_both_halves_or_nobody() {
-        let name = Some("Ada Lovelace".to_owned());
-        let email = Some("ada@example.com".to_owned());
-
-        assert!(Author::configured(&GitAuthor::of(name.clone(), email.clone())).is_some());
-        assert!(Author::configured(&GitAuthor::of(name, None)).is_none());
-        assert!(Author::configured(&GitAuthor::of(None, email)).is_none());
-        assert!(Author::configured(&GitAuthor::default()).is_none());
     }
 }

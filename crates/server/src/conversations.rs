@@ -53,10 +53,11 @@ use crate::boundaries;
 
 use crate::handoffs::Handoffs;
 use crate::repos::git;
+use crate::settings::Author;
 use crate::skills;
 use crate::stages::Startable;
 use crate::store;
-use crate::tasks::{self, Author, Clearing};
+use crate::tasks::{self, Clearing};
 use crate::worktrees;
 
 /// Start a Conversation against a registered Repo, on a branch name nobody has

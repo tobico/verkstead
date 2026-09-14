@@ -90,9 +90,10 @@ use std::path::{Path, PathBuf};
 use verkstead_schema::{Direction, Nudge};
 
 use crate::AppState;
+use crate::settings::Author;
 use crate::stages::{self, Next, Stage};
 use crate::store;
-use crate::tasks::{self, Author, Clearing};
+use crate::tasks::{self, Clearing};
 use crate::worktrees;
 
 /// Start the stage after `conversation_id`'s, where there is one.
