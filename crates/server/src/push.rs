@@ -530,6 +530,10 @@ mod tests {
                 label: "01".to_owned(),
                 roadmap: "rate-limiting".to_owned(),
             },
+            News::StageNeedsAuthor {
+                label: "01".to_owned(),
+                roadmap: "rate-limiting".to_owned(),
+            },
             News::RoadmapComplete {
                 roadmap: "rate-limiting".to_owned(),
             },
