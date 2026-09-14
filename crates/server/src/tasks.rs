@@ -42,7 +42,7 @@ use std::path::{Path, PathBuf};
 use verkstead_render::{BacklogPane, TaskEntry, TaskListEvent};
 
 use crate::checklist;
-use crate::repos::git;
+use crate::repos::run;
 use crate::settings::GitAuthor;
 
 /// Where a Conversation's backlog lives inside its Worktree.
@@ -381,6 +381,12 @@ impl Clearing {
 /// behind. No trailer either — the commit is Verkstead's own bookkeeping rather
 /// than a session's work.
 ///
+/// **Through [`crate::repos::run`] rather than [`crate::repos::git`]**, for the
+/// reason a create's own commit goes through it: `git` is the runner for reads
+/// and throws git's stderr away, and a [`Clearing::Refused`] takes the whole
+/// press back — so the reason git gave is the only thing anybody could act on
+/// afterwards, and it has to reach the log.
+///
 /// Blocking from end to end, and called where the checkouts are made.
 pub(crate) fn clear(worktree: &Path, base: &str, author: &Author) -> Clearing {
     let backlog = worktree.join(BACKLOG);
@@ -404,8 +410,9 @@ pub(crate) fn clear(worktree: &Path, base: &str, author: &Author) -> Clearing {
     // `--` rather than `--end-of-options`: what follows is a pathspec, which is
     // git's own name for a path, and it is this module's constant rather than
     // anything a human typed.
-    if git(worktree, &["rm", "--quiet", "-r", "--", BACKLOG]).is_none() {
+    if let Err(said) = run(worktree, &["rm", "--quiet", "-r", "--", BACKLOG]) {
         tracing::error!(
+            said,
             worktree = %worktree.display(),
             "the task list a branch inherited from its base could not be removed",
         );
@@ -413,7 +420,7 @@ pub(crate) fn clear(worktree: &Path, base: &str, author: &Author) -> Clearing {
         return Clearing::Refused;
     }
 
-    let committed = git(
+    let committed = run(
         worktree,
         &[
             "-c",
@@ -427,8 +434,9 @@ pub(crate) fn clear(worktree: &Path, base: &str, author: &Author) -> Clearing {
         ],
     );
 
-    if committed.is_none() {
+    if let Err(said) = committed {
         tracing::error!(
+            said,
             worktree = %worktree.display(),
             "the removal of an inherited task list could not be committed",
         );
@@ -901,6 +909,24 @@ Takes a Conversation from finished grilling to implemented work.
     fn a_start_that_cleared_nothing_says_nothing() {
         assert_eq!(Clearing::Nothing.notice("main"), None);
         assert_eq!(Clearing::Refused.notice("main"), None);
+    }
+
+    /// And a git that will not be rid of the list is a [`Clearing::Refused`],
+    /// with what git said about it in the log — which is the whole of what
+    /// anybody has to go on, the press it refuses taking every checkout back.
+    ///
+    /// A directory that is no repository at all, because what the `rm` is
+    /// refused for does not matter to what is done about it.
+    #[test]
+    fn a_git_that_will_not_be_rid_of_the_list_refuses_the_clearing() {
+        let dir = tempfile::tempdir().unwrap();
+        let tasks = dir.path().join(BACKLOG);
+
+        std::fs::create_dir_all(&tasks).unwrap();
+        std::fs::write(tasks.join(TODO), LIST).unwrap();
+
+        assert_eq!(clear(dir.path(), "main", &author()), Clearing::Refused);
+        assert!(tasks.is_dir(), "and the list is where it was");
     }
 
     /// Both halves or no author at all — git wants an identity rather than half

@@ -382,10 +382,16 @@ fn is_a_name(name: &str) -> bool {
 /// One git command in `dir`, or what it said about why not.
 ///
 /// Its own runner rather than [`git`] above, which is for the reads: what a read
-/// wants is the output or nothing at all, and what a create wants is the reason,
-/// which git writes on stderr. Read as one line the way a publish reads it — see
-/// [`crate::publishing::said`].
-fn run(dir: &Path, args: &[&str]) -> Result<(), String> {
+/// wants is the output or nothing at all, and what a *write* wants is the
+/// reason, which git writes on stderr. Read as one line the way a publish reads
+/// it — see [`crate::publishing::said`].
+///
+/// Which is why every git call Verkstead makes on its own account comes through
+/// here rather than through [`git`]: a create's first commit, and the clearing
+/// of an inherited task list in [`crate::tasks::clear`]. Both of them take the
+/// whole press back when they fail, and a refusal with no reason in the log is
+/// one nobody can do anything about.
+pub(crate) fn run(dir: &Path, args: &[&str]) -> Result<(), String> {
     let output = Command::new("git")
         .args(args)
         .unseen()
