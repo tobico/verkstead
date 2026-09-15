@@ -86,8 +86,8 @@
 //! branch, resolve the conflicts, run the tests and push — by merging, which is
 //! what a Verkstead nobody has configured does, so that nothing is force-pushed
 //! and nothing stacked on the branch breaks. The human can ask for a rebase
-//! instead, globally or for one Repo, and then the session is told to rebase and
-//! force-push with a lease. See [`resolve`], [`resolution`] and [`resolving`].
+//! instead, in the settings file, and then the session is told to rebase and
+//! force-push with a lease. See [`resolve`] and [`resolving`].
 //!
 //! A conflict is the whole of what such a poll *dispatches*. A branch nothing
 //! can land is not a branch worth getting a check green on, and the resolution's
@@ -1115,7 +1115,11 @@ async fn resolve(
     // Read as the session is dispatched rather than held from anywhere: the
     // settings file is read every time it is asked for, and a resolution
     // configured a minute ago is what the next conflict is resolved by.
-    let resolution = resolution(state, watched.repo.id).await;
+    //
+    // Here rather than on a blocking thread: it is one small file, and this is
+    // the moment a conflict was found rather than anything on the poll's hot
+    // path.
+    let resolution = state.settings.config().conflict_resolution();
 
     tracing::info!(
         conversation_id,
@@ -1129,34 +1133,6 @@ async fn resolve(
         crate::runner::address(state, conversation_id, &resolving(watched, resolution)).await;
 
     Watching::Again(said.or(writing))
-}
-
-/// How a conflict in this Repo is to be resolved: what the Repo says, else what
-/// the settings file says, else a merge.
-///
-/// Three answers in that order and each is a real state. A Repo that has been
-/// told something has been told it about this repository in particular — a
-/// stacked branch that must not be rewritten, say — so it wins over the setting
-/// every other Repo shares. A settings file that says nothing is a merge, which
-/// is the answer that rewrites nothing.
-///
-/// A store that will not answer is a merge as well, and deliberately: the
-/// question here is whether to force-push somebody's branch, and *we could not
-/// read the override* is no reason to.
-async fn resolution(state: &AppState, repo_id: i64) -> store::ConflictResolution {
-    match store::repo_resolution(&state.pool, repo_id).await {
-        Ok(Some(resolution)) => return resolution,
-        Ok(None) => {}
-        Err(error) => {
-            tracing::error!(error = ?error, repo_id, "reading how a Repo resolves a conflict failed, so the merge every Repo shares is what happens");
-            return store::ConflictResolution::Merge;
-        }
-    }
-
-    // The settings file, read here rather than on a blocking thread: it is one
-    // small file, and this is the moment a conflict was found rather than
-    // anything on the poll's hot path.
-    state.settings.config().conflict_resolution()
 }
 
 /// Stop asking the machine about a pull request that will not merge, and say so

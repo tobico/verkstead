@@ -56,7 +56,6 @@ import type {
   RepoRemoved,
   RepoSwitched,
   RepoView,
-  ConflictResolution,
   Resolved,
   Response as Decided,
   Resumed,
@@ -261,20 +260,6 @@ export function createRepo(
 /// with live work on it is refused for a reason worth saying, and not a failure.
 export function removeRepo(id: number): Promise<RepoRemoved> {
   return post<RepoRemoved>(`/api/ui/repos/${id}/remove`);
-}
-
-/// Say how one Repo resolves a merge conflict from now on, or — with `null` —
-/// take that back, so it does whatever every other Repo does.
-///
-/// A value rather than an action, and nothing to refuse: what is sent is where
-/// the setting is to stand. The answer is the Repo as it now stands, read afresh
-/// by the server, which is what the pane draws — the same rule the settings page
-/// saves under.
-export function setRepoResolution(
-  id: number,
-  resolution: ConflictResolution | null,
-): Promise<RepoView> {
-  return post<RepoView>(`/api/ui/repos/${id}/resolution`, { resolution });
 }
 
 /// The registered Repos holding roadmaps nothing is driving.

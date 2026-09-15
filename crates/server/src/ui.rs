@@ -33,7 +33,7 @@ use verkstead_render::{
     AttachmentRemoved, Author, BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView,
     CheckRollup, CleanupStepView, CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded,
     CompanionBranchRenamed, CompanionMode, CompanionModeChoice, CompanionModeChosen,
-    CompanionRemoved, CompanionView, CompileCaching, ConflictResolutionEdit, ConversationArchived,
+    CompanionRemoved, CompanionView, CompileCaching, ConflictResolution, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, Creation, Cursor, GrillingStarted, IgnoreRule,
     IgnoredCommentsEdit, InstallPress, Lifecycle, Locked, Merging, MissedOut, NewAdoption,
@@ -115,7 +115,6 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // under the Profile: what comes back is a named outcome, and a refusal
         // is an answer rather than a status.
         .route("/api/ui/repos/{id}/remove", post(remove_repo))
-        .route("/api/ui/repos/{id}/resolution", post(set_repo_resolution))
         .route(
             "/api/ui/conversations",
             get(conversations).post(start_conversation),
@@ -907,38 +906,6 @@ async fn remove_repo(State(state): State<AppState>, Path(id): Path<String>) -> H
         Err(error) => {
             tracing::error!(error = ?error, repo_id = id, "removing a Repo failed");
             unavailable("the Repo could not be removed")
-        }
-    }
-}
-
-/// `POST /api/ui/repos/{id}/resolution` — say how this Repo resolves a merge
-/// conflict, or take back what was said.
-///
-/// A value rather than an action, and nothing to refuse: what the body carries
-/// is where the setting is to stand — one of the two words, or nothing at all
-/// for *whatever the settings page says for every Repo*.
-///
-/// The answer is the Repo as it now stands rather than an outcome to read, for
-/// the reason the settings' save answers with the settings: the pane draws what
-/// the server says rather than what it just sent.
-///
-/// A 404 for an id nothing is registered under, as the reads above give: neither
-/// names a Repo, and the pane says the repo is gone.
-async fn set_repo_resolution(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    Json(edit): Json<ConflictResolutionEdit>,
-) -> HttpResponse {
-    let Ok(id) = id.parse::<i64>() else {
-        return no_such_repo(&id);
-    };
-
-    match crate::repos::set_resolution(&state.pool, id, edit.resolution).await {
-        Ok(Some(view)) => Json(view).into_response(),
-        Ok(None) => no_such_repo(&id.to_string()),
-        Err(error) => {
-            tracing::error!(error = ?error, repo_id = id, "saying how a Repo resolves a conflict failed");
-            unavailable("the Repo could not be told how to resolve a conflict")
         }
     }
 }
@@ -4177,10 +4144,10 @@ async fn save_settings(
                     CleanupStep::of(edit.cleanup.trim.enabled, Some(edit.cleanup.trim.days)),
                     CleanupStep::of(edit.cleanup.delete.enabled, Some(edit.cleanup.delete.days)),
                 ),
-                // And how a conflict is resolved where the Repo it is in says
-                // nothing, which is one of two words and never absent: there is no
-                // third state for a page to send.
-                crate::repos::stored(edit.conflict_resolution),
+                // And how a conflict is resolved, in every Repo there is, which
+                // is one of two words and never absent: there is no third state
+                // for a page to send.
+                stored(edit.conflict_resolution),
                 // And whether Done shares the record to the pull request, which is
                 // a switch: two answers, and the save says which of them this is.
                 edit.share_on_done,
@@ -4297,6 +4264,27 @@ fn compile_caching(cached: bool) -> CompileCaching {
     }
 }
 
+/// The stored word for a resolution as the settings page receives it, and back
+/// again for what a save of that page sends.
+///
+/// Two words either way, and the mapping is here rather than beside the file or
+/// beside the store because this is where either of them crosses the wire: the
+/// settings page is the one place a conflict resolution is read or written.
+fn resolution(resolution: store::ConflictResolution) -> ConflictResolution {
+    match resolution {
+        store::ConflictResolution::Merge => ConflictResolution::Merge,
+        store::ConflictResolution::Rebase => ConflictResolution::Rebase,
+    }
+}
+
+/// And back, which is what a press on the settings page sends.
+fn stored(resolution: ConflictResolution) -> store::ConflictResolution {
+    match resolution {
+        ConflictResolution::Merge => store::ConflictResolution::Merge,
+        ConflictResolution::Rebase => store::ConflictResolution::Rebase,
+    }
+}
+
 /// How the settings stand, read off the files.
 ///
 /// The token comes back as its last four characters and the moment the file was
@@ -4350,7 +4338,7 @@ fn as_told(
         },
         // Where the setting sits rather than whether anybody has been here:
         // nothing configured is a merge, and there is no third state to draw.
-        conflict_resolution: crate::repos::resolution(config.conflict_resolution()),
+        conflict_resolution: resolution(config.conflict_resolution()),
 
         // And where the switch beside it sits, which is off until somebody has
         // been here — the one setting on the page whose unconfigured state is

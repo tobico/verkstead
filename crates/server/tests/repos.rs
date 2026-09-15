@@ -21,10 +21,6 @@
 //! Where a repository *is* is not one of the refusals. Anywhere the server can
 //! read is somewhere a Repo can be registered from, whatever the installation
 //! was started with.
-//!
-//! And the one thing there is to say to a Repo that is already registered: how
-//! it resolves a merge conflict, which is an override of the global setting and
-//! so is nothing at all until somebody says something.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -36,7 +32,7 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::{ConflictResolution, Created, Registered, RepoEntry, RepoRemoved, RepoView};
+use verkstead_render::{Created, Registered, RepoEntry, RepoRemoved, RepoView};
 // Only the shell stand-in below authenticates as a saved token, and that is
 // off Windows with the shell it needs.
 #[cfg(unix)]
@@ -139,17 +135,6 @@ async fn remove(app: &Router, id: i64) -> RepoRemoved {
         app,
         &format!("/api/ui/repos/{id}/remove"),
         &serde_json::Value::Null,
-    )
-    .await
-}
-
-/// Say how one Repo is to resolve a conflict from now on — or, with `None`, that
-/// it is to go back to whatever every other Repo does.
-async fn resolve(app: &Router, id: i64, resolution: Option<ConflictResolution>) -> RepoView {
-    post(
-        app,
-        &format!("/api/ui/repos/{id}/resolution"),
-        &serde_json::json!({ "resolution": resolution }),
     )
     .await
 }
@@ -501,79 +486,6 @@ async fn a_repo_opened_carries_its_branches_its_work_and_its_roadmaps() {
         "a repository with no roadmaps has none waiting: {:?}",
         opened.roadmaps,
     );
-}
-
-/// A registered Repo says nothing about how it resolves a conflict until
-/// somebody tells it, and then it says that until they take it back.
-///
-/// `null` is *whatever the settings page says for every Repo* rather than
-/// *merge*: the two are the same answer today and stop being the same the moment
-/// the global is changed, so what a Repo nobody has been to holds is nothing at
-/// all.
-#[tokio::test]
-async fn a_repos_resolution_is_said_taken_back_and_read_off_the_pane() {
-    let src = tempfile::tempdir().unwrap();
-    let (_dir, app) = workbench().await;
-    let repo = repository(src.path().join("verkstead"));
-
-    added(register(&app, &repo).await);
-    let id = listed(&app).await[0].id;
-
-    let opened: RepoView = get(&app, &format!("/api/ui/repos/{id}")).await;
-    assert_eq!(
-        opened.conflict_resolution, None,
-        "a Repo nobody has told overrides nothing",
-    );
-
-    let saved = resolve(&app, id, Some(ConflictResolution::Rebase)).await;
-    assert_eq!(
-        saved.conflict_resolution,
-        Some(ConflictResolution::Rebase),
-        "the answer is the Repo as it now stands, which is what the pane draws",
-    );
-
-    let read: RepoView = get(&app, &format!("/api/ui/repos/{id}")).await;
-    assert_eq!(read.conflict_resolution, Some(ConflictResolution::Rebase));
-
-    assert_eq!(
-        resolve(&app, id, Some(ConflictResolution::Merge))
-            .await
-            .conflict_resolution,
-        Some(ConflictResolution::Merge),
-        "and either word can be the override, a Repo pinned to a merge being a \
-         real thing to say where the global is a rebase",
-    );
-
-    assert_eq!(
-        resolve(&app, id, None).await.conflict_resolution,
-        None,
-        "and clearing it puts the Repo back to whatever every other one does",
-    );
-}
-
-/// A Repo nothing is registered under has nothing to be told, and saying so is
-/// the same refusal opening one gives: a pane somebody left open in another tab
-/// while the Repo was taken away.
-#[tokio::test]
-async fn a_repo_that_is_not_there_cannot_be_told_how_to_resolve_a_conflict() {
-    let (_dir, app) = workbench().await;
-
-    for asked in ["404", "not-a-number"] {
-        let (status, _) = fetch(
-            &app,
-            Request::builder()
-                .method("POST")
-                .uri(format!("/api/ui/repos/{asked}/resolution"))
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    serde_json::json!({ "resolution": "Merge" }).to_string(),
-                ))
-                .unwrap(),
-        )
-        .await;
-
-        assert_eq!(status, StatusCode::NOT_FOUND, "telling {asked}");
-    }
 }
 
 /// A Repo that is not registered has nothing to open, and saying so is a

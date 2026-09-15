@@ -324,19 +324,10 @@ already read and breaks anything stacked on the branch, and nobody should meet
 that for never having found the settings page. In `config.yaml` the word is
 lowercase, as `merge` or `rebase`.
 
-One repo can say otherwise, which is a fact about the repo rather than about the
-machine and so lives in the database beside it — set from that repo's own pane on
-the settings page, or over the API:
-
-```console
-$ curl -X POST -H 'Content-Type: application/json' \
-    -d '{"resolution":"Rebase"}' \
-    http://127.0.0.1:8422/api/ui/repos/1/resolution
-```
-
-`null` there takes the override back, so that repo does whatever every other one
-does. It is nothing at all rather than a copy of today's global, so a repo left
-alone follows the setting above when it is changed.
+That word is the whole of the answer, in every repo. One repo could once say
+otherwise, from its own pane on the settings page; an override no settings page
+draws would be a repo rebasing with nowhere to read why, so it is gone and the
+file is the only place this is asked.
 
 The link is composed as a page is drawn rather than written down at the publish.
 What the record holds is the gist's own URL, so a share published before there

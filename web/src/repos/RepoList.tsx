@@ -93,8 +93,6 @@ import { IconButton } from "../IconButton";
 import { Modal } from "../Modal";
 import { PaneSticky } from "../Panes";
 import { PathField } from "../PathField";
-import { RESOLUTION, RESOLVES, forcePushed } from "../settings/Conflicts";
-import { Picker } from "../picking";
 import {
   RefusedError,
   createRepo,
@@ -102,7 +100,6 @@ import {
   loadRepo,
   registerRepo,
   removeRepo,
-  setRepoResolution,
 } from "../api/client";
 import type {
   Created,
@@ -110,7 +107,6 @@ import type {
   RepoEntry,
   RepoRemoved,
   RepoView,
-  ConflictResolution,
 } from "../api/types";
 import { repoParent, setRepoParent } from "../device";
 import { useReading } from "../freshness";
@@ -472,15 +468,11 @@ export function RepoDetails(props: {
                 </Show>
               </section>
 
-              {/* How a conflicted pull request in this repository is resolved,
-                  which is one of the two things about a Repo that are written
-                  rather than read. Over the removal because it is something to
-                  change about a Repo that is staying. */}
-              <ConflictResolution repo={repo()} />
-              {/* And what only this repository's sessions are given, which is
-                  the other: the binds scoped to its name. Drawn whether or not
-                  it has any, because the pane is where somebody learns the
-                  section exists. */}
+              {/* What only this repository's sessions are given: the binds
+                  scoped to its name, which is the one thing about a Repo that
+                  is written rather than read. Drawn whether or not it has any,
+                  because the pane is where somebody learns the section
+                  exists. */}
               <RepoBinds repo={repo().name} />
 
               {/* And the one press there is to make about a Repo, under
@@ -526,75 +518,6 @@ export function RepoDetails(props: {
         </Match>
       </Switch>
     </>
-  );
-}
-
-/// How this Repo resolves a merge conflict, as the picker that says so.
-///
-/// Three answers rather than the settings page's two, and the third is the one
-/// most Repos are on: *use the global setting*, which is this Repo saying
-/// nothing at all. It is nothing rather than a copy of what the global says
-/// today, so a Repo left alone follows that setting when it is changed.
-///
-/// The picker is its own press, the way the build cache's switch is: a choice
-/// that needed confirming afterwards would be a choice made twice. What the
-/// answer in force costs is said under it, in the words the settings page uses —
-/// the same sentence in both places, because it is the same choice.
-function ConflictResolution(props: { repo: RepoView }): JSX.Element {
-  const queries = useQueryClient();
-
-  const save = useMutation(() => ({
-    mutationFn: (resolution: ConflictResolution | null) =>
-      setRepoResolution(props.repo.id, resolution),
-    // The answer *is* a fresh read of the Repo, so a second read would learn
-    // nothing and could only disagree with what is on screen.
-    onSuccess: (saved: RepoView) =>
-      queries.setQueryData(["repo", props.repo.id], saved),
-  }));
-
-  /// What is chosen now, as the picker writes it: the empty string is the option
-  /// that sends nothing, which is this Repo overriding nothing.
-  const chosen = (): string => props.repo.conflict_resolution ?? "";
-
-  return (
-    <section class={styles.resolving}>
-      <h2>Conflict resolution</h2>
-
-      <label for="repo-conflict-resolution">
-        How a pull request that will not merge is resolved here
-      </label>
-      <Picker
-        id="repo-conflict-resolution"
-        options={["", "Merge", "Rebase"]}
-        value={(option) => option}
-        label={(option) =>
-          option === ""
-            ? "Use the global setting"
-            : RESOLUTION[option as ConflictResolution]
-        }
-        chosen={chosen()}
-        disabled={save.isPending}
-        pick={(picked) =>
-          save.mutate(picked === "" ? null : (picked as ConflictResolution))
-        }
-      />
-
-      <p class={styles.resolves}>
-        {props.repo.conflict_resolution === null
-          ? "Whatever the settings page says for every repo."
-          : RESOLVES[props.repo.conflict_resolution]}
-      </p>
-
-      <Show when={props.repo.conflict_resolution === "Rebase"}>
-        {forcePushed()}
-      </Show>
-
-      <Show when={save.isError}>
-        <ErrorLine class={styles.failure}>
-          That could not be saved: {save.error?.message}
-        </ErrorLine>
-      </Show>
-    </section>
   );
 }
 

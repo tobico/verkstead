@@ -2,17 +2,17 @@
 //! still there after the server has been restarted, and what taking one away
 //! does to all of that.
 //!
-//! And the one thing a registration is told afterwards: how a merge conflict on
-//! its pull requests is resolved, which is an override of the global setting and
-//! so is nothing at all until somebody says something.
+//! And what a registration is no longer told: how a merge conflict on its pull
+//! requests is resolved. That was an override of the settings file, kept in a
+//! table of its own, and an install that saved one comes up without it.
 
 use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Adding, ConflictResolution, Lifecycle, Unregistering, add_companion, load_repo, open_database,
-    recorded_repos, register_repo, registered_repos, repo_resolution, set_repo_resolution,
-    set_state, start_adoption, start_conversation, unregister_repo,
+    Adding, Lifecycle, Unregistering, add_companion, load_repo, open_database, recorded_repos,
+    register_repo, registered_repos, set_state, start_adoption, start_conversation,
+    unregister_repo,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -346,80 +346,57 @@ async fn a_repo_taken_away_is_still_one_to_prune() {
     );
 }
 
-/// A Repo nobody has said anything about overrides nothing: what resolves a
-/// conflict in it is whatever the settings file says for every Repo at once,
-/// and *nothing here* is how that is spelled.
-#[tokio::test]
-async fn a_repo_nobody_has_told_resolves_conflicts_the_way_everything_else_does() {
-    let (_dir, pool) = fresh_pool().await;
-
-    let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
-        .await
-        .unwrap()
-        .unwrap();
-
-    assert_eq!(repo_resolution(&pool, repo.id).await.unwrap(), None);
-}
-
-/// And one that has been told keeps what it was told, either way round, until
-/// somebody takes it back.
+/// An install that had told one Repo to rebase comes up with nothing saying so.
 ///
-/// Taking it back is `None` rather than the word the global happens to hold
-/// today: what *use the global setting* means is that there is nothing written
-/// here, and a Repo holding this morning's global would be a choice nobody made.
+/// The override is gone from every reader, and a table nothing reads is a
+/// setting nobody can see they still have — so opening the database drops it,
+/// beside the creates. Written here as the restart it is: a Verkstead that had
+/// saved one, stopped, and been started again on the same file.
 #[tokio::test]
-async fn a_repo_told_how_to_resolve_a_conflict_keeps_it_until_it_is_taken_back() {
-    let (_dir, pool) = fresh_pool().await;
+async fn an_override_a_previous_verkstead_saved_is_dropped_on_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let database = dir.path().join("verkstead.db");
 
+    let pool = open_database(&database).await.unwrap();
     let repo = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
         .await
         .unwrap()
-        .unwrap();
+        .expect("the registration should be taken");
 
-    set_repo_resolution(&pool, repo.id, Some(ConflictResolution::Rebase))
+    // What the Verkstead before this one wrote, in the shape it wrote it.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS repo_resolutions (
+             repo_id  INTEGER PRIMARY KEY REFERENCES repos(id),
+             strategy TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO repo_resolutions (repo_id, strategy) VALUES (?, 'rebase')")
+        .bind(repo.id)
+        .execute(&pool)
         .await
         .unwrap();
-    assert_eq!(
-        repo_resolution(&pool, repo.id).await.unwrap(),
-        Some(ConflictResolution::Rebase),
-    );
+    pool.close().await;
 
-    // Said again, which is the settings page being pressed twice.
-    set_repo_resolution(&pool, repo.id, Some(ConflictResolution::Merge))
-        .await
-        .unwrap();
-    assert_eq!(
-        repo_resolution(&pool, repo.id).await.unwrap(),
-        Some(ConflictResolution::Merge),
-    );
+    let pool = open_database(&database).await.unwrap();
 
-    set_repo_resolution(&pool, repo.id, None).await.unwrap();
-    assert_eq!(repo_resolution(&pool, repo.id).await.unwrap(), None);
-}
-
-/// One Repo's override is one Repo's. Two registered repositories are two
-/// answers, and the one nobody has been to is still the global's.
-#[tokio::test]
-async fn an_override_is_one_repos_alone() {
-    let (_dir, pool) = fresh_pool().await;
-
-    let told = register_repo(&pool, Path::new("/watched/verkstead"), "verkstead", "main")
-        .await
-        .unwrap()
-        .unwrap();
-
-    let untold = register_repo(&pool, Path::new("/watched/askance"), "askance", "main")
-        .await
-        .unwrap()
-        .unwrap();
-
-    set_repo_resolution(&pool, told.id, Some(ConflictResolution::Rebase))
-        .await
-        .unwrap();
+    let held: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+            .bind("repo_resolutions")
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
 
     assert_eq!(
-        repo_resolution(&pool, told.id).await.unwrap(),
-        Some(ConflictResolution::Rebase),
+        held, None,
+        "the table the override was kept in is gone, so nothing can be answering out of it",
     );
-    assert_eq!(repo_resolution(&pool, untold.id).await.unwrap(), None);
+
+    assert_eq!(
+        registered_repos(&pool).await.unwrap().len(),
+        1,
+        "and the registration itself is untouched: the Repo is the same Repo",
+    );
 }

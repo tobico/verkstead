@@ -115,8 +115,7 @@ pub use push::{
 };
 pub use repos::{
     ConflictResolution, Repo, Unregistering, load_repo, recorded_repos, register_repo,
-    registered_repo, registered_repo_at, registered_repos, repo_resolution, set_repo_resolution,
-    unregister_repo,
+    registered_repo, registered_repo_at, registered_repos, unregister_repo,
 };
 pub use session_names::session_id;
 pub use session_pairings::RanUnder;

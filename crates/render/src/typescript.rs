@@ -20,16 +20,16 @@ use crate::{
     AbandonedRepo, Adopted, AnswerAttached, AnswerAttachmentRemoved, Attached, AttachmentRemoved,
     BacklogPane, BaseBranchChoice, BaseRecorded, BranchRename, BranchRenamed, BriefEdit,
     BriefSaved, Capture, CommitPane, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
-    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, ConflictResolutionEdit,
-    ConversationArchived, ConversationClosed, ConversationEntry, ConversationSteered,
-    ConversationStopped, ConversationUnarchived, ConversationView, Created, Creation,
-    DirectoryListing, GrillingStarted, InstallPress, Locked, NewAdoption, NewCompanion,
-    NewConversation, NewOrder, NewPullRequestAdoption, OnboardingView, OpenPullRequestRepo,
-    PrefillView, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
-    ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RemoteBanner, RemoteView,
-    RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved,
-    Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress, SetReading, SettingsEdit,
-    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
+    CompanionModeChoice, CompanionModeChosen, CompanionRemoved, ConversationArchived,
+    ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
+    ConversationUnarchived, ConversationView, Created, Creation, DirectoryListing, GrillingStarted,
+    InstallPress, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder,
+    NewPullRequestAdoption, OnboardingView, OpenPullRequestRepo, PrefillView, ProfileChoice,
+    ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
+    PushKey, Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
+    RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane,
+    RoleChoice, Screen, ServeEdit, ServePress, SetReading, SettingsEdit, SettingsSaved,
+    SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
     ShowingArchived, Shown, Started, SteerOpened, SteerSubmission, Submitted, Subscribed,
     Subscription, TakenUp, TerminalOpened, TerminalsView, TranscriptView, Unsubscribe,
     UpdateNotice, Watching,
@@ -71,11 +71,6 @@ fn the_viewers_types_are_written_from_these() {
     // in, and the whole opened Repo or the reason there is none back.
     Creation::export_all(&config).unwrap();
     Created::export_all(&config).unwrap();
-
-    // And the one thing there is to say to a registered Repo: how it resolves a
-    // conflict, which is an override of the global setting or nothing at all.
-    // Its own type rather than a field of a view, being what a press sends.
-    ConflictResolutionEdit::export_all(&config).unwrap();
 
     // The workbench: the sidebar, one Conversation with its Timeline, and the
     // three things the human changes about a drafting one. Each edit brings its

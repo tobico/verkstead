@@ -14,9 +14,10 @@
 //! later by a stage that will not push, so it is said here, beside the choice,
 //! rather than left to be discovered.
 //!
-//! One setting for every Repo, and any Repo may say otherwise — that override is
-//! a fact about the Repo and is set from its own pane, in `repos/RepoList.tsx`.
-//! This is what a Repo that says nothing falls back to.
+//! One setting for every Repo, and the whole of the answer about any of them.
+//! A Repo could once be given one of its own, from its own pane; an override no
+//! settings page draws would be a Repo rebasing with nowhere to read why, so it
+//! is asked here and only here.
 //!
 //! Two halves in two panes, which is what this page is: a card in the middle
 //! saying how conflicts are resolved, and the picker that changes it in the
@@ -42,10 +43,9 @@ import { heldCleanup, heldPaths } from "./held";
 /// What each strategy is called where a human reads it, and what it does said
 /// in one line.
 ///
-/// Written once and read by both panes here and by the Repo's own pane, because
-/// all three are offering the same two answers: three spellings of *rebase*
-/// would be three chances to describe it differently, and the description is the
-/// part that matters.
+/// Written once and read by both panes here, because the two are offering the
+/// same two answers: two spellings of *rebase* would be two chances to describe
+/// it differently, and the description is the part that matters.
 export const RESOLUTION: Record<ConflictResolution, string> = {
   Merge: "Merge the base branch in",
   Rebase: "Rebase onto the base branch",
@@ -121,7 +121,7 @@ export function ConflictsCard(props: {
                   ? "rebasing the branch onto its base"
                   : "merging the base branch in"}
               </span>
-              , unless the repo says otherwise.
+              .
             </p>
 
             <Show when={told().conflict_resolution === "Rebase"}>
@@ -212,8 +212,7 @@ export function ConflictsPane(props: {
                 A branch its base has moved under conflicts without anybody
                 touching it, and nothing lands until the conflict is resolved.
                 Verkstead sends a session at one and this is what that session is
-                told to do. A repo can be given an answer of its own, and then
-                this is what every other repo does.
+                told to do, in every repo.
               </Note>
 
               <div class={styles.choosing}>

@@ -1121,17 +1121,6 @@ export type CompileCaching = "Cached" | "NoSccache";
 export type ConflictResolution = "Merge" | "Rebase";
 
 /**
- * How one Repo is to resolve a conflict from now on, which is the one thing
- * there is to *say* to a registered Repo besides taking it away.
- *
- * `null` takes the override back rather than writing the global's word down:
- * what *use the global setting* means is that this Repo says nothing, and a
- * Repo holding a copy of today's global would go on holding it after the global
- * moved.
- */
-export type ConflictResolutionEdit = { resolution: ConflictResolution | null, };
-
-/**
  * And what became of archiving one: putting a Closed Conversation away, so the
  * sidebar stops drawing it.
  *
@@ -3141,18 +3130,7 @@ finished: number,
  * new-conversation box finds them. Empty where there are none, which is
  * most repositories most days.
  */
-roadmaps: Array<AbandonedRoadmap>, 
-/**
- * How a conflicted pull request in this repository is resolved, where this
- * Repo has been told something other than what every other one does.
- *
- * `null` is *whatever the global setting says* rather than *merge*: the two
- * are the same answer today and stop being the same the moment the global
- * is changed, and a Repo that had quietly frozen this morning's global
- * would be a choice nobody made. What that global is, is on the settings
- * themselves — see [`crate::SettingsView::conflict_resolution`].
- */
-conflict_resolution: ConflictResolution | null, };
+roadmaps: Array<AbandonedRoadmap>, };
 
 /**
  * The **Resolve conflicts** press as the page receives it: when, and nothing

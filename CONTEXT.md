@@ -44,9 +44,6 @@ Profile, which is refused for nothing: a Repo is the directory a session is
 standing in, where a Profile is only the account the next one would have been
 launched under. Registering the same path again brings the same Repo back rather
 than making a second one.
-One thing about a registered Repo is configured rather than read off the
-repository: its **resolution strategy**, where its conflicts are to be resolved
-differently from every other Repo's.
 _Avoid_: project, codebase, checkout
 
 **Conversation**:
@@ -1971,10 +1968,11 @@ having found a settings page. What it costs is said on the page beside the
 choice.
 
 Said once for every Repo, in `config.yaml` beside the build cache — an absent
-key, an absent file and an unparseable one all mean merge — and any Repo may
-override it, which is a fact about the Repo and lives in the store beside it. A
-Repo that says nothing follows the global setting rather than a copy of what it
-said the day the Repo was registered.
+key, an absent file and an unparseable one all mean merge — and that is the
+whole of the answer about any of them. A Repo could once be given one of its
+own, from its own settings pane; an override no settings page draws would be a
+Repo rebasing with nowhere to read why, so the file is where this is asked and
+the only place.
 _Avoid_: merge strategy, conflict policy, force push setting
 
 **Rescue**:

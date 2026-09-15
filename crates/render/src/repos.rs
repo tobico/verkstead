@@ -18,7 +18,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{AbandonedRoadmap, ConflictResolution};
+use crate::AbandonedRoadmap;
 
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
@@ -167,16 +167,6 @@ pub struct RepoView {
     /// new-conversation box finds them. Empty where there are none, which is
     /// most repositories most days.
     pub roadmaps: Vec<AbandonedRoadmap>,
-
-    /// How a conflicted pull request in this repository is resolved, where this
-    /// Repo has been told something other than what every other one does.
-    ///
-    /// `null` is *whatever the global setting says* rather than *merge*: the two
-    /// are the same answer today and stop being the same the moment the global
-    /// is changed, and a Repo that had quietly frozen this morning's global
-    /// would be a choice nobody made. What that global is, is on the settings
-    /// themselves — see [`crate::SettingsView::conflict_resolution`].
-    pub conflict_resolution: Option<ConflictResolution>,
 }
 
 /// A repository the human is asking Verkstead to *make*, said as where it is to
@@ -277,17 +267,4 @@ pub enum Created {
     /// through making is taken back: a create that did not happen leaves nothing
     /// behind that looks as though it did.
     Refused(String),
-}
-
-/// How one Repo is to resolve a conflict from now on, which is the one thing
-/// there is to *say* to a registered Repo besides taking it away.
-///
-/// `null` takes the override back rather than writing the global's word down:
-/// what *use the global setting* means is that this Repo says nothing, and a
-/// Repo holding a copy of today's global would go on holding it after the global
-/// moved.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct ConflictResolutionEdit {
-    pub resolution: Option<ConflictResolution>,
 }
