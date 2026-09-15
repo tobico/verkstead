@@ -1,12 +1,11 @@
 /* The rows a configured path is drawn as, and the field another is written into
    — see `PathEditor.tsx`.
 
-   Its own module rather than the Paths section's, because two panes draw these:
-   the global binds on `/settings/paths`, and one Repo's own binds on that
-   Repo's pane. What a row looks like is the same question in both places, and
-   one sheet is what keeps it one answer. What is around them —
-   the card, the headings, the notices a pane says beside its lists — belongs to
-   whichever pane is drawing them. */
+   Its own module rather than the Paths section's, the way the parts themselves
+   are their own module: a row's look is a question about a row rather than
+   about the pane it stands in. What is around them — the card, the headings,
+   the notices a pane says beside its lists — belongs to the pane drawing
+   them. */
 
 .rows {
   margin: 0.85rem 0 0;

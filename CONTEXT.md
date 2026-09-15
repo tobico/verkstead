@@ -18,25 +18,29 @@ Conversations attach to one — and while one is still a Draft with nothing chec
 out, the Repo dropdown on its composer moves it onto another. Its files stay the
 source of truth for task lists (`.tasks/`) and roadmaps (`docs/roadmaps/`) —
 Verkstead parses and renders them, and never owns them.
-**One is made or opened from the dropdown that lists them**, and not only from
-the settings page. Two rows sit at the foot of that dropdown behind a rule,
+**One is made or opened from the dropdown that lists them**, which is the only
+place either is done: the settings page lists what is registered and has no
+registration of its own. Two rows sit at the foot of that dropdown behind a rule,
 wherever it is drawn — the compose page and a draft's composer both, it being one
-control. **Open repo** registers a repository that already exists, over the same
-path field and with the same refusals the settings page's own registration has.
+control. **Open repo** registers a repository that already exists, over a path
+field that browses, and a path already registered is the repository somebody
+named rather than a refusal.
 **Create repo** makes one first: a directory under a parent that is browsed for,
 `git init` onto `main`, a `README.md` naming it and one commit by the configured
 git author — an empty repository has no commit for a Conversation to take a base
 from, which is why there is a README at all — and, where a GitHub token is saved
 and the tick is left on, a private repository of the same name with `origin` set
-and `main` pushed. Both land on the one registry the settings page's registration
-lands on, and either way the Repo becomes the draft's the moment it is there: the
-compose page's own state, or a move on a saved draft. A create that made the
+and `main` pushed. Both land on the one registry, and either way the Repo becomes
+the draft's the moment it is there: the compose page's own state, or a move on a
+saved draft. A create that made the
 directory and then failed at GitHub is still a create — what it made is
 registered and picked, and what failed is said.
 **Registering one can be taken back, and that is an unregistering rather than a
-delete**: Verkstead stops offering it for new work — the settings list, the Repo
-dropdown on the compose page and on a draft's composer, the roadmaps waiting to
-be adopted — while every Conversation ever worked in it goes on naming it,
+delete**, on the settings page's **Repos** pane, which lists every one of them by
+name with a Remove beside it and asks once before it acts: Verkstead stops
+offering it for new work — that list, the Repo dropdown on the compose page and
+on a draft's composer, the roadmaps waiting to be adopted — while every
+Conversation ever worked in it goes on naming it,
 because a record that could not say which repository its work was done in would
 be no record. The directory is untouched either way. Refused while a
 Conversation that is neither Done nor Closed is on it — unlike removing an Agent
@@ -271,7 +275,8 @@ registry's, a cache Verkstead does not provide — as one global set every Sandb
 gets plus a per-Repo set composed over it. Configured in two places, the
 installation *and* the workbench: `--sandbox-bind DIR` or
 `--sandbox-bind NAME=DIR`, and the same two grammars on the settings page's
-Paths section, which holds these and nothing else, and on a Repo's own pane.
+Paths section, which holds these and nothing else — a bind written for a Repo is
+in the file and on no page.
 The two sets union, and each keeps its
 own answer to a bind that is not there — the installation's refuses startup, the
 settings' is skipped for that session with a line in the log, because a phone is

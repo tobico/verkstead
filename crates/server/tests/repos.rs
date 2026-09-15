@@ -1,6 +1,6 @@
 //! Registering a Repo over the viewer's namespace: what gets on the list, what
-//! is refused before it can, what one of them says when it is opened, and what
-//! taking one off the registry does to the list it was on.
+//! is refused before it can, and what taking one off the registry does to the
+//! list it was on.
 //!
 //! And making one, which is the other way a Repo arrives: a directory, a
 //! repository on `main` with a first commit by the configured author, and the
@@ -432,108 +432,6 @@ async fn the_branches_of_a_repo_that_is_not_there_are_refused() {
 
         assert_eq!(status, StatusCode::NOT_FOUND, "asking about {asked}");
     }
-}
-
-/// One Repo opened, which is what its card in the settings leads to: the row's
-/// own three facts, plus everything the card had no room for.
-///
-/// The roadmaps are the same reading the notice under the new-conversation box
-/// makes — `ui_content.rs` is where what that finds is pinned — so what is
-/// asserted here is that a repository holding none says so with an empty list
-/// rather than by leaving the field out.
-#[tokio::test]
-async fn a_repo_opened_carries_its_branches_its_work_and_its_roadmaps() {
-    let src = tempfile::tempdir().unwrap();
-    let (_dir, pool, app) = workbench_and_pool().await;
-    let repo = repository(src.path().join("verkstead"));
-    git(&repo, &["branch", "release"]);
-
-    added(register(&app, &repo).await);
-    let id = listed(&app).await[0].id;
-
-    // Three Conversations on it: one still going, and two that are over each
-    // way there is to be over.
-    for (branch, state) in [
-        ("rate-limiting", None),
-        ("pane-paths", Some(store::Lifecycle::Done)),
-        ("dropped", Some(store::Lifecycle::Closed)),
-    ] {
-        let started = store::start_conversation(&pool, id, branch)
-            .await
-            .unwrap()
-            .unwrap();
-
-        if let Some(state) = state {
-            store::set_state(&pool, started, state).await.unwrap();
-        }
-    }
-
-    let opened: RepoView = get(&app, &format!("/api/ui/repos/{id}")).await;
-
-    assert_eq!(opened.id, id);
-    assert_eq!(opened.name, "verkstead");
-    assert_eq!(opened.path, repo.canonicalize().unwrap().to_str().unwrap());
-    assert_eq!(opened.default_branch, "main");
-    assert_eq!(
-        opened.branches,
-        vec!["main".to_owned(), "release".to_owned()],
-        "the same list the base dropdown is filled from",
-    );
-    assert_eq!(opened.live, 1);
-    assert_eq!(opened.finished, 2, "Done and Closed counted together");
-    assert!(
-        opened.roadmaps.is_empty(),
-        "a repository with no roadmaps has none waiting: {:?}",
-        opened.roadmaps,
-    );
-}
-
-/// A Repo that is not registered has nothing to open, and saying so is a
-/// refusal: the pane reads it as the repo being gone — a link followed after
-/// somebody took it away — rather than as a Repo with nothing on it.
-#[tokio::test]
-async fn a_repo_that_is_not_there_cannot_be_opened() {
-    let (_dir, app) = workbench().await;
-
-    for asked in ["404", "not-a-number"] {
-        let (status, _) = fetch(
-            &app,
-            Request::builder()
-                .uri(format!("/api/ui/repos/{asked}"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await;
-
-        assert_eq!(status, StatusCode::NOT_FOUND, "opening {asked}");
-    }
-}
-
-/// And a Repo that was taken off the registry has nothing to open either. It is
-/// still in the table — every Conversation ever worked in it names it — but
-/// nothing is registered under that id any more, and the pane reads that as the
-/// repo being gone rather than drawing one with a Remove button on it.
-#[tokio::test]
-async fn a_repo_that_was_removed_cannot_be_opened() {
-    let src = tempfile::tempdir().unwrap();
-    let (_dir, app) = workbench().await;
-    let repo = repository(src.path().join("verkstead"));
-
-    added(register(&app, &repo).await);
-    let id = listed(&app).await[0].id;
-
-    assert_eq!(remove(&app, id).await, RepoRemoved::Removed);
-
-    let (status, _) = fetch(
-        &app,
-        Request::builder()
-            .uri(format!("/api/ui/repos/{id}"))
-            .body(Body::empty())
-            .unwrap(),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 /// A Repo taken off the registry is off every list that offers Repos for new

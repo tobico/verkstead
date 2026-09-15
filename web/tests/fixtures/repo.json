@@ -1,35 +1,12 @@
 {
   "branches": [
-    "main",
-    "tobi/steer"
+    "main"
   ],
   "default_branch": "main",
-  "finished": 2,
+  "finished": 0,
   "id": 1,
-  "live": 2,
+  "live": 0,
   "name": "verkstead",
   "path": "/srv/repos/verkstead",
-  "roadmaps": [
-    {
-      "base": "",
-      "name": "mvp",
-      "stage": "04",
-      "stage_title": "Wrap-up",
-      "title": "MVP roadmap"
-    },
-    {
-      "base": "",
-      "name": "public-release",
-      "stage": "01",
-      "stage_title": "Packaging",
-      "title": "Public release roadmap"
-    },
-    {
-      "base": "tobi/steer",
-      "name": "steer",
-      "stage": "01",
-      "stage_title": "One stop and steer",
-      "title": "Steer roadmap"
-    }
-  ]
+  "roadmaps": []
 }

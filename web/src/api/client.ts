@@ -55,7 +55,6 @@ import type {
   RepoPairingsView,
   RepoRemoved,
   RepoSwitched,
-  RepoView,
   Resolved,
   Response as Decided,
   Resumed,
@@ -158,17 +157,6 @@ export function lockSet(id: number): Promise<Locked> {
 /// The Repos Verkstead has been told about, by name.
 export function listRepos(): Promise<RepoEntry[]> {
   return get<RepoEntry[]>("/api/ui/repos");
-}
-
-/// One registered Repo opened, which is what its card in the settings leads to:
-/// what the card shows, plus the branches, how much work is on it and what it
-/// is holding that nothing is driving.
-///
-/// A 404 for an id nothing is registered under, which the pane reads as the
-/// repo being gone rather than as a failure — the same shape a Set that is not
-/// there comes back in.
-export function loadRepo(id: number): Promise<RepoView> {
-  return get<RepoView>(`/api/ui/repos/${id}`);
 }
 
 /// Every branch of one registered Repo, local and remote-tracking both — which

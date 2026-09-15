@@ -944,11 +944,16 @@ Timeline events:
   Under the Git section are the Agent Profiles and the Repos, which had pages of
   their own until they were folded in here — all of it is settled once and then
   left alone, and `/profiles` and `/repos` are no such page now rather than
-  redirects.
+  redirects. **A repository is registered from the new conversation page rather
+  than from here** (*revised 2026-09-15, building settings-ui-tidy*: the section
+  carried a plus that opened the registration at `/settings/repos/new`; **Open
+  repo** and **Create repo** at the foot of the Repo dropdown are the same form
+  and are the way in now, which is where somebody is when they find they have
+  nowhere to work).
 - **The page is read as cards and panes** (*settled 2026-08-29, building
   settings-redesign*). Everything on it that used to open a modal is a card in
   the middle pane and a details pane beside it: everything git is told as one
-  git card, each Agent Profile, each registered Repo — **Language support**,
+  git card, each Agent Profile, the Repos as one card — **Language support**,
   whose
   card lists the languages a session gets build support for and whose pane holds
   the checkbox per language and the configuration hanging off it (*revised
@@ -963,24 +968,36 @@ Timeline events:
   onboarding stage 01*: it sat directly above them, because a watched path was
   what a Repo was registered from and a machine with none had nothing to put on
   that list — with the boundary gone the Repos are what a machine is set up by
-  and the binds are the afterthought); a Repo's own pane carries the binds said
-  for its name under a **Sandbox configuration** heading, the same rows out of
-  the same read and the same save, because a page listing every path would
-  carry a column of `name=…` entries nobody could scan. **A bind written for a name no Repo is registered
-  under goes back on the Paths pane**, because that split leaves it no pane of
-  its own and a row drawn nowhere is a row nobody can take away — which is what
-  unregistering a Repo makes of every bind said for it. The Paths card's count
-  of entries the server cannot see spans a Repo's pane as well as its own, and
-  says which to open: a bind that has quietly stopped resolving is what nobody
-  goes looking for. What is on a card is what a list is scanned for
-  and the rest is in the pane — a Profile's mounted paths, agent type and
-  Remove; a Repo's branches, how much work is on it, what it is holding that
-  nothing is driving and its own binds; Language support's checkbox per language
-  and the size of the Rust cache's compiled half. Adding one is a plus icon on
-  the section's heading line, which opens the same pane blank and reads as open
-  while it stands. The two switches that are about the device and the server
+  and the binds are the afterthought). **A bind written for a name no Repo is
+  registered under is drawn on the Paths pane**, because a row drawn nowhere is a
+  row nobody can take away — which is what unregistering a Repo makes of every
+  bind said for it (*revised 2026-09-15, building settings-ui-tidy*: a bind
+  written for a Repo that *is* registered was drawn on that Repo's own pane,
+  under a **Sandbox configuration** heading, out of the same read and the same
+  save; that pane is gone and so is the heading). The Paths card's count of
+  entries the server cannot see covers the rows it does not list as well: a bind
+  that has quietly stopped resolving is what nobody goes looking for. What is on
+  a card is what a list is scanned for and the rest is in the pane — a Profile's
+  mounted paths, agent type and Remove; Language support's checkbox per language
+  and the size of the Rust cache's compiled half. Adding a Profile is a plus icon
+  on the section's heading line, which opens the same pane blank and reads as
+  open while it stands. The two switches that are about the device and the server
   rather than about anything configured stay as they were: notifications on the
   pane head's line, and the update banner above everything.
+- **The Repos are one card, counting them, over one pane listing every one by
+  name with a Remove beside it** (*revised 2026-09-15, building
+  settings-ui-tidy*: each registered Repo was a card of its own, opening a pane
+  of its path and default branch, every branch git had, how much work was on it,
+  the roadmaps in it nothing was driving, how a conflict in it was resolved, its
+  own binds, and Remove at the foot). A row is the name and nothing else: none of
+  those facts was stored, each was a git call or a count made every time somebody
+  opened one, and each is read where it is used — the branches on a composer, the
+  roadmaps waiting in the new conversation dropdown, the resolution once on the
+  Git pane for every Repo. **Remove asks once before it acts**, the way a close
+  over a run in flight does, because it is one press in a list on a phone rather
+  than the last press on a pane about the repository; it is still an
+  unregistering rather than a delete, and a Repo with a live Conversation on it
+  still refuses, in words, under the row the press was made on.
 - **On the settings page an on/off control is a plain checkbox, and what hangs
   off one is indented under it and greyed while it is off** (*settled
   2026-09-15, building settings-ui-tidy*). The painted switch stays where it

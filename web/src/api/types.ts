@@ -3085,14 +3085,18 @@ export type RepoRemoved = "Removed" | "NoSuchRepo" | "InUse";
 export type RepoSwitched = "Switched" | "NoSuchConversation" | "NotDrafting" | "Adopting" | "HoldingPullRequest" | "NoSuchRepo";
 
 /**
- * One registered Repo opened: everything the card cannot hold, read at the
- * moment it is asked for.
+ * One registered Repo, whole: the row, and everything a reading of the
+ * repository itself adds to it.
  *
- * The card's own three facts come along with it rather than being left to the
- * list behind the pane. The pane is a page of its own as far as a link is
- * concerned — somebody reloads on it, or arrives from a message — and a pane
- * that drew its own title out of another read would have nothing to say until
- * that read landed.
+ * What a create answers with — see [`Created`], which is the one thing left
+ * carrying one. The settings had a pane per Repo drawing every field here and
+ * it is gone; what is drawn of a Repo there is its name, and each of these is
+ * read where it is used instead.
+ *
+ * The row's own three facts come along with the rest rather than being left to
+ * the list: whoever made a repository is about to put a draft on it, and a
+ * caller that had to go and read the Repo it just made would be asking for
+ * something the answer was already holding.
  *
  * Nothing here is stored beyond those three. The branches are git's own answer,
  * the counts are the store's, and the roadmaps are read off the repository the

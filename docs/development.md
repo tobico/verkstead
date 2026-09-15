@@ -371,10 +371,11 @@ itself, `pnpm dev` is the better half of this: see [The dev loop](#the-dev-loop)
 
 Every Question Set is asked *from* a Conversation and lands on its Timeline, so
 there has to be one before an agent can ask anything. Open
-<http://127.0.0.1:8422/>, add a repo — any git repository root the server can
-read, and the path field's dropdown opens on your home to browse for one — and
-press **New conversation**. That opens the composer: pick the repo in the
-**Repo** dropdown along the bottom of the box, then press **Save as draft**.
+<http://127.0.0.1:8422/> and press **New conversation**. That opens the composer:
+drop the **Repo** dropdown along the bottom of the box and press **Open repo**,
+which takes any git repository root the server can read — the path field's
+dropdown opens on your home to browse for one — and puts the draft on it. Then
+press **Save as draft**.
 The URL then names what it made — `/conversations/1` — and that number is the
 one below.
 

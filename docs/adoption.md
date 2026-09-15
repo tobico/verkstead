@@ -98,9 +98,9 @@ Three of those are worth understanding before the first Conversation:
   than being skipped. A bare path goes to every session; `name=path` goes only
   to sessions working in the Repo registered under that name.
 
-The workbench says the binds as well, on the settings page's **Paths** section —
-which holds those and nothing else — and on each Repo's own pane, and what a
-session gets is the union of the two. Those entries are saved into `config.yaml`
+The workbench says the binds as well, on the settings page's **Paths** section,
+which holds those and nothing else: a bind written for one Repo is in
+`config.yaml` and on no page. What a session gets is the union of the two. Those entries are saved into `config.yaml`
 in the data directory, read afresh every time they are used, and never fatal:
 one the server cannot see is reported on the page rather than refused, and
 simply covers nothing. **On this module, that report is the one to read** — the

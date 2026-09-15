@@ -455,26 +455,29 @@ pub(crate) async fn branches(pool: &SqlitePool, id: i64) -> Result<Option<Vec<St
     ))
 }
 
-/// One registered Repo opened: everything its card cannot hold.
+/// One registered Repo, whole: the row, and everything a reading of the
+/// repository itself adds to it.
 ///
-/// `None` is a Repo that is not on the registry, which the pane reads as the
-/// repo being gone — a link followed after somebody took it away, or a pane left
-/// open in another tab while they did. Read through
+/// What a create answers with — see [`create`], which is the one caller there
+/// is. The settings had a pane per Repo drawing all of this and it is gone: what
+/// is drawn of a Repo there is its name, and each of these is read where it is
+/// used instead — the branches on a composer, the roadmaps in the new
+/// conversation dropdown.
+///
+/// `None` is a Repo that is not on the registry. Read through
 /// [`store::registered_repo`] for that reason rather than through `load_repo`,
 /// which goes on finding a Repo that was taken away because a Timeline still has
 /// to name it.
 ///
 /// The two filesystem reads go together in one blocking task rather than one
-/// apiece: they are both git against the same directory, and a pane is one thing
-/// the human opened rather than two. The counts are the store's and are awaited
-/// beside them.
+/// apiece: they are both git against the same directory. The counts are the
+/// store's and are awaited beside them.
 ///
-/// Nothing here is stored but the three facts the card already carries. The
+/// Nothing here is stored but the three facts the row already carries. The
 /// branches move without Verkstead hearing about it and a roadmap somebody picks
-/// up stops being abandoned the moment they do, so both are asked afresh every
-/// time the pane is opened — a kept copy would be a second opinion that went
-/// wrong on somebody else's push.
-pub(crate) async fn opened(pool: &SqlitePool, id: i64) -> Result<Option<RepoView>> {
+/// up stops being abandoned the moment they do, so both are asked afresh — a
+/// kept copy would be a second opinion that went wrong on somebody else's push.
+async fn opened(pool: &SqlitePool, id: i64) -> Result<Option<RepoView>> {
     let Some(repo) = store::registered_repo(pool, id).await? else {
         return Ok(None);
     };

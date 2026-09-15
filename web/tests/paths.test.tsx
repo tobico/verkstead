@@ -1,15 +1,12 @@
 //! The paths on the settings page: what the card says of the binds, what the
-//! pane draws of each row, and what adding or taking one away puts on the wire —
-//! and the same rows on one Repo's own pane, which is where a bind scoped to a
-//! Repo is drawn.
+//! pane draws of each row, and what adding or taking one away puts on the wire.
 //!
-//! Three things mounted apart, because that is what they are: a card in the
+//! Two things mounted apart, because that is what they are: a card in the
 //! middle pane saying how the list stands and whether anything is wrong with it,
-//! the rows that rewrite it in the details pane it opens, and one Repo's own
-//! binds in a section of the pane that Repo is opened at. All three read the
-//! one settings query and all three save through the one endpoint, which is what
-//! the last group below is about: a press on one of them must not cost what the
-//! others are drawn from.
+//! and the rows that rewrite it in the details pane it opens. Both read the one
+//! settings query and both save through the one endpoint, which is what the
+//! groups below keep returning to: a press on one row must not cost what the
+//! rest of the page is drawn from.
 //!
 //! Three things are worth a test rather than a reading of the source, and they
 //! are what most of this file is:
@@ -20,16 +17,16 @@
 //!   would silently ignore.
 //! - **What a save carries.** One request writes the whole of `config.yaml`, so
 //!   adding a bind must not cost a token or a build cache size — and it must not
-//!   cost a Repo's own bind either, which is a row this pane never draws and
-//!   still has to send back.
+//!   cost a bind written for a Repo either, which is a row this pane never draws
+//!   and still has to send back.
 //! - **What a row reports.** Whether the server can see what an entry names is
 //!   the one thing a human cannot check from a phone, and it is said in the
 //!   server's own words on the row itself.
-//! - **What a browse writes.** Both fields browse, and what a browse leaves
-//!   in one goes to the server exactly as a typed path does — the dropdown is a
-//!   way of writing the box rather than a second way of saving. How the dropdown
-//!   itself behaves is asked in `browsing.test.tsx`, where the field is driven
-//!   on its own.
+//! - **What a browse writes.** The field browses, and what a browse leaves in it
+//!   goes to the server exactly as a typed path does — the dropdown is a way of
+//!   writing the box rather than a second way of saving. How the dropdown itself
+//!   behaves is asked in `browsing.test.tsx`, where the field is driven on its
+//!   own.
 //!
 //! The read is a fixture the server's own tests wrote, so what the page is drawn
 //! from is the shape the endpoint really answers with. What resolution *means*
@@ -49,7 +46,6 @@ import type {
   SettingsView,
 } from "../src/api/types";
 import card from "../src/CardButton.module.css";
-import { RepoBinds } from "../src/repos/RepoBinds";
 import { PathsCard, PathsPane } from "../src/settings/Paths";
 import rowStyles from "../src/settings/PathEditor.module.css";
 import styles from "../src/settings/Paths.module.css";
@@ -70,7 +66,7 @@ const BIND = "/var/cache/verkstead-node";
 const SCOPED = "verkstead=/var/cache/verkstead-cargo";
 
 /// The Repo that last one is written against, and the directory it names — the
-/// two halves of it, because the pane that draws it knows them apart.
+/// two halves of it, because a stray row says which name it was written for.
 const REPO = "verkstead";
 const OWN = "/var/cache/verkstead-cargo";
 
@@ -111,26 +107,6 @@ function installed(standing: SettingsView): SettingsView {
         {
           path: "/etc/verkstead/certs",
           repo: null,
-          source: "Installation",
-          resolution: "Resolves",
-        },
-        ...standing.paths.binds,
-      ],
-    },
-  };
-}
-
-/// And the same settings with the installation having said a bind for one Repo
-/// as well, which is the row that draws read-only on that Repo's pane.
-function installedFor(standing: SettingsView, repo: string): SettingsView {
-  return {
-    ...standing,
-    paths: {
-      ...standing.paths,
-      binds: [
-        {
-          path: "/var/cache/the-units-cargo",
-          repo,
           source: "Installation",
           resolution: "Resolves",
         },
@@ -182,13 +158,6 @@ function mountCard(open = false) {
 function mountPane() {
   const back = vi.fn();
   return { ...mounting(() => <PathsPane back={back} />), back };
-}
-
-/// One Repo's own binds, as the section of that Repo's pane draws them. Given
-/// the name rather than the Repo, because the name is what a bind is written
-/// against and the pane around this is what knows which Repo it is on.
-function mountOwn(repo = REPO) {
-  return mounting(() => <RepoBinds repo={repo} />);
 }
 
 /// The settings, and the registry the pane reads beside them.
@@ -297,11 +266,11 @@ describe("the card", () => {
   /// And the other thing the browser can see and the human cannot: an entry that
   /// is saved, is in the file, and does nothing.
   ///
-  /// Every one of them, wherever it is drawn. A bind written for a Repo is read
-  /// on that Repo's pane rather than here, and it goes stale unwatched exactly
-  /// the same way — so a count that stopped at this section's own rows would put
-  /// the only warning there is on a pane nobody opens unprompted.
-  it("counts every entry the server cannot see, wherever it is drawn", async () => {
+  /// Every one of them, listed here or not. A bind written for a Repo is drawn
+  /// nowhere at all, and it goes stale in the file exactly the same way — so a
+  /// count that stopped at this section's own rows would leave it with nothing
+  /// saying so anywhere.
+  it("counts every entry the server cannot see, listed or not", async () => {
     theSettings(TOLD);
     const { container } = mountCard();
 
@@ -312,39 +281,17 @@ describe("the card", () => {
     await waitFor(() => screen.getByText(/2 entries the server cannot see/));
   });
 
-  /// And it says which pane to open, because one of the two is not on this
-  /// one: sending somebody to a list the row is not in is the warning that
-  /// wastes the trip.
-  it("sends the human to the repo's pane where one of them is a repo's", async () => {
+  /// And it sends the human here whichever of them it counted: this is where
+  /// every row anybody can do anything about stands.
+  it("sends the human to this section to read why", async () => {
     theSettings(TOLD);
     const { container } = mountCard();
 
     await theCard(container);
 
     await waitFor(() =>
-      screen.getByText(/the repo a bind is written for, to read why/),
+      screen.getByText(/2 entries the server cannot see\. Open this section/),
     );
-  });
-
-  /// And says nothing of the sort where every unseen entry is one of its own.
-  it("sends them only here where none of them is a repo's", async () => {
-    const noneScoped: SettingsView = {
-      ...TOLD,
-      paths: {
-        ...TOLD.paths,
-        binds: TOLD.paths.binds.filter((entry) => entry.repo === null),
-      },
-    };
-
-    theSettings(noneScoped);
-    const { container } = mountCard();
-
-    await theCard(container);
-
-    await waitFor(() =>
-      screen.getByText(/1 entry the server cannot see\. Open this section/),
-    );
-    expect(screen.queryByText(/the repo a bind is written for/)).toBeNull();
   });
 
   it("says nothing of the kind where every entry resolves", async () => {
@@ -419,9 +366,8 @@ describe("the pane", () => {
 
   /// Unless nothing is registered under the name it was written for, which is
   /// what unregistering a Repo leaves behind and what a misspelled name is from
-  /// the start. No Repo's pane can draw one of those, so this one does: it is in
-  /// the file, no session is given it, and a row nobody can reach is a row
-  /// nobody can take away.
+  /// the start. This pane draws one of those: it is in the file, no session is
+  /// given it, and a row nobody can reach is a row nobody can take away.
   it("draws a bind written for a repo nothing is registered under", async () => {
     registered(TOLD, WITHOUT_THE_REPO);
     const { container } = mountPane();
@@ -712,29 +658,13 @@ describe("browsing for one", () => {
     );
   });
 
-  /// And the other of them, on the Repo's own pane — where the pane's grammar
-  /// is put around whatever the field holds, browsed or typed.
-  it("browses a Repo's own binds, and writes them against its name", async () => {
-    const fetching = theSettings(TOLD, inHome, json(answering(TOLD)));
-    mountOwn();
-
-    await browsed("Add a bind for this repo");
-    fireEvent.click(screen.getByRole("button", { name: "Add" }));
-
-    await waitFor(() =>
-      expect(sent(fetching)).toEqual({
-        ...REST,
-        sandbox_binds: [BIND, SCOPED, `${REPO}=/home/ada/work`],
-      }),
-    );
-  });
 });
 
 describe("taking a row away", () => {
   /// Where the row stands on this pane is not where it stands in the file: a
-  /// Repo's own bind sits among the settings' binds and is not drawn here, so a
-  /// removal counted off the page would take the wrong one away.
-  it("keeps a Repo's own bind when a global one is removed", async () => {
+  /// bind written for a Repo sits among the settings' binds and is not drawn
+  /// here, so a removal counted off the page would take the wrong one away.
+  it("keeps a bind written for a repo when a global one is removed", async () => {
     const fetching = theSettings(TOLD, json(answering(TOLD)));
     const { container } = mountPane();
 
@@ -770,181 +700,5 @@ describe("taking a row away", () => {
         sandbox_binds: [SCOPED],
       }),
     );
-  });
-});
-
-/// And the same rows on one Repo's own pane, which is where a bind written
-/// against a Repo's name is drawn.
-///
-/// The section is mounted on its own, as the two above it are: what it is drawn
-/// from is the settings read, and which Repo it is about is the name the pane
-/// around it hands down. That the Repo's pane hands it down is `repos.test.tsx`'s.
-describe("a repo's own binds", () => {
-  /// The whole of what makes this a section rather than a filter on the Paths
-  /// pane: a Repo is shown its own and nobody else's, and the bind every sandbox
-  /// gets is the other pane's.
-  it("draws the binds written against that repo and no others", async () => {
-    theSettings(TOLD);
-    const { container } = mountOwn();
-
-    await waitFor(() => expect(rows(container)).toHaveLength(1));
-    expect(rows(container).map(path)).toEqual([OWN]);
-    expect(screen.queryByText(BIND)).toBeNull();
-  });
-
-  /// The same settings read on another Repo's pane, which is the other half of
-  /// that: what is written for one Repo reaches no other, and the page says so
-  /// by not drawing it.
-  it("draws none of them on another repo's pane", async () => {
-    theSettings(TOLD);
-    const { container } = mountOwn("askance");
-
-    await waitFor(() => screen.getByText("No binds of its own."));
-    expect(rows(container)).toHaveLength(0);
-  });
-
-  /// A Repo with none is shown the empty editor rather than nothing at all: the
-  /// pane is where somebody looks to learn that a repository can be given a
-  /// directory of its own, and a section that appeared only once one existed
-  /// would be a section nobody could find the first time.
-  it("offers the field to a repo that has none", async () => {
-    theSettings(TOLD);
-    mountOwn("askance");
-
-    await waitFor(() => screen.getByLabelText("Add a bind for this repo"));
-    expect(screen.getByText(/Each entry widens what those sessions/)).toBeTruthy();
-  });
-
-  /// The installation's entries are a unit's word here as everywhere: labelled,
-  /// and with nothing on them to press.
-  it("draws the installation's own labelled and read-only", async () => {
-    theSettings(installedFor(TOLD, REPO));
-    const { container } = mountOwn();
-
-    await waitFor(() => expect(rows(container)).toHaveLength(2));
-    const [installation, settings] = rows(container);
-
-    expect(installation!.querySelector(`.${rowStyles.source}`)!.textContent).toBe(
-      "the installation's",
-    );
-    expect(installation!.querySelector(`.${rowStyles.remove}`)).toBeNull();
-
-    expect(settings!.querySelector(`.${rowStyles.source}`)).toBeNull();
-    expect(settings!.querySelector(`.${rowStyles.remove}`)).not.toBeNull();
-  });
-
-  /// And resolution is reported per row here as it is on the Paths pane, in the
-  /// server's own words.
-  it("says on a row why the server cannot see it", async () => {
-    theSettings(TOLD);
-    const { container } = mountOwn();
-
-    await waitFor(() => expect(rows(container)).toHaveLength(1));
-    expect(
-      rows(container)[0]!.querySelector(`.${rowStyles.unresolved}`)!.textContent,
-    ).toBe("the server cannot see it: there is nothing at that path");
-  });
-
-  it("says nothing on a row the server can see", async () => {
-    theSettings(seen(TOLD));
-    const { container } = mountOwn();
-
-    await waitFor(() => expect(rows(container)).toHaveLength(1));
-    expect(
-      rows(container)[0]!.querySelector(`.${rowStyles.unresolved}`),
-    ).toBeNull();
-  });
-
-  /// What the field on this section writes: the directory typed, against the
-  /// name of the Repo whose pane it was typed on — and everything else in the
-  /// file exactly as it stood, the global bind included.
-  it("saves a bind against this repo's name", async () => {
-    const fetching = theSettings(TOLD, json(answering(TOLD)));
-    mountOwn();
-
-    const field = await waitFor(() =>
-      screen.getByLabelText("Add a bind for this repo"),
-    );
-    fireEvent.input(field, { target: { value: "/var/cache/npm" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add" }));
-
-    await waitFor(() =>
-      expect(sent(fetching)).toEqual({
-        ...REST,
-        sandbox_binds: [BIND, SCOPED, `${REPO}=/var/cache/npm`],
-      }),
-    );
-  });
-
-  /// And the installation's own is not sent back, on this pane as on the other:
-  /// it was never in this file, and sending one would be asking the server to
-  /// write down a flag.
-  it("sends back none of the installation's own", async () => {
-    const standing = installedFor(TOLD, REPO);
-    const fetching = theSettings(standing, json(answering(standing)));
-    mountOwn();
-
-    const field = await waitFor(() =>
-      screen.getByLabelText("Add a bind for this repo"),
-    );
-    fireEvent.input(field, { target: { value: "/var/cache/npm" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add" }));
-
-    await waitFor(() =>
-      expect(sent(fetching)).toEqual({
-        ...REST,
-        sandbox_binds: [BIND, SCOPED, `${REPO}=/var/cache/npm`],
-      }),
-    );
-  });
-
-  /// Where the row stands on this section is not where it stands in the file:
-  /// the global bind sits in front of it and is drawn on the other pane, so a
-  /// removal counted off this section alone would take the wrong one away.
-  it("takes one away without disturbing the global binds", async () => {
-    const fetching = theSettings(TOLD, json(answering(TOLD)));
-    const { container } = mountOwn();
-
-    await waitFor(() => expect(rows(container)).toHaveLength(1));
-    fireEvent.click(
-      rows(container)[0]!.querySelector<HTMLButtonElement>(
-        `.${rowStyles.remove}`,
-      )!,
-    );
-
-    await waitFor(() =>
-      expect(sent(fetching)).toEqual({
-        ...REST,
-        sandbox_binds: [BIND],
-      }),
-    );
-  });
-
-  it("says so when the save fails", async () => {
-    theSettings(TOLD, () =>
-      Promise.resolve(
-        new Response("nope", { status: 503, statusText: "Unavailable" }),
-      ),
-    );
-    mountOwn();
-
-    const field = await waitFor(() =>
-      screen.getByLabelText("Add a bind for this repo"),
-    );
-    fireEvent.input(field, { target: { value: "/var/cache/npm" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add" }));
-
-    await waitFor(() => screen.getByText(/could not be saved/));
-  });
-
-  it("says so when the settings could not be read at all", async () => {
-    serving(() =>
-      Promise.resolve(
-        new Response("nope", { status: 500, statusText: "Server Error" }),
-      ),
-    );
-    mountOwn();
-
-    await waitFor(() => screen.getByText(/Could not read the settings/));
   });
 });

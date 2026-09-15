@@ -1942,33 +1942,6 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         ),
     );
 
-    // And the same Repo opened, which is what its card in the settings leads to:
-    // the three facts the row already carries, every branch git has, how much
-    // work is on it, and the roadmaps above still waiting for somebody.
-    //
-    // Two more Conversations are put on it so the counts are something rather
-    // than nothing. The adoption above is the live one; these two are the
-    // finished pair, one that got there and one that stopped. Its path is the
-    // one thing here the filesystem decided, and it is pinned like every other.
-    for (branch, state) in [
-        ("rate-limiting", store::Lifecycle::Done),
-        ("pane-paths", store::Lifecycle::Closed),
-    ] {
-        let ended = store::start_conversation(&pool, registered.id, branch)
-            .await
-            .unwrap()
-            .unwrap();
-        store::set_state(&pool, ended, state).await.unwrap();
-    }
-
-    write(
-        "repo.json",
-        &pin_path(
-            &get(&app, &format!("/api/ui/repos/{}", registered.id)).await,
-            "/srv/repos/verkstead",
-        ),
-    );
-
     // The workbench: the sidebar, and one Conversation opened — a Brief written,
     // a branch named, and the base commit overridden, which is the whole of what
     // a drafting Conversation carries. Put in through the store for the reason
@@ -3149,6 +3122,33 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         &pin_written_at(&get(&app, "/api/ui/settings").await, ""),
     );
 
+    // And the whole Repo a create answers with, which is the one payload left
+    // carrying more than a row: the three facts the list has, plus what git says
+    // about the repository and what the store says about the work in it.
+    //
+    // Made through the endpoint, over the app above, because that is the only
+    // way this shape is answered now — a Repo's own pane went, and the endpoint
+    // behind it with it. The author the first commit is made as is the one saved
+    // a moment ago, which is what a create needs; GitHub is not asked, a
+    // repository being made here whatever a token could do. The directory is a
+    // temporary one and the path is pinned like every other.
+    let src = tempfile::tempdir().unwrap();
+    let created = post(
+        &app,
+        "/api/ui/repos/new",
+        &serde_json::json!({
+            "parent": src.path().to_str().unwrap(),
+            "name": "verkstead",
+            "github": false,
+        }),
+    )
+    .await;
+
+    write(
+        "repo.json",
+        &pin_path(&made_repo(&created), "/srv/repos/verkstead"),
+    );
+
     // And what a path field's browse dropdown is filled from: one directory of
     // the filesystem, with one entry of each kind in it.
     //
@@ -3528,6 +3528,23 @@ fn pin_path(json: &str, at: &str) -> String {
     payload["path"] = at.into();
 
     serde_json::to_string(&payload).unwrap()
+}
+
+/// The Repo a create answered with, out of the outcome carrying it.
+///
+/// The fixture is the Repo rather than the whole answer, because that is what
+/// the viewer holds: what a create's other outcomes look like is written in the
+/// viewer's own tests, and each of them is a word or a sentence beside this.
+/// Anything but a Repo here is a create that did not happen, which is a broken
+/// fixture run rather than a shape to write.
+fn made_repo(json: &str) -> String {
+    let payload: serde_json::Value = serde_json::from_str(json).unwrap();
+
+    let made = payload
+        .get("Made")
+        .unwrap_or_else(|| panic!("the create should have made one:\n{payload}"));
+
+    serde_json::to_string(made).unwrap()
 }
 
 /// Pin what a Conversation's branch came off, for the one fixture whose base

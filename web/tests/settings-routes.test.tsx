@@ -23,7 +23,6 @@ import {
   SETTINGS,
   WORDS,
   opensProfile,
-  opensRepo,
   pathTo,
   type Opening,
 } from "../src/settings/openings";
@@ -67,13 +66,11 @@ describe("the settings page's own paths", () => {
     });
   }
 
-  /// And the two named by an id, both of which take the word `new` in the same
+  /// And the one named by an id, which takes the word `new` in the same
   /// segment.
   for (const opening of [
     opensProfile(4),
     opensProfile("new"),
-    opensRepo(2),
-    opensRepo("new"),
   ] satisfies Opening[]) {
     it(`opens ${opening} at the path its card leads to`, () => {
       expect(at(pathTo(opening))).toBe(SETTLED);
@@ -96,6 +93,16 @@ describe("the settings page's own paths", () => {
   for (const word of ["build-cache", "github", "conflicts"]) {
     it(`refuses /${word}, which a section has moved off`, () => {
       expect(at(`${SETTINGS}/${word}`)).toBe(MISSED);
+    });
+  }
+
+  /// And the paths a Repo's own pane and the registration stood at. The Repos
+  /// are one card with one pane now, at the word above, and a repository is
+  /// registered from the new conversation page — so nothing under the settings
+  /// is named by a Repo's id, and the segment that carried one reaches no page.
+  for (const gone of ["repos/2", "repos/new"]) {
+    it(`refuses /${gone}, which no pane stands at`, () => {
+      expect(at(`${SETTINGS}/${gone}`)).toBe(MISSED);
     });
   }
 });

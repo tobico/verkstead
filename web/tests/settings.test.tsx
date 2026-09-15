@@ -45,7 +45,6 @@ import type {
   ConversationEntry,
   ProfileEntry,
   RepoEntry,
-  RepoView,
   SettingsSaved,
   SettingsView,
   ShowingArchived,
@@ -67,10 +66,8 @@ import {
 import {
   openingAt,
   opensProfile,
-  opensRepo,
   pathTo,
   profileOpened,
-  repoOpened,
 } from "../src/settings/openings";
 import head from "../src/workbench/PaneHead.module.css";
 import notices from "../src/notices.module.css";
@@ -79,7 +76,6 @@ import { json, serving, whenever } from "./serving";
 import conversations from "./fixtures/conversations.json" with { type: "json" };
 import profiles from "./fixtures/profiles.json" with { type: "json" };
 import repos from "./fixtures/repos.json" with { type: "json" };
-import repo from "./fixtures/repo.json" with { type: "json" };
 import told from "./fixtures/settings.json" with { type: "json" };
 import saved from "./fixtures/settings-saved.json" with { type: "json" };
 import unset from "./fixtures/settings-unset.json" with { type: "json" };
@@ -107,8 +103,6 @@ const CLEANUP = {
 const PROFILES = profiles as ProfileEntry[];
 const REPOS = repos as RepoEntry[];
 const FIRST_REPO = REPOS[0]!;
-/// The Repo the fixture opens, which is the first of the list it belongs to.
-const OPENED: RepoView = { ...(repo as RepoView), id: FIRST_REPO.id };
 const SIDEBAR = conversations as ConversationEntry[];
 const UNSET = unset as SettingsView;
 const SAVED = saved as SettingsSaved;
@@ -1268,15 +1262,6 @@ function thePage(at = "/settings") {
     whenever("/api/ui/settings", json(TOLD)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever("/api/ui/repos", json(REPOS)),
-    // And one of them opened, which is what a card leads to — with the answer
-    // for an id nothing is registered under beside it, because a link followed
-    // after somebody took a repo away is a path this page has to draw.
-    whenever(`/api/ui/repos/${FIRST_REPO.id}`, json(OPENED)),
-    whenever("/api/ui/repos/404", json({ error: "there is no Repo 404" }, 404)),
-    // The one write this page can make that is not the credentials' own: a
-    // registration, which the pane sends to the same path it read the list
-    // from.
-    whenever("/api/ui/repos", json({ Added: FIRST_REPO }), "POST"),
     whenever("/api/ui/update", json("Current")),
     whenever("/api/ui/conversations", json(SIDEBAR)),
     whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
@@ -1349,12 +1334,9 @@ describe("the settings page", () => {
     await drawn(settings, `.${languages.languagesCard}`);
     await drawn(settings, `.${paths.pathsCard}`);
     await drawn(settings, `.${profileList.profiles} .${profileList.profile}`);
-    await drawn(settings, `.${repoList.repos} .${repoList.repo}`);
+    await drawn(settings, `.${repoList.reposCard}`);
 
     expect(settings.querySelectorAll("h1")).toHaveLength(1);
-    expect(
-      settings.querySelectorAll(`.${repoList.repos} .${repoList.repo}`),
-    ).toHaveLength(REPOS.length);
     expect(
       settings.querySelectorAll(`.${profileList.profiles} .${profileList.profile}`),
     ).toHaveLength(PROFILES.length);
@@ -1369,7 +1351,7 @@ describe("the settings page", () => {
 
     const settings = panes(container)[1]!;
 
-    const repos = await drawn(settings, `.${repoList.repos}`);
+    const repos = await drawn(settings, `.${repoList.reposCard}`);
     const card = await drawn(settings, `.${paths.pathsCard}`);
 
     expect(
@@ -1439,7 +1421,7 @@ describe("the settings page", () => {
   it("carries no form at all until a pane is opened", async () => {
     const { container } = thePage();
 
-    await drawn(container, `.${repoList.repos} .${repoList.repo}`);
+    await drawn(container, `.${repoList.reposCard}`);
 
     const settings = panes(container)[1]!;
     expect(settings.querySelector("dialog")).toBeNull();
@@ -1655,20 +1637,18 @@ describe("the path a details pane stands at", () => {
     expect(container.querySelector("dialog")).toBeNull();
   });
 
-  /// A registered Repo has a pane of its own, behind the `repos/` segment for
-  /// the reason a Profile's stands behind `profiles/`.
-  it("opens a repo at /settings/repos/:id, replacing", async () => {
+  /// The Repos are one card with one pane, named by a word like the settings
+  /// above them: there is nothing under this page named by a Repo's id any more.
+  it("opens the repos at /settings/repos, replacing", async () => {
     const { container, history } = thePage();
 
     const face = await drawn<HTMLElement>(
       panes(container)[1]!,
-      `.${repoList.repos} .${repoList.repo}`,
+      `.${repoList.reposCard}`,
     );
     fireEvent.click(face);
 
-    await waitFor(() =>
-      expect(history.get()).toBe(`/settings/repos/${FIRST_REPO.id}`),
-    );
+    await waitFor(() => expect(history.get()).toBe("/settings/repos"));
 
     // Replaced rather than pushed, as every detail of the settings is: Back
     // leaves the settings rather than walking out of the pane just opened.
@@ -1678,89 +1658,23 @@ describe("the path a details pane stands at", () => {
 
   /// What the card could not hold, in the pane that has the room for it — and
   /// the card reading as open while that pane stands, like every other card.
-  it("draws the repo in the details pane, and reads its card as open", async () => {
-    const { container } = thePage(`/settings/repos/${FIRST_REPO.id}`);
+  it("lists the repos in the details pane, and reads the card as open", async () => {
+    const { container } = thePage("/settings/repos");
 
     const details = panes(container)[2]!;
-    await waitFor(() => expect(details.textContent).toContain(OPENED.path));
-
-    expect(details.textContent).toContain(OPENED.default_branch);
-    expect(details.textContent).toContain(`${OPENED.live} live`);
-    expect(details.textContent).toContain(`${OPENED.finished} finished`);
-    for (const branch of OPENED.branches) {
-      expect(details.textContent).toContain(branch);
-    }
-    for (const roadmap of OPENED.roadmaps) {
-      expect(details.textContent).toContain(roadmap.title);
-      expect(details.textContent).toContain(roadmap.stage_title);
+    await waitFor(() =>
+      expect(details.textContent).toContain(FIRST_REPO.name),
+    );
+    for (const repo of REPOS) {
+      expect(details.textContent).toContain(repo.name);
     }
 
     const face = await drawn<HTMLElement>(
       panes(container)[1]!,
-      `.${repoList.repos} .${repoList.repo}`,
+      `.${repoList.reposCard}`,
     );
     expect(face.getAttribute("aria-pressed")).toBe("true");
     expect(face.classList).toContain(card.open);
-  });
-
-  /// A link followed after somebody took the repo away: said in a line rather
-  /// than shown as an error the human is meant to do something about.
-  it("says the repo is gone where the server has no such id", async () => {
-    const { container } = thePage("/settings/repos/404");
-
-    await waitFor(() =>
-      expect(panes(container)[2]!.textContent).toContain("That repo is gone."),
-    );
-  });
-
-  /// And the other pane under the same segment: the path another Repo is
-  /// registered by, standing where an id stands.
-  it("opens the repo form at /settings/repos/new, replacing", async () => {
-    const { container, history } = thePage();
-
-    const plus = await drawn<HTMLButtonElement>(
-      panes(container)[1]!,
-      'button[aria-label="Add a repo"]',
-    );
-    fireEvent.click(plus);
-
-    await waitFor(() => expect(history.get()).toBe("/settings/repos/new"));
-
-    // Replaced rather than pushed, as every detail of the settings is: Back
-    // leaves the settings rather than walking out of the pane just opened.
-    history.back();
-    await waitFor(() => expect(history.get()).toBe("/"));
-  });
-
-  it("draws the repo form in the details pane, and reads the plus as open", async () => {
-    const { container } = thePage("/settings/repos/new");
-
-    await waitFor(() => screen.getByLabelText(/absolute path/i));
-
-    const plus = await drawn<HTMLButtonElement>(
-      panes(container)[1]!,
-      'button[aria-label="Add a repo"]',
-    );
-    expect(plus.getAttribute("aria-pressed")).toBe("true");
-    expect(plus.classList).toContain(button.open);
-
-    // In the third pane rather than over the page: the modal is gone.
-    expect(panes(container)[2]!.querySelector("form")).not.toBeNull();
-    expect(container.querySelector("dialog")).toBeNull();
-  });
-
-  /// A registration that was taken spends the pane, and the repo lands on the
-  /// list behind it: that card is the whole of the confirmation.
-  it("puts the human back on the settings once a repo is registered", async () => {
-    const { container, history } = thePage("/settings/repos/new");
-
-    const field = await waitFor(() => screen.getByLabelText(/absolute path/i));
-    fireEvent.input(field, { target: { value: "/srv/repos/verkstead" } });
-    fireEvent.click(screen.getByRole("button", { name: "Register" }));
-
-    await waitFor(() => expect(history.get()).toBe("/settings"));
-    expect(panes(container)[2]!.textContent).toBe("");
-    await drawn(container, `.${repoList.repos} .${repoList.repo}`);
   });
 
   /// A cold load of a profile's pane — a reload, or a link somebody kept —
@@ -1794,18 +1708,16 @@ describe("where a settings details pane stands", () => {
     expect(pathTo("languages")).toBe("/settings/languages");
     expect(pathTo(opensProfile(7))).toBe("/settings/profiles/7");
     expect(pathTo(opensProfile("new"))).toBe("/settings/profiles/new");
-    expect(pathTo(opensRepo(7))).toBe("/settings/repos/7");
-    expect(pathTo(opensRepo("new"))).toBe("/settings/repos/new");
+    expect(pathTo("repos")).toBe("/settings/repos");
   });
 
   it("reads back everything it writes", () => {
     for (const opening of [
       "git",
       "languages",
+      "repos",
       opensProfile(7),
       opensProfile("new"),
-      opensRepo(7),
-      opensRepo("new"),
     ] as const) {
       expect(openingAt(pathTo(opening))).toBe(opening);
     }
@@ -1817,19 +1729,8 @@ describe("where a settings details pane stands", () => {
     expect(profileOpened(opensProfile(7))).toBe(7);
     expect(profileOpened(opensProfile("new"))).toBe("new");
     expect(profileOpened("git")).toBeNull();
-    expect(profileOpened(opensRepo(7))).toBeNull();
+    expect(profileOpened("repos")).toBeNull();
     expect(profileOpened(null)).toBeNull();
-  });
-
-  /// And which Repo, read the same way. The two are the same shape and are told
-  /// apart by their segment, which is what keeps a Repo's id from reading as a
-  /// Profile's.
-  it("says which repo an opening names, and which names none", () => {
-    expect(repoOpened(opensRepo(7))).toBe(7);
-    expect(repoOpened(opensRepo("new"))).toBe("new");
-    expect(repoOpened("git")).toBeNull();
-    expect(repoOpened(opensProfile(7))).toBeNull();
-    expect(repoOpened(null)).toBeNull();
   });
 
   /// The settings' own path opens nothing, and neither does anything that is
@@ -1843,10 +1744,13 @@ describe("where a settings details pane stands", () => {
     ["/settings/profiles/nonsense"],
     ["/settings/profiles/7/extra"],
     ["/settings/profiles/7.5"],
-    ["/settings/repos"],
+    // Every one of these named a Repo's own pane or the form that registered
+    // another, and the segment reaches nothing now: the Repos are the word
+    // above, whole.
+    ["/settings/repos/7"],
+    ["/settings/repos/new"],
     ["/settings/repos/nonsense"],
     ["/settings/repos/7/extra"],
-    ["/settings/repos/new/extra"],
     ["/conversations/3/events/7"],
     ["/"],
   ])("opens nothing at %s", (path) => {

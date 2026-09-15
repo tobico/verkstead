@@ -1,13 +1,14 @@
-//! What the two places paths are edited have in common: the read they both make,
-//! the write they both make, and the rows and the field they are both drawn as.
+//! What a path is edited with: the read, the write, and the rows and the field
+//! it is drawn as.
 //!
-//! There are two of those places because a bind belongs where the thing it is
-//! for is. The binds every sandbox gets are the Paths section — see
-//! `Paths.tsx` — and a bind scoped to one Repo is on that Repo's own pane,
-//! where somebody looking at the repository will meet it. What they are editing
-//! is one file either way, so what they are editing it *with* is one set of
-//! parts: two copies would be two accounts of what an entry is and two places
-//! for the wording of a row to drift.
+//! Its own module rather than the Paths section's own — see `Paths.tsx`, which
+//! is the one pane drawing these now. There were two of them: a Repo's pane
+//! carried the binds written for its name, out of this same read and this same
+//! save, and the parts were kept here so that two lists of the same entries
+//! could not come to two accounts of what one is. That pane is gone with the
+//! rest of a Repo's own, and the parts stay where they are: what they are and
+//! how they are written is a question of its own, and the pane around them is
+//! about which of them is drawn.
 //!
 //! Every row says the same three things wherever it is drawn. What it names;
 //! whose it is, where that is the installation's, because a unit's word is not
@@ -177,10 +178,9 @@ export function Rows(props: {
   /// Whether a row naming a Repo names one nothing is registered under.
   ///
   /// Set by the pane that draws the binds every sandbox gets, where a row
-  /// naming a Repo can only be a stray — a bind for a registered Repo is drawn
-  /// on that Repo's own pane, and one for a name no Repo has would be drawn
-  /// nowhere. A Repo's own pane leaves this alone: every row there names that
-  /// Repo, and saying so on each of them would say nothing.
+  /// naming a Repo can only be a stray: a bind written for a registered Repo is
+  /// drawn nowhere at all, so a row here that names one names a name nothing
+  /// holds.
   stray?: boolean;
 }): JSX.Element {
   return (

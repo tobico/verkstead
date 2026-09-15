@@ -22,25 +22,25 @@
 //! that sentence is how somebody learns the installer has to widen the unit
 //! before what they saved can work.
 //!
-//! The card counts every one of them, including the ones on a Repo's pane
-//! rather than on this one. A bind that has quietly stopped resolving is exactly
-//! what nobody goes looking for, so the one warning there is has to be where
-//! somebody scanning the settings will meet it — and it says which pane to open,
-//! because sending them to a list the row is not in would waste the trip.
+//! The card counts every one of them, including the ones this pane does not
+//! list. A bind that has quietly stopped resolving is exactly what nobody goes
+//! looking for, so the one warning there is has to be where somebody scanning
+//! the settings will meet it.
 //!
-//! Only the global binds are here, and the strays. A bind scoped to one Repo
-//! belongs on that Repo's own pane — see `repos/RepoBinds.tsx`, which draws the
-//! same rows out of the same read — and its rows are not drawn in this list.
-//! They still ride along on every save this pane makes, because one request
-//! writes the whole of `config.yaml` and a list sent short is a list emptied.
+//! Only the global binds are here, and the strays. A bind scoped to one Repo is
+//! not drawn at all: the section that drew those rows stood on that Repo's own
+//! pane, which is gone, and `config.yaml` is where one is read and corrected
+//! now. Those rows still ride along on every save this pane makes, because one
+//! request writes the whole of `config.yaml` and a list sent short is a list
+//! emptied.
 //!
-//! A **stray** is the bind that rule would otherwise leave nowhere: one written
-//! against a name no registered Repo has, which unregistering a Repo leaves
-//! behind and a misspelled name creates outright. No Repo's pane can draw it,
-//! because no Repo of that name is there to have a pane, and a row drawn nowhere
-//! is a row nobody can correct or take away — the same reason an entry nothing
-//! can be read out of at all is a row here. So they are drawn among the global
-//! ones, each saying which name it was written for and that nothing holds it.
+//! A **stray** is a bind written against a name no registered Repo has, which
+//! unregistering a Repo leaves behind and a misspelled name creates outright.
+//! It is drawn here where a scoped one is not, because nothing will ever be
+//! given it: a row that no session gets and no page shows is one nobody can take
+//! away — the same reason an entry nothing can be read out of at all is a row
+//! here. So they are drawn among the global ones, each saying which name it was
+//! written for and that nothing holds it.
 //!
 //! Two halves in two panes, like every other section: a card in the middle pane
 //! saying how the list stands and whether anything is wrong with it, and the
@@ -74,22 +74,21 @@ import styles from "./Paths.module.css";
 
 /// The binds every sandbox gets, which are the ones this pane is *about*.
 ///
-/// A bind scoped to a Repo is that Repo's pane's, so it is not one of these. An
-/// entry nothing could be read out of comes back scoped to nothing, which is
-/// why it counts as one: it is a row somebody has to be able to correct.
+/// A bind scoped to a Repo is not one of these. An entry nothing could be read
+/// out of comes back scoped to nothing, which is why it counts as one: it is a
+/// row somebody has to be able to correct.
 function global(paths: PathsView | undefined): Row<BindEntry>[] {
   return rowed(paths?.binds ?? []).filter((row) => row.entry.repo === null);
 }
 
 /// And the rows this pane actually draws: those, and the strays.
 ///
-/// A **stray** is a bind written against a name no registered Repo has. It is
-/// nobody's pane by the rule above — no Repo's, because no Repo of that name is
-/// there to have one — and it has to be somewhere: it sits in `config.yaml`, no
-/// session will ever be given it, and a row that is drawn nowhere is a row
-/// nobody can take away. Unregistering a Repo leaves its binds like this, and so
-/// does a misspelled name. So they land here, beside the global ones, each
-/// saying which name it was written for.
+/// A **stray** is a bind written against a name no registered Repo has, and it
+/// has to be somewhere: it sits in `config.yaml`, no session will ever be given
+/// it, and a row that is drawn nowhere is a row nobody can take away.
+/// Unregistering a Repo leaves its binds like this, and so does a misspelled
+/// name. So they land here, beside the global ones, each saying which name it
+/// was written for.
 ///
 /// `registered` is `undefined` until the Repos have been read, and nothing is
 /// called a stray before then: a row that appeared and vanished as that read
@@ -109,11 +108,9 @@ function drawn(
 /// currently see — whoever said them, because the installation's own go stale
 /// the same way a settings row does.
 ///
-/// Every bind, including the ones this section's own pane does not list. A bind
-/// written for a Repo is read on that Repo's pane rather than here, and a saved
-/// entry that quietly does nothing is the one thing a human cannot check from a
-/// phone — so a count that skipped it would leave the only warning there is on a
-/// pane nobody opens unless they already suspect something.
+/// Every bind, including the ones this pane does not list: a saved entry that
+/// quietly does nothing is the one thing a human cannot check from a phone, so a
+/// count that skipped one would leave it with nothing saying so anywhere.
 function unseen(paths: PathsView | undefined): number {
   return (paths?.binds ?? []).filter((entry) => unresolved(entry.resolution))
     .length;
@@ -121,20 +118,13 @@ function unseen(paths: PathsView | undefined): number {
 
 /// What the card says about them: how many, and where to go and read why.
 ///
-/// Where is not always this section, which is why it is a sentence rather than
-/// a count with a fixed line after it: a bind written for a Repo says why on
-/// that Repo's own pane, and sending somebody to a list the row is not in would
-/// be the one warning that wastes the trip.
+/// A row this pane does not list is counted too — see [`unseen`] — and the line
+/// still sends somebody here, because this is where every row anybody can do
+/// anything about stands.
 function unseenSays(paths: PathsView | undefined): string {
   const many = counted(unseen(paths), "entry", "entries");
 
-  const onARepo = (paths?.binds ?? []).some(
-    (entry) => entry.repo !== null && unresolved(entry.resolution),
-  );
-
-  return onARepo
-    ? `${many} the server cannot see. Open this section, or the repo a bind is written for, to read why.`
-    : `${many} the server cannot see. Open this section to read why.`;
+  return `${many} the server cannot see. Open this section to read why.`;
 }
 
 /// A count with the word it counts, so that a line reads as English rather than
@@ -178,9 +168,9 @@ export function PathsCard(props: {
 
             {/* The one thing the browser can see and the human cannot: a row
                 that is saved, is in the file, and does nothing, because what it
-                names is not where the server is looking. Counted wherever it is
-                drawn, because a bind on a Repo's pane goes stale unwatched the
-                same way one here does. */}
+                names is not where the server is looking. Counted whether or not
+                this pane lists it, a bind nothing draws going stale unwatched
+                the same way one here does. */}
             <Show when={unseen(paths()) > 0}>
               <p class={styles.warning}>{unseenSays(paths())}</p>
             </Show>

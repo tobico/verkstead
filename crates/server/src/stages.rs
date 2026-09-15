@@ -772,8 +772,8 @@ fn notice(repo: &store::Repo) -> Option<AbandonedRepo> {
 /// act on it.
 ///
 /// An empty list rather than the notice's "or nothing at all": the notice under
-/// the new-conversation box is drawn only where there is something to say, and a
-/// Repo's own pane says what is waiting in it however short the list is — empty
+/// the new-conversation box is drawn only where there is something to say, and
+/// what is waiting in a Repo is asked for whether or not there is any — empty
 /// included, which is the ordinary answer.
 ///
 /// Blocking, like everything else here: short git reads against a local

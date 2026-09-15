@@ -47,7 +47,7 @@ import { Match, Switch, createMemo, createSignal, type JSX } from "solid-js";
 import { Panes, PaneSticky, type Pane } from "../Panes";
 import { ProfileList, ProfilePane } from "../profiles/ProfileList";
 import { Notifications } from "../push/Notifications";
-import { RepoDetails, RepoList, RepoPane } from "../repos/RepoList";
+import { ReposCard, ReposPane } from "../repos/RepoList";
 import { UpdateNotice } from "../update/UpdateNotice";
 import { Conversations } from "../workbench/Conversations";
 import { PaneHead } from "../workbench/PaneHead";
@@ -62,10 +62,8 @@ import {
   WORDS,
   openingAt,
   opensProfile,
-  opensRepo,
   pathTo,
   profileOpened,
-  repoOpened,
   type Opening,
 } from "./openings";
 import styles from "./SettingsPage.module.css";
@@ -82,7 +80,7 @@ import styles from "./SettingsPage.module.css";
 ///
 /// So the ones named by a word are written from [`WORDS`], which is what
 /// [`openingAt`] reads a path against — a section added there arrives with the
-/// route that reaches it. The two named by an id keep their own line: what
+/// route that reaches it. The one named by an id keeps its own line: what
 /// stands in that segment is an id or the word `new`, and no id the server
 /// issues is `new`.
 ///
@@ -100,10 +98,9 @@ export function panes(): JSX.Element {
       {WORDS.map((word) => (
         <Route path={`/${word}`} />
       ))}
-      {/* The blank form rides in the same segment an id does, as
-          `/settings/profiles/new`. */}
+      {/* The one pane named by an id, the Repos' having gone: the blank form
+          rides in the same segment an id does, as `/settings/profiles/new`. */}
       <Route path="/profiles/:profile" />
-      <Route path="/repos/:repo" />
     </>
   );
 }
@@ -141,9 +138,9 @@ export function SettingsPage(): JSX.Element {
   };
 
   /// And a details pane spending itself, which is what a Profile saved or
-  /// removed, or a Repo registered or taken off the registry, leaves behind: the
-  /// pane was asked about something that is settled now, so the settings are what
-  /// stands after it and the cards there are what say the work landed.
+  /// removed leaves behind: the pane was asked about something that is settled
+  /// now, so the settings are what stands after it and the cards there are what
+  /// say the work landed.
   ///
   /// Replacing for the reason opening one does, and over the entry opening one
   /// already wrote: the settings keep the single history entry they were entered
@@ -253,13 +250,13 @@ function Settings(props: {
           open={(id) => props.select(opensProfile(id))}
           add={() => props.select(opensProfile("new"))}
         />
-        {/* Told which of its own things is open rather than the whole opening,
-            for the reason the Profiles are: where a Repo's pane stands is this
-            page's arithmetic. */}
-        <RepoList
-          opening={repoOpened(props.opening)}
-          open={(id) => props.select(opensRepo(id))}
-          add={() => props.select(opensRepo("new"))}
+        {/* And which repositories Verkstead may work in, as a count over the
+            pane that lists them. A card like the settings above it rather than
+            a list of cards: what there is to read about a Repo is its name, and
+            what there is to do about one is take it off the registry. */}
+        <ReposCard
+          open={props.opening === "repos"}
+          press={() => props.select("repos")}
         />
         {/* Last of the lot, under the Repos: it holds the extra directories a
             session is given beyond its own worktree, which is the one thing
@@ -301,14 +298,6 @@ function Details(props: {
     return one === null ? null : { which: one };
   });
 
-  /// And which registered Repo, the same way and for the same reason. Never the
-  /// form: registering one is a pane of its own below, so what is left here is
-  /// an id.
-  const repo = createMemo(() => {
-    const one = repoOpened(props.opening);
-    return typeof one === "number" ? { which: one } : null;
-  });
-
   return (
     <Switch>
       <Match when={props.opening === "git"}>
@@ -326,21 +315,8 @@ function Details(props: {
       <Match when={props.opening === "remote"}>
         <RemotePane back={props.back} />
       </Match>
-      {/* The Repos' two panes are two components rather than one asked about a
-          Repo that does not exist yet, the way the Profiles' one form is: what
-          registers a Repo is a path typed, and what an opened one draws is
-          everything the repository and the store say about it. */}
-      <Match when={repoOpened(props.opening) === "new"}>
-        <RepoPane back={props.back} done={props.done} />
-      </Match>
-      <Match when={repo()} keyed>
-        {(open) => (
-          <RepoDetails
-            repo={open.which}
-            back={props.back}
-            done={props.done}
-          />
-        )}
+      <Match when={props.opening === "repos"}>
+        <ReposPane back={props.back} />
       </Match>
       <Match when={profile()} keyed>
         {(open) => (

@@ -62,13 +62,11 @@ const banner = () => document.querySelector(`.${styles.notice}`);
 
 /// The page having drawn what it configures, which is what every test here
 /// waits for before reading the banner. Waited for on the settings pane's own
-/// list rather than by a repo's name: the conversations pane beside it names
-/// the repo every row is in, so a name is no longer one element on this page.
+/// Repos card rather than by a repo's name: the conversations pane beside it
+/// names the repo every row is in, so a name is no element of this page's own.
 const loaded = () =>
   waitFor(() =>
-    expect(
-      document.querySelector(`.${repoList.repos} .${repoList.repo}`),
-    ).not.toBeNull(),
+    expect(document.querySelector(`.${repoList.reposCard}`)).not.toBeNull(),
   );
 
 /// The settings pane, which is the middle one of the three the page stands on:
@@ -116,17 +114,15 @@ describe("the Update Notice", () => {
     expect(banner()!.querySelectorAll("button, input, form")).toHaveLength(0);
     // And it added nothing outside itself either: what the settings pane can be
     // pressed and typed into is what it configures — the git and language
-    // support cards, the profiles, the repos and the notifications switch —
-    // all of which were there before the banner and are not the banner's. The
-    // conversations pane beside it has plenty to press and none of it is this
-    // page's.
+    // support cards, the profiles and the notifications switch — all of which
+    // were there before the banner and are not the banner's. The conversations
+    // pane beside it has plenty to press and none of it is this page's.
     const pressable = [...settingsPane(container).querySelectorAll("button, input, form")];
     expect(
       pressable.filter(
         (found) =>
           !found.closest(`.${head.head}`) &&
           !found.closest(`.${profileList.profiles}`) &&
-          !found.closest(`.${repoList.repos}`) &&
           !found.closest(`.${notifications.notifications}`),
       ),
     ).toHaveLength(0);

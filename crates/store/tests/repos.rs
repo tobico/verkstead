@@ -166,7 +166,7 @@ async fn an_unregistered_repo_still_resolves_by_id() {
 
 /// Work still going on in a repository is the reason to keep it registered, so
 /// the removal is refused while there is any — live being everything that is
-/// neither Done nor Closed, which is the count the Repo's own pane shows.
+/// neither Done nor Closed, which is `work_on_repo`'s own reading.
 #[tokio::test]
 async fn a_repo_with_live_work_on_it_cannot_be_unregistered() {
     let (_dir, pool) = fresh_pool().await;

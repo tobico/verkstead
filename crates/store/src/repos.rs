@@ -191,11 +191,12 @@ pub enum Unregistering {
 
 /// Take a Repo off the registry, if nothing live is being worked in it.
 ///
-/// The live count is the one the Repo's own pane shows — [`super::work_on_repo`]
-/// — so what refuses the removal is the same reading the human is looking at
-/// when they press it, rather than a second opinion about what "finished" means.
+/// What counts as live is [`super::work_on_repo`]'s reading — everything that is
+/// neither Done nor Closed — so what refuses the removal is the same reading
+/// every other count of the work on a Repo is made from, rather than a second
+/// opinion about what "finished" means.
 pub async fn unregister_repo(pool: &SqlitePool, id: i64) -> Result<Unregistering> {
-    // Through the same read the pane behind the press is drawn from, so that
+    // Through the same read the list behind the press is drawn from, so that
     // what counts as being on the registry is said in one place rather than
     // spelled again here.
     if registered_repo(pool, id).await?.is_none() {
