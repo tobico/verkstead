@@ -129,8 +129,70 @@
   cursor: pointer;
 }
 
+/* And what a close pressed over a run in flight asks before it is made: the
+   question, the sentence saying what the press would end, and the two ways out
+   of it. Drawn over the page through the same `Modal` the card above is, so the
+   card and where it sits are the modal's again and what is here is the four
+   things inside it.
+
+   Two presses rather than one, which is the whole of what tells this card from
+   the refusal: there is something to decide here, and nothing has happened yet.
+   Half the row each and taller than a press on a card, the way the Set sheet's
+   own confirm pair are — this is the last thing asked before hours of work end,
+   and both ways out of it are worth the same size. */
+.confirming .confirmingTitle {
+  margin-top: 0;
+  font-weight: 600;
+}
+
+.confirming .confirmingWhy {
+  margin: 0.75rem 0 0;
+  color: var(--ink-soft);
+}
+
+.confirming .confirmingOut {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+/* The shape both of them take, which is this row's own. The paint is each
+   button's below. */
+.confirming .confirmingOut button {
+  flex: 1 1 9rem;
+  padding: 0.7rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+/* The way back, which is a secondary press like every other way back in the app
+   — `.secondary` in `styles/base.css` paints it, carried on the button beside
+   this class, and the hover that goes with it is written there too. Named here
+   so the row above can be found and so that it is plain which of the pair is
+   which. */
+.confirming .confirmingKeep {
+}
+
+/* And the press that does the thing, filled — in the accent rather than in the
+   red the two closing rows are named in: the colour on the row is what marks a
+   press out among the ones around it, and there is nothing here to mark it out
+   from. What it costs is said in the words above it. */
+.confirming .confirmingGo {
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+}
+
 @media (hover: hover) {
   .refused .refusedOut button:hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+
+  .confirming .confirmingGo:hover {
     background: var(--accent-deep);
     border-color: var(--accent-deep);
   }
