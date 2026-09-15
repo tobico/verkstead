@@ -7,13 +7,12 @@
 //! settled once, and then left alone for weeks. Three pages meant three trips
 //! out of the workbench to set a machine up, and a sidebar naming each of them;
 //! folded together they are sections of one pane, read down in the order a
-//! fresh install needs them: credentials first, because without them nothing a
-//! session does with a Repo can be pushed, then the shared Rust build cache
-//! every session builds into, then where the share viewer is hosted, then how a
-//! conflicted pull request is resolved, then what becomes of a Conversation
-//! once it is archived, then whether this machine can be reached from a phone,
-//! then the Agent Profiles and the Repos a Conversation is settled against, and
-//! last the extra directories a sandbox is given.
+//! fresh install needs them: everything git is told first, because without the
+//! token and the author nothing a session does with a Repo can be pushed, then
+//! the languages a session gets build support for, then what becomes of a
+//! Conversation once it is archived, then whether this machine can be reached
+//! from a phone, then the Agent Profiles and the Repos a Conversation is
+//! settled against, and last the extra directories a sandbox is given.
 //!
 //! The conversations pane rides along because it is the app's navigation rather
 //! than the workbench's furniture: configuring a machine is something done
@@ -48,26 +47,23 @@ import { Match, Switch, createMemo, createSignal, type JSX } from "solid-js";
 import { Panes, PaneSticky, type Pane } from "../Panes";
 import { ProfileList, ProfilePane } from "../profiles/ProfileList";
 import { Notifications } from "../push/Notifications";
-import { RepoDetails, RepoList, RepoPane } from "../repos/RepoList";
+import { ReposCard, ReposPane } from "../repos/RepoList";
 import { UpdateNotice } from "../update/UpdateNotice";
 import { Conversations } from "../workbench/Conversations";
 import { PaneHead } from "../workbench/PaneHead";
 import { pathOf } from "../workbench/openings";
-import { BuildCacheCard, BuildCachePane } from "./BuildCache";
 import { CleanupCard, CleanupPane } from "./Cleanup";
-import { ConflictsCard, ConflictsPane } from "./Conflicts";
-import { GithubCard, GithubPane } from "./Credentials";
-import { PathsCard, PathsPane } from "./Paths";
+import { GitCard, GitPane } from "./Git";
+import { LanguagesCard, LanguagesPane } from "./Languages";
 import { RemoteCard, RemotePane } from "./Remote";
+import { SandboxBindsCard, SandboxBindsPane } from "./SandboxBinds";
 import {
   SETTINGS,
   WORDS,
   openingAt,
   opensProfile,
-  opensRepo,
   pathTo,
   profileOpened,
-  repoOpened,
   type Opening,
 } from "./openings";
 import styles from "./SettingsPage.module.css";
@@ -84,7 +80,7 @@ import styles from "./SettingsPage.module.css";
 ///
 /// So the ones named by a word are written from [`WORDS`], which is what
 /// [`openingAt`] reads a path against — a section added there arrives with the
-/// route that reaches it. The two named by an id keep their own line: what
+/// route that reaches it. The one named by an id keeps its own line: what
 /// stands in that segment is an id or the word `new`, and no id the server
 /// issues is `new`.
 ///
@@ -102,10 +98,9 @@ export function panes(): JSX.Element {
       {WORDS.map((word) => (
         <Route path={`/${word}`} />
       ))}
-      {/* The blank form rides in the same segment an id does, as
-          `/settings/profiles/new`. */}
+      {/* The one pane named by an id, the Repos' having gone: the blank form
+          rides in the same segment an id does, as `/settings/profiles/new`. */}
       <Route path="/profiles/:profile" />
-      <Route path="/repos/:repo" />
     </>
   );
 }
@@ -143,9 +138,9 @@ export function SettingsPage(): JSX.Element {
   };
 
   /// And a details pane spending itself, which is what a Profile saved or
-  /// removed, or a Repo registered or taken off the registry, leaves behind: the
-  /// pane was asked about something that is settled now, so the settings are what
-  /// stands after it and the cards there are what say the work landed.
+  /// removed leaves behind: the pane was asked about something that is settled
+  /// now, so the settings are what stands after it and the cards there are what
+  /// say the work landed.
   ///
   /// Replacing for the reason opening one does, and over the entry opening one
   /// already wrote: the settings keep the single history entry they were entered
@@ -212,33 +207,26 @@ function Settings(props: {
             time. */}
         <UpdateNotice />
 
-        <GithubCard
-          open={props.opening === "github"}
-          press={() => props.select("github")}
+        <GitCard
+          open={props.opening === "git"}
+          press={() => props.select("git")}
         />
-        {/* Under the credentials and above the lists: it is the other thing
-            Verkstead itself was told rather than anything a Conversation is
-            settled against. One of the two sections about what a session runs
-            inside, and the one that is on without anybody having been here —
-            which is why it reads beside the credentials rather than down with
-            the Paths, where everything is somebody's own typing. */}
-        <BuildCacheCard
-          open={props.opening === "build-cache"}
-          press={() => props.select("build-cache")}
-        />
-        {/* And the last thing Verkstead itself was told: what a session sent at
-            a pull request that will not merge is told to do about it. Last
-            because it is the one nobody has to read — what it does with nothing
-            configured is the safe half of the choice. */}
-        <ConflictsCard
-          open={props.opening === "conflicts"}
-          press={() => props.select("conflicts")}
+        {/* Under the git section and above the lists: which languages a
+            session gets build support for is the other thing Verkstead itself
+            was told rather than anything a Conversation is settled against. One
+            of the two sections about what a session runs inside, and the one
+            that is on without anybody having been here — which is why it reads
+            beside the git section rather than down with the Sandbox binds, where
+            everything is somebody's own typing. */}
+        <LanguagesCard
+          open={props.opening === "languages"}
+          press={() => props.select("languages")}
         />
         {/* And what becomes of a Conversation once the human has archived it:
             the trim that takes its bulk, and the delete that takes the whole of
-            it. Beside the one above because it is the other setting nobody has
-            to read — and the one section on this page about the record rather
-            than about the machine it is kept on. */}
+            it. Under the two above because it is the setting nobody has to read
+            — and the one section on this page about the record rather than
+            about the machine it is kept on. */}
         <CleanupCard
           open={props.opening === "cleanup"}
           press={() => props.select("cleanup")}
@@ -262,22 +250,22 @@ function Settings(props: {
           open={(id) => props.select(opensProfile(id))}
           add={() => props.select(opensProfile("new"))}
         />
-        {/* Told which of its own things is open rather than the whole opening,
-            for the reason the Profiles are: where a Repo's pane stands is this
-            page's arithmetic. */}
-        <RepoList
-          opening={repoOpened(props.opening)}
-          open={(id) => props.select(opensRepo(id))}
-          add={() => props.select(opensRepo("new"))}
+        {/* And which repositories Verkstead may work in, as a count over the
+            pane that lists them. A card like the settings above it rather than
+            a list of cards: what there is to read about a Repo is its name, and
+            what there is to do about one is take it off the registry. */}
+        <ReposCard
+          open={props.opening === "repos"}
+          press={() => props.select("repos")}
         />
         {/* Last of the lot, under the Repos: it holds the extra directories a
             session is given beyond its own worktree, which is the one thing
             here nobody has to say anything about at all. It sat above the lists
             while a Watched Path was what a Repo was registered from; with the
             binds alone in it, that reason is gone and nothing replaces it. */}
-        <PathsCard
-          open={props.opening === "paths"}
-          press={() => props.select("paths")}
+        <SandboxBindsCard
+          open={props.opening === "sandbox-binds"}
+          press={() => props.select("sandbox-binds")}
         />
       </div>
     </>
@@ -310,27 +298,16 @@ function Details(props: {
     return one === null ? null : { which: one };
   });
 
-  /// And which registered Repo, the same way and for the same reason. Never the
-  /// form: registering one is a pane of its own below, so what is left here is
-  /// an id.
-  const repo = createMemo(() => {
-    const one = repoOpened(props.opening);
-    return typeof one === "number" ? { which: one } : null;
-  });
-
   return (
     <Switch>
-      <Match when={props.opening === "github"}>
-        <GithubPane back={props.back} />
+      <Match when={props.opening === "git"}>
+        <GitPane back={props.back} />
       </Match>
-      <Match when={props.opening === "build-cache"}>
-        <BuildCachePane back={props.back} />
+      <Match when={props.opening === "languages"}>
+        <LanguagesPane back={props.back} />
       </Match>
-      <Match when={props.opening === "paths"}>
-        <PathsPane back={props.back} />
-      </Match>
-      <Match when={props.opening === "conflicts"}>
-        <ConflictsPane back={props.back} />
+      <Match when={props.opening === "sandbox-binds"}>
+        <SandboxBindsPane back={props.back} />
       </Match>
       <Match when={props.opening === "cleanup"}>
         <CleanupPane back={props.back} />
@@ -338,21 +315,8 @@ function Details(props: {
       <Match when={props.opening === "remote"}>
         <RemotePane back={props.back} />
       </Match>
-      {/* The Repos' two panes are two components rather than one asked about a
-          Repo that does not exist yet, the way the Profiles' one form is: what
-          registers a Repo is a path typed, and what an opened one draws is
-          everything the repository and the store say about it. */}
-      <Match when={repoOpened(props.opening) === "new"}>
-        <RepoPane back={props.back} done={props.done} />
-      </Match>
-      <Match when={repo()} keyed>
-        {(open) => (
-          <RepoDetails
-            repo={open.which}
-            back={props.back}
-            done={props.done}
-          />
-        )}
+      <Match when={props.opening === "repos"}>
+        <ReposPane back={props.back} />
       </Match>
       <Match when={profile()} keyed>
         {(open) => (

@@ -4518,6 +4518,34 @@ describe("a conversation's companion repos", () => {
     ).toBeNull();
   });
 
+  /// And where there is nothing to add, it says where one is taken on — which
+  /// is the Repo dropdown above it rather than the settings page.
+  ///
+  /// Asserted because this is the line that went wrong when registering left
+  /// the settings: it went on pointing at a page that lists what is registered
+  /// and offers no way to register anything. The profiles' own empty state
+  /// beside it still points at the settings, and still should.
+  it("says where a repo is taken on when there is none to add", async () => {
+    serving(
+      whenever("/api/ui/conversations", json(SIDEBAR)),
+      whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
+      whenever("/api/ui/repos", json([])),
+      whenever("/api/ui/profiles", json(PROFILES)),
+      whenever(`/api/ui/conversations/${OPEN.id}`, json({ ...OPEN, companions: [] })),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+    await openRepo(container);
+
+    const said = await waitFor(() =>
+      screen.getByText(/No repos are registered yet/),
+    );
+
+    expect(said.textContent).toContain("Open repo");
+    // No link at all: there is no path that drops a dropdown, and one to the
+    // settings would be the pointer this replaced.
+    expect(said.querySelector("a")).toBeNull();
+  });
+
   it("sends the repo that was pressed", async () => {
     const fetching = theWorkbenchWith({ companions: [] }, whenever(
       `/api/ui/conversations/${OPEN.id}/companions`,
@@ -9928,7 +9956,7 @@ describe("publishing a share", () => {
 
     expect(said.closest(`.${toasts.toast}`)).toBeTruthy();
     expect(
-      said.querySelector<HTMLAnchorElement>('a[href="/settings/github"]'),
+      said.querySelector<HTMLAnchorElement>('a[href="/settings/git"]'),
     ).toBeTruthy();
   });
 
@@ -10066,7 +10094,7 @@ describe("sharing a conversation to its pull requests", () => {
     );
 
     expect(
-      said.querySelector<HTMLAnchorElement>('a[href="/settings/github"]'),
+      said.querySelector<HTMLAnchorElement>('a[href="/settings/git"]'),
     ).toBeTruthy();
   });
 });

@@ -995,8 +995,8 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
     assert!(!saved.settings.rust_build_cache.size_configured);
 }
 
-/// The Paths half of the page: every Sandbox Configuration bind, from both of
-/// the places one is said.
+/// The Sandbox binds half of the page: every Sandbox Configuration bind, from
+/// both of the places one is said.
 ///
 /// A server the installation configured as well as a file, because the whole of
 /// what this reports is which of the two said an entry and whether the server
@@ -1024,7 +1024,7 @@ async fn app_installed(binds: &[String]) -> (tempfile::TempDir, Router) {
 }
 
 /// Save the binds and leave the rest of both files alone, which is what the
-/// Paths pane's own press sends.
+/// Sandbox binds pane's own press sends.
 async fn save_paths(app: &Router, binds: &[&str]) -> SettingsSaved {
     save(
         app,
@@ -1074,32 +1074,23 @@ async fn a_verkstead_configured_by_nobody_has_no_paths_at_all() {
 async fn the_installations_own_paths_come_back_as_the_installations() {
     let root = tempfile::tempdir().unwrap();
     let cache = made(root.path(), "node-cache");
-    let own = made(root.path(), "askance-cargo");
+    let cargo = made(root.path(), "cargo");
 
-    let (_dir, app) = app_installed(&[
-        cache.display().to_string(),
-        format!("askance={}", own.display()),
-    ])
-    .await;
+    let (_dir, app) =
+        app_installed(&[cache.display().to_string(), cargo.display().to_string()]).await;
 
     let paths = settings(&app).await.paths;
 
-    let [global, per_repo] = &paths.binds[..] else {
+    let [first, second] = &paths.binds[..] else {
         panic!("two binds, not {:?}", paths.binds);
     };
 
-    assert_eq!(global.path, cache.display().to_string());
-    assert_eq!(
-        global.repo, None,
-        "a bind every sandbox gets is nobody's own"
-    );
-    assert_eq!(global.source, PathSource::Installation);
-    assert_eq!(global.resolution, PathResolution::Resolves);
+    assert_eq!(first.path, cache.display().to_string());
+    assert_eq!(first.source, PathSource::Installation);
+    assert_eq!(first.resolution, PathResolution::Resolves);
 
-    // And the other half of a bind's shape: which Repo it is scoped to.
-    assert_eq!(per_repo.path, own.display().to_string());
-    assert_eq!(per_repo.repo.as_deref(), Some("askance"));
-    assert_eq!(per_repo.source, PathSource::Installation);
+    assert_eq!(second.path, cargo.display().to_string());
+    assert_eq!(second.source, PathSource::Installation);
 }
 
 /// And what the page saved comes back as the settings' own, beside it: the two
@@ -1112,33 +1103,21 @@ async fn the_two_sources_come_back_as_one_list_saying_which_is_which() {
 
     let (_dir, app) = app_installed(&[bound.display().to_string()]).await;
 
-    let saved = save_paths(
-        &app,
-        &[
-            &cargo.display().to_string(),
-            &format!("verkstead={}", cargo.display()),
-        ],
-    )
-    .await;
+    let saved = save_paths(&app, &[&cargo.display().to_string()]).await;
 
     let binds: Vec<_> = saved
         .settings
         .paths
         .binds
         .iter()
-        .map(|entry| (entry.path.clone(), entry.repo.clone(), entry.source.clone()))
+        .map(|entry| (entry.path.clone(), entry.source.clone()))
         .collect();
 
     assert_eq!(
         binds,
         vec![
-            (bound.display().to_string(), None, PathSource::Installation),
-            (cargo.display().to_string(), None, PathSource::Settings),
-            (
-                cargo.display().to_string(),
-                Some("verkstead".to_owned()),
-                PathSource::Settings
-            ),
+            (bound.display().to_string(), PathSource::Installation),
+            (cargo.display().to_string(), PathSource::Settings),
         ],
         "the installation's own first, then what the page saved"
     );
@@ -1188,12 +1167,49 @@ async fn a_bind_that_will_not_read_is_still_a_row() {
     };
 
     assert_eq!(bind.path, "node-cache", "the entry as it was written");
-    assert_eq!(bind.repo, None);
     assert_eq!(bind.source, PathSource::Settings);
     assert!(
-        why(&bind.resolution).contains("neither an absolute path"),
+        why(&bind.resolution).contains("not an absolute path"),
         "{bind:?}"
     );
+}
+
+/// Except an entry in the retired `name=path` grammar, which draws nothing at
+/// all.
+///
+/// It was configuration rather than a typo — somebody wrote it when Verkstead
+/// read it — and nothing about it is a row worth drawing: it reaches no session,
+/// there is no Repo to scope a bind to any more, and a row saying so on every
+/// page load would be the settings explaining a setting that no longer exists.
+/// `config.yaml` is where it stays until somebody takes it out, or until the
+/// next save from this pane drops it.
+#[tokio::test]
+async fn a_bind_written_for_a_repo_draws_no_row_at_all() {
+    let root = tempfile::tempdir().unwrap();
+    let cargo = made(root.path(), "cargo");
+
+    let (dir, app) = app().await;
+
+    let saved = save_paths(
+        &app,
+        &[
+            &cargo.display().to_string(),
+            &format!("verkstead={}", cargo.display()),
+        ],
+    )
+    .await;
+
+    let [bind] = &saved.settings.paths.binds[..] else {
+        panic!("one bind, not {:?}", saved.settings.paths.binds);
+    };
+
+    assert_eq!(bind.path, cargo.display().to_string());
+    assert_eq!(bind.resolution, PathResolution::Resolves);
+
+    // And it is still in the file, which is the whole of where it lives now: a
+    // save lands whatever it was told, and this one was told it.
+    let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+    assert!(written.contains("verkstead="), "{written}");
 }
 
 /// A save says what the settings hold afterwards, and says nothing at all about

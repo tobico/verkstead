@@ -32,7 +32,6 @@
       "binds": [
         {
           "path": "/var/cache/verkstead-node",
-          "repo": null,
           "resolution": {
             "Unresolved": {
               "why": "the server cannot see it: there is nothing at that path"
@@ -42,7 +41,6 @@
         },
         {
           "path": "/var/cache/verkstead-cargo",
-          "repo": "verkstead",
           "resolution": {
             "Unresolved": {
               "why": "the server cannot see it: there is nothing at that path"

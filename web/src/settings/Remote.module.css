@@ -1,8 +1,9 @@
 /* Remote access — see `Remote.tsx`.
 
    Two halves in two panes, like every other section of this page: the card says
-   whether this workbench can be reached from a phone, and the pane beside it
-   carries the whole of what the machine said about why.
+   whether this workbench can be reached from a phone, and the pane beside it is
+   the controls — the box, the code, the link and the key — with what the machine
+   said only where somebody has something to do about it.
 
    What a card *is* is `CardButton.module.css`'s. What is here is only what
    stands on it. */
@@ -35,12 +36,6 @@
   overflow-wrap: anywhere;
 }
 
-/* And the details pane: what the machine said, under the line that summed it
-   up. */
-.remote .standing {
-  margin-bottom: 0.85rem;
-}
-
 /* What `tailscale` printed when it was asked, shown as it came. Set as output
    rather than as prose, because it is: the line names a service to start, and a
    word of it reworded is a command that does not work.
@@ -67,39 +62,10 @@
   color: var(--accent);
 }
 
-/* What the machine is, once it is up: its name on the tailnet, and what is
-   served on that name. A description list, because that is what these are —
-   a reading apiece, each with what it is called beside it. */
-.readings {
-  display: grid;
-  grid-template-columns: auto;
-  gap: 0.25rem 0;
-  margin: 0;
-}
-
-.readings dt {
-  font-size: 0.85rem;
-  color: var(--ink-soft);
-}
-
-.readings dd {
-  margin: 0 0 0.85rem;
-  font-size: 0.95rem;
-}
-
-.readings dd:last-child {
-  margin-bottom: 0;
-}
-
-/* The serve switch and what stands under it. The switch is `Switch.module.css`'s
-   own; this is only the room around it, so the readings below do not sit on top
-   of the sentence that explains it. */
+/* The serve box and the one line under it. The box is `Check.module.css`'s
+   own; this is only the room between it and the line that is its own. */
 .remote label + p {
   margin-top: 0.5rem;
-}
-
-.remote .readings {
-  margin-top: 1.25rem;
 }
 
 /* The line that makes this machine's user Tailscale's operator, drawn as what it
@@ -108,7 +74,7 @@
    The accent down its edge rather than the stopped red the trouble beside it
    carries, because they say different things. The trouble is what went wrong;
    this is the thing to do about it, and the one line on this pane that ends with
-   the switch working. */
+   the box working. */
 .command {
   display: block;
   margin: 0.5rem 0 0;
@@ -137,23 +103,17 @@
   }
 }
 
-/* How a phone gets in, under the readings it is made of — the code and the
-   link beside it — and, under that again, the key both of them hand over.
+/* How a phone gets in — the code and the link beside it — and, under that
+   again, the key both of them hand over.
 
-   A rule above each rather than a card of its own, because they are the same
-   section: what is above is what the machine is, and these are what to do with
-   it. */
+   A rule above each rather than a heading over it: with the words gone it is the
+   rule that says a new thing has started, and what each of them is is the thing
+   itself. */
 .reach,
 .key {
   margin-top: 1.5rem;
   padding-top: 1.25rem;
   border-top: 1px solid var(--edge);
-}
-
-.reach h3,
-.key h3 {
-  margin: 0 0 0.75rem;
-  font-size: 0.95rem;
 }
 
 /* The code and the link, side by side where there is room and stacked where
@@ -164,7 +124,6 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 1rem;
-  margin-bottom: 0.85rem;
 }
 
 /* The code itself, on its own white ground: the modules are black on white
@@ -236,10 +195,10 @@
   opacity: 0.6;
 }
 
-/* The key section starts with its own heading, so the button under it needs no
-   space of its own — and the sentence under the button sits close to it. */
+/* The key section opens on the press itself, so the rule above it is all the
+   space it needs — and the sentence under the button sits close to it. */
 .key .reset {
-  margin-top: 0.85rem;
+  margin-top: 0;
 }
 
 .key .reset + p {

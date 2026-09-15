@@ -70,10 +70,10 @@ use tower::ServiceExt;
 use verkstead_render::{
     Adopted, AgentOutputEvent, AnswerAttached, Attached, BriefSaved, Capture, CommitEvent,
     CommitPane, CompanionAdded, CompanionMode, CompanionModeChosen, CompanionView,
-    ConflictResolution, ConversationClosed, ConversationSteered, ConversationStopped,
-    ConversationView, GrillingStarted, Lifecycle, NoticeEvent, PickedView, PinnedEvent,
-    ProfileSaved, PullRequestEvent, Registered, Resolved, Resumed, Shown, Size, StageListReached,
-    Started, SteerOpened, Submitted, TaskListEvent, TaskListReached, TerminalOpened, TerminalsView,
+    ConversationClosed, ConversationSteered, ConversationStopped, ConversationView,
+    GrillingStarted, Lifecycle, NoticeEvent, PickedView, PinnedEvent, ProfileSaved,
+    PullRequestEvent, Registered, Resolved, Resumed, Shown, Size, StageListReached, Started,
+    SteerOpened, Submitted, TaskListEvent, TaskListReached, TerminalOpened, TerminalsView,
     TimelineEvent, TranscriptView, Turn, Watching,
 };
 use verkstead_schema::{Direction, Nudge};
@@ -6804,19 +6804,6 @@ fn configure(fixture: &Grilling, more: &str) {
 /// Who every session in these tests commits as, which is the whole of what a
 /// bench's `config.yaml` says until a test writes something else into it.
 const THE_AUTHOR: &str = "git_author:\n  name: Verkstead Test\n  email: test@verkstead.invalid\n";
-
-/// And say how one Repo resolves a conflict, which is the override that wins
-/// over that file.
-async fn told_to_resolve_by(fixture: &Grilling, repo: i64, resolution: ConflictResolution) {
-    let view: verkstead_render::RepoView = post(
-        &fixture.app,
-        &format!("/api/ui/repos/{repo}/resolution"),
-        &serde_json::json!({ "resolution": resolution }),
-    )
-    .await;
-
-    assert_eq!(view.conflict_resolution, Some(resolution));
-}
 
 /// What Verkstead has written down about whether this Conversation's own pull
 /// request merges, which is the reading a card is drawn off long after anything
@@ -26091,23 +26078,25 @@ async fn two_conflicted_pull_requests_are_merged_one_session_at_a_time() {
     );
 }
 
-/// What each resolution session is told to *do* is the strategy configured for
-/// the repository its pull request is in: the setting every Repo shares, unless
-/// that Repo has been given one of its own.
+/// What each resolution session is told to *do* is the strategy the settings
+/// file names, whichever repository its pull request is in.
 ///
-/// Two conflicts in one wrap-up, the settings file asking for a rebase and the
-/// companion Repo overriding it back to a merge. So the two prompts have to
-/// differ — one telling its session to rebase and force-push with a lease, the
-/// other to merge and never force-push — which is the whole of the setting doing
-/// anything: a strategy that never reached the session would be a picker that
-/// wrote a word in a file.
+/// Two conflicts in one wrap-up and one word in the file, so both prompts have
+/// to carry it — here a rebase, force-pushed with a lease, rather than the merge
+/// a Verkstead nobody has configured does. Which is the whole of the setting
+/// doing anything: a strategy that never reached the session would be a picker
+/// that wrote a word in a file.
+///
+/// One answer for every Repo is the whole answer. A Repo could once be given one
+/// of its own, and an override no settings page draws is a Repo rebasing with
+/// nowhere to read why — so the file is where this is asked and the only place.
 ///
 /// The stub sessions merge either way, this being about what they are told
 /// rather than about git. What a rebase costs is said on the settings page,
 /// beside the choice, and is why the merge is what nobody choosing anything
 /// gets.
 #[tokio::test]
-async fn each_resolution_session_is_told_the_strategy_its_repo_resolves_by() {
+async fn each_resolution_session_is_told_the_strategy_the_settings_file_names() {
     let spill = tempfile::tempdir().unwrap();
     let dispatched = spill.path().join("fix-prompts");
     let busy = spill.path().join("busy");
@@ -26125,16 +26114,9 @@ async fn each_resolution_session_is_told_the_strategy_its_repo_resolves_by() {
     )
     .await;
 
-    // Both said before the wrap-up is anywhere near: the settings file is read
-    // as each session is dispatched, so what matters is that they are there by
-    // then.
+    // Said before the wrap-up is anywhere near: the settings file is read as
+    // each session is dispatched, so what matters is that it is there by then.
     configure(&fixture, "conflict_resolution: rebase\n");
-    told_to_resolve_by(
-        &fixture,
-        companion_repo(&fixture).await,
-        ConflictResolution::Merge,
-    )
-    .await;
 
     worked_to_empty(&fixture).await;
 
@@ -26152,7 +26134,7 @@ async fn each_resolution_session_is_told_the_strategy_its_repo_resolves_by() {
 
     assert!(
         own.contains("Rebase the branch") && own.contains("--force-with-lease"),
-        "the Repo that overrides nothing resolves the way the settings file says, \
+        "the work's own pull request resolves the way the settings file says, \
          which here is a rebase: {own}",
     );
 
@@ -26162,10 +26144,9 @@ async fn each_resolution_session_is_told_the_strategy_its_repo_resolves_by() {
         .expect("and so did the companion's");
 
     assert!(
-        companion.contains("Merge the pull request's base branch")
-            && companion.contains("rather than a rebase"),
-        "and the Repo that was given one of its own resolves by that, whatever \
-         every other Repo does: {companion}",
+        companion.contains("Rebase the branch") && companion.contains("--force-with-lease"),
+        "and so does the companion's, there being nowhere left for one repository \
+         to say something else: {companion}",
     );
 }
 

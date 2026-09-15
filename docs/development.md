@@ -44,14 +44,13 @@ What keeps a session to its own Conversation is the **Sandbox**, composed from
 the Repo and the Profile that Conversation names.
 
 The one path list left is the **Sandbox Configuration** binds, and they are
-said in two places — `--sandbox-bind DIR`, or `--sandbox-bind NAME=DIR` for the
-sessions working in one Repo, and the same two grammars on the settings page's
-**Paths** section. What a session gets is the union; see the `"paths"` payload
-further down this section. The flag is the shape a service unit wants, where
-startup is the moment to hear about a typo and a bind that is not there refuses
-to start; the settings are the shape a bare binary wants, where a save has to
-land whatever it was told and an entry that will not resolve is reported rather
-than fatal.
+said in two places — `--sandbox-bind DIR`, and the same grammar on the settings
+page's **Sandbox binds** section. What a session gets is the union; see the
+`"paths"` payload further down this section. The flag is the shape a service unit wants,
+where startup is the moment to hear about a typo and a bind that is not there
+refuses to start; the settings are the shape a bare binary wants, where a save
+has to land whatever it was told and an entry that will not resolve is reported
+rather than fatal.
 
 Everything Verkstead makes goes in one place, the **Data Directory**: the
 database at `verkstead.db`, the worktrees, the installed skills, the handoff
@@ -178,12 +177,11 @@ conflict_resolution: merge
 share_on_done: false
 sandbox_binds:
   - /var/cache/verkstead-node
-  - verkstead=/var/cache/verkstead-cargo
+  - /var/cache/verkstead-cargo
 ```
 
 `sandbox_binds` at the foot is the other place the Sandbox Configuration binds
-are said. A bind is a plain path where every session gets it, and `name=path`
-where only the sessions working in the Repo registered under that name do; and
+are said. A bind is one absolute path, every session gets every one of them, and
 what the server goes by is the union of this file and the installation's own
 flags.
 
@@ -280,8 +278,8 @@ its pull request when the work settles to Done, which is otherwise something the
 human presses for. It is the one setting here that is **off** with nothing
 configured — an absent key, an absent file and one nothing can parse all mean
 off — because what it turns on publishes a gist under the human's own account
-and comments on a pull request other people are reading. It is set from the
-GitHub and git author pane, beside the token it is published with.
+and comments on a pull request other people are reading. It is set from the Git
+pane, beside the token it is published with.
 
 What it turns on is the wrap-up's own settle rather than the state: a steer into
 Done shares nothing. It fires once per conversation, gated on the row in
@@ -324,19 +322,11 @@ already read and breaks anything stacked on the branch, and nobody should meet
 that for never having found the settings page. In `config.yaml` the word is
 lowercase, as `merge` or `rebase`.
 
-One repo can say otherwise, which is a fact about the repo rather than about the
-machine and so lives in the database beside it — set from that repo's own pane on
-the settings page, or over the API:
-
-```console
-$ curl -X POST -H 'Content-Type: application/json' \
-    -d '{"resolution":"Rebase"}' \
-    http://127.0.0.1:8422/api/ui/repos/1/resolution
-```
-
-`null` there takes the override back, so that repo does whatever every other one
-does. It is nothing at all rather than a copy of today's global, so a repo left
-alone follows the setting above when it is changed.
+That word is the whole of the answer, in every repo. One repo could once say
+otherwise, from its own pane on the settings page; an override no settings page
+draws would be a repo rebasing with nowhere to read why, so it is gone and the
+file is the only place this is asked. It is picked on the Git pane, under the
+author — a select of two words, saving on the pick.
 
 The link is composed as a page is drawn rather than written down at the publish.
 What the record holds is the gist's own URL, so a share published before there
@@ -379,10 +369,11 @@ itself, `pnpm dev` is the better half of this: see [The dev loop](#the-dev-loop)
 
 Every Question Set is asked *from* a Conversation and lands on its Timeline, so
 there has to be one before an agent can ask anything. Open
-<http://127.0.0.1:8422/>, add a repo — any git repository root the server can
-read, and the path field's dropdown opens on your home to browse for one — and
-press **New conversation**. That opens the composer: pick the repo in the
-**Repo** dropdown along the bottom of the box, then press **Save as draft**.
+<http://127.0.0.1:8422/> and press **New conversation**. That opens the composer:
+drop the **Repo** dropdown along the bottom of the box and press **Open repo**,
+which takes any git repository root the server can read — the path field's
+dropdown opens on your home to browse for one — and puts the draft on it. Then
+press **Save as draft**.
 The URL then names what it made — `/conversations/1` — and that number is the
 one below.
 
@@ -500,12 +491,12 @@ $ echo $?
 That is the loop. Run step 4 again and Question Set 2 appears on the same
 Conversation's Timeline, to be answered the same way. To answer it from your
 phone instead, open the settings page's **Remote access** section: it says what
-this machine's Tailscale is doing, its switch puts the tailnet name in front of
-the port this server is listening on — the HTTPS push notifications need to work
-at all — and the login link is drawn there as a QR code to point the phone's
-camera at, the address and the **Workbench Key** together. Nothing to run in a
-terminal, and nothing to paste: Tailscale itself is the machine's, and a serve
-set up by hand reads on that page exactly as one set up from it would.
+this machine's Tailscale is doing, its checkbox puts the tailnet name in front
+of the port this server is listening on — the HTTPS push notifications need to
+work at all — and the login link is drawn there as a QR code to point the
+phone's camera at, the address and the **Workbench Key** together. Nothing to
+run in a terminal, and nothing to paste: Tailscale itself is the machine's, and
+a serve set up by hand reads on that page exactly as one set up from it would.
 
 Where the press is refused for want of the operator grant — Tailscale allows a
 serve from nobody but root and the tailnet's operator — the pane shows the

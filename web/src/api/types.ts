@@ -577,12 +577,7 @@ export type BindEntry = {
  * it was written, where nothing could be read out of it at all. A row
  * nobody can see is a row nobody can correct.
  */
-path: string, 
-/**
- * The Repo this bind is only for, by the name it is registered under, or
- * `null` for one every sandbox gets.
- */
-repo: string | null, source: PathSource, resolution: PathResolution, };
+path: string, source: PathSource, resolution: PathResolution, };
 
 /**
  * One line of the backend's own bookkeeping.
@@ -1119,17 +1114,6 @@ export type CompileCaching = "Cached" | "NoSccache";
  * found later, and why merge is what nobody choosing anything gets.
  */
 export type ConflictResolution = "Merge" | "Rebase";
-
-/**
- * How one Repo is to resolve a conflict from now on, which is the one thing
- * there is to *say* to a registered Repo besides taking it away.
- *
- * `null` takes the override back rather than writing the global's word down:
- * what *use the global setting* means is that this Repo says nothing, and a
- * Repo holding a copy of today's global would go on holding it after the global
- * moved.
- */
-export type ConflictResolutionEdit = { resolution: ConflictResolution | null, };
 
 /**
  * And what became of archiving one: putting a Closed Conversation away, so the
@@ -2434,9 +2418,7 @@ export type PathSource = "Installation" | "Settings";
  */
 export type PathsView = { 
 /**
- * Every configured bind, the ones every sandbox gets and the ones one Repo
- * does together — see [`BindEntry::repo`], which is what says which of the
- * two an entry is.
+ * Every configured bind, which is a directory every sandbox gets.
  */
 binds: Array<BindEntry>, };
 
@@ -3096,14 +3078,18 @@ export type RepoRemoved = "Removed" | "NoSuchRepo" | "InUse";
 export type RepoSwitched = "Switched" | "NoSuchConversation" | "NotDrafting" | "Adopting" | "HoldingPullRequest" | "NoSuchRepo";
 
 /**
- * One registered Repo opened: everything the card cannot hold, read at the
- * moment it is asked for.
+ * One registered Repo, whole: the row, and everything a reading of the
+ * repository itself adds to it.
  *
- * The card's own three facts come along with it rather than being left to the
- * list behind the pane. The pane is a page of its own as far as a link is
- * concerned — somebody reloads on it, or arrives from a message — and a pane
- * that drew its own title out of another read would have nothing to say until
- * that read landed.
+ * What a create answers with — see [`Created`], which is the one thing left
+ * carrying one. The settings had a pane per Repo drawing every field here and
+ * it is gone; what is drawn of a Repo there is its name, and each of these is
+ * read where it is used instead.
+ *
+ * The row's own three facts come along with the rest rather than being left to
+ * the list: whoever made a repository is about to put a draft on it, and a
+ * caller that had to go and read the Repo it just made would be asking for
+ * something the answer was already holding.
  *
  * Nothing here is stored beyond those three. The branches are git's own answer,
  * the counts are the store's, and the roadmaps are read off the repository the
@@ -3141,18 +3127,7 @@ finished: number,
  * new-conversation box finds them. Empty where there are none, which is
  * most repositories most days.
  */
-roadmaps: Array<AbandonedRoadmap>, 
-/**
- * How a conflicted pull request in this repository is resolved, where this
- * Repo has been told something other than what every other one does.
- *
- * `null` is *whatever the global setting says* rather than *merge*: the two
- * are the same answer today and stop being the same the moment the global
- * is changed, and a Repo that had quietly frozen this morning's global
- * would be a choice nobody made. What that global is, is on the settings
- * themselves — see [`crate::SettingsView::conflict_resolution`].
- */
-conflict_resolution: ConflictResolution | null, };
+roadmaps: Array<AbandonedRoadmap>, };
 
 /**
  * The **Resolve conflicts** press as the page receives it: when, and nothing
@@ -3655,8 +3630,7 @@ share_on_done: boolean,
  * The Sandbox Configuration binds the settings own, as values again: what
  * is sent is what `config.yaml` holds afterwards, so a row taken off the
  * page is a row taken out of the file. In the grammar `--sandbox-bind`
- * uses: `/abs/path` for a bind every sandbox gets, and `name=/abs/path`
- * for one the Repo registered under that name gets.
+ * uses, which is `/abs/path` for a bind every sandbox gets.
  *
  * Strings rather than a shape of their own, because a string is what the
  * file holds — and one grammar for both of the places a bind is said is

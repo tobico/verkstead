@@ -12,8 +12,9 @@
 //! by the words it reads as.
 //!
 //! Every one of these takes the label, because a page holds more than one of
-//! these fields: the settings' Paths section draws two, and each is a browse of
-//! its own.
+//! these fields: an Agent Profile's form draws one for the account it names and
+//! the Sandbox binds section draws one for the path it adds, and each is a
+//! browse of its own.
 
 import { fireEvent, screen } from "@solidjs/testing-library";
 

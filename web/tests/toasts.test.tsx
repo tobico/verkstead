@@ -52,13 +52,13 @@ describe("the toast layer", () => {
     mount();
     toast(() => (
       <>
-        No token. <a href="/settings/github">Put one in.</a>
+        No token. <a href="/settings/git">Put one in.</a>
       </>
     ));
 
     expect(
       screen.getByRole("link", { name: "Put one in." }).getAttribute("href"),
-    ).toBe("/settings/github");
+    ).toBe("/settings/git");
   });
 
   /// Two presses are two outcomes, even where they were refused the same way.

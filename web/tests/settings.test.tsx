@@ -1,6 +1,8 @@
-//! The credentials at the head of the settings pane: the GitHub token every
-//! session is handed, and who its commits are by. And the settings page they
-//! head, which stands on the same three panes the workbench does.
+//! Everything git is told, at the head of the settings pane: the GitHub token
+//! every session is handed, who its commits are by, how a conflicted pull
+//! request is resolved, and whether Done shares the record to that pull
+//! request. And the settings page it heads, which stands on the same three
+//! panes the workbench does.
 //!
 //! The two halves are mounted apart, because that is what they are now: a card
 //! in the middle pane carrying what is configured, and the form that rewrites it
@@ -10,10 +12,11 @@
 //! credentials — and the pair is mounted together only where a round trip is
 //! what is being asked about: what the form saved, said back on the card.
 //!
-//! So this suite is in four parts: what is readable on the card without
+//! So this suite is in five parts: what is readable on the card without
 //! opening anything — the token's state, the author, and the warnings about
-//! whichever is missing — what the form does in its pane, what the switch beside
-//! it does, and what the page itself draws around the two.
+//! whichever is missing — what the form does in its pane, what each of the two
+//! controls that save themselves beside it does, and what the page itself draws
+//! around the lot.
 //!
 //! `tests/fixtures/settings*.json` are golden fixtures like the profiles page's:
 //! `cargo test` calls the real endpoint and writes the files, so what these
@@ -38,10 +41,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../src/App";
 import type {
+  ConflictResolution,
   ConversationEntry,
   ProfileEntry,
   RepoEntry,
-  RepoView,
   SettingsSaved,
   SettingsView,
   ShowingArchived,
@@ -52,10 +55,10 @@ import profileList from "../src/profiles/ProfileList.module.css";
 import notifications from "../src/push/Notifications.module.css";
 import repoList from "../src/repos/RepoList.module.css";
 import card from "../src/CardButton.module.css";
-import { GithubCard, GithubPane } from "../src/settings/Credentials";
-import styles from "../src/settings/Credentials.module.css";
-import buildCache from "../src/settings/BuildCache.module.css";
-import paths from "../src/settings/Paths.module.css";
+import { GitCard, GitPane } from "../src/settings/Git";
+import styles from "../src/settings/Git.module.css";
+import languages from "../src/settings/Languages.module.css";
+import binds from "../src/settings/SandboxBinds.module.css";
 import {
   SettingsPage,
   panes as settingsPanes,
@@ -63,18 +66,16 @@ import {
 import {
   openingAt,
   opensProfile,
-  opensRepo,
   pathTo,
   profileOpened,
-  repoOpened,
 } from "../src/settings/openings";
 import head from "../src/workbench/PaneHead.module.css";
+import notices from "../src/notices.module.css";
 import { SET_UP, drawn } from "./bench";
 import { json, serving, whenever } from "./serving";
 import conversations from "./fixtures/conversations.json" with { type: "json" };
 import profiles from "./fixtures/profiles.json" with { type: "json" };
 import repos from "./fixtures/repos.json" with { type: "json" };
-import repo from "./fixtures/repo.json" with { type: "json" };
 import told from "./fixtures/settings.json" with { type: "json" };
 import saved from "./fixtures/settings-saved.json" with { type: "json" };
 import unset from "./fixtures/settings-unset.json" with { type: "json" };
@@ -82,14 +83,11 @@ import unset from "./fixtures/settings-unset.json" with { type: "json" };
 const TOLD = told as SettingsView;
 
 /// The binds the fixture holds, as a save puts them back on the wire: the
-/// settings' own entries, and a Repo's bind in the `name=path` grammar the file
-/// keeps them in. Every section's save carries them, because one request writes
-/// the whole of `config.yaml` — a list left out would be a list emptied.
+/// settings' own entries, each as the path it names. Every section's save
+/// carries them, because one request writes the whole of `config.yaml` — a list
+/// left out would be a list emptied.
 const PATHS = {
-  sandbox_binds: [
-    "/var/cache/verkstead-node",
-    "verkstead=/var/cache/verkstead-cargo",
-  ],
+  sandbox_binds: ["/var/cache/verkstead-node", "/var/cache/verkstead-cargo"],
 };
 
 /// And the Cleanup as a save puts it back: the switches where the read left
@@ -102,8 +100,6 @@ const CLEANUP = {
 const PROFILES = profiles as ProfileEntry[];
 const REPOS = repos as RepoEntry[];
 const FIRST_REPO = REPOS[0]!;
-/// The Repo the fixture opens, which is the first of the list it belongs to.
-const OPENED: RepoView = { ...(repo as RepoView), id: FIRST_REPO.id };
 const SIDEBAR = conversations as ConversationEntry[];
 const UNSET = unset as SettingsView;
 const SAVED = saved as SettingsSaved;
@@ -124,7 +120,7 @@ function client(): QueryClient {
   });
 }
 
-/// Whatever half of the credentials a test is about, over one query client:
+/// Whatever half of the git section a test is about, over one query client:
 /// both halves read the same two files, so a test mounting the pair is reading
 /// them once, exactly as the page does.
 function mounting(what: () => JSX.Element) {
@@ -138,13 +134,13 @@ function mounting(what: () => JSX.Element) {
 /// The card in the middle pane, and what pressing it asked for.
 function mountCard(open = false) {
   const press = vi.fn();
-  return { ...mounting(() => <GithubCard open={open} press={press} />), press };
+  return { ...mounting(() => <GitCard open={open} press={press} />), press };
 }
 
 /// The form in the details pane, and what its way back asked for.
 function mountPane() {
   const back = vi.fn();
-  return { ...mounting(() => <GithubPane back={back} />), back };
+  return { ...mounting(() => <GitPane back={back} />), back };
 }
 
 /// Both, as the page has them while the pane is open: what the form saves is
@@ -152,8 +148,8 @@ function mountPane() {
 function mountBoth() {
   return mounting(() => (
     <>
-      <GithubCard open press={() => {}} />
-      <GithubPane back={() => {}} />
+      <GitCard open press={() => {}} />
+      <GitPane back={() => {}} />
     </>
   ));
 }
@@ -216,7 +212,7 @@ describe("the card", () => {
     theSettings(TOLD);
     const { container, press } = mountCard();
 
-    const face = await drawn<HTMLElement>(container, `.${styles.githubCard}`);
+    const face = await drawn<HTMLElement>(container, `.${styles.gitCard}`);
     expect(face.getAttribute("role")).toBe("button");
     expect(face.getAttribute("aria-pressed")).toBe("false");
     expect(face.classList).not.toContain(card.open);
@@ -229,7 +225,7 @@ describe("the card", () => {
     theSettings(TOLD);
     const { container } = mountCard(true);
 
-    const face = await drawn<HTMLElement>(container, `.${styles.githubCard}`);
+    const face = await drawn<HTMLElement>(container, `.${styles.gitCard}`);
     expect(face.getAttribute("aria-pressed")).toBe("true");
     expect(face.classList).toContain(card.open);
   });
@@ -327,7 +323,7 @@ describe("what is not configured", () => {
 
     // The settings landing is what clears them, so it is what to wait for: an
     // assertion that they are absent would pass while the save was still out.
-    await drawn(container, `.${styles.githubCard} .${styles.tokenStanding}`);
+    await drawn(container, `.${styles.gitCard} .${styles.tokenStanding}`);
 
     expect(screen.queryByText(/sessions cannot reach GitHub/)).toBeNull();
     expect(screen.queryByText(/commits inside a session fail/)).toBeNull();
@@ -347,6 +343,20 @@ describe("the form", () => {
     expect(container.querySelector("dialog")).toBeNull();
     expect(screen.getByRole("button", { name: "Replace" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Save" })).toHaveLength(1);
+  });
+
+  /// Nothing on it explains a control it stands under: what a rebase costs,
+  /// what a gist is published as and what a pattern matches are all written
+  /// down elsewhere, and a page that said them again was a page nobody read.
+  /// A computed line is not one of these — what the machine is doing stays
+  /// wherever it was, which is what the warnings above prove.
+  it("carries no note explaining a control", async () => {
+    theSettings(TOLD);
+    const { container } = mountPane();
+
+    await waitFor(() => screen.getByLabelText("Name"));
+
+    expect(container.querySelectorAll(`.${notices.note}`)).toHaveLength(0);
   });
 
   /// The way out of a details pane is the way back its head draws, hidden by the
@@ -462,7 +472,7 @@ describe("saving", () => {
     await waitFor(() =>
       expect(
         container.querySelector(
-          `.${styles.githubCard} .${styles.authorEmail}`,
+          `.${styles.gitCard} .${styles.authorEmail}`,
         )!.textContent,
       ).toContain("ada@analytical.engine"),
     );
@@ -697,7 +707,7 @@ describe("replacing and clearing the token", () => {
     // never sent away.
     await waitFor(() => screen.getByText(/sessions cannot reach GitHub/));
     expect(
-      container.querySelector(`.${styles.githubCard} .${styles.authorName}`)!
+      container.querySelector(`.${styles.gitCard} .${styles.authorName}`)!
         .textContent,
     ).toBe(TOLD.git_author.name);
   });
@@ -1019,23 +1029,26 @@ describe("the ignore rules", () => {
   });
 });
 
-/// The switch beside the token: whether Done shares the record to the pull
+/// What a save beside the form answers with, which is the settings as they now
+/// stand. Nothing either of those two controls sends can be refused: neither
+/// says anything about the rules.
+const answering = (standing: SettingsView): SettingsSaved => ({
+  settings: standing,
+  verified: null,
+  refused: [],
+});
+
+/// The checkbox beside the token: whether Done shares the record to the pull
 /// request.
 ///
 /// It is on this page because what it turns on is done with the token above it,
-/// under the account that token belongs to. It saves itself, the way the build
-/// cache's switch does — and unlike the fields it stands among, which wait for
-/// Save.
+/// under the account that token belongs to. It saves itself — and unlike the
+/// fields it stands among, which wait for Save.
 describe("sharing on Done", () => {
-  const theSwitch = (): HTMLInputElement =>
-    screen.getByRole("switch") as HTMLInputElement;
-
-  const answering = (standing: SettingsView): SettingsSaved => ({
-    settings: standing,
-    verified: null,
-    // Nothing a flip sends can be refused: it says nothing about the rules.
-    refused: [],
-  });
+  const theBox = (): HTMLInputElement =>
+    screen.getByRole("checkbox", {
+      name: "Share to pull request on Done",
+    }) as HTMLInputElement;
 
   const sharing = (standing: SettingsView, on: boolean): SettingsView => ({
     ...standing,
@@ -1048,28 +1061,29 @@ describe("sharing on Done", () => {
     theSettings(UNSET);
     mountPane();
 
-    await waitFor(() => expect(theSwitch().checked).toBe(false));
+    await waitFor(() => expect(theBox().checked).toBe(false));
   });
 
-  it("saves the moment it is flipped, and leaves the credentials alone", async () => {
+  it("saves the moment it is ticked, and leaves the credentials alone", async () => {
     const fetching = theSettings(TOLD, json(answering(sharing(TOLD, false))));
     mountPane();
 
-    await waitFor(() => expect(theSwitch().checked).toBe(true));
-    fireEvent.click(theSwitch());
+    await waitFor(() => expect(theBox().checked).toBe(true));
+    fireEvent.click(theBox());
 
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
-        // The author as the server holds it, and the token untouched: a flip is
+        // The author as the server holds it, and the token untouched: a tick is
         // not a submit.
         git_author: TOLD.git_author,
         github_token: "Keep",
         share_on_done: false,
-        // The rules ride along as an action rather than a value: a flip says
+        // The rules ride along as an action rather than a value: a tick says
         // nothing about them — see [`ruleEdit`].
         ignored_comments: "Keep",
         // And everything else in the file as it stands, because one request
-        // writes the whole of it.
+        // writes the whole of it — the resolution the select beside it owns
+        // included.
         rust_build_cache: {
           enabled: TOLD.rust_build_cache.enabled,
           size: TOLD.rust_build_cache.size,
@@ -1081,10 +1095,10 @@ describe("sharing on Done", () => {
     );
 
     // And it follows the answer rather than the press.
-    await waitFor(() => expect(theSwitch().checked).toBe(false));
+    await waitFor(() => expect(theBox().checked).toBe(false));
   });
 
-  /// A flip halfway through typing an address writes the switch and nothing
+  /// A tick halfway through typing an address writes the checkbox and nothing
   /// else — and leaves what was being typed where it was.
   it("writes neither what was typed nor over it", async () => {
     const fetching = theSettings(TOLD, json(answering(sharing(TOLD, false))));
@@ -1094,7 +1108,7 @@ describe("sharing on Done", () => {
     fireEvent.input(screen.getByLabelText("Email"), {
       target: { value: "ada@analytical." },
     });
-    fireEvent.click(theSwitch());
+    fireEvent.click(theBox());
 
     await waitFor(() =>
       expect(
@@ -1107,14 +1121,138 @@ describe("sharing on Done", () => {
     );
   });
 
-  it("says so when the flip could not be saved", async () => {
+  it("says so when the tick could not be saved", async () => {
     theSettings(TOLD, json({ error: "gone" }, 500));
     mountPane();
 
-    await waitFor(() => expect(theSwitch().checked).toBe(true));
-    fireEvent.click(theSwitch());
+    await waitFor(() => expect(theBox().checked).toBe(true));
+    fireEvent.click(theBox());
 
     await waitFor(() => screen.getByText(/could not be saved/));
+  });
+});
+
+/// And the select above it: what a session sent at a pull request that will not
+/// merge is told to do about it.
+///
+/// It was a card and a pane of its own at `/settings/conflicts`, with the two
+/// strategies described under the picker and the cost of a rebase said beside
+/// them. What is left is the select, labelled by its own subheading and saving
+/// on the pick — the page says where things stand, and what a rebase costs is
+/// `CONTEXT.md`'s to say rather than the pane's.
+///
+/// What is worth proving here is the pick and the pass-through: the page has one
+/// endpoint and it writes both settings files, so a select that dropped the
+/// author or the token on the way would be a setting that cost the credentials.
+describe("how a conflict is resolved", () => {
+  const thePicker = (): HTMLSelectElement =>
+    screen.getByLabelText("Conflict resolution") as HTMLSelectElement;
+
+  const resolving = (
+    standing: SettingsView,
+    conflict_resolution: ConflictResolution,
+  ): SettingsView => ({ ...standing, conflict_resolution });
+
+  /// Where it sits rather than whether anybody has been here: a Verkstead
+  /// nobody has told anything merges.
+  it("says where the setting stands", async () => {
+    theSettings(UNSET);
+    mountPane();
+
+    await waitFor(() => expect(thePicker().value).toBe("Merge"));
+  });
+
+  /// The two words and nothing else: what each strategy does to a branch is no
+  /// longer on this page.
+  it("offers Merge and Rebase, and nothing under them", async () => {
+    theSettings(UNSET);
+    const { container } = mountPane();
+
+    await waitFor(() => expect(thePicker().value).toBe("Merge"));
+
+    expect(
+      [...thePicker().options].map((option) => option.textContent),
+    ).toEqual(["Merge", "Rebase"]);
+    expect(container.textContent).not.toContain("force-push");
+  });
+
+  /// Picking is the press: the select saves itself, the way the checkbox under
+  /// it does. The fixture rebases, so this is the pick that takes it back —
+  /// a setting that could only be turned on would be one nobody could undo from
+  /// a phone.
+  it("saves the moment a strategy is picked, and leaves everything else alone", async () => {
+    const fetching = theSettings(
+      TOLD,
+      json(answering(resolving(TOLD, "Merge"))),
+    );
+    mountPane();
+
+    await waitFor(() => expect(thePicker().value).toBe("Rebase"));
+
+    fireEvent.change(thePicker(), { target: { value: "Merge" } });
+
+    await waitFor(() =>
+      expect(sent(fetching)).toEqual({
+        // The author as the server holds it, and the token untouched: a pick is
+        // not a submit either.
+        git_author: TOLD.git_author,
+        github_token: "Keep",
+        ignored_comments: "Keep",
+        conflict_resolution: "Merge",
+        // And everything else in the file as it stands, the checkbox below it
+        // included.
+        share_on_done: TOLD.share_on_done,
+        rust_build_cache: {
+          enabled: TOLD.rust_build_cache.enabled,
+          size: TOLD.rust_build_cache.size,
+        },
+        cleanup: CLEANUP,
+        ...PATHS,
+      }),
+    );
+
+    // And it follows the answer rather than the press.
+    await waitFor(() => expect(thePicker().value).toBe("Merge"));
+  });
+
+  /// And the other way, off a Verkstead nobody has told anything: what a
+  /// conflicted pull request does next really changes.
+  it("takes a merge to a rebase", async () => {
+    const fetching = theSettings(
+      UNSET,
+      json(answering(resolving(UNSET, "Rebase"))),
+    );
+    mountPane();
+
+    await waitFor(() => expect(thePicker().value).toBe("Merge"));
+
+    fireEvent.change(thePicker(), { target: { value: "Rebase" } });
+
+    await waitFor(() =>
+      expect(
+        (sent(fetching) as { conflict_resolution: unknown })
+          .conflict_resolution,
+      ).toBe("Rebase"),
+    );
+
+    await waitFor(() => expect(thePicker().value).toBe("Rebase"));
+  });
+
+  /// And the select goes back to saying what is written down, which is the
+  /// half that matters: the error line is easy to scroll past on a phone, and
+  /// a select left sitting on the refused pick is the page saying a strategy is
+  /// set that the file has never been told. The checkbox under it already does
+  /// this — see `Check.tsx` — and the select does it now too.
+  it("says so when the pick could not be saved, and keeps none of it", async () => {
+    theSettings(TOLD, json({ error: "gone" }, 500));
+    mountPane();
+
+    await waitFor(() => expect(thePicker().value).toBe("Rebase"));
+    fireEvent.change(thePicker(), { target: { value: "Merge" } });
+
+    await waitFor(() => screen.getByText(/could not be saved/));
+
+    expect(thePicker().value).toBe("Rebase");
   });
 });
 
@@ -1128,15 +1266,6 @@ function thePage(at = "/settings") {
     whenever("/api/ui/settings", json(TOLD)),
     whenever("/api/ui/profiles", json(PROFILES)),
     whenever("/api/ui/repos", json(REPOS)),
-    // And one of them opened, which is what a card leads to — with the answer
-    // for an id nothing is registered under beside it, because a link followed
-    // after somebody took a repo away is a path this page has to draw.
-    whenever(`/api/ui/repos/${FIRST_REPO.id}`, json(OPENED)),
-    whenever("/api/ui/repos/404", json({ error: "there is no Repo 404" }, 404)),
-    // The one write this page can make that is not the credentials' own: a
-    // registration, which the pane sends to the same path it read the list
-    // from.
-    whenever("/api/ui/repos", json({ Added: FIRST_REPO }), "POST"),
     whenever("/api/ui/update", json("Current")),
     whenever("/api/ui/conversations", json(SIDEBAR)),
     whenever("/api/ui/conversations/archived", json(HIDING_ARCHIVED)),
@@ -1198,39 +1327,36 @@ describe("the settings page", () => {
   /// One page for everything the human configures: what Verkstead itself was
   /// told, and the two things a Conversation is settled against — in the reading
   /// order a fresh install needs them in.
-  it("holds the credentials, the build cache, the paths, the profiles and the repos", async () => {
+  it("holds the credentials, the languages, the binds, the profiles and the repos", async () => {
     const { container } = thePage();
 
     const settings = panes(container)[1]!;
 
     // The repo names are on the New conversation menu as well as on this list,
     // so each list is waited for inside the pane it belongs to.
-    await drawn(settings, `.${styles.githubCard}`);
-    await drawn(settings, `.${buildCache.buildCacheCard}`);
-    await drawn(settings, `.${paths.pathsCard}`);
+    await drawn(settings, `.${styles.gitCard}`);
+    await drawn(settings, `.${languages.languagesCard}`);
+    await drawn(settings, `.${binds.bindsCard}`);
     await drawn(settings, `.${profileList.profiles} .${profileList.profile}`);
-    await drawn(settings, `.${repoList.repos} .${repoList.repo}`);
+    await drawn(settings, `.${repoList.reposCard}`);
 
     expect(settings.querySelectorAll("h1")).toHaveLength(1);
-    expect(
-      settings.querySelectorAll(`.${repoList.repos} .${repoList.repo}`),
-    ).toHaveLength(REPOS.length);
     expect(
       settings.querySelectorAll(`.${profileList.profiles} .${profileList.profile}`),
     ).toHaveLength(PROFILES.length);
   });
 
-  /// And the Paths under the Repos rather than over them. It sat above the
-  /// lists while a repo was registered only from inside a watched path — a
-  /// machine with none had nothing to put on that list — and with the sandbox
-  /// binds alone in it that reason is gone.
-  it("draws the paths below the repos", async () => {
+  /// And the Sandbox binds under the Repos rather than over them. They sat
+  /// above the lists while a repo was registered only from inside a watched
+  /// path — a machine with none had nothing to put on that list — and with
+  /// the sandbox binds alone in it that reason is gone.
+  it("draws the sandbox binds below the repos", async () => {
     const { container } = thePage();
 
     const settings = panes(container)[1]!;
 
-    const repos = await drawn(settings, `.${repoList.repos}`);
-    const card = await drawn(settings, `.${paths.pathsCard}`);
+    const repos = await drawn(settings, `.${repoList.reposCard}`);
+    const card = await drawn(settings, `.${binds.bindsCard}`);
 
     expect(
       repos.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -1299,7 +1425,7 @@ describe("the settings page", () => {
   it("carries no form at all until a pane is opened", async () => {
     const { container } = thePage();
 
-    await drawn(container, `.${repoList.repos} .${repoList.repo}`);
+    await drawn(container, `.${repoList.reposCard}`);
 
     const settings = panes(container)[1]!;
     expect(settings.querySelector("dialog")).toBeNull();
@@ -1314,13 +1440,13 @@ describe("the path a details pane stands at", () => {
   /// The card opens the pane by navigating to where that pane stands, so what is
   /// open survives a reload and can be linked to. It replaces rather than
   /// pushes: the details of the settings are places in a page rather than pages.
-  it("opens the credentials at /settings/github, replacing", async () => {
+  it("opens the git section at /settings/git, replacing", async () => {
     const { container, history } = thePage();
 
-    const face = await drawn<HTMLElement>(container, `.${styles.githubCard}`);
+    const face = await drawn<HTMLElement>(container, `.${styles.gitCard}`);
     fireEvent.click(face);
 
-    await waitFor(() => expect(history.get()).toBe("/settings/github"));
+    await waitFor(() => expect(history.get()).toBe("/settings/git"));
 
     // Replaced rather than pushed: the settings' own entry is the one that was
     // written over, so Back leaves the settings rather than walking out of the
@@ -1329,66 +1455,66 @@ describe("the path a details pane stands at", () => {
     await waitFor(() => expect(history.get()).toBe("/"));
   });
 
-  /// The build cache is the other pane a word names, and it opens the way the
-  /// credentials do.
-  it("opens the build cache at /settings/build-cache, replacing", async () => {
+  /// The languages are the other pane a word names, and they open the way the
+  /// git section does.
+  it("opens the languages at /settings/languages, replacing", async () => {
     const { container, history } = thePage();
 
     const face = await drawn<HTMLElement>(
       container,
-      `.${buildCache.buildCacheCard}`,
+      `.${languages.languagesCard}`,
     );
     fireEvent.click(face);
 
-    await waitFor(() => expect(history.get()).toBe("/settings/build-cache"));
+    await waitFor(() => expect(history.get()).toBe("/settings/languages"));
 
     history.back();
     await waitFor(() => expect(history.get()).toBe("/"));
   });
 
-  /// And the third: the paths Verkstead may work inside, and what a sandbox is
-  /// given beyond its worktree.
-  it("opens the paths at /settings/paths, replacing", async () => {
+  /// And the third: the extra paths a sandbox is given beyond the worktree a
+  /// session works in.
+  it("opens the binds at /settings/sandbox-binds, replacing", async () => {
     const { container, history } = thePage();
 
-    const face = await drawn<HTMLElement>(container, `.${paths.pathsCard}`);
+    const face = await drawn<HTMLElement>(container, `.${binds.bindsCard}`);
     fireEvent.click(face);
 
-    await waitFor(() => expect(history.get()).toBe("/settings/paths"));
+    await waitFor(() => expect(history.get()).toBe("/settings/sandbox-binds"));
 
     history.back();
     await waitFor(() => expect(history.get()).toBe("/"));
   });
 
-  it("draws the binds in the details pane, and reads the paths card as open", async () => {
-    const { container } = thePage("/settings/paths");
+  it("draws the binds in the details pane, and reads their card as open", async () => {
+    const { container } = thePage("/settings/sandbox-binds");
 
-    await waitFor(() => screen.getByLabelText("Add a bind"));
+    await waitFor(() => screen.getByLabelText("Add a path"));
 
-    const face = await drawn<HTMLElement>(container, `.${paths.pathsCard}`);
+    const face = await drawn<HTMLElement>(container, `.${binds.bindsCard}`);
     expect(face.getAttribute("aria-pressed")).toBe("true");
     expect(face.classList).toContain(card.open);
   });
 
-  it("draws the switch in the details pane, and reads the cache card as open", async () => {
-    const { container } = thePage("/settings/build-cache");
+  it("draws the checkbox in the details pane, and reads the languages card as open", async () => {
+    const { container } = thePage("/settings/languages");
 
-    await waitFor(() => screen.getByRole("switch", { name: /build cache/i }));
+    await waitFor(() => screen.getByRole("checkbox", { name: "Rust" }));
 
     const face = await drawn<HTMLElement>(
       container,
-      `.${buildCache.buildCacheCard}`,
+      `.${languages.languagesCard}`,
     );
     expect(face.getAttribute("aria-pressed")).toBe("true");
     expect(face.classList).toContain(card.open);
   });
 
   it("draws the form in the details pane, and reads the card as open", async () => {
-    const { container } = thePage("/settings/github");
+    const { container } = thePage("/settings/git");
 
     await waitFor(() => screen.getByLabelText("Name"));
 
-    const face = await drawn<HTMLElement>(container, `.${styles.githubCard}`);
+    const face = await drawn<HTMLElement>(container, `.${styles.gitCard}`);
     expect(face.getAttribute("aria-pressed")).toBe("true");
     expect(face.classList).toContain(card.open);
 
@@ -1400,7 +1526,7 @@ describe("the path a details pane stands at", () => {
   /// A cold load of a details pane — a reload, or a link somebody kept — opens
   /// on that pane, which is the level a narrow window shows.
   it("opens on the details when the path names one", async () => {
-    const { container } = thePage("/settings/github");
+    const { container } = thePage("/settings/git");
 
     await waitFor(() => screen.getByLabelText("Name"));
     expect(container.querySelector(`.${shell.panes}`)!.getAttribute("data-pane")).toBe(
@@ -1411,7 +1537,7 @@ describe("the path a details pane stands at", () => {
   /// And the way back out of it is a change of level rather than a navigation:
   /// what is open stays open, and the URL goes on saying so.
   it("walks back to the settings without closing the pane", async () => {
-    const { container, history } = thePage("/settings/github");
+    const { container, history } = thePage("/settings/git");
 
     await waitFor(() => screen.getByLabelText("Name"));
     const details = panes(container)[2]!;
@@ -1422,7 +1548,7 @@ describe("the path a details pane stands at", () => {
         container.querySelector(`.${shell.panes}`)!.getAttribute("data-pane"),
       ).toBe("middle"),
     );
-    expect(history.get()).toBe("/settings/github");
+    expect(history.get()).toBe("/settings/git");
   });
 
   /// A Profile is the first thing on this page with an id of its own, so it is
@@ -1515,20 +1641,18 @@ describe("the path a details pane stands at", () => {
     expect(container.querySelector("dialog")).toBeNull();
   });
 
-  /// A registered Repo has a pane of its own, behind the `repos/` segment for
-  /// the reason a Profile's stands behind `profiles/`.
-  it("opens a repo at /settings/repos/:id, replacing", async () => {
+  /// The Repos are one card with one pane, named by a word like the settings
+  /// above them: there is nothing under this page named by a Repo's id any more.
+  it("opens the repos at /settings/repos, replacing", async () => {
     const { container, history } = thePage();
 
     const face = await drawn<HTMLElement>(
       panes(container)[1]!,
-      `.${repoList.repos} .${repoList.repo}`,
+      `.${repoList.reposCard}`,
     );
     fireEvent.click(face);
 
-    await waitFor(() =>
-      expect(history.get()).toBe(`/settings/repos/${FIRST_REPO.id}`),
-    );
+    await waitFor(() => expect(history.get()).toBe("/settings/repos"));
 
     // Replaced rather than pushed, as every detail of the settings is: Back
     // leaves the settings rather than walking out of the pane just opened.
@@ -1538,89 +1662,23 @@ describe("the path a details pane stands at", () => {
 
   /// What the card could not hold, in the pane that has the room for it — and
   /// the card reading as open while that pane stands, like every other card.
-  it("draws the repo in the details pane, and reads its card as open", async () => {
-    const { container } = thePage(`/settings/repos/${FIRST_REPO.id}`);
+  it("lists the repos in the details pane, and reads the card as open", async () => {
+    const { container } = thePage("/settings/repos");
 
     const details = panes(container)[2]!;
-    await waitFor(() => expect(details.textContent).toContain(OPENED.path));
-
-    expect(details.textContent).toContain(OPENED.default_branch);
-    expect(details.textContent).toContain(`${OPENED.live} live`);
-    expect(details.textContent).toContain(`${OPENED.finished} finished`);
-    for (const branch of OPENED.branches) {
-      expect(details.textContent).toContain(branch);
-    }
-    for (const roadmap of OPENED.roadmaps) {
-      expect(details.textContent).toContain(roadmap.title);
-      expect(details.textContent).toContain(roadmap.stage_title);
+    await waitFor(() =>
+      expect(details.textContent).toContain(FIRST_REPO.name),
+    );
+    for (const repo of REPOS) {
+      expect(details.textContent).toContain(repo.name);
     }
 
     const face = await drawn<HTMLElement>(
       panes(container)[1]!,
-      `.${repoList.repos} .${repoList.repo}`,
+      `.${repoList.reposCard}`,
     );
     expect(face.getAttribute("aria-pressed")).toBe("true");
     expect(face.classList).toContain(card.open);
-  });
-
-  /// A link followed after somebody took the repo away: said in a line rather
-  /// than shown as an error the human is meant to do something about.
-  it("says the repo is gone where the server has no such id", async () => {
-    const { container } = thePage("/settings/repos/404");
-
-    await waitFor(() =>
-      expect(panes(container)[2]!.textContent).toContain("That repo is gone."),
-    );
-  });
-
-  /// And the other pane under the same segment: the path another Repo is
-  /// registered by, standing where an id stands.
-  it("opens the repo form at /settings/repos/new, replacing", async () => {
-    const { container, history } = thePage();
-
-    const plus = await drawn<HTMLButtonElement>(
-      panes(container)[1]!,
-      'button[aria-label="Add a repo"]',
-    );
-    fireEvent.click(plus);
-
-    await waitFor(() => expect(history.get()).toBe("/settings/repos/new"));
-
-    // Replaced rather than pushed, as every detail of the settings is: Back
-    // leaves the settings rather than walking out of the pane just opened.
-    history.back();
-    await waitFor(() => expect(history.get()).toBe("/"));
-  });
-
-  it("draws the repo form in the details pane, and reads the plus as open", async () => {
-    const { container } = thePage("/settings/repos/new");
-
-    await waitFor(() => screen.getByLabelText(/absolute path/i));
-
-    const plus = await drawn<HTMLButtonElement>(
-      panes(container)[1]!,
-      'button[aria-label="Add a repo"]',
-    );
-    expect(plus.getAttribute("aria-pressed")).toBe("true");
-    expect(plus.classList).toContain(button.open);
-
-    // In the third pane rather than over the page: the modal is gone.
-    expect(panes(container)[2]!.querySelector("form")).not.toBeNull();
-    expect(container.querySelector("dialog")).toBeNull();
-  });
-
-  /// A registration that was taken spends the pane, and the repo lands on the
-  /// list behind it: that card is the whole of the confirmation.
-  it("puts the human back on the settings once a repo is registered", async () => {
-    const { container, history } = thePage("/settings/repos/new");
-
-    const field = await waitFor(() => screen.getByLabelText(/absolute path/i));
-    fireEvent.input(field, { target: { value: "/srv/repos/verkstead" } });
-    fireEvent.click(screen.getByRole("button", { name: "Register" }));
-
-    await waitFor(() => expect(history.get()).toBe("/settings"));
-    expect(panes(container)[2]!.textContent).toBe("");
-    await drawn(container, `.${repoList.repos} .${repoList.repo}`);
   });
 
   /// A cold load of a profile's pane — a reload, or a link somebody kept —
@@ -1650,22 +1708,22 @@ describe("the path a details pane stands at", () => {
 /// page does with it is the two suites above.
 describe("where a settings details pane stands", () => {
   it("puts an id behind a segment of its own, and a word beside it", () => {
-    expect(pathTo("github")).toBe("/settings/github");
-    expect(pathTo("build-cache")).toBe("/settings/build-cache");
+    expect(pathTo("git")).toBe("/settings/git");
+    expect(pathTo("languages")).toBe("/settings/languages");
+    expect(pathTo("sandbox-binds")).toBe("/settings/sandbox-binds");
     expect(pathTo(opensProfile(7))).toBe("/settings/profiles/7");
     expect(pathTo(opensProfile("new"))).toBe("/settings/profiles/new");
-    expect(pathTo(opensRepo(7))).toBe("/settings/repos/7");
-    expect(pathTo(opensRepo("new"))).toBe("/settings/repos/new");
+    expect(pathTo("repos")).toBe("/settings/repos");
   });
 
   it("reads back everything it writes", () => {
     for (const opening of [
-      "github",
-      "build-cache",
+      "git",
+      "languages",
+      "sandbox-binds",
+      "repos",
       opensProfile(7),
       opensProfile("new"),
-      opensRepo(7),
-      opensRepo("new"),
     ] as const) {
       expect(openingAt(pathTo(opening))).toBe(opening);
     }
@@ -1676,20 +1734,9 @@ describe("where a settings details pane stands", () => {
   it("says which profile an opening names, and which names none", () => {
     expect(profileOpened(opensProfile(7))).toBe(7);
     expect(profileOpened(opensProfile("new"))).toBe("new");
-    expect(profileOpened("github")).toBeNull();
-    expect(profileOpened(opensRepo(7))).toBeNull();
+    expect(profileOpened("git")).toBeNull();
+    expect(profileOpened("repos")).toBeNull();
     expect(profileOpened(null)).toBeNull();
-  });
-
-  /// And which Repo, read the same way. The two are the same shape and are told
-  /// apart by their segment, which is what keeps a Repo's id from reading as a
-  /// Profile's.
-  it("says which repo an opening names, and which names none", () => {
-    expect(repoOpened(opensRepo(7))).toBe(7);
-    expect(repoOpened(opensRepo("new"))).toBe("new");
-    expect(repoOpened("github")).toBeNull();
-    expect(repoOpened(opensProfile(7))).toBeNull();
-    expect(repoOpened(null)).toBeNull();
   });
 
   /// The settings' own path opens nothing, and neither does anything that is
@@ -1698,15 +1745,18 @@ describe("where a settings details pane stands", () => {
     ["/settings"],
     ["/settings/"],
     ["/settings/nonsense"],
-    ["/settings/github/extra"],
+    ["/settings/git/extra"],
     ["/settings/profiles"],
     ["/settings/profiles/nonsense"],
     ["/settings/profiles/7/extra"],
     ["/settings/profiles/7.5"],
-    ["/settings/repos"],
+    // Every one of these named a Repo's own pane or the form that registered
+    // another, and the segment reaches nothing now: the Repos are the word
+    // above, whole.
+    ["/settings/repos/7"],
+    ["/settings/repos/new"],
     ["/settings/repos/nonsense"],
     ["/settings/repos/7/extra"],
-    ["/settings/repos/new/extra"],
     ["/conversations/3/events/7"],
     ["/"],
   ])("opens nothing at %s", (path) => {

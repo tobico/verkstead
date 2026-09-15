@@ -546,9 +546,8 @@ pub struct Config {
     share_on_done: Option<bool>,
 
     /// And the Sandbox Configuration binds said here rather than at the
-    /// installation: a flat list in the grammar `--sandbox-bind` takes,
-    /// `/abs/path` for a bind every sandbox gets and `name=/abs/path` for one
-    /// only the Repo registered under that name does.
+    /// installation: a flat list in the grammar `--sandbox-bind` takes, which is
+    /// `/abs/path` for a bind every sandbox gets.
     ///
     /// They compose with the installation's own set rather than replacing it,
     /// and they are read at the moment a session spawns, like the author above

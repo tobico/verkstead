@@ -18,25 +18,33 @@ Conversations attach to one — and while one is still a Draft with nothing chec
 out, the Repo dropdown on its composer moves it onto another. Its files stay the
 source of truth for task lists (`.tasks/`) and roadmaps (`docs/roadmaps/`) —
 Verkstead parses and renders them, and never owns them.
-**One is made or opened from the dropdown that lists them**, and not only from
-the settings page. Two rows sit at the foot of that dropdown behind a rule,
+**One is made or opened from the dropdown that lists them**, which is the only
+place either is done: the settings page lists what is registered and has no
+registration of its own. Two rows sit at the foot of that dropdown behind a rule,
 wherever it is drawn — the compose page and a draft's composer both, it being one
-control. **Open repo** registers a repository that already exists, over the same
-path field and with the same refusals the settings page's own registration has.
+control. **Open repo** registers a repository that already exists, over a path
+field that browses, and a path already registered is the repository somebody
+named rather than a refusal.
 **Create repo** makes one first: a directory under a parent that is browsed for,
 `git init` onto `main`, a `README.md` naming it and one commit by the configured
 git author — an empty repository has no commit for a Conversation to take a base
 from, which is why there is a README at all — and, where a GitHub token is saved
 and the tick is left on, a private repository of the same name with `origin` set
-and `main` pushed. Both land on the one registry the settings page's registration
-lands on, and either way the Repo becomes the draft's the moment it is there: the
-compose page's own state, or a move on a saved draft. A create that made the
+and `main` pushed. Both land on the one registry, and either way the Repo becomes
+the draft's the moment it is there: the compose page's own state, or a move on a
+saved draft. A create that made the
 directory and then failed at GitHub is still a create — what it made is
 registered and picked, and what failed is said.
 **Registering one can be taken back, and that is an unregistering rather than a
-delete**: Verkstead stops offering it for new work — the settings list, the Repo
-dropdown on the compose page and on a draft's composer, the roadmaps waiting to
-be adopted — while every Conversation ever worked in it goes on naming it,
+delete**, on the settings page's **Repos** pane, which lists every one of them by
+name, with the directory it was registered from under it and a Remove beside it,
+and asks once before it acts. The path is on the row because a name is the
+directory's own and two registered in different places may share one, and this
+is the one list that puts them side by side behind a press that cannot be taken
+back. Unregistering: Verkstead stops
+offering it for new work — that list, the Repo dropdown on the compose page and
+on a draft's composer, the roadmaps waiting to be adopted — while every
+Conversation ever worked in it goes on naming it,
 because a record that could not say which repository its work was done in would
 be no record. The directory is untouched either way. Refused while a
 Conversation that is neither Done nor Closed is on it — unlike removing an Agent
@@ -44,9 +52,6 @@ Profile, which is refused for nothing: a Repo is the directory a session is
 standing in, where a Profile is only the account the next one would have been
 launched under. Registering the same path again brings the same Repo back rather
 than making a second one.
-One thing about a registered Repo is configured rather than read off the
-repository: its **resolution strategy**, where its conflicts are to be resolved
-differently from every other Repo's.
 _Avoid_: project, codebase, checkout
 
 **Conversation**:
@@ -270,17 +275,18 @@ _Avoid_: container, jail, isolation, environment
 
 **Sandbox Configuration**:
 The extra writable binds a Sandbox gets beyond that surface — a package
-registry's, a cache Verkstead does not provide — as one global set every Sandbox
-gets plus a per-Repo set composed over it. Configured in two places, the
-installation *and* the workbench: `--sandbox-bind DIR` or
-`--sandbox-bind NAME=DIR`, and the same two grammars on the settings page's
-Paths section, which holds these and nothing else, and on a Repo's own pane.
+registry's, a cache Verkstead does not provide — as one set every Sandbox gets.
+Configured in two places, the installation *and* the workbench:
+`--sandbox-bind DIR`, and the same grammar on the settings page's Sandbox binds
+section. A bind could once name a Repo — `--sandbox-bind NAME=DIR`, given only to
+sessions working in the Repo registered under that name — and that grammar is
+gone: the flag refuses one, and an entry still in it in `config.yaml` reaches no
+session and draws no row.
 The two sets union, and each keeps its
 own answer to a bind that is not there — the installation's refuses startup, the
 settings' is skipped for that session with a line in the log, because a phone is
-no place to be told a typo cost every session in a Repo its start. Every one of
-them is a directory of somebody else's and a hole in the boundary, so the page
-says what each one costs beside the field that adds it. On a nix install the
+no place to be told a typo cost every session its start. Every one of them is a
+directory of somebody else's and a hole in the boundary. On a nix install the
 unit's own namespace is still the module's to widen: an entry outside it saves,
 is reported on the page as one the server cannot see, and does nothing until the
 installer widens the unit. The **Build Cache** is not one of these and is not
@@ -403,7 +409,7 @@ reads nothing of this server.
 startup line carries `workbench=`, and on the desktop app the browser opened at
 startup and the tray's **Open** both go to the link, built afresh at each press
 so a browser that forgot the cookie is let in again.
-**Reset key**, its own section on **Remote Access**, re-issues it: everything
+**Reset key**, at the foot of **Remote Access**, re-issues it: everything
 holding the old one meets a 401 on its next request, and the browser that
 pressed stays in — a reset made from the phone is a reset made from the only
 device that could reach the server at all. One secret with a press behind it,
@@ -412,11 +418,15 @@ _Avoid_: password, login, token, API key, session
 
 **Remote Access**:
 The settings section that puts this workbench in front of a phone: what this
-machine's Tailscale is doing, the switch that puts the tailnet name in front of
-the port Verkstead is listening on, and the **Workbench Key** handed over as
+machine's Tailscale is doing, the checkbox that puts the tailnet name in front
+of the port Verkstead is listening on, and the **Workbench Key** handed over as
 something a camera can read. A card and a pane like every other section, and
 the answer to what used to be a `tailscale serve --bg 8422` somebody ran in a
-terminal.
+terminal. **The pane is the controls and nothing around them**: the box with the
+one line that is its own, the code, the link with its copy beside it, and
+**Reset key** with the one line that is its own. Which of the four states the
+machine is in is the card's line; the pane says what the machine said only where
+somebody has something to do about it.
 **Everything on it is read off the machine rather than configured**: two
 commands at the moment the pane opens, so a tailnet joined in a terminal and a
 serve set up by hand read here exactly as ones set up from this page would, and
@@ -426,9 +436,17 @@ and the pane points at one; a binary with no daemon answering is a `tailscale
 up`, said in the words the command printed; up is the node's name and whether
 the workbench is served; and a shape this build cannot read says so rather than
 being read as the nearest state with room for it, because *cannot tell* under a
-switch offering to turn *off* on is the one thing this section must never say.
-**The serve switch is that reading rather than a wish**: a press answers with
-the machine read again, and the switch settles wherever the machine ended up.
+box offering to turn *off* on is the one thing this section must never say —
+that state draws what Tailscale said and no box at all.
+**The serve checkbox is that reading rather than a wish**: a press answers with
+the machine read again, and the box settles wherever the machine ended up.
+**And it will not lock the page out.** A browser reading this pane over the
+served address is here because the serve is on, so unticking it from there would
+take away the connection carrying the press. The client settles which page it is
+by comparing its own hostname with the served address's — the server sees the
+tailnet and the loopback arrive on one port and could not tell them apart — and
+where they match the box is disabled with a tooltip saying why. From the machine
+itself, or from the desktop app, it unticks as ever.
 **The operator grant is its third answer.** Tailscale refuses a serve from a
 process that is neither root nor the tailnet's operator and the server has no
 privilege to raise, so a refused press hands back `sudo tailscale set
@@ -441,11 +459,11 @@ on a host is shown a command they are also the one to run.
 login link rather than the address: a QR code, drawn in the browser from an
 encoder the viewer ships because a workbench standing behind a secret has no
 business handing it to a third party to render, with the link to copy beside it.
-**And the key those links carry is a section under them**, on every state of the
-pane rather than under the code: the key gates a machine that has never heard of
-a tailnet exactly as it gates one serving on it, so **Reset key** is not a press
-the serve switch can take away — turning remote access off is one of the moments
-somebody wants a link back.
+**And the key those links carry stands under them**, on every state of the pane
+rather than under the code: the key gates a machine that has never heard of a
+tailnet exactly as it gates one serving on it, so **Reset key** is not a press
+the serve checkbox can take away — turning remote access off is one of the
+moments somebody wants a link back.
 **The banner is how somebody finds it**: one line above the Timeline while the
 first grilling is writing its first Question Set — the first moment there is
 nothing to do at the desk — pointing here and dismissed with *Got it*. The
@@ -584,8 +602,8 @@ way the Conversation's own is: the directory goes and the branch stays.
 **A session gets the checkout, and is told it is there.** The worktree and the
 git directory behind it are both bound at the companion's mode — read-only
 reaches the git directory too, or the history would be writable around the back
-— and the companion Repo's own Sandbox Configuration binds are composed in
-beside them, because building in it needs them. Its flake is not entered for
+— and what a session builds in it with is the Sandbox Configuration every
+session gets, there being no per-Repo set any more. Its flake is not entered for
 the session: the dev shell is the Conversation's own worktree's alone, and an
 agent that needs a companion's enters it itself, `nix` being on the sandbox
 `PATH`. The prompt carries one neutral `# Companion repositories` listing —
@@ -994,9 +1012,10 @@ _Avoid_: announce, notify, post, broadcast (a comment is left, once, by a press
 or by the settle the human turned on)
 
 **Ignore rule**:
-One class of comment nobody wants addressed, written in the GitHub and git
-author settings pane, a row apiece: a regex over who said it, a regex over what
-it says, or both. A rule matches where every field it gives does, and the list
+One class of comment nobody wants addressed, written in the Git settings pane, a
+row apiece: a regex over who said it, a regex over what it says, or both. Each
+regex matches anywhere in the text and is case-sensitive unless it opens with
+`(?i)`, and a box left empty constrains nothing. A rule matches where every field it gives does, and the list
 combines with OR — so a comment any one rule matches is skipped wherever
 Wrapping reads comments, in the fresh ones a session would be dispatched about
 and the standing ones folded into the review alike, on a Companion Repo's pull
@@ -1210,14 +1229,14 @@ second, and one without a name only the first.
 **An unnamed one reads as nothing wherever the harness and the model say
 enough**, which is most of the places a Profile is read: the pairing rows of a
 harness with one account, the second line of the Agent run card, the Brief's
-three pairing facts. Where a name has to be shown it reads **Default** — the
-settings card, which is a list of Profiles by name, and a picker holding two
-accounts of one harness, where the name is the difference between the rows. It
-is a word for a blank rather than a Profile anything falls back to: there is no
-default Profile, exactly as there is no default model. And a session run under
-one writes no name into its record, so a finished run draws as the harness and
-the model alone — which is how a record from before Verkstead wrote the name
-down already drew.
+three pairing facts, and the settings card, which reads as the harness's mark
+and the harness's name with no dash after it. Where a name has to be shown it
+reads **Default** — a picker holding two accounts of one harness, where the name
+is the difference between the rows. It is a word for a blank rather than a
+Profile anything falls back to: there is no default Profile, exactly as there is
+no default model. And a session run under one writes no name into its record, so
+a finished run draws as the harness and the model alone — which is how a record
+from before Verkstead wrote the name down already drew.
 **Removing one is always allowed**, and it is a delete rather than an
 unregistering: a Profile is a way in to an account, so one the human is finished
 with is one Verkstead should stop holding. Every Conversation that had chosen it
@@ -1967,14 +1986,16 @@ is told which rather than left to pick.
 Merge is what a Verkstead nobody has configured does, and that is the whole
 shape of the setting: a rebase rewrites what reviewers have already read and
 breaks anything stacked on the branch, and nobody should meet that for never
-having found a settings page. What it costs is said on the page beside the
-choice.
+having found a settings page. What it costs is said here rather than beside the
+choice — the page is a select of two words, and a paragraph under a control the
+human has already understood is one nobody reads twice.
 
 Said once for every Repo, in `config.yaml` beside the build cache — an absent
-key, an absent file and an unparseable one all mean merge — and any Repo may
-override it, which is a fact about the Repo and lives in the store beside it. A
-Repo that says nothing follows the global setting rather than a copy of what it
-said the day the Repo was registered.
+key, an absent file and an unparseable one all mean merge — and that is the
+whole of the answer about any of them. A Repo could once be given one of its
+own, from its own settings pane; an override no settings page draws would be a
+Repo rebasing with nowhere to read why, so the file is where this is asked and
+the only place, and the **Git** section of the settings is where it is picked.
 _Avoid_: merge strategy, conflict policy, force push setting
 
 **Rescue**:
@@ -2071,7 +2092,7 @@ it is the Share it always was, a Share never having included what trimming
 takes. Named on the Conversation's page, and a card whose drill-down is gone
 says so rather than breaking; nothing anywhere announces a trim to come, only
 one that has happened. On by default, three days after the archiving, with the
-switch and the days in the settings' Cleanup section; a fresh archiving makes
+checkbox and the days in the settings' Cleanup section; a fresh archiving makes
 a Conversation trimmable again, so one steered back to life and put away again
 has its new bulk taken too.
 _Avoid_: pruned, compacted, cleaned (the sweep's word, not the state's)

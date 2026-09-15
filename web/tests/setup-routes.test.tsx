@@ -64,7 +64,7 @@ describe("while onboarding mode is on", () => {
     "/",
     "/compose",
     "/settings",
-    "/settings/github",
+    "/settings/git",
     `/conversations/${OPEN.id}`,
     `/conversations/${OPEN.id}/backlog`,
     "/nonsense",

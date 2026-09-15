@@ -1,6 +1,6 @@
 //! Registering a Repo over the viewer's namespace: what gets on the list, what
-//! is refused before it can, what one of them says when it is opened, and what
-//! taking one off the registry does to the list it was on.
+//! is refused before it can, and what taking one off the registry does to the
+//! list it was on.
 //!
 //! And making one, which is the other way a Repo arrives: a directory, a
 //! repository on `main` with a first commit by the configured author, and the
@@ -21,10 +21,6 @@
 //! Where a repository *is* is not one of the refusals. Anywhere the server can
 //! read is somewhere a Repo can be registered from, whatever the installation
 //! was started with.
-//!
-//! And the one thing there is to say to a Repo that is already registered: how
-//! it resolves a merge conflict, which is an override of the global setting and
-//! so is nothing at all until somebody says something.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -36,7 +32,7 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::{ConflictResolution, Created, Registered, RepoEntry, RepoRemoved, RepoView};
+use verkstead_render::{Created, Registered, RepoEntry, RepoRemoved, RepoView};
 // Only the shell stand-in below authenticates as a saved token, and that is
 // off Windows with the shell it needs.
 #[cfg(unix)]
@@ -139,17 +135,6 @@ async fn remove(app: &Router, id: i64) -> RepoRemoved {
         app,
         &format!("/api/ui/repos/{id}/remove"),
         &serde_json::Value::Null,
-    )
-    .await
-}
-
-/// Say how one Repo is to resolve a conflict from now on — or, with `None`, that
-/// it is to go back to whatever every other Repo does.
-async fn resolve(app: &Router, id: i64, resolution: Option<ConflictResolution>) -> RepoView {
-    post(
-        app,
-        &format!("/api/ui/repos/{id}/resolution"),
-        &serde_json::json!({ "resolution": resolution }),
     )
     .await
 }
@@ -447,181 +432,6 @@ async fn the_branches_of_a_repo_that_is_not_there_are_refused() {
 
         assert_eq!(status, StatusCode::NOT_FOUND, "asking about {asked}");
     }
-}
-
-/// One Repo opened, which is what its card in the settings leads to: the row's
-/// own three facts, plus everything the card had no room for.
-///
-/// The roadmaps are the same reading the notice under the new-conversation box
-/// makes — `ui_content.rs` is where what that finds is pinned — so what is
-/// asserted here is that a repository holding none says so with an empty list
-/// rather than by leaving the field out.
-#[tokio::test]
-async fn a_repo_opened_carries_its_branches_its_work_and_its_roadmaps() {
-    let src = tempfile::tempdir().unwrap();
-    let (_dir, pool, app) = workbench_and_pool().await;
-    let repo = repository(src.path().join("verkstead"));
-    git(&repo, &["branch", "release"]);
-
-    added(register(&app, &repo).await);
-    let id = listed(&app).await[0].id;
-
-    // Three Conversations on it: one still going, and two that are over each
-    // way there is to be over.
-    for (branch, state) in [
-        ("rate-limiting", None),
-        ("pane-paths", Some(store::Lifecycle::Done)),
-        ("dropped", Some(store::Lifecycle::Closed)),
-    ] {
-        let started = store::start_conversation(&pool, id, branch)
-            .await
-            .unwrap()
-            .unwrap();
-
-        if let Some(state) = state {
-            store::set_state(&pool, started, state).await.unwrap();
-        }
-    }
-
-    let opened: RepoView = get(&app, &format!("/api/ui/repos/{id}")).await;
-
-    assert_eq!(opened.id, id);
-    assert_eq!(opened.name, "verkstead");
-    assert_eq!(opened.path, repo.canonicalize().unwrap().to_str().unwrap());
-    assert_eq!(opened.default_branch, "main");
-    assert_eq!(
-        opened.branches,
-        vec!["main".to_owned(), "release".to_owned()],
-        "the same list the base dropdown is filled from",
-    );
-    assert_eq!(opened.live, 1);
-    assert_eq!(opened.finished, 2, "Done and Closed counted together");
-    assert!(
-        opened.roadmaps.is_empty(),
-        "a repository with no roadmaps has none waiting: {:?}",
-        opened.roadmaps,
-    );
-}
-
-/// A registered Repo says nothing about how it resolves a conflict until
-/// somebody tells it, and then it says that until they take it back.
-///
-/// `null` is *whatever the settings page says for every Repo* rather than
-/// *merge*: the two are the same answer today and stop being the same the moment
-/// the global is changed, so what a Repo nobody has been to holds is nothing at
-/// all.
-#[tokio::test]
-async fn a_repos_resolution_is_said_taken_back_and_read_off_the_pane() {
-    let src = tempfile::tempdir().unwrap();
-    let (_dir, app) = workbench().await;
-    let repo = repository(src.path().join("verkstead"));
-
-    added(register(&app, &repo).await);
-    let id = listed(&app).await[0].id;
-
-    let opened: RepoView = get(&app, &format!("/api/ui/repos/{id}")).await;
-    assert_eq!(
-        opened.conflict_resolution, None,
-        "a Repo nobody has told overrides nothing",
-    );
-
-    let saved = resolve(&app, id, Some(ConflictResolution::Rebase)).await;
-    assert_eq!(
-        saved.conflict_resolution,
-        Some(ConflictResolution::Rebase),
-        "the answer is the Repo as it now stands, which is what the pane draws",
-    );
-
-    let read: RepoView = get(&app, &format!("/api/ui/repos/{id}")).await;
-    assert_eq!(read.conflict_resolution, Some(ConflictResolution::Rebase));
-
-    assert_eq!(
-        resolve(&app, id, Some(ConflictResolution::Merge))
-            .await
-            .conflict_resolution,
-        Some(ConflictResolution::Merge),
-        "and either word can be the override, a Repo pinned to a merge being a \
-         real thing to say where the global is a rebase",
-    );
-
-    assert_eq!(
-        resolve(&app, id, None).await.conflict_resolution,
-        None,
-        "and clearing it puts the Repo back to whatever every other one does",
-    );
-}
-
-/// A Repo nothing is registered under has nothing to be told, and saying so is
-/// the same refusal opening one gives: a pane somebody left open in another tab
-/// while the Repo was taken away.
-#[tokio::test]
-async fn a_repo_that_is_not_there_cannot_be_told_how_to_resolve_a_conflict() {
-    let (_dir, app) = workbench().await;
-
-    for asked in ["404", "not-a-number"] {
-        let (status, _) = fetch(
-            &app,
-            Request::builder()
-                .method("POST")
-                .uri(format!("/api/ui/repos/{asked}/resolution"))
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    serde_json::json!({ "resolution": "Merge" }).to_string(),
-                ))
-                .unwrap(),
-        )
-        .await;
-
-        assert_eq!(status, StatusCode::NOT_FOUND, "telling {asked}");
-    }
-}
-
-/// A Repo that is not registered has nothing to open, and saying so is a
-/// refusal: the pane reads it as the repo being gone — a link followed after
-/// somebody took it away — rather than as a Repo with nothing on it.
-#[tokio::test]
-async fn a_repo_that_is_not_there_cannot_be_opened() {
-    let (_dir, app) = workbench().await;
-
-    for asked in ["404", "not-a-number"] {
-        let (status, _) = fetch(
-            &app,
-            Request::builder()
-                .uri(format!("/api/ui/repos/{asked}"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await;
-
-        assert_eq!(status, StatusCode::NOT_FOUND, "opening {asked}");
-    }
-}
-
-/// And a Repo that was taken off the registry has nothing to open either. It is
-/// still in the table — every Conversation ever worked in it names it — but
-/// nothing is registered under that id any more, and the pane reads that as the
-/// repo being gone rather than drawing one with a Remove button on it.
-#[tokio::test]
-async fn a_repo_that_was_removed_cannot_be_opened() {
-    let src = tempfile::tempdir().unwrap();
-    let (_dir, app) = workbench().await;
-    let repo = repository(src.path().join("verkstead"));
-
-    added(register(&app, &repo).await);
-    let id = listed(&app).await[0].id;
-
-    assert_eq!(remove(&app, id).await, RepoRemoved::Removed);
-
-    let (status, _) = fetch(
-        &app,
-        Request::builder()
-            .uri(format!("/api/ui/repos/{id}"))
-            .body(Body::empty())
-            .unwrap(),
-    )
-    .await;
-
-    assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 /// A Repo taken off the registry is off every list that offers Repos for new

@@ -202,24 +202,30 @@ flowchart LR
   every picker filled — a prefill the human may change, kept server-side so a
   phone and a desk share it.
 - **Sandbox configuration** (extra read-write binds such as build caches,
-  network policy) lives in global defaults with per-repo overrides. It is
-  configured in two places — `--sandbox-bind DIR` for every sandbox,
-  `--sandbox-bind NAME=DIR` for the repo registered under that name, and the
-  same two grammars in the workbench settings (*revised 2026-08-30, grilling
-  configurable-paths*; *settled 2026-08-20, building stage 02*, this
-  was the installer's alone, because each bind is a hole in the boundary and
-  widening one was held to be theirs). It is the only path list left of the
-  two that were said this way (*revised 2026-09-06, onboarding stage 01*: the
+  network policy) is one set every sandbox gets. It is configured in two places
+  — `--sandbox-bind DIR`, and the same grammar in the workbench settings
+  (*revised 2026-08-30, grilling configurable-paths*; *settled 2026-08-20,
+  building stage 02*, this was the installer's alone, because each bind is a
+  hole in the boundary and widening one was held to be theirs). A bind could
+  also name a repo — `--sandbox-bind NAME=DIR`, given only to sessions working
+  in the repo registered under that name — and that grammar is gone (*revised
+  2026-09-15, building settings-ui-tidy*): a bind is a build cache or a package
+  registry, which is the machine's rather than one repository's, and the scoped
+  half was configuration the workbench could not draw and a second rule to read
+  every entry by. The flag refuses one by name; an entry still in it in
+  `config.yaml` reaches no session, draws no row and is dropped from the file by
+  the next save the Sandbox binds pane makes. It is the only path list left of
+  the two that were said this way (*revised 2026-09-06, onboarding stage 01*: the
   watched paths were the other, and went). The two sets union, and each keeps
   its own answer to a bind that is not there: the flag's refuses startup, the
   setting's is skipped for that session with a line in the log. What makes the
   browser half safe is not that a bind stopped being a hole but that reaching
   the page is already reaching the machine — the
   tailnet is the perimeter and there is one human behind it — while a *phone* is
-  no place to be told a typo cost every session in a repository its start. On a
-  hardened nix install the unit's namespace still binds what the module was
-  given, so a settings entry outside it saves, says on the page that the server
-  cannot see it, and does nothing until the installer widens the unit. Letting a
+  no place to be told a typo cost every session its start. On a hardened nix
+  install the unit's namespace still binds what the module was given, so a
+  settings entry outside it saves, says on the page that the server cannot see
+  it, and does nothing until the installer widens the unit. Letting a
   **conversation** allow another repository into its own sandbox is the
   companion-repos bullet below (*settled 2026-08-27, staging companion-repos*;
   this said "wanted and is not built"): the sandbox takes a composed list, so it
@@ -229,8 +235,8 @@ flowchart LR
   grilling shared-rust-build-cache*; it was written up as "the one deliberate
   exception" to an installer-only rule the bullet above no longer states —
   *revised 2026-08-30, grilling configurable-paths*). It is a hole the
-  **server** opens in every sandbox by default, and the switch that closes it is
-  in the workbench settings. It was taken on the rule that *a human should never
+  **server** opens in every sandbox by default, and the checkbox that closes it
+  is in the workbench settings. It was taken on the rule that *a human should never
   have a worse experience for not having checked the settings*: every
   conversation cold-built otherwise, because `target/` is inside a worktree that
   is deleted on close and the cargo registry landed in a per-session tmpfs
@@ -238,8 +244,8 @@ flowchart LR
   and is now about defaults rather than about who may configure it: this hole is
   one directory of Verkstead's own making, holding nothing but build output, so
   it can be opened for somebody who never asked and the only control over it is
-  the one that *takes it away*. Every bind on the Paths pane is somebody else's
-  directory, and is opened only because it was typed there.
+  the one that *takes it away*. Every bind on the Sandbox binds pane is somebody
+  else's directory, and is opened only because it was typed there.
 - **Companion repos** (*settled 2026-08-27, staging companion-repos — being
   built by that roadmap*): a conversation may add other registered repos to its
   sandbox, each read-only or read-write. Configured while the brief drafts — an
@@ -259,11 +265,14 @@ flowchart LR
   a new branch, exactly as the main repo does. Fetch-then-resolve per companion
   at grill start, refusals naming the companion, teardown at close keeping the
   branches. The sandbox binds each companion's worktree and git common dir by
-  mode and composes that repo's own per-repo binds; the prompt carries one
-  neutral companion listing and no instructions — the agent decides from the
-  brief what to use. Visibility: a commit sweep per read-write companion with
-  repo-labeled commit events, and Set diffs composed server-side per repo (the
-  main repo's diff derivation moves server-side too, for consistency).
+  mode, and what a session builds in one with is the sandbox configuration every
+  session gets (*revised 2026-09-15, building settings-ui-tidy*: it composed
+  that repo's own per-repo binds in as well, until those went); the prompt
+  carries one neutral companion listing and no instructions — the agent decides
+  from the brief what to use. Visibility: a commit sweep per read-write
+  companion with repo-labeled commit events, and Set diffs composed server-side
+  per repo (the main repo's diff derivation moves server-side too, for
+  consistency).
   Pipeline: **full, per touched companion** — the finish session pushes and PRs
   each companion holding commits by that repo's own review process, a touched
   companion without a PR is a deliberate stop, each PR gets its own checks and
@@ -445,7 +454,6 @@ flowchart LR
     in words why nobody could be asked. The save lands either way: a token is
     pasted once out of a page that will not show it again (*refined 2026-08-23,
     building intentional-credentials*).
-  - per-repo extra binds from sandbox configuration
   - **A shared Rust build cache, on by default** (*settled 2026-08-29, grilling
     shared-rust-build-cache*): one directory the server resolves at startup —
     `--build-cache-dir`, `VERKSTEAD_BUILD_CACHE_DIR`, else
@@ -485,7 +493,7 @@ flowchart LR
     concurrent sessions and artifacts collide across feature sets. One global
     cache for every repo and every profile — cross-project poisoning was raised
     and accepted, sessions already sharing one uid and the whole host network.
-    The switch and the size are `rust_build_cache` in `config.yaml`, read at
+    The checkbox and the size are `rust_build_cache` in `config.yaml`, read at
     every spawn, so a change applies to the next session; absent means on at
     30G. Named for Rust so a sibling can stand beside it later.
 
@@ -627,7 +635,7 @@ being allowed any number of roadmaps where it has one `.tasks/`.
 
 **Every details pane has a path of its own** (*settled 2026-08-29, building
 settings-redesign*), nested under the Conversation — `events/:id`, `backlog`,
-`roadmaps/:name` — or under `/settings` — `github`, `profiles/:id`, `repos/:id`,
+`roadmaps/:name` — or under `/settings` — `git`, `profiles/:id`, `repos/:id`,
 with `new` standing where an id stands for the two that add one. The ids sit
 behind a segment of their own so they can never be read as the panes named by a
 word beside them. Selection is derived from the URL rather than held beside it,
@@ -926,47 +934,109 @@ Timeline events:
 - Question sets are answerable in the workbench and on the phone alike.
 - **Everything the human configures is one page**, `/settings`, the one
   place the sidebar leads out to (*settled 2026-08-23, building
-  intentional-credentials*). It opens on what Verkstead itself has been told —
-  the GitHub token and the git author, saved together because the server writes
-  both files in one request. The token field is write-only: what is shown of a
-  saved one is its last four characters and when it was written, with replace
-  and clear as presses of their own, and the account GitHub verified it as after
-  a save. With either setting missing the page says so and says what it costs:
-  sessions that cannot reach GitHub, commits that fail asking who the author is.
-  Under the credentials are the Agent Profiles and the Repos, which had pages of
+  intentional-credentials*). It opens on **Git**, which is everything git is
+  told: the GitHub token and the git author, saved together because the server
+  writes both files in one request, and under them how a conflicted pull request
+  is resolved and whether Done shares the record to that pull request, each
+  saving itself on the pick or the tick (*revised 2026-09-15, building
+  settings-ui-tidy*: it was **GitHub and git author** at `/settings/github`,
+  with the resolution a card and pane of its own at `/settings/conflicts` that
+  described both strategies and warned what a rebase force-pushes; both slugs
+  are no such page now rather than redirects, and what a rebase costs is said in
+  `CONTEXT.md` rather than beside the choice). The token field is write-only:
+  what is shown of a saved one is its last four characters and when it was
+  written, with replace and clear as presses of their own, and the account
+  GitHub verified it as after a save. With either setting missing the page says
+  so and says what it costs: sessions that cannot reach GitHub, commits that
+  fail asking who the author is.
+  Under the Git section are the Agent Profiles and the Repos, which had pages of
   their own until they were folded in here — all of it is settled once and then
   left alone, and `/profiles` and `/repos` are no such page now rather than
-  redirects.
+  redirects. **A repository is registered from the new conversation page rather
+  than from here** (*revised 2026-09-15, building settings-ui-tidy*: the section
+  carried a plus that opened the registration at `/settings/repos/new`; **Open
+  repo** and **Create repo** at the foot of the Repo dropdown are the same form
+  and are the way in now, which is where somebody is when they find they have
+  nowhere to work).
 - **The page is read as cards and panes** (*settled 2026-08-29, building
   settings-redesign*). Everything on it that used to open a modal is a card in
-  the middle pane and a details pane beside it: the credentials as one github
-  card, each Agent Profile, each registered Repo — the shared Rust build cache,
-  whose card says how it stands and whose pane holds the switch and the size,
-  and **Paths**, whose card counts the global binds and whose pane edits them
-  (*added 2026-08-30, grilling configurable-paths*; *revised 2026-09-06,
-  onboarding stage 01*: it counted the watched paths as well and its pane edited
-  both). The Paths card sits directly below the Repos (*revised 2026-09-06,
-  onboarding stage 01*: it sat directly above them, because a watched path was
+  the middle pane and a details pane beside it: everything git is told as one
+  git card, each Agent Profile, the Repos as one card — **Language support**,
+  whose
+  card lists the languages a session gets build support for and whose pane holds
+  the checkbox per language and the configuration hanging off it (*revised
+  2026-09-15, building settings-ui-tidy*: it was **Rust build cache** at
+  `/settings/build-cache`, whose card said how the cache stood in a sentence and
+  whose pane held a switch, a paragraph about it and the size; the old slug is no
+  such page rather than a redirect, the way `/profiles` and `/repos` were
+  retired), and **Sandbox binds**, whose card counts the paths every sandbox
+  gets and whose pane edits them (*added 2026-08-30, grilling
+  configurable-paths*; *revised 2026-09-06, onboarding stage 01*: it counted the
+  watched paths as well and its pane edited both; *revised 2026-09-15, building
+  settings-ui-tidy*: it was **Paths** at `/settings/paths`, over a pane holding
+  one **Sandbox binds** subsection and a paragraph about what each entry widens
+  — that subsection is the section now, at `/settings/sandbox-binds`, its one
+  line says what the section configures, and what it counts and adds is a
+  *path*; the old slug is no such page rather than a redirect). The Sandbox
+  binds card sits directly below the Repos (*revised 2026-09-06, onboarding
+  stage 01*: it sat directly above them, because a watched path was
   what a Repo was registered from and a machine with none had nothing to put on
   that list — with the boundary gone the Repos are what a machine is set up by
-  and the binds are the afterthought); a Repo's own pane carries the binds said
-  for its name under a **Sandbox configuration** heading, the same rows out of
-  the same read and the same save, because a page listing every path would
-  carry a column of `name=…` entries nobody could scan. **A bind written for a name no Repo is registered
-  under goes back on the Paths pane**, because that split leaves it no pane of
-  its own and a row drawn nowhere is a row nobody can take away — which is what
-  unregistering a Repo makes of every bind said for it. The Paths card's count
-  of entries the server cannot see spans a Repo's pane as well as its own, and
-  says which to open: a bind that has quietly stopped resolving is what nobody
-  goes looking for. What is on a card is what a list is scanned for
-  and the rest is in the pane — a Profile's mounted paths, agent type and
-  Remove; a Repo's branches, how much work is on it, what it is holding that
-  nothing is driving and its own binds; the cache's switch and the size of its
-  compiled half. Adding one is a plus icon on the section's heading line, which
-  opens the same pane blank and reads as open while it stands. The two switches
-  that are about the device and the server rather than about anything
-  configured stay as they were: notifications on the pane head's line, and the
-  update banner above everything.
+  and the binds are the afterthought). **Every bind is a row on the pane and a
+  row on that pane is every bind**, there being one kind of them (*revised
+  2026-09-15, building settings-ui-tidy*: a bind written for a registered Repo
+  was drawn on that Repo's own pane, under a **Sandbox configuration** heading,
+  and one written for a name nothing held was drawn here as a stray saying so;
+  both went with the grammar that made them). That card's count of entries the
+  server cannot see is what the warning on it is drawn from: a bind that has
+  quietly stopped resolving is what nobody goes looking for. What is on a card is
+  what a list is scanned for and the rest is in the pane — a Profile's mounted
+  paths, the models it lists, its agent type as a field and Remove; Language
+  support's checkbox per language and the size of the Rust cache's compiled
+  half. **A Profile's card is one line: the harness's mark, the harness's name,
+  and the Profile's own name after an em dash** — "Claude Code — Personal", and
+  "Claude Code" for the one nobody named, there being nothing for a name to tell
+  it apart from — with the warning under it where its account has gone
+  (*revised 2026-09-15, building settings-ui-tidy*: it read as the Profile's
+  name alone, **Default** where there was none, over a line of every model id
+  the account can launch). Adding a Profile is a plus icon on the section's
+  heading line, centred on the heading the way every heading row draws what
+  stands at the end of it, which opens the same pane blank and reads as open
+  while it stands. The two switches that are about the device and the server
+  rather than about anything configured stay as they were: notifications on the
+  pane head's line, and the update banner above everything.
+- **The Repos are one card, counting them, over one pane listing every one by
+  name with a Remove beside it** (*revised 2026-09-15, building
+  settings-ui-tidy*: each registered Repo was a card of its own, opening a pane
+  of its path and default branch, every branch git had, how much work was on it,
+  the roadmaps in it nothing was driving, how a conflict in it was resolved, its
+  own binds, and Remove at the foot). A row is the name and nothing else: none of
+  those facts was stored, each was a git call or a count made every time somebody
+  opened one, and each is read where it is used — the branches on a composer, the
+  roadmaps waiting in the new conversation dropdown, the resolution once on the
+  Git pane for every Repo. **Remove asks once before it acts**, the way a close
+  over a run in flight does, because it is one press in a list on a phone rather
+  than the last press on a pane about the repository; it is still an
+  unregistering rather than a delete, and a Repo with a live Conversation on it
+  still refuses, in words, under the row the press was made on.
+- **On the settings page an on/off control is a plain checkbox, and what hangs
+  off one is indented under it and greyed while it is off** (*settled
+  2026-09-15, building settings-ui-tidy*). The painted switch stays where it
+  was — it is a device setting offered inside a page about something else, and a
+  track that slides says *this is a thing you flip*. The settings page is a
+  form, and a form's answer to *is this on* is the box the browser has drawn
+  for that question since there were browsers: no paint over it, the platform's
+  own tick and focus ring, and the accent it fills with taken from the page. It
+  keeps the switch's one rule, that a control says where things stand rather
+  than where somebody pressed — a tick is a request, the box goes straight back,
+  and only the answer arriving moves it. Configuration that means nothing while
+  its checkbox is off sits in a disabled `fieldset` under it: one attribute, and
+  the browser greys every field and press inside, takes them out of the tab
+  order and refuses input. Disabled rather than `readonly`, and greyed rather
+  than hidden — a field that vanished would say the setting had, and it has not.
+  A group may be off for a reason of its own as well as for the box above it:
+  the Rust cache's size is sccache's own word, so a server with no sccache has
+  nowhere to put it, and the warning saying so stands between the two.
 - **A Repo can be taken off the registry** from its own pane (*settled
   2026-08-29, building settings-redesign*) — an unregistering rather than a
   delete, refused while live work is on it. See **Repo** in `CONTEXT.md` for

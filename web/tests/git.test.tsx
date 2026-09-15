@@ -266,7 +266,7 @@ describe("what Next saves", () => {
       conflict_resolution: TOLD.conflict_resolution,
       sandbox_binds: [
         "/var/cache/verkstead-node",
-        "verkstead=/var/cache/verkstead-cargo",
+        "/var/cache/verkstead-cargo",
       ],
     });
   });

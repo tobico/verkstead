@@ -1,22 +1,31 @@
-//! The Repos section of the settings page: the cards for what is registered,
-//! the pane one of them opens, and the pane that registers another.
+//! The Repos section of the settings page: the card saying how many are
+//! registered, the pane it opens listing every one of them with a Remove
+//! beside it, and the registration the Repo dropdown draws.
 //!
-//! The three are mounted apart, because that is what they are: cards in the
-//! middle pane carrying what a list is scanned for, and each pane on its own in
-//! the details beside them. The page that puts them together — which path a card
-//! opens, and whether it reads as open while that pane stands — is
-//! `settings.test.tsx`'s, along with the arithmetic behind it.
+//! The two halves are mounted apart, because that is what they are: a card in
+//! the middle pane and the pane it opens beside it. The page that puts them
+//! together — which path the card opens, and whether it reads as open while
+//! that pane stands — is `settings.test.tsx`'s, along with the arithmetic
+//! behind it.
 //!
-//! `tests/fixtures/repos.json` and `repo.json` are golden fixtures like the
-//! profiles': `cargo test` renders the real `/api/ui/repos` and
-//! `/api/ui/repos/{id}` and writes the files, so what these assertions read is
-//! the endpoints' own words.
+//! `tests/fixtures/repos.json` is a golden fixture like the profiles': `cargo
+//! test` renders the real `/api/ui/repos` and writes the file, so what these
+//! assertions read is the endpoint's own words.
 //!
-//! What is worth proving here is that a refusal reads as a refusal. Which paths
-//! are refused is the server's — the tests over there are what say a relative
-//! path or one that is no repository root is turned away — and this side's whole
-//! job is to say which of them happened in words the human can act on, inside
-//! the pane the path is about to be corrected in.
+//! What is worth proving about a removal is that it is asked about first and
+//! that a refusal reads as a refusal on the row it was pressed on. It is one
+//! press in a list on a phone now, rather than the last press on a pane about
+//! the repository, so the card in front of it is what stands between a thumb
+//! and a registry entry; and a list of rows is where saying *which* repo a
+//! refusal is about stops being automatic.
+//!
+//! What is worth proving about the registration is the same as it always was:
+//! which paths are refused is the server's — the tests over there are what say
+//! a relative path or one that is no repository root is turned away — and this
+//! side's whole job is to say which of them happened in words the human can act
+//! on, inside the card the path is about to be corrected in. It is asked from
+//! the Repo dropdown now, so it is **Open repo** that is mounted for it; what
+//! that modal does with a Repo it lands is `composing.test.tsx`'s.
 //!
 //! And that the browse writes the same box the typing does. The field is the
 //! shared one — how the dropdown itself behaves is `browsing.test.tsx`'s, where
@@ -30,19 +39,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import type { JSX } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type {
-  DirectoryListing,
-  RepoEntry,
-  RepoView,
-  ConflictResolution,
-  SettingsView,
-} from "../src/api/types";
+import type { DirectoryListing, RepoEntry } from "../src/api/types";
 import card from "../src/CardButton.module.css";
-import button from "../src/IconButton.module.css";
 import {
-  RepoDetails,
-  RepoList,
-  RepoPane,
+  OpenRepo,
+  ReposCard,
+  ReposPane,
   type RepoRefused,
 } from "../src/repos/RepoList";
 import styles from "../src/repos/RepoList.module.css";
@@ -56,23 +58,12 @@ import {
   rows as offered,
   tap,
 } from "./fields";
-import { json, serving, whenever } from "./serving";
+import { json, serving, whenever, type Answer } from "./serving";
 import repos from "./fixtures/repos.json" with { type: "json" };
-import opened from "./fixtures/repo.json" with { type: "json" };
-import settings from "./fixtures/settings.json" with { type: "json" };
 import listing from "./fixtures/directories.json" with { type: "json" };
 
 const REPOS = repos as RepoEntry[];
 const FIRST = REPOS[0]!;
-
-/// One of them opened, which is the pane's own read — the same repository the
-/// first card is about, so a test can mount the pair and have them agree.
-const OPENED: RepoView = { ...(opened as RepoView), id: FIRST.id };
-
-/// And the settings the pane's own Sandbox Configuration is drawn out of, which
-/// hold one bind for this repository by name. What that section is *about* is
-/// `paths.test.tsx`'s; what is asked here is only that the pane carries it.
-const SETTINGS = settings as SettingsView;
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -101,206 +92,145 @@ function mounting(what: () => JSX.Element) {
   };
 }
 
-/// The cards in the middle pane, and what pressing one of them — or the plus
-/// above them — asked for.
-function mountCards(opening: number | "new" | null = null) {
-  const open = vi.fn();
-  const add = vi.fn();
+/// The card in the middle pane, and what pressing it asked for.
+function mountCard(open = false) {
+  const press = vi.fn();
 
   return {
-    ...mounting(() => <RepoList opening={opening} open={open} add={add} />),
-    open,
-    add,
+    ...mounting(() => <ReposCard open={open} press={press} />),
+    press,
   };
 }
 
-/// The pane one of those cards opens, and what its two ways out asked for.
-function mountOpened(id = FIRST.id) {
-  const back = vi.fn();
-  const done = vi.fn();
-
-  return {
-    ...mounting(() => <RepoDetails repo={id} back={back} done={done} />),
-    back,
-    done,
-  };
-}
-
-/// The form in the details pane, and what its two ways out asked for.
+/// The pane it opens, and what its way back asked for.
 function mountPane() {
   const back = vi.fn();
-  const done = vi.fn();
 
-  return { ...mounting(() => <RepoPane back={back} done={done} />), back, done };
+  return { ...mounting(() => <ReposPane back={back} />), back };
+}
+
+/// And the registration, on the modal the Repo dropdown opens it as.
+function mountOpen() {
+  const close = vi.fn();
+  const landed = vi.fn();
+
+  return {
+    ...mounting(() => <OpenRepo close={close} landed={landed} />),
+    close,
+    landed,
+  };
 }
 
 /// The list as it stands, with whatever the pane's writes are answered by.
-function theRepos(...answers: Array<() => Promise<Response>>) {
+function theRepos(...answers: Array<Answer>) {
   return serving(whenever("/api/ui/repos", json(REPOS)), ...answers);
 }
 
-/// And one Repo opened, which is a read of its own rather than a row of that
-/// list — with whatever the removal on it is answered by.
-function theOpened(
-  view: RepoView = OPENED,
-  removal?: () => Promise<Response>,
-) {
-  return serving(
-    whenever(`/api/ui/repos/${view.id}`, json(view)),
-    // The pane reads the settings as well as the Repo, for the binds scoped to
-    // it — the same read every other section of this page makes.
-    whenever("/api/ui/settings", json(SETTINGS)),
-    ...(removal
-      ? [whenever(`/api/ui/repos/${view.id}/remove`, removal, "POST")]
-      : []),
-  );
+/// And the removal of one Repo, answered however the test says.
+function removing(repo: RepoEntry, answer: () => Promise<Response>) {
+  return whenever(`/api/ui/repos/${repo.id}/remove`, answer, "POST");
 }
 
-/// The same, with the pane's other write answered: how this Repo resolves a
-/// conflict, which comes back as the Repo itself read afresh.
-function theOpenedResolving(view: RepoView, saved: RepoView) {
-  return serving(
-    whenever(`/api/ui/repos/${view.id}`, json(view)),
-    whenever("/api/ui/settings", json(SETTINGS)),
-    whenever(`/api/ui/repos/${view.id}/resolution`, json(saved), "POST"),
-  );
-}
-
-/// One Repo resolving conflicts a stated way — `null` being the override taken
-/// back, which is what nearly every Repo holds.
-function resolving(resolution: ConflictResolution | null): RepoView {
-  return { ...OPENED, conflict_resolution: resolution };
-}
-
-/// The picker on the opened pane, once the read behind it has landed.
-async function thePicker(): Promise<HTMLSelectElement> {
-  return (await waitFor(() =>
-    screen.getByLabelText(/How a pull request that will not merge/),
-  )) as HTMLSelectElement;
-}
-
-/// Press the Remove that unregisters the Repo, once the read behind it has
-/// landed.
-///
-/// By where it stands rather than by its word: the binds section above it draws
-/// a Remove on every row the settings own, and both presses say the same thing
-/// about two different things.
-async function removePressed() {
-  fireEvent.click(
-    await drawn<HTMLButtonElement>(
-      document,
-      `.${styles.actions} .${styles.remove}`,
-    ),
-  );
-}
-
-/// One repo's card, by the name on it.
-function theCard(name: string): HTMLElement {
+/// One repo's row, by the name on it.
+function theRow(name: string): HTMLElement {
   return screen.getByText(name).closest(`.${styles.repo}`)!;
 }
 
-/// Type a path into the pane and send it.
+/// Press the Remove on one repo's row, which asks rather than acts.
+function removePressed(name: string) {
+  fireEvent.click(
+    theRow(name).querySelector<HTMLButtonElement>(`.${styles.remove}`)!,
+  );
+}
+
+/// The card the press is answered with, once it is up.
+async function asked(): Promise<HTMLElement> {
+  return await drawn<HTMLElement>(document, `dialog.${styles.confirming}`);
+}
+
+/// The two ways out of it, in the order they are drawn.
+function ways(sheet: HTMLElement): HTMLButtonElement[] {
+  return [
+    ...sheet.querySelectorAll<HTMLButtonElement>(
+      `.${styles.confirmingOut} button`,
+    ),
+  ];
+}
+
+/// Confirm the press that was asked about, which is the removal itself.
+async function confirmed() {
+  fireEvent.click(ways(await asked())[1]!);
+}
+
+/// Type a path into the registration and send it.
 function register(path: string) {
   fireEvent.input(screen.getByLabelText(/absolute path/i), {
     target: { value: path },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Register" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open" }));
 }
 
-describe("the cards", () => {
+describe("the card", () => {
   it("asks the server for the Repos it has been told about", async () => {
     const fetching = theRepos();
-    mountCards();
+    mountCard();
 
-    await waitFor(() => screen.getByText(FIRST.name));
+    await waitFor(() => screen.getByText(/registered/));
     expect(fetching).toHaveBeenCalledWith("/api/ui/repos", expect.anything());
   });
 
-  /// The card's face is what a list is scanned for, which for a Repo is all
-  /// three: the name it is picked by, the directory Verkstead will work in, and
-  /// what a Conversation will branch from.
-  ///
-  /// The path shown is the resolved one the server recorded rather than whatever
-  /// was typed to register it — that is the directory Verkstead will actually
-  /// work in, and the point of showing it is that it can be checked.
-  it("draws a card per Repo, with what the server said about each", async () => {
+  /// A count is the whole of what the card says: every item on the list it
+  /// opens is a name, and there is nothing else about one to scan for.
+  it("says how many are registered", async () => {
     theRepos();
-    mountCards();
+    const { container } = mountCard();
 
-    await waitFor(() => screen.getByText(FIRST.name));
-
-    const face = theCard(FIRST.name);
-    expect(face.querySelector(`.${styles.path}`)!.textContent).toBe(FIRST.path);
-    expect(face.querySelector(`.${styles.branch}`)!.textContent).toBe(
-      FIRST.default_branch,
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${styles.standing}`)!.textContent,
+      ).toBe(`${REPOS.length} repos registered.`),
     );
+    expect(container.querySelector("h2")!.textContent).toBe("Repos");
   });
 
-  it("keeps the order it was given", async () => {
-    theRepos();
-    const { container } = mountCards();
+  /// In English rather than as `1 repos`.
+  it("counts one of them in the singular", async () => {
+    serving(whenever("/api/ui/repos", json([FIRST])));
+    mountCard();
 
-    await waitFor(() => screen.getByText(FIRST.name));
-
-    expect(
-      [...container.querySelectorAll(`.${styles.repo} .${styles.title}`)].map(
-        (name) => name.textContent,
-      ),
-    ).toEqual(REPOS.map((repo) => repo.name));
+    await waitFor(() => screen.getByText("1 repo registered."));
   });
 
-  /// A card is pressed to open the pane beside it, like every other card in the
-  /// app: an `article` rather than a button, because it holds more than a run of
-  /// text, with the press, the tab stop and the role that says what it is put on
-  /// the article by `CardButton`.
-  it("opens the repo when a card is pressed", async () => {
+  it("says so plainly when none are registered", async () => {
+    serving(whenever("/api/ui/repos", json([])));
+    mountCard();
+
+    await waitFor(() => screen.getByText("No repos are registered yet."));
+  });
+
+  /// A card is pressed to open the pane beside it, like every other card on
+  /// this page: an `article` rather than a button, because it holds more than a
+  /// run of text.
+  it("opens the pane when it is pressed", async () => {
     theRepos();
-    const { open } = mountCards();
+    const { container, press } = mountCard();
 
-    await waitFor(() => screen.getByText(FIRST.name));
-
-    const face = theCard(FIRST.name);
+    const face = await drawn<HTMLElement>(container, `.${styles.reposCard}`);
     expect(face.classList).toContain(card.card);
     expect(face.getAttribute("role")).toBe("button");
     expect(face.getAttribute("aria-pressed")).toBe("false");
 
     fireEvent.click(face);
-    expect(open).toHaveBeenCalledWith(FIRST.id);
+    expect(press).toHaveBeenCalled();
   });
 
-  it("reads a card as open while its pane is", async () => {
+  it("reads as open while its pane is", async () => {
     theRepos();
-    mountCards(FIRST.id);
+    const { container } = mountCard(true);
 
-    await waitFor(() => screen.getByText(FIRST.name));
-
-    const face = theCard(FIRST.name);
+    const face = await drawn<HTMLElement>(container, `.${styles.reposCard}`);
     expect(face.getAttribute("aria-pressed")).toBe("true");
     expect(face.classList).toContain(card.open);
-
-    // And the others are not: a details pane shows one thing.
-    expect(theCard(REPOS[1]!.name).getAttribute("aria-pressed")).toBe("false");
-  });
-
-  /// The list is what stays in the pane. There is no form on it at all: adding
-  /// one is a pane of its own now, and the modal it was drawn in is gone.
-  it("keeps no form beside the cards", async () => {
-    theRepos();
-    const { container } = mountCards();
-
-    await waitFor(() => screen.getByText(FIRST.name));
-
-    expect(container.querySelector("form")).toBeNull();
-    expect(container.querySelector("dialog")).toBeNull();
-    expect(screen.queryByLabelText(/absolute path/i)).toBeNull();
-  });
-
-  it("says so plainly when none are registered", async () => {
-    serving(whenever("/api/ui/repos", json([])));
-    mountCards();
-
-    await waitFor(() => screen.getByText("No repos are registered yet."));
-    expect(screen.queryByRole("listitem")).toBeNull();
   });
 
   it("shows the server's own wording when the list cannot be read", async () => {
@@ -310,7 +240,7 @@ describe("the cards", () => {
         json({ error: "the registered Repos could not be read" }, 500),
       ),
     );
-    mountCards();
+    mountCard();
 
     await waitFor(() =>
       screen.getByText(/the registered Repos could not be read/),
@@ -318,369 +248,85 @@ describe("the cards", () => {
   });
 });
 
-describe("the plus that adds one", () => {
-  /// An `IconButton`, for the reason the gear at the head of the conversations
-  /// is one: it is another thing in the pane that is selected and opened into
-  /// the pane beside it, rather than a quiet text button of its own kind.
-  it("asks for the form when it is pressed", async () => {
-    theRepos();
-    const { container, add } = mountCards();
-
-    const plus = await drawn<HTMLButtonElement>(
-      container,
-      'button[aria-label="Add a repo"]',
-    );
-    expect(plus.getAttribute("aria-pressed")).toBe("false");
-    expect(plus.classList).not.toContain(button.open);
-
-    fireEvent.click(plus);
-    expect(add).toHaveBeenCalled();
-  });
-
-  it("reads as open while the form is", async () => {
-    theRepos();
-    const { container } = mountCards("new");
-
-    const plus = await drawn<HTMLButtonElement>(
-      container,
-      'button[aria-label="Add a repo"]',
-    );
-    expect(plus.getAttribute("aria-pressed")).toBe("true");
-    expect(plus.classList).toContain(button.open);
-  });
-
-  /// The plus and a card are two selections in the one pane: a Repo being open
-  /// is not the form being open, and the plus says so.
-  it("stays shut while a repo's own pane is open", async () => {
-    theRepos();
-    const { container } = mountCards(FIRST.id);
-
-    const plus = await drawn<HTMLButtonElement>(
-      container,
-      'button[aria-label="Add a repo"]',
-    );
-    expect(plus.getAttribute("aria-pressed")).toBe("false");
-  });
-});
-
-/// The pane a card opens: everything about a Repo the list has no room for,
-/// read when somebody opens one rather than carried by the row.
-describe("the pane a card opens", () => {
-  /// A read of its own, keyed by the Repo: none of what it shows is on the list,
-  /// so there is nothing on the list for it to have taken instead.
-  it("asks the server about the one Repo it is about", async () => {
-    const fetching = theOpened();
-    mountOpened();
-
-    await waitFor(() => screen.getByText(OPENED.path));
-    expect(fetching).toHaveBeenCalledWith(
-      `/api/ui/repos/${FIRST.id}`,
-      expect.anything(),
-    );
-  });
-
-  /// Titled by the repository rather than by a word, because a pane about one
-  /// thing is named by that thing.
-  it("is titled by the repo", async () => {
-    theOpened();
-    const { container } = mountOpened();
-
-    await waitFor(() => screen.getByText(OPENED.path));
-    expect(container.querySelector("h1")!.textContent).toBe(OPENED.name);
-  });
-
-  it("draws the path and the default branch", async () => {
-    theOpened();
-    const { container } = mountOpened();
-
-    await waitFor(() => screen.getByText(OPENED.path));
-
-    const facts = container.querySelector(`.${styles.facts}`)!;
-    expect(facts.querySelector(`.${styles.path}`)!.textContent).toBe(
-      OPENED.path,
-    );
-    expect(facts.querySelector(`.${styles.branch}`)!.textContent).toBe(
-      OPENED.default_branch,
-    );
-  });
-
-  /// Counted apart because they are read for different reasons: what is on this
-  /// Repo now, and what has been.
-  it("counts the live and the finished conversations apart", async () => {
-    theOpened();
-    const { container } = mountOpened();
-
-    await waitFor(() => screen.getByText(OPENED.path));
-
-    expect(container.querySelector(`.${styles.live}`)!.textContent).toBe(
-      `${OPENED.live} live`,
-    );
-    expect(container.querySelector(`.${styles.finished}`)!.textContent).toBe(
-      `${OPENED.finished} finished`,
-    );
-  });
-
-  it("lists every branch git gave it, in the order it gave them", async () => {
-    theOpened();
-    const { container } = mountOpened();
-
-    await waitFor(() => screen.getByText(OPENED.path));
-
-    expect(
-      [...container.querySelectorAll(`.${styles.branchList} li`)].map(
-        (branch) => branch.textContent,
-      ),
-    ).toEqual(OPENED.branches);
-  });
-
-  /// The same reading the notice under the new-conversation box makes, said here
-  /// whether or not there is any: the notice is drawn only where there is
-  /// something to say, and this pane is an account of the Repo.
-  it("names the roadmaps waiting in it, with the stage each would start", async () => {
-    theOpened();
-    const { container } = mountOpened();
-
-    await waitFor(() => screen.getByText(OPENED.path));
-
-    const waiting = [...container.querySelectorAll(`.${styles.roadmap}`)];
-    expect(waiting).toHaveLength(OPENED.roadmaps.length);
-    expect(waiting[0]!.querySelector(`.${styles.title}`)!.textContent).toBe(
-      OPENED.roadmaps[0]!.title,
-    );
-    expect(waiting[0]!.querySelector(`.${styles.stage}`)!.textContent).toBe(
-      `${OPENED.roadmaps[0]!.stage}: ${OPENED.roadmaps[0]!.stage_title}`,
-    );
-  });
-
-  it("says so plainly where nothing is waiting to be adopted", async () => {
-    theOpened({ ...OPENED, roadmaps: [] });
-    mountOpened();
-
-    await waitFor(() => screen.getByText("Nothing is waiting to be continued."));
-  });
-
-  /// The one section on this pane that is settings rather than facts, carrying
-  /// the binds written against this repository's own name. What it draws and
-  /// what a press on it saves is `paths.test.tsx`'s; what is asked here is that
-  /// the pane holds it at all, out of the settings read beside the Repo's own.
-  it("carries the binds scoped to this repo", async () => {
-    theOpened();
-    mountOpened();
-
-    await waitFor(() => screen.getByText("/var/cache/verkstead-cargo"));
-    expect(screen.getByText("Sandbox configuration")).toBeTruthy();
-
-    // And not the bind every sandbox gets, which is the Paths section's.
-    expect(screen.queryByText("/var/cache/verkstead-node")).toBeNull();
-  });
-
-  /// A link followed after somebody took the repo away, which the server says
-  /// with a 404: a line rather than an error the human is meant to act on.
-  it("says the repo is gone where there is no such id", async () => {
-    serving(
-      whenever(
-        `/api/ui/repos/${FIRST.id}`,
-        json({ error: `there is no Repo ${FIRST.id}` }, 404),
-      ),
-    );
-    mountOpened();
-
-    await waitFor(() => screen.getByText("That repo is gone."));
-    expect(screen.queryByText(/Could not read this repo/)).toBeNull();
-  });
-
-  /// And a server that could not answer at all, which is a failure rather than
-  /// an absence.
-  it("shows the server's own wording when it could not answer at all", async () => {
-    serving(
-      whenever(
-        `/api/ui/repos/${FIRST.id}`,
-        json({ error: "the Repo could not be read" }, 500),
-      ),
-    );
-    mountOpened();
-
-    await waitFor(() => screen.getByText(/the Repo could not be read/));
-  });
-
-  /// The way back out of it, in the slot every pane keeps for it: a change of
-  /// level rather than a navigation, which is the page's to make.
-  it("goes back to the settings", async () => {
-    theOpened();
-    const { container, back } = mountOpened();
-
-    const out = await drawn<HTMLButtonElement>(container, `.${head.back}`);
-    expect(out.textContent).toContain("Settings");
-
-    fireEvent.click(out);
-    expect(back).toHaveBeenCalled();
-  });
-});
-
-describe("how a repo resolves a conflict", () => {
-  /// The state nearly every Repo is in: nothing said here, so what happens is
-  /// whatever the settings page says for every Repo. Nothing at all rather than
-  /// a copy of today's global, which is why the picker's third option is the
-  /// one that sends nothing.
-  it("offers the global setting, a merge and a rebase", async () => {
-    theOpened(resolving(null));
-    mountOpened();
-
-    const picker = await thePicker();
-
-    expect(picker.value).toBe("");
-    expect([...picker.options].map((option) => option.value)).toEqual([
-      "",
-      "Merge",
-      "Rebase",
-    ]);
-    expect(picker.options[0]!.textContent).toBe("Use the global setting");
-  });
-
-  /// Picking is the save: a choice that needed confirming afterwards would be a
-  /// choice the human has to make twice.
-  it("sends the override the moment one is picked", async () => {
-    const fetching = theOpenedResolving(
-      resolving(null),
-      resolving("Rebase"),
-    );
-    mountOpened();
-
-    fireEvent.change(await thePicker(), { target: { value: "Rebase" } });
-
-    await waitFor(() =>
-      expect(fetching).toHaveBeenCalledWith(
-        `/api/ui/repos/${FIRST.id}/resolution`,
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({ resolution: "Rebase" }),
-        }),
-      ),
-    );
-  });
-
-  /// And taking it back sends nothing rather than the word the global happens to
-  /// hold today — the whole reason the option that sends nothing is there.
-  it("sends nothing at all when the override is taken back", async () => {
-    const fetching = theOpenedResolving(resolving("Rebase"), resolving(null));
-    mountOpened();
-
-    fireEvent.change(await thePicker(), { target: { value: "" } });
-
-    await waitFor(() =>
-      expect(fetching).toHaveBeenCalledWith(
-        `/api/ui/repos/${FIRST.id}/resolution`,
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({ resolution: null }),
-        }),
-      ),
-    );
-  });
-
-  /// What a rebase costs, said in the pane the choice is made in rather than
-  /// found weeks later by a stage that will not push. Drawn only where a rebase
-  /// is the answer, because a warning drawn everywhere is one nobody reads.
-  it("says what a rebase costs, wherever a rebase is the answer", async () => {
-    theOpened(resolving("Rebase"));
-    const { container } = mountOpened();
-
-    await waitFor(() => screen.getByText(/rewrites what reviewers/));
-    expect(container.textContent).toContain("force-pushed");
-  });
-
-  it("says nothing about force-pushing where the answer is a merge", async () => {
-    theOpened(resolving("Merge"));
-    const { container } = mountOpened();
-
-    await thePicker();
-
-    expect(container.textContent).not.toContain("force-pushed");
-  });
-});
-
-describe("removing a repo", () => {
-  /// In the pane rather than on the card: a destructive press beside a list
-  /// somebody is only reading is one waiting to be made by mistake — the reason
-  /// a Profile's Remove moved into its pane too.
-  it("asks the server to take the repo it is about off the registry", async () => {
-    const fetching = theOpened(OPENED, json("Removed"));
-    const { done } = mountOpened();
-
-    await removePressed();
-
-    await waitFor(() =>
-      expect(fetching).toHaveBeenCalledWith(
-        `/api/ui/repos/${FIRST.id}/remove`,
-        expect.objectContaining({ method: "POST" }),
-      ),
-    );
-    // The pane is spent: it was about something that is not registered any
-    // more, and the cards behind it are what say the removal landed.
-    await waitFor(() => expect(done).toHaveBeenCalled());
-  });
-
-  /// What removing one means, said before it is done: Verkstead stops offering
-  /// the repository, and nothing that was worked in it moves.
-  it("says that removing it is an unregistering rather than a delete", async () => {
-    theOpened();
-    mountOpened();
-
-    await waitFor(() => screen.getByText(/takes it off the registry/));
-  });
-
-  /// Refused rather than taken out from under the work going on in it, and said
-  /// in the pane, because that is where the press was made.
-  it("says why a repo with live work on it could not be removed", async () => {
-    theOpened(OPENED, json("InUse"));
-    const { done } = mountOpened();
-
-    await removePressed();
-
-    await waitFor(() =>
-      screen.getByText(/A conversation that is still going is on it/),
-    );
-    expect(done).not.toHaveBeenCalled();
-  });
-
-  /// A pane left open in another tab, whose repo somebody has already taken
-  /// away: a refusal in words rather than a failure.
-  it("says so where the repo is off the registry already", async () => {
-    theOpened(OPENED, json("NoSuchRepo"));
-    const { done } = mountOpened();
-
-    await removePressed();
-
-    await waitFor(() => screen.getByText(/off the registry already/));
-    expect(done).not.toHaveBeenCalled();
-  });
-
-  /// And a server that could not answer at all, which is the one thing here
-  /// that is an error rather than an outcome.
-  it("says so when the server could not answer", async () => {
-    theOpened(OPENED, json({ error: "the Repo could not be removed" }, 500));
-    mountOpened();
-
-    await removePressed();
-
-    await waitFor(() => screen.getByText(/could not be removed/));
-  });
-});
-
-describe("the pane the plus opens", () => {
-  /// Blank, and standing on nothing the server has said: registering a Repo is
-  /// naming a path, and the form does not wait on a read it has no use for.
-  it("opens empty", async () => {
+describe("the pane it opens", () => {
+  it("lists every registered repo by name, in the order it was given", async () => {
     theRepos();
     const { container } = mountPane();
 
+    await waitFor(() => screen.getByText(FIRST.name));
     expect(
-      (screen.getByLabelText(/absolute path/i) as HTMLInputElement).value,
-    ).toBe("");
-    // A pane rather than a modal, with no second way out: a details pane is
-    // left by opening something else or by the way back its head draws.
-    expect(container.querySelector("dialog")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+      [...container.querySelectorAll(`.${styles.repo} .${styles.name}`)].map(
+        (name) => name.textContent,
+      ),
+    ).toEqual(REPOS.map((repo) => repo.name));
+  });
+
+  /// A row is the name, the directory under it, and the one press there is to
+  /// make about a Repo. What a repository *holds* is read where it is used —
+  /// the branches on the composer, the roadmaps in the new conversation
+  /// dropdown — rather than listed here.
+  it("puts the name, its path and a Remove on a row, and nothing else", async () => {
+    theRepos();
+    mountPane();
+
+    await waitFor(() => screen.getByText(FIRST.name));
+
+    const row = theRow(FIRST.name);
+    expect(
+      row.querySelector<HTMLButtonElement>(`.${styles.remove}`)!.textContent,
+    ).toBe("Remove");
+    expect(row.textContent).toBe(`${FIRST.name}${FIRST.path}Remove`);
+    // Not a card, and nothing to open: a name is not a surface to read
+    // something off.
+    expect(row.querySelector(`.${card.card}`)).toBeNull();
+  });
+
+  /// And the path is on the row because the name is not unique.
+  ///
+  /// A name is the directory's own and nothing stops two registered
+  /// repositories in different places sharing one — the store orders its list
+  /// by `name, id` for that reason. This is the one list that puts them side by
+  /// side, with an unregistering behind each, so two rows that read the same
+  /// would be a press somebody could only get right by luck.
+  it("tells two repos of one name apart", async () => {
+    const twins: RepoEntry[] = [
+      { id: 3, name: "api", path: "/srv/repos/api", default_branch: "main" },
+      { id: 4, name: "api", path: "/work/api", default_branch: "main" },
+    ];
+    serving(whenever("/api/ui/repos", json(twins)));
+    const { container } = mountPane();
+
+    await waitFor(() =>
+      expect(container.querySelectorAll(`.${styles.repo}`)).toHaveLength(2),
+    );
+
+    expect(
+      [...container.querySelectorAll(`.${styles.repo} .${styles.path}`)].map(
+        (path) => path.textContent,
+      ),
+    ).toEqual(["/srv/repos/api", "/work/api"]);
+  });
+
+  it("says so plainly when none are registered", async () => {
+    serving(whenever("/api/ui/repos", json([])));
+    const { container } = mountPane();
+
+    await waitFor(() => screen.getByText("No repos are registered yet."));
+    expect(container.querySelector(`.${styles.repo}`)).toBeNull();
+  });
+
+  it("shows the server's own wording when the list cannot be read", async () => {
+    serving(
+      whenever(
+        "/api/ui/repos",
+        json({ error: "the registered Repos could not be read" }, 500),
+      ),
+    );
+    mountPane();
+
+    await waitFor(() =>
+      screen.getByText(/the registered Repos could not be read/),
+    );
   });
 
   /// The way back out of it, in the slot every pane keeps for it: a change of
@@ -695,85 +341,179 @@ describe("the pane the plus opens", () => {
     fireEvent.click(out);
     expect(back).toHaveBeenCalled();
   });
+});
 
-  it("sends the path that was typed", async () => {
-    const fetching = theRepos(json({ Added: REPOS[0] }));
+describe("removing a repo", () => {
+  /// Asked about before anything happens, the way a close over a run in flight
+  /// is: it is one press in a list, on a phone, and it cannot be taken back.
+  it("asks before it takes anything off the registry", async () => {
+    const fetching = theRepos(removing(FIRST, json("Removed")));
     mountPane();
 
-    register("/srv/repos/verkstead");
+    await waitFor(() => screen.getByText(FIRST.name));
+    removePressed(FIRST.name);
 
-    // The path goes out as the server's own request shape.
+    const sheet = await asked();
+    expect(
+      sheet.querySelector(`.${styles.confirmingTitle}`)!.textContent,
+    ).toBe(`Remove ${FIRST.name}?`);
+    expect(ways(sheet).map((way) => way.textContent)).toEqual([
+      "Keep it",
+      "Remove",
+    ]);
+
+    // And nothing has been asked of the server: the press was a question.
+    expect(
+      fetching.mock.calls.filter(([, init]) => init && "method" in init),
+    ).toHaveLength(0);
+  });
+
+  /// The card names the repo because the list it was pressed in is behind it: a
+  /// card asking about *this repo* over a list of them would be asking about
+  /// whichever row the human remembers pressing.
+  it("names the repo the press was made on", async () => {
+    theRepos(removing(REPOS[1]!, json("Removed")));
+    mountPane();
+
+    await waitFor(() => screen.getByText(REPOS[1]!.name));
+    removePressed(REPOS[1]!.name);
+
+    expect(
+      (await asked()).querySelector(`.${styles.confirmingTitle}`)!.textContent,
+    ).toBe(`Remove ${REPOS[1]!.name}?`);
+  });
+
+  it("leaves the registry alone where the card is answered the other way", async () => {
+    const fetching = theRepos(removing(FIRST, json("Removed")));
+    const { container } = mountPane();
+
+    await waitFor(() => screen.getByText(FIRST.name));
+    removePressed(FIRST.name);
+    fireEvent.click(ways(await asked())[0]!);
+
+    await waitFor(() =>
+      expect(container.querySelector(`dialog.${styles.confirming}`)).toBeNull(),
+    );
+    expect(
+      fetching.mock.calls.filter(([, init]) => init && "method" in init),
+    ).toHaveLength(0);
+  });
+
+  it("asks the server to take it off the registry once the press is confirmed", async () => {
+    const fetching = theRepos(removing(FIRST, json("Removed")));
+    mountPane();
+
+    await waitFor(() => screen.getByText(FIRST.name));
+    removePressed(FIRST.name);
+    await confirmed();
+
     await waitFor(() =>
       expect(fetching).toHaveBeenCalledWith(
-        "/api/ui/repos",
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({ path: "/srv/repos/verkstead" }),
-        }),
+        `/api/ui/repos/${FIRST.id}/remove`,
+        expect.objectContaining({ method: "POST" }),
       ),
     );
   });
 
-  /// A pane that has been spent: what says the registration landed is the card
-  /// behind it, which is where the human is put back.
-  it("spends the pane once the server took the path", async () => {
-    theRepos(json({ Added: REPOS[0] }));
-    const { done } = mountPane();
-
-    register("/srv/repos/verkstead");
-
-    await waitFor(() => expect(done).toHaveBeenCalled());
-  });
-
-  /// And the roadmaps waiting are read again with the list, as they are when a
-  /// repo is removed. The offers are drawn from whatever is registered, in the
-  /// conversations pane standing right beside this one — so a repository
-  /// arriving with an unadopted roadmap in it, or a taken-away path registered
-  /// again, has something to offer the moment it lands.
-  it("reads the roadmap offers again with the list", async () => {
-    theRepos(json({ Added: REPOS[0] }));
-    const { queries, done } = mountPane();
+  /// The list is read again, and the roadmaps waiting with it: the offers are
+  /// drawn from whatever is registered, so a repository leaving takes whatever
+  /// it was holding out of them.
+  it("reads the list and the roadmap offers again", async () => {
+    theRepos(removing(FIRST, json("Removed")));
+    const { queries } = mountPane();
     const invalidated = vi.spyOn(queries, "invalidateQueries");
 
-    register("/srv/repos/verkstead");
+    await waitFor(() => screen.getByText(FIRST.name));
+    removePressed(FIRST.name);
+    await confirmed();
 
-    await waitFor(() => expect(done).toHaveBeenCalled());
-    expect(invalidated).toHaveBeenCalledWith({ queryKey: ["repos"] });
+    await waitFor(() =>
+      expect(invalidated).toHaveBeenCalledWith({ queryKey: ["repos"] }),
+    );
     expect(invalidated).toHaveBeenCalledWith({
       queryKey: ["abandoned-roadmaps"],
     });
   });
 
+  /// Refused rather than taken out from under the work going on in it, and said
+  /// under the row the press was made on — which is what says which repo the
+  /// refusal is about, now that the press is one of several on a list.
+  it("says why a repo with live work on it could not be removed", async () => {
+    theRepos(removing(FIRST, json("InUse")));
+    mountPane();
+
+    await waitFor(() => screen.getByText(FIRST.name));
+    removePressed(FIRST.name);
+    await confirmed();
+
+    await waitFor(() =>
+      screen.getByText(/A conversation that is still going is on it/),
+    );
+    expect(theRow(FIRST.name).querySelector(`.${styles.failure}`)).toBeTruthy();
+    // And said about that repo alone: no other row carries it.
+    expect(theRow(REPOS[1]!.name).querySelector(`.${styles.failure}`)).toBeNull();
+  });
+
+  /// A page left open in another tab, whose repo somebody has already taken
+  /// away: a refusal in words rather than a failure.
+  it("says so where the repo is off the registry already", async () => {
+    theRepos(removing(FIRST, json("NoSuchRepo")));
+    mountPane();
+
+    await waitFor(() => screen.getByText(FIRST.name));
+    removePressed(FIRST.name);
+    await confirmed();
+
+    await waitFor(() => screen.getByText(/off the registry already/));
+  });
+
+  /// And a server that could not answer at all, which is the one thing here
+  /// that is an error rather than an outcome — said on the same row, for the
+  /// same reason.
+  it("says so when the server could not answer", async () => {
+    theRepos(
+      removing(FIRST, json({ error: "the Repo could not be removed" }, 500)),
+    );
+    mountPane();
+
+    await waitFor(() => screen.getByText(FIRST.name));
+    removePressed(FIRST.name);
+    await confirmed();
+
+    await waitFor(() => screen.getByText(/could not be removed/));
+    expect(theRow(FIRST.name).querySelector(`.${styles.failure}`)).toBeTruthy();
+  });
+});
+
+/// The registration, which has left the settings: it is asked from the Repo
+/// dropdown, over the **Open repo** modal, and nothing on the settings page
+/// registers a repository at all.
+describe("the registration the dropdown draws", () => {
   /// Every way the server can turn a path away, each said in its own words: a
-  /// refusal the human cannot tell from another is a refusal they cannot act on.
+  /// refusal the human cannot tell from another is a refusal they cannot act
+  /// on.
+  ///
+  /// A path registered already is not among them any more — this form is a way
+  /// *onto* a repository, so that answer lands on the one somebody named, which
+  /// is `composing.test.tsx`'s.
   it.each([
     ["NotARepository", /not a git repository/i],
-    ["AlreadyRegistered", /registered already/i],
     ["Missing", /nothing at that path/i],
     ["NotAbsolute", /starting with a slash/i],
     ["NoDefaultBranch", /no branch to call its default/i],
   ] satisfies Array<[RepoRefused, RegExp]>)(
     "says why a path was refused as %s",
     async (outcome, said) => {
-      // One of these is not a bare word on the wire: a path registered already
-      // carries the Repo it found, and this pane is where that is still a
-      // refusal — it is a place to add a repo rather than a way onto one.
-      theRepos(
-        json(
-          outcome === "AlreadyRegistered"
-            ? { AlreadyRegistered: REPOS[0] }
-            : outcome,
-        ),
-      );
-      const { done } = mountPane();
+      theRepos(json(outcome));
+      const { landed } = mountOpen();
 
       register("/elsewhere/verkstead");
 
-      // Beside the field, and the pane still standing: a refusal is answered by
+      // Beside the field, and the card still standing: a refusal is answered by
       // correcting the path, and the field keeps what was typed because that is
       // the path about to be corrected.
       await waitFor(() => screen.getByText(said));
-      expect(done).not.toHaveBeenCalled();
+      expect(landed).not.toHaveBeenCalled();
       expect(
         (screen.getByLabelText(/absolute path/i) as HTMLInputElement).value,
       ).toBe("/elsewhere/verkstead");
@@ -782,7 +522,7 @@ describe("the pane the plus opens", () => {
 
   it("drops the refusal as soon as the path is being changed", async () => {
     theRepos(json("NotARepository"));
-    mountPane();
+    mountOpen();
 
     register("/elsewhere/notes");
     await waitFor(() => screen.getByText(/not a git repository/i));
@@ -798,22 +538,22 @@ describe("the pane the plus opens", () => {
   /// an error rather than an outcome.
   it("shows the server's own wording when it could not answer at all", async () => {
     theRepos(json({ error: "the Repo could not be registered" }, 500));
-    const { done } = mountPane();
+    const { landed } = mountOpen();
 
     register("/srv/repos/verkstead");
 
     await waitFor(() => screen.getByText(/the Repo could not be registered/));
-    expect(done).not.toHaveBeenCalled();
+    expect(landed).not.toHaveBeenCalled();
   });
 
   it("sends nothing at all for an empty path", async () => {
     const fetching = theRepos();
-    mountPane();
+    mountOpen();
 
     // The button is the guard: there is nothing to send, so there is nothing to
     // press.
     expect(
-      screen.getByRole("button", { name: "Register" }).hasAttribute("disabled"),
+      screen.getByRole("button", { name: "Open" }).hasAttribute("disabled"),
     ).toBe(true);
     expect(
       fetching.mock.calls.filter(([, init]) => init && "method" in init),
@@ -841,9 +581,9 @@ describe("browsing for one", () => {
   /// The label the field is found by, which is the one the form has always had.
   const FIELD = "Absolute path of a git repository";
 
-  /// The list behind the pane, the two levels of the filesystem this browse
-  /// goes through, and whatever the registration itself is answered by.
-  function theBrowse(...answers: Array<() => Promise<Response>>) {
+  /// The two levels of the filesystem this browse goes through, and whatever
+  /// the registration itself is answered by.
+  function theBrowse(...answers: Array<Answer>) {
     return serving(
       whenever("/api/ui/repos", json(REPOS)),
       whenever(listingAt(null), json(HOME)),
@@ -868,7 +608,7 @@ describe("browsing for one", () => {
   /// read: what the browse opens on is a starting point rather than a fence.
   it("opens on the server's home and fills the field from there", async () => {
     theBrowse();
-    mountPane();
+    mountOpen();
 
     await browsedToTheRepo();
 
@@ -879,7 +619,7 @@ describe("browsing for one", () => {
   /// with — and a leaf, because there is nothing under one it is after.
   it("marks the repository among the directories and stops there", async () => {
     theBrowse();
-    mountPane();
+    mountOpen();
 
     browse(FIELD);
     await waitFor(() => expect(offered(FIELD)).toContain("src"));
@@ -898,14 +638,14 @@ describe("browsing for one", () => {
   });
 
   /// The point of the whole component: registering a browsed path is
-  /// registering a typed one. Add sends the box, and what the server makes of
-  /// it goes on deciding everything.
+  /// registering a typed one. The press sends the box, and what the server makes
+  /// of it goes on deciding everything.
   it("registers a browsed path exactly as a typed one", async () => {
     const fetching = theBrowse(json({ Added: REPOS[0] }));
-    const { done } = mountPane();
+    const { landed } = mountOpen();
 
     await browsedToTheRepo();
-    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
 
     await waitFor(() =>
       expect(fetching).toHaveBeenCalledWith(
@@ -916,17 +656,17 @@ describe("browsing for one", () => {
         }),
       ),
     );
-    await waitFor(() => expect(done).toHaveBeenCalled());
+    await waitFor(() => expect(landed).toHaveBeenCalledWith(REPOS[0]));
   });
 
   /// And a refusal is still the server's: what the browse offered is not a
   /// promise about what the press will do.
   it("says a refusal of a browsed path the way it says a typed one's", async () => {
     theBrowse(json("NotARepository"));
-    mountPane();
+    mountOpen();
 
     await browsedToTheRepo();
-    fireEvent.click(screen.getByRole("button", { name: "Register" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
 
     await waitFor(() => screen.getByText(/not a git repository/i));
     expect(held(FIELD)).toBe("/home/ada/src/verkstead");

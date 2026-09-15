@@ -15,23 +15,19 @@
 
    The heading each section of this page is topped with is `sectionHead`, page
    vocabulary rather than this module's: it is defined once in `App.module.css`
-   and `ProfileList.tsx` writes it beside its own. */
+   and `ProfileList.tsx` writes it beside its own. Where the plus on that line
+   sits is the row's too — centred on the heading, which is how every heading
+   row with a mark at the end of it is laid out — so nothing about it is said
+   here, and the space under the row is the row's own rather than this
+   heading's. */
 
 .profiles {
   margin-bottom: 1.5rem;
 }
 
 .profiles h2 {
-  margin: 0 0 0.75rem;
+  margin: 0;
   font-size: 1.1rem;
-}
-
-/* The plus that opens the blank form, on the heading's line. Centred on that
-   line rather than sitting on its baseline, which is what the heading beside it
-   is aligned by: the button is an icon with no text of its own, so a baseline
-   would hang it below the words rather than beside them. */
-.add {
-  align-self: center;
 }
 
 .list {
@@ -46,29 +42,23 @@
   gap: 0.25rem;
 }
 
-/* What stands on the card — the name, the models under it, and the warning
-   where the pair has gone. A column, because a card is read down. */
+/* What stands on the card — the one line reading it, and the warning where the
+   pair has gone. A column, because a card is read down. */
 .profile {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
 }
 
+/* The reading: the harness's mark and the words beside it, laid out the way a
+   picker row lays the same pair out — see `picking.module.css`. A flex row so
+   the mark keeps its own box beside words that wrap, rather than a glyph in the
+   middle of a sentence. */
 .profile .title {
-  font-weight: 600;
-}
-
-.profile .meta {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem 0.75rem;
-  font-size: 0.85rem;
-  color: var(--ink-soft);
-}
-
-/* What is quoted rather than said: every model name the account can launch. */
-.profile .model {
-  font-family: ui-monospace, SFMono-Regular, monospace;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
 }
 
 /* A profile whose pair has gone. Said in the card's edge as well as in the words

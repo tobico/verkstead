@@ -44,30 +44,33 @@ pub(crate) fn told(binds: &SandboxConfig, settings: &Settings) -> PathsView {
 /// The binds: the installation's parsed set first, then the entries the settings
 /// hold as they were written.
 ///
-/// An entry nothing can be read out of is drawn as itself, scoped to no Repo and
-/// unresolved for the reason it could not be read. It is the one kind of row
-/// whose path is not a path — and it has to be a row, because a typo that
-/// vanished from the page would be a typo nobody could correct.
+/// An entry nothing can be read out of is drawn as itself, unresolved for the
+/// reason it could not be read. It is the one kind of row whose path is not a
+/// path — and it has to be a row, because a typo that vanished from the page
+/// would be a typo nobody could correct.
+///
+/// The exception is an entry in the retired `name=path` grammar, which is
+/// dropped here exactly as it is dropped at a spawn — see
+/// [`crate::sandbox::scoped`]. It was configuration rather than a typo, it
+/// reaches no session, and `config.yaml` is where somebody takes one out.
 fn binds_told(binds: &SandboxConfig, written: &[String]) -> Vec<BindEntry> {
-    let installed = binds.entries().into_iter().map(|(repo, path)| BindEntry {
+    let installed = binds.entries().into_iter().map(|path| BindEntry {
         path: path.display().to_string(),
-        repo: repo.map(str::to_owned),
         source: PathSource::Installation,
         resolution: there(path),
     });
 
     let said = written
         .iter()
+        .filter(|written| !crate::sandbox::scoped(written))
         .map(|written| match crate::sandbox::read_bind(written) {
-            Ok((repo, path)) => BindEntry {
+            Ok(path) => BindEntry {
                 path: path.display().to_string(),
-                repo,
                 source: PathSource::Settings,
                 resolution: there(&path),
             },
             Err(error) => BindEntry {
                 path: written.to_owned(),
-                repo: None,
                 source: PathSource::Settings,
                 resolution: PathResolution::Unresolved {
                     why: format!("{error:#}"),

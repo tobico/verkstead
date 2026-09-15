@@ -23,7 +23,7 @@ import shell from "../src/Panes.module.css";
 import profileList from "../src/profiles/ProfileList.module.css";
 import notifications from "../src/push/Notifications.module.css";
 import repoList from "../src/repos/RepoList.module.css";
-import credentials from "../src/settings/Credentials.module.css";
+import git from "../src/settings/Git.module.css";
 import { SettingsPage } from "../src/settings/SettingsPage";
 import page from "../src/settings/SettingsPage.module.css";
 import head from "../src/workbench/PaneHead.module.css";
@@ -62,13 +62,11 @@ const banner = () => document.querySelector(`.${styles.notice}`);
 
 /// The page having drawn what it configures, which is what every test here
 /// waits for before reading the banner. Waited for on the settings pane's own
-/// list rather than by a repo's name: the conversations pane beside it names
-/// the repo every row is in, so a name is no longer one element on this page.
+/// Repos card rather than by a repo's name: the conversations pane beside it
+/// names the repo every row is in, so a name is no element of this page's own.
 const loaded = () =>
   waitFor(() =>
-    expect(
-      document.querySelector(`.${repoList.repos} .${repoList.repo}`),
-    ).not.toBeNull(),
+    expect(document.querySelector(`.${repoList.reposCard}`)).not.toBeNull(),
   );
 
 /// The settings pane, which is the middle one of the three the page stands on:
@@ -115,18 +113,16 @@ describe("the Update Notice", () => {
     expect(links.map((link) => link.getAttribute("href"))).toEqual([UPDATING]);
     expect(banner()!.querySelectorAll("button, input, form")).toHaveLength(0);
     // And it added nothing outside itself either: what the settings pane can be
-    // pressed and typed into is what it configures — the credentials and build
-    // cache cards, the profiles, the repos and the notifications switch — all of
-    // which were there before the banner and are not the banner's. The
-    // conversations pane beside it has plenty to press and none of it is this
-    // page's.
+    // pressed and typed into is what it configures — the git and language
+    // support cards, the profiles and the notifications switch — all of which
+    // were there before the banner and are not the banner's. The conversations
+    // pane beside it has plenty to press and none of it is this page's.
     const pressable = [...settingsPane(container).querySelectorAll("button, input, form")];
     expect(
       pressable.filter(
         (found) =>
           !found.closest(`.${head.head}`) &&
           !found.closest(`.${profileList.profiles}`) &&
-          !found.closest(`.${repoList.repos}`) &&
           !found.closest(`.${notifications.notifications}`),
       ),
     ).toHaveLength(0);
@@ -139,7 +135,7 @@ describe("the Update Notice", () => {
     await waitFor(() => expect(banner()).not.toBeNull());
 
     const column = container.querySelector(`.${page.settings}`)!;
-    const configured = column.querySelector(`.${credentials.githubCard}`)!;
+    const configured = column.querySelector(`.${git.gitCard}`)!;
     // Inside the page's column rather than beside it, and before everything the
     // page is for.
     expect(banner()!.parentElement).toBe(column);

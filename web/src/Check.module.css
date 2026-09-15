@@ -1,0 +1,61 @@
+/* The settings page's on/off control and the group that hangs off one — see
+   `Check.tsx`.
+
+   Nothing is painted over the box: the browser's own checkbox, at the size the
+   platform draws one, with the accent it draws a tick in taken from the page. */
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.95rem;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.check input {
+  flex: none;
+  margin: 0;
+  /* The tick's fill, which is the one thing about the browser's box worth
+     saying: an accent that is the page's rather than the platform's. */
+  accent-color: var(--accent);
+  cursor: inherit;
+}
+
+.check:has(input:disabled) {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.check input:disabled {
+  cursor: default;
+}
+
+/* And the configuration under it. A `fieldset` is drawn with a border, a margin
+   and a padding of its own; none of that is wanted, and what stands in its place
+   is the indent that says what this belongs to. */
+.nested {
+  margin: 0.85rem 0 0;
+  padding: 0 0 0 1.6rem;
+  border: 0;
+  min-inline-size: 0;
+}
+
+/* Off, so greyed with everything in it: the browser dims the fields and the
+   presses on its own, and this is the words beside them following. */
+.nested:disabled {
+  opacity: 0.55;
+}
+
+/* The box under the pointer, which is the accent one step deeper — the same
+   step every filled control on this page takes. The browser draws the rest of
+   what a checkbox does under a pointer, and the whole row is the target:
+   pressing the words is pressing the box, which is what the cursor above says.
+
+   Never while it is waiting on something — a dimmed box is one that will not be
+   ticked again until it gets where it is going. */
+@media (hover: hover) {
+  .check:not(:has(input:disabled)):hover input {
+    accent-color: var(--accent-deep);
+  }
+}

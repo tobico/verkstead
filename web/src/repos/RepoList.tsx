@@ -1,13 +1,48 @@
-//! The Repos Verkstead has been told about, as the cards that read them, each
-//! one opened, and the registration that adds another: an absolute path, typed
-//! or browsed to.
+//! The Repos Verkstead has been told about: the card on the settings page
+//! saying how many are registered, the pane it opens listing every one of them
+//! by name with a Remove beside it, and the registration that adds another —
+//! an absolute path, typed or browsed to.
 //!
-//! That registration is asked in two places now — this page's own pane, and the
-//! **Open repo** modal the Repo dropdown opens over the composer — so the form
-//! is one piece ([`RepoRegistration`]) drawn twice rather than a second form
-//! with a second set of words for the same refusals. What the place changes is
-//! one thing: on the pane a path already registered is a refusal, and in the
-//! modal it is the repository somebody named.
+//! **That registration has left the settings.** There was a plus on this
+//! section's heading and a pane behind it holding the form; what is left is the
+//! form itself, drawn in the one place somebody meets it — the **Open repo**
+//! and **Create repo** cards at the foot of the Repo dropdown, on the page
+//! where a Conversation is composed and there is nowhere yet to do the work.
+//! The settings are where a machine is read rather than where work begins.
+//!
+//! **And a Repo no longer has a pane of its own.** Its card opened one: the
+//! path and the default branch, every branch git had, how much work was on it,
+//! the roadmaps in it nothing was driving, a conflict picker, its own binds,
+//! and Remove at the foot. What is drawn of a Repo here now is its name and
+//! the directory it was registered from. None of the rest was stored — each was
+//! a git call or a count, made every time somebody opened one — and each is
+//! read where it is used instead: the branches on the composer, the roadmaps
+//! waiting in the new conversation dropdown, and how a conflicted pull request
+//! is resolved once on the Git pane, for every Repo.
+//!
+//! **The path is on the row because the name does not have to be unique.** A
+//! Repo is read by name everywhere else in the app, and that is enough
+//! everywhere else: a name is shown beside the work it is the repository of.
+//! Here it is not — a name is the directory's own, nothing stops two
+//! directories in different places sharing one, and the store orders its list
+//! by `name, id` for exactly that reason. This is the one list that puts them
+//! side by side, and the one press it offers cannot be taken back, so the row
+//! carries what tells them apart.
+//!
+//! So the one thing there is to *do* to a Repo is take it off the registry,
+//! which is an unregistering rather than a delete: Verkstead stops offering the
+//! repository, the directory is left where it is, and every Conversation ever
+//! worked in it goes on saying so. **It is asked about once before it happens**
+//! — the way a close over a run in flight is — because it is one press in a
+//! list on a phone now rather than the last press on a pane about the
+//! repository. Refused while live work is on it, in words, under the row the
+//! press was made on: that row is what says which Repo the refusal is about.
+//!
+//! The form is one piece ([`RepoRegistration`]) drawn twice rather than a
+//! second form with a second set of words for the same refusals. Both places
+//! that draw it are ways *onto* a repository now, so a path that is registered
+//! already is the repository somebody named rather than a dead end — which is
+//! what the pane that has gone answered differently.
 //!
 //! Beside that modal is the other way a Repo arrives, which is this file's too:
 //! [`CreateRepo`], where a parent and a name *make* one. Not the same form —
@@ -30,53 +65,18 @@
 //! Every refusal is shown as a refusal, in words, beside the field the path was
 //! typed into: the human has just done something and is owed a reason it did not
 //! happen. Which reason it was comes from the server as a named outcome, and
-//! this file is where each of them is said — which is why the pane is what a
+//! this file is where each of them is said — which is why the card is what a
 //! refusal keeps up rather than something the answer replaces.
 //!
-//! The cards are in the middle pane and the two panes they lead to are in the
-//! details beside them, which is what the settings page is now. Each registered
-//! Repo is a [`CardButton`](../CardButton.tsx), pressed to open it at
-//! `/settings/repos/:id`, and the plus over them opens the form at
-//! `/settings/repos/new`. The modal the form was drawn over the page in is gone,
-//! and so are the boxed rows the list stood over: a card is what everything else
-//! on this page is.
-//!
-//! What is on a card is what a list is scanned for, which for a Repo is all
-//! three of the things the list knows: the name it is picked by, the directory
-//! Verkstead will work in, and what a Conversation will branch from. Everything
-//! else about it is in the pane, and is asked for when somebody opens one — the
-//! branches git has, how much work is on it, and the roadmaps in it nothing is
-//! driving. None of that is on the list because none of it is stored: each is a
-//! git read or a count, and a list that carried them would pay for all of them
-//! on every visit to this page.
-//!
-//! Two things on that pane are written rather than read. The first is how a
-//! conflicted pull request in this repository is resolved: merge, rebase, or
-//! whatever the settings page says for every Repo — which is what a Repo nobody
-//! has been to holds, and is nothing at all rather than a copy of today's
-//! answer. What a rebase costs is said there in the same words the settings page
-//! says it in, because it is the same choice.
-//!
-//! The second is the Repo's own Sandbox Configuration — the binds only its
-//! sessions get — which is a section of its own, out of the settings the rest of
-//! this page is edited through. See `RepoBinds.tsx`.
-//!
-//! Taking one away is in the pane that opened it, and it is an unregistering
-//! rather than a delete: Verkstead stops offering the repository and leaves the
-//! directory where it is, so every Conversation ever worked in it goes on saying
-//! which repository that was. Refused while live work is on it, in words, beside
-//! the press — the same way a Profile a Conversation is set to run under is.
-//!
-//! The list and the form read the one query. They are two views of the same
-//! list, and a read apiece would be two reads of it — the cache is what makes
-//! the second caller free. The opened Repo is a read of its own, keyed by the
-//! Repo, because it is not on that list at all.
+//! The card and the pane read the one query, as every other section of the
+//! settings page reads one: they are two views of the same list, and a read
+//! apiece would be two reads of it — the cache is what makes the second caller
+//! free.
 //!
 //! A section of the settings page rather than a page of its own: which
 //! repositories Verkstead may touch is settled once and then left alone, which
 //! is the same kind of thing as everything else on it.
 
-import { faPlus } from "@fortawesome/free-solid-svg-icons";
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import {
   For,
@@ -89,20 +89,14 @@ import {
 } from "solid-js";
 
 import { CardButton } from "../CardButton";
-import { IconButton } from "../IconButton";
 import { Modal } from "../Modal";
 import { PaneSticky } from "../Panes";
 import { PathField } from "../PathField";
-import { RESOLUTION, RESOLVES, forcePushed } from "../settings/Conflicts";
-import { Picker } from "../picking";
 import {
-  RefusedError,
   createRepo,
   listRepos,
-  loadRepo,
   registerRepo,
   removeRepo,
-  setRepoResolution,
 } from "../api/client";
 import type {
   Created,
@@ -110,25 +104,22 @@ import type {
   RepoEntry,
   RepoRemoved,
   RepoView,
-  ConflictResolution,
 } from "../api/types";
 import { repoParent, setRepoParent } from "../device";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
 import { useSettings } from "../settings/PathEditor";
 import { PaneHead } from "../workbench/PaneHead";
-import { RepoBinds } from "./RepoBinds";
-import app from "../App.module.css";
 import styles from "./RepoList.module.css";
 
 /// The ways a registration is answered with a sentence rather than a Repo.
 ///
 /// Every outcome that left no Repo registered, which is every one that is a bare
-/// word on the wire — and `AlreadyRegistered`, which carries one and is still a
-/// refusal wherever the form is a place to *add* a repo. What is never here is
-/// `Added`: nothing is said about a registration that worked, the repo appearing
-/// on the list being what says it.
-export type RepoRefused = Extract<Registered, string> | "AlreadyRegistered";
+/// word on the wire. What is never here is `Added` — nothing is said about a
+/// registration that worked — and neither is `AlreadyRegistered`, which carries
+/// a Repo: both places this form is drawn are ways onto a repository, so a path
+/// registered already is the repository somebody named.
+export type RepoRefused = Extract<Registered, string>;
 
 /// What each way of being refused says, once, wherever it is met.
 export const REFUSAL: Record<RepoRefused, string> = {
@@ -138,7 +129,6 @@ export const REFUSAL: Record<RepoRefused, string> = {
     "That is not a git repository — name the repository's own directory.",
   NoDefaultBranch:
     "That repository has no branch to call its default. Check one out first.",
-  AlreadyRegistered: "That repo is registered already.",
 };
 
 /// The ways a create is answered with a sentence rather than a Repo, in the same
@@ -161,9 +151,8 @@ export const CREATE_REFUSAL: Record<CreateRefused, string> = {
 
 /// And what each way of being refused a removal says.
 ///
-/// `Removed` is here for completeness of the mapping and never drawn: the pane
-/// is spent by then, and the repo leaving the list behind it is what says the
-/// removal landed.
+/// `Removed` is here for completeness of the mapping and never drawn: the row
+/// leaving the list is what says the removal landed.
 export const REPO_REMOVAL_REFUSAL: Record<RepoRemoved, string> = {
   Removed: "",
   NoSuchRepo: "That repo is off the registry already.",
@@ -171,21 +160,15 @@ export const REPO_REMOVAL_REFUSAL: Record<RepoRemoved, string> = {
     "A conversation that is still going is on it. Finish or close that conversation first.",
 };
 
-/// The Repos as they stand, read once for the panes that draw them.
+/// The Repos as they stand, read once for the card and the pane that draw them.
 ///
 /// Read when the page opens, like the Profiles above them: nothing here changes
 /// on its own, and what does change is this section's own doing.
 ///
 /// Merged by the id each entry carries flat, and not frozen: registering one
 /// reads the list again, and a frozen query is one invalidation cannot reach —
-/// the new repo would never appear behind the pane that added it.
-///
-/// Exported because the Paths pane asks it too — see `settings/Paths.tsx`,
-/// which needs the registered names to tell a bind written for a Repo from one
-/// written for a name nothing is registered under. One query definition rather
-/// than a second saying the same thing: the two would share a key and have to
-/// agree about freshness anyway.
-export function useRepos() {
+/// the new repo would never appear behind the card that added it.
+function useRepos() {
   return useReading(() => ({
     queryKey: ["repos"],
     queryFn: listRepos,
@@ -193,37 +176,134 @@ export function useRepos() {
   }));
 }
 
-/// The registered Repos, as the cards that open them.
-export function RepoList(props: {
-  /// Which Repo's pane is open — its id, `"new"` while the form that registers
-  /// one is, or `null` where the details pane is showing something else
-  /// entirely.
-  opening: number | "new" | null;
-  /// Open one, which is what pressing a card does.
-  open: (id: number) => void;
-  /// And open the form, which is what the plus does.
-  add: () => void;
+/// How many Repos are registered, as the card that opens the list of them.
+///
+/// A count is the whole of what a card about a list says. What each of them is
+/// called is the pane's, and there is nothing else about one to scan for: a
+/// Repo is a directory somebody named once.
+export function ReposCard(props: {
+  /// Whether the pane beside this is the one that is open.
+  open: boolean;
+  /// What pressing it does, which is opening that pane.
+  press: () => void;
 }): JSX.Element {
   const repos = useRepos();
 
   return (
-    <section class={styles.repos}>
-      {/* The heading, with the one thing there is to do to the list under it on
-          the other end of its line. An `IconButton` rather than the quiet text
-          button it was, for the reason the gear at the head of the conversations
-          is one: it is another thing standing in this pane that is selected and
-          opened into the pane beside it, so it is drawn as open while the form
-          is what is being read. */}
-      <div class={app.sectionHead}>
-        <h2>Repos</h2>
-        <IconButton
-          of={faPlus}
-          label="Add a repo"
-          class={styles.add}
-          open={props.opening === "new"}
-          press={props.add}
-        />
-      </div>
+    <Switch>
+      <Match when={repos.isPending}>
+        <Empty>Loading…</Empty>
+      </Match>
+      <Match when={repos.isError}>
+        <ErrorLine>
+          Could not read the registered Repos: {repos.error?.message}
+        </ErrorLine>
+      </Match>
+      <Match when={repos.data}>
+        {(registered) => (
+          <CardButton
+            as="article"
+            class={styles.reposCard}
+            open={props.open}
+            press={props.press}
+          >
+            <h2>Repos</h2>
+            <p class={styles.standing}>{counted(registered().length)}</p>
+          </CardButton>
+        )}
+      </Match>
+    </Switch>
+  );
+}
+
+/// How the card says how many there are, in English rather than as `1 repos`.
+function counted(many: number): string {
+  if (many === 0) {
+    return "No repos are registered yet.";
+  }
+
+  return `${many} ${many === 1 ? "repo" : "repos"} registered.`;
+}
+
+/// And every one of them by name, which is the details pane the card opens.
+///
+/// A row is the name, the directory under it, and the one press there is to
+/// make about a Repo. Nothing else: what a repository is holding is read where
+/// it is used rather than listed here, and a list somebody scans for the name
+/// they know is a list of names — with the path under each, because two of them
+/// may be the same name and only one of those is the repo somebody meant to
+/// take away.
+///
+/// There is no Save over the whole of it and no Cancel: each Remove is its own
+/// press, and a details pane is left by opening something else or by the way
+/// back a narrow window draws.
+export function ReposPane(props: {
+  /// The way back to the settings, which is the pane this one was entered from.
+  back: () => void;
+}): JSX.Element {
+  const queries = useQueryClient();
+  const repos = useRepos();
+
+  // The Repo a press has asked about, while the card asking is up — or `null`
+  // while none is. The whole entry rather than its id: the card names it, and
+  // the removal is made from the card rather than from the row it was pressed
+  // on.
+  const [asking, setAsking] = createSignal<RepoEntry | null>(null);
+
+  // Why the last removal did not happen, and which row it was pressed on.
+  // Nothing clears it but another press: what answers a refusal is doing
+  // something about the conversation it named.
+  const [refused, setRefused] = createSignal<{
+    repo: number;
+    said: string;
+  } | null>(null);
+
+  const remove = useMutation(() => ({
+    mutationFn: (repo: RepoEntry) => removeRepo(repo.id),
+    onSuccess: (outcome: RepoRemoved, repo: RepoEntry) => {
+      // Whichever it was, this page's account of the Repos is older than the
+      // server's now: a refusal is about work that has moved on, and a removal
+      // is the list changing. The roadmaps waiting go with them, because they
+      // are read off whatever is registered.
+      void queries.invalidateQueries({ queryKey: ["repos"] });
+      void queries.invalidateQueries({ queryKey: ["abandoned-roadmaps"] });
+
+      if (outcome !== "Removed") {
+        setRefused({ repo: repo.id, said: REPO_REMOVAL_REFUSAL[outcome] });
+      }
+    },
+    // A server that could not answer at all, which is the one thing here that
+    // is an error rather than an outcome. Said under the row it was pressed on,
+    // like a refusal, because that is the whole of what tells two presses on
+    // this list apart.
+    onError: (error: Error, repo: RepoEntry) =>
+      setRefused({
+        repo: repo.id,
+        said: `The repo could not be removed: ${error.message}`,
+      }),
+  }));
+
+  /// What a Remove on a row does, which is ask rather than act.
+  const ask = (repo: RepoEntry) => {
+    setRefused(null);
+    setAsking(repo);
+  };
+
+  /// And what the press on the card that asked does, which is the removal.
+  const confirmed = () => {
+    const repo = asking();
+    setAsking(null);
+
+    if (repo !== null) {
+      remove.mutate(repo);
+    }
+  };
+
+  return (
+    <>
+      <PaneSticky>
+        <PaneHead back={{ to: "Settings", go: props.back }} title="Repos" />
+      </PaneSticky>
 
       <Switch>
         <Match when={repos.isPending}>
@@ -242,403 +322,120 @@ export function RepoList(props: {
             <ul class={styles.list}>
               <For each={registered()}>
                 {(repo) => (
-                  <RepoCard
-                    repo={repo}
-                    open={props.opening === repo.id}
-                    press={() => props.open(repo.id)}
-                  />
+                  <li class={styles.repo}>
+                    <div class={styles.row}>
+                      {/* The name, and the directory it was registered from
+                          under it. A name is what a Repo is read by
+                          everywhere else in the app, and it would be the whole
+                          of a row here too but for one thing: a name is the
+                          directory's own and nothing makes it unique — the
+                          store orders its list by `name, id` precisely
+                          because two directories of one name in different
+                          places are two Repos. This is the one list that puts
+                          them side by side, with an unregistering behind each,
+                          so it is the one place the path has to be readable. */}
+                      <div class={styles.what}>
+                        <span class={styles.name}>{repo.name}</span>
+                        <span class={styles.path}>{repo.path}</span>
+                      </div>
+                      <button
+                        type="button"
+                        class={styles.remove}
+                        disabled={remove.isPending}
+                        onClick={() => ask(repo)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+
+                    {/* Refused rather than taken out from under the work going
+                        on in it, and said under the row the press was made on:
+                        the name above it is what says which Repo this is
+                        about. */}
+                    <Show when={refused()?.repo === repo.id}>
+                      <ErrorLine class={styles.failure}>
+                        {refused()?.said}
+                      </ErrorLine>
+                    </Show>
+                  </li>
                 )}
               </For>
             </ul>
           )}
         </Match>
       </Switch>
-    </section>
-  );
-}
 
-/// One registered Repo: what it is called, where it is, and what a Conversation
-/// will branch from.
-///
-/// The path shown is the resolved one the server recorded rather than whatever
-/// was typed to register it — that is the directory Verkstead will actually work
-/// in, and the point of showing it is that it can be checked.
-///
-/// Drawn as an `article`, the way every card holding more than a run of text is
-/// — a button may not have paragraphs inside it, and `CardButton` puts the
-/// press, the keyboard and the role that says what it is on the article instead.
-function RepoCard(props: {
-  repo: RepoEntry;
-  /// Whether the pane beside this is the one that is open.
-  open: boolean;
-  /// What pressing it does, which is opening that pane.
-  press: () => void;
-}): JSX.Element {
-  return (
-    <li>
-      <CardButton
-        as="article"
-        class={styles.repo}
-        open={props.open}
-        press={props.press}
-      >
-        <span class={styles.title}>{props.repo.name}</span>
-        <span class={styles.meta}>
-          <span class={styles.path}>{props.repo.path}</span>
-          <span class={styles.branch}>{props.repo.default_branch}</span>
-        </span>
-      </CardButton>
-    </li>
-  );
-}
-
-/// One registered Repo opened, which is the details pane a card leads to.
-///
-/// Everything on it but one section and one press is the repository's own answer
-/// or the store's count of what has been done in it. The section is its Sandbox
-/// Configuration, which is settings rather than facts — see `RepoBinds.tsx` —
-/// and it is here because a bind written for this repository is about this
-/// repository, and a page listing every path on the machine is not where
-/// somebody would look for one.
-///
-/// The press is Remove, which is the one thing there is to *do* to a Repo — and
-/// it is an unregistering rather than a delete: Verkstead stops offering it, the
-/// directory is left where it is, and every Conversation ever worked in it goes
-/// on saying so.
-///
-/// That press stands under the facts and behind a rule, the way the Profile
-/// pane's does: a press that undoes something, set among the things it would
-/// undo, is one waiting to be made by mistake. It is refused while live work is
-/// on the Repo, and the refusal is said here, because here is where it was made.
-///
-/// Its own read rather than the list's row, because none of what it shows is on
-/// that row: the branches are a git call, the counts are a query, and the
-/// roadmaps are a walk of `docs/roadmaps/` at the default branch's tip. All of
-/// them are asked afresh every time the pane is opened, which is why the pane
-/// waits on a read of its own even though the card that opened it already knew
-/// the name.
-///
-/// A 404 is the repo being gone rather than a failure: somebody followed a link
-/// after it was taken away, or reloaded a page they had left open. So it is said
-/// in a line rather than shown as an error the human is meant to do something
-/// about.
-export function RepoDetails(props: {
-  /// Which Repo, by the id its card carried.
-  repo: number;
-  /// The way back to the settings, which is a change of level rather than a
-  /// navigation: what is open stays open, and the URL goes on saying so.
-  back: () => void;
-  /// And what a Repo taken off the registry does, which is a navigation: the
-  /// pane is about something that is not registered any more, and the cards it
-  /// goes back to are what say the removal landed.
-  done: () => void;
-}): JSX.Element {
-  const queries = useQueryClient();
-
-  // What the server said about the last removal asked for, or `null` while none
-  // has been. Nothing clears it: there is one press on this pane, and what
-  // answers a refusal is doing something about the conversation it named.
-  const [refusedRemoval, setRefusedRemoval] = createSignal<RepoRemoved | null>(
-    null,
-  );
-
-  const opened = useReading(() => ({
-    // The Repo is in the key, so opening another is another query rather than
-    // the same one showing the wrong repository for a moment.
-    queryKey: ["repo", props.repo],
-    queryFn: () => loadRepo(props.repo),
-    // Merged rather than frozen: none of this is the store's alone, and a Nudge
-    // is as good a moment as any to hear that a branch was pushed.
-    freshness: { reconcile: "id" },
-  }));
-
-  const remove = useMutation(() => ({
-    mutationFn: (id: number) => removeRepo(id),
-    onSuccess: (outcome: RepoRemoved) => {
-      // Whichever it was, this page's account of the Repo is older than the
-      // server's now: a refusal is about work that has moved on, and a removal
-      // is the list changing. The roadmaps waiting go with the Repos, because
-      // they are read off whatever is registered.
-      void queries.invalidateQueries({ queryKey: ["repos"] });
-      void queries.invalidateQueries({ queryKey: ["abandoned-roadmaps"] });
-      void queries.invalidateQueries({ queryKey: ["repo", props.repo] });
-
-      if (outcome !== "Removed") {
-        setRefusedRemoval(outcome);
-        return;
-      }
-
-      props.done();
-    },
-  }));
-
-  /// Whether there is simply no such Repo, which the server says with a 404 —
-  /// the same shape a Set that is not there comes back in.
-  const absent = (): boolean =>
-    opened.error instanceof RefusedError && opened.error.status === 404;
-
-  return (
-    <>
-      {/* Titled by the repository rather than by a word, because a pane about
-          one thing is named by that thing. What it falls back to is a word: the
-          head is drawn before the read lands, and there is nothing else to call
-          it until it does. */}
-      <PaneSticky>
-        <PaneHead
-          back={{ to: "Settings", go: props.back }}
-          title={opened.data?.name ?? "Repo"}
-        />
-      </PaneSticky>
-
-      <Switch>
-        <Match when={opened.isPending}>
-          <Empty>Loading…</Empty>
-        </Match>
-        <Match when={absent()}>
-          <Empty>That repo is gone.</Empty>
-        </Match>
-        <Match when={opened.isError}>
-          <ErrorLine>
-            Could not read this repo: {opened.error?.message}
-          </ErrorLine>
-        </Match>
-        <Match when={opened.data}>
-          {(repo) => (
-            <div class={styles.opened}>
-              {/* The three facts that decide what Verkstead will do in it, and
-                  what has been done in it so far. A description list, because
-                  each of them is a short answer to a named question. */}
-              <dl class={styles.facts}>
-                <dt>Path</dt>
-                <dd class={styles.path}>{repo().path}</dd>
-
-                <dt>Default branch</dt>
-                <dd class={styles.branch}>{repo().default_branch}</dd>
-
-                {/* Counted apart because they are read for different reasons:
-                    what is on this Repo now, and what has been. */}
-                <dt>Conversations</dt>
-                <dd class={styles.counted}>
-                  <span class={styles.live}>{repo().live} live</span>
-                  <span class={styles.finished}>
-                    {repo().finished} finished
-                  </span>
-                </dd>
-              </dl>
-
-              {/* Every branch git has, local and remote-tracking both — the same
-                  list a drafting Conversation picks what it comes off out of. */}
-              <section class={styles.branches}>
-                <h2>Branches</h2>
-                <Show
-                  when={repo().branches.length > 0}
-                  fallback={<Empty>Git says nothing about its branches.</Empty>}
-                >
-                  <ul class={styles.branchList}>
-                    <For each={repo().branches}>
-                      {(branch) => <li class={styles.branch}>{branch}</li>}
-                    </For>
-                  </ul>
-                </Show>
-              </section>
-
-              {/* And what it is holding that nothing is driving, which is the
-                  same reading the notice under the new-conversation box makes.
-                  Said here whether or not there is any: the notice is drawn only
-                  where there is something to say, and this pane is an account of
-                  the Repo. */}
-              <section class={styles.roadmaps}>
-                <h2>Roadmaps waiting</h2>
-                <Show
-                  when={repo().roadmaps.length > 0}
-                  fallback={<Empty>Nothing is waiting to be continued.</Empty>}
-                >
-                  <ul class={styles.roadmapList}>
-                    <For each={repo().roadmaps}>
-                      {(roadmap) => (
-                        <li class={styles.roadmap}>
-                          <span class={styles.title}>
-                            {roadmap.title || roadmap.name}
-                          </span>
-                          {/* Which stage adopting it would start, which is the
-                              roadmap's own order rather than anybody's choice. */}
-                          <span class={styles.stage}>
-                            {roadmap.stage}: {roadmap.stage_title}
-                          </span>
-                        </li>
-                      )}
-                    </For>
-                  </ul>
-                </Show>
-              </section>
-
-              {/* How a conflicted pull request in this repository is resolved,
-                  which is one of the two things about a Repo that are written
-                  rather than read. Over the removal because it is something to
-                  change about a Repo that is staying. */}
-              <ConflictResolution repo={repo()} />
-              {/* And what only this repository's sessions are given, which is
-                  the other: the binds scoped to its name. Drawn whether or not
-                  it has any, because the pane is where somebody learns the
-                  section exists. */}
-              <RepoBinds repo={repo().name} />
-
-              {/* And the one press there is to make about a Repo, under
-                  everything it is about. What the line says is what the press
-                  does: Verkstead stops offering the repository, and nothing on
-                  any Timeline moves. */}
-              <section class={styles.standing}>
-                <p class={styles.note}>
-                  Removing it takes it off the registry. The directory is left
-                  where it is, and every conversation worked in it goes on
-                  saying so.
-                </p>
-
-                <div class={styles.actions}>
-                  <button
-                    type="button"
-                    class={styles.remove}
-                    disabled={remove.isPending}
-                    onClick={() => remove.mutate(repo().id)}
-                  >
-                    Remove
-                  </button>
-                </div>
-
-                {/* Refused rather than taken out from under the work going on
-                    in it, and said here because here is where the press was
-                    made. */}
-                <Show when={refusedRemoval()}>
-                  {(outcome) => (
-                    <ErrorLine class={styles.failure}>
-                      {REPO_REMOVAL_REFUSAL[outcome()]}
-                    </ErrorLine>
-                  )}
-                </Show>
-                <Show when={remove.isError}>
-                  <ErrorLine class={styles.failure}>
-                    The repo could not be removed: {remove.error?.message}
-                  </ErrorLine>
-                </Show>
-              </section>
-            </div>
-          )}
-        </Match>
-      </Switch>
-    </>
-  );
-}
-
-/// How this Repo resolves a merge conflict, as the picker that says so.
-///
-/// Three answers rather than the settings page's two, and the third is the one
-/// most Repos are on: *use the global setting*, which is this Repo saying
-/// nothing at all. It is nothing rather than a copy of what the global says
-/// today, so a Repo left alone follows that setting when it is changed.
-///
-/// The picker is its own press, the way the build cache's switch is: a choice
-/// that needed confirming afterwards would be a choice made twice. What the
-/// answer in force costs is said under it, in the words the settings page uses —
-/// the same sentence in both places, because it is the same choice.
-function ConflictResolution(props: { repo: RepoView }): JSX.Element {
-  const queries = useQueryClient();
-
-  const save = useMutation(() => ({
-    mutationFn: (resolution: ConflictResolution | null) =>
-      setRepoResolution(props.repo.id, resolution),
-    // The answer *is* a fresh read of the Repo, so a second read would learn
-    // nothing and could only disagree with what is on screen.
-    onSuccess: (saved: RepoView) =>
-      queries.setQueryData(["repo", props.repo.id], saved),
-  }));
-
-  /// What is chosen now, as the picker writes it: the empty string is the option
-  /// that sends nothing, which is this Repo overriding nothing.
-  const chosen = (): string => props.repo.conflict_resolution ?? "";
-
-  return (
-    <section class={styles.resolving}>
-      <h2>Conflict resolution</h2>
-
-      <label for="repo-conflict-resolution">
-        How a pull request that will not merge is resolved here
-      </label>
-      <Picker
-        id="repo-conflict-resolution"
-        options={["", "Merge", "Rebase"]}
-        value={(option) => option}
-        label={(option) =>
-          option === ""
-            ? "Use the global setting"
-            : RESOLUTION[option as ConflictResolution]
-        }
-        chosen={chosen()}
-        disabled={save.isPending}
-        pick={(picked) =>
-          save.mutate(picked === "" ? null : (picked as ConflictResolution))
-        }
+      {/* Asked before anything happens, the way a close over a run in flight
+          is: one press in a list, on a phone, that cannot be taken back. */}
+      <Confirm
+        asked={asking()}
+        keep={() => setAsking(null)}
+        remove={confirmed}
       />
-
-      <p class={styles.resolves}>
-        {props.repo.conflict_resolution === null
-          ? "Whatever the settings page says for every repo."
-          : RESOLVES[props.repo.conflict_resolution]}
-      </p>
-
-      <Show when={props.repo.conflict_resolution === "Rebase"}>
-        {forcePushed()}
-      </Show>
-
-      <Show when={save.isError}>
-        <ErrorLine class={styles.failure}>
-          That could not be saved: {save.error?.message}
-        </ErrorLine>
-      </Show>
-    </section>
+    </>
   );
 }
 
-/// And the form that registers one, which is the details pane the plus opens.
+/// What a Remove is answered with before anything has happened: which Repo it
+/// would take off the registry, what that leaves alone, and the two ways out.
 ///
-/// There is no Cancel: a details pane is left by opening something else or by
-/// the way back a narrow window draws, and a button that said the same thing
-/// again would be a second way out of a pane that has one.
-///
-/// The form itself is [`RepoRegistration`], which the Repo dropdown's **Open
-/// repo** modal draws too. What is here is the pane around it, and the one thing
-/// standing here rather than there decides: a path already registered is a
-/// refusal, this being a place to add a repo rather than a way onto one.
-export function RepoPane(props: {
-  /// The way back to the settings, which is a change of level rather than a
-  /// navigation: what is open stays open, and the URL goes on saying so.
-  back: () => void;
-  /// And what a registration that was taken does, which is a navigation: the
-  /// pane is spent, and what says the work landed is the list of cards it goes
-  /// back to.
-  done: () => void;
+/// The Repo is named on the card because the list it was pressed in is behind
+/// it: a card reading *Remove this repo?* over a list of them would be asking
+/// about whichever row the human remembers pressing.
+function Confirm(props: {
+  /// The Repo the press asked about, or `null` while nothing is being asked.
+  asked: RepoEntry | null;
+  /// The way back, which is what Escape and a press on the backdrop come to as
+  /// well: every way out of this card but the one button leaves the registry
+  /// alone.
+  keep: () => void;
+  /// And the press it asked about, made.
+  remove: () => void;
 }): JSX.Element {
-  return (
-    <>
-      <PaneSticky>
-        <PaneHead back={{ to: "Settings", go: props.back }} title="Add a repo" />
-      </PaneSticky>
+  // The heading's own id, for the `aria-labelledby` that names the card by it.
+  const id = createUniqueId();
 
-      {/* What says a registration landed is the card appearing on the list this
-          pane goes back to, so the Repo it answers with is nothing to this
-          caller. */}
-      <RepoRegistration submit="Register" landed={() => props.done()} />
-    </>
+  return (
+    <Modal
+      class={styles.confirming!}
+      open={props.asked !== null}
+      close={props.keep}
+      labelledBy={id}
+    >
+      <p id={id} class={styles.confirmingTitle}>
+        Remove {props.asked?.name}?
+      </p>
+      <p class={styles.confirmingWhy}>
+        It comes off the registry. The directory is left where it is, and every
+        conversation worked in it goes on saying so.
+      </p>
+      <div class={styles.confirmingOut}>
+        {/* Both classes, as every confirm pair in the app carries them: the
+            global one is the paint, and the module's is what the row stands the
+            filled press out of. */}
+        <button
+          type="button"
+          class={`${styles.secondary!} secondary`}
+          onClick={() => props.keep()}
+        >
+          Keep it
+        </button>
+        <button type="button" onClick={() => props.remove()}>
+          Remove
+        </button>
+      </div>
+    </Modal>
   );
 }
 
 /// The registration itself: a path, a press, and every refusal said under the
 /// field it was typed into.
 ///
-/// Its own piece because it is asked in two places — the settings pane above,
-/// and the **Open repo** modal the Repo dropdown opens — and they are the same
-/// question with the same answers. A second copy would be a second set of words
-/// for the same refusals, which is exactly what [`REFUSAL`] exists to prevent one
-/// row further down.
+/// Its own piece because it is asked in two places — the **Open repo** modal
+/// the Repo dropdown opens, and the **Create repo** card beside it, which asks
+/// a different question and answers it in the same words. A second copy would
+/// be a second set of words for the same refusals, which is exactly what
+/// [`REFUSAL`] exists to prevent one row further down.
 ///
 /// The field browses, and the press is untouched by it: what is sent is whatever
 /// the box holds, tapped together or typed straight in, and every refusal is
@@ -646,8 +443,8 @@ export function RepoPane(props: {
 /// that is where a Repo may be registered from, and looking for a repository,
 /// which is what this form is being filled in with.
 export function RepoRegistration(props: {
-  /// What the button reads, which is what the human came here to do: register
-  /// one on the settings page, open one from the dropdown.
+  /// What the button reads, which is what the human came here to do: open a
+  /// repository to work in.
   submit: string;
 
   /// What a registration that left a Repo registered does with it.
@@ -657,14 +454,6 @@ export function RepoRegistration(props: {
   /// named — and the path that was typed is not the resolved path the Repo is
   /// recorded under.
   landed: (repo: RepoEntry) => void;
-
-  /// Whether a path that is registered already is somewhere to land.
-  ///
-  /// It is, on the modal that opens one to work in: the Repo comes back with
-  /// that outcome too, so a path somebody had registered before is the
-  /// repository they named rather than a dead end. It is not on the settings
-  /// pane, where the answer stays the refusal in words it always was.
-  lands?: boolean;
 
   /// What else the form draws, under the button: the modal's way out.
   children?: JSX.Element;
@@ -690,14 +479,10 @@ export function RepoRegistration(props: {
         return;
       }
 
-      // And a path registered already, where this form is a place to add one
-      // rather than a way onto a repository: the same refusal, in the same
-      // words, whatever came back beside it.
-      if (!props.lands && "AlreadyRegistered" in outcome) {
-        setRefused("AlreadyRegistered");
-        return;
-      }
-
+      // A path registered already is the repository somebody named rather than
+      // a dead end: this form is a way *onto* one, and the Repo comes back with
+      // that outcome too.
+      //
       // The list this was filled in over is now out of date — the repo
       // appearing on it is the whole of the confirmation. And the roadmaps
       // waiting go with it, as they do when a repo is removed: they are read off
@@ -766,19 +551,15 @@ export function RepoRegistration(props: {
   );
 }
 
-/// And the same registration asked from the Repo dropdown rather than from the
-/// settings: **Open repo**, on the modal every other card in front of the page
-/// is drawn on.
+/// The registration as the Repo dropdown asks it: **Open repo**, on the modal
+/// every other card in front of the page is drawn on.
 ///
-/// The form is the pane's own — one question with one set of answers, so a
-/// second copy would be a second set of words for the same refusals — and the
-/// place it stands in makes one difference to what it does with them: a path
-/// registered already is the repository somebody named rather than a dead end,
-/// because this is a way *onto* one. See `lands` on [`RepoRegistration`].
+/// The one way a repository that already exists is taken on, now that the
+/// settings have no registration of their own: somebody who has nowhere to do
+/// the work says where it is, at the moment they are starting it.
 ///
-/// A refusal keeps the modal up, exactly as it keeps the pane up: a refused path
-/// is the one about to be corrected, and taking the card away would take the
-/// field with it.
+/// A refusal keeps the modal up: a refused path is the one about to be
+/// corrected, and taking the card away would take the field with it.
 export function OpenRepo(props: {
   /// Said when the modal has closed itself — Escape, a press on the backdrop,
   /// or the Cancel beside the press.
@@ -796,7 +577,7 @@ export function OpenRepo(props: {
     <Modal class={styles.openRepo!} open close={props.close} labelledBy={id}>
       <h3 id={id}>Open a repo</h3>
 
-      <RepoRegistration submit="Open" lands landed={props.landed}>
+      <RepoRegistration submit="Open" landed={props.landed}>
         {/* Drawn as well as the ways out the modal already has: Escape and a
             press on the backdrop are for a keyboard and a cursor, and this is
             the one a thumb has. */}

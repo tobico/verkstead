@@ -18,7 +18,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{AbandonedRoadmap, ConflictResolution};
+use crate::AbandonedRoadmap;
 
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
@@ -124,14 +124,18 @@ pub enum RepoRemoved {
     InUse,
 }
 
-/// One registered Repo opened: everything the card cannot hold, read at the
-/// moment it is asked for.
+/// One registered Repo, whole: the row, and everything a reading of the
+/// repository itself adds to it.
 ///
-/// The card's own three facts come along with it rather than being left to the
-/// list behind the pane. The pane is a page of its own as far as a link is
-/// concerned — somebody reloads on it, or arrives from a message — and a pane
-/// that drew its own title out of another read would have nothing to say until
-/// that read landed.
+/// What a create answers with — see [`Created`], which is the one thing left
+/// carrying one. The settings had a pane per Repo drawing every field here and
+/// it is gone; what is drawn of a Repo there is its name, and each of these is
+/// read where it is used instead.
+///
+/// The row's own three facts come along with the rest rather than being left to
+/// the list: whoever made a repository is about to put a draft on it, and a
+/// caller that had to go and read the Repo it just made would be asking for
+/// something the answer was already holding.
 ///
 /// Nothing here is stored beyond those three. The branches are git's own answer,
 /// the counts are the store's, and the roadmaps are read off the repository the
@@ -167,16 +171,6 @@ pub struct RepoView {
     /// new-conversation box finds them. Empty where there are none, which is
     /// most repositories most days.
     pub roadmaps: Vec<AbandonedRoadmap>,
-
-    /// How a conflicted pull request in this repository is resolved, where this
-    /// Repo has been told something other than what every other one does.
-    ///
-    /// `null` is *whatever the global setting says* rather than *merge*: the two
-    /// are the same answer today and stop being the same the moment the global
-    /// is changed, and a Repo that had quietly frozen this morning's global
-    /// would be a choice nobody made. What that global is, is on the settings
-    /// themselves — see [`crate::SettingsView::conflict_resolution`].
-    pub conflict_resolution: Option<ConflictResolution>,
 }
 
 /// A repository the human is asking Verkstead to *make*, said as where it is to
@@ -277,17 +271,4 @@ pub enum Created {
     /// through making is taken back: a create that did not happen leaves nothing
     /// behind that looks as though it did.
     Refused(String),
-}
-
-/// How one Repo is to resolve a conflict from now on, which is the one thing
-/// there is to *say* to a registered Repo besides taking it away.
-///
-/// `null` takes the override back rather than writing the global's word down:
-/// what *use the global setting* means is that this Repo says nothing, and a
-/// Repo holding a copy of today's global would go on holding it after the global
-/// moved.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
-pub struct ConflictResolutionEdit {
-    pub resolution: Option<ConflictResolution>,
 }

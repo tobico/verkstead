@@ -55,8 +55,6 @@ import type {
   RepoPairingsView,
   RepoRemoved,
   RepoSwitched,
-  RepoView,
-  ConflictResolution,
   Resolved,
   Response as Decided,
   Resumed,
@@ -161,17 +159,6 @@ export function listRepos(): Promise<RepoEntry[]> {
   return get<RepoEntry[]>("/api/ui/repos");
 }
 
-/// One registered Repo opened, which is what its card in the settings leads to:
-/// what the card shows, plus the branches, how much work is on it and what it
-/// is holding that nothing is driving.
-///
-/// A 404 for an id nothing is registered under, which the pane reads as the
-/// repo being gone rather than as a failure — the same shape a Set that is not
-/// there comes back in.
-export function loadRepo(id: number): Promise<RepoView> {
-  return get<RepoView>(`/api/ui/repos/${id}`);
-}
-
 /// Every branch of one registered Repo, local and remote-tracking both — which
 /// is what a drafting Conversation picks the one it comes off out of.
 ///
@@ -261,20 +248,6 @@ export function createRepo(
 /// with live work on it is refused for a reason worth saying, and not a failure.
 export function removeRepo(id: number): Promise<RepoRemoved> {
   return post<RepoRemoved>(`/api/ui/repos/${id}/remove`);
-}
-
-/// Say how one Repo resolves a merge conflict from now on, or — with `null` —
-/// take that back, so it does whatever every other Repo does.
-///
-/// A value rather than an action, and nothing to refuse: what is sent is where
-/// the setting is to stand. The answer is the Repo as it now stands, read afresh
-/// by the server, which is what the pane draws — the same rule the settings page
-/// saves under.
-export function setRepoResolution(
-  id: number,
-  resolution: ConflictResolution | null,
-): Promise<RepoView> {
-  return post<RepoView>(`/api/ui/repos/${id}/resolution`, { resolution });
 }
 
 /// The registered Repos holding roadmaps nothing is driving.

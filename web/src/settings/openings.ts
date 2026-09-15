@@ -6,41 +6,43 @@
 //! selection held beside the URL is lost the moment the page is navigated away
 //! from and back, and a link to a pane is a link to nothing.
 //!
-//! Three shapes under the settings, because there are three kinds of thing the
+//! Two shapes under the settings, because there are two kinds of thing the
 //! pane draws:
 //!
-//! - `github`, `build-cache`, `paths`, `conflicts`, `cleanup` and `remote` —
-//!   the credentials, the shared Rust build cache, the directories Verkstead
-//!   may work in, how a conflicted pull request is resolved, what becomes of an
-//!   archived Conversation, and whether this machine can be reached from a
-//!   phone, each named by a word. There is one of each of them, and a word says
-//!   so.
+//! - `git`, `languages`, `sandbox-binds`, `cleanup`, `remote` and `repos` —
+//!   everything git is told, the languages a session gets build support for,
+//!   the extra paths every sandbox gets, what becomes of an archived
+//!   Conversation, whether this machine can be reached from a phone, and the
+//!   Repos that are registered, each named by a word. There is one of each of
+//!   them, and a word says so.
 //! - `profiles/:id` — an Agent Profile, which arrives with an id of its own,
 //!   and `profiles/new` for the blank form that adds one.
-//! - `repos/:id` — a registered Repo, opened; and `repos/new` for the path
-//!   another is registered by.
 //!
-//! The `profiles/` and `repos/` segments are what keep the ids and the
-//! word-named panes apart, as the workbench's `events/` does: a bare id segment
-//! would have read the same as `github` the moment anything was named by a
-//! word, so the ids go behind a segment of their own and can never collide with
-//! one.
+//! The `profiles/` segment is what keeps the ids and the word-named panes
+//! apart, as the workbench's `events/` does: a bare id segment would have read
+//! the same as `git` the moment anything was named by a word, so the ids go
+//! behind a segment of their own and can never collide with one.
 //!
 //! `new` stands where an id stands rather than beside it, because the blank
 //! form and the filled one are one pane asked about a Profile that does not
 //! exist yet — and no id the server issues is the word `new`, so the two cannot
-//! be confused for each other. The Repos' form stands in the same place for the
-//! same reason, beside the ids of the ones that are registered.
+//! be confused for each other.
+//!
+//! A Repo had a pane of its own under `repos/:id`, and the form that registered
+//! another beside it at `repos/new`. Both are gone: every registered Repo is a
+//! row of the one Repos pane now, and one is registered from the new
+//! conversation page, so nothing under the settings is named by a Repo's id at
+//! all.
 //!
 //! A path naming a pane this build does not have leaves the details bare, which
 //! is what they are when nothing is open at all: the URL is a record of what was
 //! picked rather than a promise that it is still there.
 
-/// The openings named by a word rather than by an id: the credentials, the
-/// shared Rust build cache, the paths Verkstead has been told about, how a
-/// conflicted pull request is resolved, what becomes of an archived
-/// Conversation and how this machine is reached from a phone — the things there
-/// is exactly one of on this page.
+/// The openings named by a word rather than by an id: everything git is told,
+/// the languages a session gets build support for, the extra paths every
+/// sandbox gets, what becomes of an archived Conversation, how this machine is
+/// reached from a phone and which Repos are registered — the things there is
+/// exactly one of on this page.
 ///
 /// A list rather than a word written wherever one is needed, because three
 /// separate things read it and all three have to agree: the [`Opening`] below is
@@ -54,12 +56,12 @@
 /// So the app writes those routes from this — see `panes` in `SettingsPage.tsx`
 /// — and a word added here arrives with the route that reaches it.
 export const WORDS = [
-  "github",
-  "build-cache",
-  "paths",
-  "conflicts",
+  "git",
+  "languages",
+  "sandbox-binds",
   "cleanup",
   "remote",
+  "repos",
 ] as const;
 
 /// What the details pane on the settings page is showing.
@@ -70,8 +72,6 @@ export const WORDS = [
 /// same value.
 export type Opening =
   | (typeof WORDS)[number]
-  | "repo:new"
-  | `repo:${number}`
   | "profile:new"
   | `profile:${number}`;
 
@@ -87,28 +87,12 @@ export function opensProfile(which: number | "new"): Opening {
 
 /// And which Profile an opening names — its id, `"new"` for the blank form, or
 /// `null` where it names no Profile at all.
-export function profileOpened(opening: Opening | null): number | "new" | null {
-  return named("profile", opening);
-}
-
-/// What opens a Repo: its id, or `"new"` for the form another is registered by.
-export function opensRepo(which: number | "new"): Opening {
-  return `repo:${which}`;
-}
-
-/// And which Repo an opening names, read the way a Profile's is.
-export function repoOpened(opening: Opening | null): number | "new" | null {
-  return named("repo", opening);
-}
-
-/// Which of one kind of thing an opening names: its id, `"new"`, or `null`
-/// where the opening is about something else entirely.
 ///
-/// The Profiles and the Repos are the same shape — a segment, then an id or the
-/// word — so they are read by the one function. Two copies of this would be two
-/// places for the two to drift apart.
-function named(kind: string, opening: Opening | null): number | "new" | null {
-  const prefix = `${kind}:`;
+/// The one opening carrying an id of its own, now that a Repo's pane is gone:
+/// what is left beside it is named by a word, and a word is compared rather
+/// than read apart.
+export function profileOpened(opening: Opening | null): number | "new" | null {
+  const prefix = "profile:";
   if (opening === null || !opening.startsWith(prefix)) {
     return null;
   }
@@ -126,11 +110,6 @@ export function pathTo(opening: Opening): string {
   const profile = profileOpened(opening);
   if (profile !== null) {
     return `${SETTINGS}/profiles/${profile}`;
-  }
-
-  const repo = repoOpened(opening);
-  if (repo !== null) {
-    return `${SETTINGS}/repos/${repo}`;
   }
 
   return `${SETTINGS}/${opening}`;
@@ -160,19 +139,14 @@ export function openingAt(pathname: string): Opening | null {
     return profile === null ? null : opensProfile(profile);
   }
 
-  if (what === "repos" && which !== undefined) {
-    const repo = which === "new" ? "new" : id(which);
-    return repo === null ? null : opensRepo(repo);
-  }
-
   return null;
 }
 
 /// The id a segment names, or `null` where it names none.
 ///
 /// Digits and nothing else, because an id is what the server issued. A segment
-/// that is anything else names no Profile and no Repo — and neither does an id
-/// nothing is saved under, which the panes answer the same way.
+/// that is anything else names no Profile — and neither does an id nothing is
+/// saved under, which the pane answers the same way.
 function id(segment: string): number | null {
   return /^\d+$/.test(segment) ? Number(segment) : null;
 }

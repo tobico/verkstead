@@ -22,10 +22,6 @@
 //! very call a typed path goes through — see [`create`]. And, where it was asked
 //! for, `gh` puts the same repository on GitHub and pushes to it, which is the
 //! one thing here that can fail without the create failing.
-//!
-//! And the one thing a registered Repo is *told* rather than read: how a merge
-//! conflict on its pull requests is resolved, which is an override of the
-//! setting every Repo shares and passes through to the store like the removal.
 
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -33,7 +29,7 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result};
 use sqlx::SqlitePool;
-use verkstead_render::{ConflictResolution, Created, Registered, RepoEntry, RepoRemoved, RepoView};
+use verkstead_render::{Created, Registered, RepoEntry, RepoRemoved, RepoView};
 
 use crate::github::Gh;
 use crate::resolved::{Resolved, resolve};
@@ -459,26 +455,29 @@ pub(crate) async fn branches(pool: &SqlitePool, id: i64) -> Result<Option<Vec<St
     ))
 }
 
-/// One registered Repo opened: everything its card cannot hold.
+/// One registered Repo, whole: the row, and everything a reading of the
+/// repository itself adds to it.
 ///
-/// `None` is a Repo that is not on the registry, which the pane reads as the
-/// repo being gone — a link followed after somebody took it away, or a pane left
-/// open in another tab while they did. Read through
+/// What a create answers with — see [`create`], which is the one caller there
+/// is. The settings had a pane per Repo drawing all of this and it is gone: what
+/// is drawn of a Repo there is its name, and each of these is read where it is
+/// used instead — the branches on a composer, the roadmaps in the new
+/// conversation dropdown.
+///
+/// `None` is a Repo that is not on the registry. Read through
 /// [`store::registered_repo`] for that reason rather than through `load_repo`,
 /// which goes on finding a Repo that was taken away because a Timeline still has
 /// to name it.
 ///
 /// The two filesystem reads go together in one blocking task rather than one
-/// apiece: they are both git against the same directory, and a pane is one thing
-/// the human opened rather than two. The counts are the store's and are awaited
-/// beside them.
+/// apiece: they are both git against the same directory. The counts are the
+/// store's and are awaited beside them.
 ///
-/// Nothing here is stored but the three facts the card already carries. The
+/// Nothing here is stored but the three facts the row already carries. The
 /// branches move without Verkstead hearing about it and a roadmap somebody picks
-/// up stops being abandoned the moment they do, so both are asked afresh every
-/// time the pane is opened — a kept copy would be a second opinion that went
-/// wrong on somebody else's push.
-pub(crate) async fn opened(pool: &SqlitePool, id: i64) -> Result<Option<RepoView>> {
+/// up stops being abandoned the moment they do, so both are asked afresh — a
+/// kept copy would be a second opinion that went wrong on somebody else's push.
+async fn opened(pool: &SqlitePool, id: i64) -> Result<Option<RepoView>> {
     let Some(repo) = store::registered_repo(pool, id).await? else {
         return Ok(None);
     };
@@ -505,57 +504,7 @@ pub(crate) async fn opened(pool: &SqlitePool, id: i64) -> Result<Option<RepoView
         live: work.live,
         finished: work.finished,
         roadmaps,
-        conflict_resolution: store::repo_resolution(pool, id).await?.map(resolution),
     }))
-}
-
-/// Say how this Repo resolves a conflict from now on, and hand back the Repo as
-/// it now stands.
-///
-/// `None` takes the override back rather than writing the global's word down —
-/// see [`verkstead_render::ConflictResolutionEdit`]. Nothing is refused: there is no
-/// work this could be taken out from under, unlike an unregistering, and the
-/// next conflict is simply resolved the new way.
-///
-/// The Repo that comes back is the whole pane's worth, read afresh: the pane
-/// draws what the server says rather than what it just sent, which is the same
-/// rule the settings page saves under.
-///
-/// `None` is a Repo nothing is registered under, which is a pane somebody left
-/// open in another tab.
-pub(crate) async fn set_resolution(
-    pool: &SqlitePool,
-    id: i64,
-    resolution: Option<ConflictResolution>,
-) -> Result<Option<RepoView>> {
-    if store::registered_repo(pool, id).await?.is_none() {
-        return Ok(None);
-    }
-
-    store::set_repo_resolution(pool, id, resolution.map(stored)).await?;
-
-    opened(pool, id).await
-}
-
-/// The store's word for a resolution as the viewer receives it.
-///
-/// Here rather than beside each caller: the settings page reads the global out
-/// of `config.yaml` and this pane reads one Repo's override out of the store,
-/// and the two are the same two words either way. A second mapping would be a
-/// second chance for the viewer's word and the store's to come apart.
-pub(crate) fn resolution(resolution: store::ConflictResolution) -> ConflictResolution {
-    match resolution {
-        store::ConflictResolution::Merge => ConflictResolution::Merge,
-        store::ConflictResolution::Rebase => ConflictResolution::Rebase,
-    }
-}
-
-/// And back, which is what a press on either page sends.
-pub(crate) fn stored(resolution: ConflictResolution) -> store::ConflictResolution {
-    match resolution {
-        ConflictResolution::Merge => store::ConflictResolution::Merge,
-        ConflictResolution::Rebase => store::ConflictResolution::Rebase,
-    }
 }
 
 /// Take a Repo off the registry, if nothing live is being worked in it.

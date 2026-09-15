@@ -85,8 +85,9 @@ export type Said = {
 /// backend's mark and the model already say the whole of what it is — see
 /// [`tells`]. This is the word for the readings that cannot: a picker with two
 /// accounts of one backend in it, where the name is the difference between the
-/// rows, and the settings card, which is a list of Profiles by name. The server
-/// says the same word in the prose it writes about an account — see
+/// rows. The settings card is not one of them — it draws the backend's mark and
+/// the backend's name, and a Profile nobody named is that and nothing after it.
+/// The server says the same word in the prose it writes about an account — see
 /// `crates/server/src/profiles.rs`.
 export const DEFAULT_PROFILE = "Default";
 

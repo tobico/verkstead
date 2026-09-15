@@ -28,25 +28,37 @@
 //! endpoint, which writes both files — so the author, the token and the rest
 //! ride along as they stand.
 //!
-//! Two ways to save, because there are two kinds of control: a switch saves
-//! itself the moment it is flipped, and a duration is typed, so it saves on a
-//! press of its own — nothing is committed while somebody is halfway through
-//! writing `30`.
+//! Two ways to save, because there are two kinds of control: a checkbox saves
+//! itself the moment it is ticked — a box that needed a second press to mean
+//! anything is not a box — and a duration is typed, so it saves on a press of
+//! its own; nothing is committed while somebody is halfway through writing `30`.
 //!
-//! Which is why **a switch sends the durations the server last gave it** rather
-//! than what the fields hold. One request writes the whole file, so a flip has
+//! Which is why **a tick sends the durations the server last gave it** rather
+//! than what the fields hold. One request writes the whole file, so a tick has
 //! to say something about both durations, and saying what is in the boxes would
 //! commit a half-typed number nobody pressed Save on — the `1` of a `10`, and on
 //! the *other* row at that, there being two of them here. What was typed stays
-//! typed: the flip did not save it, so the field goes on holding it and its own
+//! typed: the tick did not save it, so the field goes on holding it and its own
 //! Save is still what commits it.
+//!
+//! Each duration hangs off its own checkbox, which is the page's one pattern for
+//! configuration that only means something while something else is on: indented
+//! under the box it belongs to, and greyed and refusing input while that box is
+//! off — see [`Nested`]. Greyed rather than taken away, because a field that
+//! vanished would say the setting had, and it has not.
+//!
+//! **Nothing here explains itself.** What the trim takes and what the delete
+//! takes are said in `CONTEXT.md`, under **Trimmed** and **Deleted**; what is on
+//! the pane is the two labels and the two durations. The line about the delete
+//! landing first stays, because it is a reading of the numbers in the boxes
+//! rather than an explanation of what a control is for.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Match, Show, Switch as Choose, createSignal, type JSX } from "solid-js";
 
 import { CardButton } from "../CardButton";
+import { Check, Nested } from "../Check";
 import { PaneSticky } from "../Panes";
-import { Switch } from "../Switch";
 import { loadSettings, saveSettings } from "../api/client";
 import type {
   CleanupEdit,
@@ -56,7 +68,7 @@ import type {
   SettingsView,
 } from "../api/types";
 import { useReading } from "../freshness";
-import { Empty, ErrorLine, Note } from "../notices";
+import { Empty, ErrorLine } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
 import { heldCleanup, heldPaths } from "./held";
 import styles from "./Cleanup.module.css";
@@ -157,7 +169,7 @@ export function CleanupCard(props: {
 
 /// And the controls that change it, which is the details pane the card opens.
 ///
-/// There is no Save over the whole of it and no Cancel: each switch is its own
+/// There is no Save over the whole of it and no Cancel: each checkbox is its own
 /// press and each duration has one of its own, and a details pane is left by
 /// opening something else or by the way back a narrow window draws.
 export function CleanupPane(props: {
@@ -198,7 +210,7 @@ export function CleanupPane(props: {
   ///
   /// The second half is what says whether the typed text has been committed —
   /// and so whether the fields should let go of it and follow the server again.
-  /// A switch's save carries the durations as they stand on the server, so it
+  /// A tick's save carries the durations as they stand on the server, so it
   /// commits nothing anybody typed and leaves the boxes alone.
   type Asked = { edit: CleanupEdit; committed: boolean };
 
@@ -238,7 +250,7 @@ export function CleanupPane(props: {
     },
     onSuccess: (saved: SettingsSaved, asked: Asked) => {
       // What was typed goes, because the answer is now what the fields follow —
-      // and only where this save was the one that committed it. A switch's was
+      // and only where this save was the one that committed it. A tick's was
       // not, so what somebody is halfway through writing is still theirs.
       if (asked.committed) {
         setTrimTyped(null);
@@ -251,9 +263,9 @@ export function CleanupPane(props: {
     },
   }));
 
-  /// A switch flipped, which saves itself: the row it is on takes the new
-  /// answer, the other rides along as it stands, and both durations go as the
-  /// server last gave them — see this module's header.
+  /// A box ticked, which saves itself: the row it is on takes the new answer,
+  /// the other rides along as it stands, and both durations go as the server
+  /// last gave them — see this module's header.
   const flip = (which: keyof CleanupEdit, enabled: boolean) => {
     const standing = heldCleanup(told());
 
@@ -288,28 +300,15 @@ export function CleanupPane(props: {
         <Match when={cleanup()}>
           {(set) => (
             <div class={styles.cleanup}>
-              <Note>
-                Both clocks start when a conversation is archived, and
-                unarchiving one stops them. Neither touches anything outside
-                Verkstead: the git branch stays, and a share that has been
-                published stays published.
-              </Note>
-
               <section class={styles.step}>
-                <Switch
+                <Check
                   label="Trim archived conversations"
                   on={set().trim.enabled}
                   disabled={save.isPending}
                   flip={(enabled) => flip("trim", enabled)}
                 />
 
-                <Note>
-                  The full agent output, the transcripts and the session records
-                  go — everything a share never carried. Every card on the
-                  timeline stays, so the record still reads whole.
-                </Note>
-
-                <Show when={set().trim.enabled}>
+                <Nested on={set().trim.enabled}>
                   <form class={styles.timing} onSubmit={commit}>
                     <label for="cleanup-trim-days">
                       Days after archiving before trimming
@@ -333,24 +332,18 @@ export function CleanupPane(props: {
                       </button>
                     </div>
                   </form>
-                </Show>
+                </Nested>
               </section>
 
               <section class={styles.step}>
-                <Switch
+                <Check
                   label="Delete archived conversations for good"
                   on={set().delete.enabled}
                   disabled={save.isPending}
                   flip={(enabled) => flip("delete", enabled)}
                 />
 
-                <Note>
-                  The whole conversation goes: every card, every session and the
-                  timeline itself, off the sidebar even under Show archived. It
-                  cannot be undone.
-                </Note>
-
-                <Show when={set().delete.enabled}>
+                <Nested on={set().delete.enabled}>
                   <form class={styles.timing} onSubmit={commit}>
                     <label for="cleanup-delete-days">
                       Days after archiving before deleting
@@ -372,7 +365,7 @@ export function CleanupPane(props: {
                       </button>
                     </div>
                   </form>
-                </Show>
+                </Nested>
               </section>
 
               <Show when={deletedFirst(set())}>{deletedFirstNote()}</Show>

@@ -66,7 +66,7 @@ services.verkstead = {
   enable = true;
   paths = [ "/home/you/src" "/home/you/.claude" ];
   home = "/home/you";                 # optional; the service's own by default
-  sandboxBinds = [ "verkstead=/var/cache/verkstead-node" ];
+  sandboxBinds = [ "/var/cache/verkstead-node" ];
 };
 ```
 
@@ -95,13 +95,13 @@ Three of those are worth understanding before the first Conversation:
   example above names `/home/you/.claude` beside the repositories.
 - **`sandboxBinds`** is the **Sandbox Configuration** — every entry is a hole
   in the boundary, which is why one that is not there refuses startup rather
-  than being skipped. A bare path goes to every session; `name=path` goes only
-  to sessions working in the Repo registered under that name.
+  than being skipped. Each is one absolute path, and every session gets every
+  one of them.
 
-The workbench says the binds as well, on the settings page's **Paths** section —
-which holds those and nothing else — and on each Repo's own pane, and what a
-session gets is the union of the two. Those entries are saved into `config.yaml`
-in the data directory, read afresh every time they are used, and never fatal:
+The workbench says the binds as well, on the settings page's **Sandbox binds**
+section. What a session gets is the union of the two. Those entries are saved into
+`config.yaml` in the data directory, read afresh every time they are used, and
+never fatal:
 one the server cannot see is reported on the page rather than refused, and
 simply covers nothing. **On this module, that report is the one to read** — the
 unit's namespace holds what the options above name and nothing else, so a bind
@@ -154,13 +154,13 @@ a device that forgot the cookie is let back in by reading it again.
 The server binds loopback and speaks plain HTTP, and answering from a phone
 needs HTTPS — which push notifications need to work at all. That is the
 **Remote access** section of the workbench settings rather than anything to run
-here: it reads what this machine's Tailscale is doing, a switch puts the tailnet
-name in front of the port, and the login link is drawn there as a QR code to
-point a phone's camera at. What this module does for it is the two things a host
-has to do — `tailscale` goes on the unit's own `PATH`, and the service user is
-made the tailnet's operator, so nobody is shown a `sudo` line for a grant the
-build already made. Joining the tailnet stays the host's own business:
-`services.tailscale.enable`, and a `tailscale up` in a terminal.
+here: it reads what this machine's Tailscale is doing, a checkbox puts the
+tailnet name in front of the port, and the login link is drawn there as a QR
+code to point a phone's camera at. What this module does for it is the two
+things a host has to do — `tailscale` goes on the unit's own `PATH`, and the
+service user is made the tailnet's operator, so nobody is shown a `sudo` line
+for a grant the build already made. Joining the tailnet stays the host's own
+business: `services.tailscale.enable`, and a `tailscale up` in a terminal.
 
 ### The desktop app, on a Linux machine
 
@@ -185,7 +185,7 @@ there is no link to keep anywhere, and nothing to type. Started with
 `--no-open`, the same link is on the startup line in **View Logs**.
 
 **Answering from your phone is the workbench's own settings**, under **Remote
-access**: it reads what this machine's Tailscale is doing, a switch puts the
+access**: it reads what this machine's Tailscale is doing, a checkbox puts the
 tailnet name in front of the port — HTTPS, which push notifications need to work
 at all — and the login link is drawn there as a QR code to point a camera at.
 Nothing here installs Tailscale: the pane points at where to get one where the
@@ -297,7 +297,7 @@ Started with `--no-open`, the same link is on the startup line in **View Logs**.
 
 **Answering from your phone is the settings page's Remote access section**, as
 it is on Linux, and Tailscale itself is the Mac's own. What differs is the
-password dialog behind the serve switch: serving to a tailnet is refused for a
+password dialog behind the serve checkbox: serving to a tailnet is refused for a
 process that is neither root nor the tailnet's operator, and here the press is
 put to you through `osascript`'s *with administrator privileges* — the Mac's own
 authentication prompt.
@@ -472,9 +472,9 @@ printed there and in **View Logs**.
 
 **Answering from your phone is the settings page's Remote access section**, as
 it is on the other two, and Tailscale itself is the machine's own. What differs
-is the elevation prompt behind the serve switch: serving to a tailnet is refused
-for a process that is not the tailnet's operator, and here the press comes up as
-a **User Account Control** dialog.
+is the elevation prompt behind the serve checkbox: serving to a tailnet is
+refused for a process that is not the tailnet's operator, and here the press
+comes up as a **User Account Control** dialog.
 
 **The shortcut opens the shim rather than the binary**, and that is what keeps
 a console window off the screen: `verkstead.exe` is an ordinary console program
@@ -599,8 +599,8 @@ so a crate is downloaded once for the machine rather than once per
 Conversation. The other half, the compiled objects, wants an `sccache` on the
 `PATH` the server was started from: with one there, every session's `rustc`
 goes through the single Compile Server Verkstead runs, and a dependency is
-compiled once for the machine too. The workbench's build cache page says which
-of the two you have.
+compiled once for the machine too. The workbench's Language support page says
+which of the two you have.
 
 **The toolchain a session builds with is the one you installed.** `rustup`'s
 shims are on your `PATH` already, and the rustup home they resolve a toolchain

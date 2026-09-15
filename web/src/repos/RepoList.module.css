@@ -1,84 +1,162 @@
-/* The Repos section of the settings page: the cards for what is registered, the
-   pane one of them opens, and the pane that adds another — see `RepoList.tsx`.
+/* The Repos section of the settings page: the card saying how many are
+   registered, the list of them in the pane it opens, and the two modals the Repo
+   dropdown draws the registration on — see `RepoList.tsx`.
 
    What a card *is* is `CardButton.module.css`'s, shared with every other card in
    the app: the surface, and what it does under the pointer where anything is
-   behind it. What is here is only what stands on it. The boxed rows this section
-   drew are gone — the box was a second opinion about what a card looks like.
+   behind it. What is here is only what stands on it, which for this card is a
+   heading and a count.
 
-   The Agent Profiles above are the same card read the same way, and their module
-   carries a copy of it rather than either of them sharing one: two lists that
-   look alike today are still two lists, and a rule they held in common would
-   make every change to one a decision about the other.
+   The list moved into the pane with the Remove that was on each Repo's own. A
+   row is a name and a press, so it is a row rather than a card: a card is a
+   surface something is read off, and there is one word to read here. */
 
-   The heading each section of this page is topped with is `sectionHead`, page
-   vocabulary rather than this module's: it is defined once in `App.module.css`
-   and `RepoList.tsx` writes it beside its own. */
-
-.repos {
-  margin-bottom: 1.5rem;
+/* What the card says under its heading: how many are registered, which is the
+   whole of what a list is scanned for when every item is a name. */
+.reposCard .standing {
+  margin: 0;
+  color: var(--ink-soft);
 }
 
-.repos h2 {
-  margin: 0 0 0.75rem;
-  font-size: 1.1rem;
-}
-
-/* The plus that opens the form, on the heading's line. Centred on that line
-   rather than sitting on its baseline, which is what the heading beside it is
-   aligned by: the button is an icon with no text of its own, so a baseline would
-   hang it below the words rather than beside them. */
-.add {
-  align-self: center;
-}
-
+/* The registered Repos in the pane, one under another with a line of air
+   between: each is a name and the one press there is to make about it. */
 .list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  /* Close, because the cards are flat: what separates two of them is the
-     padding they each already carry, and a gap wide enough for boxes would leave
-     a list of them reading as scattered. */
-  gap: 0.25rem;
+  gap: 0.5rem;
 }
 
-/* What stands on the card — the name, and under it the two things a repo is
-   checked by. A column, because a card is read down. */
+/* One Repo: the row itself, and the refusal a press on it was answered with
+   under the row rather than beside it — a phone has no room for a sentence on
+   the line a button is on. */
 .repo {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
 }
 
-.repo .title {
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* What the row reads: the name, and the directory under it. The pair takes the
+   line and the press keeps its own width, so that every Remove down the list
+   stands under the one before it. */
+.what {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* And the directory, quieter and in the face every path in the app is written
+   in: it is what tells two Repos of one name apart rather than what the row is
+   scanned by, so it reads under the name rather than beside it. */
+.path {
+  font-size: 0.85rem;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+/* Drawn as an outline rather than as a filled press — the way the Profile
+   pane's Remove is, and for the same reason: it undoes rather than does. */
+.remove {
+  padding: 0.4rem 0.85rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--removed);
+  background: none;
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.remove:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+/* And under the pointer, which is the only thing it says before it is pressed:
+   the edge takes the colour the words already have. */
+@media (hover: hover) {
+  .remove:not(:disabled):hover {
+    border-color: var(--removed);
+  }
+}
+
+.repo .failure {
+  margin: 0.35rem 0 0;
+  font-size: 0.9rem;
+}
+
+/* The card a Remove is answered with before anything happens, on the one modal
+   in the UI — the same shape the confirm over a running conversation takes, and
+   drawn here in this module because the words are this section's.
+
+   `Modal.module.css` is the card and everything around it; what is here is what
+   stands on it. */
+.confirming .confirmingTitle {
+  margin-top: 0;
   font-weight: 600;
 }
 
-.repo .meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem 0.75rem;
-  font-size: 0.85rem;
+.confirming .confirmingWhy {
+  margin: 0.75rem 0 0;
   color: var(--ink-soft);
 }
 
-/* What is quoted rather than said, wherever it stands: a path the filesystem
-   knows by, and the branch names git does. On the card's meta line, and again
-   in the pane that card opens. */
-.repo .path,
-.repo .branch,
-.facts .path,
-.facts .branch,
-.branchList .branch {
-  font-family: ui-monospace, SFMono-Regular, monospace;
+.confirming .confirmingOut {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+/* The shape both of them take, which is this row's own. Said for both and over
+   `.secondary`, which is the paint rather than the shape. */
+.confirming .confirmingOut button {
+  flex: 1 1 9rem;
+  padding: 0.7rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+/* And the press that does the thing, filled. The way back beside it is a
+   secondary press like every other in the app — `.secondary` in
+   `styles/base.css` paints it — and it is stood out of the way with `:where`,
+   which weighs nothing: a bare `:not` would carry its class into this
+   selector's weight, and a rule written to sit over this press would find itself
+   under it instead. */
+.confirming .confirmingOut button:not(:where(.secondary)) {
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+@media (hover: hover) {
+  .confirming .confirmingOut button:not(:where(.secondary)):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
 }
 
 /* Registering a repo: a path written, and the button that sends it. The label
    stands over the field, because what has to be understood before typing is that
-   the path is an absolute one. It is the details pane now rather than a modal
-   over the page, so there is nothing around it but the pane's own head. */
+   the path is an absolute one. It is drawn on the two modals the Repo dropdown
+   opens, so there is nothing around it but the card's own heading. */
 .form label {
   display: block;
   margin-bottom: 0.35rem;
@@ -159,203 +237,9 @@
   }
 }
 
-/* One Repo opened: the facts under its name, the branches git has, and the
-   roadmaps waiting in it. Read down as three blocks with air between them,
-   because each answers a different question about the same repository. */
-.opened {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
-
-/* The named short answers: a column of labels with the answers under them
-   rather than a two-column grid, because a path is long and a grid would either
-   wrap it into a strip or push the labels off the left of a phone. */
-.facts {
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.facts dt {
-  font-size: 0.85rem;
-  color: var(--ink-soft);
-}
-
-.facts dd {
-  margin: 0.2rem 0 0;
-  /* A path has no spaces to break at, so it is broken wherever it has to be
-     rather than pushing the pane sideways. */
-  overflow-wrap: anywhere;
-}
-
-/* The two counts on one line, which is how they are read: what is on this Repo
-   now, and what has been. */
-.counted {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem 1rem;
-}
-
-/* What is going on it now reads first, and what is over reads quietly beside
-   it: the two are the same sentence, and only one of them is news. */
-.counted .live {
-  font-weight: 600;
-}
-
-.counted .finished {
-  color: var(--ink-soft);
-}
-
-.branches h2,
-.roadmaps h2 {
-  margin: 0 0 0.5rem;
-  font-size: 0.95rem;
-  color: var(--ink-soft);
-}
-
-.branchList,
-.roadmapList {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-/* Branch names wrap as a run rather than a column: there may be a great many of
-   them, and what they are read for is finding one. */
-.branchList {
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: 0.3rem 0.75rem;
-}
-
-.roadmap {
-  display: flex;
-  flex-direction: column;
-}
-
-.roadmap .title {
-  font-weight: 600;
-}
-
-/* Which stage adopting it would start, said under the roadmap's own name. */
-.roadmap .stage {
-  font-size: 0.85rem;
-  color: var(--ink-soft);
-}
-
-/* The one press there is to make about a Repo, under everything the pane says
-   about it. Set well below the facts and behind a rule, the way the Profile
-   pane's Remove is: a press that undoes something, standing in among the things
-   it would undo, is one waiting to be made by mistake. */
-.standing {
-  margin-top: 0.5rem;
-  padding-top: 1.25rem;
-  border-top: 1px solid var(--edge);
-}
-
-/* What removing one actually does, said before it is done: an unregistering
-   rather than a delete, which is the difference between a list getting shorter
-   and work going missing. */
-.standing .note {
-  margin: 0 0 0.85rem;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-}
-
-.actions {
-  display: flex;
-  gap: 0.5rem;
-}
-
-/* Drawn as an outline rather than as the filled button the register is — the
-   way the Profile pane's Remove is, and for the same reason: it undoes rather
-   than does. */
-.actions .remove {
-  padding: 0.5rem 1rem;
-  font: inherit;
-  font-weight: 600;
-  color: var(--removed);
-  background: none;
-  border: 1px solid var(--edge);
-  border-radius: 0.4rem;
-  cursor: pointer;
-}
-
-.actions .remove:disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
-}
-
-.standing .failure {
-  margin: 0.5rem 0 0;
-  font-size: 0.9rem;
-}
-
-/* And under the pointer, which is the only thing it says before it is pressed:
-   the edge takes the colour the words already have. */
-@media (hover: hover) {
-  .actions .remove:not(:disabled):hover {
-    border-color: var(--removed);
-  }
-}
-
-/* How this Repo resolves a merge conflict — the one thing on the pane that is a
-   setting rather than a reading, so it is a section of its own between what the
-   Repo is and the press that takes it off the registry. */
-.resolving {
-  margin-top: 1.5rem;
-}
-
-.resolving h2 {
-  margin: 0 0 0.5rem;
-  font-size: 1rem;
-}
-
-.resolving label {
-  display: block;
-  margin-bottom: 0.35rem;
-  font-size: 0.9rem;
-  color: var(--ink-soft);
-}
-
-.resolving select {
-  width: 100%;
-  font: inherit;
-  color: inherit;
-  background: var(--paper);
-  border: 1px solid var(--edge);
-  border-radius: 0.4rem;
-  padding: 0.5rem 0.6rem;
-}
-
-/* What the answer in force does to a pull request, under the picker: the same
-   line the settings page draws under its own, because it is the same choice. */
-.resolves {
-  margin: 0.75rem 0 0;
-  font-size: 0.9rem;
-  line-height: 1.5;
-  color: var(--ink-soft);
-}
-
-.resolving select:focus-visible {
-  border-color: var(--accent);
-}
-
-@media (hover: hover) {
-  .resolving select:hover {
-    border-color: var(--ink-soft);
-  }
-}
-
-/* The same registration asked from the Repo dropdown, on the one modal in the
-   UI — see `Modal.module.css`, which is the card and everything around it. What
-   is here is only what the card holds: a heading, and the form above already
-   drawn. */
+/* The registration on the modal the Repo dropdown opens — see
+   `Modal.module.css`, which is the card and everything around it. What is here
+   is only what the card holds: a heading, and the form above already drawn. */
 .openRepo h3 {
   margin: 0 0 0.85rem;
   font-size: 1rem;
