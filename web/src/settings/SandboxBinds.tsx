@@ -1,4 +1,4 @@
-//! The paths on the settings page: the extra directories every sandbox is
+//! The sandbox binds on the settings page: the extra paths every sandbox is
 //! given, over and above the worktree a session works in.
 //!
 //! They are said in two places — the installation's flags or environment, and
@@ -10,7 +10,7 @@
 //!
 //! An empty list is the ordinary state rather than a machine half set up: a
 //! session reaches its own worktree, its Repo's git directory and its Profile's
-//! account without anything being said here, and a bind is what somebody adds
+//! account without anything being said here, and a path is what somebody adds
 //! when one needs a package registry or a cache beyond that.
 //!
 //! Every row reports whether the server can currently see what it names, which
@@ -22,19 +22,24 @@
 //! that sentence is how somebody learns the installer has to widen the unit
 //! before what they saved can work.
 //!
-//! The card counts the ones the server cannot see. A bind that has quietly
+//! The card counts the ones the server cannot see. A path that has quietly
 //! stopped resolving is exactly what nobody goes looking for, so the one warning
 //! there is has to be where somebody scanning the settings will meet it.
 //!
-//! Every bind is here, because every bind is a directory each sandbox gets. A
-//! bind could once be written for one Repo — `name=path` — and that grammar is
-//! gone: an entry still in it reaches no session, draws no row, and is dropped
-//! from the file by the next save this pane makes.
+//! Every bind is here, because every bind is a path each sandbox gets. A bind
+//! could once be written for one Repo — `name=path` — and that grammar is gone:
+//! an entry still in it reaches no session, draws no row, and is dropped from
+//! the file by the next save this pane makes.
 //!
 //! Two halves in two panes, like every other section: a card in the middle pane
 //! saying how the list stands and whether anything is wrong with it, and the
-//! editing in the details pane it opens, at `/settings/paths`. Both read the
-//! one settings query the sections above them read.
+//! editing in the details pane it opens, at `/settings/sandbox-binds`. Both read
+//! the one settings query the sections above them read.
+//!
+//! The pane is the list and nothing else: one line saying what the section is
+//! for, the rows, and the field that adds another. There is no heading inside it
+//! — the pane's own title says what these are, and a section with one subsection
+//! was saying it twice.
 //!
 //! A row saves on its own press. Adding one is the Add beside the field and
 //! taking one away is the Remove on the row, and each is a save of the whole
@@ -58,7 +63,7 @@ import {
   useWritingPaths,
   without,
 } from "./PathEditor";
-import styles from "./Paths.module.css";
+import styles from "./SandboxBinds.module.css";
 
 /// The binds, as the rows this pane draws — every one of them, whichever of the
 /// two sources said it.
@@ -90,12 +95,12 @@ function counted(many: number, one: string, more: string): string {
   return `${many} ${many === 1 ? one : more}`;
 }
 
-/// The paths as they stand, as the card that opens them.
+/// The binds as they stand, as the card that opens them.
 ///
 /// What is on the card is what somebody scanning the page is after: how much of
 /// the list stands, and whether anything about it wants doing — which is an
 /// entry that is saved and does nothing.
-export function PathsCard(props: {
+export function SandboxBindsCard(props: {
   /// Whether the pane beside this is the one that is open.
   open: boolean;
   /// What pressing it does, which is opening that pane.
@@ -117,11 +122,11 @@ export function PathsCard(props: {
         {(paths) => (
           <CardButton
             as="article"
-            class={styles.pathsCard}
+            class={styles.bindsCard}
             open={props.open}
             press={props.press}
           >
-            <h2>Paths</h2>
+            <h2>Sandbox binds</h2>
 
             {/* The one thing the browser can see and the human cannot: a row
                 that is saved, is in the file, and does nothing, because what it
@@ -131,8 +136,7 @@ export function PathsCard(props: {
             </Show>
 
             <p class={styles.standing}>
-              {counted(paths().binds.length, "bind", "binds")} every sandbox
-              gets.
+              {counted(paths().binds.length, "path", "paths")}.
             </p>
           </CardButton>
         )}
@@ -146,7 +150,7 @@ export function PathsCard(props: {
 /// There is no Save over the whole of it and no Cancel: each row is its own
 /// press, and a details pane is left by opening something else or by the way
 /// back a narrow window draws.
-export function PathsPane(props: {
+export function SandboxBindsPane(props: {
   /// The way back to the settings, which is the pane this one was entered from.
   back: () => void;
 }): JSX.Element {
@@ -155,7 +159,10 @@ export function PathsPane(props: {
   return (
     <>
       <PaneSticky>
-        <PaneHead back={{ to: "Settings", go: props.back }} title="Paths" />
+        <PaneHead
+          back={{ to: "Settings", go: props.back }}
+          title="Sandbox binds"
+        />
       </PaneSticky>
 
       <Choose>
@@ -169,36 +176,30 @@ export function PathsPane(props: {
         </Match>
         <Match when={told()?.paths}>
           {(paths) => (
-            <div class={styles.paths}>
-              <section class={styles.list}>
-                <h2>Sandbox binds</h2>
+            <div>
+              {/* What the section is for, in the one line a pane on this page
+                  says its own in. No heading over it: the pane's title has said
+                  what these are, and the one subsection this pane held was
+                  saying it a second time. */}
+              <Note>
+                Configures additional paths which are accessible from within the
+                sandbox.
+              </Note>
 
-                {/* The boundary this list moves, stated beside the editor the
-                    way the build cache states its own — brief, and not a
-                    confirmation step: it is the human's own machine, and a
-                    press they have to acknowledge twice is one they stop
-                    reading. */}
-                <Note>
-                  Extra directories every sandboxed session may read and write,
-                  over and above the worktree it works in. Each entry widens
-                  what a session can reach, so add only what one needs.
-                </Note>
+              <Rows
+                rows={drawn(paths())}
+                none="No paths are configured yet."
+                saving={save.isPending}
+                remove={(at) => writeBinds(without(held().sandbox_binds, at))}
+              />
 
-                <Rows
-                  rows={drawn(paths())}
-                  none="No binds every sandbox gets."
-                  saving={save.isPending}
-                  remove={(at) => writeBinds(without(held().sandbox_binds, at))}
-                />
-
-                <Adding
-                  id="sandbox-bind"
-                  label="Add a bind"
-                  placeholder="/var/cache/something"
-                  saving={save.isPending}
-                  add={(path) => writeBinds([...held().sandbox_binds, path])}
-                />
-              </section>
+              <Adding
+                id="sandbox-path"
+                label="Add a path"
+                placeholder="/var/cache/something"
+                saving={save.isPending}
+                add={(path) => writeBinds([...held().sandbox_binds, path])}
+              />
 
               <Show when={save.isError}>
                 <ErrorLine class={styles.failure}>

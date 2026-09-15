@@ -27,5 +27,5 @@ same change.
 - [x] 05: Remote access is a checkbox that will not lock you out — [details](05-remote-access.md)
 - [x] 06: One Repos page — [details](06-one-repos-page.md)
 - [x] 07: Repo-scoped binds go end to end — [details](07-repo-scoped-binds-go.md)
-- [ ] 08: Paths becomes Sandbox binds — [details](08-sandbox-binds.md)
+- [x] 08: Paths becomes Sandbox binds — [details](08-sandbox-binds.md)
 - [ ] 09: Agent profile cards — [details](09-agent-profile-cards.md)

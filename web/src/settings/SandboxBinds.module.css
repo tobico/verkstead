@@ -1,4 +1,4 @@
-/* The sandbox binds every session gets — see `Paths.tsx`.
+/* The sandbox binds every session gets — see `SandboxBinds.tsx`.
 
    Two halves in two panes, like the sections above it: the card carries how the
    list stands and what is wrong with it, and the rows that rewrite it stand in
@@ -6,14 +6,13 @@
 
    What a card *is* is `CardButton.module.css`'s: the surface, the fill it takes
    while its pane is open, and what it does under the pointer. What a row is is
-   `PathEditor.module.css`'s, shared with the Repo pane that draws the same rows
-   for one Repo's own binds. What is here is only what stands around them. */
+   `PathEditor.module.css`'s. What is here is only what stands around them. */
 
-.pathsCard {
+.bindsCard {
   margin-bottom: 1.5rem;
 }
 
-.pathsCard h2 {
+.bindsCard h2 {
   margin: 0 0 0.75rem;
   font-size: 1.1rem;
 }
@@ -41,13 +40,6 @@
   border-inline-start: 3px solid var(--stopped);
   border-radius: 0.6rem;
   font-size: 0.9rem;
-}
-
-/* And the details pane, whose one heading wears the size every section's on
-   this page does. */
-.list h2 {
-  margin: 0 0 0.5rem;
-  font-size: 1rem;
 }
 
 .failure {

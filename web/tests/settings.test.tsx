@@ -58,7 +58,7 @@ import card from "../src/CardButton.module.css";
 import { GitCard, GitPane } from "../src/settings/Git";
 import styles from "../src/settings/Git.module.css";
 import languages from "../src/settings/Languages.module.css";
-import paths from "../src/settings/Paths.module.css";
+import binds from "../src/settings/SandboxBinds.module.css";
 import {
   SettingsPage,
   panes as settingsPanes,
@@ -1320,7 +1320,7 @@ describe("the settings page", () => {
   /// One page for everything the human configures: what Verkstead itself was
   /// told, and the two things a Conversation is settled against — in the reading
   /// order a fresh install needs them in.
-  it("holds the credentials, the languages, the paths, the profiles and the repos", async () => {
+  it("holds the credentials, the languages, the binds, the profiles and the repos", async () => {
     const { container } = thePage();
 
     const settings = panes(container)[1]!;
@@ -1329,7 +1329,7 @@ describe("the settings page", () => {
     // so each list is waited for inside the pane it belongs to.
     await drawn(settings, `.${styles.gitCard}`);
     await drawn(settings, `.${languages.languagesCard}`);
-    await drawn(settings, `.${paths.pathsCard}`);
+    await drawn(settings, `.${binds.bindsCard}`);
     await drawn(settings, `.${profileList.profiles} .${profileList.profile}`);
     await drawn(settings, `.${repoList.reposCard}`);
 
@@ -1339,17 +1339,17 @@ describe("the settings page", () => {
     ).toHaveLength(PROFILES.length);
   });
 
-  /// And the Paths under the Repos rather than over them. It sat above the
-  /// lists while a repo was registered only from inside a watched path — a
-  /// machine with none had nothing to put on that list — and with the sandbox
-  /// binds alone in it that reason is gone.
-  it("draws the paths below the repos", async () => {
+  /// And the Sandbox binds under the Repos rather than over them. They sat
+  /// above the lists while a repo was registered only from inside a watched
+  /// path — a machine with none had nothing to put on that list — and with
+  /// the sandbox binds alone in it that reason is gone.
+  it("draws the sandbox binds below the repos", async () => {
     const { container } = thePage();
 
     const settings = panes(container)[1]!;
 
     const repos = await drawn(settings, `.${repoList.reposCard}`);
-    const card = await drawn(settings, `.${paths.pathsCard}`);
+    const card = await drawn(settings, `.${binds.bindsCard}`);
 
     expect(
       repos.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -1465,26 +1465,26 @@ describe("the path a details pane stands at", () => {
     await waitFor(() => expect(history.get()).toBe("/"));
   });
 
-  /// And the third: the paths Verkstead may work inside, and what a sandbox is
-  /// given beyond its worktree.
-  it("opens the paths at /settings/paths, replacing", async () => {
+  /// And the third: the extra paths a sandbox is given beyond the worktree a
+  /// session works in.
+  it("opens the binds at /settings/sandbox-binds, replacing", async () => {
     const { container, history } = thePage();
 
-    const face = await drawn<HTMLElement>(container, `.${paths.pathsCard}`);
+    const face = await drawn<HTMLElement>(container, `.${binds.bindsCard}`);
     fireEvent.click(face);
 
-    await waitFor(() => expect(history.get()).toBe("/settings/paths"));
+    await waitFor(() => expect(history.get()).toBe("/settings/sandbox-binds"));
 
     history.back();
     await waitFor(() => expect(history.get()).toBe("/"));
   });
 
-  it("draws the binds in the details pane, and reads the paths card as open", async () => {
-    const { container } = thePage("/settings/paths");
+  it("draws the binds in the details pane, and reads their card as open", async () => {
+    const { container } = thePage("/settings/sandbox-binds");
 
-    await waitFor(() => screen.getByLabelText("Add a bind"));
+    await waitFor(() => screen.getByLabelText("Add a path"));
 
-    const face = await drawn<HTMLElement>(container, `.${paths.pathsCard}`);
+    const face = await drawn<HTMLElement>(container, `.${binds.bindsCard}`);
     expect(face.getAttribute("aria-pressed")).toBe("true");
     expect(face.classList).toContain(card.open);
   });
@@ -1703,6 +1703,7 @@ describe("where a settings details pane stands", () => {
   it("puts an id behind a segment of its own, and a word beside it", () => {
     expect(pathTo("git")).toBe("/settings/git");
     expect(pathTo("languages")).toBe("/settings/languages");
+    expect(pathTo("sandbox-binds")).toBe("/settings/sandbox-binds");
     expect(pathTo(opensProfile(7))).toBe("/settings/profiles/7");
     expect(pathTo(opensProfile("new"))).toBe("/settings/profiles/new");
     expect(pathTo("repos")).toBe("/settings/repos");
@@ -1712,6 +1713,7 @@ describe("where a settings details pane stands", () => {
     for (const opening of [
       "git",
       "languages",
+      "sandbox-binds",
       "repos",
       opensProfile(7),
       opensProfile("new"),

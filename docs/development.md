@@ -45,8 +45,8 @@ the Repo and the Profile that Conversation names.
 
 The one path list left is the **Sandbox Configuration** binds, and they are
 said in two places — `--sandbox-bind DIR`, and the same grammar on the settings
-page's **Paths** section. What a session gets is the union; see the `"paths"`
-payload further down this section. The flag is the shape a service unit wants,
+page's **Sandbox binds** section. What a session gets is the union; see the
+`"paths"` payload further down this section. The flag is the shape a service unit wants,
 where startup is the moment to hear about a typo and a bind that is not there
 refuses to start; the settings are the shape a bare binary wants, where a save
 has to land whatever it was told and an entry that will not resolve is reported

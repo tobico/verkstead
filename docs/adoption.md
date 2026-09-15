@@ -98,8 +98,8 @@ Three of those are worth understanding before the first Conversation:
   than being skipped. Each is one absolute path, and every session gets every
   one of them.
 
-The workbench says the binds as well, on the settings page's **Paths** section.
-What a session gets is the union of the two. Those entries are saved into
+The workbench says the binds as well, on the settings page's **Sandbox binds**
+section. What a session gets is the union of the two. Those entries are saved into
 `config.yaml` in the data directory, read afresh every time they are used, and
 never fatal:
 one the server cannot see is reported on the page rather than refused, and

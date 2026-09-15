@@ -1,11 +1,11 @@
 /* The rows a configured path is drawn as, and the field another is written into
    — see `PathEditor.tsx`.
 
-   Its own module rather than the Paths section's, the way the parts themselves
-   are their own module: a row's look is a question about a row rather than
-   about the pane it stands in. What is around them — the card, the headings,
-   the notices a pane says beside its lists — belongs to the pane drawing
-   them. */
+   Its own module rather than the Sandbox binds section's, the way the parts
+   themselves are their own module: a row's look is a question about a row rather
+   than about the pane it stands in. What is around them — the card, the
+   headings, the notices a pane says beside its lists — belongs to the pane
+   drawing them. */
 
 .rows {
   margin: 0.85rem 0 0;

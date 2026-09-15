@@ -55,8 +55,8 @@ import { pathOf } from "../workbench/openings";
 import { CleanupCard, CleanupPane } from "./Cleanup";
 import { GitCard, GitPane } from "./Git";
 import { LanguagesCard, LanguagesPane } from "./Languages";
-import { PathsCard, PathsPane } from "./Paths";
 import { RemoteCard, RemotePane } from "./Remote";
+import { SandboxBindsCard, SandboxBindsPane } from "./SandboxBinds";
 import {
   SETTINGS,
   WORDS,
@@ -216,7 +216,7 @@ function Settings(props: {
             was told rather than anything a Conversation is settled against. One
             of the two sections about what a session runs inside, and the one
             that is on without anybody having been here — which is why it reads
-            beside the git section rather than down with the Paths, where
+            beside the git section rather than down with the Sandbox binds, where
             everything is somebody's own typing. */}
         <LanguagesCard
           open={props.opening === "languages"}
@@ -263,9 +263,9 @@ function Settings(props: {
             here nobody has to say anything about at all. It sat above the lists
             while a Watched Path was what a Repo was registered from; with the
             binds alone in it, that reason is gone and nothing replaces it. */}
-        <PathsCard
-          open={props.opening === "paths"}
-          press={() => props.select("paths")}
+        <SandboxBindsCard
+          open={props.opening === "sandbox-binds"}
+          press={() => props.select("sandbox-binds")}
         />
       </div>
     </>
@@ -306,8 +306,8 @@ function Details(props: {
       <Match when={props.opening === "languages"}>
         <LanguagesPane back={props.back} />
       </Match>
-      <Match when={props.opening === "paths"}>
-        <PathsPane back={props.back} />
+      <Match when={props.opening === "sandbox-binds"}>
+        <SandboxBindsPane back={props.back} />
       </Match>
       <Match when={props.opening === "cleanup"}>
         <CleanupPane back={props.back} />

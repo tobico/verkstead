@@ -273,8 +273,8 @@ _Avoid_: container, jail, isolation, environment
 The extra writable binds a Sandbox gets beyond that surface — a package
 registry's, a cache Verkstead does not provide — as one set every Sandbox gets.
 Configured in two places, the installation *and* the workbench:
-`--sandbox-bind DIR`, and the same grammar on the settings page's Paths section.
-A bind could once name a Repo — `--sandbox-bind NAME=DIR`, given only to
+`--sandbox-bind DIR`, and the same grammar on the settings page's Sandbox binds
+section. A bind could once name a Repo — `--sandbox-bind NAME=DIR`, given only to
 sessions working in the Repo registered under that name — and that grammar is
 gone: the flag refuses one, and an entry still in it in `config.yaml` reaches no
 session and draws no row.
@@ -282,8 +282,7 @@ The two sets union, and each keeps its
 own answer to a bind that is not there — the installation's refuses startup, the
 settings' is skipped for that session with a line in the log, because a phone is
 no place to be told a typo cost every session its start. Every one of them is a
-directory of somebody else's and a hole in the boundary, so the page says what
-each one costs beside the field that adds it. On a nix install the
+directory of somebody else's and a hole in the boundary. On a nix install the
 unit's own namespace is still the module's to widen: an entry outside it saves,
 is reported on the page as one the server cannot see, and does nothing until the
 installer widens the unit. The **Build Cache** is not one of these and is not

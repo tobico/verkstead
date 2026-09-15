@@ -1,8 +1,8 @@
 //! What a path is edited with: the read, the write, and the rows and the field
 //! it is drawn as.
 //!
-//! Its own module rather than the Paths section's own — see `Paths.tsx`, which
-//! is the one pane drawing these. There were two of them: a Repo's pane carried
+//! Its own module rather than the Sandbox binds section's own — see
+//! `SandboxBinds.tsx`, which is the one pane drawing these. There were two of them: a Repo's pane carried
 //! the binds written for its name, out of this same read and this same save, and
 //! the parts were kept here so that two lists of the same entries could not come
 //! to two accounts of what one is. Both that pane and a bind written for a Repo

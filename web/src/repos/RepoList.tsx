@@ -159,13 +159,7 @@ export const REPO_REMOVAL_REFUSAL: Record<RepoRemoved, string> = {
 /// Merged by the id each entry carries flat, and not frozen: registering one
 /// reads the list again, and a frozen query is one invalidation cannot reach —
 /// the new repo would never appear behind the card that added it.
-///
-/// Exported because the Paths pane asks it too — see `settings/Paths.tsx`,
-/// which needs the registered names to tell a bind written for a Repo from one
-/// written for a name nothing is registered under. One query definition rather
-/// than a second saying the same thing: the two would share a key and have to
-/// agree about freshness anyway.
-export function useRepos() {
+function useRepos() {
   return useReading(() => ({
     queryKey: ["repos"],
     queryFn: listRepos,

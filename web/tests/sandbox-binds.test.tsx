@@ -1,4 +1,4 @@
-//! The paths on the settings page: what the card says of the binds, what the
+//! The sandbox binds on the settings page: what the card says of them, what the
 //! pane draws of each row, and what adding or taking one away puts on the wire.
 //!
 //! Two things mounted apart, because that is what they are: a card in the
@@ -44,9 +44,12 @@ import type {
   SettingsView,
 } from "../src/api/types";
 import card from "../src/CardButton.module.css";
-import { PathsCard, PathsPane } from "../src/settings/Paths";
+import {
+  SandboxBindsCard,
+  SandboxBindsPane,
+} from "../src/settings/SandboxBinds";
 import rowStyles from "../src/settings/PathEditor.module.css";
-import styles from "../src/settings/Paths.module.css";
+import styles from "../src/settings/SandboxBinds.module.css";
 import { browse, held, listingAt, rows as offered, tap } from "./fields";
 import { json, serving, whenever, type Answer } from "./serving";
 import told from "./fixtures/settings.json" with { type: "json" };
@@ -139,7 +142,7 @@ function mounting(what: () => JSX.Element) {
 function mountCard(open = false) {
   const press = vi.fn();
   return {
-    ...mounting(() => <PathsCard open={open} press={press} />),
+    ...mounting(() => <SandboxBindsCard open={open} press={press} />),
     press,
   };
 }
@@ -147,7 +150,7 @@ function mountCard(open = false) {
 /// The binds in the details pane, and what its way back asked for.
 function mountPane() {
   const back = vi.fn();
-  return { ...mounting(() => <PathsPane back={back} />), back };
+  return { ...mounting(() => <SandboxBindsPane back={back} />), back };
 }
 
 /// The settings, which is the one read this pane makes.
@@ -172,22 +175,23 @@ function sent(fetching: ReturnType<typeof serving>): unknown {
 /// The card itself, once it is drawn — waited for, because it stands on a read.
 async function theCard(container: ParentNode): Promise<HTMLElement> {
   return await waitFor(() => {
-    const face = container.querySelector<HTMLElement>(`.${styles.pathsCard}`);
+    const face = container.querySelector<HTMLElement>(`.${styles.bindsCard}`);
     expect(face, "expected the card to be drawn").not.toBeNull();
     return face!;
   });
 }
 
-/// The one list of the pane, which is the binds every sandbox gets.
-async function list(container: ParentNode): Promise<HTMLElement> {
-  return await waitFor(() => {
-    const drawn = [...container.querySelectorAll<HTMLElement>(`.${styles.list}`)];
-    expect(drawn, "expected the list to be drawn").toHaveLength(1);
-    return drawn[0]!;
-  });
+/// The pane once the read it stands on has landed.
+///
+/// Waited for on the field that adds a path rather than on a row: the list is
+/// the whole of the pane now, and a machine with nothing on it draws the empty
+/// line where the rows would be.
+async function list(container: ParentNode): Promise<ParentNode> {
+  await waitFor(() => screen.getByLabelText("Add a path"));
+  return container;
 }
 
-/// One list's rows.
+/// The pane's rows.
 function rows(list: ParentNode): HTMLElement[] {
   return [...list.querySelectorAll<HTMLElement>(`.${rowStyles.row}`)];
 }
@@ -198,15 +202,17 @@ function path(row: ParentNode): string {
 }
 
 describe("the card", () => {
-  /// What somebody scanning the page is after: how much of the list stands.
-  it("says how many binds stand", async () => {
+  /// What somebody scanning the page is after: what the section is, and how
+  /// much of the list stands.
+  it("says how many paths stand", async () => {
     theSettings(seen(TOLD));
     const { container } = mountCard();
 
-    await theCard(container);
+    const face = await theCard(container);
 
+    expect(face.querySelector("h2")!.textContent).toBe("Sandbox binds");
     expect(container.querySelector(`.${styles.standing}`)!.textContent).toBe(
-      "2 binds every sandbox gets.",
+      "2 paths.",
     );
   });
 
@@ -219,7 +225,7 @@ describe("the card", () => {
     await theCard(container);
 
     expect(container.querySelector(`.${styles.standing}`)!.textContent).toBe(
-      "0 binds every sandbox gets.",
+      "0 paths.",
     );
     expect(container.querySelector(`.${styles.warning}`)).toBeNull();
   });
@@ -288,13 +294,16 @@ describe("the card", () => {
 });
 
 describe("the pane", () => {
-  it("draws the binds under a heading of their own", async () => {
+  /// The pane's own title says what these are, so the one subsection heading
+  /// inside it was saying it twice and is gone.
+  it("draws no heading of its own inside the pane", async () => {
     theSettings(TOLD);
     const { container } = mountPane();
 
     const binds = await list(container);
 
-    expect(binds.querySelector("h2")!.textContent).toBe("Sandbox binds");
+    expect(binds.querySelector("h1")!.textContent).toBe("Sandbox binds");
+    expect(binds.querySelector("h2")).toBeNull();
   });
 
   it("draws every bind", async () => {
@@ -372,18 +381,24 @@ describe("the pane", () => {
 
     const binds = await list(container);
 
-    await waitFor(() => screen.getByText("No binds every sandbox gets."));
+    await waitFor(() => screen.getByText("No paths are configured yet."));
     expect(rows(binds)).toHaveLength(0);
     expect(container.querySelector(`.${styles.warning}`)).toBeNull();
   });
 
-  /// What every entry on the bind list costs, said beside the editor rather than
-  /// as a step to press through.
-  it("says beside the binds what each one widens", async () => {
+  /// What the section is for, in one line. Everything else it used to say —
+  /// what a bind is for, and what each one widens — has gone with the rest of
+  /// the page's explanations.
+  it("says in one line what the section configures", async () => {
     theSettings(TOLD);
     mountPane();
 
-    await waitFor(() => screen.getByText(/Each entry widens what a session/));
+    await waitFor(() =>
+      screen.getByText(
+        "Configures additional paths which are accessible from within the sandbox.",
+      ),
+    );
+    expect(screen.queryByText(/Each entry widens what a session/)).toBeNull();
   });
 
   it("says so when the settings could not be read at all", async () => {
@@ -407,7 +422,7 @@ describe("adding a row", () => {
     const fetching = theSettings(TOLD, json(answering(TOLD)));
     mountPane();
 
-    const field = await waitFor(() => screen.getByLabelText("Add a bind"));
+    const field = await waitFor(() => screen.getByLabelText("Add a path"));
     fireEvent.input(field, { target: { value: "/var/cache/npm" } });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
@@ -426,7 +441,7 @@ describe("adding a row", () => {
     const fetching = theSettings(standing, json(answering(standing)));
     mountPane();
 
-    const field = await waitFor(() => screen.getByLabelText("Add a bind"));
+    const field = await waitFor(() => screen.getByLabelText("Add a path"));
     fireEvent.input(field, { target: { value: "/var/cache/npm" } });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
@@ -457,7 +472,7 @@ describe("adding a row", () => {
     theSettings(TOLD, json(answering(now)));
     const { container } = mountPane();
 
-    const field = await waitFor(() => screen.getByLabelText("Add a bind"));
+    const field = await waitFor(() => screen.getByLabelText("Add a path"));
     fireEvent.input(field, { target: { value: "/var/cache/npm" } });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
@@ -475,7 +490,7 @@ describe("adding a row", () => {
     const fetching = theSettings(TOLD, json(answering(TOLD)));
     mountPane();
 
-    await waitFor(() => screen.getByLabelText("Add a bind"));
+    await waitFor(() => screen.getByLabelText("Add a path"));
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
     expect(
@@ -491,7 +506,7 @@ describe("adding a row", () => {
     );
     mountPane();
 
-    const field = await waitFor(() => screen.getByLabelText("Add a bind"));
+    const field = await waitFor(() => screen.getByLabelText("Add a path"));
     fireEvent.input(field, { target: { value: "/var/cache/npm" } });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
@@ -537,7 +552,7 @@ describe("browsing for one", () => {
     const fetching = theSettings(TOLD, inHome, json(answering(TOLD)));
     mountPane();
 
-    await browsed("Add a bind");
+    await browsed("Add a path");
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
     await waitFor(() =>

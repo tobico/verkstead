@@ -3,9 +3,9 @@
 //! sandbox is given and how big its compiled half may grow.
 //!
 //! One of two things on this page that are about a **Sandbox** rather than about
-//! who Verkstead is — the Paths section is the other — and the only one of the
-//! two that is on with nothing configured. Every bind the Paths section adds is
-//! a hole somebody typed on purpose; this one is Verkstead's own directory,
+//! who Verkstead is — the Sandbox binds section is the other — and the only one
+//! of the two that is on with nothing configured. Every path that section adds
+//! is a hole somebody typed on purpose; this one is Verkstead's own directory,
 //! holding nothing but build output, so it can be opened for a human who never
 //! asked and the only control over it here is the one that *closes* it.
 //!

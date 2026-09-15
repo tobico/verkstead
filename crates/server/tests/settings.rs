@@ -995,8 +995,8 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
     assert!(!saved.settings.rust_build_cache.size_configured);
 }
 
-/// The Paths half of the page: every Sandbox Configuration bind, from both of
-/// the places one is said.
+/// The Sandbox binds half of the page: every Sandbox Configuration bind, from
+/// both of the places one is said.
 ///
 /// A server the installation configured as well as a file, because the whole of
 /// what this reports is which of the two said an entry and whether the server
@@ -1024,7 +1024,7 @@ async fn app_installed(binds: &[String]) -> (tempfile::TempDir, Router) {
 }
 
 /// Save the binds and leave the rest of both files alone, which is what the
-/// Paths pane's own press sends.
+/// Sandbox binds pane's own press sends.
 async fn save_paths(app: &Router, binds: &[&str]) -> SettingsSaved {
     save(
         app,

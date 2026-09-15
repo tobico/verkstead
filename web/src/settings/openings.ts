@@ -9,9 +9,9 @@
 //! Two shapes under the settings, because there are two kinds of thing the
 //! pane draws:
 //!
-//! - `git`, `languages`, `paths`, `cleanup`, `remote` and `repos` —
+//! - `git`, `languages`, `sandbox-binds`, `cleanup`, `remote` and `repos` —
 //!   everything git is told, the languages a session gets build support for,
-//!   the directories Verkstead may work in, what becomes of an archived
+//!   the extra paths every sandbox gets, what becomes of an archived
 //!   Conversation, whether this machine can be reached from a phone, and the
 //!   Repos that are registered, each named by a word. There is one of each of
 //!   them, and a word says so.
@@ -39,8 +39,8 @@
 //! picked rather than a promise that it is still there.
 
 /// The openings named by a word rather than by an id: everything git is told,
-/// the languages a session gets build support for, the paths Verkstead has been
-/// told about, what becomes of an archived Conversation, how this machine is
+/// the languages a session gets build support for, the extra paths every
+/// sandbox gets, what becomes of an archived Conversation, how this machine is
 /// reached from a phone and which Repos are registered — the things there is
 /// exactly one of on this page.
 ///
@@ -58,7 +58,7 @@
 export const WORDS = [
   "git",
   "languages",
-  "paths",
+  "sandbox-binds",
   "cleanup",
   "remote",
   "repos",

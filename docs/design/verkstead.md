@@ -214,8 +214,8 @@ flowchart LR
   half was configuration the workbench could not draw and a second rule to read
   every entry by. The flag refuses one by name; an entry still in it in
   `config.yaml` reaches no session, draws no row and is dropped from the file by
-  the next save the Paths pane makes. It is the only path list left of the
-  two that were said this way (*revised 2026-09-06, onboarding stage 01*: the
+  the next save the Sandbox binds pane makes. It is the only path list left of
+  the two that were said this way (*revised 2026-09-06, onboarding stage 01*: the
   watched paths were the other, and went). The two sets union, and each keeps
   its own answer to a bind that is not there: the flag's refuses startup, the
   setting's is skipped for that session with a line in the log. What makes the
@@ -244,8 +244,8 @@ flowchart LR
   and is now about defaults rather than about who may configure it: this hole is
   one directory of Verkstead's own making, holding nothing but build output, so
   it can be opened for somebody who never asked and the only control over it is
-  the one that *takes it away*. Every bind on the Paths pane is somebody else's
-  directory, and is opened only because it was typed there.
+  the one that *takes it away*. Every bind on the Sandbox binds pane is somebody
+  else's directory, and is opened only because it was typed there.
 - **Companion repos** (*settled 2026-08-27, staging companion-repos — being
   built by that roadmap*): a conversation may add other registered repos to its
   sandbox, each read-only or read-write. Configured while the brief drafts — an
@@ -969,11 +969,17 @@ Timeline events:
   `/settings/build-cache`, whose card said how the cache stood in a sentence and
   whose pane held a switch, a paragraph about it and the size; the old slug is no
   such page rather than a redirect, the way `/profiles` and `/repos` were
-  retired), and **Paths**, whose card counts the global binds and whose pane
-  edits them (*added 2026-08-30, grilling configurable-paths*; *revised 2026-09-06,
-  onboarding stage 01*: it counted the watched paths as well and its pane edited
-  both). The Paths card sits directly below the Repos (*revised 2026-09-06,
-  onboarding stage 01*: it sat directly above them, because a watched path was
+  retired), and **Sandbox binds**, whose card counts the paths every sandbox
+  gets and whose pane edits them (*added 2026-08-30, grilling
+  configurable-paths*; *revised 2026-09-06, onboarding stage 01*: it counted the
+  watched paths as well and its pane edited both; *revised 2026-09-15, building
+  settings-ui-tidy*: it was **Paths** at `/settings/paths`, over a pane holding
+  one **Sandbox binds** subsection and a paragraph about what each entry widens
+  — that subsection is the section now, at `/settings/sandbox-binds`, its one
+  line says what the section configures, and what it counts and adds is a
+  *path*; the old slug is no such page rather than a redirect). The Sandbox
+  binds card sits directly below the Repos (*revised 2026-09-06, onboarding
+  stage 01*: it sat directly above them, because a watched path was
   what a Repo was registered from and a machine with none had nothing to put on
   that list — with the boundary gone the Repos are what a machine is set up by
   and the binds are the afterthought). **Every bind is a row on the pane and a
@@ -981,8 +987,8 @@ Timeline events:
   2026-09-15, building settings-ui-tidy*: a bind written for a registered Repo
   was drawn on that Repo's own pane, under a **Sandbox configuration** heading,
   and one written for a name nothing held was drawn here as a stray saying so;
-  both went with the grammar that made them). The Paths card's count of entries
-  the server cannot see is what the warning on it is drawn from: a bind that has
+  both went with the grammar that made them). That card's count of entries the
+  server cannot see is what the warning on it is drawn from: a bind that has
   quietly stopped resolving is what nobody goes looking for. What is on a card is
   what a list is scanned for and the rest is in the pane — a Profile's
   mounted paths, agent type and Remove; Language support's checkbox per language
