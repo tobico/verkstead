@@ -9,12 +9,12 @@
 //! Three shapes under the settings, because there are three kinds of thing the
 //! pane draws:
 //!
-//! - `github`, `build-cache`, `paths`, `conflicts`, `cleanup` and `remote` —
-//!   the credentials, the shared Rust build cache, the directories Verkstead
-//!   may work in, how a conflicted pull request is resolved, what becomes of an
-//!   archived Conversation, and whether this machine can be reached from a
-//!   phone, each named by a word. There is one of each of them, and a word says
-//!   so.
+//! - `github`, `languages`, `paths`, `conflicts`, `cleanup` and `remote` —
+//!   the credentials, the languages a session gets build support for, the
+//!   directories Verkstead may work in, how a conflicted pull request is
+//!   resolved, what becomes of an archived Conversation, and whether this
+//!   machine can be reached from a phone, each named by a word. There is one of
+//!   each of them, and a word says so.
 //! - `profiles/:id` — an Agent Profile, which arrives with an id of its own,
 //!   and `profiles/new` for the blank form that adds one.
 //! - `repos/:id` — a registered Repo, opened; and `repos/new` for the path
@@ -37,10 +37,10 @@
 //! picked rather than a promise that it is still there.
 
 /// The openings named by a word rather than by an id: the credentials, the
-/// shared Rust build cache, the paths Verkstead has been told about, how a
-/// conflicted pull request is resolved, what becomes of an archived
-/// Conversation and how this machine is reached from a phone — the things there
-/// is exactly one of on this page.
+/// languages a session gets build support for, the paths Verkstead has been
+/// told about, how a conflicted pull request is resolved, what becomes of an
+/// archived Conversation and how this machine is reached from a phone — the
+/// things there is exactly one of on this page.
 ///
 /// A list rather than a word written wherever one is needed, because three
 /// separate things read it and all three have to agree: the [`Opening`] below is
@@ -55,7 +55,7 @@
 /// — and a word added here arrives with the route that reaches it.
 export const WORDS = [
   "github",
-  "build-cache",
+  "languages",
   "paths",
   "conflicts",
   "cleanup",

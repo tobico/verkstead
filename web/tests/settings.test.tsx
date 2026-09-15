@@ -54,7 +54,7 @@ import repoList from "../src/repos/RepoList.module.css";
 import card from "../src/CardButton.module.css";
 import { GithubCard, GithubPane } from "../src/settings/Credentials";
 import styles from "../src/settings/Credentials.module.css";
-import buildCache from "../src/settings/BuildCache.module.css";
+import languages from "../src/settings/Languages.module.css";
 import paths from "../src/settings/Paths.module.css";
 import {
   SettingsPage,
@@ -1198,7 +1198,7 @@ describe("the settings page", () => {
   /// One page for everything the human configures: what Verkstead itself was
   /// told, and the two things a Conversation is settled against — in the reading
   /// order a fresh install needs them in.
-  it("holds the credentials, the build cache, the paths, the profiles and the repos", async () => {
+  it("holds the credentials, the languages, the paths, the profiles and the repos", async () => {
     const { container } = thePage();
 
     const settings = panes(container)[1]!;
@@ -1206,7 +1206,7 @@ describe("the settings page", () => {
     // The repo names are on the New conversation menu as well as on this list,
     // so each list is waited for inside the pane it belongs to.
     await drawn(settings, `.${styles.githubCard}`);
-    await drawn(settings, `.${buildCache.buildCacheCard}`);
+    await drawn(settings, `.${languages.languagesCard}`);
     await drawn(settings, `.${paths.pathsCard}`);
     await drawn(settings, `.${profileList.profiles} .${profileList.profile}`);
     await drawn(settings, `.${repoList.repos} .${repoList.repo}`);
@@ -1329,18 +1329,18 @@ describe("the path a details pane stands at", () => {
     await waitFor(() => expect(history.get()).toBe("/"));
   });
 
-  /// The build cache is the other pane a word names, and it opens the way the
+  /// The languages are the other pane a word names, and they open the way the
   /// credentials do.
-  it("opens the build cache at /settings/build-cache, replacing", async () => {
+  it("opens the languages at /settings/languages, replacing", async () => {
     const { container, history } = thePage();
 
     const face = await drawn<HTMLElement>(
       container,
-      `.${buildCache.buildCacheCard}`,
+      `.${languages.languagesCard}`,
     );
     fireEvent.click(face);
 
-    await waitFor(() => expect(history.get()).toBe("/settings/build-cache"));
+    await waitFor(() => expect(history.get()).toBe("/settings/languages"));
 
     history.back();
     await waitFor(() => expect(history.get()).toBe("/"));
@@ -1370,14 +1370,14 @@ describe("the path a details pane stands at", () => {
     expect(face.classList).toContain(card.open);
   });
 
-  it("draws the switch in the details pane, and reads the cache card as open", async () => {
-    const { container } = thePage("/settings/build-cache");
+  it("draws the checkbox in the details pane, and reads the languages card as open", async () => {
+    const { container } = thePage("/settings/languages");
 
-    await waitFor(() => screen.getByRole("switch", { name: /build cache/i }));
+    await waitFor(() => screen.getByRole("checkbox", { name: "Rust" }));
 
     const face = await drawn<HTMLElement>(
       container,
-      `.${buildCache.buildCacheCard}`,
+      `.${languages.languagesCard}`,
     );
     expect(face.getAttribute("aria-pressed")).toBe("true");
     expect(face.classList).toContain(card.open);
@@ -1651,7 +1651,7 @@ describe("the path a details pane stands at", () => {
 describe("where a settings details pane stands", () => {
   it("puts an id behind a segment of its own, and a word beside it", () => {
     expect(pathTo("github")).toBe("/settings/github");
-    expect(pathTo("build-cache")).toBe("/settings/build-cache");
+    expect(pathTo("languages")).toBe("/settings/languages");
     expect(pathTo(opensProfile(7))).toBe("/settings/profiles/7");
     expect(pathTo(opensProfile("new"))).toBe("/settings/profiles/new");
     expect(pathTo(opensRepo(7))).toBe("/settings/repos/7");
@@ -1661,7 +1661,7 @@ describe("where a settings details pane stands", () => {
   it("reads back everything it writes", () => {
     for (const opening of [
       "github",
-      "build-cache",
+      "languages",
       opensProfile(7),
       opensProfile("new"),
       opensRepo(7),

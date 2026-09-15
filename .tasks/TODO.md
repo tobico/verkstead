@@ -21,7 +21,7 @@ same change.
 ## Tasks
 
 - [x] 01: The per-repo conflict override goes end to end — [details](01-per-repo-override-goes.md)
-- [ ] 02: A plain checkbox with a nested group, proven on Language support — [details](02-checkbox-and-language-support.md)
+- [x] 02: A plain checkbox with a nested group, proven on Language support — [details](02-checkbox-and-language-support.md)
 - [ ] 03: The Git section — [details](03-the-git-section.md)
 - [ ] 04: Cleanup nests its days under two checkboxes — [details](04-cleanup.md)
 - [ ] 05: Remote access is a checkbox that will not lock you out — [details](05-remote-access.md)

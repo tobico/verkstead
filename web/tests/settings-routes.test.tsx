@@ -85,4 +85,14 @@ describe("the settings page's own paths", () => {
   it("refuses a path that names no pane", () => {
     expect(at(`${SETTINGS}/nonsense`)).toBe(MISSED);
   });
+
+  /// A slug a section used to stand at goes the same way. The build cache pane
+  /// became Language support and moved to `/settings/languages`; the word it
+  /// left behind is no such page rather than a redirect, the way `/profiles` and
+  /// `/repos` were retired when those pages folded into this one. A link
+  /// somebody kept is a record of what was picked rather than a promise that it
+  /// is still there.
+  it("refuses the slug a section has moved off", () => {
+    expect(at(`${SETTINGS}/build-cache`)).toBe(MISSED);
+  });
 });

@@ -229,8 +229,8 @@ flowchart LR
   grilling shared-rust-build-cache*; it was written up as "the one deliberate
   exception" to an installer-only rule the bullet above no longer states —
   *revised 2026-08-30, grilling configurable-paths*). It is a hole the
-  **server** opens in every sandbox by default, and the switch that closes it is
-  in the workbench settings. It was taken on the rule that *a human should never
+  **server** opens in every sandbox by default, and the checkbox that closes it
+  is in the workbench settings. It was taken on the rule that *a human should never
   have a worse experience for not having checked the settings*: every
   conversation cold-built otherwise, because `target/` is inside a worktree that
   is deleted on close and the cargo registry landed in a per-session tmpfs
@@ -485,7 +485,7 @@ flowchart LR
     concurrent sessions and artifacts collide across feature sets. One global
     cache for every repo and every profile — cross-project poisoning was raised
     and accepted, sessions already sharing one uid and the whole host network.
-    The switch and the size are `rust_build_cache` in `config.yaml`, read at
+    The checkbox and the size are `rust_build_cache` in `config.yaml`, read at
     every spawn, so a change applies to the next session; absent means on at
     30G. Named for Rust so a sibling can stand beside it later.
 
@@ -940,10 +940,15 @@ Timeline events:
 - **The page is read as cards and panes** (*settled 2026-08-29, building
   settings-redesign*). Everything on it that used to open a modal is a card in
   the middle pane and a details pane beside it: the credentials as one github
-  card, each Agent Profile, each registered Repo — the shared Rust build cache,
-  whose card says how it stands and whose pane holds the switch and the size,
-  and **Paths**, whose card counts the global binds and whose pane edits them
-  (*added 2026-08-30, grilling configurable-paths*; *revised 2026-09-06,
+  card, each Agent Profile, each registered Repo — **Language support**, whose
+  card lists the languages a session gets build support for and whose pane holds
+  the checkbox per language and the configuration hanging off it (*revised
+  2026-09-15, building settings-ui-tidy*: it was **Rust build cache** at
+  `/settings/build-cache`, whose card said how the cache stood in a sentence and
+  whose pane held a switch, a paragraph about it and the size; the old slug is no
+  such page rather than a redirect, the way `/profiles` and `/repos` were
+  retired), and **Paths**, whose card counts the global binds and whose pane
+  edits them (*added 2026-08-30, grilling configurable-paths*; *revised 2026-09-06,
   onboarding stage 01*: it counted the watched paths as well and its pane edited
   both). The Paths card sits directly below the Repos (*revised 2026-09-06,
   onboarding stage 01*: it sat directly above them, because a watched path was
@@ -961,12 +966,30 @@ Timeline events:
   goes looking for. What is on a card is what a list is scanned for
   and the rest is in the pane — a Profile's mounted paths, agent type and
   Remove; a Repo's branches, how much work is on it, what it is holding that
-  nothing is driving and its own binds; the cache's switch and the size of its
-  compiled half. Adding one is a plus icon on the section's heading line, which
-  opens the same pane blank and reads as open while it stands. The two switches
-  that are about the device and the server rather than about anything
-  configured stay as they were: notifications on the pane head's line, and the
-  update banner above everything.
+  nothing is driving and its own binds; Language support's checkbox per language
+  and the size of the Rust cache's compiled half. Adding one is a plus icon on
+  the section's heading line, which opens the same pane blank and reads as open
+  while it stands. The two switches that are about the device and the server
+  rather than about anything configured stay as they were: notifications on the
+  pane head's line, and the update banner above everything.
+- **On the settings page an on/off control is a plain checkbox, and what hangs
+  off one is indented under it and greyed while it is off** (*settled
+  2026-09-15, building settings-ui-tidy*). The painted switch stays where it
+  was — it is a device setting offered inside a page about something else, and a
+  track that slides says *this is a thing you flip*. The settings page is a
+  form, and a form's answer to *is this on* is the box the browser has drawn
+  for that question since there were browsers: no paint over it, the platform's
+  own tick and focus ring, and the accent it fills with taken from the page. It
+  keeps the switch's one rule, that a control says where things stand rather
+  than where somebody pressed — a tick is a request, the box goes straight back,
+  and only the answer arriving moves it. Configuration that means nothing while
+  its checkbox is off sits in a disabled `fieldset` under it: one attribute, and
+  the browser greys every field and press inside, takes them out of the tab
+  order and refuses input. Disabled rather than `readonly`, and greyed rather
+  than hidden — a field that vanished would say the setting had, and it has not.
+  A group may be off for a reason of its own as well as for the box above it:
+  the Rust cache's size is sccache's own word, so a server with no sccache has
+  nowhere to put it, and the warning saying so stands between the two.
 - **A Repo can be taken off the registry** from its own pane (*settled
   2026-08-29, building settings-redesign*) — an unregistering rather than a
   delete, refused while live work is on it. See **Repo** in `CONTEXT.md` for

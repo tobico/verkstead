@@ -1,16 +1,22 @@
-//! The shared Rust build cache on the settings page: what the card says of it,
-//! what the switch in its pane puts on the wire, and the size beside it.
+//! Language support on the settings page: which languages the card names, what
+//! the checkbox in its pane puts on the wire, and the size that hangs off it.
 //!
 //! Two halves mounted apart, because that is what they are: a card in the middle
-//! pane saying how the cache stands, and the controls that change it in the
-//! details pane it opens. Each is mounted on its own, and the pair together only
-//! where the round trip is what is being asked about.
+//! pane naming the languages that have build support on, and the controls that
+//! change them in the details pane it opens. Each is mounted on its own, and the
+//! pair together only where the round trip is what is being asked about.
 //!
-//! Two saves and one endpoint. The switch is its own press, because a switch
-//! that needed a second one is not a switch; the size is typed, so it waits for
-//! a Save. Both send the whole of the settings edit — the author as it stands
-//! and the token untouched — because the server writes both files in one
-//! request, and that is what these check is not lost.
+//! Two saves and one endpoint. The checkbox is its own press, because a box that
+//! needed a second one is not a box; the size is typed, so it waits for a Save.
+//! Both send the whole of the settings edit — the author as it stands and the
+//! token untouched — because the server writes both files in one request, and
+//! that is what these check is not lost.
+//!
+//! And the size is nested under the checkbox, which is the page's pattern for
+//! configuration that only means something while something else is on: it is
+//! greyed and refuses input while the box is unticked, and again while there is
+//! no sccache to read it. Both of those are here, because the second is the one
+//! nobody would think to try.
 //!
 //! The read is a fixture the server's own tests wrote, so what the page is
 //! drawn from is the shape the endpoint really answers with.
@@ -22,8 +28,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { SettingsSaved, SettingsView } from "../src/api/types";
 import card from "../src/CardButton.module.css";
-import { BuildCacheCard, BuildCachePane } from "../src/settings/BuildCache";
-import styles from "../src/settings/BuildCache.module.css";
+import check from "../src/Check.module.css";
+import { LanguagesCard, LanguagesPane } from "../src/settings/Languages";
+import styles from "../src/settings/Languages.module.css";
 import { json, serving, whenever } from "./serving";
 import told from "./fixtures/settings.json" with { type: "json" };
 import unset from "./fixtures/settings-unset.json" with { type: "json" };
@@ -72,7 +79,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/// Whatever half of the cache a test is about, over one query client: both
+/// Whatever half of the section a test is about, over one query client: both
 /// halves read the same two files, so a test mounting the pair is reading them
 /// once, exactly as the page does.
 function mounting(what: () => JSX.Element) {
@@ -89,7 +96,7 @@ function mounting(what: () => JSX.Element) {
 function mountCard(open = false) {
   const press = vi.fn();
   return {
-    ...mounting(() => <BuildCacheCard open={open} press={press} />),
+    ...mounting(() => <LanguagesCard open={open} press={press} />),
     press,
   };
 }
@@ -97,7 +104,7 @@ function mountCard(open = false) {
 /// The controls in the details pane, and what its way back asked for.
 function mountPane() {
   const back = vi.fn();
-  return { ...mounting(() => <BuildCachePane back={back} />), back };
+  return { ...mounting(() => <LanguagesPane back={back} />), back };
 }
 
 function theSettings(
@@ -125,36 +132,50 @@ function sent(fetching: ReturnType<typeof serving>): unknown {
 async function theCard(container: ParentNode): Promise<HTMLElement> {
   return await waitFor(() => {
     const face = container.querySelector<HTMLElement>(
-      `.${styles.buildCacheCard}`,
+      `.${styles.languagesCard}`,
     );
     expect(face, "expected the card to be drawn").not.toBeNull();
     return face!;
   });
 }
 
-function theSwitch(): HTMLInputElement {
-  return screen.getByRole("switch") as HTMLInputElement;
+/// The one checkbox on the pane, which is the language itself.
+function theCheck(): HTMLInputElement {
+  return screen.getByRole("checkbox", { name: "Rust" }) as HTMLInputElement;
+}
+
+/// And the group hanging off it, which holds the size.
+function theGroup(container: ParentNode): HTMLFieldSetElement {
+  const group = container.querySelector<HTMLFieldSetElement>(
+    `.${check.nested}`,
+  );
+  expect(group, "expected the nested group to be drawn").not.toBeNull();
+  return group!;
 }
 
 describe("the card", () => {
-  /// The whole shape of the feature, said in the one line somebody scanning the
-  /// page reads: nobody has to open anything for their sessions to share a
-  /// cache.
-  it("says the crates are downloaded once for the machine", async () => {
+  /// The summary is the list of languages that have build support on, which
+  /// today is the one word.
+  it("names Rust while the cache is on", async () => {
     theSettings(compiling(UNSET));
-    mountCard();
+    const { container } = mountCard();
 
-    await waitFor(() => screen.getByText(/downloaded/));
-    expect(screen.getByText(/downloaded/).textContent).toContain(
-      "and compiled once for this machine",
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${styles.standing}`)?.textContent,
+      ).toBe("Rust"),
     );
   });
 
-  it("says so where the cache is switched off", async () => {
+  /// And nothing at all under the heading where none are: a card saying a
+  /// machine builds nothing would be a line nobody needs.
+  it("says nothing under the heading while it is off", async () => {
     theSettings(off(TOLD));
-    mountCard();
+    const { container } = mountCard();
 
-    await waitFor(() => screen.getByText(/^Off,/));
+    const face = await theCard(container);
+    expect(face.textContent).toBe("Language support");
+    expect(container.querySelector(`.${styles.standing}`)).toBeNull();
   });
 
   /// What the human cannot fix from the browser, said where they would
@@ -174,9 +195,9 @@ describe("the card", () => {
   /// there is a cache to share them.
   it("says nothing about sccache while the cache is switched off", async () => {
     theSettings(off(UNSET));
-    mountCard();
+    const { container } = mountCard();
 
-    await waitFor(() => screen.getByText(/^Off,/));
+    await theCard(container);
     expect(screen.queryByText(/No sccache is installed/)).toBeNull();
   });
 
@@ -184,7 +205,7 @@ describe("the card", () => {
     theSettings(compiling(UNSET));
     mountCard();
 
-    await waitFor(() => screen.getByText(/downloaded/));
+    await waitFor(() => screen.getByText("Rust"));
     expect(screen.queryByText(/No sccache is installed/)).toBeNull();
   });
 
@@ -219,32 +240,78 @@ describe("the card", () => {
   });
 });
 
-describe("the cache as the pane draws it", () => {
-  /// The switch says where the cache stands rather than whether anybody has
+describe("the languages as the pane draws them", () => {
+  /// The box says where the cache stands rather than whether anybody has
   /// touched it, which is what an unconfigured cache being on means.
   it("reads as on where nothing has been configured", async () => {
     theSettings(UNSET);
     mountPane();
 
-    await waitFor(() => expect(theSwitch().checked).toBe(true));
+    await waitFor(() => expect(theCheck().checked).toBe(true));
   });
 
-  it("says when there is no sccache for the server to compile through", async () => {
+  /// The size is sccache's own word, so a server without one has nothing to
+  /// read it — and the field is greyed rather than taken away, because the
+  /// setting has not gone anywhere.
+  it("greys the size where there is no sccache to read it", async () => {
     theSettings(UNSET);
-    mountPane();
+    const { container } = mountPane();
 
     await waitFor(() => screen.getByText(/No sccache is installed/));
 
-    // And no size field, because the size is sccache's own and there is no
-    // sccache to read it.
-    expect(screen.queryByLabelText(/How large/)).toBeNull();
+    expect(theCheck().checked).toBe(true);
+    expect(theGroup(container).disabled).toBe(true);
+    expect(screen.getByLabelText(/How large/).matches(":disabled")).toBe(true);
+    expect(
+      screen.getByRole("button", { name: "Save" }).matches(":disabled"),
+    ).toBe(true);
+  });
+
+  /// And greyed again while the box is unticked, which is the other half of the
+  /// pattern: the configuration hanging off a checkbox means nothing while the
+  /// checkbox is off.
+  it("greys the size while the box is unticked", async () => {
+    theSettings(off(compiling(TOLD)));
+    const { container } = mountPane();
+
+    await waitFor(() => expect(theCheck().checked).toBe(false));
+
+    expect(theGroup(container).disabled).toBe(true);
+    expect(screen.getByLabelText(/How large/).matches(":disabled")).toBe(true);
+  });
+
+  /// A greyed group refuses input rather than only looking as though it would:
+  /// the browser will not take the press at all, so nothing is saved.
+  it("refuses a save from the greyed size", async () => {
+    const fetching = theSettings(off(compiling(TOLD)));
+    mountPane();
+
+    await waitFor(() => expect(theCheck().checked).toBe(false));
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(
+      fetching.mock.calls.some(([, init]) => init?.method === "POST"),
+      "a disabled press is no press",
+    ).toBe(false);
+  });
+
+  /// And it takes input where both halves say it means something.
+  it("lets the size be typed where the box is on and sccache is there", async () => {
+    theSettings(compiling(TOLD));
+    const { container } = mountPane();
+
+    await waitFor(() => expect(theCheck().checked).toBe(true));
+
+    expect(theGroup(container).disabled).toBe(false);
+    expect(screen.getByLabelText(/How large/).matches(":disabled")).toBe(false);
   });
 
   it("says nothing about sccache while the cache is switched off", async () => {
     theSettings(off(UNSET));
     mountPane();
 
-    await waitFor(() => expect(theSwitch().checked).toBe(false));
+    await waitFor(() => expect(theCheck().checked).toBe(false));
 
     expect(screen.queryByText(/No sccache is installed/)).toBeNull();
   });
@@ -276,16 +343,16 @@ describe("the cache as the pane draws it", () => {
   });
 });
 
-describe("changing the build cache", () => {
-  /// A switch is its own save. What goes with it is the author as it stands and
-  /// `Keep` for the token: one request writes both files, so a flip here must
-  /// not be able to take the credentials with it.
-  it("saves the moment the switch is flipped, and leaves the credentials alone", async () => {
+describe("changing the languages", () => {
+  /// A checkbox is its own save. What goes with it is the author as it stands
+  /// and `Keep` for the token: one request writes both files, so a tick here
+  /// must not be able to take the credentials with it.
+  it("saves the moment the box is ticked, and leaves the credentials alone", async () => {
     const fetching = theSettings(TOLD, json(answering(off(TOLD))));
     mountPane();
 
-    await waitFor(() => expect(theSwitch().checked).toBe(true));
-    fireEvent.click(theSwitch());
+    await waitFor(() => expect(theCheck().checked).toBe(true));
+    fireEvent.click(theCheck());
 
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
@@ -307,8 +374,8 @@ describe("changing the build cache", () => {
       }),
     );
 
-    // And the switch follows the answer rather than the press.
-    await waitFor(() => expect(theSwitch().checked).toBe(false));
+    // And the box follows the answer rather than the press.
+    await waitFor(() => expect(theCheck().checked).toBe(false));
   });
 
   /// The size is typed, so it waits for a press: nothing is committed while
@@ -376,19 +443,25 @@ describe("changing the build cache", () => {
 
   /// What the pane saved is what the card goes back to saying, because the
   /// answer is a fresh read of the files that both halves are drawn from.
-  it("says on the card what the pane switched off", async () => {
+  it("takes Rust off the card when the pane unticks it", async () => {
     theSettings(TOLD, json(answering(off(TOLD))));
-    mounting(() => (
+    const { container } = mounting(() => (
       <>
-        <BuildCacheCard open press={() => {}} />
-        <BuildCachePane back={() => {}} />
+        <LanguagesCard open press={() => {}} />
+        <LanguagesPane back={() => {}} />
       </>
     ));
 
-    await waitFor(() => expect(theSwitch().checked).toBe(true));
-    fireEvent.click(theSwitch());
+    await waitFor(() => expect(theCheck().checked).toBe(true));
+    expect(container.querySelector(`.${styles.standing}`)?.textContent).toBe(
+      "Rust",
+    );
 
-    await waitFor(() => screen.getByText(/^Off,/));
+    fireEvent.click(theCheck());
+
+    await waitFor(() =>
+      expect(container.querySelector(`.${styles.standing}`)).toBeNull(),
+    );
   });
 
   /// A save that would not land keeps the page honest about it: a settings page
@@ -403,8 +476,8 @@ describe("changing the build cache", () => {
     );
     mountPane();
 
-    await waitFor(() => expect(theSwitch().checked).toBe(true));
-    fireEvent.click(theSwitch());
+    await waitFor(() => expect(theCheck().checked).toBe(true));
+    fireEvent.click(theCheck());
 
     await waitFor(() => screen.getByText(/could not be saved/));
   });

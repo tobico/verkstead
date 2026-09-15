@@ -599,8 +599,8 @@ so a crate is downloaded once for the machine rather than once per
 Conversation. The other half, the compiled objects, wants an `sccache` on the
 `PATH` the server was started from: with one there, every session's `rustc`
 goes through the single Compile Server Verkstead runs, and a dependency is
-compiled once for the machine too. The workbench's build cache page says which
-of the two you have.
+compiled once for the machine too. The workbench's Language support page says
+which of the two you have.
 
 **The toolchain a session builds with is the one you installed.** `rustup`'s
 shims are on your `PATH` already, and the rustup home they resolve a toolchain

@@ -1,5 +1,6 @@
-//! The shared Rust build cache, on the settings page: whether sessions get one,
-//! and how big its compiled half may grow.
+//! Which languages a session gets build support for, on the settings page:
+//! today that is Rust, and what it means is the shared build cache every
+//! sandbox is given and how big its compiled half may grow.
 //!
 //! One of two things on this page that are about a **Sandbox** rather than about
 //! who Verkstead is — the Paths section is the other — and the only one of the
@@ -10,26 +11,32 @@
 //!
 //! It is on with nothing configured, which is the whole shape of the feature: a
 //! human should not have a slower machine for never having found this section.
-//! So the switch says where it stands rather than whether anybody has touched
+//! So the checkbox says where it stands rather than whether anybody has touched
 //! it, and the size field shows the default as a placeholder rather than as a
 //! value somebody chose.
 //!
 //! Two halves in two panes, which is what the settings page is: a card in the
-//! middle pane saying how the cache stands, and the controls that change it in
-//! the details pane it opens, at `/settings/build-cache`. What the human cannot
-//! fix from the browser — no sccache where the server can see one — is on the
-//! card as well as in the pane, the way the credentials' warnings are: whoever
-//! needs to read it is precisely whoever is not editing.
+//! middle pane naming the languages that have build support on, and the controls
+//! that change them in the details pane it opens, at `/settings/languages`. What
+//! the human cannot fix from the browser — no sccache where the server can see
+//! one — is on the card as well as in the pane, the way the credentials'
+//! warnings are: whoever needs to read it is precisely whoever is not editing.
 //!
 //! Both halves read the one query, which is the one the credentials above them
 //! read: one payload holds both files, and a read apiece would be two opinions
 //! about what is saved.
 //!
-//! Two ways to save, because there are two kinds of control. The switch saves
-//! itself the moment it is flipped, the way the notifications switch does — a
-//! switch that needed a second press to mean anything is not a switch. The size
-//! is typed, so it saves on a press of its own; nothing is committed while
-//! somebody is still halfway through writing `30`.
+//! Two ways to save, because there are two kinds of control. The checkbox saves
+//! itself the moment it is ticked — a box that needed a second press to mean
+//! anything is not a box. The size is typed, so it saves on a press of its own;
+//! nothing is committed while somebody is still halfway through writing `30`.
+//!
+//! The size hangs off the checkbox, which is the page's one pattern for
+//! configuration that only means something while something else is on: indented
+//! under the box it belongs to, and disabled while that box is off — see
+//! [`Nested`]. It is disabled for a second reason here as well, and the reason
+//! is the warning above it: the size is sccache's own, so a server with no
+//! sccache has nothing to read it.
 //!
 //! Both go through the one settings endpoint, which writes both files: the
 //! author rides along as it stands and the token is left alone, so saving a
@@ -39,15 +46,19 @@ import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Match, Show, Switch as Choose, createSignal, type JSX } from "solid-js";
 
 import { CardButton } from "../CardButton";
+import { Check, Nested } from "../Check";
 import { PaneSticky } from "../Panes";
-import { Switch } from "../Switch";
 import { loadSettings, saveSettings } from "../api/client";
 import type { BuildCacheView, SettingsSaved, SettingsView } from "../api/types";
 import { useReading } from "../freshness";
-import { Empty, ErrorLine, Note } from "../notices";
+import { Empty, ErrorLine } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
 import { heldCleanup, heldPaths } from "./held";
-import styles from "./BuildCache.module.css";
+import styles from "./Languages.module.css";
+
+/// What the section is called, wherever it names itself: the card's heading and
+/// the pane's head.
+const TITLE = "Language support";
 
 /// The settings as they stand, read once for the two panes that draw them.
 ///
@@ -101,13 +112,32 @@ function warned(cache: BuildCacheView): boolean {
   return cache.enabled && cache.compiles !== "Cached";
 }
 
-/// The cache as it stands, as the card that opens it.
+/// Whether the size hanging off the checkbox means anything.
 ///
-/// What is on the card is what somebody scanning the page is after: whether
-/// sessions share a cache at all, how large its compiled half may grow, and the
-/// one thing about it that wants doing somewhere else. The controls are in the
-/// pane.
-export function BuildCacheCard(props: {
+/// The checkbox being on and an sccache being there to read it: the size is
+/// sccache's own word, so a server without one has nowhere to put it. Both are
+/// the group's *off*, and the group is drawn greyed rather than taken away —
+/// a field that vanished would say the setting had, and it has not.
+function sizeable(cache: BuildCacheView): boolean {
+  return cache.enabled && cache.compiles === "Cached";
+}
+
+/// What has build support switched on, in the words the card names them by.
+///
+/// One language today, and the cache's switch is the whole of whether it is on.
+/// A list rather than a sentence, because that is what the card says: the
+/// languages a session can build, and nothing under the heading where there are
+/// none.
+function languages(cache: BuildCacheView): string[] {
+  return cache.enabled ? ["Rust"] : [];
+}
+
+/// What has build support, as the card that opens it.
+///
+/// What is on the card is what somebody scanning the page is after: which
+/// languages a session builds with help, and the one thing about that which
+/// wants doing somewhere else. The controls are in the pane.
+export function LanguagesCard(props: {
   /// Whether the pane beside this is the one that is open.
   open: boolean;
   /// What pressing it does, which is opening that pane.
@@ -129,29 +159,17 @@ export function BuildCacheCard(props: {
         {(cache) => (
           <CardButton
             as="article"
-            class={styles.buildCacheCard}
+            class={styles.languagesCard}
             open={props.open}
             press={props.press}
           >
-            <h2>Rust build cache</h2>
+            <h2>{TITLE}</h2>
 
             <Show when={warned(cache())}>{uncompiled()}</Show>
 
-            <p class={styles.standing}>
-              <Show
-                when={cache().enabled}
-                fallback="Off, so every session downloads and compiles its own crates."
-              >
-                Crates are downloaded{" "}
-                <Show when={cache().compiles === "Cached"}>and compiled </Show>
-                once for this machine
-                <Show when={cache().compiles === "Cached"}>
-                  , in up to <span class={styles.size}>{cache().size}</span> of
-                  compiled output
-                </Show>
-                .
-              </Show>
-            </p>
+            <Show when={languages(cache()).length > 0}>
+              <p class={styles.standing}>{languages(cache()).join(", ")}</p>
+            </Show>
           </CardButton>
         )}
       </Match>
@@ -161,10 +179,10 @@ export function BuildCacheCard(props: {
 
 /// And the controls that change it, which is the details pane the card opens.
 ///
-/// There is no Save over the whole of it and no Cancel: the switch is its own
+/// There is no Save over the whole of it and no Cancel: the checkbox is its own
 /// press and the size has one of its own, and a details pane is left by opening
 /// something else or by the way back a narrow window draws.
-export function BuildCachePane(props: {
+export function LanguagesPane(props: {
   /// The way back to the settings, which is the pane this one was entered from.
   back: () => void;
 }): JSX.Element {
@@ -235,10 +253,7 @@ export function BuildCachePane(props: {
   return (
     <>
       <PaneSticky>
-        <PaneHead
-          back={{ to: "Settings", go: props.back }}
-          title="Rust build cache"
-        />
+        <PaneHead back={{ to: "Settings", go: props.back }} title={TITLE} />
       </PaneSticky>
 
       <Choose>
@@ -252,25 +267,19 @@ export function BuildCachePane(props: {
         </Match>
         <Match when={cache()}>
           {(set) => (
-            <div class={styles.buildCache}>
-              <Switch
-                label="Share one build cache between all sessions"
+            <div class={styles.languages}>
+              <Check
+                label="Rust"
                 on={set().enabled}
                 disabled={save.isPending}
                 flip={flip}
               />
 
-              <Note>
-                Crates are downloaded and compiled once for this machine instead
-                of once per conversation. A change applies to the next session
-                started; one already running keeps what it began with.
-              </Note>
-
               <Show when={warned(set())}>{uncompiled()}</Show>
 
-              {/* The size is sccache's, so it is asked for only where there is
-                  an sccache to read it. */}
-              <Show when={set().enabled && set().compiles === "Cached"}>
+              {/* The size is sccache's, so the group is off where there is no
+                  sccache to read it as well as where the box is unticked. */}
+              <Nested on={sizeable(set())}>
                 <form class={styles.sizing} onSubmit={commit}>
                   <label for="build-cache-size">
                     How large the compiled half may grow
@@ -293,7 +302,7 @@ export function BuildCachePane(props: {
                     </button>
                   </div>
                 </form>
-              </Show>
+              </Nested>
 
               <Show when={save.isError}>
                 <ErrorLine class={styles.failure}>

@@ -8,8 +8,8 @@
 //! out of the workbench to set a machine up, and a sidebar naming each of them;
 //! folded together they are sections of one pane, read down in the order a
 //! fresh install needs them: credentials first, because without them nothing a
-//! session does with a Repo can be pushed, then the shared Rust build cache
-//! every session builds into, then where the share viewer is hosted, then how a
+//! session does with a Repo can be pushed, then the languages a session gets
+//! build support for, then where the share viewer is hosted, then how a
 //! conflicted pull request is resolved, then what becomes of a Conversation
 //! once it is archived, then whether this machine can be reached from a phone,
 //! then the Agent Profiles and the Repos a Conversation is settled against, and
@@ -53,10 +53,10 @@ import { UpdateNotice } from "../update/UpdateNotice";
 import { Conversations } from "../workbench/Conversations";
 import { PaneHead } from "../workbench/PaneHead";
 import { pathOf } from "../workbench/openings";
-import { BuildCacheCard, BuildCachePane } from "./BuildCache";
 import { CleanupCard, CleanupPane } from "./Cleanup";
 import { ConflictsCard, ConflictsPane } from "./Conflicts";
 import { GithubCard, GithubPane } from "./Credentials";
+import { LanguagesCard, LanguagesPane } from "./Languages";
 import { PathsCard, PathsPane } from "./Paths";
 import { RemoteCard, RemotePane } from "./Remote";
 import {
@@ -216,15 +216,16 @@ function Settings(props: {
           open={props.opening === "github"}
           press={() => props.select("github")}
         />
-        {/* Under the credentials and above the lists: it is the other thing
-            Verkstead itself was told rather than anything a Conversation is
-            settled against. One of the two sections about what a session runs
-            inside, and the one that is on without anybody having been here —
-            which is why it reads beside the credentials rather than down with
-            the Paths, where everything is somebody's own typing. */}
-        <BuildCacheCard
-          open={props.opening === "build-cache"}
-          press={() => props.select("build-cache")}
+        {/* Under the credentials and above the lists: which languages a
+            session gets build support for is the other thing Verkstead itself
+            was told rather than anything a Conversation is settled against. One
+            of the two sections about what a session runs inside, and the one
+            that is on without anybody having been here — which is why it reads
+            beside the credentials rather than down with the Paths, where
+            everything is somebody's own typing. */}
+        <LanguagesCard
+          open={props.opening === "languages"}
+          press={() => props.select("languages")}
         />
         {/* And the last thing Verkstead itself was told: what a session sent at
             a pull request that will not merge is told to do about it. Last
@@ -323,8 +324,8 @@ function Details(props: {
       <Match when={props.opening === "github"}>
         <GithubPane back={props.back} />
       </Match>
-      <Match when={props.opening === "build-cache"}>
-        <BuildCachePane back={props.back} />
+      <Match when={props.opening === "languages"}>
+        <LanguagesPane back={props.back} />
       </Match>
       <Match when={props.opening === "paths"}>
         <PathsPane back={props.back} />

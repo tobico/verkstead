@@ -1,33 +1,30 @@
-/* The shared Rust build cache — see `BuildCache.tsx`.
+/* Which languages a session gets build support for — see `Languages.tsx`.
 
-   Two halves in two panes, like the credentials above it: the card carries how
-   the cache stands and the warning about what the browser cannot fix, and the
-   controls that change it stand in the details pane beside it.
+   Two halves in two panes, like the credentials above it: the card carries the
+   languages that are on and the warning about what the browser cannot fix, and
+   the controls that change them stand in the details pane beside it.
 
    What a card *is* is `CardButton.module.css`'s: the surface, the fill it takes
    while its pane is open, and what it does under the pointer. What is here is
    only what stands on it. */
 
-.buildCacheCard {
+.languagesCard {
   margin-bottom: 1.5rem;
 }
 
-.buildCacheCard h2 {
+.languagesCard h2 {
   margin: 0 0 0.75rem;
   font-size: 1.1rem;
 }
 
-/* How the cache stands, in a line: the same quiet the credentials say what is
-   configured in. */
+/* The languages that are on, in a line: the same quiet the credentials say what
+   is configured in. Nothing at all where none are — there is no line saying a
+   machine builds nothing, because the heading has already said what the card is
+   about. */
 .standing {
   margin: 0;
   font-size: 0.9rem;
   color: var(--ink-soft);
-}
-
-.standing .size {
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  color: var(--ink);
 }
 
 /* Something the human would have to leave the browser to fix. Drawn as a notice
@@ -47,14 +44,14 @@
   font-size: 0.9rem;
 }
 
-/* And the details pane: the switch, what it means, and the size beside them. */
-.buildCache .warning {
+/* And the details pane: the checkbox, what stands in the way of it, and the size
+   hanging off it. */
+.languages .warning {
   margin: 0.85rem 0 0;
 }
 
-.sizing {
-  margin-top: 0.85rem;
-}
+/* The space above the size is the nested group's own — see `Check.module.css`,
+   which is where the indent it is read by lives too. */
 
 .sizing label {
   display: block;
@@ -98,6 +95,10 @@
   opacity: 0.65;
 }
 
+.field input:disabled {
+  cursor: not-allowed;
+}
+
 .failure {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
@@ -108,7 +109,7 @@
 }
 
 @media (hover: hover) {
-  .field input:hover {
+  .field input:not(:disabled):hover {
     border-color: var(--ink-soft);
   }
 
