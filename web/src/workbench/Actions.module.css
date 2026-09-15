@@ -157,8 +157,8 @@
   margin-top: 1rem;
 }
 
-/* The shape both of them take, which is this row's own. The paint is each
-   button's below. */
+/* The shape both of them take, which is this row's own. Said for both of them
+   and over `.secondary`, which is the paint rather than the shape. */
 .confirming .confirmingOut button {
   flex: 1 1 9rem;
   padding: 0.7rem 1rem;
@@ -168,19 +168,20 @@
   cursor: pointer;
 }
 
-/* The way back, which is a secondary press like every other way back in the app
-   — `.secondary` in `styles/base.css` paints it, carried on the button beside
-   this class, and the hover that goes with it is written there too. Named here
-   so the row above can be found and so that it is plain which of the pair is
-   which. */
-.confirming .confirmingKeep {
-}
-
 /* And the press that does the thing, filled — in the accent rather than in the
    red the two closing rows are named in: the colour on the row is what marks a
    press out among the ones around it, and there is nothing here to mark it out
-   from. What it costs is said in the words above it. */
-.confirming .confirmingGo {
+   from. What it costs is said in the words above it.
+
+   The way back beside it is a secondary press like every other way back in the
+   app — `.secondary` in `styles/base.css` paints it, and the hover that goes
+   with it is written there too — and it is stood out of the way here with
+   `:where`, which weighs nothing: a bare `:not` would carry its class into this
+   selector's weight, and a rule written to sit over this press would find
+   itself under it. Which is how `.confirmActions` in `set/Sheet.module.css`
+   tells its own pair apart, this being the third card of that shape in the app
+   and no place to invent a second way. */
+.confirming .confirmingOut button:not(:where(.secondary)) {
   color: var(--paper);
   background: var(--accent);
   border: 1px solid var(--accent);
@@ -192,7 +193,7 @@
     border-color: var(--accent-deep);
   }
 
-  .confirming .confirmingGo:hover {
+  .confirming .confirmingOut button:not(:where(.secondary)):hover {
     background: var(--accent-deep);
     border-color: var(--accent-deep);
   }

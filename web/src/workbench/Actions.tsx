@@ -442,18 +442,17 @@ function Confirm(props: {
         run.
       </p>
       <div class={styles.confirmingOut}>
+        {/* Both classes, as the Set sheet's own confirm pair carry them: the
+            global one is the paint, and the module's is what the row above
+            stands the filled press out of. */}
         <button
           type="button"
-          class={`${styles.confirmingKeep!} secondary`}
+          class={`${styles.secondary!} secondary`}
           onClick={() => props.keep()}
         >
           Keep it running
         </button>
-        <button
-          type="button"
-          class={styles.confirmingGo}
-          onClick={() => props.close()}
-        >
+        <button type="button" onClick={() => props.close()}>
           {props.asked}
         </button>
       </div>

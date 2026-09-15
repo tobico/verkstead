@@ -8448,9 +8448,13 @@ function asked(): Promise<HTMLDialogElement> {
 /// And the press inside it that makes the close it asked about, which is what a
 /// test pressing a close over a running session has to reach for to send
 /// anything at all.
+///
+/// The one of the pair that is not the way back, which is how the card itself
+/// tells them apart — see `.confirmingOut` in `Actions.module.css`, and the
+/// confirm sheet in `set/Sheet.module.css` it takes the idiom from.
 async function confirms(): Promise<HTMLButtonElement> {
   return (await asked()).querySelector<HTMLButtonElement>(
-    `.${actions.confirmingGo}`,
+    `.${actions.confirmingOut} button:not(.${actions.secondary})`,
   )!;
 }
 
