@@ -9928,7 +9928,7 @@ describe("publishing a share", () => {
 
     expect(said.closest(`.${toasts.toast}`)).toBeTruthy();
     expect(
-      said.querySelector<HTMLAnchorElement>('a[href="/settings/github"]'),
+      said.querySelector<HTMLAnchorElement>('a[href="/settings/git"]'),
     ).toBeTruthy();
   });
 
@@ -10066,7 +10066,7 @@ describe("sharing a conversation to its pull requests", () => {
     );
 
     expect(
-      said.querySelector<HTMLAnchorElement>('a[href="/settings/github"]'),
+      said.querySelector<HTMLAnchorElement>('a[href="/settings/git"]'),
     ).toBeTruthy();
   });
 });

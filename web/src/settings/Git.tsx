@@ -1,5 +1,12 @@
-//! The credentials Verkstead has been told, and the one form that tells it: the
-//! GitHub token every session is handed, and who its commits are by.
+//! Everything git is told, on one pane: the GitHub token every session is
+//! handed, who its commits are by, how a conflicted pull request is resolved,
+//! and whether Done shares the record to that pull request.
+//!
+//! **Git**, at `/settings/git`. It was *GitHub and git author* at
+//! `/settings/github`, with the resolution a section of its own at
+//! `/settings/conflicts`; both slugs are no such page now rather than
+//! redirects. One pane, because all four are about the one remote and the one
+//! branch — and a machine is set up by reading them in a row.
 //!
 //! The head of the settings pane rather than a page of its own. What sits under
 //! it there — the Agent Profiles, the Repos — is what a Conversation is settled
@@ -18,10 +25,10 @@
 //! Two halves in two panes, which is what the settings page is now. The card is
 //! a [`CardButton`](../CardButton.tsx) in the middle pane, carrying what is
 //! configured — the token's state, the author, and the warnings about whichever
-//! is missing — and pressing it opens the form in the details pane beside it, at
-//! `/settings/github`. The modal it was is gone: a form that stood over the page
-//! is a pane of its own now, and the card reads as open while that pane is,
-//! which is what every other card in this app says about itself.
+//! is missing — and pressing it opens the form in the details pane beside it.
+//! The modal it was is gone: a form that stood over the page is a pane of its
+//! own now, and the card reads as open while that pane is, which is what every
+//! other card in this app says about itself.
 //!
 //! Both halves read the one query. They are two views of the same two files, and
 //! a read apiece would be two reads of them — the cache is what makes the second
@@ -38,13 +45,37 @@
 //! email address leaves the credentials alone. Clearing is its own press for the
 //! same reason — an empty write-only field means nothing was typed.
 //!
-//! And a third section under that same button: the comments nobody wants an
-//! agent addressing, as a row of two patterns apiece. They are here because
-//! this is the pane about what Verkstead does on somebody else's GitHub. They
-//! travel as an action rather than a value for a reason of their own — a save
-//! is *refused* over a pattern that will not compile — so the rows are sent
-//! only once somebody has touched one, and a save about an email address is
-//! one the server cannot turn down.
+//! Two controls in the pane save themselves rather than waiting for that Save:
+//! the select that says how a conflicted pull request is resolved, and the
+//! checkbox that says whether a Conversation's record is published and linked
+//! on its pull request when the work settles to Done. A pick and a tick are
+//! each their own press — a choice that needed confirming afterwards is a
+//! choice the human has to make twice.
+//!
+//! The sharing checkbox is here rather than in a section of its own because
+//! what it turns on is done with the token above it and under the account that
+//! token belongs to: a control two panes away from the credential it spends
+//! would be one nobody could see the cost of. The select is here because a
+//! conflict is a thing that happens to a branch on a remote, which is the
+//! whole of what this pane is about.
+//!
+//! Both carry the author as the *server* holds it rather than as the fields
+//! hold it — see [`beside`]: neither is a submit, and half a typed email
+//! address is nobody's author. Neither spends the form either, so what was
+//! being typed is still being typed afterwards.
+//!
+//! And a last section under the Save: the comments nobody wants an agent
+//! addressing, as a row of two patterns apiece. They are here because this is
+//! the pane about what Verkstead does on somebody else's GitHub. Each box is a
+//! regular expression matched anywhere in the text, a rule's boxes must all
+//! match, and an empty one constrains nothing — see **Ignore rule** in
+//! `CONTEXT.md`, which is where that is written down now: this pane carries no
+//! explanation beyond a field's own label.
+//!
+//! The rules travel as an action rather than a value for a reason of their own
+//! — a save is *refused* over a pattern that will not compile — so the rows are
+//! sent only once somebody has touched one, and a save about an email address
+//! is one the server cannot turn down.
 //!
 //! **A row nobody wrote anything in is not a rule**, and comes off the page as
 //! the save goes out. That is how a rule is deleted — clearing both boxes says
@@ -56,27 +87,19 @@
 //! A refusal is the whole request refused: neither file is written, and what
 //! comes back names the row and the box it is about. So it is drawn at that
 //! row, with everything the human typed left exactly where they left it.
-//!
-//! And one switch stands beside them in the pane, saving itself: whether a
-//! Conversation's record is published and linked on its pull request when the
-//! work settles to Done. It is here rather than in a section of its own because
-//! what it turns on is done with the token above it and under the account that
-//! token belongs to — a switch two panes away from the credential it spends
-//! would be a switch nobody could see the cost of. It saves on the flip, the way
-//! the build cache's does, and it carries the author as the *server* holds it
-//! rather than as the fields hold it: a flip is not a submit, and half a typed
-//! email address is nobody's author.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Index, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import { CardButton } from "../CardButton";
+import { Check } from "../Check";
 import { PaneSticky } from "../Panes";
 import { QuietButton } from "../QuietButton";
-import { Switch as Toggle } from "../Switch";
 import { loadSettings, saveSettings } from "../api/client";
 import { useReading } from "../freshness";
+import { Picker } from "../picking";
 import type {
+  ConflictResolution,
   IgnoreRule,
   IgnoredCommentsEdit,
   RuleField,
@@ -88,11 +111,15 @@ import type {
   TokenSaved,
   Verified,
 } from "../api/types";
-import { Empty, ErrorLine, Note } from "../notices";
+import { Empty, ErrorLine } from "../notices";
 import { utcStamp } from "../set/when";
 import { PaneHead } from "../workbench/PaneHead";
 import { heldConfig } from "./held";
-import styles from "./Credentials.module.css";
+import styles from "./Git.module.css";
+
+/// What the section is called, wherever it names itself: the card's heading and
+/// the pane's head.
+const TITLE = "Git";
 
 /// The two files as they stand, read once for the two panes that draw them.
 ///
@@ -101,7 +128,7 @@ import styles from "./Credentials.module.css";
 /// catch-up read on reconnect could never reach. There is no list in it for the
 /// key to match by — what the merge does here is leave the fields that did not
 /// change alone, and whatever is drawn from them with them.
-function useCredentials() {
+function useGit() {
   return useReading(() => ({
     queryKey: ["settings"],
     queryFn: loadSettings,
@@ -134,7 +161,7 @@ function authored(told: SettingsView): boolean {
   return told.git_author.name !== "" || told.git_author.email !== "";
 }
 
-/// The credentials as they stand, as the card that opens them.
+/// What git has been told, as the card that opens it.
 ///
 /// A card rather than a section with an Edit button on its heading, because that
 /// is what the rest of this pane is: something standing in a pane that is
@@ -142,13 +169,13 @@ function authored(told: SettingsView): boolean {
 /// every card holding more than a run of text is — a button may not have
 /// paragraphs inside it, and `CardButton` puts the press, the keyboard and the
 /// role that says what it is on the article instead.
-export function GithubCard(props: {
+export function GitCard(props: {
   /// Whether the form beside this is the pane that is open.
   open: boolean;
   /// What pressing it does, which is opening that pane.
   press: () => void;
 }): JSX.Element {
-  const settings = useCredentials();
+  const settings = useGit();
 
   return (
     <Switch>
@@ -164,11 +191,11 @@ export function GithubCard(props: {
         {(told) => (
           <CardButton
             as="article"
-            class={styles.githubCard}
+            class={styles.gitCard}
             open={props.open}
             press={props.press}
           >
-            <h2>GitHub and git author</h2>
+            <h2>{TITLE}</h2>
 
             {/* What a token that is not there costs, said here rather than
                 found out by a session that could not push at midnight. */}
@@ -211,12 +238,12 @@ export function GithubCard(props: {
 /// something else or by the way back a narrow window draws, and a button that
 /// said the same thing again would be a second way out of a pane that has
 /// one.
-export function GithubPane(props: {
+export function GitPane(props: {
   /// The way back to the settings, which is the pane this one was entered from.
   back: () => void;
 }): JSX.Element {
   const queries = useQueryClient();
-  const settings = useCredentials();
+  const settings = useGit();
 
   // What has been typed, or `null` while nothing has — the fields follow the
   // server until somebody touches them, the way a branch name does.
@@ -259,13 +286,46 @@ export function GithubPane(props: {
   const authorName = () => name() ?? author()?.name ?? "";
   const authorEmail = () => email() ?? author()?.email ?? "";
 
-  /// Everything in `config.yaml` this pane is not about, as it stands — see
-  /// [`heldConfig`], which the wizard's git step sends the same way.
+  /// Everything in `config.yaml` this form is not about, as it stands — see
+  /// [`heldConfig`], which the wizard's git step sends the same way. The
+  /// resolution is among it: the select below saves itself, so what a press of
+  /// Save says about it is what the server already holds.
   const held = () => heldConfig(told());
 
-  /// Where the share-on-Done switch sits, which is off until somebody has been
-  /// here.
+  /// Where the share-on-Done checkbox sits, which is off until somebody has
+  /// been here.
   const sharing = () => told()?.share_on_done ?? false;
+
+  /// And where the conflict-resolution select sits, which is one of two words
+  /// and never absent: a merge is what a Verkstead nobody has configured does.
+  const resolution = (): ConflictResolution =>
+    told()?.conflict_resolution ?? "Merge";
+
+  /// What a control that saves itself sends: both files as the server holds
+  /// them, with the two values those controls own written over the top.
+  ///
+  /// The author goes back as the *server* holds it rather than as the fields
+  /// do, and the token and the rules travel as `Keep`. Neither control is a
+  /// submit: a pick made halfway through typing an address writes the pick and
+  /// nothing else, and half a typed email address is nobody's author.
+  ///
+  /// Both values on every call, each control passing its own and leaving the
+  /// other where the server has it — one place that knows what a save beside
+  /// the form carries, rather than one per control to fall out of step.
+  const beside = (owned: {
+    share_on_done: boolean;
+    conflict_resolution: ConflictResolution;
+  }): SettingsEdit => ({
+    git_author: told()?.git_author ?? { name: "", email: "" },
+    // Untouched, for the reason a blank field is a `Keep`.
+    github_token: "Keep",
+    // And the rules left exactly where they are: neither control is the form's
+    // save, and one that spoke for them could be turned down over a pattern it
+    // never showed anybody — see [`ruleEdit`].
+    ignored_comments: "Keep",
+    ...held(),
+    ...owned,
+  });
 
   const typing = () => replacing() || configured() === null;
 
@@ -425,25 +485,22 @@ export function GithubPane(props: {
     });
   };
 
-  /// And the switch's own save, which is its own press.
-  ///
-  /// Not the form's: the author goes back as the server holds it rather than as
-  /// the fields do, so a flip made halfway through typing an address writes
-  /// nothing but the switch, and nothing spends the fields either — what was
-  /// being typed is still being typed afterwards.
+  /// The checkbox's own save, which is its own press — see [`beside`] for what
+  /// rides along with it.
   const flipping = useMutation(() => ({
     mutationFn: (share_on_done: boolean) =>
-      saveSettings({
-        git_author: told()?.git_author ?? { name: "", email: "" },
-        // Untouched, for the reason a blank field is a `Keep`.
-        github_token: "Keep",
-        share_on_done,
-        // And the rules left exactly where they are: a flip is not the form's
-        // save, and one that spoke for them could be turned down over a pattern
-        // it never showed anybody — see [`ruleEdit`].
-        ignored_comments: "Keep",
-        ...held(),
-      }),
+      saveSettings(beside({ share_on_done, conflict_resolution: resolution() })),
+    onSuccess: (saved: SettingsSaved) =>
+      queries.setQueryData(["settings"], saved.settings),
+  }));
+
+  /// And the select's, which is the same shape: picking is the save.
+  ///
+  /// A mutation of its own rather than the checkbox's, so that a save one of
+  /// them could not make is said under the control that made it.
+  const picking = useMutation(() => ({
+    mutationFn: (conflict_resolution: ConflictResolution) =>
+      saveSettings(beside({ share_on_done: sharing(), conflict_resolution })),
     onSuccess: (saved: SettingsSaved) =>
       queries.setQueryData(["settings"], saved.settings),
   }));
@@ -465,7 +522,7 @@ export function GithubPane(props: {
       <PaneSticky>
         <PaneHead
           back={{ to: "Settings", go: props.back }}
-          title="GitHub and git author"
+          title={TITLE}
         />
       </PaneSticky>
 
@@ -575,34 +632,6 @@ export function GithubPane(props: {
             </section>
 
             <section>
-              <h3>Sharing</h3>
-
-              {/* In a wrapper of its own, so the form's own label rule — which
-                  is about the labels over the fields — leaves the switch's to
-                  `Switch.module.css`. */}
-              <div class={styles.sharing}>
-                <Toggle
-                  label="Share to pull request on Done"
-                  on={sharing()}
-                  disabled={flipping.isPending}
-                  flip={(on) => flipping.mutate(on)}
-                />
-              </div>
-
-              <Note>
-                When a conversation settles to Done, its record is published as
-                a secret gist and linked in a comment on its pull request. It is
-                published with the token above, which needs the gist scope.
-              </Note>
-
-              <Show when={flipping.isError}>
-                <ErrorLine class={styles.failure}>
-                  The settings could not be saved: {flipping.error?.message}
-                </ErrorLine>
-              </Show>
-            </section>
-
-            <section>
               <h3>Git author</h3>
 
               <label for="author-name">Name</label>
@@ -632,18 +661,54 @@ export function GithubPane(props: {
             </section>
 
             <section>
-              <h3>Ignored comments</h3>
+              {/* The subheading is the select's label rather than standing over
+                  one: what a second line under it could say is the heading's
+                  own words again. */}
+              <h3>
+                <label for="conflict-resolution">Conflict resolution</label>
+              </h3>
 
-              {/* What the rules do, said before the boxes that hold them: a
-                  pattern is a thing with rules of its own, and where they
-                  match is the half of it a human cannot see from the box. */}
-              <Note>
-                A comment matching one of these is never addressed by an agent.
-                A rule's fields must all match, and each is a regular
-                expression matching anywhere in the text — case-sensitive,
-                unless it opens with <code>(?i)</code>. Leave one empty for no
-                constraint on that half.
-              </Note>
+              <Picker
+                id="conflict-resolution"
+                options={["Merge", "Rebase"] satisfies ConflictResolution[]}
+                value={(resolution) => resolution}
+                label={(resolution) => resolution}
+                chosen={resolution()}
+                disabled={picking.isPending}
+                pick={(picked) => picking.mutate(picked as ConflictResolution)}
+              />
+
+              <Show when={picking.isError}>
+                <ErrorLine class={styles.failure}>
+                  The settings could not be saved: {picking.error?.message}
+                </ErrorLine>
+              </Show>
+            </section>
+
+            <section>
+              <h3>Sharing</h3>
+
+              {/* In a wrapper of its own, so the form's own label rule — which
+                  is about the labels over the fields — leaves the checkbox's to
+                  `Check.module.css`. */}
+              <div class={styles.sharing}>
+                <Check
+                  label="Share to pull request on Done"
+                  on={sharing()}
+                  disabled={flipping.isPending}
+                  flip={(on) => flipping.mutate(on)}
+                />
+              </div>
+
+              <Show when={flipping.isError}>
+                <ErrorLine class={styles.failure}>
+                  The settings could not be saved: {flipping.error?.message}
+                </ErrorLine>
+              </Show>
+            </section>
+
+            <section>
+              <h3>Ignored comments</h3>
 
               <Show
                 when={rows().length > 0}

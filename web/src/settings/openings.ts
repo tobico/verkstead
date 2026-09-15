@@ -9,12 +9,11 @@
 //! Three shapes under the settings, because there are three kinds of thing the
 //! pane draws:
 //!
-//! - `github`, `languages`, `paths`, `conflicts`, `cleanup` and `remote` —
-//!   the credentials, the languages a session gets build support for, the
-//!   directories Verkstead may work in, how a conflicted pull request is
-//!   resolved, what becomes of an archived Conversation, and whether this
-//!   machine can be reached from a phone, each named by a word. There is one of
-//!   each of them, and a word says so.
+//! - `git`, `languages`, `paths`, `cleanup` and `remote` — everything git is
+//!   told, the languages a session gets build support for, the directories
+//!   Verkstead may work in, what becomes of an archived Conversation, and
+//!   whether this machine can be reached from a phone, each named by a word.
+//!   There is one of each of them, and a word says so.
 //! - `profiles/:id` — an Agent Profile, which arrives with an id of its own,
 //!   and `profiles/new` for the blank form that adds one.
 //! - `repos/:id` — a registered Repo, opened; and `repos/new` for the path
@@ -22,7 +21,7 @@
 //!
 //! The `profiles/` and `repos/` segments are what keep the ids and the
 //! word-named panes apart, as the workbench's `events/` does: a bare id segment
-//! would have read the same as `github` the moment anything was named by a
+//! would have read the same as `git` the moment anything was named by a
 //! word, so the ids go behind a segment of their own and can never collide with
 //! one.
 //!
@@ -36,11 +35,10 @@
 //! is what they are when nothing is open at all: the URL is a record of what was
 //! picked rather than a promise that it is still there.
 
-/// The openings named by a word rather than by an id: the credentials, the
-/// languages a session gets build support for, the paths Verkstead has been
-/// told about, how a conflicted pull request is resolved, what becomes of an
-/// archived Conversation and how this machine is reached from a phone — the
-/// things there is exactly one of on this page.
+/// The openings named by a word rather than by an id: everything git is told,
+/// the languages a session gets build support for, the paths Verkstead has been
+/// told about, what becomes of an archived Conversation and how this machine is
+/// reached from a phone — the things there is exactly one of on this page.
 ///
 /// A list rather than a word written wherever one is needed, because three
 /// separate things read it and all three have to agree: the [`Opening`] below is
@@ -53,14 +51,7 @@
 ///
 /// So the app writes those routes from this — see `panes` in `SettingsPage.tsx`
 /// — and a word added here arrives with the route that reaches it.
-export const WORDS = [
-  "github",
-  "languages",
-  "paths",
-  "conflicts",
-  "cleanup",
-  "remote",
-] as const;
+export const WORDS = ["git", "languages", "paths", "cleanup", "remote"] as const;
 
 /// What the details pane on the settings page is showing.
 ///

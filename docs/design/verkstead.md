@@ -627,7 +627,7 @@ being allowed any number of roadmaps where it has one `.tasks/`.
 
 **Every details pane has a path of its own** (*settled 2026-08-29, building
 settings-redesign*), nested under the Conversation — `events/:id`, `backlog`,
-`roadmaps/:name` — or under `/settings` — `github`, `profiles/:id`, `repos/:id`,
+`roadmaps/:name` — or under `/settings` — `git`, `profiles/:id`, `repos/:id`,
 with `new` standing where an id stands for the two that add one. The ids sit
 behind a segment of their own so they can never be read as the panes named by a
 word beside them. Selection is derived from the URL rather than held beside it,
@@ -926,21 +926,30 @@ Timeline events:
 - Question sets are answerable in the workbench and on the phone alike.
 - **Everything the human configures is one page**, `/settings`, the one
   place the sidebar leads out to (*settled 2026-08-23, building
-  intentional-credentials*). It opens on what Verkstead itself has been told —
-  the GitHub token and the git author, saved together because the server writes
-  both files in one request. The token field is write-only: what is shown of a
-  saved one is its last four characters and when it was written, with replace
-  and clear as presses of their own, and the account GitHub verified it as after
-  a save. With either setting missing the page says so and says what it costs:
-  sessions that cannot reach GitHub, commits that fail asking who the author is.
-  Under the credentials are the Agent Profiles and the Repos, which had pages of
+  intentional-credentials*). It opens on **Git**, which is everything git is
+  told: the GitHub token and the git author, saved together because the server
+  writes both files in one request, and under them how a conflicted pull request
+  is resolved and whether Done shares the record to that pull request, each
+  saving itself on the pick or the tick (*revised 2026-09-15, building
+  settings-ui-tidy*: it was **GitHub and git author** at `/settings/github`,
+  with the resolution a card and pane of its own at `/settings/conflicts` that
+  described both strategies and warned what a rebase force-pushes; both slugs
+  are no such page now rather than redirects, and what a rebase costs is said in
+  `CONTEXT.md` rather than beside the choice). The token field is write-only:
+  what is shown of a saved one is its last four characters and when it was
+  written, with replace and clear as presses of their own, and the account
+  GitHub verified it as after a save. With either setting missing the page says
+  so and says what it costs: sessions that cannot reach GitHub, commits that
+  fail asking who the author is.
+  Under the Git section are the Agent Profiles and the Repos, which had pages of
   their own until they were folded in here — all of it is settled once and then
   left alone, and `/profiles` and `/repos` are no such page now rather than
   redirects.
 - **The page is read as cards and panes** (*settled 2026-08-29, building
   settings-redesign*). Everything on it that used to open a modal is a card in
-  the middle pane and a details pane beside it: the credentials as one github
-  card, each Agent Profile, each registered Repo — **Language support**, whose
+  the middle pane and a details pane beside it: everything git is told as one
+  git card, each Agent Profile, each registered Repo — **Language support**,
+  whose
   card lists the languages a session gets build support for and whose pane holds
   the checkbox per language and the configuration hanging off it (*revised
   2026-09-15, building settings-ui-tidy*: it was **Rust build cache** at

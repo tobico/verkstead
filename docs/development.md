@@ -280,8 +280,8 @@ its pull request when the work settles to Done, which is otherwise something the
 human presses for. It is the one setting here that is **off** with nothing
 configured — an absent key, an absent file and one nothing can parse all mean
 off — because what it turns on publishes a gist under the human's own account
-and comments on a pull request other people are reading. It is set from the
-GitHub and git author pane, beside the token it is published with.
+and comments on a pull request other people are reading. It is set from the Git
+pane, beside the token it is published with.
 
 What it turns on is the wrap-up's own settle rather than the state: a steer into
 Done shares nothing. It fires once per conversation, gated on the row in
@@ -327,7 +327,8 @@ lowercase, as `merge` or `rebase`.
 That word is the whole of the answer, in every repo. One repo could once say
 otherwise, from its own pane on the settings page; an override no settings page
 draws would be a repo rebasing with nowhere to read why, so it is gone and the
-file is the only place this is asked.
+file is the only place this is asked. It is picked on the Git pane, under the
+author — a select of two words, saving on the pick.
 
 The link is composed as a page is drawn rather than written down at the publish.
 What the record holds is the gist's own URL, so a share published before there

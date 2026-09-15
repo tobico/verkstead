@@ -75,7 +75,7 @@ export function published(outcome: SharePublished): JSX.Element {
     return (
       <>
         Verkstead has no GitHub token to publish as.{" "}
-        <A href="/settings/github">Put one in on the settings page.</A>
+        <A href="/settings/git">Put one in on the settings page.</A>
       </>
     );
   }
@@ -84,7 +84,7 @@ export function published(outcome: SharePublished): JSX.Element {
     return (
       <>
         The saved GitHub token may not write gists.{" "}
-        <A href="/settings/github">
+        <A href="/settings/git">
           Re-issue it with the gist scope and save it again.
         </A>
       </>

@@ -1,21 +1,25 @@
-/* The credentials at the head of the settings pane, and the pane that rewrites
-   them — see `Credentials.tsx`.
+/* Everything git is told, at the head of the settings pane, and the pane that
+   rewrites it — see `Git.tsx`.
 
    Two halves in two panes. The card carries what is configured — the token's
    state, the author, and the warnings about whichever is missing — and the form
-   stands in the details pane beside it, in three sections under one Save because
-   the server writes both files in one request. Laid out like the profile form,
-   the same labels over the same fields, since it is the same kind of form.
+   stands in the details pane beside it, in sections under one Save because the
+   server writes both files in one request. Laid out like the profile form, the
+   same labels over the same fields, since it is the same kind of form.
+
+   Two of those sections hold a control that saves itself rather than waiting
+   for that button — the resolution select and the sharing checkbox — and
+   nothing here says so: what they look like is a select and a checkbox.
 
    What a card *is* is `CardButton.module.css`'s: the surface, the fill it takes
    while its pane is open, and what it does under the pointer. What is here is
    only what stands on it. */
 
-.githubCard {
+.gitCard {
   margin-bottom: 1.5rem;
 }
 
-.githubCard h2 {
+.gitCard h2 {
   margin: 0 0 0.75rem;
   font-size: 1.1rem;
 }
@@ -28,7 +32,7 @@
    No fill of its own, unlike the block this was on the page: it stands on a
    card now, and the card shifts a step under the hand and another while its
    pane is open. An edge and the red down its side say it on all three. */
-.githubCard .warning {
+.gitCard .warning {
   margin: 0 0 0.85rem;
   padding: 0.7rem 0.9rem;
   border: 1px solid var(--edge);
@@ -105,6 +109,30 @@
   font-size: 1rem;
 }
 
+/* A subheading that is its own select's label, which is what Conflict
+   resolution is: the words are the heading, so they are drawn as one and only
+   the pointer says the whole line presses. */
+.form h3 label {
+  cursor: pointer;
+}
+
+/* And the select under it, painted like the fields above rather than like the
+   browser's own: the same box the token and the author are typed into. */
+.form select {
+  display: block;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.6rem;
+}
+
+.form select:focus-visible {
+  border-color: var(--accent);
+}
+
 /* The labels over the fields, which is what a label directly inside a section
    is here. Said as a child rather than as a descendant because the sharing
    switch below carries a label of its own that is laid out by
@@ -117,9 +145,9 @@
   color: var(--ink-soft);
 }
 
-/* The switch that shares a conversation to its pull request on Done, which
-   stands on its own rather than over a field. The gap under it is the one the
-   labels above carry, so the note beneath reads as belonging to it. */
+/* The checkbox that shares a conversation to its pull request on Done, which
+   stands on its own rather than over a field — in a wrapper, so the form's rule
+   for a label directly inside a section leaves the checkbox's own row alone. */
 .form .sharing {
   margin-bottom: 0.6rem;
 }
@@ -265,7 +293,8 @@
    are in — the clear's red here, and the keep's darkening border out of
    `.secondary` in `styles/base.css`. */
 @media (hover: hover) {
-  .form input:hover {
+  .form input:hover,
+  .form select:hover {
     border-color: var(--ink-soft);
   }
 

@@ -991,9 +991,10 @@ _Avoid_: announce, notify, post, broadcast (a comment is left, once, by a press
 or by the settle the human turned on)
 
 **Ignore rule**:
-One class of comment nobody wants addressed, written in the GitHub and git
-author settings pane, a row apiece: a regex over who said it, a regex over what
-it says, or both. A rule matches where every field it gives does, and the list
+One class of comment nobody wants addressed, written in the Git settings pane, a
+row apiece: a regex over who said it, a regex over what it says, or both. Each
+regex matches anywhere in the text and is case-sensitive unless it opens with
+`(?i)`, and a box left empty constrains nothing. A rule matches where every field it gives does, and the list
 combines with OR — so a comment any one rule matches is skipped wherever
 Wrapping reads comments, in the fresh ones a session would be dispatched about
 and the standing ones folded into the review alike, on a Companion Repo's pull
@@ -1964,15 +1965,16 @@ is told which rather than left to pick.
 Merge is what a Verkstead nobody has configured does, and that is the whole
 shape of the setting: a rebase rewrites what reviewers have already read and
 breaks anything stacked on the branch, and nobody should meet that for never
-having found a settings page. What it costs is said on the page beside the
-choice.
+having found a settings page. What it costs is said here rather than beside the
+choice — the page is a select of two words, and a paragraph under a control the
+human has already understood is one nobody reads twice.
 
 Said once for every Repo, in `config.yaml` beside the build cache — an absent
 key, an absent file and an unparseable one all mean merge — and that is the
 whole of the answer about any of them. A Repo could once be given one of its
 own, from its own settings pane; an override no settings page draws would be a
 Repo rebasing with nowhere to read why, so the file is where this is asked and
-the only place.
+the only place, and the **Git** section of the settings is where it is picked.
 _Avoid_: merge strategy, conflict policy, force push setting
 
 **Rescue**:
