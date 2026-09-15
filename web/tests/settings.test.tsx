@@ -1238,7 +1238,12 @@ describe("how a conflict is resolved", () => {
     await waitFor(() => expect(thePicker().value).toBe("Rebase"));
   });
 
-  it("says so when the pick could not be saved", async () => {
+  /// And the select goes back to saying what is written down, which is the
+  /// half that matters: the error line is easy to scroll past on a phone, and
+  /// a select left sitting on the refused pick is the page saying a strategy is
+  /// set that the file has never been told. The checkbox under it already does
+  /// this — see `Check.tsx` — and the select does it now too.
+  it("says so when the pick could not be saved, and keeps none of it", async () => {
     theSettings(TOLD, json({ error: "gone" }, 500));
     mountPane();
 
@@ -1246,6 +1251,8 @@ describe("how a conflict is resolved", () => {
     fireEvent.change(thePicker(), { target: { value: "Merge" } });
 
     await waitFor(() => screen.getByText(/could not be saved/));
+
+    expect(thePicker().value).toBe("Rebase");
   });
 });
 

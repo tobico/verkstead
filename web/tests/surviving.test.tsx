@@ -163,6 +163,41 @@ describe("a picker whose options are rebuilt", () => {
     // repository nobody could see.
     expect(chosen()).toBe("");
   });
+
+  /// And a pick nobody took up leaves it where the reading is.
+  ///
+  /// A `<select>` is the one control here with a selection of its own that
+  /// nothing re-rendered, so a caller that saves the pick and is refused would
+  /// otherwise leave the box saying a choice the server has never been told —
+  /// which is the divergence at the head of `picking.tsx` said the other way
+  /// round, by a control that was never rebuilt at all. The settings page's
+  /// conflict resolution is the one that bites: the select saves itself, and a
+  /// save that failed says so in a line easy to scroll past on a phone.
+  it("goes back to the reading when the pick is not taken up", () => {
+    const [chosen] = createSignal("2");
+
+    const { container } = render(() => (
+      <Picker
+        id="repo"
+        options={[
+          { id: 1, name: "verkstead" },
+          { id: 2, name: "askance" },
+        ]}
+        value={(repo) => String(repo.id)}
+        label={(repo) => repo.name}
+        chosen={chosen()}
+        // A caller that hears the pick and does not move: a save still in
+        // flight, and a save that came back refused.
+        pick={() => {}}
+      />
+    ));
+
+    const select = container.querySelector("select")!;
+    fireEvent.change(select, { target: { value: "1" } });
+
+    expect(select.value).toBe("2");
+    expect(select.selectedOptions[0]!.textContent).toBe("askance");
+  });
 });
 
 /// The same two questions of the control the pairings are picked with, which has

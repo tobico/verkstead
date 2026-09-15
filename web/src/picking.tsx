@@ -17,11 +17,18 @@
 //!
 //! ## The guarantees, which are the module's whole point
 //!
-//! Both controls hold all four, and hold them off the one set of readings in
+//! Both controls hold all five, and hold them off the one set of readings in
 //! [`showing`] rather than each its own:
 //!
 //! - **What is shown and what would be sent are the same string**, always, and
 //!   however the option list is rebuilt underneath the choice.
+//! - **What is shown is the reading rather than the press.** A pick is a
+//!   request handed up as the choice it would become; the control goes straight
+//!   back to what `chosen` says, and only the caller's answer arriving moves
+//!   it. So a pick the caller saves and has refused leaves the control saying
+//!   what is written down rather than what somebody pressed — which is the
+//!   rule the settings page's checkbox holds, in `Check.tsx`, and the same rule
+//!   for the same reason.
 //! - **A chosen row that is no longer among the options falls to the
 //!   placeholder**, and says so through the optional `gone` callback. Nothing
 //!   unpicks itself, and no choice is quietly moved to the row that happens to
@@ -39,12 +46,15 @@
 //! ## Which control, and why there are two
 //!
 //! [`Picker`] is the native `<select>`, and it is what an ordinary choice is
-//! still offered through: a repository, a base branch, a merge strategy. Two
-//! things give it the guarantees above. The displayed value is re-applied after
-//! the options are rebuilt, every time they are rebuilt, so a browser's
-//! fixing-up is undone before anybody sees it. And a choice that is no longer
-//! among the options is not shown as one: the control falls to its placeholder,
-//! which is the honest reading of *what you picked is gone*.
+//! still offered through: a repository, a base branch, a merge strategy. Three
+//! things give it the guarantees above, and all three are about the one thing
+//! a `<select>` has that the listbox does not, which is a selection of its own
+//! that nothing re-rendered. The displayed value is re-applied after the
+//! options are rebuilt, every time they are rebuilt, so a browser's fixing-up
+//! is undone before anybody sees it. It is re-applied on a pick as well, so a
+//! choice the caller does not take up is not left standing. And a choice that
+//! is no longer among the options is not shown as one: the control falls to
+//! its placeholder, which is the honest reading of *what you picked is gone*.
 //!
 //! [`Listbox`] is the same choice drawn out of ordinary elements, for the rows
 //! that carry a harness mark beside their words: an `<option>` holds text and
@@ -220,6 +230,18 @@ export function Picker<T>(props: Choosing<T>): JSX.Element {
         if (picked || offersNothing()) {
           props.pick(picked);
         }
+
+        // And straight back to the reading, the way the settings page's
+        // checkbox puts itself back — see `Check.tsx`. A caller that applies
+        // the pick at once has already moved `chosen`, so this writes the
+        // value that is now showing and nothing is seen to move; one that has
+        // to go and save it has not, so the control goes on saying what is
+        // true until the answer arrives. Which is the whole of what makes a
+        // save that comes back refused leave a select saying what the server
+        // holds rather than what somebody pressed — the divergence at the head
+        // of this file, said by a control that never re-rendered rather than
+        // by one whose options were rebuilt.
+        ev.currentTarget.value = shown();
       }}
     >
       {/* Drawn only while it is what the control is showing, so a settled
