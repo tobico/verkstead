@@ -400,7 +400,7 @@ reads nothing of this server.
 startup line carries `workbench=`, and on the desktop app the browser opened at
 startup and the tray's **Open** both go to the link, built afresh at each press
 so a browser that forgot the cookie is let in again.
-**Reset key**, its own section on **Remote Access**, re-issues it: everything
+**Reset key**, at the foot of **Remote Access**, re-issues it: everything
 holding the old one meets a 401 on its next request, and the browser that
 pressed stays in — a reset made from the phone is a reset made from the only
 device that could reach the server at all. One secret with a press behind it,
@@ -409,11 +409,15 @@ _Avoid_: password, login, token, API key, session
 
 **Remote Access**:
 The settings section that puts this workbench in front of a phone: what this
-machine's Tailscale is doing, the switch that puts the tailnet name in front of
-the port Verkstead is listening on, and the **Workbench Key** handed over as
+machine's Tailscale is doing, the checkbox that puts the tailnet name in front
+of the port Verkstead is listening on, and the **Workbench Key** handed over as
 something a camera can read. A card and a pane like every other section, and
 the answer to what used to be a `tailscale serve --bg 8422` somebody ran in a
-terminal.
+terminal. **The pane is the controls and nothing around them**: the box with the
+one line that is its own, the code, the link with its copy beside it, and
+**Reset key** with the one line that is its own. Which of the four states the
+machine is in is the card's line; the pane says what the machine said only where
+somebody has something to do about it.
 **Everything on it is read off the machine rather than configured**: two
 commands at the moment the pane opens, so a tailnet joined in a terminal and a
 serve set up by hand read here exactly as ones set up from this page would, and
@@ -423,9 +427,17 @@ and the pane points at one; a binary with no daemon answering is a `tailscale
 up`, said in the words the command printed; up is the node's name and whether
 the workbench is served; and a shape this build cannot read says so rather than
 being read as the nearest state with room for it, because *cannot tell* under a
-switch offering to turn *off* on is the one thing this section must never say.
-**The serve switch is that reading rather than a wish**: a press answers with
-the machine read again, and the switch settles wherever the machine ended up.
+box offering to turn *off* on is the one thing this section must never say —
+that state draws what Tailscale said and no box at all.
+**The serve checkbox is that reading rather than a wish**: a press answers with
+the machine read again, and the box settles wherever the machine ended up.
+**And it will not lock the page out.** A browser reading this pane over the
+served address is here because the serve is on, so unticking it from there would
+take away the connection carrying the press. The client settles which page it is
+by comparing its own hostname with the served address's — the server sees the
+tailnet and the loopback arrive on one port and could not tell them apart — and
+where they match the box is disabled with a tooltip saying why. From the machine
+itself, or from the desktop app, it unticks as ever.
 **The operator grant is its third answer.** Tailscale refuses a serve from a
 process that is neither root nor the tailnet's operator and the server has no
 privilege to raise, so a refused press hands back `sudo tailscale set
@@ -438,11 +450,11 @@ on a host is shown a command they are also the one to run.
 login link rather than the address: a QR code, drawn in the browser from an
 encoder the viewer ships because a workbench standing behind a secret has no
 business handing it to a third party to render, with the link to copy beside it.
-**And the key those links carry is a section under them**, on every state of the
-pane rather than under the code: the key gates a machine that has never heard of
-a tailnet exactly as it gates one serving on it, so **Reset key** is not a press
-the serve switch can take away — turning remote access off is one of the moments
-somebody wants a link back.
+**And the key those links carry stands under them**, on every state of the pane
+rather than under the code: the key gates a machine that has never heard of a
+tailnet exactly as it gates one serving on it, so **Reset key** is not a press
+the serve checkbox can take away — turning remote access off is one of the
+moments somebody wants a link back.
 **The banner is how somebody finds it**: one line above the Timeline while the
 first grilling is writing its first Question Set — the first moment there is
 nothing to do at the desk — pointing here and dismissed with *Got it*. The

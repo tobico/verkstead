@@ -90,10 +90,18 @@ Conversation-scoped session API, which is a session's own and scoped already.
 
 **Remote access** is the settings pane the key makes necessary: a phone cannot
 reach the workbench until it has the key, and the adoption docs' `tailscale
-serve --bg 8422` was a command the human ran by hand. The pane holds four
-things — whether `tailscale` is installed and up, with the node name; a switch
-that runs that command on and takes it off; the resulting `https://….ts.net`
-address; and a QR code of the login link, with a copyable link beside it.
+serve --bg 8422` was a command the human ran by hand. The pane holds three
+things — a checkbox labelled **Allow remote access via Tailscale**, which runs
+that command on and takes it off; a QR code of the login link, with a copyable
+link beside it; and **Reset key**. Which of the four states — no `tailscale`,
+a daemon that is not answering, up, or an answer this build could not read — the
+machine is in is the card's own line above the pane, and the pane draws what the
+machine said only where there is something to be done about it. **The checkbox
+will not lock the page out**: a browser whose hostname is the served address's
+is reading this over the very serve it would be turning off, so there the box is
+disabled with a tooltip saying why. The client settles that out of the address
+the reading already carries, the server seeing the tailnet and the loopback
+arrive on one port.
 `tailscale serve` from a non-root process needs that user set as the
 operator: the desktop app runs the grant through the platform's graphical
 sudo, the daemon shows the exact command and re-tries on the next press, and

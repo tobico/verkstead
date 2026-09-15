@@ -21,15 +21,27 @@
 //! node's name and whether the workbench is served to the tailnet. And an
 //! answer this build could not read is none of the three: Tailscale is whatever
 //! the host has, so a shape nobody here has seen says so rather than being read
-//! as the nearest state with room for it.
+//! as the nearest state with room for it. The card says which of the four this
+//! machine is, in a line; the pane draws only the ones with something to be
+//! done about them.
 //!
-//! **And one thing to press**, which is the serve itself. The switch's position
-//! is the reading rather than anything this page remembers, so a serve somebody
-//! set up in a terminal reads as on and the switch turns *that* off; a press
-//! answers with the machine read again, and the switch settles wherever the
-//! machine actually ended up. It is drawn only where the serve state was
-//! readable, because a switch over *cannot tell* would be offering to turn on
-//! something that may already be on.
+//! **And one thing to press**, which is the serve itself: the checkbox every
+//! other section of this page is written in — see [`Check`]. Its position is
+//! the reading rather than anything this page remembers, so a serve somebody set
+//! up in a terminal reads as on and the box unticks *that*; a press answers with
+//! the machine read again, and the box settles wherever the machine actually
+//! ended up. It is drawn only where the serve state was readable, because a box
+//! over *cannot tell* would be offering to turn on something that may already be
+//! on — that state draws what Tailscale said instead.
+//!
+//! **And it will not lock the page out.** A browser that reached this pane over
+//! the served address is here *because* the serve is on, and unticking the box
+//! from there would take away the connection carrying the request. So the box is
+//! disabled with a tooltip saying why whenever the page's own hostname is the
+//! served address's — see [`arrivedOver`]. The client settles that on its own,
+//! out of the address the reading already carries: the server sees the tailnet
+//! and the loopback arrive on one port and could not tell them apart. From
+//! localhost, or from the desktop app, the box unticks as it always did.
 //!
 //! **The operator grant is a sentence, not a button.** Tailscale refuses a
 //! serve from a process that is neither root nor the tailnet's operator, and the
@@ -45,8 +57,8 @@
 //! business handing that secret to a third party to render, and an install on a
 //! tailnet may have nowhere to fetch from — see [`Qr`].
 //!
-//! **Reset key is a section of its own**, because the key is not Tailscale's.
-//! It gates a machine that has never heard of a tailnet exactly as it gates one
+//! **Reset key stands under all of it**, because the key is not Tailscale's. It
+//! gates a machine that has never heard of a tailnet exactly as it gates one
 //! serving on it, and the daemon prints it in the startup line wherever it is
 //! running — so it stands on every state of this pane rather than under the
 //! code, and turning the serve off does not take away the press that would take
@@ -60,14 +72,21 @@
 //! sentence beside the press is what says what it costs, the way the sandbox
 //! binds say what widening one costs: a press somebody has to acknowledge twice
 //! is one they stop reading.
+//!
+//! **Nothing here explains itself beyond that.** The two subheadings, the
+//! readings of node and served address, and every note about what a tailnet is
+//! and what a login link is worth have gone: what a phone opening this pane
+//! needs is the box, the code, the link and the press. What stays under each
+//! control is the one line that is the control's own — and, where the machine is
+//! in a state somebody has to act on, what the machine said about it.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { Match, Show, Switch as Choose, type JSX } from "solid-js";
 
 import { CardButton } from "../CardButton";
+import { Check } from "../Check";
 import { Copy } from "../Copy";
 import { PaneSticky } from "../Panes";
-import { Switch } from "../Switch";
 import { loadRemote, pressServe, resetKey } from "../api/client";
 import type { RemoteView, ServePress, ServeView } from "../api/types";
 import { useReading } from "../freshness";
@@ -79,6 +98,16 @@ import styles from "./Remote.module.css";
 /// Where a machine with no Tailscale on it gets one. The one thing this section
 /// has to say that nothing on this page can do.
 const DOWNLOAD = "https://tailscale.com/download";
+
+/// Why the box will not untick on a page that arrived over the tailnet.
+///
+/// The browser's own tooltip, because there is nowhere on a cut-down pane to put
+/// a sentence that is only true on some of the devices reading it — and a
+/// disabled box that gave no reason is one somebody presses twice and then goes
+/// looking for the bug in.
+const LOCKED =
+  "This page was opened over the tailnet, so turning remote access off " +
+  "here would disconnect it. Turn it off on the machine Verkstead runs on.";
 
 /// The reading narrowed to one of its states, or `null` where it is in another.
 ///
@@ -103,6 +132,31 @@ const ungranted = (pressed: ServePress | undefined) =>
 const troubled = (pressed: ServePress | undefined) =>
   pressed?.press === "Trouble" ? pressed : null;
 
+/// Whether this page is being read over the very serve it is offering to turn
+/// off.
+///
+/// The address is the reading's own and the hostname is this document's, so the
+/// question is answered in the browser and nothing new is asked of the server —
+/// which could not answer it anyway: a request off the tailnet and one off the
+/// loopback arrive on the same port, and the socket cannot tell the two apart.
+///
+/// False wherever there is nothing to compare: a machine serving nothing has no
+/// address, and an address this browser cannot parse is not one to lock a
+/// control over.
+function arrivedOver(serve: ServeView): boolean {
+  const on = serving(serve);
+  if (!on) return false;
+
+  try {
+    return (
+      new URL(on.address).hostname.toLowerCase() ===
+      window.location.hostname.toLowerCase()
+    );
+  } catch {
+    return false;
+  }
+}
+
 /// What this machine's Tailscale is doing, read for the two panes that draw it.
 ///
 /// A read of its own rather than a field of the settings, because none of it is
@@ -118,9 +172,9 @@ function useRemote() {
 
 /// How things stand, in the one line somebody scanning the page is after.
 ///
-/// The same sentence on the card and at the head of the pane, because it is the
-/// same question in both: can this workbench be reached from a phone, and where
-/// it cannot, what is in the way.
+/// The card's line, and the card's alone: the pane below it is the controls
+/// themselves, and a box that is ticked has already said that the workbench is
+/// served.
 function standing(told: RemoteView): JSX.Element {
   return (
     <Choose>
@@ -199,8 +253,7 @@ export function RemoteCard(props: {
   );
 }
 
-/// And the whole of what the machine said, which is the details pane the card
-/// opens.
+/// And the controls the card opens: the box, the way in, and the key.
 export function RemotePane(props: {
   /// The way back to the settings, which is the pane this one was entered from.
   back: () => void;
@@ -208,7 +261,7 @@ export function RemotePane(props: {
   const queries = useQueryClient();
   const remote = useRemote();
 
-  /// The serve switch, pressed.
+  /// The serve box, ticked.
   ///
   /// What a press that went through answers with is the machine read again, so
   /// it is written straight over the read the pane is drawn from: a second
@@ -249,17 +302,13 @@ export function RemotePane(props: {
         <Match when={remote.data}>
           {(told) => (
             <div class={styles.remote}>
-              <p class={styles.standing}>{standing(told())}</p>
-
               <Choose>
                 {/* The one state whose answer is somewhere else entirely: a
                     pointer at where to get one, because nothing on this page
                     can install it. */}
                 <Match when={absent(told())}>
                   <Note>
-                    Verkstead reaches a phone over a tailnet: Tailscale puts
-                    this machine on one and gives it a name of its own, and the
-                    workbench is served on that name.{" "}
+                    Verkstead reaches a phone over a tailnet.{" "}
                     <a
                       class={styles.pointer}
                       href={DOWNLOAD}
@@ -268,8 +317,7 @@ export function RemotePane(props: {
                     >
                       Install Tailscale
                     </a>{" "}
-                    on this machine and join it to a tailnet, and this section
-                    will say so.
+                    on this machine and join it to a tailnet.
                   </Note>
                 </Match>
 
@@ -304,25 +352,44 @@ export function RemotePane(props: {
                 <Match when={up(told())} keyed>
                   {(here) => (
                     <>
-                      {/* Only where the serve state was readable. A switch over
-                          an answer this build could not read would be offering
-                          to turn on something that may already be on. */}
-                      <Show when={!unread(here.serve)}>
-                        <Switch
-                          label="Serve the workbench to the tailnet"
-                          on={Boolean(serving(here.serve))}
-                          disabled={press.isPending}
-                          flip={(on) => press.mutate(on)}
-                        />
+                      <Choose>
+                        {/* A box over an answer this build could not read would
+                            be offering to turn on something that may already be
+                            on, so the state says so instead. */}
+                        <Match when={unread(here.serve)} keyed>
+                          {(strange) => (
+                            <>
+                              <Note>
+                                What Tailscale is serving to the tailnet could
+                                not be read, so nothing here offers to change
+                                it. This is what it said:
+                              </Note>
+                              <p class={styles.trouble}>{strange.trouble}</p>
+                            </>
+                          )}
+                        </Match>
 
-                        <Note>
-                          Tailscale puts this machine's tailnet name in front of
-                          the workbench over HTTPS, which is what a phone on the
-                          tailnet opens. Where it stands is read off the machine,
-                          so a serve set up in a terminal reads as on here and
-                          this turns that one off.
-                        </Note>
-                      </Show>
+                        <Match when={!unread(here.serve)}>
+                          <Check
+                            label="Allow remote access via Tailscale"
+                            on={Boolean(serving(here.serve))}
+                            // Never from the page the serve is carrying: that
+                            // press would take away the connection making it.
+                            disabled={
+                              press.isPending || arrivedOver(here.serve)
+                            }
+                            title={
+                              arrivedOver(here.serve) ? LOCKED : undefined
+                            }
+                            flip={(on) => press.mutate(on)}
+                          />
+
+                          <Note>
+                            Allows secure remote access from other machines over
+                            the internet.
+                          </Note>
+                        </Match>
+                      </Choose>
 
                       {refused(press.data)}
 
@@ -333,18 +400,10 @@ export function RemotePane(props: {
                         </ErrorLine>
                       </Show>
 
-                      <dl class={styles.readings}>
-                        <dt>This machine on the tailnet</dt>
-                        <dd class={styles.address}>{here.node}</dd>
-
-                        {served(here.serve)}
-                      </dl>
-
                       {/* And the way in, where there is an address to be let in
                           at. A machine serving nothing has none, and so has
                           nothing for a camera to be pointed at — the key those
-                          links carry is a section of its own below, which every
-                          machine has. */}
+                          links carry stands below, which every machine has. */}
                       <Show when={here.link} keyed>
                         {(link) => <Reach link={link} />}
                       </Show>
@@ -357,7 +416,7 @@ export function RemotePane(props: {
                   turned out to be. It is not Tailscale's — it gates a machine
                   that has never heard of a tailnet exactly as it gates one
                   serving on it — so the press that re-issues it must not be a
-                  thing the serve switch can take away. */}
+                  thing the serve box can take away. */}
               <TheKey />
             </div>
           )}
@@ -372,17 +431,16 @@ export function RemotePane(props: {
 ///
 /// Two things about one string. The QR is for the phone in somebody's hand; the
 /// copy is for every other way a link travels — a laptop on the same tailnet, a
-/// note to oneself.
+/// note to oneself. Neither is labelled: a QR code on a page about reaching this
+/// workbench from a phone is a thing everybody has already scanned once.
 ///
 /// Drawn only where there is a served address to build a link on, because that
 /// is what a link *is* here: a machine serving nothing has nothing for a camera
-/// to be pointed at. The key those links carry is a section of its own below,
-/// which every machine has whether or not it is serving.
+/// to be pointed at. The key those links carry stands below it, which every
+/// machine has whether or not it is serving.
 function Reach(props: { link: string }): JSX.Element {
   return (
     <section class={styles.reach}>
-      <h3>Open the workbench on a phone</h3>
-
       <div class={styles.letIn}>
         <div class={styles.code}>
           <Qr of={props.link} label="The login link for this workbench" />
@@ -393,12 +451,6 @@ function Reach(props: { link: string }): JSX.Element {
           <Copy of={props.link} class={styles.copy} />
         </div>
       </div>
-
-      <Note>
-        Scanning this opens the workbench on the phone and leaves it logged in.
-        The link carries the workbench key, so anything holding it is in: it is
-        worth as much as the workbench itself.
-      </Note>
     </section>
   );
 }
@@ -418,7 +470,7 @@ function Reach(props: { link: string }): JSX.Element {
 /// moment somebody might want the key back, and a Reset that went away with the
 /// address would be the press removing itself.
 ///
-/// The press answers with the machine read again, exactly as the serve switch's
+/// The press answers with the machine read again, exactly as the serve box's
 /// does, so it is written straight over the read this pane is drawn from: the
 /// code above redraws on the new key out of the answer rather than out of a
 /// second request.
@@ -433,14 +485,6 @@ function TheKey(): JSX.Element {
 
   return (
     <section class={styles.key}>
-      <h3>The workbench key</h3>
-
-      <Note>
-        Every page of this workbench answers 401 without the key, and a login
-        link is the address with it on the end. Everything you have opened one
-        in stays logged in until the key is re-issued.
-      </Note>
-
       <button
         type="button"
         class={styles.reset}
@@ -451,10 +495,8 @@ function TheKey(): JSX.Element {
       </button>
 
       <Note>
-        A new key over the old one, for a phone that was lost or a link that
-        went where it should not have. Every other device is logged out by it;
-        this browser stays in, and the new link is the one the tray's Open and
-        the startup line hand out from here on.
+        Resets the secret token used to access to the UI. This will disconnect
+        all other devices.
       </Note>
 
       <Show when={reset.isError}>
@@ -463,42 +505,6 @@ function TheKey(): JSX.Element {
         </ErrorLine>
       </Show>
     </section>
-  );
-}
-
-/// What is served to the tailnet, as the rows under the node's own name.
-///
-/// Three answers rather than two: a serve configuration that could not be read
-/// is not a serve that is off, and saying *off* about one would be saying the
-/// workbench is waiting to be served when nobody here knows whether it already
-/// is.
-function served(serve: ServeView): JSX.Element {
-  return (
-    <Choose>
-      <Match when={serving(serve)} keyed>
-        {(on) => (
-          <>
-            <dt>The workbench is served at</dt>
-            <dd class={styles.address}>{on.address}</dd>
-          </>
-        )}
-      </Match>
-      <Match when={serve.serve === "Off"}>
-        <dt>The workbench</dt>
-        <dd>Not served to the tailnet.</dd>
-      </Match>
-      <Match when={unread(serve)} keyed>
-        {(strange) => (
-          <>
-            <dt>The workbench</dt>
-            <dd>
-              What is served here could not be read.
-              <span class={styles.trouble}>{strange.trouble}</span>
-            </dd>
-          </>
-        )}
-      </Match>
-    </Choose>
   );
 }
 
@@ -519,7 +525,7 @@ function refused(pressed: ServePress | undefined): JSX.Element {
           <>
             <Note>
               Tailscale will not set up a serve for the user this server runs
-              as. Run this on the machine, then press the switch again:
+              as. Run this on the machine, then press the box again:
             </Note>
             <p class={styles.command}>{denied.grant}</p>
             <p class={styles.trouble}>{denied.trouble}</p>

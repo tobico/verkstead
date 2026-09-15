@@ -492,12 +492,12 @@ $ echo $?
 That is the loop. Run step 4 again and Question Set 2 appears on the same
 Conversation's Timeline, to be answered the same way. To answer it from your
 phone instead, open the settings page's **Remote access** section: it says what
-this machine's Tailscale is doing, its switch puts the tailnet name in front of
-the port this server is listening on — the HTTPS push notifications need to work
-at all — and the login link is drawn there as a QR code to point the phone's
-camera at, the address and the **Workbench Key** together. Nothing to run in a
-terminal, and nothing to paste: Tailscale itself is the machine's, and a serve
-set up by hand reads on that page exactly as one set up from it would.
+this machine's Tailscale is doing, its checkbox puts the tailnet name in front
+of the port this server is listening on — the HTTPS push notifications need to
+work at all — and the login link is drawn there as a QR code to point the
+phone's camera at, the address and the **Workbench Key** together. Nothing to
+run in a terminal, and nothing to paste: Tailscale itself is the machine's, and
+a serve set up by hand reads on that page exactly as one set up from it would.
 
 Where the press is refused for want of the operator grant — Tailscale allows a
 serve from nobody but root and the tailnet's operator — the pane shows the

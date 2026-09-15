@@ -40,11 +40,15 @@ export function Check(props: {
   on: boolean;
   /// Whether it will take a tick. A disabled box still says where it stands.
   disabled?: boolean;
+  /// Why it will not take one, where the box is disabled for a reason of its
+  /// own rather than for a save in flight. Sits on the whole row as the
+  /// browser's own tooltip, so the words beside the box carry it as well.
+  title?: string;
   /// What to do about a tick, given the state being asked for.
   flip: (on: boolean) => void;
 }): JSX.Element {
   return (
-    <label class={styles.check}>
+    <label class={styles.check} title={props.title}>
       <input
         type="checkbox"
         // Solid sets `checked` as a property rather than an attribute, which is
