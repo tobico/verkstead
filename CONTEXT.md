@@ -75,6 +75,7 @@ on the Timeline — and neither waiting mark is drawn over the stop it carries,
 which stays on the record as history. Done is not Closed in this. A Done
 Conversation's Sets are still there to be answered, so one left open goes on
 drawing the marks: an answerable ask is still an ask.
+
 **A close pressed over a run in flight is confirmed first**, and it is the one
 press on the actions menu that is: closing ends the session along with
 everything else it ends, and nothing else on that menu is both past taking back
