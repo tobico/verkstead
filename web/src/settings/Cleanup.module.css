@@ -52,8 +52,8 @@
   font-size: 0.9rem;
 }
 
-/* And the details pane: the two rows, each a switch, what it means, and how
-   long after the archiving. */
+/* And the details pane: the two rows, each a checkbox and how long after the
+   archiving hanging off it. */
 .step {
   margin-top: 1.5rem;
 }
@@ -62,9 +62,8 @@
   margin-top: 0.85rem;
 }
 
-.timing {
-  margin-top: 0.85rem;
-}
+/* The space above a duration is the nested group's own — see
+   `Check.module.css`, which is where the indent it is read by lives too. */
 
 .timing label {
   display: block;
@@ -108,6 +107,10 @@
   opacity: 0.65;
 }
 
+.field input:disabled {
+  cursor: not-allowed;
+}
+
 .failure {
   margin: 0.5rem 0 0;
   font-size: 0.9rem;
@@ -118,7 +121,7 @@
 }
 
 @media (hover: hover) {
-  .field input:hover {
+  .field input:not(:disabled):hover {
     border-color: var(--ink-soft);
   }
 

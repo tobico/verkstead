@@ -2071,7 +2071,7 @@ it is the Share it always was, a Share never having included what trimming
 takes. Named on the Conversation's page, and a card whose drill-down is gone
 says so rather than breaking; nothing anywhere announces a trim to come, only
 one that has happened. On by default, three days after the archiving, with the
-switch and the days in the settings' Cleanup section; a fresh archiving makes
+checkbox and the days in the settings' Cleanup section; a fresh archiving makes
 a Conversation trimmable again, so one steered back to life and put away again
 has its new bulk taken too.
 _Avoid_: pruned, compacted, cleaned (the sweep's word, not the state's)

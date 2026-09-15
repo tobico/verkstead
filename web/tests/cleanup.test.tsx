@@ -1,17 +1,23 @@
 //! What becomes of an archived conversation, on the settings page: what the
-//! card says of it, what the switches in its pane put on the wire, and the two
-//! durations beside them.
+//! card says of it, what the checkboxes in its pane put on the wire, and the two
+//! durations hanging off them.
 //!
 //! Two halves mounted apart, because that is what they are: a card in the middle
 //! pane saying what happens and when, and the controls that change it in the
 //! details pane it opens.
 //!
-//! Two rows and two kinds of press. A switch is its own save, because a switch
-//! that needed a second one is not a switch; a duration is typed, so it waits
-//! for a Save. Every one of those saves sends the whole of the settings edit —
-//! the author as it stands, the token untouched and the other row where the read
+//! Two rows and two kinds of press. A checkbox is its own save, because a box
+//! that needed a second one is not a box; a duration is typed, so it waits for a
+//! Save. Every one of those saves sends the whole of the settings edit — the
+//! author as it stands, the token untouched and the other row where the read
 //! left it — because the server writes both files in one request, and that is
 //! what these check is not lost.
+//!
+//! And each duration is nested under its own checkbox, which is the page's
+//! pattern for configuration that only means something while something else is
+//! on: greyed and refusing input while its box is unticked, and taking input
+//! once it is ticked. Both rows are checked for it, because the two of them fall
+//! back the two different ways and so each is drawn in the other's state.
 //!
 //! The read is a fixture the server's own tests wrote, so what the page is drawn
 //! from is the shape the endpoint really answers with: `settings.json` is the
@@ -26,6 +32,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { CleanupView, SettingsSaved, SettingsView } from "../src/api/types";
 import card from "../src/CardButton.module.css";
+import check from "../src/Check.module.css";
 import { CleanupCard, CleanupPane } from "../src/settings/Cleanup";
 import styles from "../src/settings/Cleanup.module.css";
 import { json, serving, whenever } from "./serving";
@@ -63,7 +70,7 @@ const REST = {
 };
 
 /// The same settings with the Cleanup somewhere else — what a save answers with,
-/// and what a fixture of a switch flipped is drawn from.
+/// and what a fixture of a box ticked is drawn from.
 function cleaning(standing: SettingsView, cleanup: CleanupView): SettingsView {
   return { ...standing, cleanup };
 }
@@ -142,13 +149,25 @@ async function theCard(container: ParentNode): Promise<HTMLElement> {
   });
 }
 
-/// The two switches, in the order the pane draws them.
-function switches(): HTMLInputElement[] {
-  return screen.getAllByRole("switch") as HTMLInputElement[];
+/// The two checkboxes, each by the words beside it.
+function box(named: RegExp): HTMLInputElement {
+  return screen.getByRole("checkbox", { name: named }) as HTMLInputElement;
 }
 
-const theTrim = () => switches()[0]!;
-const theDelete = () => switches()[1]!;
+const theTrim = () => box(/^Trim archived/);
+const theDelete = () => box(/^Delete archived/);
+
+/// And the two groups hanging off them, in the order the pane draws them.
+function groups(container: ParentNode): HTMLFieldSetElement[] {
+  const nested = Array.from(
+    container.querySelectorAll<HTMLFieldSetElement>(`.${check.nested}`),
+  );
+  expect(nested.length, "expected a nested group under each box").toBe(2);
+  return nested;
+}
+
+const trimGroup = (container: ParentNode) => groups(container)[0]!;
+const deleteGroup = (container: ParentNode) => groups(container)[1]!;
 
 describe("the card", () => {
   /// The shape of the whole section, said in the two lines somebody scanning
@@ -232,8 +251,8 @@ describe("the card", () => {
 });
 
 describe("the cleanup as the pane draws it", () => {
-  /// Where the switches sit rather than whether anybody has touched them, which
-  /// is what the two defaults falling the two different ways means.
+  /// Where the boxes sit rather than whether anybody has touched them, which is
+  /// what the two defaults falling the two different ways means.
   it("reads as trimming and not deleting where nothing has been configured", async () => {
     theSettings(UNSET);
     mountPane();
@@ -268,22 +287,79 @@ describe("the cleanup as the pane draws it", () => {
     expect(field.value).toBe("5");
   });
 
-  /// The duration of a step that never happens is nothing to ask for: the
-  /// switch is what says whether there is a clock at all.
-  it("asks for no duration while a step is switched off", async () => {
+  /// The duration of a step that never happens means nothing yet, so it is
+  /// greyed — and greyed rather than taken away, because a field that vanished
+  /// would say the setting had.
+  it("greys a duration while its box is unticked", async () => {
     theSettings(UNSET);
+    const { container } = mountPane();
+
+    await waitFor(() => expect(theDelete().checked).toBe(false));
+
+    expect(deleteGroup(container).disabled).toBe(true);
+    expect(screen.getByLabelText(/before deleting/).matches(":disabled")).toBe(
+      true,
+    );
+    expect(
+      screen.getAllByRole("button", { name: "Save" })[1]!.matches(":disabled"),
+    ).toBe(true);
+
+    // And the row that is on is untouched by the one that is off.
+    expect(trimGroup(container).disabled).toBe(false);
+    expect(screen.getByLabelText(/before trimming/).matches(":disabled")).toBe(
+      false,
+    );
+  });
+
+  /// The other row, in the other state: the trim is the one that is on by
+  /// default, so switching it off is what greys its own duration.
+  it("greys the trim's duration once its box is unticked", async () => {
+    theSettings(step(TOLD, "trim", { enabled: false }));
+    const { container } = mountPane();
+
+    await waitFor(() => expect(theTrim().checked).toBe(false));
+
+    expect(trimGroup(container).disabled).toBe(true);
+    expect(screen.getByLabelText(/before trimming/).matches(":disabled")).toBe(
+      true,
+    );
+  });
+
+  /// A greyed group refuses input rather than only looking as though it would:
+  /// the browser will not take the press at all, so nothing is saved.
+  it("refuses a save from a greyed duration", async () => {
+    const fetching = theSettings(UNSET);
     mountPane();
 
-    await waitFor(() => screen.getByLabelText(/before trimming/));
-    expect(screen.queryByLabelText(/before deleting/)).toBeNull();
+    await waitFor(() => expect(theDelete().checked).toBe(false));
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Save" })[1]!);
+
+    expect(
+      fetching.mock.calls.some(([, init]) => init?.method === "POST"),
+      "a disabled press is no press",
+    ).toBe(false);
+  });
+
+  /// And it takes input once the box above it is ticked.
+  it("takes a duration where its box is ticked", async () => {
+    theSettings(TOLD);
+    const { container } = mountPane();
+
+    await waitFor(() => expect(theDelete().checked).toBe(true));
+
+    expect(deleteGroup(container).disabled).toBe(false);
+    expect(screen.getByLabelText(/before deleting/).matches(":disabled")).toBe(
+      false,
+    );
   });
 });
 
 describe("changing the cleanup", () => {
-  /// A switch is its own save. What goes with it is everything else in the
-  /// file as it stands: one request writes both files, so a flip here must not
+  /// A checkbox is its own save. What goes with it is everything else in the
+  /// file as it stands: one request writes both files, so a tick here must not
   /// be able to take the credentials or the other row with it.
-  it("saves the moment the trim is switched off, and leaves the rest alone", async () => {
+  it("saves the moment the trim is unticked, and leaves the rest alone", async () => {
     const off = step(TOLD, "trim", { enabled: false });
     const fetching = theSettings(TOLD, json(answering(off)));
     mountPane();
@@ -302,17 +378,17 @@ describe("changing the cleanup", () => {
       }),
     );
 
-    // And the switch follows the answer rather than the press.
+    // And the box follows the answer rather than the press.
     await waitFor(() => expect(theTrim().checked).toBe(false));
   });
 
-  /// And a switch never commits a duration nobody pressed Save on.
+  /// And a tick never commits a duration nobody pressed Save on.
   ///
-  /// One request writes the whole file, so a flip has to say something about
+  /// One request writes the whole file, so a tick has to say something about
   /// both durations — and what it says is what the server last gave it. Typing
-  /// the `1` of a `10` and then reaching for the other row's switch would
+  /// the `1` of a `10` and then reaching for the other row's box would
   /// otherwise save a one-day trim nobody asked for.
-  it("sends the server's durations when a switch is flipped, not what is typed", async () => {
+  it("sends the server's durations when a box is ticked, not what is typed", async () => {
     const fetching = theSettings(
       TOLD,
       json(answering(step(TOLD, "delete", { enabled: false }))),
@@ -336,7 +412,7 @@ describe("changing the cleanup", () => {
       }),
     );
 
-    // And what was typed is still there to finish typing: the flip did not
+    // And what was typed is still there to finish typing: the tick did not
     // commit it, so the field did not let go of it either.
     await waitFor(() => expect(theDelete().checked).toBe(false));
     expect(
@@ -344,7 +420,7 @@ describe("changing the cleanup", () => {
     ).toBe("1");
   });
 
-  it("saves the moment the delete is switched on", async () => {
+  it("saves the moment the delete is ticked on", async () => {
     const on = step(UNSET, "delete", { enabled: true });
     const fetching = theSettings(UNSET, json(answering(on)));
     mountPane();
