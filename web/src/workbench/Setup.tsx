@@ -1413,11 +1413,16 @@ export function CompanionChoice(props: {
           </ErrorLine>
         </Match>
         <Match when={repos.data?.length === 0}>
-          {/* Nothing to work alongside, so the only thing to offer is the page
-              that fixes that. */}
+          {/* Nothing to work alongside, so what is left to say is where one is
+              taken on. That is the Repo dropdown rather than the settings
+              page: registering is done from **Open repo** and **Create repo**
+              at the foot of it, and the settings list what is registered and
+              have no registration of their own. No link, because there is no
+              path that drops a dropdown — the words name the control, which is
+              on the same page as this one. */}
           <Empty class={styles.nothing}>
-            No repos are registered yet — <A href="/settings">register one</A>{" "}
-            to work alongside.
+            No repos are registered yet — <strong>Open repo</strong> on the
+            Repo dropdown takes one on to work alongside.
           </Empty>
         </Match>
         <Match when={repos.data}>
