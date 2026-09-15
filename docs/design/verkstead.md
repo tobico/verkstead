@@ -990,11 +990,19 @@ Timeline events:
   both went with the grammar that made them). That card's count of entries the
   server cannot see is what the warning on it is drawn from: a bind that has
   quietly stopped resolving is what nobody goes looking for. What is on a card is
-  what a list is scanned for and the rest is in the pane — a Profile's
-  mounted paths, agent type and Remove; Language support's checkbox per language
-  and the size of the Rust cache's compiled half. Adding a Profile is a plus icon
-  on the section's heading line, which opens the same pane blank and reads as
-  open while it stands. The two switches that are about the device and the server
+  what a list is scanned for and the rest is in the pane — a Profile's mounted
+  paths, the models it lists, its agent type as a field and Remove; Language
+  support's checkbox per language and the size of the Rust cache's compiled
+  half. **A Profile's card is one line: the harness's mark, the harness's name,
+  and the Profile's own name after an em dash** — "Claude Code — Personal", and
+  "Claude Code" for the one nobody named, there being nothing for a name to tell
+  it apart from — with the warning under it where its account has gone
+  (*revised 2026-09-15, building settings-ui-tidy*: it read as the Profile's
+  name alone, **Default** where there was none, over a line of every model id
+  the account can launch). Adding a Profile is a plus icon on the section's
+  heading line, centred on the heading the way every heading row draws what
+  stands at the end of it, which opens the same pane blank and reads as open
+  while it stands. The two switches that are about the device and the server
   rather than about anything configured stay as they were: notifications on the
   pane head's line, and the update banner above everything.
 - **The Repos are one card, counting them, over one pane listing every one by

@@ -161,10 +161,18 @@ function theCard(name: string): HTMLElement {
   return screen.getByText(name).closest(`.${styles.profile}`)!;
 }
 
-/// What a card is read by: the profile's name, and *Default* for the one nobody
-/// named — which is what the card draws, a list being read down by name.
-function named(profile: ProfileEntry): string {
-  return profile.name ?? DEFAULT_PROFILE;
+/// What a card is read by: the backend's own name, and the profile's name after
+/// an em dash where it has one — "Claude Code — fable".
+///
+/// Composed here rather than imported from the page, so that naming the reading
+/// and drawing it are two statements about the same words. A profile nobody
+/// named is the backend alone: *Default* is the word for a blank where a name
+/// has to be shown, and a card under the backend's own mark is not one of those
+/// places.
+function reads(profile: ProfileEntry): string {
+  const harness = AGENT_NAME[profile.account.agent_type];
+
+  return profile.name ? `${harness} — ${profile.name}` : harness;
 }
 
 /// Fill the form in, whichever profile it is about.
@@ -273,7 +281,7 @@ describe("the cards", () => {
     const fetching = theProfiles();
     const { container } = mountCards();
 
-    await waitFor(() => screen.getByText(named(FABLE)));
+    await waitFor(() => screen.getByText(reads(FABLE)));
 
     expect(fetching).toHaveBeenCalledWith(
       "/api/ui/profiles",
@@ -283,39 +291,53 @@ describe("the cards", () => {
       [...container.querySelectorAll(`.${styles.profile} .${styles.title}`)].map(
         (name) => name.textContent,
       ),
-    ).toEqual(SAVED.map(named));
+    ).toEqual(SAVED.map(reads));
   });
 
-  /// The list is the whole of what the account can launch, so the card shows all
-  /// of it: one entry drawn out of several would be a preference the profile
-  /// does not have.
-  it("shows every model a profile lists", async () => {
+  /// Under the backend's own mark, the way every picker row draws the same
+  /// pair: a list of accounts is sorted by backend, and the shape is what a
+  /// reader finds one by before any of the words.
+  it("draws each card under its backend's brand mark", async () => {
+    serving(whenever("/api/ui/profiles", json([FABLE, CODEX])));
+    mountCards();
+
+    await waitFor(() => screen.getByText(reads(CODEX)));
+
+    expect(marked(theCard(reads(FABLE)))).toBe(art(claudeMarkFile));
+    expect(marked(theCard(reads(CODEX)))).toBe(art(codexMarkFile));
+  });
+
+  /// The models came off the card and into the pane. A profile carries every
+  /// model its account can launch — the list is the whole of what it says it can
+  /// run, so a card could not draw one of them without picking — and a line of
+  /// ids under every row is what a list is scrolled past rather than scanned.
+  it("keeps the models off the card", async () => {
     theProfiles();
     mountCards();
 
-    await waitFor(() => screen.getByText(named(OPUS)));
+    await waitFor(() => screen.getByText(reads(OPUS)));
 
     expect(OPUS.models.length).toBeGreaterThan(1);
-    expect(
-      [...theCard(named(OPUS)).querySelectorAll(`.${styles.model}`)].map(
-        (model) => model.textContent,
-      ),
-    ).toEqual(OPUS.models);
+    const face = theCard(reads(OPUS));
+    for (const model of OPUS.models) {
+      expect(face.textContent).not.toContain(model);
+      expect(face.textContent).not.toContain(prettify(model));
+    }
   });
 
-  /// The mounted paths and the agent type came off the card and into the pane,
-  /// which has the room for them: a list is scanned before it is read, and two
-  /// absolute paths a card deep are neither.
-  it("keeps the paths and the agent type off the card", async () => {
+  /// The mounted paths came off the card and into the pane, which has the room
+  /// for them: a list is scanned before it is read, and two absolute paths a
+  /// card deep are neither. The agent type is on the card as the mark and the
+  /// backend's own name rather than as the word the record is written in.
+  it("keeps the paths off the card", async () => {
     theProfiles();
     mountCards();
 
-    await waitFor(() => screen.getByText(named(FABLE)));
+    await waitFor(() => screen.getByText(reads(FABLE)));
 
-    const face = theCard(named(FABLE));
+    const face = theCard(reads(FABLE));
     expect(face.textContent).not.toContain(pair(FABLE.account).claude_dir);
     expect(face.textContent).not.toContain(pair(FABLE.account).config_file);
-    expect(face.textContent).not.toContain(FABLE.account.agent_type);
   });
 
   /// It is a card like every other card in the app: pressed to open the pane
@@ -325,9 +347,9 @@ describe("the cards", () => {
     theProfiles();
     const { open } = mountCards();
 
-    await waitFor(() => screen.getByText(named(FABLE)));
+    await waitFor(() => screen.getByText(reads(FABLE)));
 
-    const face = theCard(named(FABLE));
+    const face = theCard(reads(FABLE));
     expect(face.getAttribute("role")).toBe("button");
     expect(face.getAttribute("aria-pressed")).toBe("false");
     expect(face.classList).not.toContain(card.open);
@@ -340,11 +362,11 @@ describe("the cards", () => {
     theProfiles();
     mountCards(FABLE.id);
 
-    await waitFor(() => screen.getByText(named(FABLE)));
+    await waitFor(() => screen.getByText(reads(FABLE)));
 
-    expect(theCard(named(FABLE)).getAttribute("aria-pressed")).toBe("true");
-    expect(theCard(named(FABLE)).classList).toContain(card.open);
-    expect(theCard(named(OPUS)).classList).not.toContain(card.open);
+    expect(theCard(reads(FABLE)).getAttribute("aria-pressed")).toBe("true");
+    expect(theCard(reads(FABLE)).classList).toContain(card.open);
+    expect(theCard(reads(OPUS)).classList).not.toContain(card.open);
   });
 
   /// The list is what stays in the pane. There is no form on it at all: adding
@@ -353,7 +375,7 @@ describe("the cards", () => {
     theProfiles();
     const { container } = mountCards();
 
-    await waitFor(() => screen.getByText(named(FABLE)));
+    await waitFor(() => screen.getByText(reads(FABLE)));
 
     expect(container.querySelector("form")).toBeNull();
     expect(container.querySelector("dialog")).toBeNull();
@@ -368,19 +390,24 @@ describe("the cards", () => {
   });
 
   /// A profile may go unnamed — a name tells two accounts of one agent apart,
-  /// and the wizard's accounts step saves one nobody has typed a word for. A
-  /// card is a list read down by name, so this is one of the places a name has
-  /// to be shown whatever the profile holds.
-  it("reads a profile nobody named as Default", async () => {
-    serving(whenever("/api/ui/profiles", json([{ ...FABLE, name: null }])));
+  /// and the wizard's accounts step saves one nobody has typed a word for. It
+  /// reads as the backend alone here: the mark and the harness's name have
+  /// already said the whole of what the account is, so there is no blank for
+  /// *Default* to fill and no dash with nothing after it.
+  it("reads a profile nobody named as its backend alone", async () => {
+    const unnamed = { ...FABLE, name: null };
+    serving(whenever("/api/ui/profiles", json([unnamed])));
     const { container } = mountCards();
 
-    await waitFor(() => screen.getByText(DEFAULT_PROFILE));
+    await waitFor(() => screen.getByText(AGENT_NAME[FABLE.account.agent_type]));
 
-    expect(
-      container.querySelector(`.${styles.profile} .${styles.title}`)!
-        .textContent,
-    ).toBe(DEFAULT_PROFILE);
+    const title = container.querySelector(
+      `.${styles.profile} .${styles.title}`,
+    )!;
+    expect(title.textContent).toBe(reads(unnamed));
+    expect(title.textContent).not.toContain(DEFAULT_PROFILE);
+    expect(title.textContent).not.toContain("—");
+    expect(marked(title)).toBe(art(claudeMarkFile));
   });
 });
 
@@ -892,9 +919,9 @@ describe("a profile whose account has gone", () => {
     serving(whenever("/api/ui/profiles", json(gone)));
     mountCards();
 
-    await waitFor(() => screen.getByText(named(FABLE)));
+    await waitFor(() => screen.getByText(reads(FABLE)));
 
-    const face = theCard(named(FABLE));
+    const face = theCard(reads(FABLE));
     expect(face.classList).toContain(styles.broken);
     expect(face.querySelector(`.${styles.broken}`)!.textContent).toBe(said);
   });
@@ -903,9 +930,9 @@ describe("a profile whose account has gone", () => {
     theProfiles();
     mountCards();
 
-    await waitFor(() => screen.getByText(named(FABLE)));
+    await waitFor(() => screen.getByText(reads(FABLE)));
 
-    const face = theCard(named(FABLE));
+    const face = theCard(reads(FABLE));
     expect(FABLE.broken).toBeNull();
     expect(face.classList).not.toContain(styles.broken);
     expect(face.querySelector(`.${styles.broken}`)).toBeNull();

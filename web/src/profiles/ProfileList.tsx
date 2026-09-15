@@ -42,10 +42,14 @@
 //! are the rows it stood over: a card that is pressed to open the pane beside it
 //! is what everything else on this page is.
 //!
-//! What is on the card is what a list is scanned for — the name, the models, and
-//! the warning where the account has gone. The agent type and the mounted paths
-//! come off it and into the pane, which has room for them: both are the form's
-//! own fields there, the type over the paths it decides.
+//! What is on the card is what a list is scanned for: one line reading as the
+//! harness's mark, the harness, and the profile's own name after an em dash —
+//! "Claude Code — Personal" — with the warning under it where the account has
+//! gone. The mounted paths come off it and into the pane, which has room for
+//! them, and so do the models: a profile carries every model its account can
+//! launch, and a card that listed them put a line of ids under every row. The
+//! agent type stays on the card as the mark it is drawn by rather than as a
+//! word, and is the form's own field in the pane, over the paths it decides.
 //!
 //! Removing is in that pane too, under the form. It was a second control on
 //! every row, which put a destructive press beside a list somebody was only
@@ -100,6 +104,7 @@ import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import { CardButton } from "../CardButton";
+import { HarnessMark } from "../HarnessMark";
 import { IconButton } from "../IconButton";
 import { PaneSticky } from "../Panes";
 import { PathField } from "../PathField";
@@ -109,7 +114,7 @@ import {
   editProfile,
   listProfiles,
 } from "../api/client";
-import { AGENT_NAME, DEFAULT_PROFILE, type AgentType } from "../agents";
+import { AGENT_NAME, type AgentType } from "../agents";
 import type {
   Broken,
   ProfileAccount,
@@ -351,13 +356,15 @@ export function ProfileList(props: {
           button it was, for the reason the gear at the head of the conversations
           is one: it is another thing standing in this pane that is selected and
           opened into the pane beside it, so it is drawn as open while the blank
-          form is what is being read. */}
+          form is what is being read. Where on that line it sits is the row's
+          own doing: a heading row centres what stands at the end of it, so a
+          mark with no words of its own is beside the heading rather than under
+          it, and this section says nothing about it. */}
       <div class={app.sectionHead}>
         <h2>Agent profiles</h2>
         <IconButton
           of={faPlus}
           label="Add a profile"
-          class={styles.add}
           open={props.opening === "new"}
           press={props.add}
         />
@@ -395,7 +402,26 @@ export function ProfileList(props: {
   );
 }
 
-/// One saved profile: what it is called, and what it runs.
+/// How a saved profile reads on its card: the backend, and the profile's own
+/// name after an em dash where it has one.
+///
+/// "Claude Code — Personal", and "Claude Code" for the profile nobody named.
+/// This is the one reading in the app that draws nothing at all where a name is
+/// missing rather than standing [`DEFAULT_PROFILE`](../agents.ts) in for it: a
+/// name is what tells two accounts of one backend apart, the mark beside these
+/// words has already said which backend this is, and a *Default* after the dash
+/// would be a word invented to fill the space.
+///
+/// No model is in it. A profile carries every model its account can launch and
+/// the pane is where they are picked; a card that listed them put a line of ids
+/// under every row, which is what a list is scrolled past rather than scanned.
+function summary(profile: ProfileEntry): string {
+  const harness = AGENT_NAME[profile.account.agent_type];
+
+  return profile.name ? `${harness} — ${profile.name}` : harness;
+}
+
+/// One saved profile: what it runs, and what it is called.
 ///
 /// Drawn as an `article`, the way every card holding more than a run of text is
 /// — a button may not have paragraphs inside it, and `CardButton` puts the
@@ -420,18 +446,13 @@ function ProfileCard(props: {
         open={props.open}
         press={props.press}
       >
-        {/* A card is a list read down by name, so the one nobody named still
-            needs a word to be read by — see [`DEFAULT_PROFILE`](../agents.ts),
-            which is that word wherever a name has to be shown. */}
+        {/* The harness's mark and the reading beside it, drawn the way the
+            picker rows draw the same pair: a list of accounts is sorted by
+            backend, and the shape is what a reader finds it by before any of
+            the words. */}
         <span class={styles.title}>
-          {props.profile.name ?? DEFAULT_PROFILE}
-        </span>
-        <span class={styles.meta}>
-          {/* Every model, because the list is the whole of what a profile says
-              it can run and a card showing one of them would be picking. */}
-          <For each={props.profile.models}>
-            {(model) => <span class={styles.model}>{model}</span>}
-          </For>
+          <HarnessMark of={props.profile.account.agent_type} />
+          {summary(props.profile)}
         </span>
         {/* Said here rather than left to be found out when a session will not
             start: the profile was checked when it was saved, and what has become

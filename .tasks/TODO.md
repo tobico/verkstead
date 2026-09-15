@@ -28,4 +28,4 @@ same change.
 - [x] 06: One Repos page — [details](06-one-repos-page.md)
 - [x] 07: Repo-scoped binds go end to end — [details](07-repo-scoped-binds-go.md)
 - [x] 08: Paths becomes Sandbox binds — [details](08-sandbox-binds.md)
-- [ ] 09: Agent profile cards — [details](09-agent-profile-cards.md)
+- [x] 09: Agent profile cards — [details](09-agent-profile-cards.md)

@@ -1225,14 +1225,14 @@ second, and one without a name only the first.
 **An unnamed one reads as nothing wherever the harness and the model say
 enough**, which is most of the places a Profile is read: the pairing rows of a
 harness with one account, the second line of the Agent run card, the Brief's
-three pairing facts. Where a name has to be shown it reads **Default** — the
-settings card, which is a list of Profiles by name, and a picker holding two
-accounts of one harness, where the name is the difference between the rows. It
-is a word for a blank rather than a Profile anything falls back to: there is no
-default Profile, exactly as there is no default model. And a session run under
-one writes no name into its record, so a finished run draws as the harness and
-the model alone — which is how a record from before Verkstead wrote the name
-down already drew.
+three pairing facts, and the settings card, which reads as the harness's mark
+and the harness's name with no dash after it. Where a name has to be shown it
+reads **Default** — a picker holding two accounts of one harness, where the name
+is the difference between the rows. It is a word for a blank rather than a
+Profile anything falls back to: there is no default Profile, exactly as there is
+no default model. And a session run under one writes no name into its record, so
+a finished run draws as the harness and the model alone — which is how a record
+from before Verkstead wrote the name down already drew.
 **Removing one is always allowed**, and it is a delete rather than an
 unregistering: a Profile is a way in to an account, so one the human is finished
 with is one Verkstead should stop holding. Every Conversation that had chosen it

@@ -23,13 +23,29 @@
    is drawn in rather than with any of them. Each of those components imports
    this module for the ones it writes. */
 
-/* A section heading with a control on the other end of its line. The heading
-   keeps its own margin, so the row is only the arrangement. */
+/* A section heading with a control on the other end of its line.
+
+   Centred on the heading rather than sat on its baseline. What stands at the
+   other end is as often a mark as it is words — the plus that adds an Agent
+   Profile is an icon with no text of its own — and a baseline hangs a mark
+   below the words rather than beside them. Centring is what reads right for
+   both, so it is said here once and every heading row is laid out that way.
+
+   The space under the row is the row's own. The heading's bottom margin would
+   otherwise be measured into the line being centred, which would sit the
+   control half that margin below the words: so the heading gives its margin up
+   while it stands in one of these, and the row carries the same space
+   instead. */
 .sectionHead {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 0.5rem 1rem;
+  margin-bottom: 0.6rem;
+}
+
+.sectionHead > :first-child {
+  margin-bottom: 0;
 }
 
 /* The quiet headings naming a page's sections, so a jump from the table of
