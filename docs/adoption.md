@@ -66,7 +66,7 @@ services.verkstead = {
   enable = true;
   paths = [ "/home/you/src" "/home/you/.claude" ];
   home = "/home/you";                 # optional; the service's own by default
-  sandboxBinds = [ "verkstead=/var/cache/verkstead-node" ];
+  sandboxBinds = [ "/var/cache/verkstead-node" ];
 };
 ```
 
