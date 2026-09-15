@@ -37,7 +37,11 @@ directory and then failed at GitHub is still a create — what it made is
 registered and picked, and what failed is said.
 **Registering one can be taken back, and that is an unregistering rather than a
 delete**, on the settings page's **Repos** pane, which lists every one of them by
-name with a Remove beside it and asks once before it acts: Verkstead stops
+name, with the directory it was registered from under it and a Remove beside it,
+and asks once before it acts. The path is on the row because a name is the
+directory's own and two registered in different places may share one, and this
+is the one list that puts them side by side behind a press that cannot be taken
+back. Unregistering: Verkstead stops
 offering it for new work — that list, the Repo dropdown on the compose page and
 on a draft's composer, the roadmaps waiting to be adopted — while every
 Conversation ever worked in it goes on naming it,

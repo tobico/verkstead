@@ -261,10 +261,11 @@ describe("the pane it opens", () => {
     ).toEqual(REPOS.map((repo) => repo.name));
   });
 
-  /// A row is the name and the one press there is to make about a Repo. What a
-  /// repository holds is read where it is used — the branches on the composer,
-  /// the roadmaps in the new conversation dropdown — rather than listed here.
-  it("puts the name and a Remove on a row, and nothing else", async () => {
+  /// A row is the name, the directory under it, and the one press there is to
+  /// make about a Repo. What a repository *holds* is read where it is used —
+  /// the branches on the composer, the roadmaps in the new conversation
+  /// dropdown — rather than listed here.
+  it("puts the name, its path and a Remove on a row, and nothing else", async () => {
     theRepos();
     mountPane();
 
@@ -274,11 +275,36 @@ describe("the pane it opens", () => {
     expect(
       row.querySelector<HTMLButtonElement>(`.${styles.remove}`)!.textContent,
     ).toBe("Remove");
-    expect(row.textContent).toBe(`${FIRST.name}Remove`);
+    expect(row.textContent).toBe(`${FIRST.name}${FIRST.path}Remove`);
     // Not a card, and nothing to open: a name is not a surface to read
     // something off.
     expect(row.querySelector(`.${card.card}`)).toBeNull();
-    expect(screen.queryByText(FIRST.path)).toBeNull();
+  });
+
+  /// And the path is on the row because the name is not unique.
+  ///
+  /// A name is the directory's own and nothing stops two registered
+  /// repositories in different places sharing one — the store orders its list
+  /// by `name, id` for that reason. This is the one list that puts them side by
+  /// side, with an unregistering behind each, so two rows that read the same
+  /// would be a press somebody could only get right by luck.
+  it("tells two repos of one name apart", async () => {
+    const twins: RepoEntry[] = [
+      { id: 3, name: "api", path: "/srv/repos/api", default_branch: "main" },
+      { id: 4, name: "api", path: "/work/api", default_branch: "main" },
+    ];
+    serving(whenever("/api/ui/repos", json(twins)));
+    const { container } = mountPane();
+
+    await waitFor(() =>
+      expect(container.querySelectorAll(`.${styles.repo}`)).toHaveLength(2),
+    );
+
+    expect(
+      [...container.querySelectorAll(`.${styles.repo} .${styles.path}`)].map(
+        (path) => path.textContent,
+      ),
+    ).toEqual(["/srv/repos/api", "/work/api"]);
   });
 
   it("says so plainly when none are registered", async () => {

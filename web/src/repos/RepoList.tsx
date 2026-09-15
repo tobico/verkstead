@@ -13,12 +13,21 @@
 //! **And a Repo no longer has a pane of its own.** Its card opened one: the
 //! path and the default branch, every branch git had, how much work was on it,
 //! the roadmaps in it nothing was driving, a conflict picker, its own binds,
-//! and Remove at the foot. What is drawn of a Repo here now is its name. None
-//! of those facts was stored — each was a git call or a count, made every time
-//! somebody opened one — and each is read where it is used instead: the
-//! branches on the composer, the roadmaps waiting in the new conversation
-//! dropdown, and how a conflicted pull request is resolved once on the Git
-//! pane, for every Repo.
+//! and Remove at the foot. What is drawn of a Repo here now is its name and
+//! the directory it was registered from. None of the rest was stored — each was
+//! a git call or a count, made every time somebody opened one — and each is
+//! read where it is used instead: the branches on the composer, the roadmaps
+//! waiting in the new conversation dropdown, and how a conflicted pull request
+//! is resolved once on the Git pane, for every Repo.
+//!
+//! **The path is on the row because the name does not have to be unique.** A
+//! Repo is read by name everywhere else in the app, and that is enough
+//! everywhere else: a name is shown beside the work it is the repository of.
+//! Here it is not — a name is the directory's own, nothing stops two
+//! directories in different places sharing one, and the store orders its list
+//! by `name, id` for exactly that reason. This is the one list that puts them
+//! side by side, and the one press it offers cannot be taken back, so the row
+//! carries what tells them apart.
 //!
 //! So the one thing there is to *do* to a Repo is take it off the registry,
 //! which is an unregistering rather than a delete: Verkstead stops offering the
@@ -218,10 +227,12 @@ function counted(many: number): string {
 
 /// And every one of them by name, which is the details pane the card opens.
 ///
-/// A row is the name and the one press there is to make about a Repo. Nothing
-/// else: what a repository is holding is read where it is used rather than
-/// listed here, and a list somebody scans for the name they know is a list of
-/// names.
+/// A row is the name, the directory under it, and the one press there is to
+/// make about a Repo. Nothing else: what a repository is holding is read where
+/// it is used rather than listed here, and a list somebody scans for the name
+/// they know is a list of names — with the path under each, because two of them
+/// may be the same name and only one of those is the repo somebody meant to
+/// take away.
 ///
 /// There is no Save over the whole of it and no Cancel: each Remove is its own
 /// press, and a details pane is left by opening something else or by the way
@@ -313,7 +324,20 @@ export function ReposPane(props: {
                 {(repo) => (
                   <li class={styles.repo}>
                     <div class={styles.row}>
-                      <span class={styles.name}>{repo.name}</span>
+                      {/* The name, and the directory it was registered from
+                          under it. A name is what a Repo is read by
+                          everywhere else in the app, and it would be the whole
+                          of a row here too but for one thing: a name is the
+                          directory's own and nothing makes it unique — the
+                          store orders its list by `name, id` precisely
+                          because two directories of one name in different
+                          places are two Repos. This is the one list that puts
+                          them side by side, with an unregistering behind each,
+                          so it is the one place the path has to be readable. */}
+                      <div class={styles.what}>
+                        <span class={styles.name}>{repo.name}</span>
+                        <span class={styles.path}>{repo.path}</span>
+                      </div>
                       <button
                         type="button"
                         class={styles.remove}
