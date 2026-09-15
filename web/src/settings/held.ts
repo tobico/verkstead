@@ -36,15 +36,7 @@ import type {
 /// anything, which is what the moment before the read has landed is.
 export function heldConfig(told: SettingsView | undefined) {
   return {
-    rust_build_cache: {
-      enabled: told?.rust_build_cache.enabled ?? true,
-      // A size nobody typed goes back as the empty string rather than as the
-      // default it is being shown as — see [`heldCleanup`], which says the same
-      // about a duration.
-      size: told?.rust_build_cache.size_configured
-        ? (told?.rust_build_cache.size ?? "")
-        : "",
-    },
+    rust_build_cache: heldCache(told),
     // And what becomes of an archived Conversation, likewise.
     cleanup: heldCleanup(told),
     // And how a conflicted pull request is resolved, which is one of two words
@@ -53,6 +45,31 @@ export function heldConfig(told: SettingsView | undefined) {
     // And the binds the settings hold, again for that reason — a list a form
     // left out would be a list it emptied. See [`heldPaths`].
     ...heldPaths(told),
+  };
+}
+
+/// And the build cache as it stands, ready to be sent by a section that is not
+/// about it — or by the checkbox on the section that is.
+///
+/// A size nobody typed goes back as the empty string rather than as the default
+/// it is being shown as — see [`heldCleanup`], which says the same about a
+/// duration.
+///
+/// **The size here is the server's rather than the field's**, which is what the
+/// Rust checkbox wants of it. A box saves itself the moment it is ticked, so it
+/// has to say something about the size beside it; saying what is in the box
+/// would commit a number nobody pressed Save on — the `5` of a `50` somebody
+/// was halfway through and thought better of. The size's own Save is what
+/// commits the size, and this is what a tick sends instead.
+export function heldCache(told: SettingsView | undefined): {
+  enabled: boolean;
+  size: string;
+} {
+  return {
+    enabled: told?.rust_build_cache.enabled ?? true,
+    size: told?.rust_build_cache.size_configured
+      ? (told?.rust_build_cache.size ?? "")
+      : "",
   };
 }
 

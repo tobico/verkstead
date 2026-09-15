@@ -31,6 +31,15 @@
 //! anything is not a box. The size is typed, so it saves on a press of its own;
 //! nothing is committed while somebody is still halfway through writing `30`.
 //!
+//! Which is why **a tick sends the size the server last gave it** rather than
+//! what the field holds. One request writes the whole file, so a tick has to
+//! say something about the size, and saying what is in the box would commit a
+//! number nobody pressed Save on — the `5` of a `50` somebody was halfway
+//! through and then thought better of the whole thing and unticked. What was
+//! typed stays typed: the tick did not save it, so the field goes on holding it
+//! and its own Save is still what commits it. The Cleanup pane's two durations
+//! are the same rule for the same reason.
+//!
 //! The size hangs off the checkbox, which is the page's one pattern for
 //! configuration that only means something while something else is on: indented
 //! under the box it belongs to, and disabled while that box is off — see
@@ -53,7 +62,7 @@ import type { BuildCacheView, SettingsSaved, SettingsView } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
-import { heldCleanup, heldPaths } from "./held";
+import { heldCache, heldCleanup, heldPaths } from "./held";
 import styles from "./Languages.module.css";
 
 /// What the section is called, wherever it names itself: the card's heading and
@@ -202,8 +211,17 @@ export function LanguagesPane(props: {
   const size = () =>
     typed() ?? (cache()?.size_configured ? (cache()?.size ?? "") : "");
 
+  /// What a save is asked to do: the cache as it is to stand, and whether the
+  /// size in it is one the human pressed Save on.
+  ///
+  /// The second half is what says whether the field should let go of what was
+  /// typed and follow the server again. A tick's save carries the size the
+  /// server holds, so it commits nothing anybody typed and leaves the box
+  /// alone — the same shape, and the same reason, as the Cleanup pane's.
+  type Asked = { edit: { enabled: boolean; size: string }; committed: boolean };
+
   const save = useMutation(() => ({
-    mutationFn: (edit: { enabled: boolean; size: string }) => {
+    mutationFn: ({ edit }: Asked) => {
       const author = told()?.git_author ?? { name: "", email: "" };
 
       return saveSettings({
@@ -233,9 +251,13 @@ export function LanguagesPane(props: {
         ignored_comments: "Keep",
       });
     },
-    onSuccess: (saved: SettingsSaved) => {
-      // What was typed goes, because the answer is now what the field follows.
-      setTyped(null);
+    onSuccess: (saved: SettingsSaved, asked: Asked) => {
+      // What was typed goes, because the answer is now what the field follows —
+      // and only where this save was the one that committed it. A tick's was
+      // not, so what somebody is halfway through writing is still theirs.
+      if (asked.committed) {
+        setTyped(null);
+      }
 
       // The save's answer *is* a fresh read of both files, so a second read
       // would learn nothing and could only disagree with what is on screen.
@@ -243,11 +265,22 @@ export function LanguagesPane(props: {
     },
   }));
 
-  const flip = (enabled: boolean) => save.mutate({ enabled, size: size() });
+  /// The box ticked, which saves itself: the switch takes the new answer and
+  /// the size rides along as the *server* holds it — see [`heldCache`], and
+  /// this module's header for why it is not what the field holds.
+  const flip = (enabled: boolean) =>
+    save.mutate({
+      edit: { ...heldCache(told()), enabled },
+      committed: false,
+    });
 
+  /// And the size pressed, which sends the field.
   const commit = (ev: SubmitEvent) => {
     ev.preventDefault();
-    save.mutate({ enabled: cache()?.enabled ?? true, size: size() });
+    save.mutate({
+      edit: { enabled: cache()?.enabled ?? true, size: size() },
+      committed: true,
+    });
   };
 
   return (

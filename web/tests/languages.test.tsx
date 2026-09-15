@@ -375,6 +375,35 @@ describe("changing the languages", () => {
     await waitFor(() => expect(theCheck().checked).toBe(false));
   });
 
+  /// A tick has to say something about the size, because one request writes the
+  /// whole file — and what it says is what the server holds rather than what is
+  /// in the box. Otherwise unticking the box mid-edit writes the `5` of a `50`
+  /// as the cache size, which is a number nobody pressed Save on. The Cleanup
+  /// pane's two durations hold the same rule.
+  it("sends the server's size when the box is ticked, not what is typed", async () => {
+    const fetching = theSettings(compiling(TOLD), json(answering(off(TOLD))));
+    mountPane();
+
+    const field = await waitFor(() => screen.getByLabelText(/How large/));
+    fireEvent.input(field, { target: { value: "5" } });
+
+    fireEvent.click(theCheck());
+
+    await waitFor(() =>
+      expect(
+        (sent(fetching) as { rust_build_cache: { size: string } })
+          .rust_build_cache.size,
+      ).toBe(TOLD.rust_build_cache.size),
+    );
+
+    // And what was typed is still there to finish typing: the tick did not
+    // commit it, so the field did not let go of it either.
+    await waitFor(() => expect(theCheck().checked).toBe(false));
+    expect(
+      (screen.getByLabelText(/How large/) as HTMLInputElement).value,
+    ).toBe("5");
+  });
+
   /// The size is typed, so it waits for a press: nothing is committed while
   /// somebody is halfway through writing `30`.
   it("sends a size only when it is saved", async () => {
