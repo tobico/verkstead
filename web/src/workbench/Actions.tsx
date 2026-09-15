@@ -85,7 +85,8 @@
 //! for a second press: nothing is sent, nothing is drawn, and the Conversation
 //! is where it was. Where there is no run the press is the one it always was,
 //! there being nothing to warn about. See [`running`], which is what *a run in
-//! flight* means here, and why it is not the flag the two stops are drawn from.
+//! flight* means here — the same pair the status button over this menu reads,
+//! rather than the flag the two stops are drawn from.
 //!
 //! The rest do wait, and keep the card. Resume, the two stops and Steer each
 //! end in a session actually starting or stopping, which is not something this
@@ -379,34 +380,24 @@ export function Refusal(props: {
 const CLOSE = "Close conversation";
 const CLOSE_AND_ARCHIVE = "Close and archive";
 
-/// Whether there is a run for a close to kill: a session is working, or the
-/// state is one something is driving and the drive is between two steps.
+/// Whether there is a run for a close to kill: a session in the worktree, or
+/// something of Verkstead's own still holding the Conversation.
 ///
-/// **Not `ready_to_stop` on its own**, which is the flag the next reader will
-/// reach for, both stops being drawn from it. That one is a fact about the
-/// record — the state is one something ought to be driving, and no stop has
-/// landed — so it goes on being true of a Conversation a restarted server left
-/// stalled, where nothing is running at all and a close kills nothing. A card
-/// asked there would be a false alarm, and a false alarm on the one press that
-/// asks is worse than not asking.
+/// The pair the status button over this menu already reads, and read here for
+/// the same reason — see `status` in `StatusButton.tsx`, which turns `working`
+/// into **Running** and `driven` into *the moment between one step of a backlog
+/// and the next*. The card is asked exactly where that button says one of the
+/// two, which is what stops the line and the menu under it disagreeing about
+/// whether anything is going on.
 ///
-/// What says a drive is running *now* is that flag beside `ready_to_resume`,
-/// which reads the register of running drives: Resume is offered exactly where
-/// the drive has stopped or was never in the register, so a driven Conversation
-/// not offering it is one mid-run. Which covers the gap between two steps, where
-/// no session process exists yet and the next launches the moment it can —
-/// `working` alone would miss it.
-///
-/// And `working` beside that, because a session can be alive outside a drive at
-/// all — the one a steer stops, say — and a close ends that too. Idle counts,
-/// `idle` being a thing only a working session is. So does a run whose Stop is
-/// recorded and waiting for the step to land: it is still on until then, and a
-/// run that has actually stopped reads `ready_to_resume`, where this is quiet.
+/// Both read raw off the Conversation rather than worked out from
+/// `ready_to_stop`, which is the flag the next reader will reach for, both stops
+/// being drawn from it. That one is a fact about the record — the state is one
+/// something ought to be driving, and no stop has landed — so it says nothing
+/// about a process at all, and a Conversation a restarted server left stalled
+/// has it true with nothing running to kill.
 function running(conversation: ConversationView): boolean {
-  return (
-    conversation.working ||
-    (conversation.ready_to_stop && !conversation.ready_to_resume)
-  );
+  return conversation.working || conversation.driven;
 }
 
 /// What a close pressed over a run in flight is answered with, before anything

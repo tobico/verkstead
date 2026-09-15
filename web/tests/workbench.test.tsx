@@ -8513,15 +8513,11 @@ describe("a close pressed over a run in flight", () => {
   });
 
   /// And the gap between one step and the next, where no session process exists
-  /// yet and the next launches the moment it can. The register of running drives
-  /// is what says so — a driven conversation not offering Resume is one mid-run
-  /// — and `working` alone would miss this one.
+  /// yet and the next launches the moment it can. The drivers register is what
+  /// says so — `driven` with no session beside it is the status button's own
+  /// *Driven* — and `working` alone would miss this one.
   it("asks first between one step of a drive and the next", async () => {
-    const fetching = theRunning({
-      working: false,
-      ready_to_stop: true,
-      ready_to_resume: false,
-    });
+    const fetching = theRunning({ working: false, driven: true });
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await openActions(container);
@@ -8534,16 +8530,17 @@ describe("a close pressed over a run in flight", () => {
   });
 
   /// And nothing at all on a conversation a restarted server left stalled, which
-  /// is what the fixture as shipped is: the state is one something ought to be
-  /// driving and nothing is driving it, so `ready_to_stop` is true and there is
-  /// no run for a close to kill. A card here would be a false alarm.
+  /// is what the fixture as shipped is: no session and nothing in the drivers
+  /// register, on a state something ought to be driving — so `ready_to_stop` is
+  /// true and there is still no run for a close to kill. A card here would be a
+  /// false alarm, which is why that flag is not what is read.
   it("asks nothing on a conversation nothing is running", async () => {
     // Which the test is only worth anything if the fixture really is.
     expect({
       working: GRILLING.working,
+      driven: GRILLING.driven,
       ready_to_stop: GRILLING.ready_to_stop,
-      ready_to_resume: GRILLING.ready_to_resume,
-    }).toEqual({ working: false, ready_to_stop: true, ready_to_resume: true });
+    }).toEqual({ working: false, driven: false, ready_to_stop: true });
 
     const fetching = theGrilling(
       whenever(
