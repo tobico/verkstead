@@ -857,6 +857,22 @@ impl Onboarding {
         pool: &SqlitePool,
         settings: &Settings,
     ) -> Result<OnboardingView> {
+        // The run first, where one has been started: what the probe answers is
+        // whether the machine has the thing, and what the run answers is
+        // whether Verkstead is in the middle of putting it there.
+        //
+        // **In that order, because the two are read a moment apart and only one
+        // of the two pairings is honest.** A run read after the probe can have
+        // gone from installing to over in between, which is a reading that says
+        // the install finished over a row that says the program is not there —
+        // the one thing a wizard drawn from these two must never say, and what
+        // the human would be looking at is a screen telling them to install
+        // what it has just installed. Read first, the staleness falls the other
+        // way: a row already present under a run that still says it is working,
+        // which is the next poll away from settling and says nothing untrue on
+        // the way.
+        let going = self.installer.reading();
+
         // Off the runtime: a `PATH` walk is a handful of `stat` calls and the
         // sandbox row is a process, and neither belongs on a thread that is
         // meant to be answering requests. The accounts are looked for in the
@@ -866,10 +882,7 @@ impl Onboarding {
 
         let steps = steps(&probed.dependencies, pool, settings).await?;
 
-        // And the run over the top of them, where one has been started: what the
-        // probe answers is whether the machine has the thing, and what the run
-        // answers is whether Verkstead is in the middle of putting it there.
-        let (run, dependencies) = installing(probed.dependencies, self.installer.reading());
+        let (run, dependencies) = installing(probed.dependencies, going);
 
         Ok(OnboardingView {
             mode: self.mode(steps).await,
