@@ -377,8 +377,13 @@ export function Refusal(props: {
 /// reads, so that the human confirms the press they made rather than a word this
 /// file chose for it — and two spellings of one press is exactly the way that
 /// stops being true.
+///
+/// Which is why the second is exported: the escape hatch in `Hatch.tsx` draws
+/// that row too, for a Conversation whose page will not load, and it is the same
+/// press under the same name. The first is not, that row being this menu's
+/// alone.
 const CLOSE = "Close conversation";
-const CLOSE_AND_ARCHIVE = "Close and archive";
+export const CLOSE_AND_ARCHIVE = "Close and archive";
 
 /// Whether there is a run for a close to kill: a session in the worktree, or
 /// something of Verkstead's own still holding the Conversation.
