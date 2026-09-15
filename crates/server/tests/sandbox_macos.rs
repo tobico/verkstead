@@ -1628,12 +1628,11 @@ async fn the_grilling_skill_names_the_handoff_where_a_session_would_find_it() {
 }
 
 /// What Sandbox Configuration asks for is inside and writable, composed the way
-/// it is on Linux: the global set reaches every session, a named one reaches
-/// only sessions working in the Repo registered under that name.
+/// it is on Linux: one set, and every session gets every one of it.
 ///
-/// And the one this boundary says differently: another Repo's bind is a
-/// directory that really is on the machine and is simply not in the policy, so
-/// a session finds it refused rather than absent.
+/// And the one this boundary says differently: a directory nobody configured
+/// really is on the machine and is simply not in the policy, so a session finds
+/// it refused rather than absent.
 #[tokio::test]
 #[cfg_attr(
     not(target_os = "macos"),
@@ -1642,48 +1641,40 @@ async fn the_grilling_skill_names_the_handoff_where_a_session_would_find_it() {
 async fn the_extra_binds_sandbox_configuration_asks_for_are_there_and_writable() {
     let fixture = grilling().await;
 
-    // A global one and this Repo's own, read off the configuration as the
-    // orchestrator will read them: everything gets the first, and the Repo
-    // called `verkstead` also gets the second.
-    let global = fixture.state.path().join("shared-cache");
-    let per_repo = fixture.state.path().join("verkstead-cargo-home");
-    std::fs::create_dir_all(&global).unwrap();
-    std::fs::create_dir_all(&per_repo).unwrap();
+    // Two of them, read off the configuration as the orchestrator will read
+    // them: every session gets every one.
+    let cache = fixture.state.path().join("shared-cache");
+    let cargo = fixture.state.path().join("shared-cargo-home");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::create_dir_all(&cargo).unwrap();
 
-    let config = SandboxConfig::resolve(&[
-        global.display().to_string(),
-        format!("verkstead={}", per_repo.display()),
-        // Another Repo's, which this one is no part of.
-        format!("something-else={}", fixture.sibling.display()),
-    ])
-    .unwrap();
+    let config =
+        SandboxConfig::resolve(&[cache.display().to_string(), cargo.display().to_string()])
+            .unwrap();
 
     let reported = probe(
-        &fixture.sandbox_with(config.binds_for(&fixture.conversation)),
+        &fixture.sandbox_with(config.binds()),
         &format!(
             r#"
-            dir {global} global
-            dir {per_repo} per-repo
-            dir {other} another-repos
+            dir {cache} cache
+            dir {cargo} cargo
+            dir {other} unconfigured
             "#,
-            global = quoted(&global),
-            per_repo = quoted(&per_repo),
+            cache = quoted(&cache),
+            cargo = quoted(&cargo),
             other = quoted(&fixture.sibling),
         ),
     );
 
     assert_eq!(
-        reported["global"], "write",
+        reported["cache"], "write",
         "what the machine gives every session"
     );
+    assert_eq!(reported["cargo"], "write", "and the one beside it");
     assert_eq!(
-        reported["per-repo"], "write",
-        "and what this repository asked for on top of it"
-    );
-    assert_eq!(
-        reported["another-repos"], "refused",
-        "a bind configured for another Repo is that Repo's — and on this \
-         platform it is a directory a session can see and cannot open"
+        reported["unconfigured"], "refused",
+        "a directory nobody configured is no part of a sandbox — and on this \
+         platform it is one a session can see and cannot open"
     );
 }
 
@@ -1704,9 +1695,9 @@ async fn the_binds_the_settings_file_holds_are_inside_and_writable_too() {
     let fixture = grilling().await;
 
     let installed = fixture.state.path().join("the-installations-cache");
-    let global = fixture.state.path().join("the-settings-cache");
-    let per_repo = fixture.state.path().join("the-settings-verkstead-cargo");
-    for made in [&installed, &global, &per_repo] {
+    let said = fixture.state.path().join("the-settings-cache");
+    let scoped = fixture.state.path().join("the-settings-verkstead-cargo");
+    for made in [&installed, &said, &scoped] {
         std::fs::create_dir_all(made).unwrap();
     }
 
@@ -1716,13 +1707,14 @@ async fn the_binds_the_settings_file_holds_are_inside_and_writable_too() {
     // failure than a build running without its cache.
     let missing = fixture.state.path().join("never-made");
 
+    // And an entry in the retired `name=path` grammar, which reaches no session
+    // however it is spelled: the directory is really there, and a session that
+    // got it would be a session getting a setting nobody can see on the page.
     fixture.configure(&format!(
-        "sandbox_binds:\n  - {global}\n  - verkstead={per_repo}\n  - {missing}\n  \
-         - something-else={other}\n",
-        global = global.display(),
-        per_repo = per_repo.display(),
+        "sandbox_binds:\n  - {said}\n  - verkstead={scoped}\n  - {missing}\n",
+        said = said.display(),
+        scoped = scoped.display(),
         missing = missing.display(),
-        other = fixture.sibling.display(),
     ));
 
     // And one on the command line beside them, which is the composition worth
@@ -1730,20 +1722,18 @@ async fn the_binds_the_settings_file_holds_are_inside_and_writable_too() {
     let installation = SandboxConfig::resolve(&[installed.display().to_string()]).unwrap();
 
     let reported = probe(
-        &fixture.sandbox_with(installation.binds_for(&fixture.conversation)),
+        &fixture.sandbox_with(installation.binds()),
         &format!(
             r#"
             dir {installed} installed
-            dir {global} global
-            dir {per_repo} per-repo
+            dir {said} said
+            dir {scoped} scoped
             dir {missing} missing
-            dir {other} another-repos
             "#,
             installed = quoted(&installed),
-            global = quoted(&global),
-            per_repo = quoted(&per_repo),
+            said = quoted(&said),
+            scoped = quoted(&scoped),
             missing = quoted(&missing),
-            other = quoted(&fixture.sibling),
         ),
     );
 
@@ -1752,22 +1742,19 @@ async fn the_binds_the_settings_file_holds_are_inside_and_writable_too() {
         "what the installation configured is still there"
     );
     assert_eq!(
-        reported["global"], "write",
+        reported["said"], "write",
         "and what the settings file adds to it"
     );
     assert_eq!(
-        reported["per-repo"], "write",
-        "including what it adds for this Repo by name"
+        reported["scoped"], "refused",
+        "an entry written for one Repo reaches nobody at all — and on this \
+         platform a directory outside the policy is one a session can see and \
+         cannot open"
     );
     assert_eq!(
         reported["missing"], "absent",
         "the entry that would not resolve is skipped, and the session starts \
          without it rather than not starting"
-    );
-    assert_eq!(
-        reported["another-repos"], "refused",
-        "and what it adds for a Repo this Conversation has nothing to do with \
-         is no more reachable than the rest of the machine"
     );
 }
 
@@ -1903,27 +1890,27 @@ async fn a_read_write_companion_takes_a_commit_on_its_own_branch() {
     );
 }
 
-/// What a companion repo's own Sandbox Configuration asks for is inside and
-/// writable, whatever the companion's mode.
+/// What Sandbox Configuration asks for is inside and writable beside a
+/// read-only companion's checkout, whatever the companion's mode.
 ///
 /// A configured bind is a hole somebody opened on purpose, and it sits outside
-/// the repository: a read-only companion is a checkout not to be changed rather
-/// than a repository whose builds should fail on a cold cache.
+/// every repository: a read-only companion is a checkout not to be changed
+/// rather than a repository whose builds should fail on a cold cache.
 #[tokio::test]
 #[cfg_attr(
     not(target_os = "macos"),
     ignore = "the boundary this probes is a Mac's"
 )]
-async fn a_read_only_companions_own_configured_binds_are_still_writable() {
+async fn the_configured_binds_beside_a_read_only_companion_are_still_writable() {
     let fixture = grilling_alongside(&[("askance", store::CompanionMode::ReadOnly)]).await;
 
-    let cache = fixture.state.path().join("askance-node-modules");
+    let cache = fixture.state.path().join("node-modules");
     std::fs::create_dir_all(&cache).unwrap();
 
-    let config = SandboxConfig::resolve(&[format!("askance={}", cache.display())]).unwrap();
+    let config = SandboxConfig::resolve(&[cache.display().to_string()]).unwrap();
 
     let reported = probe(
-        &fixture.sandbox_with(config.binds_for(&fixture.conversation)),
+        &fixture.sandbox_with(config.binds()),
         &format!(
             r#"
             dir {cache} cache
@@ -1936,7 +1923,7 @@ async fn a_read_only_companions_own_configured_binds_are_still_writable() {
 
     assert_eq!(
         reported["cache"], "write",
-        "a companion's builds need its caches like any other repository's"
+        "a companion's builds need the machine's caches like any other repository's"
     );
     assert_eq!(
         reported["worktree"], "read",

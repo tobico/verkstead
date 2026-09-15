@@ -38,14 +38,11 @@ import unset from "./fixtures/settings-unset.json" with { type: "json" };
 const TOLD = told as SettingsView;
 
 /// The binds the fixture holds, as a save puts them back on the wire: the
-/// settings' own entries, and a Repo's bind in the `name=path` grammar the file
-/// keeps them in. Every section's save carries them, because one request writes
-/// the whole of `config.yaml` — a list left out would be a list emptied.
+/// settings' own entries, each as the path it names. Every section's save
+/// carries them, because one request writes the whole of `config.yaml` — a list
+/// left out would be a list emptied.
 const PATHS = {
-  sandbox_binds: [
-    "/var/cache/verkstead-node",
-    "verkstead=/var/cache/verkstead-cargo",
-  ],
+  sandbox_binds: ["/var/cache/verkstead-node", "/var/cache/verkstead-cargo"],
 };
 
 /// And the Cleanup as a save puts it back: the switches where the read left

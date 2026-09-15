@@ -3099,7 +3099,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             // directory is there. Fixed paths rather than a temporary
             // directory's, because a fixture that changed with the machine that
             // wrote it would be a diff on every run.
-            "sandbox_binds": ["/var/cache/verkstead-node", "verkstead=/var/cache/verkstead-cargo"],
+            "sandbox_binds": ["/var/cache/verkstead-node", "/var/cache/verkstead-cargo"],
 
             // And one comment nobody wants addressed, for the reason the size
             // above is typed: this is the fixture of a Verkstead that has been

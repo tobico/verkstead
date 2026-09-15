@@ -44,14 +44,13 @@ What keeps a session to its own Conversation is the **Sandbox**, composed from
 the Repo and the Profile that Conversation names.
 
 The one path list left is the **Sandbox Configuration** binds, and they are
-said in two places — `--sandbox-bind DIR`, or `--sandbox-bind NAME=DIR` for the
-sessions working in one Repo, and the same two grammars on the settings page's
-**Paths** section. What a session gets is the union; see the `"paths"` payload
-further down this section. The flag is the shape a service unit wants, where
-startup is the moment to hear about a typo and a bind that is not there refuses
-to start; the settings are the shape a bare binary wants, where a save has to
-land whatever it was told and an entry that will not resolve is reported rather
-than fatal.
+said in two places — `--sandbox-bind DIR`, and the same grammar on the settings
+page's **Paths** section. What a session gets is the union; see the `"paths"`
+payload further down this section. The flag is the shape a service unit wants,
+where startup is the moment to hear about a typo and a bind that is not there
+refuses to start; the settings are the shape a bare binary wants, where a save
+has to land whatever it was told and an entry that will not resolve is reported
+rather than fatal.
 
 Everything Verkstead makes goes in one place, the **Data Directory**: the
 database at `verkstead.db`, the worktrees, the installed skills, the handoff
@@ -178,12 +177,11 @@ conflict_resolution: merge
 share_on_done: false
 sandbox_binds:
   - /var/cache/verkstead-node
-  - verkstead=/var/cache/verkstead-cargo
+  - /var/cache/verkstead-cargo
 ```
 
 `sandbox_binds` at the foot is the other place the Sandbox Configuration binds
-are said. A bind is a plain path where every session gets it, and `name=path`
-where only the sessions working in the Repo registered under that name do; and
+are said. A bind is one absolute path, every session gets every one of them, and
 what the server goes by is the union of this file and the installation's own
 flags.
 

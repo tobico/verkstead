@@ -30,11 +30,6 @@ let
   # Named once because `CacheDirectory`, `BindPaths` and the flag all say it.
   cacheDir = "/var/cache/verkstead";
 
-  # The directory half of a `sandboxBinds` entry: a plain path is the whole of
-  # it, and `name=path` is the part after the `=` — the same rule the server
-  # reads them by, so what the unit binds in is what the server hands out.
-  bindPath = bind: if lib.hasPrefix "/" bind then bind else lib.last (lib.splitString "=" bind);
-
   # Whether the home is Verkstead's own to make. Under the state directory it
   # is: systemd creates it and hands it over. Anywhere else it is the human's,
   # and something that already exists.
@@ -200,15 +195,13 @@ in
       example = lib.literalExpression ''
         [
           "/var/cache/shared"
-          "verkstead=/var/cache/verkstead-node"
+          "/var/cache/verkstead-node"
         ]
       '';
       description = ''
         Extra read-write directories every sandboxed session gets, as
-        `--sandbox-bind`. A plain path is given to every session; `name=path`
-        is given only to sessions working in the Repo registered under that
-        name, so a repository that needs a cache of its own can have one
-        without every repository getting it.
+        `--sandbox-bind`. Each is one absolute path, and every session gets
+        every one of them.
 
         A Rust build cache is not one of them any more: the server gives every
         sandbox one of its own at `/var/cache/verkstead`, with sccache on this
@@ -221,7 +214,7 @@ in
         boundary — which is why one that is not there refuses startup rather
         than being skipped for the session that wanted it.
 
-        The workbench settings say binds too, in the same two grammars, and a
+        The workbench settings say binds too, in the same grammar, and a
         session gets the union of the two. Those are saved into `config.yaml`,
         re-read at every spawn and never fatal. Under this module they are still
         bounded by what is written here: the unit's namespace holds the paths
@@ -559,7 +552,7 @@ in
           cacheDir
         ]
         ++ map (path: "${path}") cfg.paths
-        ++ map bindPath cfg.sandboxBinds;
+        ++ cfg.sandboxBinds;
 
         # A home the human named somewhere of their own, bound in for the reason
         # a `paths` entry is: it is usually under `/home`, which `ProtectHome`

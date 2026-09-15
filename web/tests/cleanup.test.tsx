@@ -46,10 +46,7 @@ const UNSET = unset as SettingsView;
 /// section's save carries them, because one request writes the whole of
 /// `config.yaml`.
 const PATHS = {
-  sandbox_binds: [
-    "/var/cache/verkstead-node",
-    "verkstead=/var/cache/verkstead-cargo",
-  ],
+  sandbox_binds: ["/var/cache/verkstead-node", "/var/cache/verkstead-cargo"],
 };
 
 /// The rest of `config.yaml` as every save from this pane sends it: what the

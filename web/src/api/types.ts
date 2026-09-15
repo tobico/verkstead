@@ -577,12 +577,7 @@ export type BindEntry = {
  * it was written, where nothing could be read out of it at all. A row
  * nobody can see is a row nobody can correct.
  */
-path: string, 
-/**
- * The Repo this bind is only for, by the name it is registered under, or
- * `null` for one every sandbox gets.
- */
-repo: string | null, source: PathSource, resolution: PathResolution, };
+path: string, source: PathSource, resolution: PathResolution, };
 
 /**
  * One line of the backend's own bookkeeping.
@@ -2423,9 +2418,7 @@ export type PathSource = "Installation" | "Settings";
  */
 export type PathsView = { 
 /**
- * Every configured bind, the ones every sandbox gets and the ones one Repo
- * does together — see [`BindEntry::repo`], which is what says which of the
- * two an entry is.
+ * Every configured bind, which is a directory every sandbox gets.
  */
 binds: Array<BindEntry>, };
 
@@ -3637,8 +3630,7 @@ share_on_done: boolean,
  * The Sandbox Configuration binds the settings own, as values again: what
  * is sent is what `config.yaml` holds afterwards, so a row taken off the
  * page is a row taken out of the file. In the grammar `--sandbox-bind`
- * uses: `/abs/path` for a bind every sandbox gets, and `name=/abs/path`
- * for one the Repo registered under that name gets.
+ * uses, which is `/abs/path` for a bind every sandbox gets.
  *
  * Strings rather than a shape of their own, because a string is what the
  * file holds — and one grammar for both of the places a bind is said is

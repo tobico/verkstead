@@ -335,7 +335,7 @@ impl Agents {
             &secrets,
             &config,
             &self.cache,
-            self.config.binds_for(conversation),
+            self.config.binds(),
         )?;
 
         let worktree = conversation.worktree.clone()?;

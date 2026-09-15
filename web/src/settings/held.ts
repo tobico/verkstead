@@ -12,9 +12,10 @@
 //! out here, once, rather than in each of the sections that has to ride them
 //! along.
 //!
-//! A bind goes back in the grammar it was written in: `/abs/path` for one every
-//! sandbox gets, and `name=/abs/path` for one Repo's own. The view takes that
-//! apart so a page can draw the two halves; this puts it back together.
+//! A bind goes back as the path it names, which is the whole of what one is. An
+//! entry the view dropped — a bind written for one Repo, in the grammar that is
+//! gone — goes back nowhere: it is not on the list that was read, so a save
+//! takes it out of the file.
 
 import type {
   CleanupEdit,
@@ -65,7 +66,7 @@ export function heldPaths(told: SettingsView | undefined): {
   return {
     sandbox_binds: (told?.paths?.binds ?? [])
       .filter((entry) => entry.source === "Settings")
-      .map((entry) => (entry.repo ? `${entry.repo}=${entry.path}` : entry.path)),
+      .map((entry) => entry.path),
   };
 }
 

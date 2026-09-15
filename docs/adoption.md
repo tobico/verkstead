@@ -95,13 +95,13 @@ Three of those are worth understanding before the first Conversation:
   example above names `/home/you/.claude` beside the repositories.
 - **`sandboxBinds`** is the **Sandbox Configuration** — every entry is a hole
   in the boundary, which is why one that is not there refuses startup rather
-  than being skipped. A bare path goes to every session; `name=path` goes only
-  to sessions working in the Repo registered under that name.
+  than being skipped. Each is one absolute path, and every session gets every
+  one of them.
 
-The workbench says the binds as well, on the settings page's **Paths** section,
-which holds those and nothing else: a bind written for one Repo is in
-`config.yaml` and on no page. What a session gets is the union of the two. Those entries are saved into `config.yaml`
-in the data directory, read afresh every time they are used, and never fatal:
+The workbench says the binds as well, on the settings page's **Paths** section.
+What a session gets is the union of the two. Those entries are saved into
+`config.yaml` in the data directory, read afresh every time they are used, and
+never fatal:
 one the server cannot see is reported on the page rather than refused, and
 simply covers nothing. **On this module, that report is the one to read** — the
 unit's namespace holds what the options above name and nothing else, so a bind

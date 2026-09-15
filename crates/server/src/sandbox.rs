@@ -3173,42 +3173,37 @@ impl Bind {
 /// Sandbox Configuration: the extra read-write binds a sandbox gets beyond the
 /// surface every one of them has.
 ///
-/// Two sets, composed. The global one every sandbox gets, and a per-Repo one so
-/// that a repository needing a build cache can say so without every repository
-/// getting it. This type is the *installation's* half of them: what
-/// `--sandbox-bind` was given, resolved once and kept. The settings file says
-/// binds too, in the same two grammars and composed the same way — see
+/// One set, and every sandbox gets the whole of it. This type is the
+/// *installation's* half of it: what `--sandbox-bind` was given, resolved once
+/// and kept. The settings file says binds too, in the same grammar — see
 /// [`SandboxConfig::settings_binds`], which is where the two part company, in
 /// what a bind that will not resolve costs.
 ///
-/// A Repo is named by its *name*, which is the directory's own: the human writes
-/// what they call the repository rather than a path they would then have to keep
-/// in step with the registration. Two Repos of one name in different places
-/// therefore share what is configured for the name, which is a collision the
-/// human can see in their own configuration and rename their way out of.
+/// A bind used to be able to name a Repo — `name=path`, given only to sessions
+/// working in the Repo registered under that name — and that grammar is gone
+/// (*revised 2026-09-15, building settings-ui-tidy*). A bind is a directory
+/// every sandbox gets and nothing else, which is what a build cache and a
+/// package registry always were: the scoped half was configuration nobody could
+/// see from the workbench and a second rule to read every entry by.
 #[derive(Debug, Clone, Default)]
 pub struct SandboxConfig {
     /// What every sandbox gets.
     global: Vec<PathBuf>,
-
-    /// And what only the Repo of that name does.
-    per_repo: std::collections::BTreeMap<String, Vec<PathBuf>>,
 }
 
 impl SandboxConfig {
     /// The binds as configured, checked once at startup.
     ///
-    /// Each is either an absolute path — a global bind — or `name=path` for the
-    /// Repo called `name`. The two are told apart by the leading `/`, so a Repo
-    /// can be called anything without a spelling of it turning into a path.
+    /// Each is an absolute path, and an entry that is not one — a relative path,
+    /// or the retired `name=path` — is refused by name rather than skipped.
     ///
-    /// A bind that is not there is refused rather than skipped, which is where
-    /// this parts company with the settings files: a setting nobody has filled in
-    /// is an installation part-way through being set up, and a missing configured
-    /// bind is a typo that would otherwise take every session in that repository
-    /// down with it, weeks later, with nobody watching. Not created either: the
-    /// path is the human's own word, so a directory made where they meant
-    /// another one is an empty cache that looks like a working one.
+    /// A bind that is not there is refused rather than skipped too, which is
+    /// where this parts company with the settings files: a setting nobody has
+    /// filled in is an installation part-way through being set up, and a missing
+    /// configured bind is a typo that would otherwise take every session down
+    /// with it, weeks later, with nobody watching. Not created either: the path
+    /// is the human's own word, so a directory made where they meant another one
+    /// is an empty cache that looks like a working one.
     ///
     /// Which is the whole of what makes [`crate::build_cache`] the exception it
     /// is. That directory is Verkstead's own choice on a fresh install rather
@@ -3219,7 +3214,7 @@ impl SandboxConfig {
         let mut config = SandboxConfig::default();
 
         for bind in binds {
-            let (repo, path) = read_bind(bind)?;
+            let path = read_bind(bind)?;
 
             if !path.exists() {
                 anyhow::bail!(
@@ -3229,10 +3224,7 @@ impl SandboxConfig {
                 );
             }
 
-            match repo {
-                Some(repo) => config.per_repo.entry(repo).or_default().push(path),
-                None => config.global.push(path),
-            }
+            config.global.push(path);
         }
 
         Ok(config)
@@ -3241,35 +3233,35 @@ impl SandboxConfig {
     /// And what `config.yaml` asks for, resolved afresh for `conversation` at
     /// the moment its session spawns.
     ///
-    /// The same grammar and the same composition as [`SandboxConfig::resolve`]
-    /// and [`SandboxConfig::binds_for`] — one bind is one bind, however it was
-    /// said — and the opposite answer to a bind that will not resolve. The two
-    /// sets compose: what is here is added to what the installation configured
-    /// rather than standing in for it.
+    /// The same grammar as [`SandboxConfig::resolve`] — one bind is one bind,
+    /// however it was said — and the opposite answer to a bind that will not
+    /// resolve. The two sets union: what is here is added to what the
+    /// installation configured rather than standing in for it.
     ///
-    /// **Nothing here is ever an error.** An entry that is neither a path nor
-    /// `name=path`, and one naming a directory the server cannot see — never
-    /// made, or outside what a hardened unit's namespace holds — is skipped with
-    /// a line in the log naming it, and the session starts without it. That is
-    /// the settings side of the line the whole of [`crate::settings`] is on: the
-    /// file is edited from a phone, a save lands whatever it was told, and a
-    /// typo in it is a bind that is missing rather than every session in that
-    /// Repo failing to start. The flag keeps the other answer, because a flag is
-    /// the installation's own word and nobody is watching when it is wrong.
+    /// **Nothing here is ever an error.** An entry that is not an absolute path,
+    /// and one naming a directory the server cannot see — never made, or outside
+    /// what a hardened unit's namespace holds — is skipped with a line in the log
+    /// naming it, and the session starts without it. That is the settings side of
+    /// the line the whole of [`crate::settings`] is on: the file is edited from a
+    /// phone, a save lands whatever it was told, and a typo in it is a bind that
+    /// is missing rather than every session failing to start. The flag keeps the
+    /// other answer, because a flag is the installation's own word and nobody is
+    /// watching when it is wrong.
     ///
-    /// The ones that are not there are dropped after the composition rather than
-    /// before it, so what is logged is what *this* session would have been
-    /// given: a bind configured for some other Repo has nothing to say to a
-    /// session that was never going to get it. An entry that will not read at
-    /// all is the exception, and unavoidably: an entry nothing can tell the Repo
-    /// of is one there is no composition to drop it out of.
+    /// An entry in the retired `name=path` grammar is the one thing dropped
+    /// without a word — see [`scoped`]. It was never a typo: it is configuration
+    /// somebody wrote when Verkstead read it, and a log line per session about a
+    /// setting that no longer exists would be noise on every spawn forever.
     pub fn settings_binds(binds: &[String], conversation: &store::Conversation) -> Vec<Bind> {
-        let mut config = SandboxConfig::default();
+        let mut paths = Vec::new();
 
         for bind in binds {
+            if scoped(bind) {
+                continue;
+            }
+
             match read_bind(bind) {
-                Ok((Some(repo), path)) => config.per_repo.entry(repo).or_default().push(path),
-                Ok((None, path)) => config.global.push(path),
+                Ok(path) => paths.push(path),
                 Err(error) => tracing::warn!(
                     conversation_id = conversation.id,
                     bind,
@@ -3280,16 +3272,15 @@ impl SandboxConfig {
             }
         }
 
-        config
-            .binds_for(conversation)
+        paths
             .into_iter()
-            .filter(|bind| {
-                let there = bind.path.exists();
+            .filter(|path| {
+                let there = path.exists();
 
                 if !there {
                     tracing::warn!(
                         conversation_id = conversation.id,
-                        bind = %bind.path.display(),
+                        bind = %path.display(),
                         "a sandbox bind in the settings is not there, so the session was \
                          started without it"
                     );
@@ -3297,107 +3288,67 @@ impl SandboxConfig {
 
                 there
             })
-            .collect()
-    }
-
-    /// What a sandbox for `conversation` binds beyond the decided surface: the
-    /// global set, then its own Repo's, then each of its companions' own.
-    ///
-    /// In that order, and all of them kept: a Repo's set composes over the
-    /// global one rather than replacing it, because the global set is what the
-    /// machine gives every session and a repository asking for a cache of its
-    /// own is not asking to give the rest up.
-    ///
-    /// A companion brings what is configured for its own name and nothing else.
-    /// Its builds need its caches like any other repository's — the checkout is
-    /// half of what building in a companion takes and this is the other half —
-    /// and the global set is already in by way of the Conversation's own Repo,
-    /// so binding it again per companion would say something this does not mean.
-    ///
-    /// Writable, every one of them, and a companion's whatever its mode. A
-    /// configured bind is a build cache or a package registry — somewhere a
-    /// build writes — and whoever configured it opened the hole on purpose.
-    /// They sit outside the repository besides, so a read-only companion whose
-    /// cache could not be written to would fail on a cold cache for nothing
-    /// gained.
-    pub fn binds_for(&self, conversation: &store::Conversation) -> Vec<Bind> {
-        let mut binds: Vec<Bind> = self.global.iter().cloned().map(Bind::writable).collect();
-
-        binds.extend(self.own_binds(&conversation.repo.name));
-
-        for companion in &conversation.companions {
-            binds.extend(self.own_binds(&companion.repo.name));
-        }
-
-        binds
-    }
-
-    /// What only the Repo of that name asked for, without the global set in
-    /// front of it.
-    pub fn own_binds(&self, repo: &str) -> Vec<Bind> {
-        self.per_repo
-            .get(repo)
-            .into_iter()
-            .flatten()
-            .cloned()
             .map(Bind::writable)
             .collect()
+    }
+
+    /// What a sandbox binds beyond the decided surface, which is the whole of
+    /// this set.
+    ///
+    /// The same list for every session, its companions included: a companion
+    /// brings its checkout and the git directory behind it, and the binds it
+    /// builds with are the ones the machine gives everybody.
+    ///
+    /// Writable, every one of them. A configured bind is a build cache or a
+    /// package registry — somewhere a build writes — and whoever configured it
+    /// opened the hole on purpose. They sit outside every repository besides, so
+    /// a read-only companion whose cache could not be written to would fail on a
+    /// cold cache for nothing gained.
+    pub fn binds(&self) -> Vec<Bind> {
+        self.global.iter().cloned().map(Bind::writable).collect()
     }
 
     /// Every bind configured, for the line the server logs about what it will
     /// hand out.
     pub fn count(&self) -> usize {
-        self.global.len() + self.per_repo.values().map(Vec::len).sum::<usize>()
+        self.global.len()
     }
 
-    /// And every one of them as the Repo it is for — `None` for every Repo — and
-    /// the directory it binds: what the settings page draws the installation's
-    /// half of its list from.
+    /// And every one of them as the directory it binds: what the settings page
+    /// draws the installation's half of its list from.
     ///
-    /// The global ones first and each Repo's after them, which is the order they
-    /// are composed in and the order the page reads them in. A pair rather than
-    /// the entry as it was written, because what was written is gone by here:
-    /// this is the parsed set, and the page draws the two halves apart anyway.
-    pub fn entries(&self) -> Vec<(Option<&str>, &Path)> {
-        let global = self.global.iter().map(|path| (None, path.as_path()));
-
-        let per_repo = self.per_repo.iter().flat_map(|(repo, paths)| {
-            paths
-                .iter()
-                .map(move |path| (Some(repo.as_str()), path.as_path()))
-        });
-
-        global.chain(per_repo).collect()
+    /// In the order they were configured, which is the order they are composed
+    /// in and the order the page reads them in. The parsed path rather than the
+    /// entry as it was written, because what was written is gone by here.
+    pub fn entries(&self) -> Vec<&Path> {
+        self.global.iter().map(PathBuf::as_path).collect()
     }
 }
 
-/// One `--sandbox-bind`, as the Repo it belongs to — `None` for every Repo — and
-/// the directory it binds.
-pub(crate) fn read_bind(bind: &str) -> anyhow::Result<(Option<String>, PathBuf)> {
-    if absolute(bind) {
-        return Ok((None, PathBuf::from(bind)));
-    }
-
-    let Some((repo, path)) = bind.split_once('=') else {
-        anyhow::bail!(
-            "the sandbox bind {bind:?} is neither an absolute path nor `name=path`: \
-             a global bind is a directory, and a Repo's own is the name it is \
-             registered under and then the directory"
-        );
-    };
-
-    if repo.is_empty() {
-        anyhow::bail!("the sandbox bind {bind:?} names no Repo before its `=`");
-    }
-
-    if !absolute(path) {
-        anyhow::bail!(
-            "the sandbox bind {bind:?} is relative: a bind has to name one directory, \
+/// One `--sandbox-bind`, as the directory it binds.
+pub(crate) fn read_bind(bind: &str) -> anyhow::Result<PathBuf> {
+    match absolute(bind) {
+        true => Ok(PathBuf::from(bind)),
+        false => anyhow::bail!(
+            "the sandbox bind {bind:?} is not an absolute path: a bind is one directory, \
              whichever directory the server was started in"
-        );
+        ),
     }
+}
 
-    Ok((Some(repo.to_owned()), PathBuf::from(path)))
+/// Whether `bind` is written in the retired `name=path` grammar, which gave a
+/// directory to the Repo registered under that name and to nobody else.
+///
+/// Read in the settings alone, and only to drop the entry: it reaches no
+/// session, draws no row, and says nothing in the log — see
+/// [`SandboxConfig::settings_binds`]. The shape asked for is exactly what used
+/// to parse, so an entry that was never a scoped bind is still the unreadable
+/// entry it always was and still draws its row.
+pub(crate) fn scoped(bind: &str) -> bool {
+    !absolute(bind)
+        && bind
+            .split_once('=')
+            .is_some_and(|(repo, path)| !repo.is_empty() && absolute(path))
 }
 
 /// Whether `path` says where it is rather than where it is from here.

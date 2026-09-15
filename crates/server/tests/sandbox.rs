@@ -2533,49 +2533,41 @@ async fn a_session_is_refused_the_workbenchs_own_namespace() {
 async fn the_extra_binds_sandbox_configuration_asks_for_are_there_and_writable() {
     let fixture = grilling().await;
 
-    // A global one and this Repo's own, read off the configuration as the
-    // orchestrator will read them: everything gets the first, and the Repo
-    // called `verkstead` also gets the second.
-    let global = fixture.state.path().join("shared-cache");
-    let per_repo = fixture.state.path().join("verkstead-cargo-home");
-    std::fs::create_dir_all(&global).unwrap();
-    std::fs::create_dir_all(&per_repo).unwrap();
+    // Two of them, read off the configuration as the orchestrator will read
+    // them: every session gets every one.
+    let cache = fixture.state.path().join("shared-cache");
+    let cargo = fixture.state.path().join("shared-cargo-home");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::create_dir_all(&cargo).unwrap();
 
-    let config = SandboxConfig::resolve(&[
-        global.display().to_string(),
-        format!("verkstead={}", per_repo.display()),
-        // Another Repo's, which this one is no part of.
-        format!("something-else={}", fixture.sibling.display()),
-    ])
-    .unwrap();
+    let config =
+        SandboxConfig::resolve(&[cache.display().to_string(), cargo.display().to_string()])
+            .unwrap();
 
-    let sandbox = fixture.sandbox(config.binds_for(&fixture.conversation));
+    let sandbox = fixture.sandbox(config.binds());
 
     let reported = probe(
         &sandbox,
         &format!(
             r#"
-            dir {global} global
-            dir {per_repo} per-repo
-            dir {other} another-repos
+            dir {cache} cache
+            dir {cargo} cargo
+            dir {other} unconfigured
             "#,
-            global = quoted(&global),
-            per_repo = quoted(&per_repo),
+            cache = quoted(&cache),
+            cargo = quoted(&cargo),
             other = quoted(&fixture.sibling),
         ),
     );
 
     assert_eq!(
-        reported["global"], "write",
+        reported["cache"], "write",
         "what the machine gives every session"
     );
+    assert_eq!(reported["cargo"], "write", "and the one beside it");
     assert_eq!(
-        reported["per-repo"], "write",
-        "and what this repository asked for on top of it"
-    );
-    assert_eq!(
-        reported["another-repos"], "absent",
-        "a bind configured for another Repo is that Repo's"
+        reported["unconfigured"], "absent",
+        "and a directory nobody configured is no part of a sandbox"
     );
 }
 
@@ -2704,21 +2696,21 @@ async fn a_read_write_companion_takes_a_commit_on_its_own_branch() {
     );
 }
 
-/// What a companion repo's own Sandbox Configuration asks for is inside and
-/// writable, whatever the companion's mode.
+/// What Sandbox Configuration asks for is inside and writable beside a
+/// read-only companion's checkout, whatever the companion's mode.
 ///
-/// A build cache is a hole somebody opened on purpose, and it sits outside the
+/// A build cache is a hole somebody opened on purpose, and it sits outside every
 /// repository: a read-only companion is a checkout not to be changed rather
 /// than a repository whose builds should fail on a cold cache.
 #[tokio::test]
-async fn a_read_only_companions_own_configured_binds_are_still_writable() {
+async fn the_configured_binds_beside_a_read_only_companion_are_still_writable() {
     let fixture = grilling_alongside(&[("askance", store::CompanionMode::ReadOnly)]).await;
 
-    let cache = fixture.state.path().join("askance-node-modules");
+    let cache = fixture.state.path().join("node-modules");
     std::fs::create_dir_all(&cache).unwrap();
 
-    let config = SandboxConfig::resolve(&[format!("askance={}", cache.display())]).unwrap();
-    let sandbox = fixture.sandbox(config.binds_for(&fixture.conversation));
+    let config = SandboxConfig::resolve(&[cache.display().to_string()]).unwrap();
+    let sandbox = fixture.sandbox(config.binds());
 
     let reported = probe(
         &sandbox,
@@ -2734,7 +2726,7 @@ async fn a_read_only_companions_own_configured_binds_are_still_writable() {
 
     assert_eq!(
         reported["cache"], "write",
-        "a companion's builds need its caches like any other repository's"
+        "a companion's builds need the machine's caches like any other repository's"
     );
     assert_eq!(
         reported["worktree"], "read",
@@ -2742,42 +2734,37 @@ async fn a_read_only_companions_own_configured_binds_are_still_writable() {
     );
 }
 
-/// The composition itself, without a sandbox to run in: what a Conversation
-/// gets is the global set, then its own Repo's, then each of its companions'.
+/// The set itself, without a sandbox to run in: one list, in the order it was
+/// configured, and the same list whatever Conversation is asking.
 ///
-/// The companion is read-only, which is the case worth asking about: what is
-/// configured for a Repo is a build cache outside it, and a build writes to one
-/// whether or not the checkout beside it may be written to.
+/// A Repo could once ask for a set of its own, composed over this one, and that
+/// is gone: a bind is a build cache or a package registry, which is the
+/// machine's rather than one repository's.
 #[tokio::test]
-async fn a_repos_own_binds_compose_over_the_global_ones() {
-    let fixture = grilling_alongside(&[("askance", store::CompanionMode::ReadOnly)]).await;
-
+async fn every_configured_bind_is_one_every_sandbox_gets() {
     let dir = tempfile::tempdir().unwrap();
     let cache = dir.path().join("cache");
     let cargo = dir.path().join("cargo");
     let node = dir.path().join("node");
-    let nobodys = dir.path().join("nobodys");
-    for made in [&cache, &cargo, &node, &nobodys] {
+    for made in [&cache, &cargo, &node] {
         std::fs::create_dir(made).unwrap();
     }
 
     let config = SandboxConfig::resolve(&[
         cache.display().to_string(),
-        format!("verkstead={}", cargo.display()),
-        format!("askance={}", node.display()),
-        format!("something-nobody-added={}", nobodys.display()),
+        cargo.display().to_string(),
+        node.display().to_string(),
     ])
     .unwrap();
 
     assert_eq!(
-        config.binds_for(&fixture.conversation),
+        config.binds(),
         vec![
             Bind::writable(cache),
             Bind::writable(cargo),
             Bind::writable(node),
         ],
-        "the global set, then the Conversation's own Repo's, then its companion's — \
-         and a Repo it has nothing to do with brings nothing"
+        "every configured bind, in the order it was configured"
     );
 }
 
@@ -2793,37 +2780,37 @@ async fn the_binds_the_settings_file_holds_are_inside_and_writable_too() {
     let fixture = grilling().await;
 
     let installed = fixture.state.path().join("the-installations-cache");
-    let global = fixture.state.path().join("the-settings-cache");
-    let per_repo = fixture.state.path().join("the-settings-verkstead-cargo");
-    for made in [&installed, &global, &per_repo] {
+    let said = fixture.state.path().join("the-settings-cache");
+    let scoped = fixture.state.path().join("the-settings-verkstead-cargo");
+    for made in [&installed, &said, &scoped] {
         std::fs::create_dir_all(made).unwrap();
     }
 
+    // And an entry in the retired `name=path` grammar, which reaches no session
+    // however it is spelled: the directory is really there, and a session that
+    // got it would be a session getting a setting nobody can see on the page.
     fixture.configure(&format!(
-        "sandbox_binds:\n  - {global}\n  - verkstead={per_repo}\n  - something-else={other}\n",
-        global = global.display(),
-        per_repo = per_repo.display(),
-        other = fixture.sibling.display(),
+        "sandbox_binds:\n  - {said}\n  - verkstead={scoped}\n",
+        said = said.display(),
+        scoped = scoped.display(),
     ));
 
     // And one on the command line beside them, which is the composition worth
     // asking about: neither set is the other's replacement.
     let installation = SandboxConfig::resolve(&[installed.display().to_string()]).unwrap();
-    let sandbox = fixture.sandbox(installation.binds_for(&fixture.conversation));
+    let sandbox = fixture.sandbox(installation.binds());
 
     let reported = probe(
         &sandbox,
         &format!(
             r#"
             dir {installed} installed
-            dir {global} global
-            dir {per_repo} per-repo
-            dir {other} another-repos
+            dir {said} said
+            dir {scoped} scoped
             "#,
             installed = quoted(&installed),
-            global = quoted(&global),
-            per_repo = quoted(&per_repo),
-            other = quoted(&fixture.sibling),
+            said = quoted(&said),
+            scoped = quoted(&scoped),
         ),
     );
 
@@ -2832,16 +2819,12 @@ async fn the_binds_the_settings_file_holds_are_inside_and_writable_too() {
         "what the installation configured is still there"
     );
     assert_eq!(
-        reported["global"], "write",
+        reported["said"], "write",
         "and what the settings file adds to it"
     );
     assert_eq!(
-        reported["per-repo"], "write",
-        "including what it adds for this Repo by name"
-    );
-    assert_eq!(
-        reported["another-repos"], "absent",
-        "and what it adds for a Repo this Conversation has nothing to do with"
+        reported["scoped"], "absent",
+        "and an entry written for one Repo reaches nobody at all"
     );
 }
 
@@ -2889,9 +2872,12 @@ async fn a_settings_bind_that_is_not_there_is_skipped_and_the_session_still_star
 }
 
 /// What the settings-held set comes to for a Conversation, without a sandbox to
-/// run in: the global entries, then its own Repo's, then its companions' — the
-/// composition the installation's own set has — and everything that will not
-/// resolve taken out of it.
+/// run in: every entry, in the order it was written — the one set the
+/// installation's own is — and everything that is not one taken out of it.
+///
+/// The Conversation has a companion, which is the case worth asking about: a
+/// companion brings its checkout, and what it builds with is the set every
+/// session gets rather than anything of its own.
 #[tokio::test]
 async fn the_settings_held_binds_compose_the_way_the_installations_do() {
     let fixture = grilling_alongside(&[("askance", store::CompanionMode::ReadOnly)]).await;
@@ -2899,20 +2885,23 @@ async fn the_settings_held_binds_compose_the_way_the_installations_do() {
     let dir = tempfile::tempdir().unwrap();
     let cache = dir.path().join("cache");
     let cargo = dir.path().join("cargo");
-    let node = dir.path().join("node");
-    let nobodys = dir.path().join("nobodys");
-    for made in [&cache, &cargo, &node, &nobodys] {
+    let scoped = dir.path().join("scoped");
+    for made in [&cache, &cargo, &scoped] {
         std::fs::create_dir(made).unwrap();
     }
 
     let binds = [
         cache.display().to_string(),
-        format!("verkstead={}", cargo.display()),
-        format!("askance={}", node.display()),
-        format!("something-nobody-added={}", nobodys.display()),
+        cargo.display().to_string(),
+        // The retired grammar, dropped without a word however it is spelled:
+        // the Conversation's own Repo, its companion's, and a name nothing at
+        // all is registered under.
+        format!("verkstead={}", scoped.display()),
+        format!("askance={}", scoped.display()),
+        format!("something-nobody-added={}", scoped.display()),
         // And the three shapes that go in the log instead of into the sandbox:
         // a directory nobody made, a path that is not one, and a `=` with no
-        // Repo in front of it.
+        // name in front of it.
         dir.path().join("never-made").display().to_string(),
         "relative/cache".to_owned(),
         "=/var/cache".to_owned(),
@@ -2920,13 +2909,8 @@ async fn the_settings_held_binds_compose_the_way_the_installations_do() {
 
     assert_eq!(
         SandboxConfig::settings_binds(&binds, &fixture.conversation),
-        vec![
-            Bind::writable(cache),
-            Bind::writable(cargo),
-            Bind::writable(node),
-        ],
-        "the global set, then the Conversation's own Repo's, then its companion's — \
-         and nothing that would not resolve"
+        vec![Bind::writable(cache), Bind::writable(cargo)],
+        "every entry that is an absolute path and is there, and nothing else"
     );
 }
 
@@ -3252,17 +3236,34 @@ fn a_bind_that_is_not_there_refuses_to_resolve() {
 
     assert!(
         SandboxConfig::resolve(&[missing.display().to_string()]).is_err(),
-        "a bind bwrap could not make is every session in that Repo failing to start"
+        "a bind bwrap could not make is every session failing to start"
     );
-    assert!(SandboxConfig::resolve(&[format!("verkstead={}", missing.display())]).is_err(),);
 }
 
+/// Every entry that is not an absolute path, the retired `name=path` among them.
+///
+/// The flag is where a bad entry is heard about: a service unit is started once,
+/// nobody is watching when it is wrong, and a startup that refused by name is
+/// how somebody learns their `name=path` is a grammar Verkstead no longer reads.
 #[test]
-fn a_bind_that_is_neither_a_path_nor_a_named_one_is_refused() {
-    for refused in ["cache", "verkstead=cache", "=/var/cache"] {
+fn a_bind_that_is_not_an_absolute_path_is_refused_by_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let there = dir.path().display().to_string();
+
+    for refused in [
+        "cache".to_owned(),
+        "verkstead=cache".to_owned(),
+        "=/var/cache".to_owned(),
+        format!("verkstead={there}"),
+    ] {
+        let error = match SandboxConfig::resolve(std::slice::from_ref(&refused)) {
+            Ok(_) => panic!("{refused:?} should be refused"),
+            Err(error) => error.to_string(),
+        };
+
         assert!(
-            SandboxConfig::resolve(&[refused.to_owned()]).is_err(),
-            "{refused:?} should be refused"
+            error.contains(&refused),
+            "the entry itself is what the refusal names: {error}"
         );
     }
 }

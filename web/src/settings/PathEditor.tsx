@@ -2,13 +2,13 @@
 //! it is drawn as.
 //!
 //! Its own module rather than the Paths section's own — see `Paths.tsx`, which
-//! is the one pane drawing these now. There were two of them: a Repo's pane
-//! carried the binds written for its name, out of this same read and this same
-//! save, and the parts were kept here so that two lists of the same entries
-//! could not come to two accounts of what one is. That pane is gone with the
-//! rest of a Repo's own, and the parts stay where they are: what they are and
-//! how they are written is a question of its own, and the pane around them is
-//! about which of them is drawn.
+//! is the one pane drawing these. There were two of them: a Repo's pane carried
+//! the binds written for its name, out of this same read and this same save, and
+//! the parts were kept here so that two lists of the same entries could not come
+//! to two accounts of what one is. Both that pane and a bind written for a Repo
+//! are gone, and the parts stay where they are: what a row is and how it is
+//! written is a question of its own, and the pane around them is about where
+//! they are drawn.
 //!
 //! Every row says the same three things wherever it is drawn. What it names;
 //! whose it is, where that is the installation's, because a unit's word is not
@@ -64,20 +64,18 @@ export function useSettings() {
 /// where it stands among the settings' *own* entries of it.
 ///
 /// The second is what a Remove sends, and it is not where the row stands on the
-/// page: the installation's entries are interleaved with them, and one pane's
-/// rows sit in the file among rows that pane never draws at all — a Repo's binds
-/// among the global ones, and the global ones among every Repo's. Counted rather
-/// than looked up by path, because nothing stops a file naming the same
-/// directory twice and a removal that took both would be taking away something
-/// nobody pressed. `-1` for a row the settings do not own, which is a row with
-/// no Remove on it.
+/// page: the installation's entries are interleaved with them and are no part of
+/// the file at all. Counted rather than looked up by path, because nothing stops
+/// a file naming the same directory twice and a removal that took both would be
+/// taking away something nobody pressed. `-1` for a row the settings do not own,
+/// which is a row with no Remove on it.
 export type Row<Entry> = { entry: Entry; held: number };
 
-/// The entries of one list, each told where it stands among the settings' own.
+/// The entries of the list, each told where it stands among the settings' own.
 ///
-/// Given the whole of a list rather than the part one pane draws: the count is a
-/// place in the file, so a pane that filtered first would count its own rows and
-/// remove somebody else's.
+/// The count is a place in the file rather than a place on the page, which is
+/// what lets the installation's entries sit among them without a Remove counting
+/// past the wrong one.
 export function rowed<Entry extends { source: PathSource }>(
   entries: Entry[],
 ): Row<Entry>[] {
@@ -92,12 +90,6 @@ export function rowed<Entry extends { source: PathSource }>(
 /// Why the server cannot see what an entry names, or `null` where it can.
 export function unresolved(resolution: PathResolution): string | null {
   return resolution === "Resolves" ? null : resolution.Unresolved.why;
-}
-
-/// Which Repo an entry is written against, or `null` where it is written
-/// against none, which is a bind every sandbox gets.
-export function writtenFor(entry: BindEntry): string | null {
-  return entry.repo;
 }
 
 /// A list with the entry standing at `at` taken out of it.
@@ -175,13 +167,6 @@ export function Rows(props: {
   saving: boolean;
   /// Take one away, by where it stands among the settings' own.
   remove: (held: number) => void;
-  /// Whether a row naming a Repo names one nothing is registered under.
-  ///
-  /// Set by the pane that draws the binds every sandbox gets, where a row
-  /// naming a Repo can only be a stray: a bind written for a registered Repo is
-  /// drawn nowhere at all, so a row here that names one names a name nothing
-  /// holds.
-  stray?: boolean;
 }): JSX.Element {
   return (
     <Show when={props.rows.length > 0} fallback={<Empty>{props.none}</Empty>}>
@@ -198,31 +183,12 @@ export function Rows(props: {
                 <Show when={row.entry.source === "Installation"}>
                   <span class={styles.source}>the installation's</span>
                 </Show>
-
-                {/* And which Repo it was written for, on a row that names one
-                    where every other row names none. */}
-                <Show when={props.stray ? writtenFor(row.entry) : null}>
-                  {(repo) => (
-                    <span class={styles.source}>written for {repo()}</span>
-                  )}
-                </Show>
               </div>
 
               {/* The one thing a human cannot check from a phone, in the
                   server's own words. */}
               <Show when={unresolved(row.entry.resolution)}>
                 {(why) => <p class={styles.unresolved}>{why()}</p>}
-              </Show>
-
-              {/* And the other thing it cannot do, which is reach a session: a
-                  bind is composed by the name a Repo is registered under, so
-                  one written for a name nothing holds is given to nobody. Said
-                  beside the reason it is drawn here at all. */}
-              <Show when={props.stray && writtenFor(row.entry) !== null}>
-                <p class={styles.unresolved}>
-                  No repo is registered under that name, so no session is given
-                  it.
-                </p>
               </Show>
 
               <Show when={row.held >= 0}>

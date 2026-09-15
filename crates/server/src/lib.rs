@@ -459,8 +459,7 @@ pub struct Config {
     )]
     pub listen: SocketAddr,
 
-    /// An extra read-write bind every sandbox gets, or `name=DIR` for one only
-    /// the Repo registered under that name gets. Repeat the flag, or separate
+    /// An extra read-write bind every sandbox gets. Repeat the flag, or separate
     /// several in the environment variable the way the platform writes `PATH`.
     ///
     /// This is the Sandbox Configuration: the package registries and the caches
@@ -471,8 +470,8 @@ pub struct Config {
     /// and nobody is watching when it is wrong.
     ///
     /// Not a requirement either, and not the only place they are said. The
-    /// workbench settings take the same two grammars, a session gets the union
-    /// of the two, and the settings' own are the ones that are never fatal — see
+    /// workbench settings take the same grammar, a session gets the union of
+    /// the two, and the settings' own are the ones that are never fatal — see
     /// [`sandbox::SandboxConfig`].
     ///
     /// A Rust build cache is not one of them: the server provides that one — see
@@ -482,7 +481,7 @@ pub struct Config {
         long = "sandbox-bind",
         env = "VERKSTEAD_SANDBOX_BINDS",
         value_delimiter = PATH_LIST_SEPARATOR,
-        value_name = "DIR|NAME=DIR"
+        value_name = "DIR"
     )]
     pub sandbox_binds: Vec<String>,
 

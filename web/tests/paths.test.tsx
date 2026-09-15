@@ -16,9 +16,8 @@
 //!   that offered to remove one would be a page offering something the server
 //!   would silently ignore.
 //! - **What a save carries.** One request writes the whole of `config.yaml`, so
-//!   adding a bind must not cost a token or a build cache size — and it must not
-//!   cost a bind written for a Repo either, which is a row this pane never draws
-//!   and still has to send back.
+//!   adding a bind must not cost a token, a build cache size or the bind
+//!   standing beside it.
 //! - **What a row reports.** Whether the server can see what an entry names is
 //!   the one thing a human cannot check from a phone, and it is said in the
 //!   server's own words on the row itself.
@@ -41,7 +40,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   DirectoryListing,
-  RepoEntry,
   SettingsSaved,
   SettingsView,
 } from "../src/api/types";
@@ -50,25 +48,18 @@ import { PathsCard, PathsPane } from "../src/settings/Paths";
 import rowStyles from "../src/settings/PathEditor.module.css";
 import styles from "../src/settings/Paths.module.css";
 import { browse, held, listingAt, rows as offered, tap } from "./fields";
-import { hangs, json, serving, whenever, type Answer } from "./serving";
-import repos from "./fixtures/repos.json" with { type: "json" };
+import { json, serving, whenever, type Answer } from "./serving";
 import told from "./fixtures/settings.json" with { type: "json" };
 import unset from "./fixtures/settings-unset.json" with { type: "json" };
 
 const TOLD = told as SettingsView;
 const UNSET = unset as SettingsView;
-const REPOS = repos as RepoEntry[];
 
 /// The settings' own entries the fixture holds, as a save puts them back on the
-/// wire — one bind every sandbox gets, and one a single Repo gets. The second is
-/// not a row on this pane and rides along on every save it makes.
+/// wire. Two binds, which is what makes a Remove worth asking about: what one
+/// press sends is the list with that one entry gone and the other where it was.
 const BIND = "/var/cache/verkstead-node";
-const SCOPED = "verkstead=/var/cache/verkstead-cargo";
-
-/// The Repo that last one is written against, and the directory it names — the
-/// two halves of it, because a stray row says which name it was written for.
-const REPO = "verkstead";
-const OWN = "/var/cache/verkstead-cargo";
+const BESIDE = "/var/cache/verkstead-cargo";
 
 /// The rest of the settings as every save from this pane sends them: the author
 /// as it stands, the token untouched, and what the sections above own.
@@ -106,7 +97,6 @@ function installed(standing: SettingsView): SettingsView {
       binds: [
         {
           path: "/etc/verkstead/certs",
-          repo: null,
           source: "Installation",
           resolution: "Resolves",
         },
@@ -160,36 +150,10 @@ function mountPane() {
   return { ...mounting(() => <PathsPane back={back} />), back };
 }
 
-/// The settings, and the registry the pane reads beside them.
-///
-/// Both, because which names are registered is what tells a bind written for a
-/// Repo from a stray — see `drawn` in `Paths.tsx`. The fixture's registry holds
-/// the Repo the fixture's scoped bind is written for, so the ordinary case is a
-/// pane with no stray on it.
+/// The settings, which is the one read this pane makes.
 function theSettings(standing: SettingsView, ...answers: Array<Answer>) {
-  return registered(standing, REPOS, ...answers);
+  return serving(whenever("/api/ui/settings", json(standing)), ...answers);
 }
-
-/// The same, over a registry a test says: what makes an entry a stray is that
-/// nothing on this list is called what it was written for.
-function registered(
-  standing: SettingsView,
-  repos: RepoEntry[] | (() => Promise<Response>),
-  ...answers: Array<Answer>
-) {
-  return serving(
-    whenever("/api/ui/settings", json(standing)),
-    whenever(
-      "/api/ui/repos",
-      typeof repos === "function" ? repos : json(repos),
-    ),
-    ...answers,
-  );
-}
-
-/// The registry with the Repo the fixture's scoped bind is written for taken
-/// off it, which is what unregistering one leaves behind.
-const WITHOUT_THE_REPO = REPOS.filter((repo) => repo.name !== REPO);
 
 /// What a save answers with, which is the settings as they now stand.
 function answering(standing: SettingsView): SettingsSaved {
@@ -234,10 +198,7 @@ function path(row: ParentNode): string {
 }
 
 describe("the card", () => {
-  /// What somebody scanning the page is after: how much of the list stands. The
-  /// binds counted are the ones every sandbox gets — a Repo's own is on that
-  /// Repo's pane, and counting it here would be counting a row this section
-  /// cannot show.
+  /// What somebody scanning the page is after: how much of the list stands.
   it("says how many binds stand", async () => {
     theSettings(seen(TOLD));
     const { container } = mountCard();
@@ -245,7 +206,7 @@ describe("the card", () => {
     await theCard(container);
 
     expect(container.querySelector(`.${styles.standing}`)!.textContent).toBe(
-      "1 bind every sandbox gets.",
+      "2 binds every sandbox gets.",
     );
   });
 
@@ -265,24 +226,17 @@ describe("the card", () => {
 
   /// And the other thing the browser can see and the human cannot: an entry that
   /// is saved, is in the file, and does nothing.
-  ///
-  /// Every one of them, listed here or not. A bind written for a Repo is drawn
-  /// nowhere at all, and it goes stale in the file exactly the same way — so a
-  /// count that stopped at this section's own rows would leave it with nothing
-  /// saying so anywhere.
-  it("counts every entry the server cannot see, listed or not", async () => {
+  it("counts every entry the server cannot see", async () => {
     theSettings(TOLD);
     const { container } = mountCard();
 
     await theCard(container);
 
-    // The bind every sandbox gets, and the one written for a Repo — which this
-    // section does not list and does count.
     await waitFor(() => screen.getByText(/2 entries the server cannot see/));
   });
 
-  /// And it sends the human here whichever of them it counted: this is where
-  /// every row anybody can do anything about stands.
+  /// And it sends the human here to read why: this is where every row anybody
+  /// can do anything about stands.
   it("sends the human to this section to read why", async () => {
     theSettings(TOLD);
     const { container } = mountCard();
@@ -343,93 +297,30 @@ describe("the pane", () => {
     expect(binds.querySelector("h2")!.textContent).toBe("Sandbox binds");
   });
 
-  it("draws every global bind", async () => {
+  it("draws every bind", async () => {
     theSettings(installed(TOLD));
     const { container } = mountPane();
 
     const binds = await list(container);
 
-    expect(rows(binds).map(path)).toEqual(["/etc/verkstead/certs", BIND]);
+    expect(rows(binds).map(path)).toEqual([
+      "/etc/verkstead/certs",
+      BIND,
+      BESIDE,
+    ]);
   });
 
-  /// A bind scoped to one Repo is that Repo's pane's, so it is no row here — and
-  /// the save below is what says it is still in the file.
-  it("leaves a Repo's own bind off this pane", async () => {
+  /// A bind could once be written for one Repo — `name=path` — and that grammar
+  /// is gone. The server drops such an entry as it reads the file, so there is
+  /// nothing for this pane to draw and nothing for it to explain.
+  it("draws nothing for a bind written for a repo", async () => {
     theSettings(TOLD);
     const { container } = mountPane();
 
     const binds = await list(container);
 
-    expect(rows(binds).map(path)).toEqual([BIND]);
-    expect(screen.queryByText("/var/cache/verkstead-cargo")).toBeNull();
-  });
-
-  /// Unless nothing is registered under the name it was written for, which is
-  /// what unregistering a Repo leaves behind and what a misspelled name is from
-  /// the start. This pane draws one of those: it is in the file, no session is
-  /// given it, and a row nobody can reach is a row nobody can take away.
-  it("draws a bind written for a repo nothing is registered under", async () => {
-    registered(TOLD, WITHOUT_THE_REPO);
-    const { container } = mountPane();
-
-    const binds = await list(container);
-
-    await waitFor(() => expect(rows(binds)).toHaveLength(2));
-    expect(rows(binds).map(path)).toEqual([BIND, OWN]);
-  });
-
-  /// And says both things about it: which name it was written for, and that
-  /// nothing holds that name — the second being why it is doing nothing.
-  it("says on a stray which repo it was written for, and that nothing is", async () => {
-    registered(TOLD, WITHOUT_THE_REPO);
-    const { container } = mountPane();
-
-    const binds = await list(container);
-    await waitFor(() => expect(rows(binds)).toHaveLength(2));
-
-    const stray = rows(binds)[1]!;
-
-    expect(stray.textContent).toContain(`written for ${REPO}`);
-    expect(stray.textContent).toContain("No repo is registered under that name");
-
-    // And the row beside it, which is nobody's, says neither.
-    expect(rows(binds)[0]!.textContent).not.toContain("written for");
-  });
-
-  /// Nothing is a stray until the registry has been read. A row that appeared
-  /// and vanished as that read landed would be worse than one that arrives a
-  /// moment after the rest of the list.
-  it("calls nothing a stray before the repos have been read", async () => {
-    registered(TOLD, hangs());
-    const { container } = mountPane();
-
-    const binds = await list(container);
-
-    expect(rows(binds).map(path)).toEqual([BIND]);
-  });
-
-  /// And it can be taken away, which is the whole point of drawing it. What a
-  /// Remove sends is where the row stands in the *file* — the stray sits behind
-  /// the global bind there, and taking it away leaves that one alone.
-  it("takes a stray away without disturbing the bind beside it", async () => {
-    const fetching = registered(
-      TOLD,
-      WITHOUT_THE_REPO,
-      json(answering(TOLD)),
-    );
-    const { container } = mountPane();
-
-    const binds = await list(container);
-    await waitFor(() => expect(rows(binds)).toHaveLength(2));
-
-    fireEvent.click(rows(binds)[1]!.querySelector("button")!);
-
-    await waitFor(() =>
-      expect(sent(fetching)).toMatchObject({
-        ...REST,
-        sandbox_binds: [BIND],
-      }),
-    );
+    expect(rows(binds).map(path)).toEqual([BIND, BESIDE]);
+    expect(screen.queryByText(/written for/)).toBeNull();
   });
 
   /// The installation's entries are a unit's word, and there is nothing on a
@@ -509,9 +400,9 @@ describe("the pane", () => {
 
 describe("adding a row", () => {
   /// The round trip, and the whole of what a save from this pane has to get
-  /// right: the new entry on the end of the list, and everything else — the
-  /// Repo's own bind among them, the author, the token and the build cache —
-  /// exactly as it stood.
+  /// right: the new entry on the end of the list, and everything else — the bind
+  /// standing beside it, the author, the token and the build cache — exactly as
+  /// it stood.
   it("saves a bind without disturbing anything else", async () => {
     const fetching = theSettings(TOLD, json(answering(TOLD)));
     mountPane();
@@ -523,7 +414,7 @@ describe("adding a row", () => {
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
         ...REST,
-        sandbox_binds: [BIND, SCOPED, "/var/cache/npm"],
+        sandbox_binds: [BIND, BESIDE, "/var/cache/npm"],
       }),
     );
   });
@@ -542,7 +433,7 @@ describe("adding a row", () => {
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
         ...REST,
-        sandbox_binds: [BIND, SCOPED, "/var/cache/npm"],
+        sandbox_binds: [BIND, BESIDE, "/var/cache/npm"],
       }),
     );
   });
@@ -557,7 +448,6 @@ describe("adding a row", () => {
           ...TOLD.paths.binds,
           {
             path: "/var/cache/npm",
-            repo: null,
             source: "Settings",
             resolution: "Resolves",
           },
@@ -573,7 +463,7 @@ describe("adding a row", () => {
 
     await waitFor(async () => {
       const binds = await list(container);
-      expect(rows(binds).map(path)).toEqual([BIND, "/var/cache/npm"]);
+      expect(rows(binds).map(path)).toEqual([BIND, BESIDE, "/var/cache/npm"]);
     });
 
     // And the box is empty again: what was in it has gone to the server, and the
@@ -653,7 +543,7 @@ describe("browsing for one", () => {
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
         ...REST,
-        sandbox_binds: [BIND, SCOPED, "/home/ada/work"],
+        sandbox_binds: [BIND, BESIDE, "/home/ada/work"],
       }),
     );
   });
@@ -661,10 +551,10 @@ describe("browsing for one", () => {
 });
 
 describe("taking a row away", () => {
-  /// Where the row stands on this pane is not where it stands in the file: a
-  /// bind written for a Repo sits among the settings' binds and is not drawn
-  /// here, so a removal counted off the page would take the wrong one away.
-  it("keeps a bind written for a repo when a global one is removed", async () => {
+  /// What a Remove sends is the list with that one entry gone and every other
+  /// one where it was — one request writes the whole of `config.yaml`, so a
+  /// list sent short is a list emptied.
+  it("keeps the bind beside the one that is removed", async () => {
     const fetching = theSettings(TOLD, json(answering(TOLD)));
     const { container } = mountPane();
 
@@ -676,13 +566,15 @@ describe("taking a row away", () => {
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
         ...REST,
-        sandbox_binds: [SCOPED],
+        sandbox_binds: [BESIDE],
       }),
     );
   });
 
-  /// And neither is it where it stands among the settings' own, once the
-  /// installation has said one of its own in front of them.
+  /// And where the row stands on the page is not where it stands in the file,
+  /// once the installation has said one of its own in front of them: those are
+  /// not in the file at all, so a removal counted off the page would take the
+  /// wrong one away.
   it("counts past the installation's entries", async () => {
     const standing = installed(TOLD);
     const fetching = theSettings(standing, json(answering(standing)));
@@ -697,7 +589,7 @@ describe("taking a row away", () => {
     await waitFor(() =>
       expect(sent(fetching)).toEqual({
         ...REST,
-        sandbox_binds: [SCOPED],
+        sandbox_binds: [BESIDE],
       }),
     );
   });

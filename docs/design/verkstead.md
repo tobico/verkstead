@@ -202,13 +202,19 @@ flowchart LR
   every picker filled — a prefill the human may change, kept server-side so a
   phone and a desk share it.
 - **Sandbox configuration** (extra read-write binds such as build caches,
-  network policy) lives in global defaults with per-repo overrides. It is
-  configured in two places — `--sandbox-bind DIR` for every sandbox,
-  `--sandbox-bind NAME=DIR` for the repo registered under that name, and the
-  same two grammars in the workbench settings (*revised 2026-08-30, grilling
-  configurable-paths*; *settled 2026-08-20, building stage 02*, this
-  was the installer's alone, because each bind is a hole in the boundary and
-  widening one was held to be theirs). It is the only path list left of the
+  network policy) is one set every sandbox gets. It is configured in two places
+  — `--sandbox-bind DIR`, and the same grammar in the workbench settings
+  (*revised 2026-08-30, grilling configurable-paths*; *settled 2026-08-20,
+  building stage 02*, this was the installer's alone, because each bind is a
+  hole in the boundary and widening one was held to be theirs). A bind could
+  also name a repo — `--sandbox-bind NAME=DIR`, given only to sessions working
+  in the repo registered under that name — and that grammar is gone (*revised
+  2026-09-15, building settings-ui-tidy*): a bind is a build cache or a package
+  registry, which is the machine's rather than one repository's, and the scoped
+  half was configuration the workbench could not draw and a second rule to read
+  every entry by. The flag refuses one by name; an entry still in it in
+  `config.yaml` reaches no session, draws no row and is dropped from the file by
+  the next save the Paths pane makes. It is the only path list left of the
   two that were said this way (*revised 2026-09-06, onboarding stage 01*: the
   watched paths were the other, and went). The two sets union, and each keeps
   its own answer to a bind that is not there: the flag's refuses startup, the
@@ -216,10 +222,10 @@ flowchart LR
   browser half safe is not that a bind stopped being a hole but that reaching
   the page is already reaching the machine — the
   tailnet is the perimeter and there is one human behind it — while a *phone* is
-  no place to be told a typo cost every session in a repository its start. On a
-  hardened nix install the unit's namespace still binds what the module was
-  given, so a settings entry outside it saves, says on the page that the server
-  cannot see it, and does nothing until the installer widens the unit. Letting a
+  no place to be told a typo cost every session its start. On a hardened nix
+  install the unit's namespace still binds what the module was given, so a
+  settings entry outside it saves, says on the page that the server cannot see
+  it, and does nothing until the installer widens the unit. Letting a
   **conversation** allow another repository into its own sandbox is the
   companion-repos bullet below (*settled 2026-08-27, staging companion-repos*;
   this said "wanted and is not built"): the sandbox takes a composed list, so it
@@ -259,11 +265,14 @@ flowchart LR
   a new branch, exactly as the main repo does. Fetch-then-resolve per companion
   at grill start, refusals naming the companion, teardown at close keeping the
   branches. The sandbox binds each companion's worktree and git common dir by
-  mode and composes that repo's own per-repo binds; the prompt carries one
-  neutral companion listing and no instructions — the agent decides from the
-  brief what to use. Visibility: a commit sweep per read-write companion with
-  repo-labeled commit events, and Set diffs composed server-side per repo (the
-  main repo's diff derivation moves server-side too, for consistency).
+  mode, and what a session builds in one with is the sandbox configuration every
+  session gets (*revised 2026-09-15, building settings-ui-tidy*: it composed
+  that repo's own per-repo binds in as well, until those went); the prompt
+  carries one neutral companion listing and no instructions — the agent decides
+  from the brief what to use. Visibility: a commit sweep per read-write
+  companion with repo-labeled commit events, and Set diffs composed server-side
+  per repo (the main repo's diff derivation moves server-side too, for
+  consistency).
   Pipeline: **full, per touched companion** — the finish session pushes and PRs
   each companion holding commits by that repo's own review process, a touched
   companion without a PR is a deliberate stop, each PR gets its own checks and
@@ -445,7 +454,6 @@ flowchart LR
     in words why nobody could be asked. The save lands either way: a token is
     pasted once out of a page that will not show it again (*refined 2026-08-23,
     building intentional-credentials*).
-  - per-repo extra binds from sandbox configuration
   - **A shared Rust build cache, on by default** (*settled 2026-08-29, grilling
     shared-rust-build-cache*): one directory the server resolves at startup —
     `--build-cache-dir`, `VERKSTEAD_BUILD_CACHE_DIR`, else
@@ -968,16 +976,15 @@ Timeline events:
   onboarding stage 01*: it sat directly above them, because a watched path was
   what a Repo was registered from and a machine with none had nothing to put on
   that list — with the boundary gone the Repos are what a machine is set up by
-  and the binds are the afterthought). **A bind written for a name no Repo is
-  registered under is drawn on the Paths pane**, because a row drawn nowhere is a
-  row nobody can take away — which is what unregistering a Repo makes of every
-  bind said for it (*revised 2026-09-15, building settings-ui-tidy*: a bind
-  written for a Repo that *is* registered was drawn on that Repo's own pane,
-  under a **Sandbox configuration** heading, out of the same read and the same
-  save; that pane is gone and so is the heading). The Paths card's count of
-  entries the server cannot see covers the rows it does not list as well: a bind
-  that has quietly stopped resolving is what nobody goes looking for. What is on
-  a card is what a list is scanned for and the rest is in the pane — a Profile's
+  and the binds are the afterthought). **Every bind is a row on the pane and a
+  row on that pane is every bind**, there being one kind of them (*revised
+  2026-09-15, building settings-ui-tidy*: a bind written for a registered Repo
+  was drawn on that Repo's own pane, under a **Sandbox configuration** heading,
+  and one written for a name nothing held was drawn here as a stray saying so;
+  both went with the grammar that made them). The Paths card's count of entries
+  the server cannot see is what the warning on it is drawn from: a bind that has
+  quietly stopped resolving is what nobody goes looking for. What is on a card is
+  what a list is scanned for and the rest is in the pane — a Profile's
   mounted paths, agent type and Remove; Language support's checkbox per language
   and the size of the Rust cache's compiled half. Adding a Profile is a plus icon
   on the section's heading line, which opens the same pane blank and reads as
