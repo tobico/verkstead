@@ -210,7 +210,7 @@ describe("the pane", () => {
     expect(screen.getByText("Reset key")).toBeTruthy();
     expect(
       screen.getByText(
-        "Resets the secret token used to access to the UI. This will " +
+        "Resets the secret token used to access the UI. This will " +
           "disconnect all other devices.",
       ),
     ).toBeTruthy();

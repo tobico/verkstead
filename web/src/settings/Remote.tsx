@@ -495,7 +495,7 @@ function TheKey(): JSX.Element {
       </button>
 
       <Note>
-        Resets the secret token used to access to the UI. This will disconnect
+        Resets the secret token used to access the UI. This will disconnect
         all other devices.
       </Note>
 
