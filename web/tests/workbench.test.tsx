@@ -1897,6 +1897,12 @@ describe("what a right-click on a card offers", () => {
     rightClick(await grillingCard(container));
     fireEvent.click(await drawn(await opened(container), `.${actions.close}`));
 
+    // The fixture this suite serves has a session running on it, so the close is
+    // asked about before it is made and the second press is what sends — see
+    // *a close pressed over a run in flight*. Which card it is about is the
+    // question here, and the card the press opens is about the same one.
+    fireEvent.click(await confirms());
+
     await waitFor(() =>
       expect(
         sent(fetching, `/api/ui/conversations/${GRILLING.id}/close`),
@@ -1938,6 +1944,10 @@ describe("what a right-click on a card offers", () => {
     const read = askedFor(fetching, reading);
 
     fireEvent.click(menu.querySelector<HTMLElement>(`.${actions.close}`)!);
+    // A session is running on this fixture, so the close asks before it is made
+    // — see *a close pressed over a run in flight*. The card is drawn over the
+    // page the press was made from, which is the page this test is about.
+    fireEvent.click(await confirms());
     await waitFor(() => expect(sent(fetching, closes)).toEqual({}));
 
     // The read every press ends with, and the Timeline still drawn when it
@@ -8409,6 +8419,319 @@ describe("closing and archiving a conversation", () => {
     await waitFor(() =>
       expect(spokenRow(container, GRILLING.id)).toContain(STATE.Grilling),
     );
+  });
+});
+
+/// The card a close pressed over a run in flight is asked about in, or nothing
+/// where nothing is being asked about. On the body rather than in the container,
+/// a `dialog` being drawn in the top layer.
+///
+/// Out here rather than inside the suite below, because a close over a running
+/// session is asked about wherever it was pressed from — the sidebar's own suite
+/// presses one, on a fixture it gives a running session to.
+function asking(): HTMLDialogElement | null {
+  return document.body.querySelector<HTMLDialogElement>(
+    `dialog.${actions.confirming}`,
+  );
+}
+
+/// The same, waited for: what the press opens is a signal away rather than a
+/// request away, but it is still not there on the tick the click was made on.
+function asked(): Promise<HTMLDialogElement> {
+  return waitFor(() => {
+    const card = asking();
+    if (!card) throw new Error("nothing is being asked about");
+    return card;
+  });
+}
+
+/// And the press inside it that makes the close it asked about, which is what a
+/// test pressing a close over a running session has to reach for to send
+/// anything at all.
+///
+/// The one of the pair that is not the way back, which is how the card itself
+/// tells them apart — see `.confirmingOut` in `Actions.module.css`, and the
+/// confirm sheet in `set/Sheet.module.css` it takes the idiom from.
+async function confirms(): Promise<HTMLButtonElement> {
+  return (await asked()).querySelector<HTMLButtonElement>(
+    `.${actions.confirmingOut} button:not(.${actions.secondary})`,
+  )!;
+}
+
+/// Closing is the one press on this menu that ends a run, and the only one that
+/// ends it without being about it: the two stops know what they are stopping and
+/// the two archives end nothing. So where there is a run for a close to kill, it
+/// is asked about before it is made — which is the whole of what is here. What
+/// counts as a run in flight, what the card says, and that nothing at all has
+/// happened until the second press.
+describe("a close pressed over a run in flight", () => {
+  const CLOSING_IT = `/api/ui/conversations/${GRILLING.id}/close`;
+  const CLOSING_AWAY = `/api/ui/conversations/${GRILLING.id}/close-and-archive`;
+
+  /// The card's two presses, in the order it draws them: the way back, and the
+  /// close itself.
+  function ways(card: HTMLDialogElement): HTMLButtonElement[] {
+    return [
+      ...card.querySelectorAll<HTMLButtonElement>(
+        `.${actions.confirmingOut} button`,
+      ),
+    ];
+  }
+
+  /// The grilling conversation with a run actually in flight on it, which the
+  /// fixture as shipped has not got — see the stalled one below.
+  ///
+  /// The one the page is sent to by an archive is served beside it, the close
+  /// that puts the row away being one of the two presses asked about here.
+  function theRunning(
+    over: Partial<ConversationView>,
+    ...answers: Parameters<typeof serving>
+  ) {
+    return theGrilling(
+      whenever(
+        `/api/ui/conversations/${GRILLING.id}`,
+        json({ ...GRILLING, ...over }),
+      ),
+      whenever(`/api/ui/conversations/${BUILDING.id}`, json(BUILDING)),
+      ...answers,
+    );
+  }
+
+  /// A session is running, which is the plainest way for there to be a run to
+  /// kill: the press opens the card and does nothing else at all.
+  it("asks first where a session is running", async () => {
+    const fetching = theRunning({ working: true });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.close}`),
+    );
+
+    expect((await asked()).open, "opened as a modal").toBe(true);
+    expect(askedFor(fetching, CLOSING_IT), "nothing has been sent").toBe(0);
+
+    // And the conversation is where it was, on the page and in the list both.
+    expect((await standing(container)).state).toBe(STATE.Grilling);
+    expect(spokenRow(container, GRILLING.id)).toContain(STATE.Grilling);
+  });
+
+  /// And the gap between one step and the next, where no session process exists
+  /// yet and the next launches the moment it can. The drivers register is what
+  /// says so — `driven` with no session beside it is the status button's own
+  /// *Driven* — and `working` alone would miss this one.
+  it("asks first between one step of a drive and the next", async () => {
+    const fetching = theRunning({ working: false, driven: true });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.close}`),
+    );
+
+    await asked();
+    expect(askedFor(fetching, CLOSING_IT)).toBe(0);
+  });
+
+  /// And nothing at all on a conversation a restarted server left stalled, which
+  /// is what the fixture as shipped is: no session and nothing in the drivers
+  /// register, on a state something ought to be driving — so `ready_to_stop` is
+  /// true and there is still no run for a close to kill. A card here would be a
+  /// false alarm, which is why that flag is not what is read.
+  it("asks nothing on a conversation nothing is running", async () => {
+    // Which the test is only worth anything if the fixture really is.
+    expect({
+      working: GRILLING.working,
+      driven: GRILLING.driven,
+      ready_to_stop: GRILLING.ready_to_stop,
+    }).toEqual({ working: false, driven: false, ready_to_stop: true });
+
+    const fetching = theGrilling(
+      whenever(
+        CLOSING_IT,
+        json("Closed" satisfies ConversationClosed),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.close}`),
+    );
+
+    await waitFor(() => expect(sent(fetching, CLOSING_IT)).toEqual({}));
+    expect(asking()).toBeNull();
+  });
+
+  /// The way back, which is the whole point of the card: the run is still on and
+  /// the page is exactly where the press found it, down to the rows the menu
+  /// drops.
+  it("sends nothing and moves nothing where the run is kept", async () => {
+    const fetching = theRunning({ working: true });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.close}`),
+    );
+
+    const card = await asked();
+    expect(ways(card)[0]!.textContent).toBe("Keep it running");
+    fireEvent.click(ways(card)[0]!);
+
+    await waitFor(() => expect(asking()).toBeNull());
+    expect(askedFor(fetching, CLOSING_IT), "and still nothing was sent").toBe(0);
+    expect((await standing(container)).state).toBe(STATE.Grilling);
+
+    // And the menu drops what it dropped before: both closes, and no archive
+    // standing where one of them was.
+    const menu = await openActions(container);
+    expect(menu.querySelector(`.${actions.close}`)).toBeTruthy();
+    expect(menu.querySelector(`.${actions.closeAndArchive}`)).toBeTruthy();
+    expect(menu.querySelector(`.${actions.archive}`)).toBeNull();
+  });
+
+  /// And Escape is the way back too, as a press on the backdrop is: both are the
+  /// `Modal`'s own — `tests/modals.test.tsx` is where they are pinned — and both
+  /// come back here as the card closing itself, which leaves the run alone.
+  it("sends nothing where the card is escaped", async () => {
+    const fetching = theRunning({ working: true });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.close}`),
+    );
+
+    await asked();
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => expect(asking()).toBeNull());
+    expect(askedFor(fetching, CLOSING_IT)).toBe(0);
+    expect((await standing(container)).state).toBe(STATE.Grilling);
+  });
+
+  /// And the second press is the first one made: the close goes out and the page
+  /// draws it at once, exactly as it does where nothing was asked.
+  it("closes eagerly once the close is confirmed", async () => {
+    const fetching = theRunning(
+      { working: true },
+      whenever(CLOSING_IT, hangs(), "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.close}`),
+    );
+
+    const card = await asked();
+    expect(ways(card)[1]!.textContent).toBe("Close conversation");
+    fireEvent.click(ways(card)[1]!);
+
+    await waitFor(() => expect(sent(fetching, CLOSING_IT)).toEqual({}));
+    await waitFor(() => expect(asking()).toBeNull());
+
+    // The state word on its own, which is what the button says of a conversation
+    // the work has ended in — with the request still out and never coming back.
+    await waitFor(async () => {
+      const line = await standing(container);
+      expect(line.word).toBe(STATE.Closed);
+      expect(line.state).toBeNull();
+    });
+    expect(spokenRow(container, GRILLING.id)).toContain(STATE.Closed);
+  });
+
+  /// And the row under it is the same press with the archive already made: the
+  /// card names *that* press, and confirming it takes the row off the list and
+  /// the page with it.
+  it("closes and archives eagerly once that row's close is confirmed", async () => {
+    const fetching = theRunning(
+      { working: true },
+      whenever(CLOSING_AWAY, hangs(), "POST"),
+    );
+    const { container, history } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(
+        container,
+        `.${actions.conversationActions} .${actions.closeAndArchive}`,
+      ),
+    );
+
+    const card = await asked();
+    expect(ways(card)[1]!.textContent).toBe("Close and archive");
+    fireEvent.click(ways(card)[1]!);
+
+    await waitFor(() => expect(sent(fetching, CLOSING_AWAY)).toEqual({}));
+    await waitFor(() =>
+      expect(container.querySelector(`[data-id="${GRILLING.id}"]`)).toBeNull(),
+    );
+
+    // And the page goes where the eye already is: the row above the one that has
+    // gone. See `Actions.tsx`.
+    await waitFor(() =>
+      expect(history.get().startsWith(`/conversations/${BUILDING.id}`)).toBe(
+        true,
+      ),
+    );
+    expect(askedFor(fetching, CLOSING_IT)).toBe(0);
+  });
+
+  /// What the card says, whole: the question, the two sentences under it, and
+  /// the two ways out. Nothing about the worktree or the branch — what is at
+  /// stake in this moment is the run.
+  it("asks about the run and nothing else", async () => {
+    theRunning({ working: true });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    await openActions(container);
+    fireEvent.click(
+      await drawn(container, `.${actions.conversationActions} .${actions.close}`),
+    );
+
+    const card = await asked();
+    expect(card.querySelector(`.${actions.confirmingTitle}`)!.textContent).toBe(
+      "Close while the agent is running?",
+    );
+    expect(card.querySelector(`.${actions.confirmingWhy}`)!.textContent).toBe(
+      "The agent is still working on this conversation. Closing now will end the run.",
+    );
+
+    // Two of them, and no third: Stop is a row of the menu this press came from.
+    expect(ways(card).map((way) => way.textContent)).toEqual([
+      "Keep it running",
+      "Close conversation",
+    ]);
+  });
+
+  /// And the sidebar's right-click asks it too, both menus being the one set of
+  /// rows: the card it reads the conversation into is the pane's own, so every
+  /// fact the rule needs is in hand there as well.
+  it("is asked the same way from the sidebar's right-click", async () => {
+    const fetching = theRunning({ working: true });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const rows = await cards(container);
+    const row = rows.find((card) => card.dataset.id === String(GRILLING.id));
+    expect(row, "the fixture sidebar should hold the grilling conversation")
+      .toBeTruthy();
+
+    fireEvent.contextMenu(row!.querySelector<HTMLElement>(`.${sidebar.open}`)!, {
+      clientX: 120,
+      clientY: 200,
+    });
+
+    const menu = await drawn(
+      container,
+      `.${shell.conversationsPane} .${actions.conversationActions} > .${dropdown.drop}`,
+    );
+    fireEvent.click(await drawn(menu, `.${actions.close}`));
+
+    await asked();
+    expect(askedFor(fetching, CLOSING_IT)).toBe(0);
   });
 });
 

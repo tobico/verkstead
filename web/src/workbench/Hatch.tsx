@@ -31,11 +31,22 @@
 //! they are the same one.
 //!
 //! **And it leaves at the press rather than at the answer.** Both rows here are
-//! the ordinary menu's eager ones — see `eager.ts` — so the row goes off the
+//! eager, as the ordinary menu's are — see `eager.ts` — so the row goes off the
 //! sidebar and the page goes home the moment the human presses, and the close
 //! runs behind them. There is no page left to roll back to: what a failure
 //! takes back is the row, which quietly reappears in the list, and what says
 //! why is a toast.
+//!
+//! **Eager even over a run in flight**, which is the one place this row and the
+//! ordinary menu's part company: there, a close pressed over a running agent
+//! opens a card and waits for a second press — see `running` in `Actions.tsx`.
+//! Here there is nothing to ask it with. What that card is asked on is the
+//! Conversation's own reading, and the reading is the thing that failed; the
+//! sidebar row this menu is built from says whether a session is working and
+//! nothing about what is driving the Conversation, so a card drawn from it
+//! would be asked on half the question. The row that exists to get a human off
+//! a page that will not load is not the row to make conditional on a fact this
+//! page cannot see.
 //!
 //! Which matters more here than anywhere else it is done. Everywhere else a
 //! refusal is a page drawn against a Conversation that has moved, and the
@@ -55,7 +66,12 @@ import {
 } from "../api/client";
 import type { ConversationArchived, ConversationClosed } from "../api/types";
 import { useReading } from "../freshness";
-import { ARCHIVE_REFUSAL, Action, CLOSE_REFUSAL } from "./Actions";
+import {
+  ARCHIVE_REFUSAL,
+  Action,
+  CLOSE_AND_ARCHIVE,
+  CLOSE_REFUSAL,
+} from "./Actions";
 import styles from "./Actions.module.css";
 import { eagerly, type Said } from "./eager";
 import { PaneHead } from "./PaneHead";
@@ -168,7 +184,7 @@ export function Hatch(props: {
               fallback={
                 <Action
                   class={styles.closeAndArchive}
-                  label="Close and archive"
+                  label={CLOSE_AND_ARCHIVE}
                   says="Permanently end the conversation, delete the worktree, and take it off the conversations list. The branch stays where it is."
                   press={closeAway}
                 />

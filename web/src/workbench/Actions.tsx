@@ -77,6 +77,17 @@
 //! outcome the human has already watched happen would be the page arguing with
 //! itself.
 //!
+//! **Except a close pressed over a run in flight, which is asked about first.**
+//! The two closes end the session along with everything else they end, and they
+//! are the only presses here that do it without being about the run at all — the
+//! stops know what they are stopping, and the archives end nothing. So where
+//! there is a run to kill a card opens over the page and the eager half waits
+//! for a second press: nothing is sent, nothing is drawn, and the Conversation
+//! is where it was. Where there is no run the press is the one it always was,
+//! there being nothing to warn about. See [`running`], which is what *a run in
+//! flight* means here — the same pair the status button over this menu reads,
+//! rather than the flag the two stops are drawn from.
+//!
 //! The rest do wait, and keep the card. Resume, the two stops and Steer each
 //! end in a session actually starting or stopping, which is not something this
 //! page can truthfully draw ahead of the server — so they keep the pending
@@ -107,8 +118,8 @@
 //! which is very often a different one — but *what there is to do about a
 //! Conversation* does not depend on which of the two asked. So the presses live
 //! in [`actions`], which is a factory rather than a component: it holds one set
-//! of mutations and one modal, and hands back the rows to draw and the way to
-//! shut whatever menu is drawing them.
+//! of mutations and the cards they open over the page, and hands back the rows
+//! to draw and the way to shut whatever menu is drawing them.
 //!
 //! The sidebar's is a pointer affordance and nothing else. A touch device has no
 //! right-click, and a long press on a card there already picks it up to be
@@ -360,6 +371,100 @@ export function Refusal(props: {
   );
 }
 
+/// What the two closing rows are called, said once rather than at each of them.
+///
+/// The row's own name is also what the confirming button in the card below
+/// reads, so that the human confirms the press they made rather than a word this
+/// file chose for it — and two spellings of one press is exactly the way that
+/// stops being true.
+///
+/// Which is why the second is exported: the escape hatch in `Hatch.tsx` draws
+/// that row too, for a Conversation whose page will not load, and it is the same
+/// press under the same name. The first is not, that row being this menu's
+/// alone.
+const CLOSE = "Close conversation";
+export const CLOSE_AND_ARCHIVE = "Close and archive";
+
+/// Whether there is a run for a close to kill: a session in the worktree, or
+/// something of Verkstead's own still holding the Conversation.
+///
+/// The pair the status button over this menu already reads, and read here for
+/// the same reason — see `status` in `StatusButton.tsx`, which turns `working`
+/// into **Running** and `driven` into *the moment between one step of a backlog
+/// and the next*. The card is asked exactly where that button says one of the
+/// two, which is what stops the line and the menu under it disagreeing about
+/// whether anything is going on.
+///
+/// Both read raw off the Conversation rather than worked out from
+/// `ready_to_stop`, which is the flag the next reader will reach for, both stops
+/// being drawn from it. That one is a fact about the record — the state is one
+/// something ought to be driving, and no stop has landed — so it says nothing
+/// about a process at all, and a Conversation a restarted server left stalled
+/// has it true with nothing running to kill.
+function running(conversation: ConversationView): boolean {
+  return conversation.working || conversation.driven;
+}
+
+/// What a close pressed over a run in flight is answered with, before anything
+/// at all has happened: what the press would end, and the two ways out of it.
+///
+/// Two buttons, which is the whole of what tells this card from [`Refusal`]
+/// above it: there is something to decide here and the press has not been made
+/// yet. The confirming one reads the pressed row's own name, so the human can
+/// see which of the two closes they are on the way to making — the sidebar's
+/// menu is very often about a Conversation no pane is showing, and the card is
+/// all there is left on the screen saying which press this was.
+///
+/// Two rather than three: a *Stop instead* beside them was considered and is
+/// not here. Stop is a row of the menu the press came from, and a card that
+/// offered a third thing would be a menu drawn over a menu.
+function Confirm(props: {
+  /// The pressed row's name, or `null` while nothing is being asked about.
+  asked: string | null;
+  /// The way back, which is what Escape and a press on the backdrop come to as
+  /// well: every way out of this card but the one button leaves the run alone.
+  keep: () => void;
+  /// And the press it asked about, made.
+  close: () => void;
+}): JSX.Element {
+  // Generated rather than written, for the reason [`Refusal`]'s is: two of these
+  // stand on a page at once, the Conversation pane's menu and the sidebar's
+  // right-click each holding one.
+  const id = createUniqueId();
+
+  return (
+    <Modal
+      class={styles.confirming!}
+      open={props.asked !== null}
+      close={props.keep}
+      labelledBy={id}
+    >
+      <p id={id} class={styles.confirmingTitle}>
+        Close while the agent is running?
+      </p>
+      <p class={styles.confirmingWhy}>
+        The agent is still working on this conversation. Closing now will end the
+        run.
+      </p>
+      <div class={styles.confirmingOut}>
+        {/* Both classes, as the Set sheet's own confirm pair carry them: the
+            global one is the paint, and the module's is what the row above
+            stands the filled press out of. */}
+        <button
+          type="button"
+          class={`${styles.secondary!} secondary`}
+          onClick={() => props.keep()}
+        >
+          Keep it running
+        </button>
+        <button type="button" onClick={() => props.close()}>
+          {props.asked}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 /// Every press this menu can make, and the rows that make them.
 ///
 /// A factory rather than a component, because the rows are drawn in two menus of
@@ -378,8 +483,9 @@ function actions(): {
   closes: (close: () => void) => void;
   /// The rows, for the Conversation given.
   rows: (conversation: () => ConversationView) => JSX.Element;
-  /// And what the rows open over the page — the steer form, and the card a
-  /// refused press is answered with. Both outlive the menu that opened them.
+  /// And what the rows open over the page — the steer form, the card a refused
+  /// press is answered with, and the card a close pressed over a run in flight
+  /// asks before it makes it. All three outlive the menu that opened them.
   modal: () => JSX.Element;
 } {
   const queries = useQueryClient();
@@ -467,6 +573,23 @@ function actions(): {
   /// nothing to answer. Held out here for the reason the steer is: what opens
   /// over the page outlives the menu the press was made in.
   const [refused, setRefused] = createSignal<string | null>(null);
+
+  /// And the close that was pressed over a run in flight, while the human is
+  /// being asked about it — `null` while nothing is. Held out here for the same
+  /// reason again: the press shuts the menu the row was in.
+  ///
+  /// The whole press is kept rather than a flag, because what the second press
+  /// makes is this one: which of the two closes it was, and the Conversation as
+  /// it stood when the row was hit. Frozen as the steer's is — the card is
+  /// asking about the world the human pressed in, and reading the menu's
+  /// accessor again from inside it would be asking about another one.
+  const [confirming, setConfirming] = createSignal<{
+    conversation: ConversationView;
+    ending: (id: number) => Promise<ConversationClosed>;
+    away: boolean;
+    /// The pressed row's own name, which is what the confirming button reads.
+    label: string;
+  } | null>(null);
 
   // The menu's own way to shut, held here because what closes it is the press
   // coming back rather than the press going out.
@@ -604,6 +727,42 @@ function actions(): {
         `The conversation could not be closed: ${error.message}`,
       reread,
     });
+  };
+
+  /// And what pressing either closing row actually is: the close, or the
+  /// question before it.
+  ///
+  /// Where there is a run to kill — see [`running`] — the menu shuts and the
+  /// card opens over the page, and that is the whole of what the press did:
+  /// nothing sent, nothing drawn, the Conversation where it was. The eager half
+  /// below waits for the second press. Where there is no run there is nothing to
+  /// warn about, and the press is what it has always been.
+  ///
+  /// The menu first, as a refusal does it: shutting it hands the focus back to
+  /// the button it was dropped from, which is then where the card hands the
+  /// focus back to when it is answered.
+  const ends = (
+    conversation: ConversationView,
+    ending: (id: number) => Promise<ConversationClosed>,
+    away: boolean,
+    label: string,
+  ) => {
+    if (!running(conversation)) {
+      closing(conversation, ending, away);
+      return;
+    }
+
+    shut();
+    setConfirming({ conversation, ending, away, label });
+  };
+
+  /// And the second press, which is the first one made: the card goes, and the
+  /// close runs exactly as it would have run without it.
+  const confirmed = (): void => {
+    const asked = confirming();
+    setConfirming(null);
+
+    if (asked !== null) closing(asked.conversation, asked.ending, asked.away);
   };
 
   /// And putting the closed conversation away, which reads the same way: both
@@ -764,11 +923,17 @@ function actions(): {
               </Show>
             }
           >
+            {/* And the two that are asked about before they are made, where
+                there is a run for them to kill — the only presses on this menu
+                that are, and the one thing here that is not eager the moment it
+                is hit. Which of them it is depends on the Conversation rather
+                than on the row: see [`ends`], and [`running`] for what counts.
+                A close on a Conversation nothing is running is unchanged. */}
             <Action
               class={styles.close}
-              label="Close conversation"
+              label={CLOSE}
               says="Permanently end the conversation and delete the worktree. The branch stays where it is."
-              press={() => closing(conversation(), closeConversation, false)}
+              press={() => ends(conversation(), closeConversation, false, CLOSE)}
             />
 
             {/* And the same press with the archive already made, which saves
@@ -777,10 +942,15 @@ function actions(): {
                 what it adds is the reversible half. */}
             <Action
               class={styles.closeAndArchive}
-              label="Close and archive"
+              label={CLOSE_AND_ARCHIVE}
               says="The same, and take it off the conversations list. Its record stays where it is."
               press={() =>
-                closing(conversation(), closeAndArchiveConversation, true)
+                ends(
+                  conversation(),
+                  closeAndArchiveConversation,
+                  true,
+                  CLOSE_AND_ARCHIVE,
+                )
               }
             />
           </Show>
@@ -795,6 +965,16 @@ function actions(): {
         {/* What a press that did nothing is answered with — see [`Refusal`],
             which the escape hatch draws the same card from. */}
         <Refusal said={refused()} close={() => setRefused(null)} />
+
+        {/* And what a close pressed over a run in flight asks before it is made
+            — see [`Confirm`]. Every way out of it but the one button clears the
+            signal and does nothing else, which is what leaves the page exactly
+            as the press found it. */}
+        <Confirm
+          asked={confirming()?.label ?? null}
+          keep={() => setConfirming(null)}
+          close={() => confirmed()}
+        />
 
         <Show when={steering()}>
           {(opened) => {
