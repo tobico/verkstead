@@ -681,6 +681,59 @@ testers.runNixOSTest {
         ).strip()
 
 
+    def save_author(name, email):
+        """Write the git author down the way the settings page writes it, and
+        the way the wizard's git step writes it on a machine nobody has set up
+        yet: `POST /api/ui/settings`, carrying the whole of `config.yaml`.
+
+        Read first and then saved, because one request is the whole file: a
+        section left out of a save is a section emptied, so every part of it but
+        the author's goes back exactly as it was read a moment before. A value
+        nobody typed goes back empty rather than as the default it is being
+        shown as — which is what leaves the build cache's size the default the
+        sandbox probe reads further down — and the installation's own binds are
+        filtered out, being the unit's word rather than anything this file
+        holds.
+        """
+        stood = json.loads(
+            machine.succeed("curl -sf http://127.0.0.1:8422/api/ui/settings")
+        )
+        cache = stood["rust_build_cache"]
+
+        saved = json.loads(
+            post(
+                "/api/ui/settings",
+                {
+                    "git_author": {"name": name, "email": email},
+                    "github_token": "Keep",
+                    "rust_build_cache": {
+                        "enabled": cache["enabled"],
+                        "size": cache["size"] if cache["size_configured"] else "",
+                    },
+                    "cleanup": {
+                        which: {
+                            "enabled": step["enabled"],
+                            "days": str(step["days"]) if step["days_configured"] else "",
+                        }
+                        for which, step in stood["cleanup"].items()
+                    },
+                    "conflict_resolution": stood["conflict_resolution"],
+                    "share_on_done": stood["share_on_done"],
+                    "sandbox_binds": [
+                        f"{entry['repo']}={entry['path']}" if entry["repo"] else entry["path"]
+                        for entry in stood["paths"]["binds"]
+                        if entry["source"] == "Settings"
+                    ],
+                    "ignored_comments": "Keep",
+                },
+            )
+        )
+
+        assert saved["settings"]["git_author"] == {"name": name, "email": email}, (
+            f"the author was saved as {saved['settings']['git_author']}"
+        )
+
+
     with subtest("the unit reaches the Tailscale daemon through its own hardening"):
         # The one part of the workbench whose subject is another daemon on the
         # same machine — and the only place the unit's hardening can be seen
@@ -953,6 +1006,16 @@ testers.runNixOSTest {
         # roles settled. A Pairing is a Profile and one of its models together:
         # there is no default model anywhere, so neither half is left to be
         # assumed.
+        #
+        # And a git author, which is a precondition of the press rather than of
+        # the Conversation: the branch this cuts carries a commit of its own
+        # before anything runs in it — the clearing of whatever task list the
+        # base was holding — and a press with nobody to make it as is refused
+        # `NoGitAuthor`. Nothing of the machine's own gitconfig would do; who a
+        # session commits as is said on the settings page, which is why it is
+        # said here the same way.
+        save_author("Verkstead", "vm@verkstead.invalid")
+
         post(
             f"/api/ui/conversations/{conversation}/brief",
             {"markdown": "Whether the packaged unit can host a sandbox."},
@@ -1121,8 +1184,9 @@ testers.runNixOSTest {
             "and it is bound in read-only, like the `verkstead` beside it"
         )
         assert reported["sccache-size"] == "30G", (
-            f"the default nobody has been to the settings page to change: "
-            f"{reported['sccache-size']!r}"
+            f"the default nobody has typed over — the one save this test makes "
+            f"sends the size back empty, which is what a value nobody chose "
+            f"means: {reported['sccache-size']!r}"
         )
 
         # And the operations the hardening is what would forbid: a UTS namespace
