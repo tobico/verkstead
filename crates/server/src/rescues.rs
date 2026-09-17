@@ -409,9 +409,10 @@ pub(crate) struct Escalation {
     /// Whether the human has been told about this silence.
     told: bool,
 
-    /// The Notice that told them, where it was written. `told` without one is
-    /// an escalation the store would not take — still one per silence, so a
-    /// store that fails is not a phone told every poll.
+    /// The Notice that told them, where this loop wrote it. `told` without one
+    /// is an escalation that was already standing over the Conversation when
+    /// this went to write: somebody has been told about this silence, and the
+    /// mark is not this loop's to take away again.
     notice: Option<i64>,
 }
 
@@ -433,9 +434,15 @@ impl Escalation {
     /// Tell the human: a Notice on the Timeline, the *blocked on you* mark over
     /// it, and a push to their devices. What a stop Verkstead decided on sends,
     /// without the stop — nothing is ended, and nothing is written as stopped.
+    ///
+    /// **Told is what the store took rather than what was attempted.** A write
+    /// that fell over left nothing on the Timeline, nothing on the phone and no
+    /// mark on the Conversation — so counting it as told would hold the whole of
+    /// this off for the rest of the silence, no line typed into the session ever
+    /// again and nobody told, over a session still sitting there holding its
+    /// Worktree. Which is the one outcome this exists to prevent. So a failure is
+    /// left to the next poll, and only a write that landed says the human knows.
     async fn escalate(&mut self, event_id: i64, what: &str) {
-        self.told = true;
-
         let conversation_id = self.conversation_id;
 
         let said = format!(
@@ -449,6 +456,8 @@ impl Escalation {
 
         match store::escalate(&self.pool, conversation_id, &said).await {
             Ok(Some(notice)) => {
+                self.told = true;
+
                 tracing::warn!(
                     conversation_id,
                     event_id,
@@ -471,17 +480,26 @@ impl Escalation {
                     },
                 );
             }
-            // One standing already, which is not this loop's: nothing to add.
-            Ok(None) => tracing::info!(
-                conversation_id,
-                event_id,
-                "the session went unanswered, and an escalation already stands",
-            ),
+            // One standing already, which is not this loop's: the human has been
+            // told about this silence, so there is nothing to add and nothing
+            // more to type into the session.
+            Ok(None) => {
+                self.told = true;
+
+                tracing::info!(
+                    conversation_id,
+                    event_id,
+                    "the session went unanswered, and an escalation already stands",
+                );
+            }
+            // Nothing was written, so nobody has been told: left unsaid rather
+            // than taken as said, and gone at again on the next poll.
             Err(error) => tracing::error!(
                 error = ?error,
                 conversation_id,
                 event_id,
-                "telling the human about a session gone unanswered failed",
+                "telling the human about a session gone unanswered failed, so it is tried \
+                 again",
             ),
         }
     }
