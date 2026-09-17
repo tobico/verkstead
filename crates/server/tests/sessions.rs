@@ -116,8 +116,9 @@ const LISTENING: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8
 /// flakes came from.
 ///
 /// **Uniformly, and that is not a detail.** [`BRISKLY`] keeps `grace` under
-/// `proposing` deliberately, so that a review ended after the shorter of them
-/// is a review ended by the wrong rule — scaling the two by different factors
+/// `proposing` deliberately, so that a session that has said it is done is
+/// ended well before the rescue would have spoken to it, and one still there
+/// when the rescue arrives is one nothing ended — scaling the two by different factors
 /// would quietly delete the thing several tests here exist to prove. One
 /// multiplier over the whole file keeps every such ordering as it was written.
 ///
@@ -476,8 +477,8 @@ impl Grilling {
     ///
     /// Which leaves one thing the stub has to be told: that the Set is up. A real
     /// session asks moments after it starts and is talking until it does, so the
-    /// silence a propose-then-fix session is ended on only ever begins with an ask
-    /// of its own already open — see [`WHILE_NOBODY_HAS_ASKED`]. A Set posted from
+    /// silence of a propose-then-fix session waiting on the human only ever begins
+    /// with an ask of its own already open — see [`WHILE_NOBODY_HAS_ASKED`]. A Set posted from
     /// out here arrives whenever the test gets to it, so the marker is what puts
     /// the two back in the order they really happen in.
     async fn ask(&self, yaml: &str) -> i64 {
@@ -564,8 +565,9 @@ impl Grilling {
     /// a run would otherwise go on telling every session after it that somebody
     /// is asking. What that costs is a session that falls straight through the
     /// loop it was meant to talk through, goes quiet with nothing of its own
-    /// open, and is ended before the test has asked it anything: the fixture
-    /// racing an ender rather than anything about the work.
+    /// open, and is spoken to by the rescue before the test has asked it
+    /// anything: the fixture racing the rescue rather than anything about the
+    /// work.
     fn asked_nothing(&self) {
         let asked = handoff_directory(self).join("asked");
 
@@ -1027,9 +1029,9 @@ questions:
 /// launching sessions rather than sleeping between them.
 ///
 /// The pace a server keeps is [`Pace::default`] — two seconds and five. What is
-/// being asked here is whether a session is ended once its step has landed *and*
-/// it has gone quiet, and the number of seconds that takes is not part of the
-/// answer.
+/// being asked here is whether a session is ended once it has said it is done
+/// *and* gone idle since, and the number of seconds that takes is not part of
+/// the answer.
 ///
 /// Every span here goes through [`paced`], so a loaded machine gets budgets it
 /// can meet — and all of them by the same factor, which is what keeps the
@@ -1038,9 +1040,10 @@ static BRISKLY: LazyLock<Pace> = LazyLock::new(|| Pace {
     poll: paced(Duration::from_millis(100)),
     grace: paced(Duration::from_millis(300)),
     checks: paced(Duration::from_millis(100)),
-    // Longer than the grace above, as a server's is: the tests that watch a
-    // review being ended on quiet want the two apart, so that a session ended
-    // after the shorter of them is one ended by the wrong rule.
+    // Longer than the grace above, as a server's is: this is how long a session
+    // sits idle before the rescue speaks to it, and the tests that watch a
+    // session ended on its Done signal want the two apart, so that one still
+    // there when the rescue arrives is one the signal did not end.
     proposing: paced(Duration::from_millis(900)),
     // Four times the grace above, where a server's is five times it: what the
     // ceiling on a stir is for is a session that will never speak again, so the
@@ -2478,7 +2481,7 @@ impl Bench {
     /// whole run is on the second backend looks like.
     ///
     /// What the tests about the store-and-nudge channel want: the sessions that
-    /// ask and are ended on quiet are the wrap-up's, so putting only the
+    /// ask and then idle on the answer are the wrap-up's, so putting only the
     /// grilling role on that backend would leave every ask of theirs blocking.
     ///
     /// The grilling role on a model of its own, because one Profile is running
@@ -5258,8 +5261,9 @@ async fn a_capture_survives_the_server_restarting() {
 }
 
 /// The inline direction end to end: the human picks it on the closing Set, the
-/// grilling session writes a handoff where the skill says and goes quiet, and
-/// that handoff plus quiet is what ends the grilling — after which a fresh
+/// grilling session writes a handoff where the skill says and runs `verkstead
+/// done`, and that signal, borne out by the handoff, is what ends the grilling —
+/// after which a fresh
 /// session under the *other* Profile builds the work, primed with the handoff and
 /// committing without anything to wait on, and carries the branch to a pull
 /// request the Conversation then wraps up.
@@ -5315,7 +5319,7 @@ async fn choosing_inline_runs_the_implementation_profile_on_the_handoff() {
     let set = fixture.ask(PROPOSING).await;
     assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
 
-    // The handoff plus quiet is what ends the grilling, and the document goes on
+    // The signal over the handoff is what ends the grilling, and the document goes on
     // the Timeline at that moment — the one moment it is certainly finished.
     let handed = fixture
         .until(|view| handoff(view).map(|handoff| handoff.html.clone()))
@@ -5400,7 +5404,7 @@ async fn choosing_inline_runs_the_implementation_profile_on_the_handoff() {
     );
 }
 
-/// And an inline grilling that goes quiet without writing one: the run stops,
+/// And an inline grilling that ends without writing one: the run stops,
 /// the way every other step that never landed does.
 ///
 /// The handoff is what the session that builds is primed with, so a session that
@@ -5570,7 +5574,7 @@ async fn a_later_pick_moves_the_watcher_onto_the_artifact_it_asked_for() {
     }
 
     // Long enough for many more polls than the handoff watcher would have needed:
-    // it wakes every 100ms and ends a session on 300ms of quiet.
+    // it wakes every 100ms, and ends a signalled session 300ms after it idles.
     pause(Duration::from_millis(1500)).await;
 
     let view = fixture.view().await;
@@ -5848,7 +5852,7 @@ async fn choosing_a_task_list_breaks_the_work_down_in_the_grilling_session() {
     let set = fixture.ask(PROPOSING).await;
     assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
 
-    // The plan commit plus quiet is what ends the grilling, and the move that
+    // The signal over the plan commit is what ends the grilling, and the move that
     // follows it is what says the work is being built.
     fixture
         .until(|view| (view.state == Lifecycle::Implementing).then_some(()))
@@ -5941,8 +5945,8 @@ async fn choosing_a_task_list_breaks_the_work_down_in_the_grilling_session() {
 /// them.
 ///
 /// The session idles after its commit, which is what a real interactive one
-/// does. So what ends it is Verkstead's own done-signal — a roadmap on the
-/// branch that was not there before, committed, and then quiet.
+/// does. So what ends it is its Done signal, checked against a roadmap on the
+/// branch that was not there before, committed.
 #[tokio::test]
 async fn choosing_a_roadmap_stages_the_work_in_the_grilling_session() {
     let fixture = grilling(
@@ -6132,7 +6136,8 @@ async fn choosing_a_roadmap_stages_the_work_in_the_grilling_session() {
 ///
 /// Every session here idles after its commit, which is what a real interactive
 /// one does: nothing exits, so what advances the run is the runner ending each
-/// session on its done-signal plus quiet. A stub that exited would prove the
+/// session once it has given its Done signal and gone idle since. A stub that
+/// exited would prove the
 /// loop counts to four and nothing about the part that is hard.
 ///
 /// The stub decides what it is by looking at `.tasks/`, exactly as the bundled
@@ -6248,7 +6253,7 @@ async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
     );
     assert!(
         outputs(&view).iter().all(|output| !output.running),
-        "every one of them was ended once its step landed and it had gone quiet, though \
+        "every one of them was ended on its Done signal over a landed step, though \
          each was still sitting on its `sleep`",
     );
 
@@ -8377,11 +8382,11 @@ esac
 ///
 /// The two halves of a propose-then-fix session in one line, because the fixture
 /// splits them across two processes. A real one reads the branch out loud, asks
-/// within moments of starting and only then goes silent — so the quiet it is
-/// ended on begins with its ask already open, and the ask is the only thing
-/// keeping it alive. Here the reading is a stub and the asking is the test, which
-/// posts the Set whenever it gets to it: without this the stub would fall silent
-/// with nothing open, and be ended before the test had asked anything.
+/// within moments of starting and only then goes silent — so its silence begins
+/// with its ask already open, and the ask is what keeps the rescue off it. Here
+/// the reading is a stub and the asking is the test, which posts the Set whenever
+/// it gets to it: without this the stub would fall silent with nothing open, and
+/// be spoken to before the test had asked anything.
 ///
 /// The same line over and over, so that the last thing said is the same whether
 /// it was said once or fifty times — which is what the Timeline shows of a
@@ -8398,10 +8403,10 @@ const REVIEW_THEN_WAIT: &str = "    SAYING='reading the branch'\n    \
 
 /// One that is still at work when the answers have come back, and stays that way.
 ///
-/// What a restart has to interrupt to be a restart at all: a session with nothing
-/// left to do is ended on quiet rather than left hanging, so a stub that fell
-/// silent on being answered would be seen out by the server that started it and
-/// there would be nothing for the restart to find.
+/// What a restart has to interrupt to be a restart at all: a session at work
+/// through it, rather than one that fell silent on being answered and was
+/// spoken to by the rescue of the server that started it — which would leave
+/// the restart finding a session being prodded rather than one at work.
 const REVIEW_THEN_WORK_ON: &str = "    SAYING='reading the branch'\n    \
      printf '%s\\n' \"$SAYING\"\n    \
      WHILE_NOBODY_HAS_ASKED\n    \
@@ -9220,11 +9225,10 @@ async fn a_deferred_ask_of_a_reviews_own_does_not_hold_its_session_open() {
 /// Which is the whole of the third state. The Set is stored as a Deferred Ask
 /// is — nothing is waiting on the wire, so the CLI returns and the session ends
 /// its turn — and a session *is* idling on it, waiting for the line Verkstead
-/// types when the Response lands. Read as a Deferred Ask it would be ended on
-/// quiet and prodded by the rescue before the human had answered, leaving the
-/// Response with nothing to nudge; read as a blocking one the CLI would sit
-/// there for hours. So it is counted as open by the enders and by the rescue,
-/// and stored by the reply.
+/// types when the Response lands. Read as a Deferred Ask it would be prodded by
+/// the rescue before the human had answered, a session told to carry on with
+/// nothing to carry on with; read as a blocking one the CLI would sit there for
+/// hours. So it is counted as open by the rescue, and stored by the reply.
 ///
 /// Nothing is nudged here — that is the next step's — so the stub waits on the
 /// marker the test writes, exactly as the blocking one does.
@@ -9468,8 +9472,8 @@ async fn a_response_to_a_store_and_nudge_ask_is_typed_into_the_session_that_stor
     );
 
     // And the session takes another turn on it, which is the whole of what the
-    // line is for: it fetches, says what it did and goes quiet, and going quiet
-    // with nothing open is what ends a review.
+    // line is for: it fetches, says it is done and says what it did, and that
+    // signal is what ends a review.
     let deadline = Instant::now() + *PATIENCE;
     while !review_settled(&fixture).await {
         assert!(
@@ -9825,9 +9829,10 @@ fn responded(view: &ConversationView, set_id: i64) -> bool {
 
 /// A review that is still talking is never cut off, however long it goes on for.
 ///
-/// Anything printed puts the whole grace back on the clock, which is what makes a
-/// grace safe to end a session on: the work after a commit — a message, a
-/// summary, a push — runs to completion rather than being killed mid-sentence.
+/// A session printing is not idle, and nothing ends one that is not: its Done
+/// signal is not given, and the rescue never speaks to a session mid-sentence.
+/// So the work of a long review — a message, a summary, a push — runs to
+/// completion rather than being killed under it.
 #[tokio::test]
 async fn a_review_that_keeps_talking_is_never_ended_under_it() {
     let spill = tempfile::tempdir().unwrap();
@@ -16059,9 +16064,10 @@ async fn force_stop_ends_the_session_where_it_stands_and_halts_at_once() {
 /// stop, and not about the press.
 ///
 /// The stub keeps talking after it writes the handoff, which is what makes the
-/// press land in that moment rather than beside it: handoff plus quiet is what
-/// would ordinarily end the grilling, so a session that never goes quiet leaves
-/// the document on disk and unclaimed until the press ends it.
+/// press land in that moment rather than beside it: a Done signal over the
+/// handoff is what ends the grilling once it is next idle, so a session that
+/// signals and never goes idle leaves the document on disk and unclaimed until
+/// the press ends it.
 #[tokio::test]
 async fn force_stop_as_the_handoff_lands_starts_nothing_behind_the_halt() {
     let fixture = grilling(
@@ -19699,7 +19705,8 @@ async fn typing_into_a_driven_session_changes_nothing_about_when_it_ends() {
     let at = fixture.listening().await;
     let (_watcher, event) = typed_into_at_the_breakdown(&fixture, at).await;
 
-    // The step lands, and the session goes quiet sitting on its `sleep`.
+    // The step lands, the session says it is done, and it goes quiet sitting on
+    // its `sleep`.
     std::fs::write(&gate, "go").unwrap();
 
     // And the run picks up behind it, with nothing pressed.
@@ -20955,6 +20962,97 @@ esac
     );
 }
 
+/// And that second session's own Done signal is taken, with nothing committed
+/// behind it.
+///
+/// What every other inline signal is checked against is a commit past where the
+/// run stood, which this session has not got and is not expected to get: it was
+/// sent onto a branch that already holds the work, and what it was sent to do is
+/// the pull request. So the check is the pull request instead — the one it ends
+/// on either way — and refusing it for the missing commit would leave the
+/// session signalling into a refusal it could never put right, with nothing but
+/// the escalation on the other side of it.
+#[tokio::test]
+async fn a_second_inline_session_with_nothing_to_commit_is_taken_at_its_signal() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-by-the-session");
+
+    // The second session opens the pull request and then says it is done,
+    // sitting there afterwards: nothing but the signal being taken can end it.
+    // What tells the two sessions apart is kept out of the Worktree, an
+    // untracked file there being a signal refused for a reason of its own.
+    let stub = format!(
+        r#"
+printf 'prompt was: %s\n' "$2"
+
+case "$2" in
+*reviewing/SKILL.md*)
+    printf 'reading the whole branch\n'
+    sleep 300
+    ;;
+*implementing/SKILL.md*)
+    if [ -f /tmp/verkstead/tried ]; then
+        printf 'the work was already here, so all it wanted was a pull request\n'
+        printf 'https://github.com/tobico/verkstead/pull/41\n' > {opened}
+        : > /tmp/verkstead/done
+        printf 'and I have said so\n'
+        sleep 300
+    else
+        printf 'once\n' > /tmp/verkstead/tried
+        printf 'a limiter\n' > limiter.md
+        git add limiter.md
+        git commit --quiet -m 'feat: rate limiting'
+        printf 'the limiter is in, and nothing pushed it\n'
+    fi
+    ;;
+*submitting/SKILL.md*)
+    printf 'nothing opened a pull request\n'
+    ;;
+*)
+    printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+    : > /tmp/verkstead/done
+    printf 'the handoff is written\n'
+    sleep 300
+    ;;
+esac
+"#,
+        opened = quoted(&opened),
+    );
+
+    let fixture = grilling_spilling(spill, &stub, &gh_opened_by_hand(&opened)).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    // The first session builds the work and goes without pushing, which is what
+    // leaves the second one with nothing to commit.
+    fixture.stopped().await;
+
+    assert_eq!(fixture.resume().await, Resumed::Resumed);
+
+    let found = fixture
+        .until(|view| {
+            (view.state == Lifecycle::Wrapping)
+                .then(|| pull_request(view).cloned())
+                .flatten()
+        })
+        .await;
+
+    assert_eq!(
+        found.number, 41,
+        "the session was taken at its word and the run carried on to the pull request",
+    );
+    assert_eq!(
+        commits(&fixture.view().await).len(),
+        1,
+        "with the one commit the session before it made and none of its own",
+    );
+}
+
 /// And Resume where `gh` cannot answer at all halts saying so, without spending
 /// a session on it.
 ///
@@ -22062,14 +22160,14 @@ const IDLE_UNTIL_TOLD: &str = "    printf 'reading the branch\\n'\n    \
      : > /tmp/verkstead/done\n    \
      sleep 300";
 
-/// One that is answered, works on for longer than the grace, and only then
-/// finishes: a session that is gone because it had nothing left to do.
+/// One that is answered, works on for longer than the rescue's grace, and only
+/// then exits without a Done signal: a session that is gone because it had
+/// nothing left to do.
 ///
-/// The talking is what makes this a test of the ending rather than of the
-/// quiet. Anything a session prints puts the whole grace back on the clock, so
-/// a stub that goes on printing past [`BRISKLY`]'s `proposing` cannot be ended
-/// on quiet — which leaves the session going first as the only way this
-/// follow-up can end at all.
+/// The talking is what makes this a test of the exit rather than of the rescue.
+/// A session printing is not idle, so a stub that goes on printing past
+/// [`BRISKLY`]'s `proposing` is never spoken to — which leaves the session going
+/// by itself as the only way this follow-up can end at all.
 const A_MARKED_ROUND_THEN_GONE: &str = "    SAYING='following it up'\n    \
      printf '%s\\n' \"$SAYING\"\n    \
      WHILE_NOBODY_HAS_ASKED\n    \
@@ -22283,13 +22381,14 @@ async fn a_follow_up_session_that_is_gone_stops_the_conversation() {
 /// is the whole of what tells the two endings apart. **Finish your turn** is
 /// what the skill tells a session with nothing left to ask, and an interactive
 /// agent that decides there is nothing to do exits zero — so a session going
-/// before the grace beside it has run out is the ordinary shape of a follow-up
-/// ending rather than one that fell over. Read on the quiet alone, it would put
+/// by itself without a Done signal can be the ordinary shape of a follow-up
+/// ending rather than one that fell over. Read without the mark, it would put
 /// a stop on the Timeline of a Conversation the human had finished with, and
 /// cost them a press to get back what they had already said.
 ///
-/// The stub talks past the grace after it is answered, so nothing here can be
-/// ended on quiet: the session going is the only way this one lands anywhere.
+/// The stub talks past the rescue's grace after it is answered and never
+/// signals, so nothing else here can end it: the session going is the only way
+/// this one lands anywhere.
 #[tokio::test]
 async fn a_follow_up_session_that_finishes_on_the_mark_lands_in_the_wrap_up() {
     let spill = tempfile::tempdir().unwrap();
@@ -22401,8 +22500,8 @@ async fn a_follow_up_ends_on_the_mark_and_lands_back_in_the_wrap_up() {
 
     let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
 
-    // Long enough for the grace several times over. The round is open, so
-    // nothing here ends anything however quiet the session goes.
+    // Long enough for the rescue's grace several times over. The round is open,
+    // so nothing here speaks to the session or ends it however quiet it goes.
     tokio::time::sleep(BRISKLY.proposing * 3).await;
 
     assert_eq!(
@@ -22572,9 +22671,9 @@ async fn a_set_asked_after_the_mark_keeps_the_follow_up_open() {
     // human wrote beside their tick and coming back about it.
     let second = fixture.ask(A_FOLLOW_UP_ROUND).await;
 
-    // Long enough for the grace several times over. The first Response is marked
-    // and the session is quiet between its lines, so a rule that read the newest
-    // *mark* rather than the newest *Response* would have landed by now.
+    // Long enough for the rescue's grace several times over. The first Response
+    // is marked and the session is quiet between its lines, and neither of those
+    // ends a follow-up: what is waited on is the answer to the newest round.
     tokio::time::sleep(BRISKLY.proposing * 3).await;
 
     let view = fixture.view().await;
@@ -22719,15 +22818,16 @@ async fn a_marked_follow_up_that_never_signals_is_not_ended_but_told_it_may_be_d
     assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
     std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
 
-    // The rescue waits on a longer quiet than the grace the old ending did, so
-    // a follow-up still there when it arrives is one that quiet did not end.
+    // The rescue waits out a longer silence than the grace a signalled session
+    // is ended after, so a follow-up still there when it arrives is one that
+    // neither the mark nor its silence ended.
     let said = told(&fixture, 1).await;
     let view = fixture.view().await;
 
     assert_eq!(
         view.state,
         Lifecycle::FollowUp,
-        "the mark and the quiet together ended nothing",
+        "the mark and the silence together ended nothing",
     );
     assert!(view.working, "and the session is still there");
     assert!(
@@ -22917,13 +23017,13 @@ async fn picked_through_to_the_task(fixture: &Grilling) -> (i64, i64) {
 }
 
 /// The Done signal given over a landed step is taken, and the session is ended
-/// once it is next quiet — after what it said on the way out, which is kept.
+/// once it is next idle — after what it said on the way out, which is kept.
 ///
 /// The words after the command are the point: an agent that runs `verkstead
 /// done` and then says what it did is saying it to the human, and a session
 /// ended as the signal arrived would have that cut off under it.
 #[tokio::test]
-async fn a_session_that_says_it_is_done_is_ended_once_quiet_with_its_last_words_kept() {
+async fn a_session_that_says_it_is_done_is_ended_once_idle_with_its_last_words_kept() {
     let fixture = grilling(&a_backlog_that_says_so(
         "",
         ": > /tmp/verkstead/done\n        \
@@ -22985,8 +23085,9 @@ async fn a_session_that_lands_its_step_and_says_nothing_is_not_ended_but_told_it
         })
         .await;
 
-    // The rescue waits on a longer quiet than the grace the old ending did, so
-    // a session still there when it arrives is one that quiet did not end.
+    // The rescue waits out a longer silence than the grace a signalled session
+    // is ended after, so a session still there when it arrives is one its landed
+    // step and its silence did not end.
     let said = told(&fixture, 1).await;
 
     assert!(
@@ -24277,7 +24378,7 @@ async fn escalated(fixture: &Grilling) -> NoticeEvent {
 /// `prompt` standing on the Screen.
 ///
 /// And each of them leaves a silence in the middle of its turn that is longer
-/// than the grace a printing session is ended on, which is the other half of the
+/// than the grace the rescue waits out, which is the other half of the
 /// same claim: a TUI that stops to think is not a TUI that has finished.
 ///
 /// `frames` is how many times the prompt is drawn before the session falls
@@ -24287,8 +24388,8 @@ async fn escalated(fixture: &Grilling) -> NoticeEvent {
 /// silence to start has something to wait for.
 ///
 /// `commits` is whether the step does what its task asked. One that does is
-/// ended on its landing and its judgement together; one that does not is a run
-/// nobody can move, which is the rescue's.
+/// ended on the Done signal it gives over that landing; one that does not is a
+/// run nobody can move, which is the rescue's.
 fn a_backlog_drawing(prompt: &str, frames: i32, commits: bool) -> String {
     let working = if commits {
         r#"
@@ -24310,9 +24411,9 @@ fn a_backlog_drawing(prompt: &str, frames: i32, commits: bool) -> String {
     };
 
     // A span of the suite's own, and one that has to sit between two of the
-    // Pace's: past the grace, so that a session ended inside it would be one
-    // ended by the byte clock, and well short of the long-stop, so that it is
-    // not the long-stop catching it either.
+    // Pace's: past the grace the rescue waits out, so that a session spoken to
+    // inside it would be one judged by the byte clock, and well short of the
+    // long-stop, so that it is not the long-stop catching it either.
     let thinking = (BRISKLY.proposing * 3 / 2).as_secs_f64();
 
     format!(
@@ -24370,8 +24471,8 @@ esac
 /// leaves standing.
 ///
 /// **And the silence each leaves mid-turn ends nothing.** It is longer than the
-/// grace a printing session is ended on and longer than the one the rescue waits
-/// out, and on this backend it is not idle at all — a TUI that stops to think
+/// grace a signalled session is ended after and longer than the one the rescue
+/// waits out, and on this backend it is not idle at all — a TUI that stops to think
 /// would otherwise be prodded, or reaped, in the middle of its work.
 #[tokio::test]
 async fn sessions_that_repaint_are_ended_on_the_prompt_they_draw_rather_than_on_silence() {
@@ -24391,7 +24492,7 @@ async fn sessions_that_repaint_are_ended_on_the_prompt_they_draw_rather_than_on_
     assert!(
         !handoff_directory(&fixture).join("rescues").exists(),
         "and nothing was typed into any of them: the silence each left in the \
-         middle of its turn is longer than the grace, and on this backend a \
+         middle of its turn is longer than either grace, and on this backend a \
          session that has stopped printing has not stopped working",
     );
 }
@@ -24445,7 +24546,7 @@ async fn a_step_that_draws_its_prompt_without_committing_is_told_and_then_put_to
 /// rather than never.
 ///
 /// **And it is slow**, deliberately: the session draws its unknown prompt for
-/// longer than the grace and nothing is typed into it, because on this backend a
+/// longer than the rescue's grace and nothing is typed into it, because on this backend a
 /// session that is printing is a session at work whatever it is printing. Only
 /// once it has stopped printing altogether does the long-stop start, and only
 /// once that is out is it idle.
@@ -24459,7 +24560,7 @@ async fn a_prompt_the_signature_does_not_know_is_caught_by_the_long_stop() {
 
     picked(&fixture, "task-list").await;
 
-    // The step session has drawn its prompt for a window longer than the grace,
+    // The step session has drawn its prompt for a window longer than either grace,
     // and has now stopped printing altogether — which is where the long-stop
     // starts.
     until_written(&handoff_directory(&fixture).join("silent-step")).await;
@@ -24475,7 +24576,7 @@ async fn a_prompt_the_signature_does_not_know_is_caught_by_the_long_stop() {
 
     assert!(
         fell_silent.elapsed() >= BRISKLY.proposing * 2,
-        "and what caught it was the long-stop rather than the grace, which \
+        "and what caught it was the long-stop rather than the rescue's grace, which \
          would have had it in under half the time",
     );
     assert!(
@@ -24524,7 +24625,7 @@ const AT_WORK_IN_OTHER_WORDS: &str = "◦ Thinking (12s • press escape to stop
 /// at-work line *going* says it, and the quiet behind it is the other half.
 ///
 /// Each of these leaves a silence in the middle of its turn that is longer than
-/// the grace a printing session is ended on, with its at-work line standing
+/// the grace the rescue waits out, with its at-work line standing
 /// through it: a TUI that stops to think is not a TUI that has finished, and on
 /// this reading the line standing is what says so.
 ///
@@ -24626,7 +24727,7 @@ esac
 /// covers — a Codex session judged by the line the real codex draws.
 ///
 /// **And the silence each leaves mid-turn ends nothing.** It is longer than the
-/// grace a printing session is ended on, and the at-work line stands through it:
+/// grace the rescue waits out, and the at-work line stands through it:
 /// a TUI that stops to think has not stopped working, whatever its terminal is
 /// doing.
 #[tokio::test]
@@ -24652,7 +24753,7 @@ async fn codex_sessions_are_ended_on_the_at_work_line_going_rather_than_on_the_f
     assert!(
         !handoff_directory(&fixture).join("rescues").exists(),
         "and nothing was typed into any of them: the silence each left in the \
-         middle of its turn is longer than the grace, and its at-work line was \
+         middle of its turn is longer than either grace, and its at-work line was \
          standing through the whole of it",
     );
 }
@@ -24744,7 +24845,7 @@ async fn an_at_work_line_that_has_moved_on_leaves_the_run_on_the_byte_clock() {
 /// slow round rather than never.
 ///
 /// **And it is slow**, deliberately: the step draws its at-work line for longer
-/// than the grace and nothing is typed into it, because a session showing that
+/// than the rescue's grace and nothing is typed into it, because a session showing that
 /// it is at work is at work whatever else its terminal is doing. Only once it
 /// has stopped printing altogether does the long-stop start, and only once that
 /// is out is it idle.
@@ -24761,7 +24862,7 @@ async fn an_at_work_line_that_never_goes_is_caught_by_the_long_stop() {
     picked(&fixture, "task-list").await;
 
     // The step session has drawn its at-work line for a window longer than the
-    // grace, and has now stopped printing altogether — which is where the
+    // rescue's grace, and has now stopped printing altogether — which is where the
     // long-stop starts.
     until_written(&handoff_directory(&fixture).join("silent-step")).await;
     let fell_silent = Instant::now();
@@ -24776,7 +24877,7 @@ async fn an_at_work_line_that_never_goes_is_caught_by_the_long_stop() {
 
     assert!(
         fell_silent.elapsed() >= BRISKLY.proposing * 2,
-        "and what caught it was the long-stop rather than the grace, which \
+        "and what caught it was the long-stop rather than the rescue's grace, which \
          would have had it in under half the time",
     );
     assert!(
@@ -24844,7 +24945,7 @@ async fn grok_sessions_are_ended_on_their_own_at_work_hint_rather_than_on_codexs
     assert!(
         !handoff_directory(&fixture).join("rescues").exists(),
         "and nothing was typed into any of them: the silence each left in the \
-         middle of its turn is longer than the grace, and its at-work hint was \
+         middle of its turn is longer than either grace, and its at-work hint was \
          standing through the whole of it",
     );
 }
@@ -24871,7 +24972,7 @@ async fn a_grok_at_work_hint_that_never_goes_is_caught_by_the_long_stop() {
     picked(&fixture, "task-list").await;
 
     // The step session has drawn its at-work hint for a window longer than the
-    // grace, and has now stopped printing altogether — which is where the
+    // rescue's grace, and has now stopped printing altogether — which is where the
     // long-stop starts.
     until_written(&handoff_directory(&fixture).join("silent-step")).await;
     let fell_silent = Instant::now();
@@ -24886,7 +24987,7 @@ async fn a_grok_at_work_hint_that_never_goes_is_caught_by_the_long_stop() {
 
     assert!(
         fell_silent.elapsed() >= BRISKLY.long_stop,
-        "and what caught it was the long-stop rather than the grace or the \
+        "and what caught it was the long-stop rather than the rescue's grace or the \
          three seconds behind the screen — which is the whole of what says \
          Verkstead is reading grok's own hint here: a hint it did not know \
          would have had this session in half the time",
@@ -24958,7 +25059,7 @@ async fn opencode_sessions_are_ended_on_their_own_at_work_label_rather_than_on_c
     assert!(
         !handoff_directory(&fixture).join("rescues").exists(),
         "and nothing was typed into any of them: the silence each left in the \
-         middle of its turn is longer than the grace, and its at-work label was \
+         middle of its turn is longer than either grace, and its at-work label was \
          standing through the whole of it",
     );
 }
@@ -24986,7 +25087,7 @@ async fn an_opencode_at_work_label_that_never_goes_is_caught_by_the_long_stop() 
     picked(&fixture, "task-list").await;
 
     // The step session has drawn its at-work label for a window longer than the
-    // grace, and has now stopped printing altogether — which is where the
+    // rescue's grace, and has now stopped printing altogether — which is where the
     // long-stop starts.
     until_written(&handoff_directory(&fixture).join("silent-step")).await;
     let fell_silent = Instant::now();
@@ -25002,7 +25103,7 @@ async fn an_opencode_at_work_label_that_never_goes_is_caught_by_the_long_stop() 
 
     assert!(
         fell_silent.elapsed() >= BRISKLY.long_stop,
-        "and what caught it was the long-stop rather than the grace or the \
+        "and what caught it was the long-stop rather than the rescue's grace or the \
          three seconds behind the screen — which is the whole of what says \
          Verkstead is reading opencode's own label here: a label it did not \
          know would have had this session in half the time",
@@ -25171,14 +25272,14 @@ async fn an_opencode_session_holding_a_blocking_ask_is_neither_ended_nor_prodded
     until_written(&handoff_directory(&fixture).join("holding")).await;
     let holding = Instant::now();
 
-    // Longer than the long-stop, which is the longest clock in here: the grace
-    // is spent several times over, and the byte quiet that catches a signature
+    // Longer than the long-stop, which is the longest clock in here: both graces
+    // are spent several times over, and the byte quiet that catches a signature
     // nobody has caught up with has run past its own mark.
     tokio::time::sleep(BRISKLY.long_stop + BRISKLY.proposing * 2).await;
 
     assert!(
         holding.elapsed() >= BRISKLY.long_stop,
-        "the session was quiet past the one clock that ends a drawing session \
+        "the session was quiet past the one clock that calls a drawing session idle \
          whatever its screen says",
     );
 
@@ -25356,8 +25457,9 @@ esac
         })
         .await;
 
-    // The rescue waits on a longer quiet than the grace the old ending did, so a
-    // session still there when it arrives is one its commit did not end.
+    // The rescue waits out a longer silence than the grace a signalled session
+    // is ended after, so a session still there when it arrives is one its commit
+    // and its silence did not end.
     let said = told(&fixture, 1).await;
     let view = fixture.view().await;
 
@@ -25816,10 +25918,10 @@ async fn a_step_that_has_not_spoken_since_launch_is_left_alone_until_the_ceiling
 /// And the line this loop types itself is a stir like any other: the second
 /// rescue waits on a word too.
 ///
-/// Otherwise a slow turn after the first line would burn the second and the stop
-/// with it — a session told twice inside one turn it was in the middle of
-/// taking, and stopped for a silence that was one wait rather than two. What
-/// ends a Conversation here is meant to be the same evidence twice over.
+/// Otherwise a slow turn after the first line would burn the second and the third
+/// with it — a session told three times inside one turn it was in the middle of
+/// taking, and escalated over a silence that was one wait rather than three. What
+/// reaches the human here is meant to be the same evidence three times over.
 #[tokio::test]
 async fn the_second_rescue_waits_on_a_word_as_the_first_did() {
     let fixture = grilling(A_BACKLOG_THEN_A_STEP_THAT_NEVER_SPEAKS).await;
@@ -25842,7 +25944,7 @@ async fn the_second_rescue_waits_on_a_word_as_the_first_did() {
         told(&fixture, 2).await.len(),
         2,
         "and the ceiling brings it, so a session that will not speak at all is \
-         still stopped rather than left",
+         still spoken to again rather than left",
     );
 }
 
@@ -29318,8 +29420,8 @@ async fn a_blocking_ask_from_an_ungrilled_session_waits_on_the_human() {
         .until(|view| (!sets(view).is_empty()).then_some(()))
         .await;
 
-    // Several graces of silence, which is what waiting on a human looks like
-    // from outside — and the session is not ended on it.
+    // Several of the rescue's graces of silence, which is what waiting on a human
+    // looks like from outside — and the session is neither spoken to nor ended.
     tokio::time::sleep(BRISKLY.proposing * 4).await;
 
     assert!(

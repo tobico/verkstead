@@ -879,8 +879,8 @@ pub(crate) enum Ended {
     /// Exited badly, said as what happened to it — "exited with status 1".
     Badly(String),
 
-    /// Verkstead ended it, however it came to: its step had landed and it had
-    /// gone quiet, the human closed the Conversation or pressed Force stop out
+    /// Verkstead ended it, however it came to: it had said it was done and gone
+    /// quiet since, the human closed the Conversation or pressed Force stop out
     /// from under it, or the account it was spending ran out of window and the
     /// stop written for that ended it — see [`crate::limits`].
     Stopped,
@@ -996,11 +996,12 @@ enum Judged {
     ///
     /// **The long-stop is what a drifted signature lands in.** The wording is
     /// the backend's and will move, and a signature that no longer matches
-    /// reads as a session that never stops: Rescue's precondition is idle,
-    /// every ender waits on the same judgement, and no session carries a cap on
-    /// its life. So a session that has printed nothing for `long_stop` is idle
-    /// whatever its screen says, and what the human gets is the ordinary
-    /// would-not-ask stop — one slow round rather than never. See
+    /// reads as a session that never stops: Rescue's precondition is idle, the
+    /// ending an accepted signal earns waits on the same judgement, and no
+    /// session carries a cap on its life. So a session that has printed nothing
+    /// for `long_stop` is idle whatever its screen says, and what follows is the
+    /// ordinary course — the session ended if it had signalled, and spoken to by
+    /// the Rescue if it had not. One slow round rather than never. See
     /// [`crate::runner::Pace::long_stop`].
     Drawing {
         signature: Signature,

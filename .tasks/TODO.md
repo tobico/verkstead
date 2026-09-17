@@ -29,4 +29,4 @@ describing the finished work rather than the code as any one task finds it.
 - [x] 06: Done checks for the pull request — [details](06-pull-request-check.md)
 - [x] 07: The Rescue escalates and never stops a session — [details](07-rescue-escalates.md)
 - [x] 08: `verkstead waiting` declares a background wait — [details](08-declared-wait.md)
-- [ ] 09: Sweep what still describes ending on quiet — [details](09-sweep.md)
+- [x] 09: Sweep what still describes ending on quiet — [details](09-sweep.md)

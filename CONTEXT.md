@@ -1214,7 +1214,9 @@ and what it was sent for. **The repository is read at that moment and only
 then**, and what it is read for is the kind's own — a **Step**'s box ticked and
 committed, the picked **Direction**'s artifact, a new commit for an inline run
 or an instruction, the human's Nothing-else mark for a follow-up. A fix session
-alone is asked for nothing, GitHub's check being what judges a fix.
+alone is asked for nothing, GitHub's check being what judges a fix; and an
+inline run sent again onto a branch that already holds its work has no commit to
+make, so its pull request is what it is asked for instead.
 
 **A signal the evidence does not bear out is refused**: the command exits
 non-zero saying what is missing, the session stays alive, and the agent puts it
@@ -1873,8 +1875,11 @@ writes an ordinary Preface, ordinary Questions and an ordinary Postscript, and
 it never asks whether there is anything else.
 
 **What ends it is the human's mark and the session's Done signal together**: the
-newest round they answered carries **Nothing else**, and the session, having
-seen it, says it is done. The mark alone would end a follow-up in the middle of
+newest round they answered carries **Nothing else**, and the session says it is
+done. The mark itself never reaches the agent — the Response it is handed
+carries no trace of it — so what a session goes on is a round that left it
+nothing to do and nothing to ask. The mark alone would end a follow-up in the
+middle of
 the work the last round asked for, and a signal without the mark is refused —
 whether there is anything else is the human's to say. Then the session is ended
 and the Conversation is

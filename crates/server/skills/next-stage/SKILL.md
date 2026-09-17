@@ -66,8 +66,9 @@ questions are read against. Then ask about it: whether the granularity is right,
 whether anything should be merged, split or reordered, whether anything is
 missing — plus whatever drift step 1 turned up.
 
-Iterate until they approve the breakdown. Every round is an ordinary Set:
-nothing in this session ends anything.
+Iterate until they approve the breakdown. Every round is an ordinary Set, and
+nothing you send ends anything. What ends this session is `verkstead done`,
+once the plan commit below is on the branch.
 
 ## 4. Put the branch in the stack, if the prompt says it is stacked
 

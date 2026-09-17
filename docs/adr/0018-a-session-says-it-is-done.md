@@ -61,6 +61,15 @@ This is the answer to what ADR-0008 held against an explicit signal, that it was
 is now sent back rather than acted on, and a forgotten one is what the Rescue
 below is for.
 
+**An inline run sent onto work already built is checked against its pull
+request instead.** A run whose first session committed the work and went before
+the push is picked up by a second, and what that one is sent for is to read the
+branch over and carry it to a pull request: it has nothing to commit, and a rule
+that demanded a commit would leave it signalling into a refusal it could never
+put right. It is one of the sessions that end on a pull request, so that is what
+it is asked for. The first session on a branch holding nothing is asked for its
+commit as before.
+
 **A fix session is the one kind with nothing to show.** One that finds nothing
 to commit is not refused for it: what a fix is judged by is the check on GitHub,
 asked again once the session is over, and the wrap-up's two goes at a check are

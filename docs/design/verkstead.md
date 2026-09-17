@@ -129,9 +129,11 @@ flowchart LR
   2026-08-26, building close-and-retirements*). **Follow-up** sits beside the
   ladder the way Closed sits off it: a steer from Done or Wrapping, on work
   that is already on a pull request, opens a session the human asks and is
-  asked in until they are finished with it. It ends when they tick **Nothing
-  else** on the newest round they answer and the session goes idle with
-  nothing left open; the conversation then re-enters Wrapping over the same
+  asked in until they are finished with it. It ends when the session runs
+  `verkstead done`, which is refused until the human has ticked **Nothing
+  else** on the newest round they answered (*refined 2026-09-18, building
+  agent-signals-done*: it was that mark plus the session going idle with
+  nothing left open); the conversation then re-enters Wrapping over the same
   pull request — with the checks put back to waiting where the follow-up
   pushed — and settles to Done the ordinary way (*added 2026-08-27, building
   follow-ups*).
@@ -139,26 +141,32 @@ flowchart LR
   show for itself leaves a conversation nobody can move: the human sees only
   what arrives as a question set, and none has. So Verkstead types a canned
   line into the running session — the channel a watcher's keystrokes take —
-  telling it to carry on where it has a next step and otherwise to summarize
-  where it has got to and ask what to do next, as a set.
+  telling it to carry on where it has a next step, to run `verkstead done`
+  where its work is finished, to run `verkstead waiting` where background work
+  of its own is still running, and otherwise to summarize where it has got to
+  and ask what to do next, as a set.
   The line and the enter after it are typed a moment apart, because an agent's
   terminal interface reads the two arriving together as a paste and a return
-  inside a paste is a line break rather than a send. Twice at most; a session
-  still saying nothing after the second stops the conversation with a notice
-  saying it would not ask.
+  inside a paste is a line break rather than a send. **It never stops a
+  session** (*refined 2026-09-18, building agent-signals-done*: it was twice at
+  most, then a stop saying the session would not ask). A rescue the session
+  answers puts the count back to nothing; after three unanswered in a row
+  Verkstead escalates instead — a notice on the timeline and a push to the
+  human's devices, the conversation reading *blocked on you* — and holds off
+  until the session is seen working again. What happens next is the human's:
+  typing into the screen, steering, or Stop. A session that has declared a wait
+  with `verkstead waiting` is at work rather than idle, and is not spoken to.
   Follow-up is where it started, the state where an idle session is exactly the
   failure (*added 2026-08-27, building follow-ups*). It now watches **every
   session Verkstead launches**, one loop with the state's own done-indicator as
   its parameter: a grilling's artifact, a backlog step's task file, an inline
   implementation's, an instruction's or a fix's commit, a follow-up's
-  Nothing-else mark. A session
-  with a set open is waiting on the human and one still printing is at work, so
-  neither is ever spoken to; a fix session is ended rather than stopped over,
-  the wrap-up's two goes at a check being the stop it already has (*refined
-  2026-08-27, building follow-ups*). The inline session was the one the sweep
-  left out, and it had no quiet ending either — so it is ended on committed plus
-  quiet, the way the instruction session it is the same shape as always was
-  (*refined 2026-08-27, reviewing follow-ups*). And it waits for a word after
+  Nothing-else mark — *refined 2026-09-18, building agent-signals-done*: the
+  parameter is now the session's done signal, which is what ends every kind of
+  session, so one that landed its work and said nothing is exactly a session to
+  speak to. A session with a set open is waiting on the human and one still
+  printing is at work, so neither is ever spoken to (*refined 2026-08-27,
+  building follow-ups*). And it waits for a word after
   every **stir** — the session's launch, an answer arriving, a line it typed
   itself — because what carries an answer to a session is a chain of hops
   Verkstead can see none of, and one slower than the grace looked exactly like
@@ -298,10 +306,12 @@ flowchart LR
   rationale; the human picks on that set, and the pick goes back to the
   still-living grilling session. That session then produces what was picked —
   the `.tasks/` backlog, the `docs/roadmaps/` staging, or (for **inline**) a
-  handoff document — and the artifact landing plus quiet is what moves the
-  conversation on. Inline needs the handoff because its builder is a fresh
-  session under the implementation pairing: the grilling session cannot simply
-  continue, the accounts differ (ADR-0008).
+  handoff document — and the session's `verkstead done`, refused until the
+  picked direction's artifact is committed on the branch, is what moves the
+  conversation on (*refined 2026-09-18, building agent-signals-done*: it was
+  the artifact landing plus quiet). Inline needs the handoff because its
+  builder is a fresh session under the implementation pairing: the grilling
+  session cannot simply continue, the accounts differ (ADR-0008).
 - **Two kinds of ask.** *Blocking* asks work as in askance: the session idles
   until the answer arrives. *Deferred* asks don't block; they sit in the
   timeline awaiting answers, which are folded into a later session's prompt.
@@ -348,10 +358,12 @@ flowchart LR
   alone always among them (*refined 2026-08-26, building wrapping-fix*), rather
   than a fix-it-or-leave-it pair. **Verkstead ends both kinds of session
   itself** (*refined 2026-08-26, building wrapping-fix*): every session is an
-  interactive agent, which idles when its work is done rather than exiting, so
-  the rule is quiet for a grace with no unanswered blocking ask of its own — a
-  deferred ask holds nothing open — and waiting to see one exit was waiting for
-  something that never came. **What a review left behind is read off the branch
+  interactive agent, which idles when its work is done rather than exiting, and
+  waiting to see one exit was waiting for something that never came. *Refined
+  2026-09-18, building agent-signals-done*: the rule was quiet for a grace with
+  no unanswered blocking ask of its own; it is now the session's
+  `verkstead done`, which locks a blocking set of its own still open and leaves
+  a deferred ask standing. **What a review left behind is read off the branch
   and the session, never off the record** (*settled 2026-08-26, building
   wrapping-fix*): the session that read the picks is the one that carried them
   out, so its ending cleanly is the whole of its report, a fresh `.tasks/`
@@ -846,7 +858,10 @@ Timeline events:
   again reaches the conversation being watched rather than the sidebar's list.
   On the card the waiting dot still outranks both rings, so a grilling sitting
   on an open set is drawn as waiting rather than as idle (*settled 2026-08-23,
-  building agent-output-polish*).
+  building agent-output-polish*). A session that has declared a wait with
+  `verkstead waiting` is working by that judgement until the wait is over, so
+  it keeps the turning ring (*refined 2026-09-18, building
+  agent-signals-done*).
 - **A call and the answer to it are one card** (*settled 2026-08-24, building
   workbench-refit*): on the Transcript a tool call and the result answering it
   are a single fold — the tool and its one line while it is shut, what it was
@@ -924,7 +939,8 @@ Timeline events:
   gives the worktrees back before it writes the record, so one cancelled
   between the two would leave a conversation with nowhere to work.
 - **Push notifications** for needs-you — a blocking question set, a stop
-  Verkstead decided on, an exhausted usage window among them — **and
+  Verkstead decided on, an exhausted usage window, a rescue escalated after
+  three unanswered lines among them — **and
   milestones** (PR opened, stage complete, conversation done). A stop nobody
   chose sends nothing: a restart picks that one up unasked, so waking a phone
   about it would be asking for something that is already happening; neither

@@ -133,8 +133,8 @@ pub(crate) fn listening(state: &AppState) {
                 // this may have been the only reader of. What it costs is a
                 // session left idling on Answers nobody told it about, and what
                 // catches that is the same thing that catches a session idling
-                // on anything else: the Set is settled now, so the quiet grace
-                // and the rescue see nothing open and take it in hand.
+                // on anything else: the Set is settled now, so the rescue sees
+                // nothing open and speaks to the session.
                 Err(RecvError::Lagged(missed)) => {
                     tracing::error!(
                         missed,
@@ -156,8 +156,8 @@ pub(crate) fn listening(state: &AppState) {
 /// and where it was asked from and nothing else: how it was asked is what
 /// [`store::asked_as`] says, and whether the human answered it or closed it
 /// unanswered is what [`store::settlement`] says. A Set locked unanswered has
-/// no Answers to fetch, so nothing is typed and the session is left to the quiet
-/// grace, which now sees nothing open on it.
+/// no Answers to fetch, so nothing is typed and the session is left to the
+/// rescue, which now sees nothing open on it.
 ///
 /// Which of the three kinds it is decides only *when* — see [`after_the_wait`]
 /// for the one that waits, and [`tell`] for the typing the two of them share.
@@ -251,8 +251,9 @@ fn after_the_wait(state: &AppState, conversation_id: i64, set_id: i64) {
 async fn tell(state: &AppState, conversation_id: i64, set_id: i64, ask: store::Ask) {
     // Whatever session is running for the Conversation the Set was asked from,
     // which is the session that asked it in every case that matters: one idling
-    // on a stored ask is not ended on quiet and not rescued, so it is there until
-    // it goes of its own accord, and one whose wait was killed is still inside
+    // on a stored ask has a Set open, so nothing ends it and nothing rescues it:
+    // it is there until it goes of its own accord, and one whose wait was killed
+    // is still inside
     // the window the rescue gives a stirred session to speak — see [`RECONNECT`].
     // Where it has gone and something has started another — a run picked up again
     // after a session died — the line reaches that one, which is the right end of

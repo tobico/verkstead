@@ -2900,7 +2900,7 @@ pub async fn last_batch_proposal(pool: &SqlitePool, conversation_id: i64) -> Res
 /// and close it on the human's behalf into the bargain. A store-and-nudge ask
 /// is on the other side of that line, stored though it is: a session is idling
 /// on it with its turn ended, so it is a proposal like any other. This is the
-/// same question [`unanswered_set_since`] asks of a quiet session, and the two
+/// same question [`open_set`] asks of an idle session, and the two
 /// have to answer it the same way: a Set that holds no session open holds no
 /// wrap-up open either.
 ///
@@ -2962,34 +2962,25 @@ struct Proposal {
     asked_at: String,
 }
 
-/// A Question Set of this Conversation's that arrived after `event_id` and is
-/// still waiting to be answered, or `None` where none is.
+/// A Question Set of this Conversation's that is still waiting to be answered,
+/// or `None` where none is.
 ///
 /// Unanswered *and* unlocked: a Set the human closed without answering is one
 /// nothing is coming for, so it is settled as much as an answered one is.
 ///
-/// The Event id is what makes it *whose* Set. Nothing else on the record says
-/// which session asked one, and nothing has to: one Worktree holds one agent, so
-/// every Set that landed after a session's own Event is that session's. What
-/// asks is a driver deciding whether a quiet session is finished — a session
-/// idling on a Blocking Ask prints nothing for hours, and quiet alone would reap
-/// it mid-question.
+/// The Conversation's rather than any one session's, whoever asked it. What asks
+/// are the rescue, deciding whether an idle session is one to speak to, and a
+/// follow-up's own rule: both want to know whether the human is left holding a
+/// question, and a question is one of those whoever put it up.
 ///
-/// The Sets somebody is idling on, for that same reason read the other way: a
-/// Deferred Ask idles nobody, so a session that has gone quiet behind one has
-/// finished rather than being mid-question, and a driver that waited on it would
-/// wait for as long as the human took to answer something nothing was waiting
-/// for.
-///
-/// A store-and-nudge ask is one somebody is idling on, whatever the row beside
-/// it looks like: the session that sent one has ended its turn and is waiting
-/// for the nudge, so ending it on quiet would leave the Response with nothing to
-/// nudge — see [`super::Ask`].
-pub async fn unanswered_set_since(
-    pool: &SqlitePool,
-    conversation_id: i64,
-    event_id: i64,
-) -> Result<Option<i64>> {
+/// The Sets somebody is idling on, and never a Deferred one: a Deferred Ask idles
+/// nobody and holds nothing open, so a reader that counted one would hold off
+/// over a question that was working exactly as it was meant to. A store-and-nudge
+/// ask is one somebody is idling on, whatever the row beside it looks like: the
+/// session that sent one has ended its turn and is waiting for the nudge, so a
+/// line typed into it would arrive in the middle of a wait that is working — see
+/// [`super::Ask`].
+pub async fn open_set(pool: &SqlitePool, conversation_id: i64) -> Result<Option<i64>> {
     let found: Option<(i64,)> = sqlx::query_as(
         "SELECT q.id
          FROM question_sets q
@@ -2998,14 +2989,13 @@ pub async fn unanswered_set_since(
          LEFT JOIN responses r ON r.set_id = q.id
          LEFT JOIN archivings a ON a.set_id = q.id
          LEFT JOIN deferrals d ON d.set_id = q.id
-         WHERE e.conversation_id = ? AND e.id > ?
+         WHERE e.conversation_id = ?
            AND r.set_id IS NULL AND a.set_id IS NULL
            AND (d.set_id IS NULL OR d.idled)
          ORDER BY q.id
          LIMIT 1",
     )
     .bind(conversation_id)
-    .bind(event_id)
     .fetch_optional(pool)
     .await
     .with_context(|| {
@@ -3013,25 +3003,6 @@ pub async fn unanswered_set_since(
     })?;
 
     Ok(found.map(|(set_id,)| set_id))
-}
-
-/// A Question Set of this Conversation's that is still waiting to be answered,
-/// whoever asked it.
-///
-/// [`unanswered_set_since`] widened to the whole Timeline, which is the same
-/// question asked without a session to ask it *of*: what a follow-up's rule
-/// wants to know is whether the human is left holding a question, and a
-/// question is one of those whoever put it up.
-///
-/// Every Timeline Event's id is positive, so opening the window at zero leaves
-/// nothing out.
-///
-/// The Sets somebody is idling on, and never a Deferred one, exactly as the read
-/// it is made of: a Deferred Ask idles nobody and holds nothing open, so a
-/// follow-up that waited on one would be waiting on a question that was working
-/// exactly as it was meant to.
-pub async fn open_set(pool: &SqlitePool, conversation_id: i64) -> Result<Option<i64>> {
-    unanswered_set_since(pool, conversation_id, 0).await
 }
 
 /// Which Conversation a Set was asked from, or `None` if it is on no Timeline

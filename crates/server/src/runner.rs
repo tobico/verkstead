@@ -1,10 +1,10 @@
 //! The auto-advancing task runner: once there is a backlog, it works itself.
 //!
-//! A fresh session per task, launched the moment the one before it has landed,
+//! A fresh session per task, launched the moment the one before it is over,
 //! with no gate between them and nobody asked. That is the whole of it — and
-//! everything difficult about it is in the two questions it has to answer from
-//! the repository alone, because the sessions are ordinary interactive ones and
-//! the repository is the only thing they report through.
+//! everything difficult about it is in the two questions it has to answer:
+//! what is next, which the repository says, and when a step is over, which the
+//! session says and the repository checks.
 //!
 //! **What is next** is [`next_step`]: the lowest-numbered entry of `TODO.md`
 //! whose box is not ticked, or the finish step once every box is. Read off the
@@ -13,57 +13,63 @@
 //! one list. An unticked entry naming a file nobody wrote is neither, and stops
 //! the run rather than putting a session at nothing to work from.
 //!
-//! **When a step is over** is [`Landing`]: an entry ticked in `TODO.md`, or a
-//! path gone from the Worktree or arrived in it — and, either way, committed as
-//! it stands. A box ticked but not committed is a session still mid-task, and a
-//! commit is the one report an agent cannot half make. The poll never takes
-//! `index.lock` — everything here
-//! goes through [`crate::repos::git`], which passes `--no-optional-locks`,
-//! because what it is reading is a repository a session is committing in and a
-//! watcher that tripped the session's own `git add` would break the step it is
-//! waiting for.
+//! **What a finished step looks like** is [`Landing`]: an entry ticked in
+//! `TODO.md`, or a path gone from the Worktree or arrived in it — and, either
+//! way, committed as it stands. A box ticked but not committed is a session
+//! still mid-task, and a commit is the one report an agent cannot half make.
+//! The read never takes `index.lock` — everything here goes through
+//! [`crate::repos::git`], which passes `--no-optional-locks`, because what it is
+//! reading is a repository a session is committing in, and a read that tripped
+//! the session's own `git add` would break the step it is reading.
 //!
-//! **A step's session is ended because it said it was done** — see
-//! [`crate::done`], and ADR-0018. The landing is no longer what ends one: it is
-//! what the session's `verkstead done` is checked against, at that moment and
-//! only then, so a session that commits and then waits on its tests or asks a
-//! question is a session still at work. Once the signal is taken the session is
-//! ended when it has next printed nothing for the grace period, so what it says
-//! on the way out is kept.
+//! **When a step is over is the session's to say** — see [`crate::done`], and
+//! ADR-0018. Every session here is an ordinary interactive agent, which idles
+//! when its work is over rather than exiting, so something has to end it, and
+//! what ends it is its `verkstead done`. The landing is what that signal is
+//! checked against, at that moment and only then: a signal the branch does not
+//! bear out is refused, and a session that commits and then waits on its tests,
+//! or asks a question, is a session still at work however long it is quiet.
+//! Once the signal is taken the session is ended when it is next idle, and has
+//! been for [`Pace::grace`], so what it says on the way out is kept — see
+//! [`signalled_and_idle`].
 //!
-//! **Every kind of session is ended by Verkstead**, and none of them by itself:
-//! they are ordinary interactive agents, which idle when their work is done
-//! rather than exiting, so waiting to see one exit is waiting for something that
-//! never comes. What differs between the kinds is what their Done signal is
-//! checked against. A propose-then-fix session — the wrap-up's review, and each
-//! batch of comments — reports through nothing but its own words, so its signal
-//! is checked against nothing of its own: see [`proposing`].
+//! What differs between the kinds of session is only what their signal is
+//! checked against — see [`crate::done::Evidence`]. A step's is its landing, an
+//! inline run's or an instruction's a new commit, a follow-up's the human's own
+//! *Nothing else* mark. A propose-then-fix session — the wrap-up's review, and
+//! each batch of comments — reports through nothing but its own words, and a
+//! fix through a check GitHub is asked about once it is over, so theirs is
+//! checked against nothing of its own: see [`proposing`] and [`address`].
 //!
-//! A step whose session ends without landing it stops the run where it is, and
-//! what it stops at is a **stop**: the Conversation records that nothing is
-//! driving it any more, and a Notice carrying the evidence goes on the Timeline
-//! — see [`crate::stopping`]. The run does not go round again from there; getting
-//! going is a press of Resume, because a runner that relaunched a step nothing
-//! had moved would spend an account on the same failure with nobody watching.
+//! A step whose session exits by itself without landing it stops the run where
+//! it is, and what it stops at is a **stop**: the Conversation records that
+//! nothing is driving it any more, and a Notice carrying the evidence goes on
+//! the Timeline — see [`crate::stopping`]. The repository is asked once first,
+//! because an agent that landed its step and then exited has done the step. The
+//! run does not go round again from a stop; getting going is a press of Resume,
+//! because a runner that relaunched a step nothing had moved would spend an
+//! account on the same failure with nobody watching.
 //!
-//! **And one whose session never ends at all** is spoken to, and never stopped
-//! over. A session that goes idle with nothing open and nothing landed has not
-//! ended and has not finished: it is sitting there with the turn over and no way
-//! of knowing that the screen it printed to has nobody in front of it. So it is
-//! told, and where it will not answer the human is told instead — see [`crate::rescues`], which
-//! is one loop over every driver here and takes what *done* is read off as its
+//! **And a session that never signals is spoken to, and never stopped over.**
+//! One idle with nothing open, no wait declared and no signal given has not
+//! finished as far as anything here can tell: it is sitting there with the turn
+//! over and no way of knowing that the screen it printed to has nobody in front
+//! of it. So it is told, and where it will not answer the human is told
+//! instead, with the session left running for them — see [`crate::rescues`],
+//! which is one loop over every driver here and takes the signal as its
 //! parameter.
 //!
 //! **The pull request is the one thing that gets a second go.** Every run here
 //! ends on one — a backlog's finish step, an inline implementation, a roadmap's
 //! own session — and each of them commits its work and then pushes and opens the
-//! pull request after the commit. So each of them can land everything it was
-//! sent for and still stop short of the one act that makes the work readable,
-//! leaving it built, committed and unreviewable. That is not a step to run
-//! again: it is one push and one `gh pr create`, so it is asked for on its own,
-//! by a session sent for nothing else, and what follows is GitHub asked again
-//! and the ordinary stop where the answer has not changed. See
-//! [`to_a_pull_request`].
+//! pull request after the commit. A session that signals before the pull request
+//! is open is refused for it, so it puts that right in the same turn; but one
+//! that exits by itself can still land everything it was sent for and stop short
+//! of the one act that makes the work readable, leaving it built, committed and
+//! unreviewable. That is not a step to run again: it is one push and one
+//! `gh pr create`, so it is asked for on its own, by a session sent for nothing
+//! else, and what follows is GitHub asked again and the ordinary stop where the
+//! answer has not changed. See [`to_a_pull_request`].
 //!
 //! **And Resume takes the same go**, which is what makes pressing it worth
 //! anything here: a run that stopped at its push is a Conversation whose work is
@@ -102,8 +108,15 @@ pub struct Pace {
     /// short git read a couple of times a minute.
     pub poll: Duration,
 
-    /// How long a session must have printed nothing, its step landed, before it
-    /// is ended.
+    /// How long a session that has said it is done must have printed nothing
+    /// before it is ended.
+    ///
+    /// Counted from the signal as well as from the last thing printed, so the
+    /// closing words an agent writes once `verkstead done` comes back reach the
+    /// Transcript rather than being cut off under it — see
+    /// [`signalled_and_idle`]. Nothing is read off the branch while it runs: the
+    /// signal was checked when it was given, and this is only the pause that
+    /// keeps the last few lines.
     pub grace: Duration,
 
     /// How often a wrapping Conversation's pull request is asked about.
@@ -113,16 +126,18 @@ pub struct Pace {
     /// them at once — see [`crate::checks::ASKED_EVERY`] for what it costs.
     pub checks: Duration,
 
-    /// And how long a session must have been idle, with nothing open and no
-    /// Done signal given, before the Rescue speaks to it — see
+    /// And how long a session must have been idle — with nothing open, no wait
+    /// declared and no Done signal given — before the Rescue speaks to it; see
     /// [`crate::rescues`].
     ///
-    /// Named for what it once also was: the quiet a session that proposes and
-    /// then fixes, and a follow-up the human had marked, were ended on. Nothing ends a session on quiet any more — see
-    /// ADR-0018 — so what is left of it is the Rescue's grace. Distinctly longer
-    /// than [`Pace::grace`], because a line typed into a session still at work
-    /// costs a turn: a minute of silence is the shortest an agent still at work
-    /// reliably breaks.
+    /// The Rescue's grace, and the whole of what this is: no session is ended on
+    /// quiet any more, so the only thing silence buys is a line typed into the
+    /// session. Named for the propose-then-fix sessions it was once the ending of
+    /// as well — see ADR-0018 for why that ending went.
+    ///
+    /// Distinctly longer than [`Pace::grace`], because a line typed into a
+    /// session still at work costs it a turn: a minute of silence is the shortest
+    /// an agent still at work reliably breaks.
     pub proposing: Duration,
 
     /// And how long a session that has just been stirred — launched, handed an
@@ -153,8 +168,9 @@ pub struct Pace {
     /// because a backend that repaints leaves gaps a few seconds long in the
     /// middle of its work and a session reaped inside one would be reaped at
     /// work. What it is for is a signature that has drifted, which is a session
-    /// nothing else here catches — Rescue's precondition is quiet, every ender
-    /// gates on the same judgement, and no session carries a cap on its life —
+    /// nothing else here catches — Rescue's precondition is idle, the ending a
+    /// signal earns waits on the same judgement, and no session carries a cap on
+    /// its life —
     /// so what this decides is not how fast that is noticed but whether it ever
     /// is.
     ///
@@ -427,9 +443,9 @@ async fn nothing_to_work_from(state: &AppState, conversation_id: i64, step: &Ste
 ///
 /// Nothing is launched: the session is the one that proposed, idling on the
 /// blocking ask the Response is being delivered through, and it goes on from
-/// there with the whole thread still in its context. What this is, is the watcher
-/// — the artifact landing, plus quiet, is what ends the session and moves the
-/// Conversation on.
+/// there with the whole thread still in its context. What this is, is the watch:
+/// the session's Done signal, checked against the artifact the pick asked for, is
+/// what ends it and moves the Conversation on.
 ///
 /// The three tails differ in what the artifact is and in where landing it leaves
 /// the Conversation. A backlog is the start of a run — the tasks it names are
@@ -1303,9 +1319,10 @@ async fn submitted(state: &AppState, conversation_id: i64) -> Option<i64> {
 /// accounts the Conversation fixed separately and a session cannot change the
 /// one it is running as, which is the whole reason the handoff exists.
 ///
-/// A session that goes quiet without writing one stops, the way every other step
-/// does: nothing is driving the Conversation and a Notice says so, and starting
-/// it again is Resume's.
+/// A session that goes without writing one stops, the way every other step does:
+/// nothing is driving the Conversation and a Notice says so, and starting it
+/// again is Resume's. One still sitting there without it is refused its signal
+/// and spoken to instead, which is the same rule read a moment earlier.
 ///
 /// The registration is held across all of it — the watch, the move, and the run
 /// on the other side of it — so there is no moment between the handoff landing
@@ -1360,15 +1377,17 @@ async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session,
 /// nothing says so. Where it will not answer the human is told, and the session
 /// left running, as every other driver here does it. See [`crate::rescues`].
 ///
-/// Landing is measured against what was already there rather than against zero,
-/// which is what makes a second go answerable: a first attempt that committed
-/// twice and then died leaves two commits behind, and a second that commits
-/// nothing has still landed nothing.
+/// Committing is measured against what was already there rather than against
+/// zero, which is what makes a second go answerable: a first attempt that
+/// committed twice and then died leaves two commits behind, and a second that
+/// commits nothing has committed nothing. What such a second session is sent for
+/// is the pull request, so that is what its signal is checked against instead —
+/// see [`crate::done`]'s `missing`.
 ///
 /// What follows a session that landed something is the same ending a backlog's
-/// finish step has: the session followed the repository's own review process on
-/// its way out, so the branch is pushed and on a pull request by the time it
-/// goes quiet, and [`to_a_pull_request`] is what finds that pull request and
+/// finish step has: the session followed the repository's own review process
+/// before it signalled, so the branch is pushed and on a pull request by then,
+/// and [`to_a_pull_request`] is what finds that pull request and
 /// moves the Conversation on — or, where the session stopped short of the push,
 /// sends for the one thing missing before anything stops. An inline
 /// implementation is work like any other work and goes for review like any other
@@ -1828,7 +1847,7 @@ async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: D
 /// **Nothing is watched for on the branch.** A follow-up is rounds of asking
 /// rather than a step with a landing: what it commits is the human's to have
 /// asked for, and a round that was a question and an answer commits nothing at
-/// all. So there is no committed-and-quiet to end it on and no artifact to read.
+/// all. So there is no commit to check a signal against and no artifact to read.
 ///
 /// **What ends it is its Done signal, checked against the human's own mark** —
 /// see [`crate::done`], and ADR-0018. Whether there is anything else is the
@@ -2180,7 +2199,7 @@ async fn follow_staging(state: AppState, conversation_id: i64, writing: Session,
 /// plans are Conversations of their own — so there is no next step to launch.
 /// What there is, is the same ending a backlog's last step has: the session
 /// commits the roadmap and then follows the repository's own finish sequence, so
-/// the branch is pushed and on a pull request by the time it goes quiet. A
+/// the branch is pushed and on a pull request by the time it signals. A
 /// roadmap is work like any other work and goes for review like any other work.
 ///
 /// So the ladder for a roadmap Conversation is Grilling to Wrapping, with nothing
@@ -2710,8 +2729,8 @@ async fn see_out(
 /// Wait until the session has given its Done signal and been accepted, and is
 /// idle again since.
 ///
-/// Idle by the judgement every ender reads — the grace of quiet, see
-/// [`crate::sessions::Idle`] — and the grace out since the signal too, so the
+/// Idle by the judgement everything here reads, which is its backend's own — see
+/// [`crate::sessions::Idle`] — and [`Pace::grace`] out since the signal too, so the
 /// closing words an agent prints once the command comes back reach the
 /// Transcript rather than being cut off under it. Output arriving in the
 /// meantime lengthens the wait rather than ending it.

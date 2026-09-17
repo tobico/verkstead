@@ -80,7 +80,9 @@ pub(crate) enum Evidence {
     /// An inline run or an instruction: the Conversation's commits standing past
     /// `already`, where they stood when the session started — see
     /// [`crate::runner::committed_since`]. There is no path to watch for either,
-    /// and a commit is the one report an agent cannot half make.
+    /// and a commit is the one report an agent cannot half make. An inline run
+    /// sent onto a branch already holding its work is the exception, whose
+    /// report is the pull request instead — see [`missing`].
     Committed { already: i64 },
 
     /// A fix session, which has nothing to show. What judges a fix is the check
@@ -286,7 +288,7 @@ async fn verdict(state: &AppState, conversation_id: i64) -> Verdict {
         );
     }
 
-    if let Some(missing) = missing(state, conversation_id, &evidence).await {
+    if let Some(missing) = missing(state, conversation_id, &evidence, ends).await {
         return Verdict::Refused(format!(
             "this session is not done yet: {missing}. Put that right, then run `verkstead done` \
              again"
@@ -386,7 +388,19 @@ async fn registered(
 
 /// What `evidence` is still missing, in words an agent can act on, or `None`
 /// where it bears the signal out.
-async fn missing(state: &AppState, conversation_id: i64, evidence: &Evidence) -> Option<String> {
+///
+/// `ends` matters to one reading. An inline run sent again onto a branch that
+/// already holds its work — the one before it built and committed it, and went
+/// before the push — has nothing left to commit, and is sent to carry that work
+/// to a pull request. What it did is the pull request rather than a commit, so
+/// with commits already on the branch its signal is left to that check instead.
+/// An instruction ends with its work, and has no pull request to fall back on.
+async fn missing(
+    state: &AppState,
+    conversation_id: i64,
+    evidence: &Evidence,
+    ends: Ends,
+) -> Option<String> {
     match evidence {
         Evidence::Landed { worktree, landing } => crate::runner::missing(worktree, landing).await,
         Evidence::Committed { already } => {
@@ -396,7 +410,9 @@ async fn missing(state: &AppState, conversation_id: i64, evidence: &Evidence) ->
             // seconds.
             crate::commits::sweep_now(state, conversation_id).await;
 
-            (!crate::runner::committed_since(state, conversation_id, *already).await)
+            let carried_on = ends == Ends::OnAPullRequest && *already > 0;
+
+            (!carried_on && !crate::runner::committed_since(state, conversation_id, *already).await)
                 .then(|| "nothing has been committed since this session began".to_owned())
         }
         // Read in [`verdict`], where its refusal is said in words of its own.
