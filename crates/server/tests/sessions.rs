@@ -22997,11 +22997,12 @@ async fn a_session_that_lands_its_step_and_says_nothing_is_not_ended_but_told_it
     for move_offered in [
         "carry on with it now",
         "run `verkstead done`",
+        "run `verkstead waiting`",
         "verkstead ask",
     ] {
         assert!(
             said[0].contains(move_offered),
-            "the rescue offers {move_offered:?} among its three moves: {said:?}",
+            "the rescue offers {move_offered:?} among its moves: {said:?}",
         );
     }
 
@@ -23080,6 +23081,177 @@ async fn signal_done(fixture: &Grilling) -> (StatusCode, String) {
             .unwrap(),
     )
     .await
+}
+
+/// What a task session does once its task is committed, where it goes on to
+/// wait on work of its own: it asks the test to declare the wait for it, says a
+/// word as the declaring turn does, writes down every line typed into it from
+/// then on, and — where `then` says to — does something more.
+fn waits_in_the_background(then: &str) -> String {
+    format!(
+        ": > /tmp/verkstead/wait-now\n        \
+         while [ ! -f /tmp/verkstead/declared ]; do sleep 0.05; done\n        \
+         ( while read -r TOLD; do printf '%s\\n' \"$TOLD\" >> /tmp/verkstead/rescues; done ) <&0 &\n        \
+         printf 'the tests are running in the background\\n'\n        \
+         {then}"
+    )
+}
+
+/// Stand in for `verkstead waiting <length>` once the session asks for it, the
+/// way [`signalling`] stands in for `verkstead done`, and hand back when the
+/// wait was declared.
+async fn declare_a_wait(fixture: &Grilling, length: Duration) -> Instant {
+    let directory = handoff_directory(fixture);
+    let deadline = Instant::now() + *PATIENCE;
+
+    while !directory.join("wait-now").exists() {
+        assert!(
+            Instant::now() < deadline,
+            "the task session never got as far as its wait"
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    let (status, body) = fetch(
+        &fixture.app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/conversations/{}/api/v1/waiting", fixture.id))
+            .body(Body::from(format!("{}s", length.as_secs())))
+            .unwrap(),
+    )
+    .await;
+
+    let declared = Instant::now();
+
+    assert_eq!(status, StatusCode::OK, "the wait is taken: {body}");
+    std::fs::write(directory.join("declared"), "").unwrap();
+
+    declared
+}
+
+/// Every line typed into the session so far.
+fn told_so_far(fixture: &Grilling) -> String {
+    std::fs::read_to_string(handoff_directory(fixture).join("rescues")).unwrap_or_default()
+}
+
+/// And whether the session printing into `event` reads as at work, on its
+/// Timeline row and its sidebar card both.
+async fn at_work(fixture: &Grilling, event: i64) -> bool {
+    let row = outputs(&fixture.view().await)
+        .into_iter()
+        .any(|output| output.id == event && output.running && !output.idle);
+    let card = fixture.row().await;
+
+    row && card.working && !card.idle
+}
+
+/// A session that declares a wait on work of its own is at work for as long as
+/// the wait stands — never spoken to, however quiet, and drawn with the spinner
+/// rather than the Idle mark — and once the wait runs out with the session still
+/// quiet, the Rescue speaks to it after its ordinary grace.
+#[tokio::test]
+async fn a_session_with_a_wait_standing_is_at_work_until_the_wait_runs_out() {
+    let fixture = grilling(&a_backlog_that_says_so("", &waits_in_the_background(""))).await;
+
+    let (_, task) = picked_through_to_the_task(&fixture).await;
+
+    let length = paced(Duration::from_secs(10));
+    let declared = declare_a_wait(&fixture, length).await;
+
+    // Long past the quiet and the grace a session with no wait is spoken to
+    // after, and short of the wait.
+    pause(Duration::from_secs(7)).await;
+
+    assert_eq!(
+        told_so_far(&fixture),
+        "",
+        "nothing typed while the wait stands"
+    );
+    assert!(
+        at_work(&fixture, task).await,
+        "and it shows as working on its row and its card"
+    );
+
+    let said = told(&fixture, 1).await;
+
+    assert!(
+        declared.elapsed() >= length,
+        "spoken to once the wait ran out and not before: {:?} of {length:?}",
+        declared.elapsed(),
+    );
+    assert!(
+        said[0].contains("run `verkstead waiting`"),
+        "and told to declare a wait where its work is still running: {said:?}",
+    );
+}
+
+/// The words the declaring turn goes on printing do not release a wait, and
+/// work seen once the session has gone quiet behind it does: from there it is
+/// Idle by its backend's own reading, and spoken to long before the wait would
+/// have run out.
+#[tokio::test]
+async fn work_after_the_quiet_behind_a_wait_releases_it() {
+    let fixture = grilling(&a_backlog_that_says_so(
+        "",
+        &waits_in_the_background(
+            "while [ ! -f /tmp/verkstead/work ]; do sleep 0.05; done\n        \
+             printf 'the tests passed\\n'",
+        ),
+    ))
+    .await;
+
+    let (_, task) = picked_through_to_the_task(&fixture).await;
+
+    let length = paced(Duration::from_secs(120));
+    let declared = declare_a_wait(&fixture, length).await;
+
+    pause(Duration::from_secs(7)).await;
+
+    assert_eq!(
+        told_so_far(&fixture),
+        "",
+        "the declaring turn's own words did not release the wait"
+    );
+    assert!(at_work(&fixture, task).await, "so it is still at work");
+
+    std::fs::write(handoff_directory(&fixture).join("work"), "").unwrap();
+
+    told(&fixture, 1).await;
+
+    assert!(
+        declared.elapsed() < length,
+        "spoken to after the work that released the wait, not when it ran out"
+    );
+}
+
+/// An accepted Done signal clears a wait standing, and the session is ended once
+/// it is Idle — rather than kept at work for the rest of an hour's wait.
+#[tokio::test]
+async fn an_accepted_done_signal_clears_a_wait_and_the_session_is_ended() {
+    let fixture = grilling(&a_backlog_that_says_so(
+        "",
+        &waits_in_the_background(": > /tmp/verkstead/done"),
+    ))
+    .await;
+
+    let (_, task) = picked_through_to_the_task(&fixture).await;
+
+    declare_a_wait(&fixture, Duration::from_secs(60 * 60)).await;
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("chore: finish"))
+                .then_some(())
+        })
+        .await;
+
+    assert!(
+        !running(&fixture, task).await,
+        "the task session was ended, which is what let the finish start",
+    );
 }
 
 /// A grilling session's signal is checked against the latest pick: refused

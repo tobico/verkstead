@@ -1559,6 +1559,21 @@ mod tests {
         );
     }
 
+    /// Any session may run a build in the background, so every skill points at
+    /// the Guide's section on declaring a wait. See ADR-0018.
+    #[test]
+    fn every_skill_says_to_declare_a_wait_on_background_work() {
+        for name in NAMED {
+            let skill = flowed(name);
+
+            assert!(
+                skill.contains("run `verkstead waiting`")
+                    && skill.contains("*Waiting in the background*"),
+                "{name} has to point at declaring a wait: {skill}"
+            );
+        }
+    }
+
     /// The sessions a run ends on are refused while their branch has no pull
     /// request open, so their skills say so, and put the push and the pull
     /// request before the signal rather than after it. See ADR-0018.

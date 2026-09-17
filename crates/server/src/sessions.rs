@@ -949,6 +949,11 @@ impl Session {
 /// would be a backend judged one way by the sidebar and another by the thing
 /// that ends it. See [`Judged`].
 ///
+/// **A Declared wait is the one thing read into it beside the backend's own
+/// reading**: while one stands the session is at work, whatever it prints and
+/// whatever its screen says, so every reader above takes it as at work without
+/// being taught about waits. See [`Idle::waiting`] and ADR-0018.
+///
 /// Shared with the relay, which puts it back to now on everything that arrives.
 /// That is what makes a grace period safe to end a session on: a session still
 /// working is never one to end, however long it goes on for, and the work a
@@ -963,6 +968,10 @@ pub(crate) struct Idle {
     /// And what the relay has seen of it, which is what the judgement is made
     /// of.
     silence: Arc<Mutex<Silence>>,
+
+    /// Word to the relay that a wait was declared or cleared: the one change to
+    /// the judgement that nothing arriving on the terminal carries.
+    rejudged: Arc<tokio::sync::Notify>,
 }
 
 /// How a session's backend says it has stopped.
@@ -1083,8 +1092,8 @@ impl Signature {
 }
 
 /// What the clock holds: when the session last printed anything, whether that
-/// was ever it saying anything rather than it starting, and when the judgement
-/// last turned to idle.
+/// was ever it saying anything rather than it starting, when the judgement
+/// last turned to idle, and the wait it has declared, where it has.
 #[derive(Debug)]
 struct Silence {
     /// The moment it was last put back — the session's last word, or the moment
@@ -1106,6 +1115,21 @@ struct Silence {
     /// Never set at all under [`Judged::Printing`], where the silence itself is
     /// the judgement and [`Silence::at`] is the whole of it.
     idling_since: Option<Instant>,
+
+    /// The Declared wait, where the session has said it is waiting on work of
+    /// its own — see [`Idle::waiting`].
+    ///
+    /// Kept once its time has run out, until the session is next seen at work:
+    /// an expired wait is what says the silence is counted from the moment it
+    /// ran out rather than from the session's last word.
+    wait: Option<Wait>,
+}
+
+/// A Declared wait: when it was declared, and when it runs out.
+#[derive(Debug, Clone, Copy)]
+struct Wait {
+    declared: Instant,
+    until: Instant,
 }
 
 impl Idle {
@@ -1121,7 +1145,9 @@ impl Idle {
             silence: Arc::new(Mutex::new(Silence {
                 at: now,
                 idling_since: undrawn.then_some(now),
+                wait: None,
             })),
+            rejudged: Arc::new(tokio::sync::Notify::new()),
         }
     }
 
@@ -1139,7 +1165,22 @@ impl Idle {
             Judged::Drawing { signature, .. } => signature.at_rest(screen),
         };
 
+        self.arrived(at_rest);
+    }
+
+    /// Something arrived, leaving the frame `at_rest` or not — the half of
+    /// [`Idle::printed`] that is the clock's rather than the Screen's.
+    fn arrived(&self, at_rest: bool) {
         let mut silence = self.silence();
+
+        // Whether it had gone quiet behind its wait before this arrived: stopped
+        // by its backend's own reading, and stopped since the wait was declared.
+        // The turn that declares a wait goes on printing for a moment, and that
+        // is the declaring turn rather than the background work coming back.
+        let quiet_behind = silence.wait.is_some_and(|wait| {
+            self.stopped(&silence) && self.stopped_since(&silence) >= wait.declared
+        });
+
         let now = Instant::now();
 
         silence.at = now;
@@ -1149,6 +1190,46 @@ impl Idle {
         } else {
             silence.idling_since = None;
         }
+
+        // Seen at work once it would have been idle but for the wait, or at all
+        // once the wait has run out: either way the wait is over, and what is
+        // read from here is the backend's own judgement.
+        if silence.wait.is_some() && !self.stopped(&silence) {
+            let ran_out = silence.wait.is_some_and(|wait| wait.until <= now);
+
+            if quiet_behind || ran_out {
+                silence.wait = None;
+            }
+        }
+    }
+
+    /// The session has declared a wait on work of its own for `length`: it is
+    /// at work, whatever it prints and whatever its screen says, until the
+    /// length runs out or it is seen at work again after going quiet behind it.
+    ///
+    /// Replaces any wait already standing, which is how a wait is renewed.
+    pub(crate) fn waiting(&self, length: Duration) {
+        let now = Instant::now();
+
+        self.silence().wait = Some(Wait {
+            declared: now,
+            until: now + length,
+        });
+
+        self.rejudged.notify_one();
+    }
+
+    /// And the wait is over, because the session said it is done.
+    pub(crate) fn done_waiting(&self) {
+        self.silence().wait = None;
+        self.rejudged.notify_one();
+    }
+
+    /// Wait until a wait has been declared or cleared, which moves the
+    /// judgement without anything arriving on the terminal — for the relay,
+    /// which announces the crossings.
+    async fn rejudged(&self) {
+        self.rejudged.notified().await;
     }
 
     /// Whether the session is idle as of now.
@@ -1158,6 +1239,91 @@ impl Idle {
     pub(crate) fn idling(&self) -> bool {
         let silence = self.silence();
 
+        Self::standing(&silence).is_none() && self.stopped(&silence)
+    }
+
+    /// And how long it has been, which is what every grace is measured against.
+    ///
+    /// [`Duration::ZERO`] where it is not idle at all: a backend judged on its
+    /// screen is at work however long it has been between frames, which is the
+    /// point of judging it that way — a TUI that falls silent for a moment
+    /// mid-turn would otherwise be reaped out from under its own work.
+    ///
+    /// Past the long-stop the whole silence counts, rather than the part of it
+    /// after the long-stop: the session *was* stopped for all of it, and this is
+    /// the moment Verkstead is willing to say so.
+    ///
+    /// Behind a wait that has run out, only the part of the silence since it
+    /// ran out: the session was at work, by its own word, until then.
+    pub(crate) fn for_how_long(&self) -> Duration {
+        let silence = self.silence();
+
+        if Self::standing(&silence).is_some() {
+            return Duration::ZERO;
+        }
+
+        let stopped = self.stopped_for(&silence);
+
+        match silence.wait {
+            Some(wait) => stopped.min(wait.until.elapsed()),
+            None => stopped,
+        }
+    }
+
+    /// When it will be idle if nothing else arrives, for whoever wants to sleep
+    /// until it is rather than to keep asking.
+    ///
+    /// A moment already past where it is idle now, which is a sleep that is over
+    /// before it starts — exactly what a caller waiting for the crossing wants
+    /// of a session that has already crossed.
+    pub(crate) fn crossing(&self) -> Instant {
+        let silence = self.silence();
+        let crossing = self.crosses(&silence);
+
+        match silence.wait {
+            Some(wait) => crossing.max(wait.until),
+            None => crossing,
+        }
+    }
+
+    /// When it was last seen at work, for whoever wants to know whether that was
+    /// *after* something else — an answer handed to the session, a line typed
+    /// into it — which is a question about the order of two moments rather than
+    /// about a span. See [`crate::rescues::watched`], where a
+    /// session seen working later than the stir is the proof that the stir
+    /// reached it at all.
+    ///
+    /// The same judgement read as a moment rather than as a span, and it has to
+    /// be: a byte is free on a backend that repaints, so a session's last *word*
+    /// would prove nothing there.
+    ///
+    /// The moment it was launched, where it has done nothing yet: a session that
+    /// never got going has been stopped since it started, which is exactly what
+    /// this reader wants of one.
+    ///
+    /// Now, while a wait stands, and the moment it ran out where that is later
+    /// than anything else: a waiting session is at work for as long as it is.
+    pub(crate) fn since(&self) -> Instant {
+        let silence = self.silence();
+
+        match silence.wait {
+            Some(_) if Self::standing(&silence).is_some() => Instant::now(),
+            Some(wait) => self.stopped_since(&silence).max(wait.until),
+            None => self.stopped_since(&silence),
+        }
+    }
+
+    /// When the wait standing runs out, or `None` where none stands.
+    fn standing(silence: &Silence) -> Option<Instant> {
+        silence
+            .wait
+            .map(|wait| wait.until)
+            .filter(|until| *until > Instant::now())
+    }
+
+    /// The backend's own judgement, with no wait in it: whether the session has
+    /// stopped as of now.
+    fn stopped(&self, silence: &Silence) -> bool {
         match &self.judged {
             Judged::Printing => silence.at.elapsed() >= IDLE_AFTER,
             Judged::Drawing {
@@ -1173,19 +1339,8 @@ impl Idle {
         }
     }
 
-    /// And how long it has been, which is what every grace is measured against.
-    ///
-    /// [`Duration::ZERO`] where it is not idle at all: a backend judged on its
-    /// screen is at work however long it has been between frames, which is the
-    /// point of judging it that way — a TUI that falls silent for a moment
-    /// mid-turn would otherwise be reaped out from under its own work.
-    ///
-    /// Past the long-stop the whole silence counts, rather than the part of it
-    /// after the long-stop: the session *was* stopped for all of it, and this is
-    /// the moment Verkstead is willing to say so.
-    pub(crate) fn for_how_long(&self) -> Duration {
-        let silence = self.silence();
-
+    /// And for how long, by the same reading — see [`Idle::for_how_long`].
+    fn stopped_for(&self, silence: &Silence) -> Duration {
         match &self.judged {
             Judged::Printing => silence.at.elapsed(),
             Judged::Drawing {
@@ -1208,15 +1363,8 @@ impl Idle {
         }
     }
 
-    /// When it will be idle if nothing else arrives, for whoever wants to sleep
-    /// until it is rather than to keep asking.
-    ///
-    /// A moment already past where it is idle now, which is a sleep that is over
-    /// before it starts — exactly what a caller waiting for the crossing wants
-    /// of a session that has already crossed.
-    pub(crate) fn crossing(&self) -> Instant {
-        let silence = self.silence();
-
+    /// And when it will have stopped — see [`Idle::crossing`].
+    fn crosses(&self, silence: &Silence) -> Instant {
         match &self.judged {
             Judged::Printing => silence.at + IDLE_AFTER,
             Judged::Drawing {
@@ -1229,23 +1377,8 @@ impl Idle {
         }
     }
 
-    /// When it was last seen at work, for whoever wants to know whether that was
-    /// *after* something else — an answer handed to the session, a line typed
-    /// into it — which is a question about the order of two moments rather than
-    /// about a span. See [`crate::rescues::watched`], where a
-    /// session seen working later than the stir is the proof that the stir
-    /// reached it at all.
-    ///
-    /// The same judgement read as a moment rather than as a span, and it has to
-    /// be: a byte is free on a backend that repaints, so a session's last *word*
-    /// would prove nothing there.
-    ///
-    /// The moment it was launched, where it has done nothing yet: a session that
-    /// never got going has been stopped since it started, which is exactly what
-    /// this reader wants of one.
-    pub(crate) fn since(&self) -> Instant {
-        let silence = self.silence();
-
+    /// And when it was last at work — see [`Idle::since`].
+    fn stopped_since(&self, silence: &Silence) -> Instant {
         match &self.judged {
             Judged::Printing => silence.at,
             Judged::Drawing { signature, .. } => silence
@@ -2376,7 +2509,28 @@ async fn relay(
 
                 tailed = Instant::now();
             }
+            // A wait declared or cleared, which moves the judgement with nothing
+            // arriving: a session sitting idle that has just declared one is at
+            // work again, and the sidebar hears so. One declared by a session at
+            // work changes nothing anybody sees, and going idle once a wait is
+            // cleared or runs out is the arm below's, off a crossing read afresh.
+            () = idle.rejudged() => {
+                if announced && !idle.idling() {
+                    announced = false;
+
+                    nudges.announce(Nudge::Conversation {
+                        conversation: printing.conversation_id,
+                    });
+                }
+            }
+            // Read again as it fires rather than taken on the deadline's word: a
+            // wait declared since the deadline was read has moved the crossing,
+            // and the next time round reads the new one.
             _ = tokio::time::sleep_until(idling), if !announced => {
+                if !idle.idling() {
+                    continue;
+                }
+
                 announced = true;
 
                 // The row on the Timeline and the sidebar card alike, which is
@@ -3212,5 +3366,133 @@ exit 1
 
             assert!(seen.insert(name.clone()), "{name:?} was handed out twice");
         }
+    }
+
+    /// Move everything `idle` remembers `by` into the past, which is the clock
+    /// going on by that much with nothing arriving.
+    fn quiet_for(idle: &Idle, by: Duration) {
+        let back = |at: Instant| {
+            at.checked_sub(by)
+                .expect("this machine has been up that long")
+        };
+        let mut silence = idle.silence();
+
+        silence.at = back(silence.at);
+        silence.idling_since = silence.idling_since.map(back);
+
+        if let Some(wait) = silence.wait.as_mut() {
+            wait.declared = back(wait.declared);
+            wait.until = back(wait.until);
+        }
+    }
+
+    /// A session judged by what it prints that has said a word, declared a wait
+    /// and said a word after it, the way a declaring turn does.
+    fn declared(length: Duration) -> Idle {
+        let idle = Idle::started(Judged::Printing);
+
+        idle.arrived(false);
+        idle.waiting(length);
+        idle.arrived(false);
+
+        idle
+    }
+
+    #[test]
+    fn a_session_with_a_wait_standing_is_at_work_however_quiet() {
+        let idle = declared(Duration::from_secs(45 * 60));
+
+        quiet_for(&idle, Duration::from_secs(40 * 60));
+
+        assert!(!idle.idling());
+        assert_eq!(idle.for_how_long(), Duration::ZERO);
+        assert!(idle.since().elapsed() < Duration::from_secs(1));
+        assert!(idle.crossing() > Instant::now());
+    }
+
+    #[test]
+    fn the_declaring_turn_does_not_release_the_wait_but_work_after_the_quiet_does() {
+        let idle = declared(Duration::from_secs(45 * 60));
+
+        // Printing on straight after the declaration, before any quiet.
+        idle.arrived(false);
+        quiet_for(&idle, Duration::from_secs(60));
+        assert!(
+            !idle.idling(),
+            "the declaring turn's own words keep the wait"
+        );
+
+        // Then the background work comes back and the session takes a turn.
+        idle.arrived(false);
+        quiet_for(&idle, IDLE_AFTER * 2);
+
+        assert!(idle.idling(), "released by work seen after the quiet");
+        assert!(idle.for_how_long() >= IDLE_AFTER * 2);
+    }
+
+    #[test]
+    fn a_wait_that_runs_out_is_idle_counted_from_when_it_ran_out() {
+        let idle = declared(Duration::from_secs(10 * 60));
+
+        quiet_for(&idle, Duration::from_secs(12 * 60));
+
+        assert!(idle.idling());
+
+        let idle_for = idle.for_how_long();
+        assert!(
+            idle_for >= Duration::from_secs(2 * 60) && idle_for < Duration::from_secs(3 * 60),
+            "the grace starts when the wait ran out, not at the last word: {idle_for:?}"
+        );
+        assert!(idle.since().elapsed() >= Duration::from_secs(2 * 60));
+        assert!(idle.since().elapsed() < Duration::from_secs(3 * 60));
+    }
+
+    #[test]
+    fn declaring_again_replaces_the_wait_standing() {
+        let idle = declared(Duration::from_secs(10 * 60));
+
+        quiet_for(&idle, Duration::from_secs(9 * 60));
+        idle.waiting(Duration::from_secs(10 * 60));
+        quiet_for(&idle, Duration::from_secs(9 * 60));
+
+        assert!(!idle.idling(), "renewed, so still standing");
+    }
+
+    #[test]
+    fn being_done_clears_a_wait() {
+        let idle = declared(Duration::from_secs(45 * 60));
+
+        quiet_for(&idle, Duration::from_secs(60));
+        idle.done_waiting();
+
+        assert!(idle.idling());
+        assert!(idle.for_how_long() >= Duration::from_secs(60));
+    }
+
+    /// A backend read by what it draws, repainting the prompt it sits at: a
+    /// repaint is the same silence going on rather than work, and the long-stop
+    /// does not call a waiting session stopped either.
+    #[test]
+    fn a_prompt_repainted_behind_a_wait_neither_releases_it_nor_is_a_long_stop() {
+        let idle = Idle::started(Judged::Drawing {
+            signature: Signature::AtThePrompt("> ".to_owned()),
+            long_stop: Duration::from_secs(5 * 60),
+        });
+
+        idle.arrived(false);
+        idle.waiting(Duration::from_secs(60 * 60));
+        idle.arrived(true);
+        quiet_for(&idle, Duration::from_secs(60));
+        idle.arrived(true);
+        quiet_for(&idle, Duration::from_secs(30 * 60));
+
+        assert!(!idle.idling());
+        assert_eq!(idle.for_how_long(), Duration::ZERO);
+
+        // And the work coming back does release it.
+        idle.arrived(false);
+        idle.arrived(true);
+
+        assert!(idle.idling());
     }
 }

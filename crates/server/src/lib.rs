@@ -230,6 +230,7 @@ mod ui;
 pub mod unseen;
 mod updates;
 mod viewer;
+mod waiting;
 mod worktrees;
 mod wrapping;
 
@@ -1043,6 +1044,11 @@ fn routed(
         .route(
             &format!("{ASKING_FROM}/{{conversation}}/api/v1/done"),
             post(done::signal),
+        )
+        // And saying it is waiting on work of its own, which keeps it at work.
+        .route(
+            &format!("{ASKING_FROM}/{{conversation}}/api/v1/waiting"),
+            post(waiting::declare),
         )
         // The viewer's half. It shares this state rather than holding its own:
         // a submit or a locking from the browser has to reach an agent

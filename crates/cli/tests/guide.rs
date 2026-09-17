@@ -195,6 +195,7 @@ fn the_guide_covers_every_core_area() {
         "## The CLI contract",
         "## Running the ask",
         "## Reading the Response",
+        "## Waiting in the background",
         "## Ending the session",
     ] {
         assert!(
@@ -736,6 +737,7 @@ fn only_the_two_asking_sections_differ_between_the_backends() {
         "## The CLI contract",
         "## Authoring the Set",
         "## Reading the Response",
+        "## Waiting in the background",
         "## Ending the session",
     ] {
         assert_eq!(
@@ -877,4 +879,30 @@ fn the_guide_says_how_a_session_ends() {
         !guide.contains("go quiet") && !guide.contains("goes quiet"),
         "and nothing in the Guide says a session is ended by going quiet, got:\n{guide}"
     );
+}
+
+/// A session waiting on work of its own in the background looks stopped from
+/// outside, so the Guide says how to declare the wait: the verb, its bounds,
+/// renewing it, and that an ask needs none.
+#[test]
+fn the_guide_says_how_to_declare_a_wait() {
+    let guide = stdout(&run(&["guide"]));
+
+    let waiting = section(&guide, "## Waiting in the background")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    for phrase in [
+        "verkstead waiting 45m",
+        "at most an hour**",
+        "fifteen minutes",
+        "Declare again",
+        "An ask needs none",
+    ] {
+        assert!(
+            waiting.contains(phrase),
+            "the section on waiting should say {phrase:?}, got:\n{waiting}"
+        );
+    }
 }

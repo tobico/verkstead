@@ -402,6 +402,30 @@ A Response of nothing but `unanswered` entries plus a `comment` is a valid
 counter-question. It means the human is not answering as asked — take the
 discussion back a step rather than putting the same Set again.
 
+## Waiting in the background
+
+A session that ends its turn looks, from outside, like one that has stopped.
+Verkstead speaks to a stopped session to get it moving, and tells the human
+when that does not work. So **before ending a turn with work of your own still
+running** — a build, a test run, anything started in the background that will
+wake you when it finishes — say so, with how long you expect it to take:
+
+```
+verkstead waiting 45m
+```
+
+- The length is seconds, minutes or hours: `90s`, `45m`, `1h`. It is **at most
+  an hour**, and **fifteen minutes** where you give none. A longer length, or
+  one that does not parse, is refused with a non-zero exit naming the maximum.
+- It returns at once. End your turn as you meant to.
+- **Declare again if the work runs over.** A new declaration replaces the one
+  standing, so the wait never has to be guessed right the first time.
+- The wait is over when its time runs out, when you are next seen working after
+  going quiet behind it, or when `verkstead done` is accepted.
+
+**An ask needs none.** A Question Set waiting on the human already keeps the
+session from being taken as stopped.
+
 ## Ending the session
 
 A session Verkstead launched is ended by **`verkstead done`**, and by nothing

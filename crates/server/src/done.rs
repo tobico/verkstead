@@ -330,6 +330,14 @@ async fn verdict(state: &AppState, conversation_id: i64) -> Verdict {
 
     abandoned(state, conversation_id, event_id).await;
 
+    // A signal clears a wait: the session has said it is finished, so it is
+    // ended once it is next idle by its backend's own reading.
+    if let Some(session) = state.sessions.following(conversation_id)
+        && session.event_id == event_id
+    {
+        session.idle.done_waiting();
+    }
+
     Verdict::Accepted
 }
 

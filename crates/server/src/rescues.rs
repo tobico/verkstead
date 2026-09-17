@@ -13,8 +13,9 @@
 //! moves that would end the silence: carrying on, where it has a next step;
 //! running `verkstead done`, where it is a session ended on that signal and its
 //! work is finished; and otherwise the one move that reaches the human at all,
-//! which is where it has got to put to them as a Set. An agent that had finished its turn takes
-//! another one.
+//! which is where it has got to put to them as a Set. And it is told to declare
+//! a wait where work of its own is still running in the background. An agent
+//! that had finished its turn takes another one.
 //!
 //! **Both, because the line is sometimes wrong.** What it is read off is a
 //! session watched from outside, and a session doing exactly what it should can
@@ -44,8 +45,10 @@
 //! whatever the kind checks it against — so the loop takes the signal. See
 //! [`watched`], which is the whole of the mechanism.
 //!
-//! **And sessions legitimately waiting are never spoken to.** One sitting on a
-//! Blocking Ask has a Set open, which is the middle third of the condition —
+//! **And sessions legitimately waiting are never spoken to.** One that has
+//! declared a wait on work of its own is at work until the wait is over — see
+//! [`crate::waiting`] — and one sitting on a Blocking Ask has a Set open, which
+//! is the middle third of the condition —
 //! the Conversation's rather than the session's, because what the rescue is for
 //! is a human with nothing in front of them. One still at work is not idle —
 //! which is its backend's judgement rather than one rule for all of them, see
@@ -108,12 +111,14 @@ pub(crate) const UNANSWERED: usize = 3;
 /// Which is what makes a wrongly typed line cheap — one quiet turn, rather than
 /// a Question Set manufactured for a human who did not need one. A session that
 /// has done its work and not said so is exactly one to speak to now, because
-/// nothing else ends it.
+/// nothing else ends it. And a session waiting on a build of its own that forgot
+/// to say so is told how to, rather than prodded into doing something else.
 ///
 /// One line and no newline of its own. The Enter is [`crate::typing`]'s, and a
 /// line broken over two would be submitted half-written.
 pub(crate) const LINE: &str = "If you have your next step, carry on with it now. If your work is finished, run \
-     `verkstead done`. If you are blocked or waiting on me, summarize your status and ask me \
+     `verkstead done`. If background work you started is still running, run `verkstead waiting` \
+     and keep waiting. If you are blocked or waiting on me, summarize your status and ask me \
      what to do next via `verkstead ask`.";
 
 /// How long the wait for that echo goes on for before the stir is taken anyway.
@@ -213,7 +218,9 @@ async fn after_the_echo(idle: &Idle) -> Instant {
 ///
 /// **Three things at once, and none of them is enough alone.** *Idle*, because a
 /// session still printing is one at work — and anything it prints puts the whole
-/// grace back on the clock, so one mid-sentence is never spoken to. *Nothing
+/// grace back on the clock, so one mid-sentence is never spoken to. A session
+/// with a Declared wait standing is at work by the same judgement, so it is
+/// never spoken to either, however quiet it is. *Nothing
 /// open*, because a session sitting on a Blocking Ask is doing exactly what it
 /// should: the ask blocks for as long as the human takes, and that may be the
 /// next morning. *And not done*, because a session that has said so is one the

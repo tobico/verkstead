@@ -483,3 +483,11 @@ it for a commit.
 Verkstead checks the repository when you run it. A refusal exits non-zero and
 says on stderr what is missing — changes left uncommitted, say — and the session
 carries on: put that right and run `verkstead done` again.
+
+## Waiting on work in the background
+
+Before you end a turn with work of your own still running in the background — a
+build, a test run — run `verkstead waiting` with how long you expect it to take,
+such as `verkstead waiting 20m`, and declare it again if the work runs over.
+Otherwise Verkstead takes the session as stopped and prompts it. An ask needs no
+declaration. The Guide's *Waiting in the background* section has the details.
