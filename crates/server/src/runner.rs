@@ -115,11 +115,10 @@ pub struct Pace {
 
     /// And how long a session must have been idle, with nothing open and no
     /// Done signal given, before the Rescue speaks to it — see
-    /// [`crate::rescues`], and the follow-up's own wait in
-    /// [`nothing_else_and_quiet`].
+    /// [`crate::rescues`].
     ///
     /// Named for what it once also was: the quiet a session that proposes and
-    /// then fixes was ended on. Nothing ends a session on quiet any more — see
+    /// then fixes, and a follow-up the human had marked, were ended on. Nothing ends a session on quiet any more — see
     /// ADR-0018 — so what is left of it is the Rescue's grace. Distinctly longer
     /// than [`Pace::grace`], because a line typed into a session still at work
     /// costs a turn: a minute of silence is the shortest an agent still at work
@@ -1226,7 +1225,7 @@ async fn submitted(state: &AppState, conversation_id: i64) -> Option<i64> {
             event_id,
             &idle,
             pace,
-            crate::rescues::Done::Signalled(signal),
+            signal,
         ) => {
             tracing::warn!(
                 conversation_id,
@@ -1428,7 +1427,7 @@ async fn follow_inline(
             event_id,
             &idle,
             pace,
-            crate::rescues::Done::Signalled(signal),
+            signal,
         ) => {
             tracing::warn!(
                 conversation_id,
@@ -1648,7 +1647,7 @@ pub(crate) async fn instructed(
             event_id,
             &idle,
             pace,
-            crate::rescues::Done::Signalled(signal),
+            signal,
         ) => {
             let _driving = driving;
 
@@ -1862,13 +1861,18 @@ async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: D
 /// asked for, and a round that was a question and an answer commits nothing at
 /// all. So there is no committed-and-quiet to end it on and no artifact to read.
 ///
-/// **What ends it is the human's own mark**, on the newest round they answered,
-/// with the session idle and nothing left open — see [`nothing_else_and_quiet`],
-/// which is the three of those waited on together. Then the session is ended and
-/// the Conversation goes back to Wrapping over the pull request it was opened
-/// about, with the wrap-up's watchers started over whatever the branch now
-/// holds. *Back to Done* is the wrap-up's own settling rule and nothing this
-/// decides — see [`over`].
+/// **What ends it is its Done signal, checked against the human's own mark** —
+/// see [`crate::done`], and ADR-0018. Whether there is anything else is the
+/// human's to say, on the newest round they answered, so a signal without the
+/// mark is refused and the next round goes to them as a Set: a follow-up cannot
+/// end itself. With the mark, the signal is taken and the session is ended once
+/// it is next idle — and never on the mark alone, because the work the last
+/// round asked for comes after it, nor on quiet, because a follow-up that pushes
+/// and then waits on its checks in the background is still at work. Then the
+/// Conversation goes back to Wrapping over the pull request it was opened about,
+/// with the wrap-up's watchers started over whatever the branch now holds.
+/// *Back to Done* is the wrap-up's own settling rule and nothing this decides —
+/// see [`over`].
 ///
 /// **And a session that is gone is a stop**, which is the responding rule: no
 /// other session is ever sent to finish somebody else's, so what it had got to,
@@ -1927,9 +1931,18 @@ pub(crate) async fn following_up(
     let idle = session.idle.clone();
     let pace = state.sessions.pace();
 
+    // The signal is checked against the human's mark rather than anything on the
+    // branch: see [`crate::done::Evidence::NothingElse`].
+    let expecting = state.signals.expecting(
+        conversation_id,
+        event_id,
+        crate::done::Evidence::NothingElse,
+    );
+    let signal = expecting.signal();
+
     let ended = tokio::select! {
         ended = session.ended() => Some(ended),
-        () = nothing_else_and_quiet(&state, conversation_id, &idle, pace) => None,
+        () = signalled_and_idle(signal.clone(), &idle, pace) => None,
         // The session is still there and still saying nothing, having been asked
         // twice to say it where the human would hear. So it is ended here rather
         // than waited on any longer, and the stop written over it is one the
@@ -1942,7 +1955,7 @@ pub(crate) async fn following_up(
             event_id,
             &idle,
             pace,
-            crate::rescues::Done::NothingElse,
+            signal,
         ) => {
             let _driving = driving;
 
@@ -1959,6 +1972,8 @@ pub(crate) async fn following_up(
             .await;
         }
     };
+
+    drop(expecting);
 
     let Some(ended) = ended else {
         return over(&state, conversation_id, already, driving).await;
@@ -1986,8 +2001,7 @@ pub(crate) async fn following_up(
     // is read as a follow-up nobody is left to have, exactly as an instruction
     // session's commits are asked for again where it ends first.
     //
-    // The same two questions [`nothing_else_and_quiet`] asks, and asked in the
-    // same order: a Set still standing is the human holding a question, and one
+    // A Set still standing is asked about first: it is the human holding a question, and one
     // is worth closing and stopping over whatever the newest answer said. Both
     // read the safe way round for this — a store that will not answer reads as
     // open and as not marked — so a record that cannot be asked leaves the stop
@@ -2143,74 +2157,6 @@ async fn left_open(state: &AppState, conversation_id: i64) {
 
     if let Some(set_id) = standing {
         crate::review::closed(state, conversation_id, set_id).await;
-    }
-}
-
-/// Wait until the follow-up is over: the human has marked their newest answer
-/// *Nothing else*, nothing is left open on the Conversation, and the session has
-/// printed nothing for [`Pace::proposing`].
-///
-/// All three, and none of them is enough alone. **The mark alone** would end a
-/// follow-up in the middle of the work the last round asked for — the human
-/// answers and the agent goes off and does it, which is the whole point of the
-/// state. **Quiet alone** would reap a session idling on a Blocking Ask, which is
-/// a session doing exactly what it should: the ask blocks for as long as the
-/// human takes, and that may be the next morning. **Nothing open alone** would end
-/// every follow-up the moment it started, none of them having asked anything yet.
-///
-/// The grace is asked first because it is the cheap half: a session still
-/// talking is not one to ask the store about, and anything it prints puts the whole grace back on the
-/// clock. An answer arriving does the same — a session that has just been told
-/// what to do has everything it asked for and nothing done yet — so the grace
-/// runs again from the last time a Set was open, and this returns only once both
-/// are spent.
-///
-/// **The mark is read last and every time round**, which is what makes the
-/// latest Response the one that decides: a Set asked after an end-marked one puts
-/// the follow-up back to running through the open-Set arm above, and its own
-/// answer is what this reads when it comes.
-///
-/// **And a follow-up whose human never says *nothing else* is rescued rather
-/// than waited on for ever.** That is this condition read the other way round —
-/// quiet, nothing open and no mark — and it is watched for beside this rather
-/// than here, by the one loop that watches for it in every state. See
-/// [`crate::rescues::until_it_will_not_ask`], which takes the mark as its
-/// done-indicator.
-async fn nothing_else_and_quiet(state: &AppState, conversation_id: i64, idle: &Idle, pace: Pace) {
-    // When a Set of the Conversation's was last seen open. An answer arriving is
-    // something the session has just been given to act on, and one that has just
-    // been given something has had no time to act on it yet — so the grace runs
-    // again from here. `None` while it has asked nothing at all.
-    let mut asked: Option<Instant> = None;
-
-    loop {
-        let owed = pace.proposing.saturating_sub(idle.for_how_long());
-
-        if !owed.is_zero() {
-            tokio::time::sleep(owed).await;
-            continue;
-        }
-
-        if open(state, conversation_id).await {
-            asked = Some(Instant::now());
-            tokio::time::sleep(pace.poll).await;
-            continue;
-        }
-
-        let owed = asked
-            .map(|at| pace.proposing.saturating_sub(at.elapsed()))
-            .unwrap_or_default();
-
-        if !owed.is_zero() {
-            tokio::time::sleep(owed).await;
-            continue;
-        }
-
-        if marked(state, conversation_id).await {
-            return;
-        }
-
-        tokio::time::sleep(pace.poll).await;
     }
 }
 
@@ -2395,7 +2341,7 @@ pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &s
             event_id,
             &idle,
             pace,
-            crate::rescues::Done::Signalled(signal),
+            signal,
         ) => {
             tracing::warn!(
                 conversation_id,
@@ -2572,7 +2518,7 @@ async fn proposing(
             event_id,
             &idle,
             pace,
-            crate::rescues::Done::Signalled(signal),
+            signal,
         ) => {
             tracing::warn!(
                 conversation_id,
@@ -2757,7 +2703,7 @@ async fn see_out(
             event_id,
             &idle,
             pace,
-            crate::rescues::Done::Signalled(signal),
+            signal,
         ) => {
             tracing::warn!(
                 conversation_id,

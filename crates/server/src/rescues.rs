@@ -32,10 +32,10 @@
 //! **The same condition in every state.** A grilling writing the artifact its
 //! pick asked for, a backlog step, an inline implementation, an instruction, a
 //! fix, a follow-up: each of them is a session that should be either working,
-//! asking or finished, and *none of the three* is the shape this watches for. What differs from one to
-//! the next is only what *finished* looks like — a Done signal given and borne out,
-//! the human's own mark — so that is the parameter and the loop is not. See
-//! [`Done`], and [`until_it_will_not_ask`], which is the whole of the mechanism.
+//! asking or finished, and *none of the three* is the shape this watches for.
+//! Finished is the same everywhere too — a Done signal given and borne out,
+//! whatever the kind checks it against — so the loop takes the signal. See
+//! [`until_it_will_not_ask`], which is the whole of the mechanism.
 //!
 //! **And sessions legitimately waiting are never spoken to.** One sitting on a
 //! Blocking Ask has a Set open, which is the middle third of the condition —
@@ -89,24 +89,16 @@ pub(crate) const AT_MOST: usize = 2;
 /// could say about the session is read from outside it, and outside is where a
 /// session that is working and one that is stuck look alike. So it names the
 /// condition rather than the move: a session that has its next step is told to
-/// get on with it, and only a session that is actually waiting on the human is
-/// told to say so as a Set. Which is what makes a wrongly typed line cheap —
-/// one quiet turn, rather than a Question Set manufactured for a human who did
-/// not need one.
+/// get on with it, one whose work is finished is told to say so, and only a
+/// session that is actually waiting on the human is told to say so as a Set.
+/// Which is what makes a wrongly typed line cheap — one quiet turn, rather than
+/// a Question Set manufactured for a human who did not need one. A session that
+/// has done its work and not said so is exactly one to speak to now, because
+/// nothing else ends it.
 ///
 /// One line and no newline of its own. The Enter is [`crate::typing`]'s, and a
 /// line broken over two would be submitted half-written.
-pub(crate) const LINE: &str = "If you have your next step, carry on with it now. If you are blocked or waiting on me, \
-     summarize your status and ask me what to do next via `verkstead ask`.";
-
-/// What is typed into a session that is ended on its Done signal, which has a
-/// third move the others have not: saying it is finished.
-///
-/// The same conditional shape as [`LINE`], and for the same reason. A session
-/// that has landed its work and not said so is exactly one to speak to now —
-/// nothing else ends it — and one that was only between two steps spends the
-/// line on carrying on.
-pub(crate) const SIGNALLING_LINE: &str = "If you have your next step, carry on with it now. If your work is finished, run \
+pub(crate) const LINE: &str = "If you have your next step, carry on with it now. If your work is finished, run \
      `verkstead done`. If you are blocked or waiting on me, summarize your status and ask me \
      what to do next via `verkstead ask`.";
 
@@ -201,56 +193,6 @@ async fn after_the_echo(idle: &Idle) -> Instant {
     Instant::now()
 }
 
-/// What would say this session's work is done, which is the one thing about the
-/// rescue that differs from one state to the next.
-///
-/// The condition is the same everywhere — a running session that is idle, with
-/// nothing open on the Conversation, and nothing to show for itself — and only
-/// the last third of it is a fact about the state. So it is a parameter rather
-/// than four copies of the loop below, and a state added later brings an
-/// indicator rather than a mechanism.
-#[derive(Debug, Clone)]
-pub(crate) enum Done {
-    /// A grilling's artifact, a backlog step, an inline run, an instruction or a
-    /// fix: the session has given its Done signal and the repository bore it
-    /// out — see [`crate::done`].
-    ///
-    /// The signal rather than the landing itself. A session that has landed
-    /// its work and not said so is not being ended by anything, so it is
-    /// exactly a session to speak to.
-    Signalled(Signal),
-
-    /// A follow-up: the newest round the human answered carries the
-    /// Nothing-else mark. Nothing on the branch says whether a follow-up is
-    /// over, because what it commits is the human's to have asked for and a
-    /// round that was a question and an answer commits nothing at all.
-    NothingElse,
-}
-
-impl Done {
-    /// Whether the session has anything to show for itself yet.
-    ///
-    /// Every one of these reads *not done* where it cannot be answered, which is
-    /// the right way round for what it decides: on the other side is a line
-    /// typed into a working session, and each of the three readers already
-    /// errs that way for the ending it also decides.
-    async fn reached(&self, state: &AppState, conversation_id: i64) -> bool {
-        match self {
-            Done::Signalled(signal) => signal.given(),
-            Done::NothingElse => crate::runner::marked(state, conversation_id).await,
-        }
-    }
-
-    /// What to type into a session of this kind: the three moves where the
-    /// session ends on its Done signal, and the two where Verkstead ends it.
-    fn line(&self) -> &'static str {
-        match self {
-            Done::Signalled(_) => SIGNALLING_LINE,
-            Done::NothingElse => LINE,
-        }
-    }
-}
-
 /// Watch a running session for the one shape nothing else can move, speak to it
 /// when it takes that shape, and return once it will not be talked out of it.
 ///
@@ -260,8 +202,8 @@ impl Done {
 /// open*, because a session sitting on a Blocking Ask is doing exactly what it
 /// should: the ask blocks for as long as the human takes, and that may be the
 /// next morning. *And not done*, because a session that has landed what it was
-/// sent for is one the driver beside this is already ending — see [`Done`],
-/// which is the whole of what differs from state to state.
+/// sent for and said so is one the driver beside this is already ending — see
+/// [`crate::done`].
 ///
 /// The open Set is the Conversation's rather than this session's — see
 /// [`crate::runner::open`]. What the rescue is for is a human with nothing in
@@ -302,7 +244,7 @@ pub(crate) async fn until_it_will_not_ask(
     event_id: i64,
     idle: &Idle,
     pace: Pace,
-    done: Done,
+    signal: Signal,
 ) {
     // When the session was last stirred: a Set of the Conversation's seen open,
     // a rescue typed in, or the moment this began. Each is something the session
@@ -375,7 +317,7 @@ pub(crate) async fn until_it_will_not_ask(
         // this is ending the session on exactly that, and a line typed into one
         // that has done its job would be Verkstead prodding an agent for
         // finishing.
-        if done.reached(state, conversation_id).await {
+        if signal.given() {
             tokio::time::sleep(pace.poll).await;
             continue;
         }
@@ -391,7 +333,7 @@ pub(crate) async fn until_it_will_not_ask(
         // Counted only where it reached a session. One that has ended between
         // the last look and this one is not a rescue that failed — the ending is
         // being waited on beside this, and it is the ending that decides.
-        if rescue(state, conversation_id, event_id, done.line()).await {
+        if rescue(state, conversation_id, event_id, LINE).await {
             spent += 1;
 
             // Once what was typed has finished arriving back, rather than as it

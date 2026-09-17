@@ -21646,24 +21646,23 @@ esac
 const A_ROUND_THEN_WAITING: &str = r#"    printf 'it counts the 429s it sends\n' >> notes.md
     git add -A
     git commit --quiet -m 'docs: say what the limiter counts'
-    : > /tmp/verkstead/done
     sleep 300"#;
 
-/// One that does a round of work, waits to be answered, says its piece and then
-/// idles — which is every follow-up session between rounds, an interactive agent
-/// having nothing to do until it is spoken to.
+/// One that does a round of work, waits to be answered, says its piece, says it
+/// is done and then idles — which is every follow-up session at the end of its
+/// last round, an interactive agent having nothing to do until it is ended.
 ///
 /// The commit is what makes this follow-up one that pushed, which is what puts
 /// the wrap-up's checks back to waiting when it lands.
 const A_ROUND_THEN_IDLE: &str = "    printf 'it counts the 429s it sends\\n' >> notes.md\n    \
      git add -A\n    \
      git commit --quiet -m 'docs: say what the limiter counts'\n    \
-     : > /tmp/verkstead/done\n    \
      SAYING='following it up'\n    \
      printf '%s\\n' \"$SAYING\"\n    \
      WHILE_NOBODY_HAS_ASKED\n    \
      while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
      printf 'nothing else then\\n'\n    \
+     : > /tmp/verkstead/done\n    \
      sleep 300";
 
 /// The same, committing nothing at all: a follow-up that was a question and an
@@ -21673,6 +21672,41 @@ const A_QUESTION_THEN_IDLE: &str = "    SAYING='following it up'\n    \
      WHILE_NOBODY_HAS_ASKED\n    \
      while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
      printf 'it counts them, yes\\n'\n    \
+     : > /tmp/verkstead/done\n    \
+     sleep 300";
+
+/// One that is answered, says it is done, keeps the refusal, and puts the next
+/// round — which is what a follow-up does when the human has not said there is
+/// nothing else — then says it is done again once that round is answered.
+///
+/// `answered` and `again` are the two rounds, as in [`TWO_ROUNDS_THEN_IDLE`].
+const SIGNALS_BEFORE_THE_MARK: &str = "    SAYING='following it up'\n    \
+     printf '%s\\n' \"$SAYING\"\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
+     while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
+     : > /tmp/verkstead/done\n    \
+     while ! grep -q 'nothing else' /tmp/verkstead/done-said 2>/dev/null; do sleep 0.05; done\n    \
+     cp /tmp/verkstead/done-said /tmp/verkstead/refused\n    \
+     rm -f /tmp/verkstead/done\n    \
+     rm -f /tmp/verkstead/asked\n    \
+     SAYING='one more round then'\n    \
+     printf '%s\\n' \"$SAYING\"\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
+     while [ ! -f /tmp/verkstead/again ]; do sleep 0.1; done\n    \
+     printf 'nothing else then\\n'\n    \
+     : > /tmp/verkstead/done\n    \
+     sleep 300";
+
+/// One that is answered and then goes idle without saying it is done, until it
+/// is spoken to — and says it is done once it has been.
+const MARKED_THEN_IDLE_UNTIL_TOLD: &str = "    SAYING='following it up'\n    \
+     printf '%s\\n' \"$SAYING\"\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
+     while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
+     printf 'it counts them, yes\\n'\n    \
+     read -r TOLD\n    \
+     printf '%s\\n' \"$TOLD\" >> /tmp/verkstead/rescues\n    \
+     : > /tmp/verkstead/done\n    \
      sleep 300";
 
 /// And one that goes round twice: it is answered, asks again, and idles once
@@ -21709,6 +21743,7 @@ const IDLE_UNTIL_TOLD: &str = "    printf 'reading the branch\\n'\n    \
      WHILE_NOBODY_HAS_ASKED\n    \
      while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
      printf 'nothing else then\\n'\n    \
+     : > /tmp/verkstead/done\n    \
      sleep 300";
 
 /// And one that will not ask whatever it is told: it writes down every line
@@ -21997,9 +22032,9 @@ async fn a_follow_up_session_that_finishes_on_the_mark_lands_in_the_wrap_up() {
 /// A follow-up that pushed ends on the human's mark and lands back in the
 /// wrap-up, which waits on the new checks before it says Done again.
 ///
-/// The three things that end one, together: the newest round they answered
-/// carries **Nothing else**, nothing is left open on the Conversation, and the
-/// session has gone quiet. Then it is ended where it stands and the Conversation
+/// What ends one: the newest round they answered carries **Nothing else**, and
+/// the session says it is done and is idle since. Then it is ended where it
+/// stands and the Conversation
 /// goes back to Wrapping over the pull request it was opened about — with the
 /// checks put back to waiting, because the follow-up committed and GitHub has a
 /// new run to make up its mind about. *Back to Done* is the wrap-up's own
@@ -22257,6 +22292,147 @@ async fn a_set_asked_after_the_mark_keeps_the_follow_up_open() {
         fixture.view().await.state,
         Lifecycle::FollowUp,
         "the newest Response decides, and it carried no mark",
+    );
+}
+
+/// A follow-up's Done signal while the newest answered round carries no mark is
+/// refused, saying the human has not said there is nothing else — and the
+/// follow-up goes on to its next round, and ends on the signal once that round
+/// comes back marked.
+///
+/// Whether there is anything else is the human's to say, so a follow-up session
+/// cannot end itself however finished it believes it is.
+#[tokio::test]
+async fn a_follow_up_signal_without_the_mark_is_refused_and_one_with_it_ends_the_follow_up() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_a_follow_up(&reviews, SIGNALS_BEFORE_THE_MARK),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        fixture
+            .steer_following_up("Does it count the 429s it sends?\n")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    let first = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(fixture.answer(first).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    let said = refused(&fixture).await;
+
+    assert!(
+        said.contains("the human has not said there is nothing else"),
+        "the refusal says why: {said:?}",
+    );
+    assert!(
+        said.contains("verkstead ask"),
+        "and that the next round goes to them as a Set: {said:?}",
+    );
+
+    let second = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::FollowUp,
+        "the refused signal ended nothing",
+    );
+
+    assert_eq!(fixture.answer_ending(second).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("again"), "").unwrap();
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        notices(&view).is_empty(),
+        "the follow-up ended on its signal rather than stopping: {:?}",
+        notices(&view),
+    );
+    assert!(!view.working, "and nothing is left holding the Worktree");
+}
+
+/// A follow-up the human has marked is not ended on the mark or on quiet: one
+/// that never signals is left running, and is spoken to by the Rescue — which
+/// offers it `verkstead done` — and ended once it signals.
+#[tokio::test]
+async fn a_marked_follow_up_that_never_signals_is_not_ended_but_told_it_may_be_done() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_a_follow_up(&reviews, MARKED_THEN_IDLE_UNTIL_TOLD),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        fixture
+            .steer_following_up("Does it count the 429s it sends?\n")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    assert_eq!(fixture.answer_ending(set).await, Submitted::Accepted);
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    // The rescue waits on a longer quiet than the grace the old ending did, so
+    // a follow-up still there when it arrives is one that quiet did not end.
+    let said = told(&fixture, 1).await;
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::FollowUp,
+        "the mark and the quiet together ended nothing",
+    );
+    assert!(view.working, "and the session is still there");
+    assert!(
+        said[0].contains("run `verkstead done`"),
+        "the rescue offers the signal among its moves: {said:?}",
+    );
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    assert!(
+        notices(&fixture.view().await).is_empty(),
+        "and once it signalled the follow-up ended the ordinary way: {:?}",
+        notices(&fixture.view().await),
     );
 }
 

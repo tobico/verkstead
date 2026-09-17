@@ -86,6 +86,13 @@ pub(crate) enum Evidence {
     /// on GitHub, asked again once the session is over, and a rule that demanded
     /// a commit would leave a fix with nothing to fix unable to end.
     Nothing,
+
+    /// A follow-up, whose end is the human's to say rather than the session's:
+    /// the newest round they answered carries the Nothing-else mark — see
+    /// [`crate::runner::marked`]. What it commits is theirs to have asked for,
+    /// and a round that was a question and an answer commits nothing at all, so
+    /// there is nothing on the branch to read instead.
+    NothingElse,
 }
 
 /// A driver's hold on its entry, for as long as it is seeing the session out.
@@ -203,8 +210,8 @@ enum Verdict {
 ///
 /// 200 where the work has landed by its kind's own reading, and the session is
 /// ended once it is next idle. 409 otherwise, with the reason in words the agent
-/// can act on in the same turn: what is missing, no session here to end, or no
-/// Direction picked yet. The session is left exactly as it was.
+/// can act on in the same turn: what is missing, no session here to end, no
+/// Direction picked yet, or a follow-up the human has not said is over. The session is left exactly as it was.
 pub(crate) async fn signal(
     State(state): State<AppState>,
     Path(conversation_id): Path<i64>,
@@ -243,6 +250,18 @@ async fn verdict(state: &AppState, conversation_id: i64) -> Verdict {
     let Some((token, evidence)) = registered(state, conversation_id, event_id).await else {
         return Verdict::Refused(unexpected(state, conversation_id).await);
     };
+
+    // Not a gap the session can close by itself, so not said as one: whether
+    // there is anything else is the human's, and the move that asks them is a Set.
+    if matches!(evidence, Evidence::NothingElse)
+        && !crate::runner::marked(state, conversation_id).await
+    {
+        return Verdict::Refused(
+            "the human has not said there is nothing else, so this follow-up is not over: put \
+             the next round to them as a Set with `verkstead ask`"
+                .to_owned(),
+        );
+    }
 
     if let Some(missing) = missing(state, conversation_id, &evidence).await {
         return Verdict::Refused(format!(
@@ -341,7 +360,8 @@ async fn missing(state: &AppState, conversation_id: i64, evidence: &Evidence) ->
             (!crate::runner::committed_since(state, conversation_id, *already).await)
                 .then(|| "nothing has been committed since this session began".to_owned())
         }
-        Evidence::Nothing => None,
+        // Read in [`verdict`], where its refusal is said in words of its own.
+        Evidence::Nothing | Evidence::NothingElse => None,
     }
 }
 

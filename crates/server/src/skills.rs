@@ -1516,6 +1516,7 @@ mod tests {
             "reviewing/SKILL.md",
             "responding/SKILL.md",
             "submitting/SKILL.md",
+            "following-up/SKILL.md",
         ] {
             let skill = skill(name);
 
@@ -3191,16 +3192,23 @@ mod tests {
         );
     }
 
-    /// How a follow-up ends is the system's business: the mark rides the human's
-    /// Response and never reaches the agent, so the skill has nothing to say
-    /// about it and must not invent a mechanism of its own.
+    /// Whether a follow-up is over is the human's to say: the mark rides their
+    /// Response and never reaches the agent, so the skill says only to give the
+    /// Done signal when there is nothing left, and that a refusal means another
+    /// round — never the mark itself, nor a mechanism of its own.
     #[test]
     fn the_following_up_skill_says_nothing_about_how_a_follow_up_ends() {
         let following_up = skill("following-up/SKILL.md");
 
         assert!(
-            following_up.contains("finish your turn"),
-            "it simply stops asking when it has nothing to ask: {following_up}"
+            flowed("following-up/SKILL.md").contains("nothing to do and nothing to ask")
+                && flowed("following-up/SKILL.md").contains("run `verkstead done`"),
+            "it gives the signal when it has nothing left to do or ask: {following_up}"
+        );
+        assert!(
+            flowed("following-up/SKILL.md").contains("put the next round to them as a Set"),
+            "and a refusal is the human not having finished, so it goes round again: \
+             {following_up}"
         );
         for ending in ["Nothing else", "Wrapping", "Done"] {
             assert!(
