@@ -1606,6 +1606,30 @@ mod tests {
         }
     }
 
+    /// And a companion's pull request is asked for at the signal rather than
+    /// once the session is over, so the session that could open a missing one is
+    /// still there to — see ADR-0018. The skills that send a session into a
+    /// companion say so.
+    #[test]
+    fn the_skills_that_list_companions_say_their_pull_requests_are_asked_for_at_the_signal() {
+        for name in [
+            "next-task/SKILL.md",
+            "implementing/SKILL.md",
+            "staging/SKILL.md",
+        ] {
+            let skill = flowed(name);
+
+            assert!(
+                skill.contains("asks GitHub about each of them when you run `verkstead done`"),
+                "{name} has to say the companions are asked about at the signal: {skill}"
+            );
+            assert!(
+                !skill.contains("about each of them once this session is over"),
+                "and not once the session that could open a missing one has gone: {skill}"
+            );
+        }
+    }
+
     /// No gate anywhere in the implementation: the agent commits on its own,
     /// and feedback consolidates when the branch is reviewed as a whole.
     #[test]

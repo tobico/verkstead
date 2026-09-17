@@ -109,6 +109,13 @@ pub(crate) enum Evidence {
 /// caught in the same turn rather than by a second session sent afterwards — see
 /// [`crate::runner`]'s `to_a_pull_request`, which stays as the net under a
 /// session that exits without signalling.
+///
+/// **Every companion the work committed in, beside the Conversation's own** —
+/// see [`uncovered`]. The finish sequence covers each of them in that
+/// repository's own words, so each is a pull request that can be stopped short
+/// of, and the wrap-up stops the run over one a session later. It is the same
+/// reading uncommitted changes are looked for by: what a session may write in
+/// is what it is asked about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Ends {
     WithItsWork,
@@ -235,8 +242,8 @@ enum Verdict {
 /// ended once it is next idle. 409 otherwise, with the reason in words the agent
 /// can act on in the same turn: what is missing, no session here to end, no
 /// Direction picked yet, a follow-up the human has not said is over, or a
-/// session a run ends on whose branch has no pull request open. The session is
-/// left exactly as it was.
+/// session a run ends on whose branch — or whose companion's — has no pull
+/// request open. The session is left exactly as it was.
 pub(crate) async fn signal(
     State(state): State<AppState>,
     Path(conversation_id): Path<i64>,
@@ -300,11 +307,17 @@ async fn verdict(state: &AppState, conversation_id: i64) -> Verdict {
     }
 
     // After the commit rather than before it, which is the order the work goes
-    // in: a pull request is opened on what was committed and pushed.
-    if ends == Ends::OnAPullRequest
-        && let Some(unopened) = unopened(state, conversation_id).await
-    {
-        return Verdict::Refused(unopened);
+    // in: a pull request is opened on what was committed and pushed. The
+    // Conversation's own branch first, and then every companion the work
+    // committed in, because the finish sequence covers both.
+    if ends == Ends::OnAPullRequest {
+        if let Some(unopened) = unopened(state, conversation_id).await {
+            return Verdict::Refused(unopened);
+        }
+
+        if let Some(uncovered) = uncovered(state, conversation_id).await {
+            return Verdict::Refused(uncovered);
+        }
     }
 
     // The same entry the check was made for, rather than whichever is there now:
@@ -575,6 +588,86 @@ async fn unopened(state: &AppState, conversation_id: i64) -> Option<String> {
             None
         }
     }
+}
+
+/// Why a signal is refused over a companion repository the work committed in
+/// that has no pull request open, or `None` where every one of them has one.
+///
+/// **The finish sequence covers the companions too**, in each repository's own
+/// words, so a session that can stop short of its own pull request can stop
+/// short of theirs — and [`crate::wrapping::covering`] stops the run over one, a
+/// session later, with the session that could have put it right already gone.
+/// That second session is what the signal exists to save, so the same reading is
+/// made here: which companions are asked about is
+/// [`crate::wrapping::committed_in`]'s, shared with the wrap-up so the two
+/// cannot come to disagree about one repository.
+///
+/// **GitHub out of reach reads as accepted**, exactly as it does for the
+/// Conversation's own branch — see [`unopened`] — and so does a reading that
+/// fell over: none of them is GitHub saying there is no pull request, and a
+/// session is not to be held hostage by somebody else's outage. The wrap-up asks
+/// again either way.
+async fn uncovered(state: &AppState, conversation_id: i64) -> Option<String> {
+    let conversation = match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return None,
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                conversation_id,
+                "reading a Conversation to check its companions' pull requests failed"
+            );
+            return None;
+        }
+    };
+
+    let committed = crate::wrapping::committed_in(state, &conversation).await?;
+    let mut missing = Vec::new();
+
+    for companion in committed {
+        let asked = {
+            let gh = state.github.clone();
+            let repo = companion.path.clone();
+            let head = companion.head.clone();
+
+            // Off the runtime's threads: `gh` is a process, and one that goes to
+            // the network.
+            tokio::task::spawn_blocking(move || crate::github::pull_request(&gh, &repo, &head))
+                .await
+        };
+
+        match asked {
+            Ok(Ok(_)) => {}
+            Ok(Err(crate::github::Trouble::NoPullRequest)) => missing.push(format!(
+                "`{}`, where the branch is `{}`",
+                companion.name, companion.head
+            )),
+            Ok(Err(trouble)) => tracing::warn!(
+                conversation_id,
+                repo = companion.name,
+                branch = companion.branch,
+                why = trouble.why(),
+                "whether a companion has a pull request could not be checked, so the Done \
+                 signal is taken without it"
+            ),
+            Err(error) => tracing::error!(
+                error = ?error,
+                conversation_id,
+                repo = companion.name,
+                "asking gh for a companion's pull request failed, so the Done signal is taken \
+                 without it"
+            ),
+        }
+    }
+
+    (!missing.is_empty()).then(|| {
+        format!(
+            "this session is not done yet: the work is committed in {} with no open pull \
+             request. Open one in each, the way that repository's own review process says, \
+             then run `verkstead done` again",
+            missing.join("; ")
+        )
+    })
 }
 
 /// Lock the Sets the session that signalled was idling on, now that nothing will

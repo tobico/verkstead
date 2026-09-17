@@ -868,6 +868,7 @@ fn the_guide_says_how_a_session_ends() {
         "uncommitted",
         "closed unanswered",
         "Open the pull request before you signal",
+        "companion repository the work committed in",
         "cannot reach GitHub",
     ] {
         assert!(

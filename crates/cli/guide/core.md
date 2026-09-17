@@ -459,9 +459,10 @@ files.
 **Open the pull request before you signal, where the session ends on one.** A
 backlog's finish step, an inline implementation, a roadmap's own session and a
 session sent to open a pull request are refused while their branch has no open
-pull request. Push it and open one the way the repository's own review process
-says, then signal. Where Verkstead cannot reach GitHub to check, the signal is
-taken.
+pull request — **and while any companion repository the work committed in has
+none**, the refusal naming the repository and the branch. Push each and open one
+the way that repository's own review process says, then signal. Where Verkstead
+cannot reach GitHub to check, the signal is taken.
 
 **Do not signal with a question you still want answered.** Once the signal is
 accepted, nothing will read the Answer, so a Set of yours that is still waiting

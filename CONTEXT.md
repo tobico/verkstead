@@ -1222,8 +1222,10 @@ make, so its pull request is what it is asked for instead.
 non-zero saying what is missing, the session stays alive, and the agent puts it
 right in the same turn. Refused too over uncommitted changes, in the Worktree or
 in any companion repo the Conversation may write in, naming the files — and, for
-a session meant to end on a pull request, while the branch has none open, GitHub
-out of reach reading as accepted.
+a session meant to end on a pull request, while the branch has none open, or any
+companion repo the work committed in has none, GitHub out of reach reading as
+accepted. The companions are asked about here rather than only by the wrap-up
+afterwards, so the session that could open the missing one is still there to.
 
 A Blocking Ask of the session's own still open does not refuse it: the Set is
 locked unanswered, nothing being left to read the Answer. An accepted signal

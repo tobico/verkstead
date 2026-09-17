@@ -366,11 +366,9 @@ pub(crate) fn watching(state: &AppState, conversation_id: i64, reviewing: Review
 /// missing pull request by hand and pressed Resume. A companion already recorded
 /// is read past, so running it twice records nothing twice.
 ///
-/// **Touched means commits beyond the base**, asked of git in the companion's
-/// own repository — see [`crate::commits::touched`]. A read-only companion is
-/// not asked at all, and a read-write one with nothing on its branch is ignored
-/// by the whole of wrap-up: no pull request expected, nothing recorded, nothing
-/// waited on.
+/// **Which companions are asked about is [`committed_in`]'s**, shared with the
+/// Done signal that is refused over the same thing a session earlier — see
+/// [`crate::done`].
 ///
 /// **Each one is recorded as it is found**, and the missing ones are gathered up
 /// rather than stopped at. So a wrap-up that cannot find all of them still shows
@@ -407,78 +405,17 @@ pub(crate) async fn covering(state: AppState, conversation_id: i64) {
         return;
     }
 
+    let Some(committed) = committed_in(&state, &conversation).await else {
+        return;
+    };
+
     let mut missing = Vec::new();
 
-    for companion in &conversation.companions {
-        // A read-only companion is detached and bound read-only, so nothing can
-        // have landed on it and there is no branch to ask GitHub about.
-        if companion.mode != store::CompanionMode::ReadWrite {
-            continue;
-        }
-
-        // Mirroring resolved, which is the record's own business — see
-        // [`store::Companion::branch_for`].
-        let Some(branch) = companion.branch_for(&conversation.branch) else {
-            continue;
-        };
-
-        // Recorded already: a finish that ran twice, a server that came back up,
-        // or a Resume over a wrap-up that stopped on another companion. Asked
-        // before git and before GitHub, both being dearer than a row.
-        match store::pull_request(&state.pool, conversation_id, companion.repo.id).await {
-            Ok(Some(_)) => continue,
-            Ok(None) => {}
-            Err(error) => {
-                tracing::error!(error = ?error, conversation_id, repo = companion.repo.name, "reading whether a companion's pull request was recorded failed");
-                return;
-            }
-        }
-
-        let Some(base) = companion.base_commit.clone() else {
-            tracing::error!(
-                conversation_id,
-                repo = companion.repo.name,
-                "a read-write companion has no base commit, so what the work committed \
-                 in it cannot be told from what it branched off"
-            );
-            continue;
-        };
-
-        let repo = companion.repo.path.clone();
-
-        // Off the runtime's threads: git is a process, and so is `gh`.
-        let touched = {
-            let repo = repo.clone();
-            let branch = branch.clone();
-
-            match tokio::task::spawn_blocking(move || {
-                crate::commits::touched(&repo, &base, &branch)
-            })
-            .await
-            {
-                Ok(touched) => touched,
-                Err(error) => {
-                    tracing::error!(error = ?error, conversation_id, repo = companion.repo.name, "asking git what a companion holds failed");
-                    return;
-                }
-            }
-        };
-
-        if !touched {
-            continue;
-        }
-
-        // Under whatever name that repository's remote is carrying the branch,
-        // which is the Conversation's own question asked again per companion —
-        // see [`head_ref`]. A companion's finish sequence is that repository's,
-        // so its naming rule is that repository's too, and two repositories may
-        // well disagree about what one Conversation's branch is called.
-        let head = head_ref(conversation_id, &repo, &branch).await;
-
+    for companion in committed {
         let asked = {
             let gh = state.github.clone();
-            let repo = repo.clone();
-            let head = head.clone();
+            let repo = companion.path.clone();
+            let head = companion.head.clone();
 
             tokio::task::spawn_blocking(move || github::pull_request(&gh, &repo, &head)).await
         };
@@ -486,7 +423,7 @@ pub(crate) async fn covering(state: AppState, conversation_id: i64) {
         let found = match asked {
             Ok(found) => found,
             Err(error) => {
-                tracing::error!(error = ?error, conversation_id, repo = companion.repo.name, "asking gh for a companion's pull request failed");
+                tracing::error!(error = ?error, conversation_id, repo = companion.name, "asking gh for a companion's pull request failed");
                 return;
             }
         };
@@ -496,14 +433,14 @@ pub(crate) async fn covering(state: AppState, conversation_id: i64) {
             Err(trouble) => {
                 tracing::warn!(
                     conversation_id,
-                    repo = companion.repo.name,
-                    branch,
-                    head,
+                    repo = companion.name,
+                    branch = companion.branch,
+                    head = companion.head,
                     why = trouble.why(),
                     "the work committed in a companion Verkstead can find no pull request in",
                 );
 
-                missing.push(format!("`{}`: {}", companion.repo.name, trouble.why()));
+                missing.push(format!("`{}`: {}", companion.name, trouble.why()));
                 continue;
             }
         };
@@ -511,7 +448,7 @@ pub(crate) async fn covering(state: AppState, conversation_id: i64) {
         match store::record_another_pull_request(
             &state.pool,
             conversation_id,
-            companion.repo.id,
+            companion.repo_id,
             &opened,
         )
         .await
@@ -519,7 +456,7 @@ pub(crate) async fn covering(state: AppState, conversation_id: i64) {
             Ok(true) => {
                 tracing::info!(
                     conversation_id,
-                    repo = companion.repo.name,
+                    repo = companion.name,
                     number = opened.number,
                     url = opened.url,
                     "a companion the work committed in is on a pull request of its own",
@@ -532,7 +469,7 @@ pub(crate) async fn covering(state: AppState, conversation_id: i64) {
                 // starts none of these — a companion recorded already is read
                 // past above — so a server coming back up over one gets its
                 // watchers from [`watching`] rather than from here.
-                let repo_id = companion.repo.id;
+                let repo_id = companion.repo_id;
 
                 driving(&state, conversation_id, move |state, conversation_id| {
                     crate::checks::watch(state, conversation_id, repo_id)
@@ -555,7 +492,7 @@ pub(crate) async fn covering(state: AppState, conversation_id: i64) {
                 "there is no Conversation left to record a companion's pull request against"
             ),
             Err(error) => {
-                tracing::error!(error = ?error, conversation_id, repo = companion.repo.name, "recording a companion's pull request failed");
+                tracing::error!(error = ?error, conversation_id, repo = companion.name, "recording a companion's pull request failed");
                 return;
             }
         }
@@ -589,6 +526,134 @@ pub(crate) async fn covering(state: AppState, conversation_id: i64) {
         writing,
     )
     .await;
+}
+
+/// One companion repository the work has committed in, as the two things
+/// anything asking GitHub about it needs: which repository, and the name its
+/// branch went to GitHub under.
+pub(crate) struct Committed {
+    /// The registered Repo, which is which of a Conversation's pull requests a
+    /// pull request found here would be.
+    pub(crate) repo_id: i64,
+
+    /// And what it is called, which is what a refusal and a Notice name.
+    pub(crate) name: String,
+
+    /// Where it is on this machine, which is where `gh` is run.
+    pub(crate) path: PathBuf,
+
+    /// The branch the work is on there, mirroring resolved.
+    pub(crate) branch: String,
+
+    /// And the name the remote is carrying that branch under, which is what a
+    /// pull request's head is — see [`head_ref`].
+    pub(crate) head: String,
+}
+
+/// The read-write companions this Conversation has committed in and has no pull
+/// request recorded for yet, ready to be asked about.
+///
+/// **One reading, because its two readers have to agree.** [`covering`] stops
+/// the run over a companion left without a pull request, and [`crate::done`]
+/// refuses a Done signal over the same thing a session earlier — so a companion
+/// the signal let through would be one the wrap-up stops the run over a moment
+/// later, which is the second session the signal exists to save.
+///
+/// **Touched means commits beyond the base**, asked of git in the companion's
+/// own repository — see [`crate::commits::touched`]. A read-only companion is
+/// not asked at all, and a read-write one with nothing on its branch is ignored
+/// by the whole of wrap-up: no pull request expected, nothing recorded, nothing
+/// waited on.
+///
+/// **A pull request recorded already is read past**, which is a finish that ran
+/// twice, a server that came back up, or a Resume over a wrap-up that stopped on
+/// another companion. Asked before git and before GitHub, both being dearer than
+/// a row.
+///
+/// `None` where the reading itself fell over — a record that would not be read,
+/// git that would not answer. Not an empty list: what a caller does about *not
+/// knowing* is its own, and the difference is the whole of why this says which
+/// it is.
+pub(crate) async fn committed_in(
+    state: &AppState,
+    conversation: &store::Conversation,
+) -> Option<Vec<Committed>> {
+    let conversation_id = conversation.id;
+    let mut committed = Vec::new();
+
+    for companion in &conversation.companions {
+        // A read-only companion is detached and bound read-only, so nothing can
+        // have landed on it and there is no branch to ask GitHub about.
+        if companion.mode != store::CompanionMode::ReadWrite {
+            continue;
+        }
+
+        // Mirroring resolved, which is the record's own business — see
+        // [`store::Companion::branch_for`].
+        let Some(branch) = companion.branch_for(&conversation.branch) else {
+            continue;
+        };
+
+        match store::pull_request(&state.pool, conversation_id, companion.repo.id).await {
+            Ok(Some(_)) => continue,
+            Ok(None) => {}
+            Err(error) => {
+                tracing::error!(error = ?error, conversation_id, repo = companion.repo.name, "reading whether a companion's pull request was recorded failed");
+                return None;
+            }
+        }
+
+        let Some(base) = companion.base_commit.clone() else {
+            tracing::error!(
+                conversation_id,
+                repo = companion.repo.name,
+                "a read-write companion has no base commit, so what the work committed \
+                 in it cannot be told from what it branched off"
+            );
+            continue;
+        };
+
+        let repo = companion.repo.path.clone();
+
+        // Off the runtime's threads: git is a process.
+        let touched = {
+            let repo = repo.clone();
+            let branch = branch.clone();
+
+            match tokio::task::spawn_blocking(move || {
+                crate::commits::touched(&repo, &base, &branch)
+            })
+            .await
+            {
+                Ok(touched) => touched,
+                Err(error) => {
+                    tracing::error!(error = ?error, conversation_id, repo = companion.repo.name, "asking git what a companion holds failed");
+                    return None;
+                }
+            }
+        };
+
+        if !touched {
+            continue;
+        }
+
+        // Under whatever name that repository's remote is carrying the branch,
+        // which is the Conversation's own question asked again per companion —
+        // see [`head_ref`]. A companion's finish sequence is that repository's,
+        // so its naming rule is that repository's too, and two repositories may
+        // well disagree about what one Conversation's branch is called.
+        let head = head_ref(conversation_id, &repo, &branch).await;
+
+        committed.push(Committed {
+            repo_id: companion.repo.id,
+            name: companion.repo.name.clone(),
+            path: repo,
+            branch,
+            head,
+        });
+    }
+
+    Some(committed)
 }
 
 /// Start one of them, registered as a driver of the Conversation for as long as

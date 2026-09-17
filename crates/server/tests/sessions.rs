@@ -1718,6 +1718,20 @@ const COMPANION_PULL_REQUEST: &str = r#"    printf '{"mergeable":"MERGEABLE","nu
 const COMPANION_NO_PULL_REQUEST: &str = r#"    printf 'no pull requests found for branch "%s"\n' "$3" >&2
     exit 1"#;
 
+/// And what it says when the finish left it without one until `opened` is there
+/// — the session going back and opening it, which is what a refused signal asks
+/// of it.
+fn companion_opened_once_refused(opened: &Path) -> String {
+    format!(
+        r#"    if [ ! -f {opened} ]; then
+        printf 'no pull requests found for branch "%s"\n' "$3" >&2
+        exit 1
+    fi
+{COMPANION_PULL_REQUEST}"#,
+        opened = quoted(opened),
+    )
+}
+
 /// One of those scripts as a `gh` the server can run: `sh -c` gives `$0` the
 /// program's own name, so what Verkstead passes lands in `$1` onwards.
 fn gh_stub(script: &str) -> Gh {
@@ -2003,8 +2017,20 @@ async fn grilling_alongside_asking(stub: &str, companion: &str, gh: &str) -> Gri
 /// And the same again with something else where `gh` goes, for the tests about
 /// what a wrap-up makes of the pull requests a finish opened in the companion.
 async fn grilling_building_in_asking(stub: &str, companion: &str, gh: &str) -> Grilling {
+    grilling_building_in_spilling(tempfile::tempdir().unwrap(), stub, companion, gh).await
+}
+
+/// The same over a spill directory the caller keeps a path into — for a stub
+/// that has something to say to the `gh` beside it, which is the one thing a
+/// caller needs the directory itself for.
+async fn grilling_building_in_spilling(
+    spill: tempfile::TempDir,
+    stub: &str,
+    companion: &str,
+    gh: &str,
+) -> Grilling {
     grilling_at_pace(
-        tempfile::tempdir().unwrap(),
+        spill,
         stub,
         gh,
         *BRISKLY,
@@ -6462,9 +6488,11 @@ esac
 /// finish that carries that companion to a pull request of its own, which is what
 /// the bundled forks tell a session to do about every repository it committed in.
 ///
-/// The companion's commit lands after the finish commit and before the session
-/// says anything, exactly as a finish sequence worked in order leaves it: the
-/// Conversation's own repository first, then each companion in its own worktree.
+/// The companion's commit lands after the finish commit and before the signal,
+/// exactly as a finish sequence worked in order leaves it: the Conversation's
+/// own repository first, then each companion in its own worktree, and
+/// `verkstead done` last of all — which is what the signal being checked against
+/// every companion's pull request asks for. See ADR-0018.
 const A_BACKLOG_ALONGSIDE: &str = r#"
 case "$1" in
 claude-grilling-5)
@@ -6496,7 +6524,6 @@ claude-grilling-5)
     else
         git rm --quiet -r .tasks
         git commit --quiet -m 'chore: finish rate-limiting'
-        : > /tmp/verkstead/done
         cd ../askance-*
         printf 'the other half\n' > halves.md
         git add halves.md
@@ -6508,6 +6535,87 @@ claude-grilling-5)
     ;;
 esac
 "#;
+
+/// The same again, with a finish that sees itself out instead of signalling.
+///
+/// Which is the one shape [`verkstead_server`]'s wrap-up is still the net under:
+/// a session that exits by itself is read off the repository once, so a step
+/// that landed is a step done and the run goes on to ask GitHub about the
+/// companions with nobody left to tell. See ADR-0018.
+const A_BACKLOG_ALONGSIDE_UNSIGNALLED: &str = r#"
+case "$1" in
+claude-grilling-5)
+    printf 'grilling\n'
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    : > /tmp/verkstead/done
+    sleep 300
+    ;;
+*)
+    case "$2" in
+    *reviewing/SKILL.md*)
+        printf 'I read the whole branch and found nothing worth raising\n'
+        exit 0
+        ;;
+    esac
+    number=$(sed -n 's/^- \[ \] \([0-9]*\):.*/\1/p' .tasks/TODO.md | head -n 1)
+    next=$(ls .tasks | grep -E "^$number-" | head -n 1)
+    if [ -n "$next" ]; then
+        printf 'a limiter\n' >> limiter.md
+        sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
+        git add -A
+        git commit --quiet -m "feat: count the requests"
+        : > /tmp/verkstead/done
+        sleep 300
+    else
+        git rm --quiet -r .tasks
+        git commit --quiet -m 'chore: finish rate-limiting'
+        cd ../askance-*
+        printf 'the other half\n' > halves.md
+        git add halves.md
+        git commit --quiet -m 'feat: the other half'
+        printf 'pushed both, and the pull requests are open\n'
+        exit 0
+    fi
+    ;;
+esac
+"#;
+
+/// And one whose finish is refused for the companion's pull request and goes
+/// back and opens it, which is what a refusal asks of a session.
+///
+/// `opened` is this fixture's stand-in for that pull request appearing on
+/// GitHub: the companion's `gh` answers *no pull request* until the file is
+/// there — see [`companion_opened_once_refused`].
+fn a_backlog_alongside_opened_once_refused(opened: &Path) -> String {
+    let signalled = r#"        git commit --quiet -m 'feat: the other half'
+        : > /tmp/verkstead/done
+"#;
+
+    assert!(
+        A_BACKLOG_ALONGSIDE.contains(signalled),
+        "the finish that is being given a refusal to put right has to signal after the \
+         companion's commit",
+    );
+
+    A_BACKLOG_ALONGSIDE.replace(
+        signalled,
+        &format!(
+            r#"        git commit --quiet -m 'feat: the other half'
+        rm -f /tmp/verkstead/done-said
+        : > /tmp/verkstead/done
+        while ! grep -q askance /tmp/verkstead/done-said 2>/dev/null; do sleep 0.05; done
+        cp /tmp/verkstead/done-said /tmp/verkstead/refused
+        : > {opened}
+"#,
+            opened = quoted(opened),
+        ),
+    )
+}
 
 /// The same backlog, with the session Verkstead sends after a finish that opened
 /// nothing doing the one thing it is sent for.
@@ -8075,17 +8183,78 @@ async fn a_read_only_companion_is_not_asked_about_a_pull_request() {
     );
 }
 
-/// And a companion the work *did* commit in and left without a pull request stops
-/// the run, with a Notice naming the repository.
+/// And a companion the work *did* commit in and left without a pull request
+/// refuses the signal, naming the repository — so the session that could open it
+/// is still there to, which is the whole of why the signal is checked at all.
 ///
-/// A deliberate stop, the shape a missing pull request already had: the work ran
-/// and left none, so what is wrong is out here rather than in a driver that went
-/// away. What was already found stays found — the Conversation's own pull request
-/// is pinned and clickable while the human sorts out the one that is missing.
+/// The finish sequence covers each companion in that repository's own words, so
+/// each is a pull request a session can stop short of. Left to the wrap-up it
+/// would be a stop, a session later, with whoever could have put it right gone.
+/// See ADR-0018.
 #[tokio::test]
-async fn a_committed_in_companion_without_a_pull_request_stops_the_run_naming_it() {
+async fn a_committed_in_companion_without_a_pull_request_refuses_the_signal_naming_it() {
+    // The session's own spill directory, because that is the one place both ends
+    // of this can reach: the stub writes into it to say the companion's pull
+    // request is open now, and the `gh` beside it reads that.
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("askance-pull-request");
+
+    let fixture = grilling_building_in_spilling(
+        spill,
+        &a_backlog_alongside_opened_once_refused(&opened),
+        "askance",
+        &gh_alongside(&companion_opened_once_refused(&opened)),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let refused = refused_for_a_pull_request(&fixture).await;
+
+    assert!(
+        refused.contains("askance"),
+        "the refusal names the companion that was left without one: {refused:?}",
+    );
+    assert!(
+        refused.contains("no open pull request"),
+        "and says what is missing about it: {refused:?}",
+    );
+
+    // Put right in the same turn, which is what a refusal is for: the session
+    // opened the one it had missed and signalled again.
+    let found = fixture
+        .until(|view| {
+            let found = pull_requests(view);
+
+            (found.len() == 2).then(|| found.iter().map(|pull| pull.number).collect::<Vec<_>>())
+        })
+        .await;
+
+    assert_eq!(
+        found, [41, 7],
+        "one pull request per repository the work committed in",
+    );
+    assert_eq!(
+        fixture.view().await.state,
+        Lifecycle::Wrapping,
+        "and nothing stopped over it",
+    );
+}
+
+/// A finish that sees itself out without signalling and left a companion without
+/// a pull request stops the run, with a Notice naming the repository.
+///
+/// The net under a session that exits by itself, which is the one shape nothing
+/// can be told about in the turn: the step landed, so the run goes on, and the
+/// wrap-up is where the missing pull request is found. A deliberate stop — the
+/// work ran and left none, so what is wrong is out here rather than in a driver
+/// that went away. What was already found stays found: the Conversation's own
+/// pull request is pinned and clickable while the human sorts out the missing
+/// one.
+#[tokio::test]
+async fn a_finish_that_exits_leaving_a_companion_without_a_pull_request_stops_the_run_naming_it() {
     let fixture = grilling_building_in_asking(
-        A_BACKLOG_ALONGSIDE,
+        A_BACKLOG_ALONGSIDE_UNSIGNALLED,
         "askance",
         &gh_alongside(COMPANION_NO_PULL_REQUEST),
     )

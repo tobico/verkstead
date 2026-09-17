@@ -137,9 +137,9 @@ needs nothing at all, and a read-only one could hold nothing to begin with —
 `git log --oneline <base>..HEAD` in its worktree, against the commit its branch
 was cut from, is what says which is which.
 
-Verkstead asks GitHub about each of them once this session is over, so a
-companion holding commits and no pull request stops the run rather than being
-carried on past.
+Verkstead asks GitHub about each of them when you run `verkstead done`, so a
+companion holding commits and no pull request refuses the signal, naming the
+repository. Open the missing one and run it again.
 
 ### A session that finds the work already done
 
@@ -160,8 +160,9 @@ on an answer, is not cut off while it waits.
 
 Verkstead checks the repository when you run it. A refusal exits non-zero and
 says on stderr what is missing — nothing committed since this session began,
-changes left uncommitted, or a branch with no open pull request — and the
-session carries on: put that right and run `verkstead done` again.
+changes left uncommitted, or a branch with no open pull request, this one's or a
+companion's — and the session carries on: put that right and run
+`verkstead done` again.
 
 ## When you need the human
 

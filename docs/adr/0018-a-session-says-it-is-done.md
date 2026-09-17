@@ -53,8 +53,14 @@ it right in the same turn. It is refused when:
   uncommitted changes, the refusal naming the files;
 - the session is one meant to end on a pull request — a finish step, an inline
   run, a roadmap's own session, the session sent to open one — and the branch
-  has none open. GitHub out of reach reads as accepted, because a session is not
-  to be held hostage by somebody else's outage.
+  has none open, or a companion repo the work committed in has none. The finish
+  sequence covers each companion in that repository's own words, so each is a
+  pull request a session can stop short of, and the wrap-up stops the run over
+  one a session later with whoever could have opened it already gone. The
+  companions are read the one way both of them read them, so the signal and the
+  wrap-up cannot come to disagree about one repository. GitHub out of reach
+  reads as accepted, because a session is not to be held hostage by somebody
+  else's outage.
 
 This is the answer to what ADR-0008 held against an explicit signal, that it was
 "a second report beside the artifact and a forgettable one". A half-made report

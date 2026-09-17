@@ -197,9 +197,9 @@ needs nothing at all, and a read-only one could hold nothing to begin with —
 `git log --oneline <base>..HEAD` in its worktree, against the commit its branch
 was cut from, is what says which is which.
 
-Verkstead asks GitHub about each of them once this session is over, so a
-companion holding commits and no pull request stops the run rather than being
-carried on past.
+Verkstead asks GitHub about each of them when you run `verkstead done`, so a
+companion holding commits and no pull request refuses the signal, naming the
+repository. Open the missing one and run it again.
 
 ## Saying you are done
 
@@ -212,9 +212,10 @@ Verkstead checks the repository when you run it. A refusal exits non-zero and
 says on stderr what is missing — a box not ticked and committed, say — and the
 session carries on: put that right and run `verkstead done` again.
 
-The finish step is checked for its pull request too: its signal is refused while
-the branch has no open pull request. So push and open it first, the way the
-repository's own review process says, and signal after.
+The finish step is checked for its pull requests too: its signal is refused
+while the branch has no open pull request, and while any companion the work
+committed in has none. So push and open each first, the way that repository's
+own review process says, and signal after.
 
 ## When you need the human
 

@@ -219,9 +219,9 @@ needs nothing at all, and a read-only one could hold nothing to begin with —
 `git log --oneline <base>..HEAD` in its worktree, against the commit its branch
 was cut from, is what says which is which.
 
-Verkstead asks GitHub about each of them once this session is over, so a
-companion holding commits and no pull request stops the run rather than being
-carried on past.
+Verkstead asks GitHub about each of them when you run `verkstead done`, so a
+companion holding commits and no pull request refuses the signal, naming the
+repository. Open the missing one and run it again.
 
 ## Saying you are done
 
@@ -229,8 +229,9 @@ The last thing this session does, once the roadmap is committed and the branch
 is on a pull request, is run `verkstead done`. That is what ends the session,
 and nothing else does: not the commit, and not going quiet. Verkstead checks the
 repository when you run it. A refusal exits non-zero and says on stderr what is
-missing — the roadmap not committed, or a branch with no open pull request — and
-the session carries on: put that right and run `verkstead done` again.
+missing — the roadmap not committed, or a branch with no open pull request, this
+one's or a companion's — and the session carries on: put that right and run
+`verkstead done` again.
 
 ## How the questions reach them
 
