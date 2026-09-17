@@ -56,6 +56,7 @@ mod conversations;
 mod deferrals;
 /// The uncommitted changes the server reads for a Question Set's Diff.
 mod diffs;
+mod done;
 mod drivers;
 mod exchanges;
 /// What a follow-up session is started on, and read back from where it stands.
@@ -311,6 +312,10 @@ pub(crate) struct AppState {
     /// question: a session is one agent running, and a driver is the task that
     /// keeps starting them — see [`drivers`].
     drivers: drivers::Drivers,
+
+    /// And what each running session is to be ended on the Done signal for,
+    /// where something is waiting on one — see [`done`].
+    signals: done::Signals,
 
     updates: updates::Updates,
 
@@ -927,6 +932,7 @@ fn routed(
         terminals: terminals::Terminals::new(),
         followers: followers::Followers::new(),
         drivers: drivers::Drivers::new(),
+        signals: done::Signals::new(),
         updates,
 
         // What the installation asked every sandbox to bind, kept whole for
@@ -1032,6 +1038,11 @@ fn routed(
         .route(
             &format!("{ASKING_FROM}/{{conversation}}/api/v1/sets/{{id}}/response"),
             post(responses::submit_response).get(responses::wait_for_response),
+        )
+        // And the session saying its work is finished, which is what ends it.
+        .route(
+            &format!("{ASKING_FROM}/{{conversation}}/api/v1/done"),
+            post(done::signal),
         )
         // The viewer's half. It shares this state rather than holding its own:
         // a submit or a locking from the browser has to reach an agent

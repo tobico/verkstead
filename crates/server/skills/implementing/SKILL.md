@@ -137,7 +137,7 @@ needs nothing at all, and a read-only one could hold nothing to begin with —
 `git log --oneline <base>..HEAD` in its worktree, against the commit its branch
 was cut from, is what says which is which.
 
-Verkstead asks GitHub about each of them once you have gone quiet, so a
+Verkstead asks GitHub about each of them once this session is over, so a
 companion holding commits and no pull request stops the run rather than being
 carried on past.
 

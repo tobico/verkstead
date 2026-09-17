@@ -9,10 +9,11 @@
 //!
 //! **So it is spoken to.** Verkstead types a canned line into the running
 //! session — through the terminal a watcher's keystrokes go through, which is the
-//! only way in there is and which [`crate::typing`] is — putting to it the two
-//! moves that would end the silence: carrying on, where it has a next step, and
-//! otherwise the one move that reaches the human at all, which is where it has
-//! got to put to them as a Set. An agent that had finished its turn takes
+//! only way in there is and which [`crate::typing`] is — putting to it the
+//! moves that would end the silence: carrying on, where it has a next step;
+//! running `verkstead done`, where it is a session ended on that signal and its
+//! work is finished; and otherwise the one move that reaches the human at all,
+//! which is where it has got to put to them as a Set. An agent that had finished its turn takes
 //! another one.
 //!
 //! **Both, because the line is sometimes wrong.** What it is read off is a
@@ -43,8 +44,10 @@
 //! which is its backend's judgement rather than one rule for all of them, see
 //! [`crate::sessions::Idle`] — and anything that says it is working again puts
 //! the whole grace back on the clock. And a session that
-//! has landed what it was sent for is not spoken to either — the driver beside
-//! this is already ending it.
+//! has finished is not spoken to either — the driver beside this is already
+//! ending it. Finished is the kind's own reading: a session ended on its Done
+//! signal has finished once it has given one, whatever is on the branch, so one
+//! that landed its work and said nothing is exactly a session to speak to.
 //!
 //! **Nor is one that has been handed something and not yet said a word about
 //! it.** An answer reaches a session down a chain Verkstead can see no hop of —
@@ -62,11 +65,11 @@
 //! prodding an agent rather than anything the work has got to, and the session's
 //! own Capture holds the line and whatever the agent made of it.
 
-use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use crate::AppState;
-use crate::runner::{Landing, Pace};
+use crate::done::Signal;
+use crate::runner::Pace;
 use crate::sessions::Idle;
 
 /// How many times one session is spoken to before Verkstead stops asking.
@@ -96,6 +99,17 @@ pub(crate) const AT_MOST: usize = 2;
 pub(crate) const LINE: &str = "If you have your next step, carry on with it now. If you are blocked or waiting on me, \
      summarize your status and ask me what to do next via `verkstead ask`.";
 
+/// What is typed into a session that is ended on its Done signal, which has a
+/// third move the others have not: saying it is finished.
+///
+/// The same conditional shape as [`LINE`], and for the same reason. A session
+/// that has landed its work and not said so is exactly one to speak to now —
+/// nothing else ends it — and one that was only between two steps spends the
+/// line on carrying on.
+pub(crate) const SIGNALLING_LINE: &str = "If you have your next step, carry on with it now. If your work is finished, run \
+     `verkstead done`. If you are blocked or waiting on me, summarize your status and ask me \
+     what to do next via `verkstead ask`.";
+
 /// How long the wait for that echo goes on for before the stir is taken anyway.
 ///
 /// The ceiling on [`after_the_echo`], and there are two terminals it is for: the
@@ -121,8 +135,13 @@ const FOR_THE_ECHO: Duration = Duration::from_secs(2);
 /// look and this one — which is not a rescue that failed but a rescue that had
 /// nothing to rescue. The caller is waiting on that ending too, so what to do
 /// about it is already in hand.
-pub(crate) async fn rescue(state: &AppState, conversation_id: i64, event_id: i64) -> bool {
-    if !crate::typing::typed(state, conversation_id, event_id, LINE).await {
+pub(crate) async fn rescue(
+    state: &AppState,
+    conversation_id: i64,
+    event_id: i64,
+    line: &str,
+) -> bool {
+    if !crate::typing::typed(state, conversation_id, event_id, line).await {
         tracing::info!(
             conversation_id,
             event_id,
@@ -192,17 +211,13 @@ async fn after_the_echo(idle: &Idle) -> Instant {
 /// indicator rather than a mechanism.
 #[derive(Debug, Clone)]
 pub(crate) enum Done {
-    /// A grilling's artifact, or a backlog step's task file: the path is where
-    /// it should be and git has nothing pending for it — see
-    /// [`crate::runner::Landing`], which is the same reading the step is ended
-    /// on.
-    Landed {
-        /// The Worktree the session is working in.
-        worktree: PathBuf,
-
-        /// And what landing looks like there.
-        landing: Landing,
-    },
+    /// A grilling's artifact, or a backlog step: the session has given its Done
+    /// signal and the repository bore it out — see [`crate::done`].
+    ///
+    /// The signal rather than the landing itself. A session that has landed
+    /// its work and not said so is not being ended by anything, so it is
+    /// exactly a session to speak to.
+    Signalled(Signal),
 
     /// An instruction or a fix: the Conversation's commits standing somewhere
     /// past where they stood when the session started. There is no path to watch
@@ -231,11 +246,20 @@ impl Done {
     /// errs that way for the ending it also decides.
     async fn reached(&self, state: &AppState, conversation_id: i64) -> bool {
         match self {
-            Done::Landed { worktree, landing } => crate::runner::check(worktree, landing).await,
+            Done::Signalled(signal) => signal.given(),
             Done::Committed { already } => {
                 crate::runner::committed_since(state, conversation_id, *already).await
             }
             Done::NothingElse => crate::runner::marked(state, conversation_id).await,
+        }
+    }
+
+    /// What to type into a session of this kind: the three moves where the
+    /// session ends on its Done signal, and the two where Verkstead ends it.
+    fn line(&self) -> &'static str {
+        match self {
+            Done::Signalled(_) => SIGNALLING_LINE,
+            Done::Committed { .. } | Done::NothingElse => LINE,
         }
     }
 }
@@ -380,7 +404,7 @@ pub(crate) async fn until_it_will_not_ask(
         // Counted only where it reached a session. One that has ended between
         // the last look and this one is not a rescue that failed — the ending is
         // being waited on beside this, and it is the ending that decides.
-        if rescue(state, conversation_id, event_id).await {
+        if rescue(state, conversation_id, event_id, done.line()).await {
             spent += 1;
 
             // Once what was typed has finished arriving back, rather than as it

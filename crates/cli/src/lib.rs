@@ -25,6 +25,7 @@ mod ask;
 mod client;
 #[cfg(feature = "desktop")]
 mod desktop;
+mod done;
 mod guide;
 /// The verb nobody types: the launcher a Windows session's console is made by,
 /// as the session account, because a console cannot be handed to a process
@@ -128,6 +129,21 @@ enum Command {
         server: String,
     },
 
+    /// Say this session's work is finished, which is what ends it.
+    ///
+    /// Run it last: once the work is committed and everything after it is
+    /// finished. Verkstead checks the repository there and then. Accepted, it
+    /// prints a confirmation, exits 0, and the session is ended once it next
+    /// stops; refused, it exits non-zero and says on stderr what is missing,
+    /// and the session carries on so that it can be put right.
+    Done {
+        /// Where the Verkstead server is: its base URL, or `pipe://<name>` for
+        /// a named pipe, which is Windows' own and what a session in a
+        /// container asks through.
+        #[arg(long, env = "VERKSTEAD_SERVER", default_value = DEFAULT_SERVER)]
+        server: String,
+    },
+
     /// Run the Verkstead server: the agents' API and the human's viewer.
     ///
     /// The flags are the server's own, and the one verb here that is not an
@@ -198,6 +214,7 @@ impl Cli {
                 server,
             }) => ask::ask(file.as_deref(), deferred, &server),
             Some(Command::Answers { id, server }) => answers::answers(id, &server),
+            Some(Command::Done { server }) => done::done(&server),
             Some(Command::Serve(config)) => serve::serve(config),
             #[cfg(feature = "desktop")]
             Some(Command::Desktop(app)) => desktop::desktop(app),

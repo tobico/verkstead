@@ -79,8 +79,10 @@ The whole Response comes back to you, the pick with the rest of it, and you are
 still holding the thread. Read all of it and judge for yourself whether
 everything is clear. **Proceeding is producing the picked direction's
 artifact** — the handoff, the committed backlog or the committed roadmap, as the
-three branches below set out. Nothing else you could do moves this on: Verkstead
-watches for that artifact and for you to go quiet, and for nothing else.
+three branches below set out. Nothing else you could do moves this on. Once the
+artifact is written, run `verkstead done`: Verkstead checks it against the
+latest pick, and that is the one thing that ends this session. A refusal exits
+non-zero and says what is missing; put that right and run it again.
 
 So there is no hurry in it. If something they wrote beside the pick opens a gap,
 **go back and ask** — an ordinary Set, no `proposal` block — and write nothing
@@ -89,7 +91,7 @@ until it is closed. The pick keeps standing while you do.
 And if what you now think is that the direction itself is wrong, **propose
 again**: a fresh `proposal` block on the Set you go back with, arguing for the
 other one. A pick on that supersedes the one before it, and the latest is what
-Verkstead watches for.
+`verkstead done` is checked against.
 
 **Arguing with a pick by writing a different artifact is the one thing you may
 never do.** A backlog where they picked inline is not a counter-argument, it is
@@ -125,9 +127,9 @@ read the Brief and nothing else:
 - **What would count as done.**
 
 Whatever they wrote beside the pick is part of what the handoff has to say —
-read the whole Response before you write it. Then stop: the handoff plus your
-going quiet is what ends this session, and Verkstead starts the build. Do not
-start the work yourself.
+read the whole Response before you write it. Then run `verkstead done`, which is
+what ends this session, and Verkstead starts the build. Do not start the work
+yourself.
 
 ### When they pick a task list
 
@@ -141,10 +143,9 @@ the agreement is this conversation rather than a document somebody handed you.
 Whatever they wrote beside the pick is part of what the backlog has to answer
 to — read the whole Response before you draft anything.
 
-The plan commit is what ends this session. Verkstead watches for `.tasks/`
-committed to the branch and then for you to go quiet, and runs the backlog from
-there — a fresh session per task, under the account that builds. Do not start
-task 01.
+Once the plan commit is on the branch, run `verkstead done`, which is what
+ends this session. Verkstead runs the backlog from there — a fresh session per
+task, under the account that builds. Do not start task 01.
 
 ### When they pick a roadmap
 
@@ -160,10 +161,10 @@ conversation, and whatever they wrote beside the pick.
 That skill goes further than the breaking-down one does: it ends with the
 roadmap committed *and* the branch carried to a pull request, the way this
 repository's own review process says. Both are yours to do here, and neither
-waits on approval. Verkstead watches for the roadmap on the branch and then for
-you to go quiet, and takes the Conversation on to wrapping that pull request
-up. **Do not start stage 01** — Verkstead runs each stage as a Conversation of
-its own, on a branch of its own.
+waits on approval. Once the pull request is open, run `verkstead done`, which is
+what ends this session, and Verkstead takes the Conversation on to wrapping that
+pull request up. **Do not start stage 01** — Verkstead runs each stage as a
+Conversation of its own, on a branch of its own.
 
 ### When they don't accept
 

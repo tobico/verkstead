@@ -195,6 +195,7 @@ fn the_guide_covers_every_core_area() {
         "## The CLI contract",
         "## Running the ask",
         "## Reading the Response",
+        "## Ending the session",
     ] {
         assert!(
             guide.contains(heading),
@@ -735,6 +736,7 @@ fn only_the_two_asking_sections_differ_between_the_backends() {
         "## The CLI contract",
         "## Authoring the Set",
         "## Reading the Response",
+        "## Ending the session",
     ] {
         assert_eq!(
             section(&blocking, heading),
@@ -845,4 +847,25 @@ fn every_backends_guide_stands_alone() {
     for agent_type in ["claude", "codex", "grok", "opencode"] {
         stands_alone(&stdout(&run_as(agent_type, &["guide"])));
     }
+}
+
+/// A session is ended by the Done signal and nothing else, so the Guide an
+/// agent reads before asking is also where it learns how to finish: the verb,
+/// that it goes last, and what a refusal asks of it.
+#[test]
+fn the_guide_says_how_a_session_ends() {
+    let guide = stdout(&run(&["guide"]));
+
+    let ending = section(&guide, "## Ending the session");
+
+    for phrase in ["verkstead done", "Run it last", "Refused", "again"] {
+        assert!(
+            ending.contains(phrase),
+            "the section on ending a session should say {phrase:?}, got:\n{ending}"
+        );
+    }
+    assert!(
+        !guide.contains("go quiet") && !guide.contains("goes quiet"),
+        "and nothing in the Guide says a session is ended by going quiet, got:\n{guide}"
+    );
 }

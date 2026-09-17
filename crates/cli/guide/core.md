@@ -401,3 +401,31 @@ omission, and there is nothing there to follow up:
 A Response of nothing but `unanswered` entries plus a `comment` is a valid
 counter-question. It means the human is not answering as asked — take the
 discussion back a step rather than putting the same Set again.
+
+## Ending the session
+
+A session Verkstead launched is ended by **`verkstead done`**, and by nothing
+else: not by the work arriving on the branch, and not by going quiet. So a
+session can commit, start a test run, ask a question or wait on anything else
+without being ended in the middle of it.
+
+**Run it last** — once the work is committed and everything after it is
+finished: the push, the pull request, whatever the skill being followed says
+comes after the commit. It takes no arguments, because Verkstead already knows
+what this session was sent to do.
+
+```
+verkstead done
+```
+
+Verkstead checks the repository at that moment:
+
+- **Accepted** — it prints a confirmation and exits 0, and the session is ended
+  once it next stops. Anything still to say can be said straight after; it is
+  kept.
+- **Refused** — it exits non-zero and says on stderr what is missing: a box not
+  ticked and committed, a document not written, no Direction picked yet. The
+  session carries on. Put right what it names, then run `verkstead done` again.
+
+Being unable to finish is not a kind of done. That is a Question for the human,
+asked with `verkstead ask`.

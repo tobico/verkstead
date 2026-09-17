@@ -4,7 +4,7 @@ description: Start a roadmap stage: re-ground its brief against the code, quiz t
 ---
 
 Turn the stage brief in the prompt into a sequential `.tasks/` backlog in this
-worktree, commit it, and stop.
+worktree, commit it, and say you are done with `verkstead done`.
 
 The brief was written when the roadmap was staged, out of a whole grilling. It is
 the agreement about *what this stage is for* — but its task chunking is
@@ -164,9 +164,16 @@ If the re-grounding turned up changes to `CONTEXT.md`, the ADRs under
 `docs/adr/`, or other project documentation, include them too — they belong on
 the branch beside the plan that motivated them.
 
-Then stop. **Do not start on task 01**, and do not say anything about clearing a
-context — Verkstead reads `.tasks/` back off the branch and runs a session of its
-own per task.
+**Do not start on task 01**, and do not say anything about clearing a context —
+Verkstead reads `.tasks/` back off the branch and runs a session of its own per
+task.
+
+The last thing this session does, once that commit is on the branch, is run
+`verkstead done`. That is what ends the session, and nothing else does: not the
+commit, and not going quiet. Verkstead checks the repository when you run it. A
+refusal exits non-zero and says on stderr what is missing — `TODO.md` not
+committed, say — and the session carries on: put that right and run
+`verkstead done` again.
 
 ## How the questions reach them
 

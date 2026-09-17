@@ -2170,6 +2170,16 @@ async fn worktree(pool: &SqlitePool, id: i64) -> Result<Option<std::path::PathBu
     Ok(row.map(|(path,)| std::path::PathBuf::from(path)))
 }
 
+/// The Direction the human last picked on a Conversation, where they have
+/// picked one.
+///
+/// For the one reader with nothing else to ask: a session saying it is done
+/// with nothing yet waiting on its signal, which is a grilling picked on a
+/// moment ago or one nobody has picked on at all.
+pub async fn picked_direction(pool: &SqlitePool, id: i64) -> Result<Option<Direction>> {
+    direction(pool, id).await
+}
+
 /// How a Conversation's work is to be built, if the human has chosen yet.
 async fn direction(pool: &SqlitePool, id: i64) -> Result<Option<Direction>> {
     let row: Option<(String,)> =

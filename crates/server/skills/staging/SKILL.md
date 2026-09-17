@@ -87,8 +87,8 @@ merged, split or reordered — plus whatever drift step 1 turned up.
 
 Iterate until they approve it. Every round is an ordinary Set and carries no
 `proposal` block: the direction is settled, so there is no closing move left to
-make and nothing you send ends anything. What ends this session is the pull
-request below.
+make and nothing you send ends anything. What ends this session is
+`verkstead done`, once the pull request below is open.
 
 ## 4. Write the roadmap
 
@@ -200,9 +200,9 @@ the roadmap —
 **Nothing waits on approval here either.** No gate, no confirmation and nobody
 at this terminal: the pull request opens unasked, and it opens as a *draft*
 because merging is the human's act and nothing here is allowed to look like it
-was theirs. Then stop — that is also what ends this session: Verkstead sees the
-roadmap land, waits for you to go quiet, and takes the Conversation on to
-wrapping the pull request up.
+was theirs. Then run `verkstead done`, once every companion below is finished
+too — see *Saying you are done* below — and Verkstead takes the Conversation on
+to wrapping the pull request up.
 
 ### And every companion repository you committed in
 
@@ -219,9 +219,18 @@ needs nothing at all, and a read-only one could hold nothing to begin with —
 `git log --oneline <base>..HEAD` in its worktree, against the commit its branch
 was cut from, is what says which is which.
 
-Verkstead asks GitHub about each of them once you have gone quiet, so a
+Verkstead asks GitHub about each of them once this session is over, so a
 companion holding commits and no pull request stops the run rather than being
 carried on past.
+
+## Saying you are done
+
+The last thing this session does, once the roadmap is committed and the branch
+is on a pull request, is run `verkstead done`. That is what ends the session,
+and nothing else does: not the commit, and not going quiet. Verkstead checks the
+repository when you run it. A refusal exits non-zero and says on stderr what is
+missing — the roadmap not committed, say — and the session carries on: put that
+right and run `verkstead done` again.
 
 ## How the questions reach them
 

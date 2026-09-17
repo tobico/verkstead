@@ -66,7 +66,7 @@ missing — plus whatever drift step 1 turned up.
 Iterate until they approve the breakdown. Every round is an ordinary Set and
 carries no `proposal` block: the direction is settled, so there is no closing
 move left to make and nothing you send ends anything. What ends this session is
-the plan commit below.
+`verkstead done`, once the plan commit below is on the branch.
 
 ## 4. Write the task files
 
@@ -121,10 +121,16 @@ If the planning turned up changes to `CONTEXT.md`, the ADRs under `docs/adr/`, o
 other project documentation, include them in that commit: they belong on the
 branch beside the plan that motivated them.
 
-Then stop. **Do not start on task 01**, and do not say anything about clearing a
-context — Verkstead reads `.tasks/` back off the branch and runs a session of its
-own per task. That commit is also what ends this session: Verkstead sees the
-backlog land, waits for you to go quiet, and takes it from there.
+**Do not start on task 01**, and do not say anything about clearing a context —
+Verkstead reads `.tasks/` back off the branch and runs a session of its own per
+task.
+
+The last thing this session does, once that commit is on the branch, is run
+`verkstead done`. That is what ends the session, and nothing else does: not the
+commit, and not going quiet. Verkstead checks the repository when you run it. A
+refusal exits non-zero and says on stderr what is missing — `TODO.md` not
+committed, say — and the session carries on: put that right and run
+`verkstead done` again.
 
 ## How the questions reach them
 

@@ -21,7 +21,7 @@ describing the finished work rather than the code as any one task finds it.
 
 ## Tasks
 
-- [ ] 01: `verkstead done` ends a session that landed its work — [details](01-done-ends-a-landed-session.md)
+- [x] 01: `verkstead done` ends a session that landed its work — [details](01-done-ends-a-landed-session.md)
 - [ ] 02: Done is refused over uncommitted changes, and locks an open Set — [details](02-uncommitted-changes-and-open-sets.md)
 - [ ] 03: Sessions that report through a commit — [details](03-commit-reported-sessions.md)
 - [ ] 04: Sessions that report through their own words — [details](04-word-reported-sessions.md)

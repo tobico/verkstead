@@ -23,11 +23,13 @@
 //! watcher that tripped the session's own `git add` would break the step it is
 //! waiting for.
 //!
-//! A session is then ended on **done plus quiet**, never on done alone. Work
-//! does not always stop at the commit — a message, a summary, the tidying after
-//! — so the session is ended only once it has printed nothing for the grace
-//! period, and anything it prints in the meantime puts the whole grace back on
-//! the clock. A session that keeps talking is never killed blind.
+//! **A step's session is ended because it said it was done** — see
+//! [`crate::done`], and ADR-0018. The landing is no longer what ends one: it is
+//! what the session's `verkstead done` is checked against, at that moment and
+//! only then, so a session that commits and then waits on its tests or asks a
+//! question is a session still at work. Once the signal is taken the session is
+//! ended when it has next printed nothing for the grace period, so what it says
+//! on the way out is kept.
 //!
 //! **Every kind of session is ended by Verkstead**, and none of them by itself:
 //! they are ordinary interactive agents, which idle when their work is done
@@ -2750,8 +2752,13 @@ async fn stop(
     }
 }
 
-/// See one step's session out: end it once the step has landed and the session
-/// has gone quiet, and say whether the step landed at all.
+/// See one step's session out: end it once it has said it is done and gone
+/// quiet since, and say whether the step landed at all.
+///
+/// What its Done signal is checked against is the step's own [`Landing`],
+/// written down for the length of the watch — see [`crate::done`]. A session
+/// that lands its step and says nothing is left running, and the rescue is what
+/// speaks to it.
 ///
 /// `None` is a session that is over with its step not done. That is a crash, a
 /// hang given up on, or an agent that stopped short — which of them is not
@@ -2764,7 +2771,7 @@ async fn stop(
 /// there with the turn finished. So it is told what it cannot see from inside —
 /// twice, and then ended where it stands and stopped over like any other step
 /// that did not land. See [`crate::rescues`], whose done-indicator here is the
-/// step's own [`Landing`].
+/// session's own Done signal.
 ///
 /// `Some` is the Timeline Event the session printed into. The step landed, and
 /// what comes after it may still want the session's own last words — the finish
@@ -2788,23 +2795,29 @@ async fn see_out(
     let idle = session.idle.clone();
     let pace = state.sessions.pace();
 
+    // What the session's Done signal is checked against, written down for as
+    // long as it is being seen out — and taken away with this if the watch is
+    // cancelled, which a later pick does. See [`crate::done`].
+    let expecting =
+        state
+            .signals
+            .expecting(conversation_id, event_id, worktree.clone(), landing.clone());
+    let signal = expecting.signal();
+
     let ended = tokio::select! {
         ended = session.ended() => Some(ended),
-        _ = landed_and_quiet(&worktree, &landing, &idle, pace) => None,
-        // The step is not landing and the session is not asking about it: it has
-        // gone idle with nothing open and nothing on the branch, which is a run
-        // nobody can move. Told twice and then stopped where it stands — see
-        // [`crate::rescues`], whose loop this is one of five callers of.
+        () = signalled_and_idle(signal.clone(), &idle, pace) => None,
+        // The session has not said it is done and is not asking about anything:
+        // it has gone idle with nothing open, which is a run nobody can move.
+        // Told twice and then stopped where it stands — see [`crate::rescues`],
+        // whose loop this is one of five callers of.
         () = crate::rescues::until_it_will_not_ask(
             state,
             conversation_id,
             event_id,
             &idle,
             pace,
-            crate::rescues::Done::Landed {
-                worktree: worktree.clone(),
-                landing: landing.clone(),
-            },
+            crate::rescues::Done::Signalled(signal),
         ) => {
             tracing::warn!(
                 conversation_id,
@@ -2830,12 +2843,14 @@ async fn see_out(
         }
     };
 
+    drop(expecting);
+
     let Some(ended) = ended else {
         tracing::info!(
             conversation_id,
             event_id,
             step = ?step,
-            "a step has landed and its session has gone quiet, so it is being ended",
+            "a session said its step is done and has gone quiet since, so it is being ended",
         );
 
         state.sessions.end(conversation_id).await;
@@ -2896,32 +2911,35 @@ async fn see_out(
     None
 }
 
-/// Wait until `landing` has landed and the session has been quiet for the grace
-/// period.
+/// Wait until the session has given its Done signal and been accepted, and is
+/// idle again since.
 ///
-/// Two loops rather than one condition, because the second is not a poll: once
-/// the step is done, what is left is sleeping out whatever quiet is still owed
-/// and looking again. Output arriving in the meantime lengthens the wait rather
-/// than ending it, and there is no cap on how long that may go on for.
-async fn landed_and_quiet(worktree: &Path, landing: &Landing, idle: &Idle, pace: Pace) {
+/// Idle by the judgement every ender reads — the grace of quiet, see
+/// [`crate::sessions::Idle`] — and the grace out since the signal too, so the
+/// closing words an agent prints once the command comes back reach the
+/// Transcript rather than being cut off under it. Output arriving in the
+/// meantime lengthens the wait rather than ending it.
+///
+/// Nothing on the branch is read here. The signal was checked against the
+/// repository when it was given, and that is the only reading there is: a
+/// session that lands its step and says nothing is a session still at work, and
+/// the rescue is what speaks to it.
+async fn signalled_and_idle(signal: crate::done::Signal, idle: &Idle, pace: Pace) {
+    signal.arrived().await;
+
+    let signalled = Instant::now();
+
     loop {
-        tokio::time::sleep(pace.poll).await;
+        let owed = pace
+            .grace
+            .saturating_sub(idle.for_how_long())
+            .max(pace.grace.saturating_sub(signalled.elapsed()));
 
-        if !check(worktree, landing).await {
-            continue;
+        if owed.is_zero() {
+            return;
         }
 
-        loop {
-            let owed = pace.grace.saturating_sub(idle.for_how_long());
-
-            if owed.is_zero() {
-                break;
-            }
-
-            tokio::time::sleep(owed).await;
-        }
-
-        return;
+        tokio::time::sleep(owed).await;
     }
 }
 
@@ -2947,6 +2965,27 @@ pub(crate) async fn check(worktree: &Path, landing: &Landing) -> bool {
 /// way round for the one thing this decides: a session is ended on the strength
 /// of this, and a git that was briefly busy is no reason to end one.
 fn landed(worktree: &Path, landing: &Landing) -> bool {
+    lacking(worktree, landing).is_none()
+}
+
+/// What `landing` is still missing, in words an agent can act on, or `None`
+/// where it has landed — see [`crate::done`], which refuses a Done signal with
+/// exactly this.
+pub(crate) async fn missing(worktree: &Path, landing: &Landing) -> Option<String> {
+    let worktree = worktree.to_owned();
+    let landing = landing.clone();
+
+    match tokio::task::spawn_blocking(move || lacking(&worktree, &landing)).await {
+        Ok(missing) => missing,
+        Err(error) => {
+            tracing::error!(error = ?error, "asking a Worktree what a step is missing failed");
+            Some("the repository could not be read, so try again in a moment".to_owned())
+        }
+    }
+}
+
+/// The same, blocking, and the one reading [`landed`] is made of.
+fn lacking(worktree: &Path, landing: &Landing) -> Option<String> {
     let (path, wanted) = match landing {
         Landing::Gone(path) => (path, false),
         Landing::Arrived(path) => (path, true),
@@ -2959,27 +2998,67 @@ fn landed(worktree: &Path, landing: &Landing) -> bool {
                     .any(|entry| entry.number == *number && entry.checked)
             });
 
-            return ticked && pending(worktree, &todo()) == Some(false);
+            return match (ticked, pending(worktree, &todo())) {
+                (true, Some(false)) => None,
+                (false, _) => Some(format!(
+                    "task {number}'s box in `{}` is not ticked and committed",
+                    todo().display(),
+                )),
+                (true, _) => Some(format!(
+                    "task {number}'s box in `{}` is ticked but not committed",
+                    todo().display(),
+                )),
+            };
         }
         // Not a path this branch was told about but one it went and wrote, so
         // what is asked is which roadmaps it has touched — the same reading the
         // pinned stage list is drawn by, so the list the human is watching and
         // the step the runner is waiting on cannot disagree.
         Landing::Roadmap(base) => {
-            return !crate::stages::touched(worktree, base).is_empty()
-                && pending(worktree, Path::new(crate::stages::ROADMAPS)) == Some(false);
+            if crate::stages::touched(worktree, base).is_empty() {
+                return Some(format!(
+                    "this branch has not written a roadmap under `{}`",
+                    crate::stages::ROADMAPS,
+                ));
+            }
+
+            return match pending(worktree, Path::new(crate::stages::ROADMAPS)) {
+                Some(false) => None,
+                _ => Some(format!(
+                    "the roadmap under `{}` is not committed",
+                    crate::stages::ROADMAPS,
+                )),
+            };
         }
         // And this one is not in the Worktree at all, so there is no commit to
         // wait for: the document being there with something in it is the whole
         // of it, read by exactly the rule that will take it.
-        Landing::Handoff(path) => return crate::handoffs::written(path),
+        Landing::Handoff(path) => {
+            // Named the way the skill names it rather than by this path, which
+            // is where the document is from outside the session and nowhere the
+            // session can see.
+            return (!crate::handoffs::written(path)).then(|| {
+                "the handoff document has not been written where the grilling skill says to \
+                 write it"
+                    .to_owned()
+            });
+        }
     };
 
     if worktree.join(path).exists() != wanted {
-        return false;
+        return Some(match wanted {
+            true => format!("`{}` has not been written", path.display()),
+            false => format!("`{}` has not been taken away", path.display()),
+        });
     }
 
-    pending(worktree, path) == Some(false)
+    match pending(worktree, path) {
+        Some(false) => None,
+        _ => Some(match wanted {
+            true => format!("`{}` is not committed", path.display()),
+            false => format!("taking `{}` away is not committed", path.display()),
+        }),
+    }
 }
 
 /// Whether git has any pending change for `path`, or `None` where it cannot say.
@@ -4089,6 +4168,39 @@ mod tests {
         run(path, &["commit", "-m", "docs: stage the mvp roadmap"]);
 
         assert!(landed(path, &landing), "written and committed");
+    }
+
+    /// A Done signal refused over a step that has not landed says which half is
+    /// missing, in words the agent can act on: the box, or the commit.
+    #[test]
+    fn what_a_task_is_missing_is_said_by_which_half_it_is() {
+        let dir = worktree(&list(0), &DOCUMENTS);
+        let path = dir.path();
+
+        assert_eq!(
+            lacking(path, &Landing::Ticked(1)).as_deref(),
+            Some("task 1's box in `.tasks/TODO.md` is not ticked and committed"),
+        );
+
+        let list = path.join(BACKLOG).join(TODO);
+        let ticked = std::fs::read_to_string(&list)
+            .unwrap()
+            .replace("- [ ] 01:", "- [x] 01:");
+        std::fs::write(&list, ticked).unwrap();
+
+        assert_eq!(
+            lacking(path, &Landing::Ticked(1)).as_deref(),
+            Some("task 1's box in `.tasks/TODO.md` is ticked but not committed"),
+        );
+
+        run(path, &["commit", "-am", "feat: a task"]);
+
+        assert_eq!(lacking(path, &Landing::Ticked(1)), None);
+
+        assert_eq!(
+            lacking(path, &Landing::Gone(todo())).as_deref(),
+            Some("`.tasks/TODO.md` has not been taken away"),
+        );
     }
 
     /// The repository being polled is one a session is committing in, and the

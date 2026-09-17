@@ -1389,7 +1389,7 @@ mod tests {
              {grilling}"
         );
         assert!(
-            grilling.contains("Do not start\ntask 01"),
+            flowed("grilling/SKILL.md").contains("Do not start task 01"),
             "the backlog is where this session stops: the tasks are the runner's, \
              a fresh session each: {grilling}"
         );
@@ -1497,6 +1497,59 @@ mod tests {
                  anywhere: {branch}"
             );
         }
+    }
+
+    /// The sessions ended on the Done signal are told to give it, and nothing in
+    /// what they read says they are ended by going quiet — which is the guess
+    /// the signal replaced, and a session that believed it would idle waiting to
+    /// be ended. See ADR-0018.
+    #[test]
+    fn the_skills_ended_on_the_done_signal_say_to_give_it() {
+        for name in [
+            "next-task/SKILL.md",
+            "next-stage/SKILL.md",
+            "breaking-down/SKILL.md",
+            "staging/SKILL.md",
+        ] {
+            let skill = skill(name);
+
+            assert!(
+                flowed(name).contains("run `verkstead done`"),
+                "{name} has to tell the session to run `verkstead done`"
+            );
+            assert!(
+                !skill.contains("go quiet") && !skill.contains("gone quiet"),
+                "and nothing in {name} says quiet ends a session: {skill}"
+            );
+        }
+
+        let grilling = skill("grilling/SKILL.md");
+        let (_, picked) = grilling
+            .split_once("### After they pick")
+            .expect("the grilling skill carries what follows a pick");
+
+        for branch in [
+            "### When they pick inline",
+            "### When they pick a task list",
+            "### When they pick a roadmap",
+        ] {
+            let (_, rest) = picked
+                .split_once(branch)
+                .unwrap_or_else(|| panic!("the grilling skill carries {branch:?}"));
+            let this = rest.split("\n### ").next().unwrap();
+
+            assert!(
+                this.split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .contains("run `verkstead done`"),
+                "{branch} has to end on `verkstead done`: {this}"
+            );
+        }
+        assert!(
+            !grilling.contains("go quiet") && !grilling.contains("going quiet"),
+            "and nothing in the grilling skill says quiet ends a session: {grilling}"
+        );
     }
 
     /// No gate anywhere in the implementation: the agent commits on its own,

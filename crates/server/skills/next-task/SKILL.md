@@ -3,7 +3,8 @@ name: next-task
 description: Work one task of a .tasks/ backlog, or finish the feature once none are left. Use when a Conversation is working through a task list and this session has been launched for the next step.
 ---
 
-Work **one** task of the `.tasks/` backlog in this worktree, commit it, and stop.
+Work **one** task of the `.tasks/` backlog in this worktree, commit it, and say you
+are done with `verkstead done`.
 One task per session is the whole point: this session has none of the context of
 the ones before it, and the next one will have none of yours.
 
@@ -102,8 +103,9 @@ Trailers go at the end as usual; the workbench takes them off what it shows.
       class throttle removed
     ```
 
-Then **stop**. Do not start the next task, and do not say anything about clearing
-a context — Verkstead runs a fresh session of its own for it, and starting on it
+Then **run `verkstead done`** — see *Saying you are done* below — and stop
+there. Do not start the next task, and do not say anything about clearing a
+context — Verkstead runs a fresh session of its own for it, and starting on it
 here would put two tasks in one commit and one task's worth of context in the
 wrong session.
 
@@ -177,7 +179,8 @@ pull request titled for the feature —
 **Nothing waits on approval here either.** No gate, no confirmation and nobody
 at this terminal: the pull request opens unasked, and it opens as a *draft*
 because merging is the human's act and nothing here is allowed to look like it
-was theirs. Then stop.
+was theirs. Then run `verkstead done`, once every companion below is finished
+too.
 
 ### And every companion repository you committed in
 
@@ -194,9 +197,20 @@ needs nothing at all, and a read-only one could hold nothing to begin with —
 `git log --oneline <base>..HEAD` in its worktree, against the commit its branch
 was cut from, is what says which is which.
 
-Verkstead asks GitHub about each of them once you have gone quiet, so a
+Verkstead asks GitHub about each of them once this session is over, so a
 companion holding commits and no pull request stops the run rather than being
 carried on past.
+
+## Saying you are done
+
+The last thing this session does, once the work is committed and everything
+after the commit is finished, is run `verkstead done`. That is what ends the
+session, and nothing else does: not the commit, and not going quiet. So a
+session that waits on a test run or on an answer is not cut off while it waits.
+
+Verkstead checks the repository when you run it. A refusal exits non-zero and
+says on stderr what is missing — a box not ticked and committed, say — and the
+session carries on: put that right and run `verkstead done` again.
 
 ## When you need the human
 

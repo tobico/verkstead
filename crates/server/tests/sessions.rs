@@ -197,6 +197,10 @@ struct Grilling {
     /// it.
     database: PathBuf,
 
+    /// The stand-in for `verkstead done` — see [`signalling`]. Stopped when the
+    /// fixture goes.
+    _signalling: Signalling,
+
     /// This fixture's place in the suite — see [`ROOM`]. Last, so that it is
     /// handed back only once everything above has been let go of.
     _room: tokio::sync::OwnedSemaphorePermit,
@@ -2680,6 +2684,11 @@ impl Bench {
 
     /// The fixture the tests read, once there is a Conversation running in it.
     fn holding(self, id: i64) -> Grilling {
+        let signalling = Signalling(tokio::spawn(signalling(
+            self.app.clone(),
+            self.state.path().join("handoffs"),
+        )));
+
         Grilling {
             _elsewhere: self.elsewhere,
             home: self.home,
@@ -2687,6 +2696,7 @@ impl Bench {
             spill: self.spill,
             app: self.app,
             id,
+            _signalling: signalling,
             database: self.database,
             _room: self.room,
         }
@@ -3084,6 +3094,89 @@ async fn delete(app: &Router, path: &str) {
         StatusCode::NO_CONTENT,
         "DELETE {path} failed: {body}"
     );
+}
+
+/// A stub saying its work is done: the marker it writes to have the relay give
+/// the Done signal for it.
+///
+/// Inside the sandbox this is `/tmp/verkstead/done`, the same directory every
+/// other marker between a stub and this file is written in.
+const DONE: &str = "done";
+
+/// What the relay writes beside it each time it gives the signal: the server's
+/// reply, the latest one only.
+const SAID: &str = "done-said";
+
+/// The relay that gives the Done signal for a stub, stopped when it is dropped.
+struct Signalling(tokio::task::JoinHandle<()>);
+
+impl Drop for Signalling {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// Stand in for `verkstead done` for as long as the fixture stands.
+///
+/// A stub is a shell script in a sandbox, and the server these tests drive has
+/// no socket to reach — so it cannot run the CLI, any more than it can ask. What
+/// it does instead is write [`DONE`] into its Conversation's own directory, and
+/// this posts the signal over the agent API the way the CLI would.
+///
+/// **Every Conversation's**, not only the one the fixture started: a roadmap
+/// that settles starts its stages as Conversations of their own, and their
+/// sessions signal the same way.
+///
+/// **Until the server takes it**, which is what an agent does with a refusal:
+/// puts right what it names and runs the command again. A stub that wrote the
+/// marker a moment before its commit landed is a stub that signals again once
+/// it has, and one whose work never lands goes on being refused — with the
+/// latest reply written to [`SAID`] for a test that wants to read it.
+async fn signalling(app: Router, handoffs: PathBuf) {
+    loop {
+        pause(Duration::from_millis(50)).await;
+
+        let marked = std::fs::read_dir(&handoffs)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|entry| {
+                let id = entry.file_name().to_str()?.parse::<i64>().ok()?;
+                entry.path().join(DONE).exists().then(|| (id, entry.path()))
+            })
+            .collect::<Vec<_>>();
+
+        for (id, directory) in marked {
+            signal(&app, id, &directory).await;
+        }
+    }
+}
+
+/// Give the signal for one Conversation whose stub has asked for it.
+async fn signal(app: &Router, id: i64, directory: &Path) {
+    let marker = directory.join(DONE);
+
+    let (status, body) = fetch(
+        app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/conversations/{id}/api/v1/done"))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    let _ = std::fs::write(directory.join(SAID), &body);
+
+    // Taken, or refused for a reason no retry changes: nothing running to
+    // end, or a session Verkstead ends by itself. Either way the marker is
+    // spent, and left lying it would be taken for the next session's.
+    if status == StatusCode::OK
+        || body.contains("no session running")
+        || body.contains("ends this session by itself")
+    {
+        let _ = std::fs::remove_file(&marker);
+    }
 }
 
 async fn fetch(app: &Router, request: Request<Body>) -> (StatusCode, String) {
@@ -5066,6 +5159,7 @@ async fn a_run_that_halted_is_waiting_on_the_human() {
         case "$1" in
         claude-grilling-5)
             printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            : > /tmp/verkstead/done
             printf 'the grilling is running\n'
             sleep 300
             ;;
@@ -5186,6 +5280,7 @@ async fn choosing_inline_runs_the_implementation_profile_on_the_handoff() {
         case "$1" in
         claude-grilling-5)
             printf '# What we settled\n\nAn in-process counter.\n' > /tmp/verkstead/handoff.md
+            : > /tmp/verkstead/done
             printf 'the handoff is written\n'
             sleep 300
             ;;
@@ -5195,6 +5290,7 @@ async fn choosing_inline_runs_the_implementation_profile_on_the_handoff() {
             printf 'a limiter\n' > limiter.md
             git add limiter.md
             git commit --quiet -m 'feat: rate limiting'
+            : > /tmp/verkstead/done
             ;;
         esac
         "#,
@@ -5328,6 +5424,7 @@ async fn an_inline_grilling_that_writes_no_handoff_halts_the_run() {
             printf 'a limiter\n' > limiter.md
             git add limiter.md
             git commit --quiet -m 'feat: rate limiting'
+            : > /tmp/verkstead/done
             ;;
         esac
         "#,
@@ -5413,6 +5510,7 @@ async fn a_later_pick_moves_the_watcher_onto_the_artifact_it_asked_for() {
             printf 'the grilling is running\n'
             while [ ! -f /tmp/verkstead/handoff-now ]; do sleep 0.1; done
             printf '# What we settled\n\nAn in-process counter.\n' > /tmp/verkstead/handoff.md
+            : > /tmp/verkstead/done
             printf 'the handoff is written\n'
             while [ ! -f /tmp/verkstead/backlog-now ]; do sleep 0.1; done
             mkdir -p .tasks
@@ -5420,6 +5518,7 @@ async fn a_later_pick_moves_the_watcher_onto_the_artifact_it_asked_for() {
             printf '# 01. Count the requests\n' > .tasks/01-counter.md
             git add .tasks
             git commit --quiet -m 'chore: plan rate-limiting tasks'
+            : > /tmp/verkstead/done
             printf 'the backlog is written\n'
             sleep 300
             ;;
@@ -5638,6 +5737,7 @@ async fn a_sandbox_that_will_not_start_says_why_on_the_capture() {
             printf 'the grilling is running\n'
             while [ ! -f /tmp/verkstead/go ]; do sleep 0.1; done
             printf '# What we settled\n\nAn in-process counter.\n' > /tmp/verkstead/handoff.md
+            : > /tmp/verkstead/done
             printf 'the handoff is written\n'
             sleep 300
             ;;
@@ -5712,11 +5812,13 @@ async fn choosing_a_task_list_breaks_the_work_down_in_the_grilling_session() {
             printf 'model=%s\n' "$1"
             grep '^name:' "/verkstead/skills/breaking-down/SKILL.md"
             printf '# A document nobody asked for\n' > /tmp/verkstead/handoff.md
+            : > /tmp/verkstead/done
             mkdir -p .tasks
             printf '# Rate limiting\n\n## Tasks\n\n- [ ] 01: count the requests\n' > .tasks/TODO.md
             printf '# 01. Count the requests\n' > .tasks/01-counter.md
             git add .tasks
             git commit --quiet -m 'chore: plan rate-limiting tasks'
+            : > /tmp/verkstead/done
             printf 'the backlog is written\n'
             sleep 300
             ;;
@@ -5850,12 +5952,14 @@ async fn choosing_a_roadmap_stages_the_work_in_the_grilling_session() {
             printf 'model=%s\n' "$1"
             grep '^name:' "/verkstead/skills/staging/SKILL.md"
             printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            : > /tmp/verkstead/done
             mkdir -p docs/roadmaps/rate-limiting
             printf '# Rate limiting roadmap\n\n## Stages\n\n- [x] 01: Count the requests — [brief](01-counter.md)\n- [ ] 02: Refuse the rest — [brief](02-refusing.md)\n' > docs/roadmaps/rate-limiting/ROADMAP.md
             printf '# 01. Count the requests\n' > docs/roadmaps/rate-limiting/01-counter.md
             printf '# 02. Refuse the rest\n' > docs/roadmaps/rate-limiting/02-refusing.md
             git add docs
             git commit --quiet -m 'docs: stage the rate-limiting roadmap'
+            : > /tmp/verkstead/done
             printf 'the roadmap is written\n'
             sleep 300
             ;;
@@ -6041,6 +6145,7 @@ async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
         case "$1" in
         claude-grilling-5)
             printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            : > /tmp/verkstead/done
             printf 'breaking down\n'
             mkdir -p .tasks
             printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
@@ -6050,6 +6155,7 @@ async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
             printf '# 02. Refuse the excess\n' > .tasks/02-refuse.md
             git add .tasks
             git commit --quiet -m 'chore: plan rate-limiting tasks'
+            : > /tmp/verkstead/done
             sleep 300
             ;;
         *)
@@ -6068,10 +6174,12 @@ async fn a_committed_backlog_works_itself_one_fresh_session_per_task() {
                 sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
                 git add -A
                 git commit --quiet -m "feat: $next"
+                : > /tmp/verkstead/done
             else
                 printf 'finishing\n'
                 git rm --quiet -r .tasks
                 git commit --quiet -m 'chore: finish rate-limiting'
+                : > /tmp/verkstead/done
             fi
             sleep 300
             ;;
@@ -6191,6 +6299,7 @@ async fn the_pinned_task_list_ticks_along_as_the_runner_works_it() {
             printf '# 02\n' > .tasks/02-refuse.md
             git add .tasks
             git commit --quiet -m 'chore: plan rate-limiting tasks'
+            : > /tmp/verkstead/done
             sleep 300
             ;;
         *)
@@ -6200,6 +6309,7 @@ async fn the_pinned_task_list_ticks_along_as_the_runner_works_it() {
                 sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
                 git add -A
                 git commit --quiet -m "feat: $next"
+                : > /tmp/verkstead/done
                 # Only the first task, so the list is caught half worked
                 # through rather than empty.
                 sleep 300
@@ -6304,6 +6414,7 @@ claude-grilling-5|gpt-5-codex-grilling)
     printf '# 01\n' > .tasks/01-count.md
     git add .tasks
     git commit --quiet -m 'chore: plan rate-limiting tasks'
+    : > /tmp/verkstead/done
     sleep 300
     ;;
 *)
@@ -6320,9 +6431,11 @@ claude-grilling-5|gpt-5-codex-grilling)
         sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
         git add -A
         git commit --quiet -m "feat: count the requests"
+        : > /tmp/verkstead/done
     else
         git rm --quiet -r .tasks
         git commit --quiet -m 'chore: finish rate-limiting'
+        : > /tmp/verkstead/done
         printf 'pushed, and the pull request is open\n'
     fi
     sleep 300
@@ -6347,6 +6460,7 @@ claude-grilling-5)
     printf '# 01\n' > .tasks/01-count.md
     git add .tasks
     git commit --quiet -m 'chore: plan rate-limiting tasks'
+    : > /tmp/verkstead/done
     sleep 300
     ;;
 *)
@@ -6363,13 +6477,16 @@ claude-grilling-5)
         sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
         git add -A
         git commit --quiet -m "feat: count the requests"
+        : > /tmp/verkstead/done
     else
         git rm --quiet -r .tasks
         git commit --quiet -m 'chore: finish rate-limiting'
+        : > /tmp/verkstead/done
         cd ../askance-*
         printf 'the other half\n' > halves.md
         git add halves.md
         git commit --quiet -m 'feat: the other half'
+        : > /tmp/verkstead/done
         printf 'pushed both, and the pull requests are open\n'
     fi
     sleep 300
@@ -6644,6 +6761,7 @@ case "$2" in
     printf 'a fix\n' >> fixes.md
     git add -A
     git commit --quiet -m 'fix: have a go at the failing check'
+    : > /tmp/verkstead/done
     sleep 300
     ;;
 *)
@@ -7753,6 +7871,7 @@ case "$2" in
     printf 'a merge\n' >> merged.md
     git add -A
     git commit --quiet -m 'fix: merge the base branch in and resolve the conflicts'
+    : > /tmp/verkstead/done
     printf 'x' > {resolved}
     sleep 300
     ;;
@@ -7793,6 +7912,7 @@ case "$2" in
     printf 'a merge\n' >> merged.md
     git add -A
     git commit --quiet -m 'fix: merge the base branch in and resolve the conflicts'
+    : > /tmp/verkstead/done
     printf 'x' > {resolved}
     sleep 300
     ;;
@@ -7861,6 +7981,7 @@ case "$2" in
     printf 'a fix\n' >> fixes.md
     git add -A
     git commit --quiet -m 'fix: address what the wrap-up raised'
+    : > /tmp/verkstead/done
     sleep 300
     ;;
 *)
@@ -7920,6 +8041,7 @@ const REVIEW_THEN_FIX: &str = "    SAYING='reading the branch'\n    \
      printf 'a fix\\n' >> fixes.md\n    \
      git add -A\n    \
      git commit --quiet -m 'fix: reset the counter as the window rolls'\n    \
+     : > /tmp/verkstead/done\n    \
      printf 'fixed what was accepted and left the rest\\n'";
 
 /// One that fixes what was accepted in both of the repositories the work
@@ -7937,10 +8059,12 @@ const REVIEW_THEN_FIX_BOTH: &str = "    SAYING='reading the branch'\n    \
      printf 'a fix\\n' >> fixes.md\n    \
      git add -A\n    \
      git commit --quiet -m 'fix: reset the counter as the window rolls'\n    \
+     : > /tmp/verkstead/done\n    \
      cd ../askance-*\n    \
      printf 'a fix\\n' >> halves.md\n    \
      git add -A\n    \
      git commit --quiet -m 'fix: take the other half with it'\n    \
+     : > /tmp/verkstead/done\n    \
      printf 'fixed what was accepted in both, and pushed both\\n'";
 
 /// One that waits for the answers and then goes without landing any of them,
@@ -8036,6 +8160,7 @@ const RESPOND_THEN_FIX: &str = "    SAYING='reading what was said'\n    \
      printf 'a fix\n' >> fixes.md\n    \
      git add -A\n    \
      git commit --quiet -m 'fix: move the reset above the comparison'\n    \
+     : > /tmp/verkstead/done\n    \
      printf 'did what was accepted and left the rest\n'";
 
 /// And one that waits for the answers and then goes without landing any of them.
@@ -8994,6 +9119,7 @@ case "$1" in
     printf '# 01\n' > .tasks/01-count.md
     git add .tasks
     git commit --quiet -m 'chore: plan rate-limiting tasks'
+    : > /tmp/verkstead/done
     sleep 300
     ;;
 *)
@@ -9010,9 +9136,11 @@ case "$1" in
         sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
         git add -A
         git commit --quiet -m "feat: $next"
+        : > /tmp/verkstead/done
     else
         git rm --quiet -r .tasks
         git commit --quiet -m 'chore: finish rate-limiting'
+        : > /tmp/verkstead/done
         printf 'pushed, and the pull request is open\n'
     fi
     sleep 300
@@ -10124,6 +10252,7 @@ fn review_then_split(once: &Path, also: &str) -> String {
          printf '# 01. Collapse the clocks\n' > .tasks/01-clocks.md\n    \
          git add -A\n    \
          git commit --quiet -m 'chore: plan the clock tasks'\n    \
+         : > /tmp/verkstead/done\n    \
          printf 'fixed what was accepted and split the rest out\n'",
         once = quoted(once),
     )
@@ -10363,6 +10492,7 @@ case "$2" in
     printf 'a limiter\n' > limiter.md
     git add limiter.md
     git commit --quiet -m 'feat: rate limiting'
+    : > /tmp/verkstead/done
     printf 'pushed, and the pull request is open\n'
     ;;
 *next-task/SKILL.md*)
@@ -10373,15 +10503,18 @@ case "$2" in
         sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
         git add -A
         git commit --quiet -m 'feat: collapse the clocks'
+        : > /tmp/verkstead/done
     else
         git rm --quiet -r .tasks
         git commit --quiet -m 'chore: finish the clocks'
+        : > /tmp/verkstead/done
         printf 'pushed, and the pull request is open\n'
     fi
     sleep 300
     ;;
 *)
     printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+    : > /tmp/verkstead/done
     printf 'the handoff is written\n'
     sleep 300
     ;;
@@ -11442,6 +11575,7 @@ async fn a_wrap_up_waits_for_the_run_a_batch_session_pushed() {
         "    printf 'a fix\\n' >> fixes.md\n    \
          git add -A\n    \
          git commit --quiet -m 'fix: what was asked'\n    \
+         : > /tmp/verkstead/done\n    \
          printf 'x' > {landed}\n    \
          printf 'did what was accepted\\n'",
         landed = quoted(&landed),
@@ -13505,11 +13639,13 @@ async fn what_a_session_commits_in_a_companion_lands_on_the_timeline_labelled() 
         printf 'a limiter\n' > limiter.md
         git add limiter.md
         git commit --quiet -m 'feat: rate limiting'
+        : > /tmp/verkstead/done
 
         cd ../askance-*
         printf 'the other half\n' > halves.md
         git add halves.md
         git commit --quiet -m 'feat: the other half'
+        : > /tmp/verkstead/done
         "#,
         "askance",
     )
@@ -13581,6 +13717,7 @@ async fn a_companion_a_steer_opened_up_is_one_the_next_session_writes_in() {
             printf 'the other half\n' > halves.md
             git add halves.md
             git commit --quiet -m 'feat: the other half'
+            : > /tmp/verkstead/done
             printf 'committed in the companion\n'
             sleep 300
             ;;
@@ -13667,6 +13804,7 @@ async fn a_read_only_companion_is_not_swept_and_the_conversations_own_is_unlabel
         printf 'a limiter\n' > limiter.md
         git add limiter.md
         git commit --quiet -m 'feat: rate limiting'
+        : > /tmp/verkstead/done
 
         printf 'committed\n'
         sleep 300
@@ -13755,6 +13893,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>'
         printf 'why\nand how\n' > NOTES.md
         git add NOTES.md
         git commit --quiet -m 'docs: say what it does'
+        : > /tmp/verkstead/done
 
         printf 'committed\n'
         sleep 300
@@ -13866,6 +14005,7 @@ async fn a_commit_made_as_the_session_ends_still_lands() {
         printf 'a limiter\n' > limiter.md
         git add limiter.md
         git commit --quiet -m 'feat: rate limiting'
+        : > /tmp/verkstead/done
         "#,
     )
     .await;
@@ -13967,6 +14107,7 @@ async fn a_session_that_exits_badly_halts_the_run_with_a_notice() {
         case "$1" in
         claude-grilling-5)
             printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            : > /tmp/verkstead/done
             printf 'the handoff is written\n'
             sleep 300
             ;;
@@ -14080,6 +14221,7 @@ async fn the_evidence_of_a_run_that_stopped_is_what_the_agent_said() {
         case "$model" in
         claude-grilling-5)
             printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            : > /tmp/verkstead/done
             printf 'the handoff is written\n'
             sleep 300
             ;;
@@ -14132,11 +14274,13 @@ async fn a_backlog_halts_at_the_task_whose_session_died() {
         case "$1" in
         claude-grilling-5)
             printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            : > /tmp/verkstead/done
             mkdir -p .tasks
             printf '# Rate limiting\n\n- [ ] 01: Count the requests\n' > .tasks/TODO.md
             printf '# 01. Count the requests\n' > .tasks/01-count.md
             git add .tasks
             git commit --quiet -m 'chore: plan the rate limiter'
+            : > /tmp/verkstead/done
             printf 'the backlog is written\n'
             sleep 300
             ;;
@@ -14224,6 +14368,7 @@ async fn a_backlog_entry_with_no_task_file_stops_the_run() {
         case "$1" in
         claude-grilling-5)
             printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            : > /tmp/verkstead/done
             mkdir -p .tasks
             printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
             printf -- '- [x] 01: count the requests\n' >> .tasks/TODO.md
@@ -14231,6 +14376,7 @@ async fn a_backlog_entry_with_no_task_file_stops_the_run() {
             printf '# 01. Count the requests\n' > .tasks/01-count.md
             git add .tasks
             git commit --quiet -m 'chore: plan the rate limiter'
+            : > /tmp/verkstead/done
             printf 'the backlog is written\n'
             sleep 300
             ;;
@@ -14376,6 +14522,7 @@ fn out_of_window_saying(banner: &str) -> String {
         case "$1" in
         claude-grilling-5|gpt-5-codex-grilling|grok-4.6-grilling)
             printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            : > /tmp/verkstead/done
             mkdir -p .tasks
             printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
             printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
@@ -14384,6 +14531,7 @@ fn out_of_window_saying(banner: &str) -> String {
             printf '# 02. Refuse the excess\n' > .tasks/02-refuse.md
             git add .tasks
             git commit --quiet -m 'chore: plan the rate limiter'
+            : > /tmp/verkstead/done
             printf 'the backlog is written\n'
             sleep 300
             ;;
@@ -14396,6 +14544,7 @@ fn out_of_window_saying(banner: &str) -> String {
                 sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
                 git add -A
                 git commit --quiet -m "feat: $next"
+                : > /tmp/verkstead/done
                 if [ "$next" = 01-count.md ]; then
                     # The wait itself, in miniature: the task lands, the account
                     # runs out before the next one, and the agent holds with its
@@ -14423,6 +14572,7 @@ fn out_of_window_saying(banner: &str) -> String {
                 printf 'finishing\n'
                 git rm --quiet -r .tasks
                 git commit --quiet -m 'chore: finish rate-limiting'
+                : > /tmp/verkstead/done
             fi
             sleep 300
             ;;
@@ -15077,6 +15227,7 @@ async fn closing_a_run_is_not_something_to_ask_the_human_about() {
         case "$1" in
         claude-grilling-5)
             printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            : > /tmp/verkstead/done
             printf 'the handoff is written\n'
             sleep 300
             ;;
@@ -15135,6 +15286,7 @@ fn two_tasks_waiting_at(gate: &Path) -> String {
 case "$1" in
 claude-grilling-5)
     printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+    : > /tmp/verkstead/done
     printf 'breaking down\r\n'
     mkdir -p .tasks
     printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
@@ -15144,6 +15296,7 @@ claude-grilling-5)
     printf '# 02. Refuse the excess\n' > .tasks/02-refuse.md
     git add .tasks
     git commit --quiet -m 'chore: plan rate-limiting tasks'
+    : > /tmp/verkstead/done
     printf 'the backlog has landed\r\n'
     sleep 300
     ;;
@@ -15156,6 +15309,7 @@ claude-grilling-5)
     sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
     git add -A
     git commit --quiet -m "feat: $next"
+    : > /tmp/verkstead/done
     sleep 300
     ;;
 esac
@@ -15429,6 +15583,7 @@ async fn force_stop_as_the_handoff_lands_starts_nothing_behind_the_halt() {
             printf 'the grilling is running\n'
             while [ ! -f /tmp/verkstead/go ]; do sleep 0.1; done
             printf '# What we settled\n\nAn in-process counter.\n' > /tmp/verkstead/handoff.md
+            : > /tmp/verkstead/done
             while true; do printf 'still talking\n'; sleep 0.05; done
             ;;
         *)
@@ -15781,6 +15936,7 @@ fn a_roadmap_then_wraps_up(
 case "$2" in
 *grilling/SKILL.md*)
     printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+    : > /tmp/verkstead/done
     printf 'the handoff is written\n'
     mkdir -p docs/roadmaps/rate-limiting docs/agents
 {workflow}
@@ -15789,6 +15945,7 @@ case "$2" in
     printf '# 02. Refuse the rest\n' > docs/roadmaps/rate-limiting/02-refusing.md
     git add -A
     git commit --quiet -m 'docs: stage the rate-limiting roadmap'
+    : > /tmp/verkstead/done
     printf 'pushed, and the pull request is open\n'
     sleep 300
     ;;
@@ -15806,6 +15963,7 @@ case "$2" in
     sed -i 's|\[brief\](01-counter.md)|[brief](01-counter.md) *(in progress: `rate-limiting/01-counter`)*|' docs/roadmaps/rate-limiting/ROADMAP.md 2>/dev/null || true
     git add -A
     git commit --quiet -m 'chore: plan counter tasks'
+    : > /tmp/verkstead/done
     sleep 300
     ;;
 *next-task/SKILL.md*)
@@ -17303,6 +17461,7 @@ fn a_roadmap_beside_another(planning: &Path, worked: &Path) -> String {
 case "$2" in
 *grilling/SKILL.md*)
     printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+    : > /tmp/verkstead/done
     printf 'the handoff is written\n'
     mkdir -p docs/roadmaps/rate-limiting
     printf '# Rate limiting roadmap\n\n## Stages\n\n- [x] 01: Count the requests — [brief](01-counter.md)\n- [x] 02: Refuse the rest — [brief](02-refusing.md)\n' > docs/roadmaps/rate-limiting/ROADMAP.md
@@ -17311,6 +17470,7 @@ case "$2" in
     printf '\nThe widget waits on the counter.\n' >> docs/roadmaps/brain-chat-parity/14-widget.md
     git add -A
     git commit --quiet -m 'docs: stage the rate-limiting roadmap'
+    : > /tmp/verkstead/done
     printf 'pushed, and the pull request is open\n'
     sleep 300
     ;;
@@ -17392,6 +17552,7 @@ fn two_roadmaps_then_wraps_up(planning: &Path, worked: &Path) -> String {
 case "$2" in
 *grilling/SKILL.md*)
     printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+    : > /tmp/verkstead/done
     printf 'the handoff is written\n'
     mkdir -p docs/roadmaps/rate-limiting docs/roadmaps/brain-chat-parity
     printf '# Rate limiting roadmap\n\n## Stages\n\n- [ ] 01: Count the requests — [brief](01-counter.md)\n' > docs/roadmaps/rate-limiting/ROADMAP.md
@@ -17400,6 +17561,7 @@ case "$2" in
     printf '# 14. The widget\n' > docs/roadmaps/brain-chat-parity/14-widget.md
     git add -A
     git commit --quiet -m 'docs: stage two roadmaps'
+    : > /tmp/verkstead/done
     printf 'pushed, and the pull request is open\n'
     sleep 300
     ;;
@@ -17558,6 +17720,7 @@ claude-grilling-5|gpt-5-codex-grilling)
     printf '\nThe widget waits on the counter.\n' >> docs/roadmaps/brain-chat-parity/14-widget.md
     git add -A
     git commit --quiet -m 'chore: plan rate-limiting tasks'
+    : > /tmp/verkstead/done
     sleep 300
     ;;
 *)
@@ -17896,6 +18059,7 @@ case "$2" in
     printf '# 01. count them\n' > .tasks/01-count.md
     git add -A
     git commit --quiet -m 'chore: plan counter tasks'
+    : > /tmp/verkstead/done
     sleep 300
     ;;
 *)
@@ -18046,6 +18210,7 @@ case "$2" in
     sed -i "/($stage.md)/s|\$| *(in progress: \`$branch\`)*|" docs/roadmaps/rate-limiting/ROADMAP.md
     git add -A
     git commit --quiet -m "chore: plan the $branch stage"
+    : > /tmp/verkstead/done
     sleep 300
     ;;
 *next-task/SKILL.md*)
@@ -18057,10 +18222,12 @@ case "$2" in
         sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
         git add -A
         git commit --quiet -m 'feat: count the requests'
+        : > /tmp/verkstead/done
     else
         printf 'finishing\n'
         git rm --quiet -r .tasks
         git commit --quiet -m 'chore: finish the stage'
+        : > /tmp/verkstead/done
         printf 'pushed, and the pull request is open\n'
     fi
     sleep 300
@@ -18903,6 +19070,7 @@ claude-grilling-5)
     printf '# 01. Count the requests\n' > .tasks/01-count.md
     git add .tasks
     git commit --quiet -m 'chore: plan rate-limiting tasks'
+    : > /tmp/verkstead/done
     printf 'the backlog has landed\r\n'
     {then}
     ;;
@@ -18912,6 +19080,7 @@ claude-grilling-5)
     sed -i "s/- \[ \] 01:/- [x] 01:/" .tasks/TODO.md
     git add -A
     git commit --quiet -m 'feat: count the requests'
+    : > /tmp/verkstead/done
     sleep 300
     ;;
 esac
@@ -19093,6 +19262,7 @@ async fn typing_into_a_session_that_lands_nothing_does_not_hold_the_halt_off() {
 case "$1" in
 claude-grilling-5)
     printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+    : > /tmp/verkstead/done
     printf 'the handoff is written\r\n'
     sleep 300
     ;;
@@ -19193,6 +19363,7 @@ async fn a_halt_verkstead_decided_on_tells_the_devices_once() {
         case "$1" in
         claude-grilling-5)
             printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            : > /tmp/verkstead/done
             printf 'the handoff is written\n'
             sleep 300
             ;;
@@ -19637,6 +19808,7 @@ async fn an_inline_run_that_opened_no_pull_request_leaves_the_conversation_where
         case "$1" in
         claude-grilling-5)
             printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            : > /tmp/verkstead/done
             printf 'the handoff is written\n'
             sleep 300
             ;;
@@ -19645,6 +19817,7 @@ async fn an_inline_run_that_opened_no_pull_request_leaves_the_conversation_where
             printf 'a limiter\n' >> limiter.md
             git add limiter.md
             git commit --quiet -m 'feat: rate limiting'
+            : > /tmp/verkstead/done
             printf 'and a note to self\n' > notes.md
             ;;
         esac
@@ -19852,6 +20025,7 @@ async fn resuming_a_stalled_backlog_run_takes_the_next_task_off_the_repository()
             printf '# 01. Count the requests\n' > .tasks/01-count.md
             git add .tasks
             git commit --quiet -m 'chore: plan the rate limiter'
+            : > /tmp/verkstead/done
             printf 'the backlog is written\n'
             sleep 300
             ;;
@@ -19968,10 +20142,12 @@ case "$2" in
     printf 'a limiter\n' > limiter.md
     git add limiter.md
     git commit --quiet -m 'feat: rate limiting'
+    : > /tmp/verkstead/done
     printf 'the limiter is in, the middleware is not\n'
     ;;
 *)
     printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+    : > /tmp/verkstead/done
     printf 'the handoff is written\n'
     sleep 300
     ;;
@@ -20114,11 +20290,13 @@ async fn resuming_an_inline_run_with_no_pull_request_builds_the_work_again() {
                 printf 'a limiter\n' > limiter.md
                 git add limiter.md
                 git commit --quiet -m 'feat: rate limiting'
+                : > /tmp/verkstead/done
                 printf 'the limiter is in, the middleware is not\n'
             fi
             ;;
         *)
             printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            : > /tmp/verkstead/done
             printf 'the handoff is written\n'
             sleep 300
             ;;
@@ -20215,11 +20393,13 @@ case "$2" in
         printf 'a limiter\n' > limiter.md
         git add limiter.md
         git commit --quiet -m 'feat: rate limiting'
+        : > /tmp/verkstead/done
         printf 'the limiter is in, and nothing pushed it\n'
     fi
     ;;
 *)
     printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+    : > /tmp/verkstead/done
     printf 'the handoff is written\n'
     sleep 300
     ;;
@@ -20612,6 +20792,7 @@ async fn steering_a_stalled_backlog_run_into_implementing_works_the_next_task() 
             printf '# 01. Count the requests\n' > .tasks/01-count.md
             git add .tasks
             git commit --quiet -m 'chore: plan the rate limiter'
+            : > /tmp/verkstead/done
             printf 'the backlog is written\n'
             sleep 300
             ;;
@@ -20721,6 +20902,7 @@ claude-grilling-5)
     printf '# 01. Count the requests\n' > .tasks/01-count.md
     git add .tasks
     git commit --quiet -m 'chore: plan the rate limiter'
+    : > /tmp/verkstead/done
     printf 'the backlog is written\n'
     sleep 300
     ;;
@@ -21020,6 +21202,7 @@ case "$2" in
     printf 'and the burst is unbounded\n' >> notes.md
     git add -A
     git commit --quiet -m 'docs: note what the limiter still does not do'
+    : > /tmp/verkstead/done
     sleep 300
     ;;
 *)
@@ -21282,6 +21465,7 @@ esac
 const A_ROUND_THEN_WAITING: &str = r#"    printf 'it counts the 429s it sends\n' >> notes.md
     git add -A
     git commit --quiet -m 'docs: say what the limiter counts'
+    : > /tmp/verkstead/done
     sleep 300"#;
 
 /// One that does a round of work, waits to be answered, says its piece and then
@@ -21293,6 +21477,7 @@ const A_ROUND_THEN_WAITING: &str = r#"    printf 'it counts the 429s it sends\n'
 const A_ROUND_THEN_IDLE: &str = "    printf 'it counts the 429s it sends\\n' >> notes.md\n    \
      git add -A\n    \
      git commit --quiet -m 'docs: say what the limiter counts'\n    \
+     : > /tmp/verkstead/done\n    \
      SAYING='following it up'\n    \
      printf '%s\\n' \"$SAYING\"\n    \
      WHILE_NOBODY_HAS_ASKED\n    \
@@ -21972,6 +22157,400 @@ async fn a_gone_follow_up_session_takes_the_question_it_left_with_it() {
     );
 }
 
+/// A backlog of one whose sessions say they are done, with what each task
+/// session does between landing its work and saying so left to `between`, and
+/// what it does after to `after`.
+///
+/// The grilling session signals as soon as its backlog is committed, before
+/// anybody has picked — so the relay's retrying is part of every run here: the
+/// signal is refused until the pick, and taken once there is one.
+fn a_backlog_that_says_so(between: &str, after: &str) -> String {
+    format!(
+        r#"
+case "$1" in
+claude-grilling-5)
+    printf 'grilling\n'
+    mkdir -p .tasks
+    printf '# Rate limiting\n\n## Tasks\n\n' > .tasks/TODO.md
+    printf -- '- [ ] 01: count the requests\n' >> .tasks/TODO.md
+    printf '# 01\n' > .tasks/01-count.md
+    git add .tasks
+    git commit --quiet -m 'chore: plan rate-limiting tasks'
+    : > /tmp/verkstead/done
+    sleep 300
+    ;;
+*)
+    case "$2" in
+    *reviewing/SKILL.md*)
+        printf 'I read the whole branch and found nothing worth raising\n'
+        exit 0
+        ;;
+    *next-task/SKILL.md*)
+        ;;
+    *)
+        sleep 300
+        ;;
+    esac
+    if [ -f .tasks/01-count.md ] && grep -q -- '- \[ \] 01:' .tasks/TODO.md; then
+        printf 'working the task\n'
+        {between}
+        printf 'a limiter\n' >> limiter.md
+        sed -i "s/- \[ \] 01:/- [x] 01:/" .tasks/TODO.md
+        git add -A
+        git commit --quiet -m 'feat: count the requests'
+        printf 'the task is committed\n'
+        {after}
+    else
+        git rm --quiet -r .tasks
+        git commit --quiet -m 'chore: finish rate-limiting'
+        printf 'pushed, and the pull request is open\n'
+        : > /tmp/verkstead/done
+    fi
+    sleep 300
+    ;;
+esac
+"#
+    )
+}
+
+/// The task session of a run, once it has started: the one output that is not
+/// the grilling's.
+async fn the_task_session(fixture: &Grilling, grilled: i64) -> i64 {
+    fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id != grilled)
+                .map(|output| output.id)
+        })
+        .await
+}
+
+/// Whether the session printing into `event` is still running.
+async fn running(fixture: &Grilling, event: i64) -> bool {
+    outputs(&fixture.view().await)
+        .into_iter()
+        .any(|output| output.id == event && output.running)
+}
+
+/// Take a Conversation from its grilling to the task session of the backlog it
+/// picked, and hand back the grilling's Event and the task session's.
+async fn picked_through_to_the_task(fixture: &Grilling) -> (i64, i64) {
+    let grilled = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+    fixture.asked_nothing();
+
+    let task = the_task_session(fixture, grilled).await;
+
+    (grilled, task)
+}
+
+/// The Done signal given over a landed step is taken, and the session is ended
+/// once it is next quiet — after what it said on the way out, which is kept.
+///
+/// The words after the command are the point: an agent that runs `verkstead
+/// done` and then says what it did is saying it to the human, and a session
+/// ended as the signal arrived would have that cut off under it.
+#[tokio::test]
+async fn a_session_that_says_it_is_done_is_ended_once_quiet_with_its_last_words_kept() {
+    let fixture = grilling(&a_backlog_that_says_so(
+        "",
+        ": > /tmp/verkstead/done\n        \
+         while [ -f /tmp/verkstead/done ]; do sleep 0.05; done\n        \
+         printf 'said so, and these are my last words\\n'",
+    ))
+    .await;
+
+    let (_, task) = picked_through_to_the_task(&fixture).await;
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("chore: finish"))
+                .then_some(())
+        })
+        .await;
+
+    assert!(
+        !running(&fixture, task).await,
+        "the task session was ended, which is what let the finish start",
+    );
+
+    let said = fixture.capture(task).await;
+
+    assert!(
+        said.contains("said so, and these are my last words"),
+        "and what it said after the signal is on its record: {said:?}",
+    );
+}
+
+/// A session that lands its step and never says so is not ended, however long
+/// it sits there — and the rescue that speaks to it offers the signal as one of
+/// its moves.
+///
+/// Which is the reported bug turned round: a session that commits and then
+/// waits on something is a session still at work, and nothing on the branch
+/// says otherwise any more.
+#[tokio::test]
+async fn a_session_that_lands_its_step_and_says_nothing_is_not_ended_but_told_it_may_be_done() {
+    let fixture = grilling(&a_backlog_that_says_so(
+        "",
+        "read -r TOLD\n        \
+         printf '%s\\n' \"$TOLD\" >> /tmp/verkstead/rescues\n        \
+         while [ ! -f /tmp/verkstead/go ]; do sleep 0.05; done\n        \
+         : > /tmp/verkstead/done",
+    ))
+    .await;
+
+    let (_, task) = picked_through_to_the_task(&fixture).await;
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("feat: count"))
+                .then_some(())
+        })
+        .await;
+
+    // The rescue waits on a longer quiet than the grace the old ending did, so
+    // a session still there when it arrives is one that quiet did not end.
+    let said = told(&fixture, 1).await;
+
+    assert!(
+        running(&fixture, task).await,
+        "a landed step with no signal is a session left running",
+    );
+
+    for move_offered in [
+        "carry on with it now",
+        "run `verkstead done`",
+        "verkstead ask",
+    ] {
+        assert!(
+            said[0].contains(move_offered),
+            "the rescue offers {move_offered:?} among its three moves: {said:?}",
+        );
+    }
+
+    // And the session that takes the move is ended on it, which is the run
+    // going on to its finish.
+    std::fs::write(handoff_directory(&fixture).join("go"), "").unwrap();
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("chore: finish"))
+                .then_some(())
+        })
+        .await;
+}
+
+/// A signal over a step that has not landed is refused by name, and the session
+/// is left to put it right.
+///
+/// The stub signals before its commit, keeps what the server said, and then
+/// commits — so the run reaching its finish is the proof that the refusal ended
+/// nothing, and the relay's retry is the agent running the command again.
+#[tokio::test]
+async fn a_signal_over_a_step_that_has_not_landed_is_refused_saying_what_is_missing() {
+    let fixture = grilling(&a_backlog_that_says_so(
+        ": > /tmp/verkstead/done\n        \
+         while ! grep -q 'not done yet' /tmp/verkstead/done-said 2>/dev/null; do sleep 0.05; done\n        \
+         cp /tmp/verkstead/done-said /tmp/verkstead/refused",
+        "",
+    ))
+    .await;
+
+    let (_, task) = picked_through_to_the_task(&fixture).await;
+
+    let refused = handoff_directory(&fixture).join("refused");
+    let deadline = Instant::now() + *PATIENCE;
+    while !refused.is_file() {
+        assert!(Instant::now() < deadline, "the signal was never refused");
+        pause(Duration::from_millis(25)).await;
+    }
+
+    let said = std::fs::read_to_string(&refused).unwrap();
+
+    assert!(
+        said.contains("task 1's box in `.tasks/TODO.md` is not ticked and committed"),
+        "the refusal names what is missing, in words the agent can act on: {said:?}",
+    );
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("chore: finish"))
+                .then_some(())
+        })
+        .await;
+
+    let captured = fixture.capture(task).await;
+
+    assert!(
+        captured.contains("the task is committed"),
+        "the refused session went on and put it right: {captured:?}",
+    );
+}
+
+/// Post the Done signal for the session running in `fixture`, the way the CLI
+/// does, and hand back what the server answered.
+async fn signal_done(fixture: &Grilling) -> (StatusCode, String) {
+    fetch(
+        &fixture.app,
+        Request::builder()
+            .method("POST")
+            .uri(format!("/conversations/{}/api/v1/done", fixture.id))
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await
+}
+
+/// A grilling session's signal is checked against the latest pick: refused
+/// before there is one, and refused where what it wrote is another Direction's
+/// artifact.
+///
+/// The stub commits a backlog whatever it is asked, which is the grilling that
+/// argues with a pick by writing something else — and exactly what must not end
+/// the session.
+#[tokio::test]
+async fn a_grilling_signal_is_refused_before_a_pick_and_over_another_directions_artifact() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf 'grilling\n'
+            mkdir -p .tasks
+            printf '# Rate limiting\n\n## Tasks\n\n- [ ] 01: count\n' > .tasks/TODO.md
+            printf '# 01\n' > .tasks/01-count.md
+            git add .tasks
+            git commit --quiet -m 'chore: plan rate-limiting tasks'
+            printf 'the backlog is written\n'
+            sleep 300
+            ;;
+        *)
+            sleep 300
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    let grilled = fixture
+        .until(|view| {
+            (commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("chore: plan")))
+            .then(|| output(view).map(|output| output.id))
+            .flatten()
+        })
+        .await;
+
+    let (status, body) = signal_done(&fixture).await;
+
+    assert_eq!(status, StatusCode::CONFLICT, "refused: {body}");
+    assert!(
+        body.contains("no Direction has been picked yet"),
+        "and said why: {body}",
+    );
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    // Asked until the watcher the pick armed is up: a moment after the pick it
+    // says so rather than claiming there was none.
+    let deadline = Instant::now() + *PATIENCE;
+    let (status, body) = loop {
+        let (status, body) = signal_done(&fixture).await;
+
+        if !body.contains("still being taken up") {
+            break (status, body);
+        }
+
+        assert!(Instant::now() < deadline, "the pick was never taken up");
+        pause(Duration::from_millis(25)).await;
+    };
+
+    assert_eq!(status, StatusCode::CONFLICT, "refused: {body}");
+    assert!(
+        body.contains("handoff document has not been written"),
+        "a backlog is not what an inline pick asked for: {body}",
+    );
+
+    pause(Duration::from_millis(600)).await;
+
+    let view = fixture.view().await;
+
+    assert_eq!(view.state, Lifecycle::Grilling, "and nothing moved");
+    assert!(
+        running(&fixture, grilled).await,
+        "with the grilling session still running",
+    );
+}
+
+/// A session that lands its step and then puts a blocking Set up is left alive
+/// while the Set is open, and after it is answered — which is the bug the Done
+/// signal began with.
+#[tokio::test]
+async fn a_session_that_lands_its_step_and_then_asks_is_left_alive_through_the_answer() {
+    let fixture = grilling(&a_backlog_that_says_so(
+        "",
+        "while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n        \
+         printf 'answered, and finishing\\n'\n        \
+         : > /tmp/verkstead/done",
+    ))
+    .await;
+
+    let (_, task) = picked_through_to_the_task(&fixture).await;
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("feat: count"))
+                .then_some(())
+        })
+        .await;
+
+    let set = fixture.ask(A_FOLLOW_UP_ROUND).await;
+
+    pause(Duration::from_millis(1500)).await;
+
+    assert!(
+        running(&fixture, task).await,
+        "a session asking over its landed step is left to wait for the answer",
+    );
+
+    assert_eq!(fixture.answer(set).await, Submitted::Accepted);
+
+    pause(Duration::from_millis(900)).await;
+
+    assert!(
+        running(&fixture, task).await,
+        "and to read it once it arrives",
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("answered"), "").unwrap();
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("chore: finish"))
+                .then_some(())
+        })
+        .await;
+}
+
 /// What a rescued session was told, waited for from the file the stub writes
 /// each line typed into it to.
 ///
@@ -22209,6 +22788,7 @@ const AN_INLINE_RUN_THAT_GOES_IDLE: &str = r#"
 case "$1" in
 claude-grilling-5)
     printf '# What we settled\n\nAn in-process counter.\n' > /tmp/verkstead/handoff.md
+    : > /tmp/verkstead/done
     printf 'the handoff is written\n'
     sleep 300
     ;;
@@ -22227,6 +22807,7 @@ const AN_INLINE_RUN_THAT_COMMITS_AND_IDLES: &str = r#"
 case "$1" in
 claude-grilling-5)
     printf '# What we settled\n\nAn in-process counter.\n' > /tmp/verkstead/handoff.md
+    : > /tmp/verkstead/done
     printf 'the handoff is written\n'
     sleep 300
     ;;
@@ -22235,6 +22816,7 @@ claude-grilling-5)
     printf 'a limiter\n' > limiter.md
     git add limiter.md
     git commit --quiet -m 'feat: rate limiting'
+    : > /tmp/verkstead/done
     printf 'pushed, and the pull request is open\n'
     sleep 300
     ;;
@@ -22256,6 +22838,7 @@ claude-grilling-5)
     printf '# 01\n' > .tasks/01-count.md
     git add .tasks
     git commit --quiet -m 'chore: plan rate-limiting tasks'
+    : > /tmp/verkstead/done
     sleep 300
     ;;
 *)
@@ -22278,6 +22861,7 @@ claude-grilling-5)
     printf '# 01\n' > .tasks/01-count.md
     git add .tasks
     git commit --quiet -m 'chore: plan rate-limiting tasks'
+    : > /tmp/verkstead/done
     sleep 300
     ;;
 *)
@@ -22305,6 +22889,7 @@ claude-grilling-5)
     printf '# 01\n' > .tasks/01-count.md
     git add .tasks
     git commit --quiet -m 'chore: plan rate-limiting tasks'
+    : > /tmp/verkstead/done
     sleep 300
     ;;
 *)
@@ -22334,6 +22919,7 @@ claude-grilling-5)
     printf '# 01\n' > .tasks/01-count.md
     git add .tasks
     git commit --quiet -m 'chore: plan rate-limiting tasks'
+    : > /tmp/verkstead/done
     sleep 300
     ;;
 *)
@@ -22359,6 +22945,7 @@ claude-grilling-5)
     printf '# 01\n' > .tasks/01-count.md
     git add .tasks
     git commit --quiet -m 'chore: plan rate-limiting tasks'
+    : > /tmp/verkstead/done
     sleep 300
     ;;
 *)
@@ -22528,9 +23115,11 @@ fn a_backlog_drawing(prompt: &str, frames: i32, commits: bool) -> String {
         sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
         git add -A
         git commit --quiet -m "feat: count the requests"
+        : > /tmp/verkstead/done
     else
         git rm --quiet -r .tasks
         git commit --quiet -m 'chore: finish rate-limiting'
+        : > /tmp/verkstead/done
     fi"#
     } else {
         ""
@@ -22565,6 +23154,7 @@ gpt-5-codex-grilling)
     printf '# 01\n' > .tasks/01-count.md
     git add .tasks
     git commit --quiet -m 'chore: plan rate-limiting tasks'
+    : > /tmp/verkstead/done
     drawing grilling
     ;;
 *)
@@ -22781,9 +23371,11 @@ fn a_backlog_at_work(grilling_model: &str, at_work: &str, resting: &str, commits
         sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
         git add -A
         git commit --quiet -m "feat: count the requests"
+        : > /tmp/verkstead/done
     else
         git rm --quiet -r .tasks
         git commit --quiet -m 'chore: finish rate-limiting'
+        : > /tmp/verkstead/done
     fi"#
     } else {
         ""
@@ -22820,6 +23412,7 @@ case "$1" in
     printf '# 01\n' > .tasks/01-count.md
     git add .tasks
     git commit --quiet -m 'chore: plan rate-limiting tasks'
+    : > /tmp/verkstead/done
     resting grilling
     ;;
 *)
@@ -23304,6 +23897,7 @@ case "$1" in
     printf '# 01\n' > .tasks/01-count.md
     git add .tasks
     git commit --quiet -m 'chore: plan rate-limiting tasks'
+    : > /tmp/verkstead/done
     frame '{resting}'
     sleep 300
     ;;
@@ -23330,9 +23924,11 @@ case "$1" in
         sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
         git add -A
         git commit --quiet -m "feat: count the requests"
+        : > /tmp/verkstead/done
     else
         git rm --quiet -r .tasks
         git commit --quiet -m 'chore: finish rate-limiting'
+        : > /tmp/verkstead/done
     fi
     frame '{resting}'
     while read -r TOLD; do printf '%s\n' "$TOLD" >> /tmp/verkstead/rescues; done
@@ -23964,6 +24560,7 @@ async fn an_instruction_session_over_a_backlog_hands_on_to_the_next_task() {
             printf 'a note\n' >> notes.md
             git add -A
             git commit --quiet -m 'docs: note the window it counts against'
+            : > /tmp/verkstead/done
             sleep 300
             ;;
         *)
@@ -23974,6 +24571,7 @@ async fn an_instruction_session_over_a_backlog_hands_on_to_the_next_task() {
                 printf '# 01. Count the requests\n' > .tasks/01-count.md
                 git add .tasks
                 git commit --quiet -m 'chore: plan the rate limiter'
+                : > /tmp/verkstead/done
                 printf 'the backlog is written\n'
                 sleep 300
                 ;;
@@ -24911,6 +25509,7 @@ async fn a_restarted_server_works_the_backlog_it_was_left_implementing() {
             printf '# 01. Count the requests\n' > .tasks/01-count.md
             git add .tasks
             git commit --quiet -m 'chore: plan the rate limiter'
+            : > /tmp/verkstead/done
             printf 'the backlog is written\n'
             sleep 300
             ;;
@@ -25018,6 +25617,7 @@ async fn a_deliberate_halt_survives_a_restart_with_its_badge_intact() {
             printf '# 01. Count the requests\n' > .tasks/01-count.md
             git add .tasks
             git commit --quiet -m 'chore: plan the rate limiter'
+            : > /tmp/verkstead/done
             printf 'the backlog is written\n'
             sleep 300
             ;;
@@ -25360,6 +25960,7 @@ claude-grilling-5)
     printf '# 02\n' > .tasks/02-refuse.md
     git add .tasks
     git commit --quiet -m 'chore: plan rate-limiting tasks'
+    : > /tmp/verkstead/done
     sleep 300
     ;;
 *)
@@ -25377,9 +25978,11 @@ claude-grilling-5)
         sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
         git add -A
         git commit --quiet -m "feat: $next"
+        : > /tmp/verkstead/done
     else
         git rm --quiet -r .tasks
         git commit --quiet -m 'chore: finish rate-limiting'
+        : > /tmp/verkstead/done
         printf 'pushed, and the pull request is open\n'
     fi
     sleep 300
@@ -25623,6 +26226,7 @@ claude-grilling-5)
     printf '# 01\n' > .tasks/01-count.md
     git add .tasks
     git commit --quiet -m 'chore: plan rate-limiting tasks'
+    : > /tmp/verkstead/done
     sleep 300
     ;;
 *)
@@ -25643,6 +26247,7 @@ claude-grilling-5)
         printf 'a fix\n' >> fixes.md
         git add -A
         git commit --quiet -m 'fix: have a go at the failing check'
+        : > /tmp/verkstead/done
         rm -f {busy}
         sleep 300
         ;;
@@ -25654,13 +26259,16 @@ claude-grilling-5)
         sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
         git add -A
         git commit --quiet -m "feat: count the requests"
+        : > /tmp/verkstead/done
     else
         git rm --quiet -r .tasks
         git commit --quiet -m 'chore: finish rate-limiting'
+        : > /tmp/verkstead/done
         cd ../askance-*
         printf 'the other half\n' > halves.md
         git add halves.md
         git commit --quiet -m 'feat: the other half'
+        : > /tmp/verkstead/done
         printf 'pushed both, and the pull requests are open\n'
     fi
     sleep 300
@@ -26351,6 +26959,7 @@ claude-grilling-5)
     printf '# 01\n' > .tasks/01-count.md
     git add .tasks
     git commit --quiet -m 'chore: plan rate-limiting tasks'
+    : > /tmp/verkstead/done
     sleep 300
     ;;
 *)
@@ -26373,13 +26982,16 @@ claude-grilling-5)
         sed -i "s/- \[ \] $number:/- [x] $number:/" .tasks/TODO.md
         git add -A
         git commit --quiet -m "feat: count the requests"
+        : > /tmp/verkstead/done
     else
         git rm --quiet -r .tasks
         git commit --quiet -m 'chore: finish rate-limiting'
+        : > /tmp/verkstead/done
         cd ../askance-*
         printf 'the other half\n' > halves.md
         git add halves.md
         git commit --quiet -m 'feat: the other half'
+        : > /tmp/verkstead/done
         printf 'pushed both, and the pull requests are open\n'
     fi
     sleep 300
@@ -27092,6 +27704,7 @@ case "$2" in
     printf 'a limiter\n' > limiter.md
     git add limiter.md
     git commit --quiet -m 'feat: rate limiting'
+    : > /tmp/verkstead/done
     ;;
 *)
     printf 'nothing to do\n'
