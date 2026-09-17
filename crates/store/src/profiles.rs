@@ -133,10 +133,10 @@ pub enum Channel {
 pub enum Account {
     /// Claude Code's pair.
     Claude {
-        /// The directory bind-mounted over `~/.claude`, resolved.
+        /// The directory a session's `~/.claude` is built from, resolved.
         claude_dir: PathBuf,
 
-        /// The file bind-mounted over `~/.claude.json`, resolved.
+        /// The file a session's `~/.claude.json` is copied from, resolved.
         config_file: PathBuf,
     },
 
