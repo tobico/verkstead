@@ -2657,6 +2657,17 @@ impl Home {
     pub(crate) fn built(&self) -> &Path {
         &self.built
     }
+
+    /// And where a Claude session's root is on the host, inside that.
+    pub(crate) fn claude_root(&self) -> PathBuf {
+        self.built.join(CLAUDE_DIR_INSIDE_HOME)
+    }
+
+    /// And the root's own `projects/` on the host, which is where a Claude
+    /// session's transcript is written when its Profile shares no memory.
+    pub(crate) fn claude_projects(&self) -> PathBuf {
+        root::Root::projects_in(&self.claude_root())
+    }
 }
 
 /// The Verkstead executable a session is given, which is the one serving it.
@@ -3716,11 +3727,13 @@ impl Sandbox {
 
         // And a Claude session's root, whose `projects/` entries are made in the
         // account here where they are not there yet: each is a join, and a join
-        // of nothing is a session that will not start. Refused the way a
+        // of nothing is a session that will not start. None where the Profile
+        // shares no memory, there being no join to make. Refused the way a
         // handoff directory that cannot be made is.
         let root = match &profile.account {
             store::Account::Claude { claude_dir, .. } => {
-                let root = root::Root::of(homes.platform(), claude_dir, &git_dir, &worktree);
+                let root = root::Root::of(homes.platform(), claude_dir, &git_dir, &worktree)
+                    .remembering(profile.memory);
 
                 if let Err(error) = root.made_in_account() {
                     tracing::error!(
@@ -4397,8 +4410,10 @@ impl Sandbox {
     /// Linux, where HOME is made inside the namespace — and the root is made
     /// in it. Then the root is put where Claude looks, which is a bind on Linux
     /// and on a Mac is where it already is, and the account's credentials and
-    /// two `projects/` entries are joined into that. Nothing else of the account
-    /// is said, so nothing else of it is there.
+    /// two `projects/` entries are joined into that — the entries only where the
+    /// Profile shares its memory, and an empty `projects/` of the root's own
+    /// where it does not. Nothing else of the account is said, so nothing else
+    /// of it is there.
     ///
     /// **And a `settings.json` of Verkstead's own is written into it**, out of
     /// the account's — see [`root::Root::settings`]. Written rather than joined,
@@ -4422,6 +4437,12 @@ impl Sandbox {
                     path: root::Root::settings_in(&built),
                     contents: root.settings(),
                 });
+
+            // A root that shares no memory has a `projects/` of its own, empty,
+            // for the session's memory and transcript to be written into.
+            if !root.shares_memory() {
+                surface.made(Access::Built(root::Root::projects_in(&built)));
+            }
         }
 
         surface.elsewhere(&built, &inside, Reach::ReadWrite);
@@ -4473,7 +4494,7 @@ impl Sandbox {
 
     /// Where a Claude session's root is on the host.
     fn built_root(&self) -> PathBuf {
-        self.home.built().join(CLAUDE_DIR_INSIDE_HOME)
+        self.home.claude_root()
     }
 
     /// And where its copy of `.claude.json` is on the host.

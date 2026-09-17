@@ -35,6 +35,7 @@ fn facts(name: &str, models: &[&str]) -> ProfileFacts {
             config_file: PathBuf::from(format!("/watched/accounts/{name}/.claude.json")),
         },
         models: models.iter().map(|model| (*model).to_owned()).collect(),
+        memory: true,
     }
 }
 

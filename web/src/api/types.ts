@@ -2581,7 +2581,14 @@ account: ProfileAccount,
  * whitespace are the server's to drop, and a list that comes to nothing is
  * refused.
  */
-models: Array<string>, };
+models: Array<string>, 
+/**
+ * Whether a session under this Profile shares the account's memory store:
+ * `true` for the store the human's own sessions keep, `false` for an empty
+ * one of the session's own. Left out, it is on — the default the form
+ * draws, and what every Profile had before there was a switch.
+ */
+memory: boolean, };
 
 /**
  * One row of the Profile list.
@@ -2616,7 +2623,13 @@ models: Array<string>,
  * `null` while the account is where it was left, which is the ordinary
  * case.
  */
-broken: Broken | null, };
+broken: Broken | null, 
+/**
+ * Whether a session under this Profile shares the account's memory store,
+ * or starts with an empty one of its own. On unless the human switched it
+ * off.
+ */
+memory: boolean, };
 
 /**
  * What became of saving a Profile.

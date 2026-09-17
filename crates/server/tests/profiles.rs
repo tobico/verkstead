@@ -376,6 +376,41 @@ async fn a_saved_profile_appears_on_the_list_with_everything_it_was_given() {
     assert_eq!(profile.broken, None);
 }
 
+/// The memory switch is on for a Profile saved without saying — what an older
+/// client sends — and a save that switches it off reads back off, on the list
+/// and after the server has been started again over the same database.
+#[tokio::test]
+async fn a_profile_saved_with_its_memory_off_reads_back_off() {
+    let (accounts, dir, app) = workbench().await;
+
+    let profile = saved(&app, accounts.path(), "work").await;
+    assert!(
+        profile.memory,
+        "a save that says nothing about memory shares it"
+    );
+
+    let (claude_dir, config_file) = pair(accounts.path(), "work");
+    let mut forgetting = edit("work", &claude_dir, &config_file, &MODELS);
+    forgetting["memory"] = serde_json::Value::Bool(false);
+
+    assert_eq!(
+        rewrite(&app, profile.id, &forgetting).await,
+        ProfileSaved::Saved
+    );
+    assert!(!listed(&app).await[0].memory);
+
+    let reopened = router_keeping(
+        open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap(),
+        dir.path().to_owned(),
+    );
+    assert!(
+        !listed(&reopened).await[0].memory,
+        "and it is still off once the server is started again"
+    );
+}
+
 #[tokio::test]
 async fn a_profile_is_rewritten_whole_and_removed_when_nobody_is_running_under_it() {
     let (accounts, _dir, app) = workbench().await;

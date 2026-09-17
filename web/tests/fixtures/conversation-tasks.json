@@ -22,6 +22,7 @@
         },
         "broken": null,
         "id": 1,
+        "memory": true,
         "models": [
           "claude-fable-5"
         ],
@@ -40,6 +41,7 @@
       },
       "broken": null,
       "id": 2,
+      "memory": true,
       "models": [
         "claude-opus-5",
         "claude-haiku-4-5-20251001"
@@ -99,6 +101,7 @@
         },
         "broken": "DirMissing",
         "id": 3,
+        "memory": true,
         "models": [
           "claude-sonnet-5"
         ],

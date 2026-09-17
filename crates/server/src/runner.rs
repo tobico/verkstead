@@ -4138,6 +4138,7 @@ mod tests {
                     config_file: PathBuf::from("/data/claude.json"),
                 },
                 models: vec![model.to_owned()],
+                memory: true,
             },
             model: Some(model.to_owned()),
         }

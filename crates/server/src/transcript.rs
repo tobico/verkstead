@@ -15,7 +15,8 @@
 //! **How it is found is the backend's own** — see [`Search`]. Claude Code takes
 //! the name Verkstead gave the session before it started it (see
 //! [`crate::sessions`]) and writes a file called that, so its log is a lookup
-//! inside the Agent Profile's `projects` directory. Codex takes no session id at
+//! inside the Agent Profile's `projects` directory, or the session root's own
+//! where the Profile shares no memory. Codex takes no session id at
 //! all, so nothing known before it starts names its log: what identifies a
 //! rollout is what the session wrote in it about itself, which is the Worktree
 //! it opened in — so the session's log is the one naming this Worktree that
@@ -191,23 +192,32 @@ impl Tail {
     /// The last two are what the two backends that take no session id are found
     /// *by*, and are nothing to the two that name their own: a Codex or an
     /// OpenCode session with neither is a session with nothing to look for —
-    /// see [`Search`].
+    /// see [`Search`]. `home` is the Conversation's own, which is where a root
+    /// a session was built is on the host — see [`crate::sandbox::Home`].
     pub(crate) fn of(
         conversation: i64,
         profile: &store::Profile,
         session: &str,
         worktree: Option<&Path>,
         launched: SystemTime,
+        home: &crate::sandbox::Home,
     ) -> Tail {
         // One arm per agent type rather than one path every type is assumed to
         // keep: where a backend puts its record, and what it calls it, is that
         // backend's own business, and a backend arriving with a fourth answer
         // lands here.
         let search = match (&profile.account, worktree) {
-            // Where Claude Code keeps its logs, under the directory the account
-            // is.
+            // Where Claude Code keeps its logs: under the directory the account
+            // is where the Profile shares its memory, and under the session's
+            // own root on the host where it does not. A shared entry is a join,
+            // and on Linux a join is a bind inside the namespace only, so on the
+            // host the log is in the account; an unshared `projects/` is the
+            // root's own directory, so the log is there and nowhere else.
             (store::Account::Claude { claude_dir, .. }, _) => Search::Named {
-                projects: claude_dir.join("projects"),
+                projects: match profile.memory {
+                    true => claude_dir.join("projects"),
+                    false => home.claude_projects(),
+                },
                 session: session.to_owned(),
             },
 

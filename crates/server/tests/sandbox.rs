@@ -393,6 +393,7 @@ fi
                 name: Some("codex".to_owned()),
                 account: store::Account::Codex { home },
                 models: vec!["gpt-5-codex".to_owned()],
+                memory: true,
             },
         )
         .await
@@ -421,6 +422,7 @@ fi
                 name: Some("grok".to_owned()),
                 account: store::Account::Grok { home },
                 models: vec!["grok-4.6".to_owned()],
+                memory: true,
             },
         )
         .await
@@ -458,6 +460,7 @@ fi
                 name: Some("opencode".to_owned()),
                 account: store::Account::OpenCode { home },
                 models: vec!["opencode/big-pickle".to_owned()],
+                memory: true,
             },
         )
         .await
@@ -600,6 +603,7 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
                 config_file,
             },
             models: vec!["claude-opus-5".to_owned()],
+            memory: true,
         },
     )
     .await
@@ -1785,6 +1789,7 @@ async fn an_account_on_another_volume_is_a_session_that_is_not_started() {
                 config_file: PathBuf::from(r"Z:\accounts\work\.claude.json"),
             },
             models: vec!["claude-opus-5".to_owned()],
+            memory: true,
         },
     )
     .await
@@ -2420,6 +2425,82 @@ async fn memory_and_a_transcript_written_inside_land_in_the_account() {
         "and so is the session's transcript, one level under `projects/` where it \
          is looked for"
     );
+}
+
+/// With the Profile's memory switched off, a Claude session's root holds a
+/// `projects/` of its own and nothing in it: none of the account's entries is
+/// joined, and none is made in the account for a join that is not there.
+///
+/// What the session writes there is the root's, on the host, under the
+/// Conversation's own directory — which is where its transcript is looked for.
+#[tokio::test]
+async fn a_root_without_memory_has_an_empty_projects_of_its_own() {
+    let fixture = grilling().await;
+    let forgetting = store::Profile {
+        memory: false,
+        ..fixture.profile.clone()
+    };
+
+    let account = fixture.claude_dir().join("projects");
+    let (repo, worktree) = (
+        account.join(entry_named(&fixture.repo)),
+        account.join(entry_named(fixture.worktree())),
+    );
+
+    let sandbox = fixture.sandbox_under(&forgetting, LISTENING, &BuildCache::none(), vec![]);
+
+    assert!(
+        !repo.exists() && !worktree.exists(),
+        "nothing is made in the account's `projects/` for a root that joins none of it"
+    );
+
+    let reported = probe(
+        &sandbox,
+        &format!(
+            r#"
+            say root "$(ls -A "$HOME/.claude" | sort | tr '\n' ' ')"
+            say projects "$(ls -A "$HOME/.claude/projects" | tr '\n' ' ')"
+            dir "$HOME/.claude/projects/-home-you-src-something-else" another-repository
+            file "$HOME/.claude/.credentials.json" credentials
+            mkdir -p "$HOME/.claude/projects/{worktree}"
+            printf '{{"turn": 1}}\n' > "$HOME/.claude/projects/{worktree}/the-session.jsonl"
+            "#,
+            worktree = entry_named(fixture.worktree()),
+        ),
+    );
+
+    assert_eq!(
+        reported["root"], ".credentials.json projects settings.json ",
+        "the same root as with memory on"
+    );
+    assert_eq!(reported["projects"], "", "but its `projects/` starts empty");
+    assert_eq!(
+        reported["another-repository"], "absent",
+        "and none of the account's transcripts are in it"
+    );
+    assert_eq!(
+        reported["credentials"], "write",
+        "while the login is joined either way"
+    );
+
+    let home = fixture
+        .state
+        .path()
+        .join("homes")
+        .join(fixture.conversation.id.to_string());
+
+    assert_eq!(
+        std::fs::read_to_string(
+            home.join(".claude/projects")
+                .join(entry_named(fixture.worktree()))
+                .join("the-session.jsonl")
+        )
+        .unwrap(),
+        "{\"turn\": 1}\n",
+        "the transcript is in the root on the host, one level under `projects/` \
+         where it is looked for"
+    );
+    assert!(!worktree.exists(), "and not in the account");
 }
 
 /// A login refreshed inside is the account's login, as it is written.

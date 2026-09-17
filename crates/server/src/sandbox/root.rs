@@ -17,6 +17,11 @@
 //! a bind on Linux, a symlink on a Mac, and on Windows a hard link for the login
 //! and a junction for each entry.
 //!
+//! **The two entries are joined only where the Profile's memory switch is on.**
+//! Off, the root's `projects/` is its own and starts empty, so the session has
+//! fresh memory and none of the human's transcripts, and its own transcript is
+//! written into the root — see [`Root::remembering`].
+//!
 //! **Beside the root, `.claude.json` is copied rather than joined**, so the
 //! trust seeded into it is not written straight into the account, and what a
 //! session changes in it is merged back as it ends — see [`merged_back`].
@@ -81,6 +86,10 @@ pub(crate) struct Root {
     /// plain path, with forward slashes on Windows. One where the two are the
     /// same path.
     trusted: Vec<String>,
+
+    /// Whether the entries are joined at all: the Profile's memory switch — see
+    /// [`Root::remembering`].
+    memory: bool,
 }
 
 impl Root {
@@ -130,7 +139,37 @@ impl Root {
             account: account.to_owned(),
             entries,
             trusted,
+            memory: true,
         }
+    }
+
+    /// The same root, sharing the account's memory or not.
+    ///
+    /// **On**, which is what [`Root::of`] makes: the two `projects/` entries are
+    /// made in the account and joined, so memory a session writes is the
+    /// account's and its transcript is in the account's store.
+    ///
+    /// **Off**: nothing under the account's `projects/` is made or joined. The
+    /// root's `projects/` is a directory of its own, empty as the session
+    /// starts, and Claude writes the session's memory and transcript there — see
+    /// [`Root::shares_memory`]. The credentials, the settings and the
+    /// `.claude.json` copy are the same either way.
+    pub(crate) fn remembering(self, memory: bool) -> Root {
+        Root { memory, ..self }
+    }
+
+    /// Whether the account's `projects/` entries are joined into this root.
+    ///
+    /// Where they are not, the root's own `projects/` is made empty as it is
+    /// built — see [`Root::projects_in`] — and a transcript is looked for there
+    /// rather than in the account.
+    pub(crate) fn shares_memory(&self) -> bool {
+        self.memory
+    }
+
+    /// Where the directory of `projects/` entries is in a root at `root`.
+    pub(crate) fn projects_in(root: &Path) -> PathBuf {
+        root.join(PROJECTS)
     }
 
     /// The account's credentials file, whether or not there is one.
@@ -182,9 +221,12 @@ impl Root {
     /// case for a Repo nobody has run Claude in yet, and a join of nothing is a
     /// session that will not start.
     ///
+    /// **Nothing at all where memory is off**: nothing is joined, so nothing of
+    /// the account's is written to make a join of.
+    ///
     /// Blocking.
     pub(crate) fn made_in_account(&self) -> io::Result<()> {
-        for entry in &self.entries {
+        for entry in self.joined_entries() {
             std::fs::create_dir_all(self.account.join(PROJECTS).join(entry))?;
         }
 
@@ -211,7 +253,7 @@ impl Root {
             joined.push((credentials, Root::credentials_in(inside)));
         }
 
-        for entry in &self.entries {
+        for entry in self.joined_entries() {
             joined.push((
                 self.account.join(PROJECTS).join(entry),
                 inside.join(PROJECTS).join(entry),
@@ -219,6 +261,15 @@ impl Root {
         }
 
         joined
+    }
+
+    /// The `projects/` entries joined from the account: all of them where
+    /// memory is shared, and none where it is not.
+    fn joined_entries(&self) -> &[String] {
+        match self.memory {
+            true => &self.entries,
+            false => &[],
+        }
     }
 }
 
@@ -945,6 +996,39 @@ mod tests {
 
         let same = Root::of(Platform::Linux, &account, &worktree.join(".git"), &worktree);
         assert_eq!(same.entries, [worktree_entry]);
+    }
+
+    /// With memory off, only the credentials are joined, and nothing is made
+    /// under the account's `projects/`.
+    #[test]
+    fn a_root_without_memory_joins_no_entry_and_makes_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        let worktree = dir.path().join("worktree");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+        std::fs::create_dir_all(&worktree).unwrap();
+
+        let account = dir.path().join("account/.claude");
+        std::fs::create_dir_all(&account).unwrap();
+        std::fs::write(account.join(CREDENTIALS), "{}\n").unwrap();
+
+        let root =
+            Root::of(Platform::Linux, &account, &repo.join(".git"), &worktree).remembering(false);
+        assert!(!root.shares_memory());
+
+        root.made_in_account().unwrap();
+        assert!(
+            !account.join("projects").exists(),
+            "nothing is made in the account for a root that joins none of it"
+        );
+
+        assert_eq!(
+            root.joined(Path::new("/inside/.claude")),
+            [(
+                account.join(CREDENTIALS),
+                PathBuf::from("/inside/.claude/.credentials.json")
+            )]
+        );
     }
 
     /// A path resolved on Windows carries `\\?\` in front of it, and its entry is

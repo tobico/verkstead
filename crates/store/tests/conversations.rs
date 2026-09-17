@@ -46,6 +46,7 @@ fn profile_facts(name: &str) -> ProfileFacts {
             config_file: PathBuf::from(format!("/watched/accounts/{name}/.claude.json")),
         },
         models: vec![MODEL.to_owned()],
+        memory: true,
     }
 }
 

@@ -162,6 +162,7 @@ async fn printed(pool: &SqlitePool, id: i64, session: &str, said: &str) -> i64 {
                 home: PathBuf::from("/watched/accounts/work/.codex"),
             },
             models: vec!["gpt-5".to_owned()],
+            memory: true,
         },
     )
     .await
@@ -531,6 +532,7 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
                 home: PathBuf::from("/watched/accounts/work/.codex"),
             },
             models: vec!["gpt-5".to_owned()],
+            memory: true,
         },
     )
     .await

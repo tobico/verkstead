@@ -388,8 +388,8 @@ function runnable(reading: OnboardingView): AgentType[] {
   return there.length > 0 ? there : harnesses;
 }
 
-/// One found account as the Profile it would be saved as: no name, and every
-/// model this build knows for its harness.
+/// One found account as the Profile it would be saved as: no name, memory shared,
+/// and every model this build knows for its harness.
 ///
 /// Unnamed because a home holds one account per harness, so there is nothing to
 /// tell it from — and the models because a Profile with none is refused, while
@@ -402,6 +402,7 @@ function asProfile(found: AccountView): ProfileEdit {
     models: KNOWN_MODELS.filter(
       (model) => model.agent === found.account.agent_type,
     ).map((model) => model.id),
+    memory: true,
   };
 }
 

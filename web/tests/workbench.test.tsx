@@ -5123,6 +5123,7 @@ describe("a conversation's pairings", () => {
       account: { agent_type: "Grok", home: "/srv/accounts/grok" },
       broken: null,
       id: 9,
+      memory: true,
       models: ["grok-4.6"],
       name: "grok",
     },

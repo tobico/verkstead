@@ -280,6 +280,7 @@ async fn standing() -> Standing {
                 config_file,
             },
             models: vec!["claude-opus-5".to_owned()],
+            memory: true,
         },
     )
     .await

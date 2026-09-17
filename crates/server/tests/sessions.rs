@@ -1757,6 +1757,24 @@ async fn grilling(stub: &str) -> Grilling {
     grilling_spilling(tempfile::tempdir().unwrap(), stub, PULL_REQUEST).await
 }
 
+/// And the same on a Claude account whose memory is switched off, so that a
+/// session's root has a `projects/` of its own and its log is written there.
+async fn grilling_forgetting(stub: &str) -> Grilling {
+    grilling_however_started(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        NOTHING_ATTACHED,
+        Pickers::GrillingForgetting,
+        Origin::None,
+        Seeded::Nothing,
+        None,
+    )
+    .await
+}
+
 /// The same, grilled under an account of the second agent type — one home
 /// rather than Claude's pair.
 ///
@@ -2166,6 +2184,10 @@ enum Pickers {
 
     /// And on the fourth — see [`Bench::everything_on_opencode`].
     EverythingOnOpenCode,
+
+    /// Every role under a Pairing of its own, and the grilling Profile's memory
+    /// switched off — see [`Bench::grilling_forgetting`].
+    GrillingForgetting,
 }
 
 /// The same with a read-write companion beside it, for the tests about a
@@ -2355,6 +2377,7 @@ async fn grilling_however_started(
         Pickers::EverythingOnCodex => bench.everything_on_codex(id).await,
         Pickers::EverythingOnGrok => bench.everything_on_grok(id).await,
         Pickers::EverythingOnOpenCode => bench.everything_on_opencode(id).await,
+        Pickers::GrillingForgetting => bench.grilling_forgetting().await,
     }
 
     // While it is still drafting, which is the only time a companion can be
@@ -2491,6 +2514,31 @@ impl Bench {
             .await;
             assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
         }
+    }
+
+    /// And switch the grilling Profile's memory off, which is the one thing the
+    /// form changes about it: the same account and models, saved again with the
+    /// switch unticked.
+    async fn grilling_forgetting(&self) {
+        let profiles: Vec<verkstead_render::ProfileEntry> =
+            get(&self.app, "/api/ui/profiles").await;
+        let grilling = profiles
+            .into_iter()
+            .find(|profile| profile.name.as_deref() == Some("grilling"))
+            .expect("every role has a Profile of its own");
+
+        let saved: ProfileSaved = post(
+            &self.app,
+            &format!("/api/ui/profiles/{}", grilling.id),
+            &serde_json::json!({
+                "name": grilling.name,
+                "account": grilling.account,
+                "models": grilling.models,
+                "memory": false,
+            }),
+        )
+        .await;
+        assert_eq!(saved, ProfileSaved::Saved);
     }
 
     /// And pick the grilling role under an account of the second agent type,
@@ -3718,6 +3766,78 @@ async fn a_sessions_own_log_is_followed_line_by_line_while_it_runs() {
     assert!(
         said.contains("Reading the brief.\n") && said.contains("Asking.\n"),
         "following the log should not cost the Capture anything: {said:?}"
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+}
+
+/// With the Profile's memory switched off, the session's log is written into
+/// its root's own `projects/` rather than the account's — and it is followed
+/// from there onto the Timeline all the same.
+///
+/// The root is on the host under the Conversation's own directory in the Data
+/// Directory, which is where the log is looked for; the account's `projects/`
+/// holds nothing of this session's.
+#[tokio::test]
+async fn a_sessions_log_is_followed_out_of_its_root_where_memory_is_off() {
+    let fixture = grilling_forgetting(
+        r#"
+        name=
+        while [ $# -gt 0 ]; do
+            if [ "$1" = --session-id ]; then name=$2; fi
+            shift
+        done
+
+        log=$HOME/.claude/projects/$(pwd | tr -c 'a-zA-Z0-9\n' -)/$name.jsonl
+        mkdir -p "$(dirname "$log")"
+
+        printf '{"type":"user","text":"Rate limiting"}\n' > "$log"
+        printf 'Reading the brief.\n'
+
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+    let transcript = fixture.transcript_of(event, 1).await;
+
+    assert_eq!(
+        transcript,
+        vec![r#"{"type":"user","text":"Rate limiting"}"#.to_owned()],
+        "the log in the root is followed onto the Transcript"
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+    let name = verkstead_store::session_id(&pool, event)
+        .await
+        .unwrap()
+        .expect("Verkstead should have written down what it named the session");
+
+    let written = |projects: PathBuf| {
+        std::fs::read_dir(projects)
+            .map(|entries| {
+                entries
+                    .map(|entry| entry.unwrap().path().join(format!("{name}.jsonl")))
+                    .any(|log| log.is_file())
+            })
+            .unwrap_or(false)
+    };
+
+    assert!(
+        written(
+            fixture
+                .state
+                .path()
+                .join("homes")
+                .join(fixture.id.to_string())
+                .join(".claude/projects")
+        ),
+        "the log is in the root on the host"
+    );
+    assert!(
+        !written(fixture._elsewhere.path().join("grilling/.claude/projects")),
+        "and not in the account"
     );
 
     assert_eq!(fixture.close().await, ConversationClosed::Closed);

@@ -746,6 +746,7 @@ async fn grilling() -> Grilling {
                 config_file,
             },
             models: vec!["claude-opus-5".to_owned()],
+            memory: true,
         },
     )
     .await
@@ -1414,6 +1415,89 @@ async fn a_login_read_through_the_link_and_saved_by_rename_is_the_accounts_after
             .expect("the account has its login"),
         "{\"refreshed\": true}",
         "which is written back over the account's own login as the session ends"
+    );
+}
+
+/// With the Profile's memory switched off, a session's root holds a `projects/`
+/// of its own and nothing in it, and no entry is granted on the account's own
+/// `projects/` entries — so they are refused like the rest of the account, even
+/// where an earlier session with memory on made them.
+///
+/// What the session writes there is the root's, under the Conversation's own
+/// profile on the host, which is where its transcript is looked for.
+#[tokio::test]
+async fn a_root_without_memory_has_an_empty_projects_of_its_own() {
+    let mut fixture = grilling().await;
+
+    // Made in the account by a sandbox with memory on, as a Profile switched
+    // off after sessions ran under it has them.
+    let entries = fixture.joined_entries();
+
+    fixture.profile.memory = false;
+
+    let projects = fixture.root_inside().join("projects");
+    let transcript = projects
+        .join(entries[0].file_name().unwrap())
+        .join("the-session.jsonl");
+    let quoted = |path: &Path| path.display().to_string().replace('\'', "''");
+
+    let mut asked = vec![
+        directory("projects-in-the-root", &projects),
+        file("credentials", fixture.root_inside().join(CREDENTIALS)),
+    ];
+
+    for (name, entry) in ["an-entry", "the-other-entry"].into_iter().zip(&entries) {
+        asked.push(directory(name, entry));
+    }
+
+    let classified = fixture.probe_running(&format!(
+        "{}\
+         Report 'listed' ([System.IO.Directory]::GetFileSystemEntries('{projects}').Length)\r\n\
+         [void][System.IO.Directory]::CreateDirectory('{entry}')\r\n\
+         [System.IO.File]::WriteAllText('{transcript}', '{{\"turn\": 1}}')\r\n",
+        classifying(&asked),
+        projects = quoted(&projects),
+        entry = quoted(transcript.parent().unwrap()),
+        transcript = quoted(&transcript),
+    ));
+
+    assert_eq!(
+        said(&classified, "projects-in-the-root"),
+        "write",
+        "the root's own `projects/` is there and writable, and the probe said: {classified:?}"
+    );
+    assert_eq!(
+        said(&classified, "listed"),
+        "0",
+        "and it starts empty, and the probe said: {classified:?}"
+    );
+    assert_eq!(
+        said(&classified, "credentials"),
+        "write",
+        "while the login is joined either way, and the probe said: {classified:?}"
+    );
+
+    for name in ["an-entry", "the-other-entry"]
+        .into_iter()
+        .take(entries.len())
+    {
+        assert_eq!(
+            said(&classified, name),
+            "refused",
+            "no entry is granted on the account's own `projects/` entries, and the \
+             probe said: {classified:?}"
+        );
+    }
+
+    assert_eq!(
+        std::fs::read_to_string(&transcript).unwrap(),
+        "{\"turn\": 1}",
+        "the transcript is in the root on the host, one level under `projects/` \
+         where it is looked for"
+    );
+    assert!(
+        !entries[0].join("the-session.jsonl").exists(),
+        "and not in the account"
     );
 }
 

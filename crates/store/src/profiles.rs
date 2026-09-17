@@ -13,12 +13,13 @@
 //! available, and every pick made from it is explicit.
 //!
 //! They live in a table of their own, `profile_models`, hung off `profiles` the
-//! way the directions are hung off the conversations: there is no migration
-//! machinery here and `profiles` is STRICT, so a new fact arrives as a new table
-//! rather than as a column added to an old one. The old `model` column stays
-//! where it is, and a Profile written before the list existed is read as the one
-//! entry that column holds — which is what carries every saved Profile over with
-//! nothing for the human to re-enter.
+//! way the directions are hung off the conversations: there was no migration
+//! machinery here when the list arrived, so it came as a new table rather than as
+//! a column added to an old one. There is machinery now — see
+//! [`super::migrations`] — and it is how [`Profile::memory`] became a column
+//! instead. The old `model` column stays where it is, and a Profile written
+//! before the list existed is read as the one entry that column holds — which is
+//! what carries every saved Profile over with nothing for the human to re-enter.
 //!
 //! An account's paths are stored resolved, as a Repo's is and for the same
 //! reason: whoever saved the Profile had `..` and every symlink taken out of
@@ -213,6 +214,16 @@ pub struct Profile {
     /// written. None of them is the default: the order is the human's typing
     /// kept intact so that editing the list reads back as they left it.
     pub models: Vec<String>,
+
+    /// Whether a session under this Profile is given the account's memory store,
+    /// or starts with an empty one of its own.
+    ///
+    /// On by default, and on for every Profile saved before there was a switch:
+    /// the shared store is what the human has always been getting, so the switch
+    /// is a way to stop rather than a way to start. Off, the session's store is
+    /// its own and empty — fresh memory, and none of the human's transcripts
+    /// reachable from inside it.
+    pub memory: bool,
 }
 
 impl Profile {
@@ -327,6 +338,7 @@ pub struct ProfileFacts {
     pub name: Option<String>,
     pub account: Account,
     pub models: Vec<String>,
+    pub memory: bool,
 }
 
 /// What became of writing a Profile down.
@@ -385,7 +397,8 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
              claude_dir  TEXT NOT NULL,
              config_file TEXT NOT NULL,
              model       TEXT NOT NULL,
-             agent_type  TEXT NOT NULL
+             agent_type  TEXT NOT NULL,
+             memory      INTEGER NOT NULL DEFAULT 1
          ) STRICT",
     )
     .execute(pool)
@@ -409,9 +422,9 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     .context("creating the index that keeps one unnamed Profile per harness")?;
 
     // The models each Profile can run, one row apiece. A table of its own for
-    // the reason the directions are one: `profiles` is STRICT and there is no
-    // migration machinery to alter it with, so what is new hangs off what is
-    // there.
+    // the reason the directions are one: there was no migration machinery to
+    // alter `profiles` with when the list arrived, so what was new hung off what
+    // was there.
     //
     // `position` is the order they were written in and nothing more — no entry
     // is preferred — kept so that a list read back into the form is the list the
@@ -430,10 +443,10 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 
     // And where a Profile whose account is one relocatable home keeps it —
     // every backend but Claude, whose account is the pair in the row itself. A
-    // table rather than a column for the reason `profile_models` is one:
-    // `profiles` is STRICT and there is no migration machinery, so a new fact
-    // about a Profile is a new table hung off it by id. One home per Profile,
-    // so the id is the key.
+    // table rather than a column for the reason `profile_models` is one: there
+    // was no migration machinery to add a column with when homes arrived, so the
+    // fact became a table hung off `profiles` by id. One home per Profile, so the
+    // id is the key.
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS profile_homes (
              profile_id INTEGER PRIMARY KEY REFERENCES profiles(id),
@@ -469,8 +482,8 @@ pub async fn create_profile(
     let (claude_dir, config_file) = pair(&facts.account)?;
 
     let row: Option<(i64,)> = sqlx::query_as(
-        "INSERT INTO profiles (name, claude_dir, config_file, model, agent_type)
-         VALUES (?, ?, ?, ?, ?)
+        "INSERT INTO profiles (name, claude_dir, config_file, model, agent_type, memory)
+         VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT DO NOTHING
          RETURNING id",
     )
@@ -479,6 +492,7 @@ pub async fn create_profile(
     .bind(config_file)
     .bind(legacy_model(facts))
     .bind(facts.account.agent_type().word())
+    .bind(facts.memory)
     .fetch_optional(&mut *tx)
     .await
     .with_context(|| format!("saving the Profile {:?}", facts.name))?;
@@ -502,6 +516,7 @@ pub async fn create_profile(
         name: facts.name.clone(),
         account: facts.account.clone(),
         models: facts.models.clone(),
+        memory: facts.memory,
     }))
 }
 
@@ -548,7 +563,8 @@ pub async fn update_profile(pool: &SqlitePool, id: i64, facts: &ProfileFacts) ->
 
     let changed = sqlx::query(
         "UPDATE profiles
-         SET name = ?, claude_dir = ?, config_file = ?, model = ?, agent_type = ?
+         SET name = ?, claude_dir = ?, config_file = ?, model = ?, agent_type = ?,
+             memory = ?
          WHERE id = ?",
     )
     .bind(&facts.name)
@@ -556,6 +572,7 @@ pub async fn update_profile(pool: &SqlitePool, id: i64, facts: &ProfileFacts) ->
     .bind(config_file)
     .bind(legacy_model(facts))
     .bind(facts.account.agent_type().word())
+    .bind(facts.memory)
     .bind(id)
     .execute(&mut *tx)
     .await
@@ -641,7 +658,7 @@ pub async fn delete_profile(pool: &SqlitePool, id: i64) -> Result<Deleting> {
 /// its named accounts are the exceptions on.
 pub async fn profiles(pool: &SqlitePool) -> Result<Vec<Profile>> {
     let rows: Vec<Row> = sqlx::query_as(
-        "SELECT id, name, claude_dir, config_file, model, agent_type
+        "SELECT id, name, claude_dir, config_file, model, agent_type, memory
          FROM profiles
          ORDER BY name, id",
     )
@@ -686,7 +703,7 @@ pub async fn profiles(pool: &SqlitePool) -> Result<Vec<Profile>> {
 /// One Profile, or `None` if there is no such Profile.
 pub async fn load_profile(pool: &SqlitePool, id: i64) -> Result<Option<Profile>> {
     let row: Option<Row> = sqlx::query_as(
-        "SELECT id, name, claude_dir, config_file, model, agent_type
+        "SELECT id, name, claude_dir, config_file, model, agent_type, memory
          FROM profiles
          WHERE id = ?",
     )
@@ -722,7 +739,7 @@ pub async fn load_profile(pool: &SqlitePool, id: i64) -> Result<Option<Profile>>
 }
 
 /// A row of the profiles table as a [`Profile`].
-type Row = (i64, Option<String>, String, String, String, String);
+type Row = (i64, Option<String>, String, String, String, String, bool);
 
 /// One row, whatever `profile_models` holds for it, and the home in
 /// `profile_homes` where its type keeps one.
@@ -736,7 +753,7 @@ type Row = (i64, Option<String>, String, String, String, String);
 /// edited by hand: refused rather than read as a home of the empty string,
 /// because an account of nowhere is a bind that would land on `/`.
 fn read_row(row: Row, listed: Vec<String>, home: Option<String>) -> Result<Profile> {
-    let (id, name, claude_dir, config_file, model, agent_type) = row;
+    let (id, name, claude_dir, config_file, model, agent_type, memory) = row;
 
     let models = match (listed.is_empty(), model.is_empty()) {
         (true, false) => vec![model],
@@ -766,6 +783,7 @@ fn read_row(row: Row, listed: Vec<String>, home: Option<String>) -> Result<Profi
         name,
         account,
         models,
+        memory,
     })
 }
 
