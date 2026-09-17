@@ -1578,6 +1578,11 @@ async fn started(
 ///   [`super::Decision::waits_on_the_human`], which is that rule, and
 ///   `stops::waited_on`, which is it said as the condition below. A column on
 ///   the row rather than a subselect, so the whole list costs one query.
+/// - A **session escalated over**: gone Idle, spoken to three times by the
+///   Rescue without an answer, and still running. Not a stop — nothing
+///   stopped, and Resume is not offered — but a Conversation nothing will move
+///   until the human does. A column on the row for the stop's reason; see
+///   `escalations::escalate`.
 ///
 /// A grilling waiting on its closing proposal is the first of them and not a
 /// source of its own: the proposal rides a Question Set, and an unanswered Set
@@ -1608,10 +1613,12 @@ fn waits_on_the_human() -> String {
                    )
              )
              OR ({stopped})
+             OR ({escalated})
          )",
         draft = Lifecycle::Draft.stored(),
         closed = Lifecycle::Closed.stored(),
         stopped = super::stops::waited_on(),
+        escalated = super::escalations::waited_on(),
     )
 }
 

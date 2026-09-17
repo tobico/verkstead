@@ -1567,7 +1567,21 @@ pub(crate) async fn conversation_view(
     // And the mark points at the stop's own Notice, whatever wrote it: a run
     // that has stopped is stopped, and a mark with nowhere to go would be one
     // the human could not act on.
-    let blocked_on = marked.map(|stopped| stopped.notice);
+    //
+    // Or, where nothing has stopped, at the Notice of a session escalated over:
+    // not a stop, but the one thing on the record the human is waiting on the
+    // session over. A read that fails reads as none, which leaves the page
+    // quiet. See [`crate::rescues`].
+    let escalated = match (&marked, conversation.state) {
+        (None, lifecycle) if lifecycle != store::Lifecycle::Closed => {
+            store::escalated(&state.pool, id).await.unwrap_or_else(|error| {
+                tracing::error!(error = ?error, conversation_id = id, "reading whether a Conversation was escalated over failed");
+                None
+            })
+        }
+        _ => None,
+    };
+    let blocked_on = marked.map(|stopped| stopped.notice).or(escalated);
 
     // Which mark it is, decided here so the browser never weighs a stored word:
     // Verkstead's brake and a driver a crash took away are things that happened

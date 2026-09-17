@@ -1232,7 +1232,7 @@ impl Idle {
     /// When it was last seen at work, for whoever wants to know whether that was
     /// *after* something else — an answer handed to the session, a line typed
     /// into it — which is a question about the order of two moments rather than
-    /// about a span. See [`crate::rescues::until_it_will_not_ask`], where a
+    /// about a span. See [`crate::rescues::watched`], where a
     /// session seen working later than the stir is the proof that the stir
     /// reached it at all.
     ///

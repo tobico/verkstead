@@ -437,8 +437,18 @@ async fn land(
 /// with no *Worktree* heading reads as a stop nobody looked into.
 fn said(what: &str, how: &str, git_status: &str, tail: &str) -> String {
     format!(
-        "**{}** stopped.\n\n{how}\n\n### The worktree\n\n{}\n\n### What the last session said\n\n{}\n",
+        "**{}** stopped.\n\n{how}\n\n{}",
         opening(what),
+        evidence(git_status, tail),
+    )
+}
+
+/// The two pieces of evidence under their headings, for a Notice that is not a
+/// stop's and carries what one does — see [`crate::rescues`], which tells the
+/// human about a session it could not talk round.
+pub(crate) fn evidence(git_status: &str, tail: &str) -> String {
+    format!(
+        "### The worktree\n\n{}\n\n### What the last session said\n\n{}\n",
         indented(
             git_status,
             "Git had nothing pending, or the repository would not answer.",
@@ -462,7 +472,7 @@ pub(crate) fn out_of_window(profile: &str, said: &str) -> String {
 /// The stop with its first letter up, because it opens the sentence the Notice
 /// is. Every caller names it the way the log does — "implementing the work" —
 /// and a Notice opening in lower case would read as half a line.
-fn opening(what: &str) -> String {
+pub(crate) fn opening(what: &str) -> String {
     let mut letters = what.chars();
 
     match letters.next() {

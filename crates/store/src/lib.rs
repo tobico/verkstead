@@ -39,6 +39,7 @@ mod conversations;
 mod deferrals;
 mod deliveries;
 mod endings;
+mod escalations;
 mod migrations;
 mod pairings;
 mod pauses;
@@ -96,6 +97,7 @@ pub use conversations::{
 pub use deferrals::{Ask, Unfolded, asked_as, record_folded, stored_on_timeline, unfolded};
 pub use deliveries::{delivered, record_delivery};
 pub use endings::{ended_on, nothing_else};
+pub use escalations::{escalate, escalated, settle_escalation};
 pub use pairings::{RepoPairings, last_started_pairings, remembered_pairings};
 pub use pauses::Pause;
 pub use placements::place_conversations;
@@ -743,6 +745,11 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // because a database written before this carries its open ones onto the
     // Conversations as the columns arrive — see [`stops::apply_schema`].
     stops::apply_schema(pool).await?;
+
+    // And that a session the Rescue could not talk round has been put to the
+    // human, which is a column beside the stop for the stop's reason: it is how
+    // things are, and what happened is the Notice it points at.
+    escalations::apply_schema(pool).await?;
 
     // And what the work ended up on, which hangs off the Timelines the same way
     // — and off the Conversations, which is what makes *one pull request per

@@ -18,16 +18,23 @@
 //!
 //! **Both, because the line is sometimes wrong.** What it is read off is a
 //! session watched from outside, and a session doing exactly what it should can
-//! wear that shape for a moment — see [`until_it_will_not_ask`], which is mostly
+//! wear that shape for a moment — see [`watched`], which is mostly
 //! the business of not being wrong. One told only to ask *asks*, and a Set that
 //! nothing needed is noise on the human's phone in the middle of the work they
 //! are being asked about. Told to carry on or to ask, a session that was never
 //! stuck spends the line on one quiet turn and nobody is disturbed.
 //!
-//! **Twice at most**, because the second time it fails to work is evidence rather
-//! than bad luck. What follows is a stop like any other: the Conversation lands
-//! in front of the human with a Notice saying the session would not ask, and
-//! Resume is what they have.
+//! **It escalates, and never stops a session.** A rescue the session answers —
+//! the session seen at work since the line arrived — puts the count back to
+//! nothing, however many times over its life that happens. Three in a row with
+//! no answer and Verkstead tells the human instead: a Notice on the Timeline and
+//! a push to their devices, which is what a stop sends, without the stop. The
+//! session stays alive with its Worktree, the Conversation reads *blocked on
+//! you*, and the rescue holds off until the session is seen working again —
+//! one escalation per silence. What happens next is the human's: typing into
+//! the Screen, steering, or pressing Stop. Any bound that ended the session
+//! would be a guess about it read from outside, and it would go on killing a
+//! session legitimately waiting on work of its own. See ADR-0018.
 //!
 //! **The same condition in every state.** A grilling writing the artifact its
 //! pick asked for, a backlog step, an inline implementation, an instruction, a
@@ -35,7 +42,7 @@
 //! asking or finished, and *none of the three* is the shape this watches for.
 //! Finished is the same everywhere too — a Done signal given and borne out,
 //! whatever the kind checks it against — so the loop takes the signal. See
-//! [`until_it_will_not_ask`], which is the whole of the mechanism.
+//! [`watched`], which is the whole of the mechanism.
 //!
 //! **And sessions legitimately waiting are never spoken to.** One sitting on a
 //! Blocking Ask has a Set open, which is the middle third of the condition —
@@ -57,27 +64,34 @@
 //! it had gone quiet. So a *stir* — the session's launch, an answer arriving, a
 //! rescue typed in — holds the rescue off until the session has said something
 //! since, which is the one thing from out here that proves the stir landed. See
-//! [`until_it_will_not_ask`], and [`crate::runner::Pace::waking`], which is the
+//! [`watched`], and [`crate::runner::Pace::waking`], which is the
 //! ceiling on the holding off: a session that says nothing at all for that long
 //! is one that died mid-wait, and it is rescued having never spoken.
 //!
 //! Nothing is written to the Timeline for the rescue itself. It is Verkstead
 //! prodding an agent rather than anything the work has got to, and the session's
-//! own Capture holds the line and whatever the agent made of it.
+//! own Capture holds the line and whatever the agent made of it. The escalation
+//! is the one thing written, because that is the human being told.
 
 use std::time::{Duration, Instant};
 
+use sqlx::SqlitePool;
+use verkstead_schema::Nudge;
+
 use crate::AppState;
 use crate::done::Signal;
+use crate::nudge::Nudges;
 use crate::runner::Pace;
 use crate::sessions::Idle;
+use crate::store;
 
-/// How many times one session is spoken to before Verkstead stops asking.
+/// How many rescues in a row go unanswered before the human is told.
 ///
-/// Two, and the third time round is the stop. Once is a turn that ended a moment
-/// early and the line is enough to start another; twice with the same silence
-/// after it is a session that is not going to ask, whatever it is told.
-pub(crate) const AT_MOST: usize = 2;
+/// Three. Once is a turn that ended a moment early, and the line is enough to
+/// start another; the same silence after three is something the human should
+/// look at. Not a stop — the count is only how long Verkstead goes on speaking
+/// to the session before it speaks to them instead.
+pub(crate) const UNANSWERED: usize = 3;
 
 /// What is typed in.
 ///
@@ -194,16 +208,16 @@ async fn after_the_echo(idle: &Idle) -> Instant {
 }
 
 /// Watch a running session for the one shape nothing else can move, speak to it
-/// when it takes that shape, and return once it will not be talked out of it.
+/// when it takes that shape, and tell the human when it will not be talked out
+/// of it.
 ///
 /// **Three things at once, and none of them is enough alone.** *Idle*, because a
 /// session still printing is one at work — and anything it prints puts the whole
 /// grace back on the clock, so one mid-sentence is never spoken to. *Nothing
 /// open*, because a session sitting on a Blocking Ask is doing exactly what it
 /// should: the ask blocks for as long as the human takes, and that may be the
-/// next morning. *And not done*, because a session that has landed what it was
-/// sent for and said so is one the driver beside this is already ending — see
-/// [`crate::done`].
+/// next morning. *And not done*, because a session that has said so is one the
+/// driver beside this is already ending — see [`crate::done`].
 ///
 /// The open Set is the Conversation's rather than this session's — see
 /// [`crate::runner::open`]. What the rescue is for is a human with nothing in
@@ -218,34 +232,34 @@ async fn after_the_echo(idle: &Idle) -> Instant {
 /// **And it waits for a word after every stir.** A session's launch, an answer
 /// arriving, and a line typed in by this loop are all something it has just been
 /// given to act on, and a session that has just been given something has had no
-/// time to act on it yet. What used to follow a stir was the grace over again,
-/// which was a guess at how long the answer takes to arrive at a session — down
-/// a chain of hops Verkstead cannot see one of, and one that is slower than the
-/// grace more often than it looks. What follows a stir now is the session's own
-/// first word: it may take as long as it takes, and the grace begins from what
-/// it says. Which is the near half of the condition read properly rather than a
-/// longer number — the question was never *how long has it been* but *did the
-/// thing we handed it get there*, and a word is the only answer to that from out
-/// here.
+/// time to act on it yet. What follows a stir is the session's own first word:
+/// it may take as long as it takes, and the grace begins from what it says. The
+/// question was never *how long has it been* but *did the thing we handed it
+/// get there*, and a word is the only answer to that from out here.
 ///
 /// The ceiling on that is [`Pace::waking`], because a stir a session never
 /// answers is exactly what a session dying mid-wait looks like. One that has said
 /// nothing at all since the stir is rescued when it passes, having never spoken.
 ///
-/// **Returns only where the rescue is spent** — twice typed in, and still idle
-/// with nothing open and nothing landed. What follows is the caller's, and it is
-/// the same thing everywhere: the session is ended where it stands and the
-/// Conversation stops with a Notice saying it would not ask. Otherwise this
-/// never returns, which is what makes it an arm of the `select!` every driver
-/// here waits on.
-pub(crate) async fn until_it_will_not_ask(
+/// **A rescue answered puts the count back to nothing.** Answered is the session
+/// seen at work since the line finished arriving — the stir's own reading, so
+/// the echo of the line is not an answer. [`UNANSWERED`] in a row with no answer
+/// and the human is told instead — see [`escalate`] — and the rescue holds off,
+/// typing nothing and telling nobody again, until the session is seen at work.
+/// That takes the escalation away and rearms the whole of it.
+///
+/// **Never returns**: the session ending is what ends this, as the arm of the
+/// `select!` every driver here waits on that loses. Which is also when an
+/// escalation standing goes — see [`Escalation`].
+pub(crate) async fn watched(
     state: &AppState,
     conversation_id: i64,
     event_id: i64,
     idle: &Idle,
     pace: Pace,
     signal: Signal,
-) {
+    what: &str,
+) -> std::convert::Infallible {
     // When the session was last stirred: a Set of the Conversation's seen open,
     // a rescue typed in, or the moment this began. Each is something the session
     // has just been given to act on, and none of them is a moment it can be
@@ -257,12 +271,25 @@ pub(crate) async fn until_it_will_not_ask(
     // that gave it its direction was handed back to it.
     let mut stirred = Instant::now();
 
-    // How many times it has been told. Never reset: a session that asked and
-    // then went quiet again has had its round, and the bound is on this
-    // session's whole life rather than on a run of silences.
-    let mut spent = 0;
+    // How many rescues in a row have gone unanswered, and the moment the last
+    // one finished arriving — which is what an answer is read against.
+    let mut unanswered = 0;
+    let mut rescued: Option<Instant> = None;
+
+    // The human told about this silence, where they have been. Taken away as
+    // the session is seen at work again, or with this loop as the session ends.
+    let mut escalation = Escalation::none(state, conversation_id);
 
     loop {
+        // Answered: seen at work since the last rescue arrived. The count goes
+        // back to nothing, and so does anything the human was told about the
+        // silence it answered.
+        if rescued.is_some_and(|at| idle.since() > at) {
+            unanswered = 0;
+            rescued = None;
+            escalation.settle().await;
+        }
+
         // The store first, and every poll — which is the one place here that
         // does not put the cheap half first, and it is deliberate. What this
         // asks is not only whether the human has something in front of them
@@ -279,6 +306,14 @@ pub(crate) async fn until_it_will_not_ask(
             // The last look that saw it open, rather than the answer itself,
             // which is the same moment to within `pace.poll`.
             stirred = Instant::now();
+            tokio::time::sleep(pace.poll).await;
+            continue;
+        }
+
+        // Told already, about this same silence: nothing more is typed and
+        // nobody is told twice until the session is seen at work, which is the
+        // top of this loop's to notice.
+        if escalation.standing() {
             tokio::time::sleep(pace.poll).await;
             continue;
         }
@@ -313,51 +348,187 @@ pub(crate) async fn until_it_will_not_ask(
             }
         }
 
-        // Idle and silent, but with something to show for it: the driver beside
-        // this is ending the session on exactly that, and a line typed into one
-        // that has done its job would be Verkstead prodding an agent for
-        // finishing.
+        // Idle and silent, having said it is done: the driver beside this is
+        // ending the session on exactly that, and a line typed into one that has
+        // done its job would be Verkstead prodding an agent for finishing.
         if signal.given() {
             tokio::time::sleep(pace.poll).await;
             continue;
         }
 
-        // Spent, and the session still there to have spent it on. One that has
-        // gone in the meantime is the ending's to report and not this: the
-        // driver beside this is waiting on it, and *it finished* is a truer
-        // account of a session than *it would not ask*.
-        if spent >= AT_MOST && state.sessions.alive(conversation_id, event_id) {
-            return;
+        // Spoken to as many times as it will be, and the session still there to
+        // have been spoken to. One that has gone in the meantime is the ending's
+        // to report: the driver beside this is waiting on it.
+        if unanswered >= UNANSWERED {
+            if state.sessions.alive(conversation_id, event_id) {
+                escalation.escalate(event_id, what).await;
+            }
+
+            tokio::time::sleep(pace.poll).await;
+            continue;
         }
 
         // Counted only where it reached a session. One that has ended between
-        // the last look and this one is not a rescue that failed — the ending is
-        // being waited on beside this, and it is the ending that decides.
+        // the last look and this one is not a rescue that went unanswered — the
+        // ending is being waited on beside this, and it is the ending that
+        // decides.
         if rescue(state, conversation_id, event_id, LINE).await {
-            spent += 1;
+            unanswered += 1;
 
-            // Once what was typed has finished arriving back, rather than as it
             // Once what was typed has finished arriving back, rather than as it
             // was typed — see [`after_the_echo`]. A terminal echoes, so a stir
             // taken at the last keystroke is one the keystrokes answer
             // themselves.
             stirred = after_the_echo(idle).await;
+            rescued = Some(stirred);
         }
 
         tokio::time::sleep(pace.poll).await;
     }
 }
 
-/// What a stop over a session that would not ask says beyond what it was doing.
+/// What the human is told about a session that went unanswered, and the mark it
+/// leaves on the Conversation for as long as that lasts.
 ///
-/// The rescue spent: it was idle with nothing open and nothing landed, it was
-/// twice told to carry on or else to say where it had got to and put the next
-/// move to the human, and it did neither. Which leaves a Conversation nobody
-/// can move — nothing to answer and nothing to read — so it stops rather than
-/// sitting there, and Resume is what the human has.
+/// Owned by the loop that wrote it, so that it goes with the loop: a session
+/// ended — by its signal, by itself, or by the human pressing Stop — drops the
+/// loop watching it, and *blocked on you* over a session that is no longer
+/// there would be a mark with nothing behind it.
+pub(crate) struct Escalation {
+    pool: SqlitePool,
+    nudges: Nudges,
+    conversation_id: i64,
+
+    /// Whether the human has been told about this silence.
+    told: bool,
+
+    /// The Notice that told them, where it was written. `told` without one is
+    /// an escalation the store would not take — still one per silence, so a
+    /// store that fails is not a phone told every poll.
+    notice: Option<i64>,
+}
+
+impl Escalation {
+    fn none(state: &AppState, conversation_id: i64) -> Self {
+        Self {
+            pool: state.pool.clone(),
+            nudges: state.nudges.clone(),
+            conversation_id,
+            told: false,
+            notice: None,
+        }
+    }
+
+    fn standing(&self) -> bool {
+        self.told
+    }
+
+    /// Tell the human: a Notice on the Timeline, the *blocked on you* mark over
+    /// it, and a push to their devices. What a stop Verkstead decided on sends,
+    /// without the stop — nothing is ended, and nothing is written as stopped.
+    async fn escalate(&mut self, event_id: i64, what: &str) {
+        self.told = true;
+
+        let conversation_id = self.conversation_id;
+
+        let said = format!(
+            "**{}** has gone idle without finishing.\n\n{ESCALATED}\n\n{}",
+            crate::stopping::opening(what),
+            crate::stopping::evidence(
+                &crate::stopping::worktree_status(&self.pool, conversation_id).await,
+                &crate::stopping::session_tail(&self.pool, conversation_id, Some(event_id)).await,
+            ),
+        );
+
+        match store::escalate(&self.pool, conversation_id, &said).await {
+            Ok(Some(notice)) => {
+                tracing::warn!(
+                    conversation_id,
+                    event_id,
+                    notice,
+                    "the session went unanswered after being spoken to {UNANSWERED} times, so \
+                     the human is told and the session left running",
+                );
+
+                self.notice = Some(notice);
+
+                self.nudges.announce(Nudge::Conversation {
+                    conversation: conversation_id,
+                });
+
+                crate::push::told(
+                    &self.pool,
+                    conversation_id,
+                    crate::push::News::Escalated {
+                        idle: crate::stopping::opening(what),
+                    },
+                );
+            }
+            // One standing already, which is not this loop's: nothing to add.
+            Ok(None) => tracing::info!(
+                conversation_id,
+                event_id,
+                "the session went unanswered, and an escalation already stands",
+            ),
+            Err(error) => tracing::error!(
+                error = ?error,
+                conversation_id,
+                event_id,
+                "telling the human about a session gone unanswered failed",
+            ),
+        }
+    }
+
+    /// The session is seen at work: take the mark away and rearm.
+    async fn settle(&mut self) {
+        self.told = false;
+
+        if let Some(notice) = self.notice.take() {
+            settled(&self.pool, &self.nudges, self.conversation_id, notice).await;
+        }
+    }
+}
+
+impl Drop for Escalation {
+    fn drop(&mut self) {
+        let Some(notice) = self.notice.take() else {
+            return;
+        };
+
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+
+        let (pool, nudges, conversation_id) =
+            (self.pool.clone(), self.nudges.clone(), self.conversation_id);
+
+        runtime.spawn(async move { settled(&pool, &nudges, conversation_id, notice).await });
+    }
+}
+
+/// Take one escalation's mark away, and redraw an open page where it went.
 ///
-/// [`crate::stopping::Decided::Verkstead`] wherever it is written: Verkstead
-/// looked at this session and decided it was not going to ask.
-pub(crate) const WOULD_NOT_ASK: &str = "the session went quiet without asking you anything or finishing what it was doing, and \
-     went on saying nothing after being told twice to carry on with its next step or else say \
-     where it had got to and ask you what to do next";
+/// The Notice stays on the Timeline: it is what happened.
+async fn settled(pool: &SqlitePool, nudges: &Nudges, conversation_id: i64, notice: i64) {
+    match store::settle_escalation(pool, conversation_id, notice).await {
+        Ok(true) => nudges.announce(Nudge::Conversation {
+            conversation: conversation_id,
+        }),
+        Ok(false) => {}
+        Err(error) => tracing::error!(
+            error = ?error,
+            conversation_id,
+            notice,
+            "taking away the mark over a session gone unanswered failed",
+        ),
+    }
+}
+
+/// What the escalation's Notice says beyond what was being done.
+///
+/// What happened, that nothing was stopped, and what the human can do about it
+/// — the three moves that are theirs, the session being still there to move.
+pub(crate) const ESCALATED: &str = "The session went idle without saying it is done, asking you \
+     anything or declaring a wait, and did not answer when it was spoken to three times. It is \
+     still running, with its worktree. You can type into its Screen, steer the Conversation, or \
+     press **Stop**.";

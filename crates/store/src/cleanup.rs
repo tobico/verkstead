@@ -480,11 +480,15 @@ pub async fn delete_conversation(pool: &SqlitePool, id: i64) -> Result<Deletion>
         }
     }
 
-    sqlx::query("UPDATE conversations SET stopped_notice = NULL WHERE id = ?")
-        .bind(id)
-        .execute(&mut *tx)
-        .await
-        .with_context(|| format!("letting go of the stop Notice of Conversation {id}"))?;
+    sqlx::query(
+        "UPDATE conversations SET stopped_notice = NULL, escalated_notice = NULL WHERE id = ?",
+    )
+    .bind(id)
+    .execute(&mut *tx)
+    .await
+    .with_context(|| {
+        format!("letting go of the stop and escalation Notices of Conversation {id}")
+    })?;
 
     erase(&mut tx, id, "timeline_events", "conversation_id = ?").await?;
     erase(&mut tx, id, "conversations", "id = ?").await?;

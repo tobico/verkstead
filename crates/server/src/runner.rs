@@ -46,11 +46,11 @@
 //! going is a press of Resume, because a runner that relaunched a step nothing
 //! had moved would spend an account on the same failure with nobody watching.
 //!
-//! **And one whose session never ends at all** is spoken to before it is stopped
+//! **And one whose session never ends at all** is spoken to, and never stopped
 //! over. A session that goes idle with nothing open and nothing landed has not
 //! ended and has not finished: it is sitting there with the turn over and no way
 //! of knowing that the screen it printed to has nobody in front of it. So it is
-//! told, twice, and then stopped where it stands — see [`crate::rescues`], which
+//! told, and where it will not answer the human is told instead — see [`crate::rescues`], which
 //! is one loop over every driver here and takes what *done* is read off as its
 //! parameter.
 //!
@@ -1204,10 +1204,8 @@ async fn asked_for_a_pull_request(state: &AppState, conversation_id: i64) {
 /// finish it.
 ///
 /// **And one that will not ask is spoken to**, until it signals — see
-/// [`crate::rescues`]. Where the rescue is spent the session is ended where it
-/// stands and what follows is what follows every ending here: GitHub asked, and
-/// the Conversation wrapped up or stopped. Nothing else would ever end a session
-/// that forgot the signal.
+/// [`crate::rescues`], which tells the human where it will not answer and leaves
+/// the session running for them to move.
 ///
 /// The Timeline Event it printed into, or `None` where nothing ran: no session
 /// could be started, or the run was stopped from outside while this one did. Both
@@ -1233,28 +1231,18 @@ async fn submitted(state: &AppState, conversation_id: i64) -> Option<i64> {
     let ended = tokio::select! {
         ended = session.ended() => Some(ended),
         () = signalled_and_idle(signal.clone(), &idle, pace) => None,
-        // No signal given and nothing open, with the session sitting there. Told
-        // twice and then ended where it stands; whether that leaves a pull
-        // request is GitHub's to say, and asked next either way.
-        () = crate::rescues::until_it_will_not_ask(
+        // No signal given and nothing open, with the session sitting there.
+        // Spoken to, and the human told where it will not answer — see
+        // [`crate::rescues`].
+        never = crate::rescues::watched(
             state,
             conversation_id,
             event_id,
             &idle,
             pace,
             signal,
-        ) => {
-            tracing::warn!(
-                conversation_id,
-                event_id,
-                "the session sent to open the pull request went quiet without saying it is \
-                 done or asking about anything, so it is being ended",
-            );
-
-            state.sessions.end(conversation_id).await;
-
-            return Some(event_id);
-        }
+            "opening the pull request",
+        ) => match never {},
     };
 
     drop(expecting);
@@ -1369,8 +1357,8 @@ async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session,
 /// signal given and nothing put to the human is an inline run come to nothing,
 /// or finished and not said, with a process still holding the Worktree — a
 /// Conversation nobody can move, driven so nothing sweeps it and silent so
-/// nothing says so. Told twice and then stopped where it stands, as every other
-/// driver here does it. See [`crate::rescues`].
+/// nothing says so. Where it will not answer the human is told, and the session
+/// left running, as every other driver here does it. See [`crate::rescues`].
 ///
 /// Landing is measured against what was already there rather than against zero,
 /// which is what makes a second go answerable: a first attempt that committed
@@ -1438,34 +1426,17 @@ async fn follow_inline(
         // And one that is idle with nothing open and no signal given: the whole
         // of an inline run come to nothing, or finished and not said, with a
         // process still holding the Worktree and nothing on the page to press.
-        // Told twice and then stopped where it stands — see [`crate::rescues`].
-        () = crate::rescues::until_it_will_not_ask(
+        // Spoken to, and the human told where it will not answer — see
+        // [`crate::rescues`].
+        never = crate::rescues::watched(
             &state,
             conversation_id,
             event_id,
             &idle,
             pace,
             signal,
-        ) => {
-            tracing::warn!(
-                conversation_id,
-                event_id,
-                "the inline session went quiet without committing anything or asking \
-                 about it, so the Conversation stops here",
-            );
-
-            state.sessions.end(conversation_id).await;
-
-            return stop(
-                &state,
-                conversation_id,
-                crate::stopping::Decided::Verkstead,
-                "implementing the work inline",
-                crate::rescues::WOULD_NOT_ASK,
-                Some(event_id),
-            )
-            .await;
-        }
+            "implementing the work inline",
+        ) => match never {},
     };
 
     drop(expecting);
@@ -1614,8 +1585,8 @@ async fn follow_inline(
 ///
 /// **Including one that never ends at all.** Idle, with no signal given and
 /// nothing put to the human, is the same instruction come to nothing with a
-/// process still holding the Worktree — so it is told twice and then stopped in
-/// the same words. See [`crate::rescues`].
+/// process still holding the Worktree — so it is spoken to, and the human told
+/// where it will not answer. See [`crate::rescues`].
 pub(crate) async fn instructed(
     state: AppState,
     conversation_id: i64,
@@ -1657,38 +1628,17 @@ pub(crate) async fn instructed(
         () = signalled_and_idle(signal.clone(), &idle, pace) => None,
         // No signal given and nothing asked, with the session sitting there:
         // an instruction that has come to nothing, or finished and not said, and
-        // nobody to say so to. Told twice and then stopped where it stands,
-        // which is the same ending a step that would not land gets — see
-        // [`crate::rescues`].
-        () = crate::rescues::until_it_will_not_ask(
+        // nobody to say so to. Spoken to, and the human told where it will not
+        // answer — see [`crate::rescues`].
+        never = crate::rescues::watched(
             &state,
             conversation_id,
             event_id,
             &idle,
             pace,
             signal,
-        ) => {
-            let _driving = driving;
-
-            tracing::warn!(
-                conversation_id,
-                event_id,
-                "the instruction session went quiet without committing anything or asking \
-                 about it, so the Conversation stops here",
-            );
-
-            state.sessions.end(conversation_id).await;
-
-            return stop(
-                &state,
-                conversation_id,
-                crate::stopping::Decided::Verkstead,
-                "doing what the instruction said",
-                crate::rescues::WOULD_NOT_ASK,
-                Some(event_id),
-            )
-            .await;
-        }
+            "doing what the instruction said",
+        ) => match never {},
     };
 
     drop(expecting);
@@ -1909,9 +1859,8 @@ async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: D
 ///
 /// **So is one that will not ask.** A session that goes idle without a Set open
 /// leaves the human holding a Conversation they can neither answer nor end, so
-/// it is spoken to — twice, and then stopped where it stands. Nothing it left
-/// open goes off with that one: there being nothing open is half of what said it
-/// was stuck.
+/// it is spoken to, and the human told where it will not answer. The session is
+/// left running for them to move.
 pub(crate) async fn following_up(
     state: AppState,
     conversation_id: i64,
@@ -1963,34 +1912,18 @@ pub(crate) async fn following_up(
     let ended = tokio::select! {
         ended = session.ended() => Some(ended),
         () = signalled_and_idle(signal.clone(), &idle, pace) => None,
-        // The session is still there and still saying nothing, having been asked
-        // twice to say it where the human would hear. So it is ended here rather
-        // than waited on any longer, and the stop written over it is one the
-        // human presses Resume on — which starts a fresh follow-up session on
-        // the same brief. Nothing it left open goes off with it: there being
-        // nothing open is half of what said it was stuck.
-        () = crate::rescues::until_it_will_not_ask(
+        // The session is still there and saying nothing, with nothing put to
+        // the human. Spoken to, and the human told where it will not answer —
+        // see [`crate::rescues`].
+        never = crate::rescues::watched(
             &state,
             conversation_id,
             event_id,
             &idle,
             pace,
             signal,
-        ) => {
-            let _driving = driving;
-
-            state.sessions.end(conversation_id).await;
-
-            return stop(
-                &state,
-                conversation_id,
-                crate::stopping::Decided::Verkstead,
-                "following the work up",
-                crate::rescues::WOULD_NOT_ASK,
-                Some(event_id),
-            )
-            .await;
-        }
+            "following the work up",
+        ) => match never {},
     };
 
     drop(expecting);
@@ -2185,7 +2118,7 @@ async fn left_open(state: &AppState, conversation_id: i64) {
 /// The Conversation's rather than any one session's, which is the question both
 /// its readers are really asking: what matters is whether the human is left
 /// holding something to answer, and something to answer is one whoever put it
-/// up. See [`crate::rescues::until_it_will_not_ask`], which is the other reader
+/// up. See [`crate::rescues::watched`], which is the other reader
 /// — a session with a question standing in front of the human is not one to
 /// prod, whichever session wrote it.
 ///
@@ -2322,11 +2255,8 @@ async fn follow_roadmap(
 /// had its two goes at it — see [`crate::checks`].
 ///
 /// **A session that will not ask is still spoken to**, which is the one thing
-/// the rescue does here that it does everywhere — see [`crate::rescues`]. What
-/// it does *not* do here is write the stop the other callers write: a fix
-/// session is one of two goes at one check, and the state that dispatched it has
-/// a stop of its own for when they run out. So the rescue ends the session and
-/// the wrap-up carries on from the check, which is still red.
+/// the rescue does here that it does everywhere — see [`crate::rescues`]: the
+/// human is told where it will not answer, and the session left running.
 pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &str) -> Option<i64> {
     let mut session = launch(
         state,
@@ -2354,28 +2284,17 @@ pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &s
         ended = session.ended() => Some(ended),
         () = signalled_and_idle(signal.clone(), &idle, pace) => None,
         // Idle, with no signal given and nothing put to the human, which is a
-        // fix nobody can move on. Told twice and then ended where it stands; the
-        // stop, where there is to be one, is the wrap-up's own once the branch
-        // has had its two goes.
-        () = crate::rescues::until_it_will_not_ask(
+        // fix nobody can move on. Spoken to, and the human told where it will
+        // not answer — see [`crate::rescues`].
+        never = crate::rescues::watched(
             state,
             conversation_id,
             event_id,
             &idle,
             pace,
             signal,
-        ) => {
-            tracing::warn!(
-                conversation_id,
-                event_id,
-                "the fix session went quiet without saying it is done or asking about \
-                 anything, so it is being ended and the check looked at again",
-            );
-
-            state.sessions.end(conversation_id).await;
-
-            return Some(event_id);
-        }
+            "fixing the check",
+        ) => match never {},
     };
 
     drop(expecting);
@@ -2481,8 +2400,8 @@ pub(crate) async fn respond(state: &AppState, conversation_id: i64, said: &str) 
 /// blocks for as long as the human takes.
 ///
 /// **And one that will not ask is spoken to**, until it signals — see
-/// [`crate::rescues`]. Told twice and then stopped where it stands, which is
-/// [`Reviewed::Stopped`] to the caller in the rescue's own words.
+/// [`crate::rescues`], which tells the human where it will not answer and leaves
+/// the session running.
 ///
 /// A session ended on its signal **is a session that finished**: it is
 /// [`Reviewed::Done`], exactly as one that saw itself out cleanly is. Where the
@@ -2534,31 +2453,17 @@ async fn proposing(
             return Reviewed::Done;
         }
         // No signal given and nothing open, with the session sitting there: a
-        // review or a batch nobody can move on. Told twice and then stopped
-        // where it stands — see [`crate::rescues`].
-        () = crate::rescues::until_it_will_not_ask(
+        // review or a batch nobody can move on. Spoken to, and the human told
+        // where it will not answer — see [`crate::rescues`].
+        never = crate::rescues::watched(
             state,
             conversation_id,
             event_id,
             &idle,
             pace,
             signal,
-        ) => {
-            tracing::warn!(
-                conversation_id,
-                event_id,
-                what,
-                "the session went quiet without saying it is done or asking about anything, \
-                 so it is being ended",
-            );
-
-            state.sessions.end(conversation_id).await;
-
-            return Reviewed::Stopped {
-                how: crate::rescues::WOULD_NOT_ASK.to_owned(),
-                writing: event_id,
-            };
-        }
+            what,
+        ) => match never {},
     };
 
     drop(expecting);
@@ -2675,8 +2580,8 @@ async fn stop(
 /// **A session that hangs is one of those**, and until it is spoken to it is
 /// none of them: it has not crashed and it has not stopped short, it is sitting
 /// there with the turn finished. So it is told what it cannot see from inside —
-/// twice, and then ended where it stands and stopped over like any other step
-/// that did not land. See [`crate::rescues`], whose done-indicator here is the
+/// and where it will not answer the human is told, the session left running.
+/// See [`crate::rescues`], whose done-indicator here is the
 /// session's own Done signal.
 ///
 /// `Some` is the Timeline Event the session printed into. The step landed, and
@@ -2714,44 +2619,24 @@ async fn see_out(
         step.ends(),
     );
     let signal = expecting.signal();
+    let what = step.what();
 
     let ended = tokio::select! {
         ended = session.ended() => Some(ended),
         () = signalled_and_idle(signal.clone(), &idle, pace) => None,
         // The session has not said it is done and is not asking about anything:
         // it has gone idle with nothing open, which is a run nobody can move.
-        // Told twice and then stopped where it stands — see [`crate::rescues`],
-        // whose loop this is one of five callers of.
-        () = crate::rescues::until_it_will_not_ask(
+        // Spoken to, and the human told where it will not answer — see
+        // [`crate::rescues`]. Never an ending of its own.
+        never = crate::rescues::watched(
             state,
             conversation_id,
             event_id,
             &idle,
             pace,
             signal,
-        ) => {
-            tracing::warn!(
-                conversation_id,
-                event_id,
-                step = ?step,
-                "a session went quiet without finishing its step or asking about it, so the \
-                 backlog stops here",
-            );
-
-            state.sessions.end(conversation_id).await;
-
-            stop(
-                state,
-                conversation_id,
-                crate::stopping::Decided::Verkstead,
-                &step.what(),
-                crate::rescues::WOULD_NOT_ASK,
-                Some(event_id),
-            )
-            .await;
-
-            return None;
-        }
+            &what,
+        ) => match never {},
     };
 
     drop(expecting);

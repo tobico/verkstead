@@ -20622,6 +20622,9 @@ const AN_INLINE_RUN: &str = r#"
 printf 'prompt was: %s\n' "$2"
 
 case "$2" in
+*submitting/SKILL.md*)
+    printf 'nothing opened a pull request\n'
+    ;;
 *reviewing/SKILL.md*)
     printf 'reading the whole branch\n'
     sleep 300
@@ -20782,6 +20785,9 @@ async fn resuming_an_inline_run_with_no_pull_request_builds_the_work_again() {
                 printf 'the limiter is in, the middleware is not\n'
             fi
             ;;
+        *submitting/SKILL.md*)
+            printf 'nothing opened a pull request\n'
+            ;;
         *)
             printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
             : > /tmp/verkstead/done
@@ -20884,6 +20890,9 @@ case "$2" in
         : > /tmp/verkstead/done
         printf 'the limiter is in, and nothing pushed it\n'
     fi
+    ;;
+*submitting/SKILL.md*)
+    printf 'nothing opened a pull request\n'
     ;;
 *)
     printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
@@ -22051,12 +22060,6 @@ const IDLE_UNTIL_TOLD: &str = "    printf 'reading the branch\\n'\n    \
      while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
      printf 'nothing else then\\n'\n    \
      : > /tmp/verkstead/done\n    \
-     sleep 300";
-
-/// And one that will not ask whatever it is told: it writes down every line
-/// typed into it and puts nothing to anybody, for as long as it is left there.
-const IDLE_WHATEVER_IT_IS_TOLD: &str = "    printf 'reading the branch\\n'\n    \
-     while read -r TOLD; do printf '%s\\n' \"$TOLD\" >> /tmp/verkstead/rescues; done\n    \
      sleep 300";
 
 /// One that is answered, works on for longer than the grace, and only then
@@ -23559,21 +23562,27 @@ async fn a_follow_up_that_goes_idle_without_asking_is_told_to_put_it_to_the_huma
     );
 }
 
-/// A follow-up session that will not ask, whatever it is told, stops the
-/// Conversation after the second rescue — with a Notice saying so.
+/// A follow-up session that will not answer, whatever it is told, is put to the
+/// human after the third rescue — and left running.
 ///
-/// Twice at most, because the second failure is evidence rather than bad luck.
-/// What is left is a Conversation with nobody putting anything to the human, and
-/// that is a stop like any other: they read what happened and press Resume,
-/// which starts a fresh session on the same brief.
+/// Not a stop. Any bound that ended the session would be a guess about it read
+/// from outside, and one legitimately waiting on work of its own would be killed
+/// by it. So the human is told the way a stop tells them — a Notice and a push —
+/// and the session stays where it is for them to move: the Conversation reads
+/// *blocked on you*, nothing is written as stopped, and Resume is not what they
+/// are offered.
+///
+/// One escalation per silence: nothing more is typed and nobody is told twice
+/// while it lasts. The session seen at work takes the mark away and rearms the
+/// whole of it.
 #[tokio::test]
-async fn a_follow_up_session_that_will_not_ask_is_stopped_after_two_rescues() {
+async fn a_follow_up_session_that_will_not_answer_is_put_to_the_human_and_left_running() {
     let spill = tempfile::tempdir().unwrap();
     let reviews = spill.path().join("review-prompts");
 
     let fixture = grilling_spilling(
         spill,
-        &a_backlog_then_a_follow_up(&reviews, IDLE_WHATEVER_IT_IS_TOLD),
+        &a_backlog_then_a_follow_up(&reviews, IDLE_UNTIL_PUT_BACK_TO_WORK),
         &gh_about(GREEN, "", ""),
     )
     .await;
@@ -23583,6 +23592,12 @@ async fn a_follow_up_session_that_will_not_ask_is_stopped_after_two_rescues() {
     fixture
         .until(|view| (view.state == Lifecycle::Done).then_some(()))
         .await;
+
+    // Subscribed after the run's own news, so the only push these devices are
+    // told about is the escalation.
+    let (service, taken) = push_service().await;
+    let phone = Device::new(&service, "phone");
+    fixture.subscribe(&phone).await;
 
     assert_eq!(
         fixture.steer().await,
@@ -23595,51 +23610,171 @@ async fn a_follow_up_session_that_will_not_ask_is_stopped_after_two_rescues() {
         ConversationSteered::Steered,
     );
 
-    let stopped = fixture.stopped().await;
+    let escalated = fixture
+        .until(|view| {
+            said(view)
+                .last()
+                .filter(|notice| notice.html.contains("has gone idle"))
+                .map(|notice| (*notice).clone())
+        })
+        .await;
 
     assert!(
-        stopped.html.contains("Following the work up"),
-        "what was being done, said in the words the state is judged by: {:?}",
-        stopped.html,
+        escalated
+            .html
+            .contains("<strong>Following the work up</strong> has gone idle without finishing."),
+        "what was being done, said in the words a stop would say it in: {:?}",
+        escalated.html,
     );
     assert!(
-        stopped.html.contains("without asking you anything"),
-        "and why it is a stop: nothing was ever put to the human: {:?}",
-        stopped.html,
-    );
-    assert!(
-        stopped.html.contains("being told twice"),
+        escalated.html.contains("spoken to three times"),
         "with the rescue named, so that the Notice is not about a session that \
          was never spoken to: {:?}",
-        stopped.html,
+        escalated.html,
+    );
+    assert!(
+        escalated.html.contains("<strong>Stop</strong>"),
+        "and what the human can do about it: {:?}",
+        escalated.html,
+    );
+    assert!(
+        escalated.html.contains("What the last session said"),
+        "carrying the evidence a stop's Notice carries: {:?}",
+        escalated.html,
+    );
+    assert_eq!(told(&fixture, 3).await.len(), 3, "three rescues first");
+
+    let pushed = pushes(&taken, 1).await;
+    let news = phone.read(&pushed[0]);
+
+    assert_eq!(
+        news["path"],
+        format!("/conversations/{}", fixture.id),
+        "and a push that opens the Conversation: {news}",
+    );
+
+    let view = fixture.view().await;
+
+    assert_eq!(view.state, Lifecycle::FollowUp, "still following up");
+    assert!(
+        view.working,
+        "with the session still running in its Worktree"
+    );
+    assert!(view.waiting, "and the card reading *blocked on you*");
+    assert_eq!(
+        view.blocked_on,
+        Some(escalated.id),
+        "marked at the Notice that says why",
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    assert_eq!(
+        verkstead_store::stopped(&pool, fixture.id).await.unwrap(),
+        None,
+        "and nothing written as stopped",
+    );
+
+    // The same silence going on: several graces and a waking ceiling over.
+    pause(BRISKLY.waking * 2).await;
+
+    assert_eq!(
+        anything_told(&fixture).len(),
+        3,
+        "nothing more typed while the same silence lasts",
+    );
+    assert_eq!(
+        notices(&fixture.view().await).len(),
+        notices(&view).len(),
+        "and no second Notice",
+    );
+    assert_eq!(taken.lock().unwrap().len(), 1, "and no second push");
+
+    // Back at work: the mark goes, and the rescue rearms from nothing.
+    std::fs::write(handoff_directory(&fixture).join("work"), "").unwrap();
+
+    fixture
+        .until(|view| (!view.waiting && view.blocked_on.is_none()).then_some(()))
+        .await;
+
+    assert!(
+        fixture.view().await.working,
+        "the session is still the one running",
+    );
+    assert_eq!(
+        told(&fixture, 4).await.len(),
+        4,
+        "and a new silence is spoken to again",
+    );
+}
+
+/// A follow-up session that answers every rescue with a word of work and then
+/// goes quiet again, for as long as it is left there.
+///
+/// Each rescue is answered, so the count never reaches the human: it is spoken
+/// to again from nothing every time.
+#[tokio::test]
+async fn a_rescue_answered_puts_the_count_back_to_nothing() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_a_follow_up(&reviews, ANSWERS_EVERY_RESCUE),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let before = notices(&fixture.view().await).len();
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        fixture
+            .steer_following_up("Does it count the 429s it sends?\n")
+            .await,
+        ConversationSteered::Steered,
     );
 
     assert_eq!(
-        told(&fixture, 2).await.len(),
-        2,
-        "twice and no more: the third time round is the stop rather than \
-         another line",
+        told(&fixture, 5).await.len(),
+        5,
+        "spoken to past three, each answer putting the count back",
     );
 
     let view = fixture.view().await;
 
     assert_eq!(
-        view.state,
-        Lifecycle::FollowUp,
-        "stopped where it stood, as every stop is",
+        notices(&view).len(),
+        before,
+        "and the human never told: {:?}",
+        notices(&view),
     );
-    assert_eq!(
-        view.blocked_on,
-        Some(stopped.id),
-        "with the human blocked on the Notice, which is the one thing there is \
-         to read",
-    );
-    assert_eq!(
-        fixture.chosen().await,
-        Decision::Verkstead,
-        "and Verkstead decided it, so a restart leaves it exactly here",
-    );
+    assert!(!view.waiting, "nothing waiting on them");
+    assert!(view.working, "and the session still running");
 }
+
+/// One that will not answer until the test puts it back to work: it writes down
+/// every line typed into it, and says a word once `work` appears.
+const IDLE_UNTIL_PUT_BACK_TO_WORK: &str = "    printf 'reading the branch\\n'\n    \
+     ( while [ ! -f /tmp/verkstead/work ]; do sleep 0.1; done; printf 'back at it\\n' ) &\n    \
+     while read -r TOLD; do printf '%s\\n' \"$TOLD\" >> /tmp/verkstead/rescues; done\n    \
+     sleep 300";
+
+/// And one that answers each line with a word of work a moment later — after
+/// the echo has settled, so the word is an answer rather than the echo — and
+/// then goes quiet again.
+const ANSWERS_EVERY_RESCUE: &str = "    printf 'reading the branch\\n'\n    \
+     while read -r TOLD; do printf '%s\\n' \"$TOLD\" >> /tmp/verkstead/rescues; sleep 1; printf 'on it\\n'; done\n    \
+     sleep 300";
 
 /// A grilling session that has been given its direction and then goes idle —
 /// nothing asked, nothing written — with every line typed into it written down
@@ -23875,15 +24010,15 @@ async fn picked(fixture: &Grilling, direction: &str) {
 }
 
 /// A grilling session that goes idle without writing what the pick asked for is
-/// told to ask, and stopped after the second time it will not.
+/// told to ask, and put to the human after the third time it will not answer.
 ///
 /// The rescue is one mechanism over every state, and this is the same condition
 /// a follow-up's is read against with a different done-indicator under it: a
-/// grilling is finished when its artifact has landed, and one that is idle, has
-/// nothing open and has written nothing is a run nobody can move. Today that sat
-/// there indefinitely with nothing saying so.
+/// grilling is finished when it says so over its artifact, and one that is idle,
+/// has nothing open and has said nothing is a run nobody can move. The human is
+/// told, and the session is left running for them.
 #[tokio::test]
-async fn a_grilling_that_goes_idle_without_its_artifact_is_told_and_then_stopped() {
+async fn a_grilling_that_goes_idle_without_its_artifact_is_told_and_then_put_to_the_human() {
     let fixture = grilling(&a_grilling_that_never_writes_the_backlog()).await;
 
     picked(&fixture, "task-list").await;
@@ -23896,45 +24031,29 @@ async fn a_grilling_that_goes_idle_without_its_artifact_is_told_and_then_stopped
          else: {said:?}",
     );
 
-    let stopped = fixture.stopped().await;
+    let escalated = escalated(&fixture).await;
 
     assert!(
-        stopped.html.contains("reaking the work down"),
+        escalated.html.contains("reaking the work down"),
         "what was being done, said in the words the step is judged by: {:?}",
-        stopped.html,
+        escalated.html,
     );
-    assert!(
-        stopped.html.contains("without asking you anything"),
-        "and why it is a stop: nothing was ever put to the human: {:?}",
-        stopped.html,
-    );
-    assert!(
-        stopped.html.contains("being told twice"),
-        "with the rescue named, so that the Notice is not about a session that \
-         was never spoken to: {:?}",
-        stopped.html,
-    );
-    assert_eq!(
-        told(&fixture, 2).await.len(),
-        2,
-        "twice and no more: the third time round is the stop rather than \
-         another line",
-    );
-    assert_eq!(
-        fixture.chosen().await,
-        Decision::Verkstead,
-        "and Verkstead decided it, so a restart leaves it exactly here",
-    );
+    assert_eq!(told(&fixture, 3).await.len(), 3, "three times first");
+
+    let view = fixture.view().await;
+
+    assert!(view.working, "the session is left running");
+    assert!(view.waiting, "and the Conversation is blocked on the human");
+    assert_eq!(view.blocked_on, Some(escalated.id));
 }
 
 /// And a backlog step that goes quiet without the commit that finishes it is
-/// told and stopped the same way.
+/// told and put to the human the same way.
 ///
-/// The same loop with the same bound, over the done-indicator a step is judged
-/// by: the entry ticked off in the Worktree's `TODO.md` and git holding nothing
-/// pending for it. A hung step used to hold the whole run open with the human never told.
+/// The same loop with the same count, over the done-indicator a step is judged
+/// by. A hung step used to hold the whole run open with the human never told.
 #[tokio::test]
-async fn a_step_that_goes_quiet_without_its_commit_is_told_and_then_stopped() {
+async fn a_step_that_goes_quiet_without_its_commit_is_told_and_then_put_to_the_human() {
     let fixture = grilling(A_BACKLOG_THEN_AN_IDLE_STEP).await;
 
     picked(&fixture, "task-list").await;
@@ -23947,20 +24066,33 @@ async fn a_step_that_goes_quiet_without_its_commit_is_told_and_then_stopped() {
          {said:?}",
     );
 
-    let stopped = fixture.stopped().await;
+    let escalated = escalated(&fixture).await;
 
     assert!(
-        stopped.html.contains("01-count.md"),
+        escalated.html.contains("01-count.md"),
         "the Notice names the step rather than the state, a human wanting to \
          know which task: {:?}",
-        stopped.html,
+        escalated.html,
     );
+    assert_eq!(told(&fixture, 3).await.len(), 3, "three times first");
     assert!(
-        stopped.html.contains("without asking you anything"),
-        "and says why it stopped: {:?}",
-        stopped.html,
+        fixture.view().await.working,
+        "and the session is left running"
     );
-    assert_eq!(told(&fixture, 2).await.len(), 2, "twice and no more");
+}
+
+/// Wait for the Notice that puts a session the rescue could not talk round to
+/// the human, and hand it back.
+async fn escalated(fixture: &Grilling) -> NoticeEvent {
+    fixture
+        .until(|view| {
+            said(view)
+                .into_iter()
+                .rev()
+                .find(|notice| notice.html.contains("has gone idle without finishing"))
+                .cloned()
+        })
+        .await
 }
 
 /// A backlog of one worked by sessions that draw a full screen rather than
@@ -24093,14 +24225,14 @@ async fn sessions_that_repaint_are_ended_on_the_prompt_they_draw_rather_than_on_
 }
 
 /// And one that draws its prompt without doing what it was sent for is told and
-/// then stopped, on the same judgement.
+/// then put to the human, on the same judgement.
 ///
 /// The rescue's precondition is idle, so a backend judged only on its silence
 /// would be one the rescue never reached: this session repaints for ever, and
 /// what says it is sitting there with nothing to do is the prompt it is
 /// repainting.
 #[tokio::test]
-async fn a_step_that_draws_its_prompt_without_committing_is_told_and_then_stopped() {
+async fn a_step_that_draws_its_prompt_without_committing_is_told_and_then_put_to_the_human() {
     let fixture =
         grilling_drawing(&a_backlog_drawing(AT_THE_PROMPT, -1, false), AT_THE_PROMPT).await;
 
@@ -24114,19 +24246,19 @@ async fn a_step_that_draws_its_prompt_without_committing_is_told_and_then_stoppe
          have typed: {said:?}",
     );
 
-    let stopped = fixture.stopped().await;
+    let notice = escalated(&fixture).await;
 
     assert!(
-        stopped.html.contains("01-count.md"),
+        notice.html.contains("01-count.md"),
         "the Notice names the step, a human wanting to know which task: {:?}",
-        stopped.html,
+        notice.html,
     );
     assert!(
-        stopped.html.contains("without asking you anything"),
-        "and says why it stopped: {:?}",
-        stopped.html,
+        notice.html.contains("has gone idle without finishing"),
+        "and the human told, with the session left running: {:?}",
+        notice.html,
     );
-    assert_eq!(told(&fixture, 2).await.len(), 2, "twice and no more");
+    assert_eq!(told(&fixture, 3).await.len(), 3, "three times first");
 }
 
 /// And a prompt the signature no longer matches is caught by the long-stop,
@@ -24137,7 +24269,7 @@ async fn a_step_that_draws_its_prompt_without_committing_is_told_and_then_stoppe
 /// that never stops working. Nothing else here would catch it: the rescue's
 /// precondition is idle, every ender waits on the same judgement, and no session
 /// carries a cap on its life. So the byte clock stays behind it as a long-stop,
-/// and what the human gets is the ordinary would-not-ask stop — one slow round
+/// and what the human gets is the ordinary rescue and escalation — one slow round
 /// rather than never.
 ///
 /// **And it is slow**, deliberately: the session draws its unknown prompt for
@@ -24180,14 +24312,14 @@ async fn a_prompt_the_signature_does_not_know_is_caught_by_the_long_stop() {
          {said:?}",
     );
 
-    let stopped = fixture.stopped().await;
+    let notice = escalated(&fixture).await;
 
     assert!(
-        stopped.html.contains("without asking you anything"),
-        "and the ordinary stop under them: {:?}",
-        stopped.html,
+        notice.html.contains("has gone idle without finishing"),
+        "and the human told, with the session left running: {:?}",
+        notice.html,
     );
-    assert_eq!(told(&fixture, 2).await.len(), 2, "twice and no more");
+    assert_eq!(told(&fixture, 3).await.len(), 3, "three times first");
 }
 
 /// What the real codex has on its Screen while it is working, which is the whole
@@ -24354,13 +24486,13 @@ async fn codex_sessions_are_ended_on_the_at_work_line_going_rather_than_on_the_f
 }
 
 /// And a step that draws its composer without doing what it was sent for is told
-/// and then stopped, on the same judgement.
+/// and then put to the human, on the same judgement.
 ///
 /// The rescue's precondition is idle, so this is the other half of the reading
 /// being right: a session that has stopped has to *reach* the rescue, and what
 /// says this one has stopped is the at-work line no longer on its Screen.
 #[tokio::test]
-async fn a_codex_step_that_stops_without_committing_is_told_and_then_stopped() {
+async fn a_codex_step_that_stops_without_committing_is_told_and_then_put_to_the_human() {
     let fixture = grilling_at_work(&a_backlog_at_work(
         CODEX_GRILLING_MODEL,
         AT_WORK,
@@ -24379,19 +24511,19 @@ async fn a_codex_step_that_stops_without_committing_is_told_and_then_stopped() {
          have typed: {said:?}",
     );
 
-    let stopped = fixture.stopped().await;
+    let notice = escalated(&fixture).await;
 
     assert!(
-        stopped.html.contains("01-count.md"),
+        notice.html.contains("01-count.md"),
         "the Notice names the step, a human wanting to know which task: {:?}",
-        stopped.html,
+        notice.html,
     );
     assert!(
-        stopped.html.contains("without asking you anything"),
-        "and says why it stopped: {:?}",
-        stopped.html,
+        notice.html.contains("has gone idle without finishing"),
+        "and the human told, with the session left running: {:?}",
+        notice.html,
     );
-    assert_eq!(told(&fixture, 2).await.len(), 2, "twice and no more");
+    assert_eq!(told(&fixture, 3).await.len(), 3, "three times first");
 }
 
 /// An at-work line that has moved on without Verkstead costs the run nothing:
@@ -24436,7 +24568,7 @@ async fn an_at_work_line_that_has_moved_on_leaves_the_run_on_the_byte_clock() {
 /// reads as one that never stops working. Nothing else here would catch it: the
 /// rescue's precondition is idle, every ender waits on the same judgement, and
 /// no session carries a cap on its life. So the byte clock stays behind it as a
-/// long-stop, and what the human gets is the ordinary would-not-ask stop — one
+/// long-stop, and what the human gets is the ordinary rescue and escalation — one
 /// slow round rather than never.
 ///
 /// **And it is slow**, deliberately: the step draws its at-work line for longer
@@ -24481,12 +24613,12 @@ async fn an_at_work_line_that_never_goes_is_caught_by_the_long_stop() {
          {said:?}",
     );
 
-    let stopped = fixture.stopped().await;
+    let notice = escalated(&fixture).await;
 
     assert!(
-        stopped.html.contains("without asking you anything"),
-        "and the ordinary stop under them: {:?}",
-        stopped.html,
+        notice.html.contains("has gone idle without finishing"),
+        "and the human told, with the session left running: {:?}",
+        notice.html,
     );
 }
 
@@ -24553,7 +24685,7 @@ async fn grok_sessions_are_ended_on_their_own_at_work_hint_rather_than_on_codexs
 /// that never stops working. Nothing else here would catch it — the rescue's
 /// precondition is idle and every ender waits on the same judgement — so the
 /// byte clock stays behind it, and what the human gets is the ordinary
-/// would-not-ask stop.
+/// rescue and escalation.
 #[tokio::test]
 async fn a_grok_at_work_hint_that_never_goes_is_caught_by_the_long_stop() {
     let fixture = grilling_on_grok(&a_backlog_at_work(
@@ -24593,12 +24725,12 @@ async fn a_grok_at_work_hint_that_never_goes_is_caught_by_the_long_stop() {
          {said:?}",
     );
 
-    let stopped = fixture.stopped().await;
+    let notice = escalated(&fixture).await;
 
     assert!(
-        stopped.html.contains("without asking you anything"),
-        "and the ordinary stop under them: {:?}",
-        stopped.html,
+        notice.html.contains("has gone idle without finishing"),
+        "and the human told, with the session left running: {:?}",
+        notice.html,
     );
 }
 
@@ -24668,7 +24800,7 @@ async fn opencode_sessions_are_ended_on_their_own_at_work_label_rather_than_on_c
 /// that never stops working. Nothing else here would catch it — the rescue's
 /// precondition is idle and every ender waits on the same judgement — so the
 /// byte clock stays behind it, and what the human gets is the ordinary
-/// would-not-ask stop.
+/// rescue and escalation.
 #[tokio::test]
 async fn an_opencode_at_work_label_that_never_goes_is_caught_by_the_long_stop() {
     let fixture = grilling_on_opencode(&a_backlog_at_work(
@@ -24709,12 +24841,12 @@ async fn an_opencode_at_work_label_that_never_goes_is_caught_by_the_long_stop() 
          {said:?}",
     );
 
-    let stopped = fixture.stopped().await;
+    let notice = escalated(&fixture).await;
 
     assert!(
-        stopped.html.contains("without asking you anything"),
-        "and the ordinary stop under them: {:?}",
-        stopped.html,
+        notice.html.contains("has gone idle without finishing"),
+        "and the human told, with the session left running: {:?}",
+        notice.html,
     );
 }
 
@@ -24925,7 +25057,7 @@ async fn an_opencode_session_holding_a_blocking_ask_is_neither_ended_nor_prodded
 }
 
 /// And an inline implementation that goes quiet without committing anything is
-/// told and stopped the same way.
+/// told and put to the human the same way.
 ///
 /// The one driver the sweep had been left out of, and the worst place to leave
 /// it: an inline run is the whole of a Conversation's work in one session, so
@@ -24933,7 +25065,7 @@ async fn an_opencode_session_holding_a_blocking_ask_is_neither_ended_nor_prodded
 /// that says the Conversation is being driven — for ever, with nothing swept
 /// because it *was* driven and nothing said because it never spoke.
 #[tokio::test]
-async fn an_inline_session_that_goes_quiet_without_committing_is_told_and_then_stopped() {
+async fn an_inline_session_that_goes_quiet_without_committing_is_told_and_then_put_to_the_human() {
     let fixture = grilling(AN_INLINE_RUN_THAT_GOES_IDLE).await;
 
     picked(&fixture, "inline").await;
@@ -24946,19 +25078,19 @@ async fn an_inline_session_that_goes_quiet_without_committing_is_told_and_then_s
          {said:?}",
     );
 
-    let stopped = fixture.stopped().await;
+    let notice = escalated(&fixture).await;
 
     assert!(
-        stopped.html.contains("Implementing the work inline"),
+        notice.html.contains("Implementing the work inline"),
         "the Notice names what was being done: {:?}",
-        stopped.html,
+        notice.html,
     );
     assert!(
-        stopped.html.contains("without asking you anything"),
-        "and says why it stopped: {:?}",
-        stopped.html,
+        notice.html.contains("has gone idle without finishing"),
+        "and the human told, with the session left running: {:?}",
+        notice.html,
     );
-    assert_eq!(told(&fixture, 2).await.len(), 2, "twice and no more");
+    assert_eq!(told(&fixture, 3).await.len(), 3, "three times first");
 }
 
 /// And one that commits, says it is done and then idles is ended on that, rather
