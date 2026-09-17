@@ -300,7 +300,9 @@ file Verkstead writes**, carrying only what names a model provider; and an
 global one. Nothing else of the account is there. Claude's `.claude.json` is
 copied rather than linked, pre-seeded with the Repo's trust, and written back
 at session end as ADR-0014 decided, because a re-login from inside a run has
-to reach the account.
+to reach the account. ADR-0014 built that write-back for Windows's hard links
+alone; a copy follows nothing on any platform, so it now runs on Linux and a
+Mac too.
 
 Rejected: launch flags — `--setting-sources`, `--settings` — which close the
 inheritance and leave the write-through open; `--safe-mode`, which takes the

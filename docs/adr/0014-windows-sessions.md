@@ -560,10 +560,13 @@ Directory of its own; a root has to exist somewhere to be bound, so Linux
 makes `homes/<id>` as the other two platforms do and binds the built `.claude`
 over the tmpfs home's.
 
-**The write-back stays**, exactly as *A hard link wants one volume* decided it:
-nothing a session wrote to its account is lost, and a re-login from inside a
-run reaches the account. The pre-seeded trust entries reach it too, and the
-human accepted that.
+**The write-back stays**, as *The fresh profile* decided it: nothing a session
+wrote to its account is lost, and a re-login from inside a run reaches the
+account. The pre-seeded trust entries reach it too, and the human accepted
+that. **And it now runs on every platform.** It was built for hard links, so
+Linux and a Mac have had nothing to write back; a copied `.claude.json` follows
+nothing anywhere, so their renderings hand back the credentials file and the
+copy as this one does.
 
 ## What stays as it was
 

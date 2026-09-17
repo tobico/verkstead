@@ -26,7 +26,8 @@ is built rather than joined*, and from the grilling that settled this roadmap.
 - **The allowlist, and nothing outside it.** `.credentials.json` is *linked* —
   a hard link on Windows, a symlink on a Mac, a bind on Linux — so a login or a
   token refresh from inside lands in the account; where the agent replaces it
-  rather than writing in place, ADR-0014's write-back carries it. `projects/` is
+  rather than writing in place, the write-back carries it, on every platform —
+  see the write-back decision below. `projects/` is
   joined read-write — junction, symlink, bind — because it holds Claude's
   per-Repo memory, keyed by the Repo's main checkout rather than the worktree,
   and because session-log discovery already globs there. This stage joins it
@@ -48,6 +49,14 @@ is built rather than joined*, and from the grilling that settled this roadmap.
   from inside a run to reach the account, and accepted that the trust entries
   reach it too. The identity check that drives the write-back already treats a
   copy as a replaced file.
+- **The write-back runs on all three platforms.** Today it is Windows's alone:
+  it was built for hard links, and `Closing` is `nothing` on Linux and a Mac
+  (`sandbox/closing.rs`), because a bind and a symlink follow their target. A
+  copy follows nothing on any platform, so without this a re-login inside a
+  Linux or Mac run never reaches the account, and a credentials file the agent
+  replaces through a symlink is lost with the profile. So the Unix renderings
+  hand back the credentials file and the `.claude.json` copy the way the Windows
+  rendering does, and the same identity check decides.
 - **The cover over `.claude/skills` goes.** ADR-0011 bound an empty directory
   read-only over it to hide the account's own skills; a built root has nothing
   there to hide, and `/verkstead/skills` is unchanged.
@@ -85,11 +94,16 @@ is built rather than joined*, and from the grilling that settled this roadmap.
    with `apiKeyHelper` keeps it and loses its `hooks`; the Repo and the Worktree
    read as trusted in the copy; the write-back carries the copy back at session
    end.
-4. **The `.claude/skills` cover removed**, and the Windows grant narrowed to
+4. **The write-back on every platform.** The Linux and Mac renderings hand back
+   a `Closing` naming the credentials file and the `.claude.json` copy. AC: on
+   all three, a `.claude.json` changed inside reaches the account at session
+   end; a credentials file replaced by rename inside reaches the account; a file
+   still one with the account's is left alone.
+5. **The `.claude/skills` cover removed**, and the Windows grant narrowed to
    the root. AC: the Surface names no entry on the account directory; the
    Windows suite's boundary is written over the root and the `projects/` target
    only.
-5. **The docs.** CONTEXT.md's Agent Profile and Sandbox entries, the adoption
+6. **The docs.** CONTEXT.md's Agent Profile and Sandbox entries, the adoption
    doc's three platform sections and its NixOS `paths` example, `docs/design`
    where it says the pair is bind-mounted. AC: no document says the account is
    joined whole.
@@ -106,3 +120,6 @@ is built rather than joined*, and from the grilling that settled this roadmap.
 - Assumes session-log discovery still globs `projects/` for `<session-id>.jsonl`.
 - Assumes ADR-0014's write-back still decides by file identity rather than by
   remembering how the link was made.
+- Check how Claude Code saves `.credentials.json`. A bind over a single file
+  refuses a rename onto it, so if a token refresh saves by rename, Linux copies
+  the file in rather than binding it and leaves the rest to the write-back.
