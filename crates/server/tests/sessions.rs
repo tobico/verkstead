@@ -24525,17 +24525,44 @@ async fn a_step_that_goes_quiet_without_its_commit_is_told_and_then_put_to_the_h
 
 /// Wait for the Notice that puts a session the rescue could not talk round to
 /// the human, and hand it back.
+///
+/// **Longer than the suite's ordinary patience**, because what it waits out is
+/// the rescue's whole course rather than something a session does: three lines
+/// that go unanswered, each held off first for the ceiling on a stir — and a
+/// count that anything Verkstead hands the session in the middle puts back to
+/// nothing, an answer nudged in being a stir like any other. So the wait is
+/// written as what it is waiting for, twice over, rather than as a number.
 async fn escalated(fixture: &Grilling) -> NoticeEvent {
-    fixture
-        .until(|view| {
-            said(view)
-                .into_iter()
-                .rev()
-                .find(|notice| notice.html.contains("has gone idle without finishing"))
-                .cloned()
-        })
-        .await
+    // `BRISKLY.waking` is paced already, so it is not paced again — see
+    // [`paced`].
+    let deadline = Instant::now() + *PATIENCE + BRISKLY.waking * 2 * RESCUES_BEFORE_THE_HUMAN;
+
+    loop {
+        let view = fixture.view().await;
+        let found = said(&view)
+            .into_iter()
+            .rev()
+            .find(|notice| notice.html.contains("has gone idle without finishing"))
+            .cloned();
+
+        if let Some(notice) = found {
+            return notice;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the human was never told about the session that would not answer. \
+             The Timeline says: {}",
+            standing(&view),
+        );
+
+        pause(Duration::from_millis(25)).await;
+    }
 }
+
+/// How many unanswered rescues in a row the human is told after — the server's
+/// own `rescues::UNANSWERED`, said here because the tests cannot read it.
+const RESCUES_BEFORE_THE_HUMAN: u32 = 3;
 
 /// A backlog of one worked by sessions that draw a full screen rather than
 /// printing lines, which is what every backend after Claude does.

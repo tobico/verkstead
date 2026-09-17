@@ -2247,9 +2247,10 @@ mod tests {
             "a companion nobody committed in is nothing to carry anywhere: {block}"
         );
         assert!(
-            block.contains("stops the run"),
-            "and one committed in and left without a pull request is a stop rather \
-         than something wrap-up carries on past: {block}"
+            block.contains("refuses the signal"),
+            "and one committed in and left without a pull request is a refusal the \
+         session is still there to put right, rather than something wrap-up carries \
+         on past: {block}"
         );
     }
 

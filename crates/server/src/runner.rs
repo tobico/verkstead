@@ -3987,14 +3987,19 @@ mod tests {
 
     /// A Done signal refused over a step that has not landed says which half is
     /// missing, in words the agent can act on: the box, or the commit.
+    ///
+    /// The list is named the way its own platform writes a path, because that is
+    /// what the agent reading the refusal is looking at — so what is expected
+    /// here is written the same way rather than with a separator of its own.
     #[test]
     fn what_a_task_is_missing_is_said_by_which_half_it_is() {
         let dir = worktree(&list(0), &DOCUMENTS);
         let path = dir.path();
+        let named = todo().display().to_string();
 
         assert_eq!(
-            lacking(path, &Landing::Ticked(1)).as_deref(),
-            Some("task 1's box in `.tasks/TODO.md` is not ticked and committed"),
+            lacking(path, &Landing::Ticked(1)),
+            Some(format!("task 1's box in `{named}` is not ticked and committed")),
         );
 
         let list = path.join(BACKLOG).join(TODO);
@@ -4004,8 +4009,8 @@ mod tests {
         std::fs::write(&list, ticked).unwrap();
 
         assert_eq!(
-            lacking(path, &Landing::Ticked(1)).as_deref(),
-            Some("task 1's box in `.tasks/TODO.md` is ticked but not committed"),
+            lacking(path, &Landing::Ticked(1)),
+            Some(format!("task 1's box in `{named}` is ticked but not committed")),
         );
 
         run(path, &["commit", "-am", "feat: a task"]);
@@ -4013,8 +4018,8 @@ mod tests {
         assert_eq!(lacking(path, &Landing::Ticked(1)), None);
 
         assert_eq!(
-            lacking(path, &Landing::Gone(todo())).as_deref(),
-            Some("`.tasks/TODO.md` has not been taken away"),
+            lacking(path, &Landing::Gone(todo())),
+            Some(format!("`{named}` has not been taken away")),
         );
     }
 

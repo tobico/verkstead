@@ -3371,10 +3371,18 @@ exit 1
 
     /// Move everything `idle` remembers `by` into the past, which is the clock
     /// going on by that much with nothing arriving.
+    ///
+    /// **Which is why the waits below are written in seconds** where a real one
+    /// is written in minutes: an [`Instant`] cannot be wound back past the
+    /// moment the machine started, and a freshly booted CI runner has not been
+    /// up for the three quarters of an hour a realistic wait would ask for. What
+    /// every one of these is about is the ordering of a wait against a silence
+    /// and against [`IDLE_AFTER`], so the spans are the smallest that keep the
+    /// ordering plain.
     fn quiet_for(idle: &Idle, by: Duration) {
         let back = |at: Instant| {
             at.checked_sub(by)
-                .expect("this machine has been up that long")
+                .expect("the clock is not wound back past the moment the machine started")
         };
         let mut silence = idle.silence();
 
@@ -3401,9 +3409,9 @@ exit 1
 
     #[test]
     fn a_session_with_a_wait_standing_is_at_work_however_quiet() {
-        let idle = declared(Duration::from_secs(45 * 60));
+        let idle = declared(Duration::from_secs(45));
 
-        quiet_for(&idle, Duration::from_secs(40 * 60));
+        quiet_for(&idle, Duration::from_secs(40));
 
         assert!(!idle.idling());
         assert_eq!(idle.for_how_long(), Duration::ZERO);
@@ -3413,11 +3421,11 @@ exit 1
 
     #[test]
     fn the_declaring_turn_does_not_release_the_wait_but_work_after_the_quiet_does() {
-        let idle = declared(Duration::from_secs(45 * 60));
+        let idle = declared(Duration::from_secs(45));
 
         // Printing on straight after the declaration, before any quiet.
         idle.arrived(false);
-        quiet_for(&idle, Duration::from_secs(60));
+        quiet_for(&idle, IDLE_AFTER * 2);
         assert!(
             !idle.idling(),
             "the declaring turn's own words keep the wait"
@@ -3433,41 +3441,41 @@ exit 1
 
     #[test]
     fn a_wait_that_runs_out_is_idle_counted_from_when_it_ran_out() {
-        let idle = declared(Duration::from_secs(10 * 60));
+        let idle = declared(Duration::from_secs(10));
 
-        quiet_for(&idle, Duration::from_secs(12 * 60));
+        quiet_for(&idle, Duration::from_secs(16));
 
         assert!(idle.idling());
 
         let idle_for = idle.for_how_long();
         assert!(
-            idle_for >= Duration::from_secs(2 * 60) && idle_for < Duration::from_secs(3 * 60),
+            idle_for >= Duration::from_secs(6) && idle_for < Duration::from_secs(10),
             "the grace starts when the wait ran out, not at the last word: {idle_for:?}"
         );
-        assert!(idle.since().elapsed() >= Duration::from_secs(2 * 60));
-        assert!(idle.since().elapsed() < Duration::from_secs(3 * 60));
+        assert!(idle.since().elapsed() >= Duration::from_secs(6));
+        assert!(idle.since().elapsed() < Duration::from_secs(10));
     }
 
     #[test]
     fn declaring_again_replaces_the_wait_standing() {
-        let idle = declared(Duration::from_secs(10 * 60));
+        let idle = declared(Duration::from_secs(10));
 
-        quiet_for(&idle, Duration::from_secs(9 * 60));
-        idle.waiting(Duration::from_secs(10 * 60));
-        quiet_for(&idle, Duration::from_secs(9 * 60));
+        quiet_for(&idle, Duration::from_secs(9));
+        idle.waiting(Duration::from_secs(10));
+        quiet_for(&idle, Duration::from_secs(9));
 
         assert!(!idle.idling(), "renewed, so still standing");
     }
 
     #[test]
     fn being_done_clears_a_wait() {
-        let idle = declared(Duration::from_secs(45 * 60));
+        let idle = declared(Duration::from_secs(45));
 
-        quiet_for(&idle, Duration::from_secs(60));
+        quiet_for(&idle, IDLE_AFTER * 2);
         idle.done_waiting();
 
         assert!(idle.idling());
-        assert!(idle.for_how_long() >= Duration::from_secs(60));
+        assert!(idle.for_how_long() >= IDLE_AFTER * 2);
     }
 
     /// A backend read by what it draws, repainting the prompt it sits at: a
@@ -3477,15 +3485,15 @@ exit 1
     fn a_prompt_repainted_behind_a_wait_neither_releases_it_nor_is_a_long_stop() {
         let idle = Idle::started(Judged::Drawing {
             signature: Signature::AtThePrompt("> ".to_owned()),
-            long_stop: Duration::from_secs(5 * 60),
+            long_stop: Duration::from_secs(5),
         });
 
         idle.arrived(false);
-        idle.waiting(Duration::from_secs(60 * 60));
+        idle.waiting(Duration::from_secs(60));
         idle.arrived(true);
-        quiet_for(&idle, Duration::from_secs(60));
+        quiet_for(&idle, IDLE_AFTER * 2);
         idle.arrived(true);
-        quiet_for(&idle, Duration::from_secs(30 * 60));
+        quiet_for(&idle, Duration::from_secs(30));
 
         assert!(!idle.idling());
         assert_eq!(idle.for_how_long(), Duration::ZERO);
