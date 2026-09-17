@@ -293,7 +293,8 @@ sessions were doing the same, unnoticed, through the read-write bind. So a
 session runs in a **built root** under the Conversation's profile, seeded by an
 allowlist that is the same rule for every harness: the **credentials**, linked
 so a login from inside lands in the account; the **memory store** — Claude's
-`projects/`, Codex's and Grok's `sessions/`, OpenCode's data directory — shared
+entries under `projects/` for the Repo and its Worktree and no other
+repository's, Codex's and Grok's `sessions/`, OpenCode's data directory — shared
 when the Profile's memory switch says so, on by default; a **configuration
 file Verkstead writes**, carrying only what names a model provider; and an
 **instructions file** from the settings page, in place of the human's own

@@ -27,11 +27,15 @@ is built rather than joined*, and from the grilling that settled this roadmap.
   a hard link on Windows, a symlink on a Mac, a bind on Linux — so a login or a
   token refresh from inside lands in the account; where the agent replaces it
   rather than writing in place, the write-back carries it, on every platform —
-  see the write-back decision below. `projects/` is
-  joined read-write — junction, symlink, bind — because it holds Claude's
-  per-Repo memory, keyed by the Repo's main checkout rather than the worktree,
-  and because session-log discovery already globs there. This stage joins it
-  unconditionally; stage 02 puts the switch in front of it. `settings.json` is
+  see the write-back decision below. **Two entries under `projects/`** are
+  joined read-write — junction, symlink, bind — and made in the account first
+  where they are missing: the Repo's main checkout's, which holds Claude's
+  per-Repo memory, and the Worktree's, where the session's transcript is
+  written. Not the rest of `projects/`: that is every other repository's
+  transcripts (finding 9f), and most of the tree a first boundary walks —
+  286.6 MB of the reporter's 341.6 MB. Session-log discovery globs the root's
+  `projects/` as before and finds the log under the Worktree's entry. This stage
+  joins the two unconditionally; stage 02 puts the switch in front of them. `settings.json` is
   written by Verkstead: `skipDangerousModePermissionPrompt: true`, plus the
   account's own `apiKeyHelper` and `env` copied over where the account's
   `settings.json` has them, because those are how an API-key login reaches the
@@ -63,7 +67,7 @@ is built rather than joined*, and from the grilling that settled this roadmap.
 - **The Windows boundary grants the root, not the account.** The read-write
   entry on the whole of `~/.claude` — 1,289 files on the reporter's machine, and
   the tree a first boundary walks — becomes an entry on the built root plus one
-  on the `projects/` target; a hard link shares the file's own list, so the
+  on each of the two joined `projects/` entries; a hard link shares the file's own list, so the
   credentials file is reachable as it is today. `%APPDATA%`, `%LOCALAPPDATA%`,
   `TEMP` and the rest of the fresh profile are untouched.
 - **Detection is unchanged.** The wizard still finds an account by `~/.claude`
@@ -85,9 +89,11 @@ is built rather than joined*, and from the grilling that settled this roadmap.
    built there into the tmpfs home. AC: the Linux suite sees a built directory
    under the Data Directory; nothing the session writes under `$HOME` lands
    outside it but through a bind.
-2. **The built `.claude` by allowlist.** Credentials linked, `projects/` joined,
-   the rest absent, on all three renderings. AC: the account's `settings.json`,
-   `plugins/` and `CLAUDE.md` are not visible inside; a login written inside
+2. **The built `.claude` by allowlist.** Credentials linked, the Repo's and the
+   Worktree's `projects/` entries joined, the rest absent, on all three
+   renderings. AC: the account's `settings.json`, `plugins/`, `CLAUDE.md` and
+   another repository's `projects/` entry are not visible inside; the Repo's
+   memory is; a login written inside
    appears in the account; the three boundary suites assert it.
 3. **The written `settings.json` and the pre-seeded `.claude.json`.** AC: a
    fresh account with no `settings.json` still gets the bypass key; an account
@@ -101,8 +107,8 @@ is built rather than joined*, and from the grilling that settled this roadmap.
    still one with the account's is left alone.
 5. **The `.claude/skills` cover removed**, and the Windows grant narrowed to
    the root. AC: the Surface names no entry on the account directory; the
-   Windows suite's boundary is written over the root and the `projects/` target
-   only.
+   Windows suite's boundary is written over the root and the two `projects/`
+   entries only.
 6. **The docs.** CONTEXT.md's Agent Profile and Sandbox entries, the adoption
    doc's three platform sections and its NixOS `paths` example, `docs/design`
    where it says the pair is bind-mounted. AC: no document says the account is
@@ -118,6 +124,8 @@ is built rather than joined*, and from the grilling that settled this roadmap.
   still saves `.claude.json` by write-and-rename. Check against the shipped
   version before finalising the pre-seed.
 - Assumes session-log discovery still globs `projects/` for `<session-id>.jsonl`.
+- Check how Claude Code names a `projects/` entry from a path, so the two
+  joined are the two it writes to.
 - Assumes ADR-0014's write-back still decides by file identity rather than by
   remembering how the link was made.
 - Check how Claude Code saves `.credentials.json`. A bind over a single file

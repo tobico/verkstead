@@ -542,7 +542,9 @@ directory of Verkstead's own, made as the profile is, and what goes into it is
 an allowlist decided in [ADR-0011](0011-agent-backends.md)'s amendment of the
 same name: the credentials file by a **hard link**, so a login inside writes
 through — and where the agent replaces it, the write-back below carries it;
-the memory store by a **junction**, when the Profile's switch says so; a
+the memory store by a **junction**, when the Profile's switch says so — for
+Claude, the Repo's and the Worktree's entries under `projects/` and no other
+repository's; a
 `settings.json` and an instructions file **written**; and `.claude.json`
 **copied** rather than linked, pre-seeded, and written back. Nothing else of
 the account. The other three harnesses get roots by the same rule and their own
@@ -550,8 +552,9 @@ allowlists.
 
 **What it gives the boundary.** The read-write entry on the account directory
 — 1,289 files on the reporter's machine, and the tree a first boundary spent
-its minutes walking — becomes an entry on the built root and one on the memory
-store's target. A hard link shares the file's own list, so the credentials
+its minutes walking — becomes an entry on the built root and one on each joined
+memory entry. The other repositories' transcripts, which were most of that walk,
+are no longer in it. A hard link shares the file's own list, so the credentials
 file is reachable through the same entry it has today.
 
 **Linux gains a profile directory.** A Linux session has run in a tmpfs over
