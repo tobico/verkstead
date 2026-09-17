@@ -29,7 +29,7 @@ Read the log and the diff against the branch this one came off, and the
 
 If the branch genuinely holds nothing — no commits of its own since it came off
 its base — then there is nothing to open a pull request for. Say so plainly and
-stop, rather than pushing an empty branch.
+run `verkstead done`, rather than pushing an empty branch.
 
 ## 2. Get the branch reviewed, the way this repository does it
 
@@ -61,19 +61,30 @@ push the branch and open a draft pull request titled for the work —
 **A pull request may already be half there.** The session before you may have
 pushed and got no further, so a push that says everything is up to date is not a
 failure — go on and open the pull request. And if `gh pr view` finds one on this
-branch after all, that is the job done: say so and stop.
+branch after all, that is the job done: say so and run `verkstead done`.
 
 **Nothing waits on approval.** No gate, no confirmation and nobody at this
 terminal: the pull request opens unasked, and it opens as a *draft* because
 merging is the human's act and nothing here is allowed to look like it was
-theirs. Then stop — that is also what ends this session: Verkstead waits for you
-to go quiet, asks GitHub for the pull request, and takes the Conversation on to
-wrapping it up.
+theirs. Then run `verkstead done` — see *Saying you are done* below. Verkstead
+then asks GitHub for the pull request and takes the Conversation on to wrapping
+it up.
 
 **And say what happened, either way.** If you cannot open one — `gh` missing,
-not logged in, the push refused — say what stopped you as the last thing you
-print. That is what the human reads on the Timeline when Verkstead finds no pull
-request a second time.
+not logged in, the push refused — say what stopped you, and then run `verkstead
+done`. What you said is what the human reads on the Timeline when Verkstead
+finds no pull request a second time.
+
+## Saying you are done
+
+The last thing this session does, once the pull request is open or you have said
+why it could not be, is run `verkstead done`. That is what ends the session, and
+nothing else does: not the push, and not going quiet. So a session that waits on
+a push, or on an answer, is not cut off while it waits.
+
+Verkstead checks the repository when you run it. A refusal exits non-zero and
+says on stderr what is missing — changes left uncommitted, say — and the session
+carries on: put that right and run `verkstead done` again.
 
 ## When you need the human
 

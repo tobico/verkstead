@@ -437,7 +437,7 @@ in these repositories and in every companion beside them — belongs to somebody
 else's piece of work. The pull requests exist, and merging is the human's act.
 
 Then say what you fixed, what you split out and what you left, and where each of
-it was, and stop.
+it was, and run `verkstead done`.
 
 ## 10. A review with nothing to raise
 
@@ -449,9 +449,9 @@ has asked for a change, is a review that proposes about that change alone.
 Ask nothing where there is genuinely neither.
 **Say plainly, as the last thing you print, that you reviewed the work and
 found nothing worth raising** — that line is what the human sees on the
-Timeline — and stop. Say which pull requests you read, where there was more than
-one, and that you read what was said on them too where there was anything to
-read: it is the only report that any of it was looked at.
+Timeline — and run `verkstead done`. Say which pull requests you read, where
+there was more than one, and that you read what was said on them too where there
+was anything to read: it is the only report that any of it was looked at.
 
 A Set with no findings in it is a row for them to dismiss, and the point of this
 phase is to spend their attention only where there is a decision. Finding
@@ -460,10 +460,26 @@ not.
 
 The same holds at the other end: a review whose every finding was declined has
 nothing of its own to commit, and committing nothing is the right end to it. Say
-what you raised and what they left, and stop.
+what you raised and what they left, and run `verkstead done`.
 
 The checks are the one exception, at both ends. A review that asked nothing was
 never away long enough for one to go red behind it, and hands the Worktree
 straight back to whatever watches them. A review that waited did: a check that
 went red while it waited is yours whatever they decided about your findings, so
 step 7 still runs and what it fixes is still pushed.
+
+## 11. Say you are done
+
+The last thing this session does, once what they accepted is committed and
+pushed and everything above is finished, is run `verkstead done`. That is what
+ends the session, and nothing else does: not the commit, not the push, and not
+going quiet. So a review that waits on a check run, or on an answer, is not cut
+off while it waits.
+
+A review that found nothing, or whose every finding was declined, runs it too:
+committing nothing is the right end to one of those, and Verkstead does not ask
+it for a commit.
+
+Verkstead checks the repository when you run it. A refusal exits non-zero and
+says on stderr what is missing — changes left uncommitted, say — and the session
+carries on: put that right and run `verkstead done` again.

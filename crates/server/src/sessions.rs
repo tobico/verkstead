@@ -939,8 +939,7 @@ impl Session {
     }
 }
 
-/// Whether a session is idle, how long it has been, and whether it has ever
-/// said anything at all.
+/// Whether a session is idle, and how long it has been.
 ///
 /// **One judgement, read by everything that has ever asked**: the mark on the
 /// sidebar and on the Conversation, every ender's grace, and Rescue — both the
@@ -955,10 +954,6 @@ impl Session {
 /// working is never one to end, however long it goes on for, and the work a
 /// session does after its commit — a message, a summary, a push — runs to
 /// completion rather than being cut off mid-sentence.
-///
-/// The last part is for the driver that has nothing else to read. A session
-/// ended on its own quiet is one being taken at its word, and a session that
-/// never said a word has given none: see [`Idle::said_anything`].
 #[derive(Debug, Clone)]
 pub(crate) struct Idle {
     /// How this session's backend is read — the same for the whole of its life,
@@ -1096,9 +1091,6 @@ struct Silence {
     /// it was launched where it has had none.
     at: Instant,
 
-    /// Whether it has said anything since it started.
-    spoke: bool,
-
     /// When the judgement last said the session had stopped, and `None` while it
     /// says the session is at work.
     ///
@@ -1128,7 +1120,6 @@ impl Idle {
             judged,
             silence: Arc::new(Mutex::new(Silence {
                 at: now,
-                spoke: false,
                 idling_since: undrawn.then_some(now),
             })),
         }
@@ -1152,7 +1143,6 @@ impl Idle {
         let now = Instant::now();
 
         silence.at = now;
-        silence.spoke = true;
 
         if at_rest {
             silence.idling_since.get_or_insert(now);
@@ -1237,21 +1227,6 @@ impl Idle {
                 None => silence.at + *long_stop,
             },
         }
-    }
-
-    /// Whether the session has said anything at all since it started.
-    ///
-    /// What tells a session that finished from one that never got going, for the
-    /// driver whose only signal is silence — see [`crate::runner`]'s
-    /// propose-then-fix rule. A session that reports through the repository has a
-    /// commit or an artifact to be read as done; one that reports through nothing
-    /// but its own words has said nothing, and *nothing* is not a report.
-    ///
-    /// Every byte counts here, whatever the judgement makes of it: what this
-    /// asks is whether the session ever got going, and a frame drawn is a
-    /// session that did.
-    pub(crate) fn said_anything(&self) -> bool {
-        self.silence().spoke
     }
 
     /// When it was last seen at work, for whoever wants to know whether that was

@@ -6524,6 +6524,31 @@ esac
     )
 }
 
+/// The same session, except that it idles once the pull request is open, goes
+/// on saying nothing until it is spoken to, and says it is done only once the
+/// test writes `go`.
+fn a_backlog_whose_pull_request_is_opened_and_then_signalled(opened: &Path) -> String {
+    format!(
+        r#"
+case "$2" in
+*submitting/SKILL.md*)
+    printf 'the branch is pushed and the pull request is open\n'
+    printf 'https://github.com/tobico/verkstead/pull/41\n' > {opened}
+    read -r TOLD
+    printf '%s\n' "$TOLD" >> /tmp/verkstead/rescues
+    while [ ! -f /tmp/verkstead/go ]; do sleep 0.05; done
+    : > /tmp/verkstead/done
+    sleep 300
+    ;;
+*)
+{A_BACKLOG_OF_ONE}
+    ;;
+esac
+"#,
+        opened = quoted(opened),
+    )
+}
+
 /// And the same again where the session sent for the pull request cannot open one
 /// either: it says why and exits, which is what a `gh` nobody logged in looks
 /// like from inside a session.
@@ -7477,6 +7502,52 @@ async fn a_finish_that_opened_no_pull_request_is_sent_back_for_one() {
     );
 }
 
+/// The session sent for the pull request is not ended on quiet either, with the
+/// pull request open: it is spoken to, and the run wraps up once it signals.
+#[tokio::test]
+async fn a_quiet_session_sent_for_the_pull_request_is_ended_only_once_it_signals() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-when-asked");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_whose_pull_request_is_opened_and_then_signalled(&opened),
+        &gh_opened_by_hand(&opened),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let said = told(&fixture, 1).await;
+    let view = fixture.view().await;
+
+    assert_ne!(
+        view.state,
+        Lifecycle::Wrapping,
+        "a pull request open and a quiet session is not the session over",
+    );
+    assert!(
+        outputs(&view).last().is_some_and(|output| output.running),
+        "the session is left running: {:?}",
+        outputs(&view).last(),
+    );
+    assert!(
+        said[0].contains("run `verkstead done`"),
+        "and the rescue offers it the signal: {said:?}",
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("go"), "").unwrap();
+
+    let view = fixture
+        .until(|view| {
+            (view.state == Lifecycle::Wrapping && pull_request(view).is_some())
+                .then(|| view.clone())
+        })
+        .await;
+
+    assert_eq!(view.blocked_on, None, "and nothing is waiting on the human",);
+}
+
 /// And what happens when the session sent for it opens none either — no `gh`, no
 /// login, or a branch nothing was opened on. The Conversation stays where it is
 /// with the reason on its Timeline, rather than becoming a Wrapping with no pull
@@ -8096,8 +8167,9 @@ const REVIEW_AND_FIND_NOTHING: &str =
 /// The one above exits when it has finished, which is convenient to write and is
 /// a shape no agent has: a stub that sees itself out proves nothing about a
 /// session that simply sits there, which is every session there is.
-const REVIEW_AND_FIND_NOTHING_THEN_IDLE: &str =
-    "    printf 'I read the whole branch and found nothing worth raising\n'\n    sleep 300";
+const REVIEW_AND_FIND_NOTHING_THEN_IDLE: &str = "    : > /tmp/verkstead/done\n    \
+     printf 'I read the whole branch and found nothing worth raising\n'\n    \
+     sleep 300";
 
 /// One that stores its ask, ends its turn, and reads what is typed into it when
 /// the Answers land — which is what a session on a store-and-nudge backend does
@@ -8111,7 +8183,7 @@ const REVIEW_AND_FIND_NOTHING_THEN_IDLE: &str =
 /// still getting there — and each read writes down what it got.
 ///
 /// Then it carries on, as a session told its Answers are there does: it says
-/// what it did and idles, which is what ends the review on quiet.
+/// what it did, says it is done and idles.
 const REVIEW_THEN_READ_THE_NUDGE: &str = "    SAYING='reading the branch'\n    \
      printf '%s\\n' \"$SAYING\"\n    \
      stty -icanon min 1 time 0\n    \
@@ -8120,24 +8192,40 @@ const REVIEW_THEN_READ_THE_NUDGE: &str = "    SAYING='reading the branch'\n    \
      printf '%s\\n' \"$LINE\" >> /tmp/verkstead/nudges\n    \
      ENTER=$(dd bs=4096 count=1 2>/dev/null | od -An -c)\n    \
      printf '%s\\n' \"$ENTER\" >> /tmp/verkstead/nudges\n    \
+     : > /tmp/verkstead/done\n    \
      printf 'fetched the answers and left the rest\\n'\n    \
      sleep 300";
 
-/// One that reads the branch, waits on the human, does what they accepted — and
-/// then idles rather than exiting, as a real one does.
+/// One that reads the branch, waits on the human, does what they accepted, says
+/// it is done — and then idles rather than exiting, as a real one does.
 const REVIEW_THEN_FIX_AND_IDLE: &str = "    SAYING='reading the branch'\n    \
      printf '%s\\n' \"$SAYING\"\n    \
      WHILE_NOBODY_HAS_ASKED\n    \
      while [ ! -f /tmp/verkstead/answered ]; do sleep 0.1; done\n    \
+     : > /tmp/verkstead/done\n    \
      printf 'fixed what was accepted and left the rest\\n'\n    \
      sleep 300";
 
-/// One that comes up and never says a word — an agent that fell over before its
-/// first line, or one that never got as far as reading anything.
+/// One that reads the branch, asks with `--deferred`, and finishes without
+/// waiting on the answers — which is what a Deferred Ask is for.
+const REVIEW_THEN_DEFER_AND_FINISH: &str = "    SAYING='reading the branch'\n    \
+     printf '%s\\n' \"$SAYING\"\n    \
+     WHILE_NOBODY_HAS_ASKED\n    \
+     : > /tmp/verkstead/done\n    \
+     printf 'left the questions for later\\n'\n    \
+     sleep 300";
+
+/// One that comes up and never says a word until it is spoken to — an agent that
+/// finished its turn before its first line — and then, once the test lets it,
+/// says it is done.
 ///
-/// Silence is the whole of what quiet-with-nothing-pending has to read, so this
-/// is the shape that would satisfy it having done nothing at all.
-const REVIEW_THAT_SAYS_NOTHING: &str = "    sleep 300";
+/// Reads the line typed into it and writes it down, so that a test can tell a
+/// session spoken to from one taken at its silence.
+const REVIEW_THAT_SAYS_NOTHING: &str = "    read -r TOLD\n    \
+     printf '%s\\n' \"$TOLD\" >> /tmp/verkstead/rescues\n    \
+     while [ ! -f /tmp/verkstead/go ]; do sleep 0.05; done\n    \
+     : > /tmp/verkstead/done\n    \
+     sleep 300";
 
 /// And one that never goes quiet at all, which is a session still at work.
 const REVIEW_THAT_KEEPS_TALKING: &str = "    printf 'reading the branch\\n'\n    \
@@ -8147,6 +8235,16 @@ const REVIEW_THAT_KEEPS_TALKING: &str = "    printf 'reading the branch\\n'\n   
 /// as the last thing it prints, and stops.
 const RESPOND_AND_FIND_NOTHING: &str =
     "    printf 'I read what was said and none of it needs a change\n'";
+
+/// One that says what it made of the batch and then goes quiet without saying it
+/// is done, until it is spoken to — and says it is done once the test writes
+/// `go`.
+const RESPOND_QUIETLY_THEN_SIGNAL: &str = "    printf 'I read what was said and none of it needs a change\n'\n    \
+     read -r TOLD\n    \
+     printf '%s\\n' \"$TOLD\" >> /tmp/verkstead/rescues\n    \
+     while [ ! -f /tmp/verkstead/go ]; do sleep 0.05; done\n    \
+     : > /tmp/verkstead/done\n    \
+     sleep 300";
 
 /// One that proposes, waits for the answers and then does what was accepted,
 /// which is the whole of what a batch session is for.
@@ -8655,10 +8753,9 @@ async fn a_review_that_finishes_without_exiting_is_ended_and_the_wrap_up_carries
 /// A review sitting on a Blocking Ask is left alone however long the human takes,
 /// and is ended once they have answered and it has finished.
 ///
-/// The other half of the rule, and the one that makes the first half safe: a
-/// session idling on an ask prints nothing for hours, and quiet on its own would
-/// reap it mid-question and throw the answers away. So it is quiet *and* nothing
-/// of its own left to answer, or it is left where it is.
+/// A session idling on an ask prints nothing for hours, and it is neither ended
+/// nor spoken to while it does: nothing ends a review but its own Done signal,
+/// and the rescue holds off while a Set is open.
 #[tokio::test]
 async fn a_review_waiting_on_its_ask_is_left_alone_until_the_answers_are_in() {
     let spill = tempfile::tempdir().unwrap();
@@ -8734,7 +8831,7 @@ async fn a_review_waiting_on_its_ask_is_left_alone_until_the_answers_are_in() {
 }
 
 /// A Deferred Ask holds nothing open: nobody is idling on it, so the session that
-/// sent one is ended on quiet like any other.
+/// sent one and says it is done is ended like any other.
 ///
 /// Waiting on one would be waiting for the human to answer something nothing was
 /// waiting for — its Answers reach a later session by design — and the session
@@ -8753,7 +8850,7 @@ async fn a_deferred_ask_of_a_reviews_own_does_not_hold_its_session_open() {
 
     let fixture = grilling_spilling(
         spill,
-        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_FIX_AND_IDLE),
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_DEFER_AND_FINISH),
         PULL_REQUEST,
     )
     .await;
@@ -8916,7 +9013,7 @@ async fn an_ask_on_a_store_and_nudge_backend_is_stored_and_holds_its_session_ope
 }
 
 /// And `--deferred` on that same backend still means an ask nobody is idling on:
-/// the session that sent one is ended on quiet like any other.
+/// the session that sent one and says it is done is ended like any other.
 ///
 /// The one thing the backend does not decide. `--deferred` is the agent saying
 /// it will carry straight on, and a backend that stores every ask does not make
@@ -8930,7 +9027,7 @@ async fn a_deferred_ask_on_a_store_and_nudge_backend_still_holds_nothing_open() 
 
     let fixture = grilling_spilling_on_codex(
         spill,
-        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_FIX_AND_IDLE),
+        &a_backlog_then_wraps_up(&reviews, &dispatched, REVIEW_THEN_DEFER_AND_FINISH),
         PULL_REQUEST,
     )
     .await;
@@ -9455,20 +9552,21 @@ async fn a_review_that_keeps_talking_is_never_ended_under_it() {
     );
 }
 
-/// A review session that never says a word is not a review that found nothing.
+/// A review that goes quiet without saying it is done is not ended on its
+/// silence, however long the silence is: it is spoken to, and ended once it
+/// signals.
 ///
-/// The one place the quiet rule needs a second signal. Every other ending here
-/// pairs quiet with something the session produced — a commit, a backlog, a
-/// handoff — so a session that came up and did nothing satisfies none of them.
-/// This one is satisfied by pure silence, and a review is exactly the session
-/// whose whole report is its own words: reading silence as *it found nothing*
-/// would settle the review and carry the wrap-up to Done over a branch nobody
-/// read, with nothing on the Timeline saying so.
+/// Quiet with nothing open used to be the whole of what ended a review, so one
+/// that started a check run in the background and ended its turn was cut off
+/// mid-review. And a review that never said a word used to stop the run, as a
+/// session that gave no report. Neither is read off silence any more: the only
+/// report a review gives is its Done signal.
 ///
 /// Green all the way through, so nothing but the review stands between this
-/// wrap-up and Done — which is what makes the stop the whole proof.
+/// wrap-up and Done — which is what makes reaching Done the proof it was taken
+/// as a review that finished.
 #[tokio::test]
-async fn a_review_that_never_said_anything_stops_the_run_rather_than_settling() {
+async fn a_quiet_review_is_spoken_to_rather_than_ended_and_is_ended_once_it_signals() {
     let spill = tempfile::tempdir().unwrap();
     let reviews = spill.path().join("review-prompts");
     let dispatched = spill.path().join("fix-prompts");
@@ -9482,33 +9580,52 @@ async fn a_review_that_never_said_anything_stops_the_run_rather_than_settling() 
 
     worked_to_empty(&fixture).await;
 
-    let stopped = fixture.stopped().await;
+    // The rescue waits out a silent session's whole wake, which is several times
+    // the quiet a review used to be ended on — so a session still there when it
+    // arrives is one its silence did not end.
+    let said = told(&fixture, 1).await;
+    let view = fixture.view().await;
 
     assert!(
-        stopped
-            .html
-            .contains("Reviewing the branch the pull request is on"),
-        "the step is named as what it was: {:?}",
-        stopped.html,
-    );
-    assert!(
-        stopped.html.contains("never said anything"),
-        "and the reason is that there was no report to read: {:?}",
-        stopped.html,
+        outputs(&view).last().is_some_and(|output| output.running),
+        "the silent review is left running: {:?}",
+        outputs(&view).last(),
     );
     assert!(
         !review_settled(&fixture).await,
-        "a branch nobody said a word about is not a branch that was reviewed",
+        "and nothing settled a review that has not said it is done",
     );
-    assert_ne!(
-        fixture.view().await.state,
-        Lifecycle::Done,
-        "so the wrap-up does not carry on over the top of it",
+    assert!(
+        notices(&view).is_empty(),
+        "nor stopped over its silence: {:?}",
+        notices(&view),
     );
-    assert_eq!(
-        fixture.view().await.blocked_on,
-        Some(stopped.id),
-        "what is waiting is the human",
+    assert!(
+        said[0].contains("run `verkstead done`"),
+        "and the rescue offers it the signal: {said:?}",
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("go"), "").unwrap();
+
+    fixture
+        .until(|view| (view.state == Lifecycle::Done).then_some(()))
+        .await;
+
+    let view = fixture.view().await;
+
+    assert!(
+        review_settled(&fixture).await,
+        "once it signalled the review settled, as one that finished",
+    );
+    assert!(
+        outputs(&view).last().is_some_and(|output| !output.running),
+        "and the session is over: {:?}",
+        outputs(&view).last(),
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "with nothing stopped on the way: {:?}",
+        notices(&view),
     );
 }
 
@@ -11413,6 +11530,70 @@ async fn a_batch_with_nothing_to_do_asks_nothing_and_settles_as_addressed() {
         outputs(&view).last(),
     );
     assert_eq!(fixes(&view), 0, "with nothing changed about the branch");
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped: {:?}",
+        notices(&view),
+    );
+}
+
+/// A batch session that has said what it made of the batch and gone quiet
+/// without saying it is done is not ended on the quiet, however long it is: it
+/// is spoken to, and the batch settles once it signals.
+#[tokio::test]
+async fn a_quiet_batch_session_is_spoken_to_rather_than_ended_and_settles_once_it_signals() {
+    let spill = tempfile::tempdir().unwrap();
+    let reviews = spill.path().join("review-prompts");
+    let dispatched = spill.path().join("fix-prompts");
+    let batches = spill.path().join("batch-prompts");
+
+    let gh = gh_about_once(CHECKS_UNANSWERABLE, &reviews, THREE_COMMENTS, "");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_backlog_then_answers_comments(
+            &reviews,
+            &dispatched,
+            &batches,
+            RESPOND_QUIETLY_THEN_SIGNAL,
+        ),
+        &gh,
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+    until_written(&batches).await;
+
+    let said = told(&fixture, 1).await;
+    let view = fixture.view().await;
+
+    assert!(
+        outputs(&view).last().is_some_and(|output| output.running),
+        "the quiet batch session is left running: {:?}",
+        outputs(&view).last(),
+    );
+    assert!(
+        !comments_settled(&fixture).await,
+        "and nothing settled a batch whose session has not said it is done",
+    );
+    assert!(
+        said[0].contains("run `verkstead done`"),
+        "and the rescue offers it the signal: {said:?}",
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("go"), "").unwrap();
+
+    let deadline = Instant::now() + *PATIENCE;
+    while !comments_settled(&fixture).await {
+        assert!(
+            Instant::now() < deadline,
+            "the batch session signalled and the batch never settled",
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    let view = fixture.view().await;
+
     assert!(
         notices(&view).is_empty(),
         "and nothing stopped: {:?}",
