@@ -35,18 +35,9 @@
 //! Windows arms of [`super::own_directory`], [`crate::skills::Skills::inside`],
 //! [`crate::handoffs::inside`] and [`super::Executable`] are for, and what
 //! [`super::Surface::elsewhere`] does with a bind of a path onto itself. What
-//! is left to join in is the Profile's account and the Conversation's handoff
+//! is left to join in is the Profile's account — for Claude, what goes into
+//! the root built for it, see [`super::root`] — and the Conversation's handoff
 //! directory.
-//!
-//! **And one thing it deliberately does not make.**
-//! [`super::Access::Nothing`] is the account's own skills hidden, which the
-//! other two platforms answer with an empty directory over them and a refusal
-//! of the path. There is nothing made here, and the answer that looks nearest
-//! would be worse than none: that path is *inside* the account, which by now is
-//! a junction, so a directory made at it would be a directory made in the
-//! human's own account. So nothing is put there and the path is refused
-//! instead, which on this platform is an entry rather than a mount — see
-//! [`super::granting::writing::refuse`].
 //!
 //! **Finding the program is this rendering's own work.** The two Unix
 //! renderings hand a vector to a wrapper and the wrapper's own `execvp` finds
@@ -225,12 +216,6 @@ fn realise(surface: &Surface) -> Vec<(PathBuf, PathBuf)> {
 
                 joined(host, inside)
             }
-
-            // And the one thing left unmade on purpose — see this module's own
-            // documentation, which says why the nearest answer would be worse
-            // than none. What refuses the path is an entry written after this,
-            // on the real directory the junction leads to.
-            Access::Nothing { .. } => Ok(()),
 
             // And what needs nothing made for it: a path of the host's is
             // already where the description says it is, and the process table

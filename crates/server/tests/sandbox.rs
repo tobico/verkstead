@@ -25,7 +25,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -1344,8 +1344,9 @@ async fn the_open_rendering_hands_a_session_the_environment_it_was_described_wit
 /// there and by a symbolic link on the machine running this, and it is the
 /// `windows-2025` job that reads the first of those back.
 ///
-/// Claude's pair, which is the one shape of account that is a directory *and* a
-/// file — so this is the junction and the hard link in one test.
+/// Claude's, which is a root of Verkstead's own with the login hard-linked into
+/// it and this Repo's and this Worktree's `projects/` entries junctioned in —
+/// and beside it the file half of the pair, hard-linked as it always was.
 #[tokio::test]
 async fn a_windows_session_finds_the_profiles_account_inside_a_profile_of_its_own() {
     let fixture = grilling().await;
@@ -1353,23 +1354,73 @@ async fn a_windows_session_finds_the_profiles_account_inside_a_profile_of_its_ow
     made(&fixture.sandbox_on(Platform::Windows));
 
     let profile = fixture.windows_profile();
+    let root = profile.join(".claude");
 
-    assert_eq!(
-        std::fs::read_to_string(profile.join(".claude/settings.json")).unwrap(),
-        "{}\n",
-        "what the account holds should be readable at the name Claude looks for \
-         it under"
+    assert!(
+        !std::fs::symlink_metadata(&root).unwrap().is_symlink(),
+        "the root is a directory of Verkstead's own, not a junction to the account"
     );
 
-    // And the other direction, which is the half that says this is the account
-    // rather than a copy of it: a session logging in writes a file, and the
-    // human's own account is where it has to land.
-    std::fs::write(profile.join(".claude/written-inside.json"), "inside\n").unwrap();
+    let mut held: Vec<String> = std::fs::read_dir(&root)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    held.sort();
 
     assert_eq!(
-        std::fs::read_to_string(fixture.claude_dir().join("written-inside.json")).unwrap(),
-        "inside\n",
-        "a file a session writes into its account should be on the account"
+        held,
+        [".credentials.json", "projects"],
+        "the login and the projects directory are the whole of the root: none of \
+         the account's settings, plugins, skills, `CLAUDE.md` or history"
+    );
+
+    let mut entries: Vec<String> = std::fs::read_dir(root.join("projects"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    entries.sort();
+
+    let mut expected = vec![entry_named(&fixture.repo), entry_named(fixture.worktree())];
+    expected.sort();
+
+    assert_eq!(
+        entries, expected,
+        "and under it this Repo's entry and this Worktree's, and no other \
+         repository's"
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(root.join(".credentials.json")).unwrap(),
+        "{\"the\": \"login\"}\n",
+        "the login is readable at the name Claude looks for it under"
+    );
+    assert_eq!(
+        std::fs::metadata(root.join(".credentials.json"))
+            .unwrap()
+            .ino(),
+        std::fs::metadata(fixture.claude_dir().join(".credentials.json"))
+            .unwrap()
+            .ino(),
+        "and it is the account's own file, which is what a hard link is"
+    );
+
+    // And the other direction, which is the half that says the entries are the
+    // account rather than a copy of it: what a session writes as memory and
+    // transcript has to land in the human's own account.
+    let transcript = root
+        .join("projects")
+        .join(entry_named(fixture.worktree()))
+        .join("the-session.jsonl");
+    std::fs::write(&transcript, "{}\n").unwrap();
+
+    assert!(
+        fixture
+            .claude_dir()
+            .join("projects")
+            .join(entry_named(fixture.worktree()))
+            .join("the-session.jsonl")
+            .is_file(),
+        "a transcript a session writes should be on the account"
     );
 
     // The file half, written the way a program writes one in place — which is
@@ -1460,19 +1511,34 @@ async fn each_session_gets_the_profile_fresh_and_the_account_untouched() {
 
     let profile = fixture.windows_profile();
     std::fs::write(profile.join("what-the-last-session-left"), "state\n").unwrap();
+    std::fs::write(profile.join(".claude/left-in-the-root"), "state\n").unwrap();
 
     made(&fixture.sandbox_on(Platform::Windows));
 
     assert!(
-        !profile.join("what-the-last-session-left").exists(),
-        "a session should start in a profile holding nothing of the session \
-         before it"
+        !profile.join("what-the-last-session-left").exists()
+            && !profile.join(".claude/left-in-the-root").exists(),
+        "a session should start in a profile and a root holding nothing of the \
+         session before it"
     );
 
     assert_eq!(
-        std::fs::read_to_string(fixture.claude_dir().join("settings.json")).unwrap(),
-        "{}\n",
-        "and the account should be joined in again, whole"
+        std::fs::read_to_string(profile.join(".claude/.credentials.json")).unwrap(),
+        "{\"the\": \"login\"}\n",
+        "and the login should be joined in again"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_dir().join(".credentials.json")).unwrap(),
+        "{\"the\": \"login\"}\n",
+        "with the account's own file untouched by the emptying"
+    );
+    assert!(
+        fixture
+            .claude_dir()
+            .join("projects")
+            .join(entry_named(fixture.worktree()))
+            .is_dir(),
+        "and so is each `projects/` entry a junction led to"
     );
     assert_eq!(
         std::fs::read_to_string(fixture.claude_config()).unwrap(),
@@ -1543,6 +1609,71 @@ async fn a_file_a_session_replaced_is_written_back_to_the_account_as_the_session
     );
 }
 
+/// A login a Windows session saves by rename is the account's once the session
+/// has ended, as Claude saves one: a temporary file renamed over the hard link
+/// in the root.
+#[tokio::test]
+async fn a_login_a_windows_session_saved_by_rename_is_written_back_to_the_account() {
+    let fixture = grilling().await;
+    let credentials = fixture.claude_dir().join(".credentials.json");
+
+    let afterwards = made(&fixture.sandbox_on(Platform::Windows));
+    let inside = fixture.windows_profile().join(".claude/.credentials.json");
+
+    let written = inside.with_extension("json.tmp");
+    std::fs::write(&written, "{\"refreshed\": true}\n").unwrap();
+    std::fs::rename(&written, &inside).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{\"the\": \"login\"}\n",
+        "the rename took the root's name off the account's file"
+    );
+
+    afterwards.close();
+
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{\"refreshed\": true}\n",
+        "so as the session ends the refreshed login is written back over it"
+    );
+    assert_eq!(
+        std::fs::metadata(&inside).unwrap().ino(),
+        std::fs::metadata(&credentials).unwrap().ino(),
+        "and the root's name is one with the account's file again"
+    );
+}
+
+/// An account with no login has none to link into a Windows root, so the
+/// login a session makes is handed back as the session ends and is the
+/// account's from then on.
+#[tokio::test]
+async fn a_login_a_windows_session_made_in_an_account_with_none_is_the_accounts_afterwards() {
+    let fixture = grilling().await;
+    let credentials = fixture.claude_dir().join(".credentials.json");
+    std::fs::remove_file(&credentials).unwrap();
+
+    let afterwards = made(&fixture.sandbox_on(Platform::Windows));
+    let inside = fixture.windows_profile().join(".claude/.credentials.json");
+
+    assert!(!inside.exists(), "there is no login to give the root");
+    assert!(
+        afterwards.linked().any(|linked| linked == inside),
+        "and the name a login would be made at is what the session's ending is \
+         asked about"
+    );
+
+    std::fs::write(&inside, "{\"logged\": \"in\"}\n").unwrap();
+
+    afterwards.close();
+
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{\"logged\": \"in\"}\n",
+        "the login the session made is the account's"
+    );
+}
+
 /// And what each rendering leaves to be seen to, which is nothing at all on the
 /// platform whose links follow their own target — for an account with a login
 /// to bind, which is the fixture's. See
@@ -1573,6 +1704,10 @@ async fn a_rendering_whose_links_follow_their_target_leaves_nothing_to_close() {
         linked.contains(&fixture.windows_profile().join(".claude.json")),
         "and the platform that joins a file in by hard link leaves the file it \
          joined in: {linked:?}"
+    );
+    assert!(
+        linked.contains(&fixture.windows_profile().join(".claude/.credentials.json")),
+        "the login in the root included: {linked:?}"
     );
 
     // And nothing else anywhere. A name outside the profile is a rendering

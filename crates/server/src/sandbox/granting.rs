@@ -40,9 +40,6 @@
 //! [`super::entries`], which is what holds a Conversation's and takes them off
 //! the machine when its work stops.
 
-//! - **`Nothing`** is refused — see [`Wanted::Refused`], and
-//!   [`writing::refuse`] for the mechanism, which is the one part of this the
-//!   probe could not settle from outside.
 //! - **`ProcessTable` and `Devices`** are nothing at all here. There is no
 //!   process table in the filesystem on this platform, and the devices a
 //!   program opens by name are the machine's own.
@@ -122,7 +119,14 @@ pub(crate) enum Wanted {
     Stepped,
 
     /// And refused, whatever a grant above it says — the account's own skills,
-    /// which a session is to find nothing at.
+    /// which a session joined to the whole of a Claude account was to find
+    /// nothing at.
+    ///
+    /// **No description says this any more.** A Claude session is given a root
+    /// of its own with none of the account's skills in it — see
+    /// [`super::root`]. It is kept because a record written by an older build
+    /// still names a refusal, and taking that boundary back has to leave the
+    /// directory as it was found — see [`writing::strip`].
     Refused,
 }
 
@@ -144,9 +148,7 @@ pub(crate) struct Entry {
 /// the description said it.
 ///
 /// **The order is the description's**, for the reason [`Surface`] keeps one: a
-/// path said twice is the second one, and what covers the account's own skills
-/// is said after the account it is inside. Written in that order, the refusal
-/// lands over a grant rather than under it.
+/// path said twice is the second one.
 ///
 /// **And the steps come last**, after every path the description names is in
 /// the list, because what a step is wanted on is what nothing else has spoken
@@ -193,11 +195,6 @@ pub(crate) fn entries(surface: &Surface, profile: Option<&Path>) -> Vec<Entry> {
                 entries.push(granted(path, Reach::ReadWrite));
             }
 
-            Access::Nothing { inside, .. } => entries.push(Entry {
-                path: inside.clone(),
-                wanted: Wanted::Refused,
-            }),
-
             // Neither of which is a path on this platform — see this module's
             // own documentation. And a built directory is granted by what is
             // said after it rather than by being said.
@@ -221,26 +218,18 @@ pub(crate) fn entries(surface: &Surface, profile: Option<&Path>) -> Vec<Entry> {
 /// the order the entries are for.
 ///
 /// **Nothing is spoken for twice.** A directory that is on the way to two
-/// granted paths takes one entry, and one the description already names —
-/// granted or refused — takes none at all: a step is the narrowest thing
-/// written here, and one landing on a path that is already granted would be a
-/// session behind a boundary narrower than its description. Which is why this
-/// is worked out over the whole list rather than as each entry is made.
-///
-/// **A refusal is stepped to by nothing.** What a description refuses is inside
-/// something it grants, so the way to it is already here — and a step of its
-/// own would be an entry on the very directories a refusal exists to keep a
-/// session out of.
+/// granted paths takes one entry, and one the description already names takes
+/// none at all: a step is the narrowest thing written here, and one landing on
+/// a path that is already granted would be a session behind a boundary
+/// narrower than its description. Which is why this is worked out over the
+/// whole list rather than as each entry is made.
 fn stepping(entries: &[Entry]) -> Vec<Entry> {
     let named: HashSet<String> = entries.iter().map(|entry| folded(&entry.path)).collect();
 
     let mut already = HashSet::new();
     let mut stepping = Vec::new();
 
-    for entry in entries
-        .iter()
-        .filter(|entry| entry.wanted != Wanted::Refused)
-    {
+    for entry in entries {
         for directory in ancestors(&entry.path) {
             let folded = folded(&directory);
 
@@ -518,22 +507,40 @@ mod tests {
     use std::ffi::OsString;
 
     /// A description with one of everything in it, in the order a session's own
-    /// is built in.
+    /// is built in — a Claude root included, with the login and one
+    /// `projects/` entry joined into it.
     fn described(account: &Path, home: &Path) -> Surface {
         let mut surface = Surface::starting_in(PathBuf::from(r"C:\repo"));
+        let root = under(home, ".claude");
 
         surface.made(Access::Empty(home.to_owned()));
         surface.made(Access::Temporary(home.join("Temp")));
         surface.made(Access::ProcessTable);
         surface.made(Access::Devices);
+        surface.made(Access::Built(root.clone()));
         surface
             .own(r"C:\repo", Reach::ReadWrite)
             .own(r"C:\repo\.git", Reach::ReadWrite)
             .own(r"C:\ProgramData\verkstead\skills", Reach::ReadOnly)
-            .elsewhere(account, home.join(".claude"), Reach::ReadWrite)
-            .nothing(home.join(".claude").join("skills"), PathBuf::from("unused"));
+            .elsewhere(&root, &root, Reach::ReadWrite)
+            .elsewhere(
+                under(account, ".credentials.json"),
+                under(&root, ".credentials.json"),
+                Reach::ReadWrite,
+            )
+            .elsewhere(
+                under(account, r"projects\C--repo"),
+                under(&root, r"projects\C--repo"),
+                Reach::ReadWrite,
+            );
 
         surface
+    }
+
+    /// `name` under `directory`, written with the separator Windows writes
+    /// whichever machine is joining the two.
+    fn under(directory: &Path, name: &str) -> PathBuf {
+        PathBuf::from(format!(r"{}\{name}", directory.display()))
     }
 
     /// Every part of the vocabulary, as the entry it comes to.
@@ -565,14 +572,21 @@ mod tests {
                     PathBuf::from(r"C:\ProgramData\verkstead\skills"),
                     Wanted::Granted(Reach::ReadOnly)
                 ),
-                // The account itself rather than the name it is found under,
-                // and the refusal after it, which is the order the description
-                // said them in.
-                (account.to_owned(), Wanted::Granted(Reach::ReadWrite)),
-                (home.join(".claude").join("skills"), Wanted::Refused),
+                // The root built for Claude, and what is joined into it as the
+                // account's own paths rather than the names they are found
+                // under — and never the account's directory itself.
+                (under(home, ".claude"), Wanted::Granted(Reach::ReadWrite)),
+                (
+                    under(account, ".credentials.json"),
+                    Wanted::Granted(Reach::ReadWrite)
+                ),
+                (
+                    under(account, r"projects\C--repo"),
+                    Wanted::Granted(Reach::ReadWrite)
+                ),
             ],
-            "the process table and the devices are nothing at all here, and \
-             everything else is one entry",
+            "the process table, the devices and a built directory are nothing \
+             at all here, and everything else is one entry",
         );
     }
 
@@ -609,10 +623,13 @@ mod tests {
                 // And the way to the skills of Verkstead's own.
                 PathBuf::from(r"C:\ProgramData"),
                 PathBuf::from(r"C:\ProgramData\verkstead"),
-                // And the way to the account, which is the human's own profile
-                // being walked through without being given.
+                // And the way to the login and the `projects/` entry, which is
+                // the human's own profile and account being walked through
+                // without being given.
                 PathBuf::from(r"C:\Users"),
                 PathBuf::from(r"C:\Users\ada"),
+                PathBuf::from(r"C:\Users\ada\.claude"),
+                PathBuf::from(r"C:\Users\ada\.claude\projects"),
             ],
             "every directory on the way to a granted path is stepped through \
              once, outermost first, and a path the description already names \
@@ -726,29 +743,6 @@ mod tests {
         assert!(
             !stands(Path::new(r"C:\Users\ada\.cargo"), &standing),
             "and not a neighbour",
-        );
-    }
-
-    /// And what a refusal is on the way to: nothing.
-    ///
-    /// The directories above a refused path are the ones a refusal exists to
-    /// keep a session out of, and the way to it is the granted path it is
-    /// inside — which is already in the list.
-    #[test]
-    fn a_refused_path_is_stepped_to_by_nothing() {
-        let home = Path::new(r"D:\homes\7");
-        let mut surface = Surface::starting_in(PathBuf::from(r"C:\repo"));
-
-        surface.nothing(home.join(".claude").join("skills"), PathBuf::from("unused"));
-
-        assert_eq!(
-            entries(&surface, None)
-                .iter()
-                .filter(|entry| entry.wanted == Wanted::Stepped)
-                .count(),
-            0,
-            "a description that refuses one path and grants none is one step \
-             through nothing at all",
         );
     }
 

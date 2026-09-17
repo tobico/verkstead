@@ -1615,12 +1615,13 @@ mod tests {
     /// the two look the same to anything coarser and only one of them is a
     /// boundary.
     ///
-    /// **The entries come off a [`Surface`] rather than being written by
+    /// **The grant comes off a [`Surface`] rather than being written by
     /// hand**, which is not tidiness: what makes the granted path resolve at
     /// all is the step on every directory on the way to it, and a list naming
     /// only the two paths this test cares about would be refused at the first
     /// ancestor. See [`super::entries`], which is what a session start asks and
-    /// what puts the steps in.
+    /// what puts the steps in. The refusal is added by hand, no description
+    /// saying one any more — see [`Wanted::Refused`].
     #[test]
     fn a_granted_path_is_read_as_the_account_and_a_refused_one_is_not() {
         let account = the_session_account();
@@ -1640,11 +1641,13 @@ mod tests {
         }
 
         let mut surface = Surface::starting_in(granted.clone());
-        surface
-            .own(&granted, Reach::ReadWrite)
-            .nothing(&refused, &refused);
+        surface.own(&granted, Reach::ReadWrite);
 
-        let entries = super::super::entries(&surface, None);
+        let mut entries = super::super::entries(&surface, None);
+        entries.push(Entry {
+            path: refused.clone(),
+            wanted: Wanted::Refused,
+        });
         let cut = inheriting(&entries);
 
         write(&entries, account.sid().text(), &cut).expect("the entries this description comes to");

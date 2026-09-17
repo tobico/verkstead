@@ -14,10 +14,8 @@
 //! in the Data Directory, emptied and made again as each session starts — see
 //! [`super::Access::Built`]. What goes into it is joined rather than copied, so
 //! a login from inside and a memory written inside both land in the account:
-//! a bind on Linux and a symlink on a Mac.
-//!
-//! **Windows is not here yet.** A Windows session is still joined to the whole
-//! account, and gets its own root in a later stage of this work.
+//! a bind on Linux, a symlink on a Mac, and on Windows a hard link for the login
+//! and a junction for each entry.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -57,10 +55,14 @@ impl Root {
     /// path's. The main checkout is what Claude reads back out of the
     /// Worktree's own `.git` file, which git writes resolved — the same answer
     /// git gave for `git_dir`. The Worktree is the directory Claude was started
-    /// in, as the machine reports it: resolved on a Mac, where a session
-    /// starts in the host's own path, and as stored on Linux, where a bind
-    /// makes the Worktree at the path it was stored under and nothing on the
-    /// way to it is a link.
+    /// in, as the machine reports it: resolved on a Mac and on Windows, where a
+    /// session starts in the host's own path, and as stored on Linux, where a
+    /// bind makes the Worktree at the path it was stored under and nothing on
+    /// the way to it is a link.
+    ///
+    /// **And plain**, because resolving a path on Windows writes `\\?\` in
+    /// front of it, and Claude names an entry from the path it was started in,
+    /// which has no such prefix — see [`super::plainly`].
     pub(crate) fn of(platform: Platform, account: &Path, git_dir: &Path, worktree: &Path) -> Root {
         let worktree = match platform {
             Platform::Linux => worktree.to_owned(),
@@ -70,7 +72,7 @@ impl Root {
         let mut entries = Vec::new();
 
         for path in [main_checkout(git_dir), worktree] {
-            let entry = entry_named(&path);
+            let entry = entry_named(&super::plainly(&path));
 
             if !entries.contains(&entry) {
                 entries.push(entry);
@@ -114,9 +116,10 @@ impl Root {
     /// account's own path and the path a session finds it at.
     ///
     /// The credentials file first, and only where the account has one. A join
-    /// of a file that is not there is nothing on a Mac and a bind that will not
-    /// start on Linux — so a root for an account with no file has none, and
-    /// the file a session logs in and writes is handed back as it ends instead.
+    /// of a file that is not there is nothing on a Mac, a hard link that fails on
+    /// Windows and a bind that will not start on Linux — so a root for an
+    /// account with no file has none, and the file a session logs in and writes
+    /// is handed back as it ends instead.
     /// See [`super::Sandbox::command`].
     ///
     /// Blocking: one `stat`.
@@ -331,6 +334,26 @@ mod tests {
 
         let same = Root::of(Platform::Linux, &account, &worktree.join(".git"), &worktree);
         assert_eq!(same.entries, [worktree_entry]);
+    }
+
+    /// A path resolved on Windows carries `\\?\` in front of it, and its entry is
+    /// named from the plain path a session is started in.
+    #[test]
+    fn a_verbatim_path_is_named_as_the_plain_path_it_spells() {
+        let root = Root::of(
+            Platform::Windows,
+            Path::new(r"C:\Users\ada\.claude"),
+            Path::new(r"\\?\C:\Users\ada\src\verkstead"),
+            Path::new(r"\\?\C:\ProgramData\Verkstead\worktrees\verkstead-x"),
+        );
+
+        assert_eq!(
+            root.entries,
+            [
+                "C--Users-ada-src-verkstead",
+                "C--ProgramData-Verkstead-worktrees-verkstead-x"
+            ]
+        );
     }
 
     /// A Worktree reached through a link is named as a session will find itself

@@ -40,9 +40,8 @@
 //!   root of Verkstead's own at `~/.claude`, see [`root`], beside `~/.claude.json`
 //! - **read-only** — `/nix` and the system paths, the bundled skills in a
 //!   directory of Verkstead's own — see [`own_directory`] — the files the human
-//!   attached to the Conversation beside them, on Windows nothing at all where the
-//!   account's own skills would be found, and the executable serving all this,
-//!   as `verkstead`
+//!   attached to the Conversation beside them, and the executable serving all
+//!   this, as `verkstead`
 //! - **tmpfs** — `/tmp`, and everything else in HOME simply absent
 //! - **by mode** — each companion repo the Conversation was configured with,
 //!   its worktree and its git directory together, read-only or read-write as
@@ -126,8 +125,8 @@ mod closing;
 mod rendering;
 mod surface;
 
-// And what a Claude session is given of its account on the two Unix platforms:
-// a `.claude` of Verkstead's own, built out of an allowlist — see [`root`].
+// And what a Claude session is given of its account: a `.claude` of
+// Verkstead's own, built out of an allowlist — see [`root`].
 mod root;
 
 // And what a rendering cannot say on the platform it is for: how long what it
@@ -181,7 +180,7 @@ use crate::build_cache::{self, BuildCache};
 use crate::handoffs::{self, Handoffs};
 use crate::platform::Platform;
 use crate::settings::{Config, GitAuthor, Secrets};
-use crate::skills::{self, Skills};
+use crate::skills::Skills;
 use crate::store;
 use crate::terminal;
 use crate::unseen::Unseen;
@@ -393,9 +392,7 @@ const COMPLAINT: usize = 500;
 ///
 /// Claude's pair, and the one directory each backend after it keeps its whole
 /// account under. Written out rather than derived, because they are the paths
-/// those programs look in and not a scheme any of them follows — and named
-/// apart from [`skills::CLAUDE_INSIDE_HOME`], which is the directory *inside*
-/// the first of them that a sandbox covers.
+/// those programs look in and not a scheme any of them follows.
 const CLAUDE_DIR_INSIDE_HOME: &str = ".claude";
 const CLAUDE_CONFIG_INSIDE_HOME: &str = ".claude.json";
 const CODEX_INSIDE_HOME: &str = ".codex";
@@ -2159,6 +2156,10 @@ fn kept_in(agent_type: store::AgentType, home: &Path) -> store::Account {
 /// privilege. A name with nothing at it yet is taken as a file, that being the
 /// one shape of account path that may not be there — an agent that has not
 /// written its config out yet.
+///
+/// **And a Claude account's login beside them.** A Claude session is given a
+/// root of its own rather than the account's directory (see [`root`]), and
+/// the login is the one file joined into it — by hard link, like the rest.
 fn across_volumes(platform: Platform, home: &Path, account: &store::Account) -> Option<PathBuf> {
     if platform != Platform::Windows {
         return None;
@@ -2166,9 +2167,15 @@ fn across_volumes(platform: Platform, home: &Path, account: &store::Account) -> 
 
     let ours = volume(home);
 
+    let login = match account {
+        store::Account::Claude { claude_dir, .. } => Some(root::Root::credentials_in(claude_dir)),
+        _ => None,
+    };
+
     account_inside(account, home)
         .into_iter()
         .map(|(host, _)| host)
+        .chain(login)
         .filter(|host| !host.is_dir())
         .find(|host| volume(host) != ours)
 }
@@ -3442,17 +3449,14 @@ pub struct Sandbox {
     account: store::Account,
 
     /// What a Claude session is given of that account in place of the whole of
-    /// `~/.claude`, on the two platforms that build one — see [`root`].
+    /// `~/.claude` — see [`root`].
     ///
-    /// `None` for every other backend, and for Claude on Windows, which is still
-    /// joined to the whole account.
+    /// `None` for every other backend.
     root: Option<root::Root>,
 
     /// The bundled skills, read-only where a session is told to read them —
     /// see [`crate::skills`] for why they are Verkstead's rather than the
-    /// account's, why they are read-only, and why the path is nobody's. And the
-    /// empty directory that goes over `~/.claude/skills`, which comes with them
-    /// — see [`skills::Skills::nothing`].
+    /// account's, why they are read-only, and why the path is nobody's.
     skills: Skills,
 
     /// The executable a session runs as `verkstead`, read-only where a session
@@ -3700,7 +3704,7 @@ impl Sandbox {
         // of nothing is a session that will not start. Refused the way a
         // handoff directory that cannot be made is.
         let root = match &profile.account {
-            store::Account::Claude { claude_dir, .. } if homes.platform() != Platform::Windows => {
+            store::Account::Claude { claude_dir, .. } => {
                 let root = root::Root::of(homes.platform(), claude_dir, &git_dir, &worktree);
 
                 if let Err(error) = root.made_in_account() {
@@ -3998,9 +4002,8 @@ impl Sandbox {
     ///
     /// **The order is the description**, because a path said twice is the
     /// second one — see [`surface`]. Which is why the account lands after the
-    /// directory it goes inside, why what covers the account's own skills is
-    /// after the account, and why the handoff directory is after the temporary
-    /// filesystem that would otherwise be over it.
+    /// directory it goes inside, and why the handoff directory is after the
+    /// temporary filesystem that would otherwise be over it.
     fn surface<S: AsRef<OsStr>>(&self, argv: &[S]) -> Surface {
         // What a session searches for a program in, said once: Verkstead's own
         // directory and then the machine's own half of it — see [`path`]. Read
@@ -4048,8 +4051,7 @@ impl Sandbox {
         // **After the empty HOME**, because on Linux that HOME *is* the
         // server's own home and these are inside it: a bind said before it is
         // one the directory made over it takes away again. And ahead of the
-        // account and of what covers the account's own skills, so that what is
-        // said later still stands over them.
+        // account, so that what is said later still stands over them.
         reaching(
             self.platform,
             &session_path,
@@ -4106,7 +4108,7 @@ impl Sandbox {
         // Where a bind can make that path, this is one; where none can, the
         // path a session is told to read is the one they are really written at
         // and the two sides of this are the same directory — see
-        // [`skills::Skills::inside`].
+        // [`crate::skills::Skills::inside`].
         surface.elsewhere(self.skills.path(), self.skills.inside(), Reach::ReadOnly);
 
         // And the files the human attached to this Conversation, beside them in
@@ -4124,44 +4126,17 @@ impl Sandbox {
             surface.elsewhere(attached.host(), attached.inside(), Reach::ReadOnly);
         }
 
-        // And nothing at all where the account's own skills would otherwise be
-        // found: after the Profile's directory and inside it, because what is
-        // said second is what a session gets — an empty directory of
-        // Verkstead's own standing over them where a mount can do that, and a
-        // refusal of the path where none can.
+        // **And nothing covers the account's own skills any more.** Claude's
+        // were hidden under an empty directory, or refused where no mount can
+        // make one, while a session was joined to the whole account. A built
+        // root has none of the account's skills in it to hide — see [`root`].
         //
-        // Claude's, and so far Claude's alone. Each backend after it has a
-        // discovery path of its own, covered the same way by the stage that
-        // lands it — except where that path is *inside* the account home
-        // itself, as Codex's `~/.codex/skills` and Grok Build's `~/.grok/skills`
-        // both are: covering one would hide the skills those programs ship as
-        // well as the ones the account added, and the home is the whole of what
-        // such a Profile names, so it is left as the account keeps it
-        // (ADR-0011).
-        //
-        // OpenCode adds none either, and for a reason of its own. Its two
-        // global paths — `~/.claude/skills` and `~/.agents/skills` — are
-        // Claude-shaped and sit under HOME rather than under its account, and
-        // an OpenCode Profile puts neither of them inside: HOME inside is
-        // fresh, so there is nothing at either to hide and an empty directory
-        // over one would cover nothing. Its own is inside the config directory
-        // the Profile names, which is the exception above. So every backend
-        // that has landed adds nothing here, and a stage that adds nothing is
-        // following the rule rather than forgetting one.
-        //
-        // And the account's type at all, rather than every home there is,
-        // because covering a home no session is running under would cover
-        // nothing and make a directory the account never had.
-        //
-        // **And only where Claude is still joined to the whole account**, which
-        // is Windows alone. A built root has no skills of the account's in it
-        // to cover — see [`root`].
-        if matches!(self.account, store::Account::Claude { .. }) && self.root.is_none() {
-            surface.nothing(
-                self.home.path().join(skills::CLAUDE_INSIDE_HOME),
-                self.skills.nothing(),
-            );
-        }
+        // No other backend covers any either. Codex's `~/.codex/skills` and
+        // Grok Build's `~/.grok/skills` are inside the account home itself, so
+        // covering one would hide the skills those programs ship as well as the
+        // ones the account added (ADR-0011). OpenCode's two global paths —
+        // `~/.claude/skills` and `~/.agents/skills` — sit under a HOME that is
+        // fresh inside, so there is nothing at either to hide.
 
         // And the binary the session asks with, in a directory of its own that
         // goes first on `PATH` — see [`Executable`]. What is on that `PATH`
@@ -4415,6 +4390,12 @@ impl Sandbox {
     /// with no login, whose first session logs in and writes a file into the
     /// root itself. Where a bind was made, the file in the root on the host is
     /// the empty name the bind was made over, and is nothing to write back.
+    ///
+    /// **Windows likewise only where the account had no file to link.** A file
+    /// that was linked is already handed back by the rendering, as every file
+    /// it joins by hard link is — see [`open`]. What is left is the login a
+    /// session makes where there was none, which is then linked back into the
+    /// root the way the rendering would have linked it.
     fn credentials_closing(
         &self,
         root: &root::Root,
@@ -4431,6 +4412,7 @@ impl Sandbox {
         match self.platform {
             Platform::MacOs => Some((credentials, inside, Rejoin::Symbolic)),
             Platform::Linux if !bound => Some((credentials, inside, Rejoin::Not)),
+            Platform::Windows if !bound => Some((credentials, inside, Rejoin::Hard)),
             Platform::Linux | Platform::Windows => None,
         }
     }
@@ -6021,10 +6003,14 @@ mod tests {
         // junction and everything else by a hard link.
         let account = tempfile::tempdir().unwrap();
 
-        let claude = |config: &str| store::Account::Claude {
-            claude_dir: account.path().to_owned(),
+        // A Claude account named by its paths alone: the login inside the
+        // directory half is a file a hard link is asked for too, so the
+        // directory has to be on a volume this test can say.
+        let claude_in = |dir: &str, config: &str| store::Account::Claude {
+            claude_dir: PathBuf::from(dir),
             config_file: PathBuf::from(config),
         };
+        let claude = |config: &str| claude_in(r"C:\Users\someone\.claude", config);
 
         let profile = Path::new(r"C:\ProgramData\Verkstead\homes\7");
         let elsewhere = r"D:\accounts\someone\.claude.json";
@@ -6045,6 +6031,21 @@ mod tests {
             None,
             "and one volume is the whole of what it needed"
         );
+
+        // On the machine this is for, the directory is a real one and so is
+        // left out, and what is found is the login inside it. Here neither is
+        // there, so either name will do: what is asked is the drive.
+        let found = across_volumes(
+            Platform::Windows,
+            profile,
+            &claude_in(
+                r"D:\accounts\someone\.claude",
+                r"C:\Users\someone\.claude.json",
+            ),
+        )
+        .expect("a login on another drive is one a hard link cannot join in");
+
+        assert_eq!(written(&found), Some(b"D:".to_vec()));
 
         assert_eq!(
             across_volumes(

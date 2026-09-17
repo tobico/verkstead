@@ -55,18 +55,6 @@ pub(crate) enum Access {
         reach: Reach,
     },
 
-    /// A path a session must not reach, whatever is under it: the account's own
-    /// skills, which are hidden rather than merged with.
-    ///
-    /// Said as an intention of its own rather than as one more
-    /// [`Access::Elsewhere`], because it is the one place the two mechanisms
-    /// answer a description in opposite directions. A mount makes something not
-    /// be there by putting an empty directory of Verkstead's own over it —
-    /// which is what `empty` is for — and a policy makes it not be there by
-    /// refusing it, having nothing to put anywhere. Rendered as a bind, the
-    /// second of them would write into the account it is standing on.
-    Nothing { inside: PathBuf, empty: PathBuf },
-
     /// The process table, which is the sandbox's own where the platform keeps
     /// one in the filesystem.
     ProcessTable,
@@ -210,21 +198,6 @@ impl Surface {
             host,
             inside,
             reach,
-        });
-
-        self
-    }
-
-    /// And a path a session must not reach, with the empty directory a mount
-    /// puts over it — see [`Access::Nothing`].
-    pub(crate) fn nothing(
-        &mut self,
-        inside: impl Into<PathBuf>,
-        empty: impl Into<PathBuf>,
-    ) -> &mut Surface {
-        self.reaches.push(Access::Nothing {
-            inside: inside.into(),
-            empty: empty.into(),
         });
 
         self

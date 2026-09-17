@@ -347,8 +347,8 @@ pub(crate) fn standing_wrote(
         entries: standing.entries.iter().map(Line::of).collect(),
 
         // Nothing a refusal cut is ever in here: what stands is a grant or a
-        // step, and a refusal is a Conversation's own by definition — it
-        // covers the account's own skills from that Conversation's session.
+        // step, and a refusal is a Conversation's own by definition — one
+        // covered the account's own skills from that Conversation's session.
         cut: Vec::new(),
     };
 
