@@ -33,7 +33,7 @@
 //! pick asked for, a backlog step, an inline implementation, an instruction, a
 //! fix, a follow-up: each of them is a session that should be either working,
 //! asking or finished, and *none of the three* is the shape this watches for. What differs from one to
-//! the next is only what *finished* looks like — a path on the branch, a commit,
+//! the next is only what *finished* looks like — a Done signal given and borne out,
 //! the human's own mark — so that is the parameter and the loop is not. See
 //! [`Done`], and [`until_it_will_not_ask`], which is the whole of the mechanism.
 //!
@@ -211,24 +211,14 @@ async fn after_the_echo(idle: &Idle) -> Instant {
 /// indicator rather than a mechanism.
 #[derive(Debug, Clone)]
 pub(crate) enum Done {
-    /// A grilling's artifact, or a backlog step: the session has given its Done
-    /// signal and the repository bore it out — see [`crate::done`].
+    /// A grilling's artifact, a backlog step, an inline run, an instruction or a
+    /// fix: the session has given its Done signal and the repository bore it
+    /// out — see [`crate::done`].
     ///
     /// The signal rather than the landing itself. A session that has landed
     /// its work and not said so is not being ended by anything, so it is
     /// exactly a session to speak to.
     Signalled(Signal),
-
-    /// An instruction or a fix: the Conversation's commits standing somewhere
-    /// past where they stood when the session started. There is no path to watch
-    /// — an instruction can ask for anything — and a commit is the one report an
-    /// agent cannot half make.
-    Committed {
-        /// Where the Conversation's commits stood before the session started —
-        /// see [`store::commits_landed`], which is what a marker like this
-        /// means.
-        already: i64,
-    },
 
     /// A follow-up: the newest round the human answered carries the
     /// Nothing-else mark. Nothing on the branch says whether a follow-up is
@@ -247,9 +237,6 @@ impl Done {
     async fn reached(&self, state: &AppState, conversation_id: i64) -> bool {
         match self {
             Done::Signalled(signal) => signal.given(),
-            Done::Committed { already } => {
-                crate::runner::committed_since(state, conversation_id, *already).await
-            }
             Done::NothingElse => crate::runner::marked(state, conversation_id).await,
         }
     }
@@ -259,7 +246,7 @@ impl Done {
     fn line(&self) -> &'static str {
         match self {
             Done::Signalled(_) => SIGNALLING_LINE,
-            Done::Committed { .. } | Done::NothingElse => LINE,
+            Done::NothingElse => LINE,
         }
     }
 }

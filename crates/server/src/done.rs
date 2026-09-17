@@ -9,7 +9,7 @@
 //! and that is what ends it. See ADR-0018.
 //!
 //! **The repository is still read, at that moment and only then.** What *done*
-//! means is the kind's own reading, unchanged — see
+//! means is the kind's own reading, unchanged — see [`Evidence`] and
 //! [`crate::runner::Landing`] — and what it is for now is the check on a signal
 //! rather than the trigger for an ending. A signal the evidence does not bear
 //! out is refused, naming what is missing, and the session stays alive to put
@@ -31,6 +31,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -63,9 +64,28 @@ pub(crate) struct Signals {
 struct Expected {
     token: u64,
     event_id: i64,
-    worktree: PathBuf,
-    landing: Landing,
+    evidence: Evidence,
     given: watch::Sender<bool>,
+}
+
+/// What a session's Done signal is checked against: the kind's own reading of
+/// what *done* is, unchanged from when it was the trigger for an ending.
+#[derive(Debug, Clone)]
+pub(crate) enum Evidence {
+    /// A backlog step, the finish, a stage's planning or a grilling's tail after
+    /// a pick: `landing` in `worktree` — see [`crate::runner::Landing`].
+    Landed { worktree: PathBuf, landing: Landing },
+
+    /// An inline run or an instruction: the Conversation's commits standing past
+    /// `already`, where they stood when the session started — see
+    /// [`crate::runner::committed_since`]. There is no path to watch for either,
+    /// and a commit is the one report an agent cannot half make.
+    Committed { already: i64 },
+
+    /// A fix session, which has nothing to show. What judges a fix is the check
+    /// on GitHub, asked again once the session is over, and a rule that demanded
+    /// a commit would leave a fix with nothing to fix unable to end.
+    Nothing,
 }
 
 /// A driver's hold on its entry, for as long as it is seeing the session out.
@@ -94,7 +114,7 @@ impl Signals {
     }
 
     /// Write down that the session printing into `event_id` is to be ended on
-    /// its Done signal, once `landing` has landed in `worktree`.
+    /// its Done signal, once `evidence` bears it out.
     ///
     /// Replaces whatever the Conversation had written down: one Worktree holds
     /// one session, and the driver seeing it out now is the one that knows what
@@ -103,8 +123,7 @@ impl Signals {
         &self,
         conversation_id: i64,
         event_id: i64,
-        worktree: PathBuf,
-        landing: Landing,
+        evidence: Evidence,
     ) -> Expecting {
         let token = self.issued.fetch_add(1, Ordering::Relaxed);
         let (given, receiver) = watch::channel(false);
@@ -114,8 +133,7 @@ impl Signals {
             Expected {
                 token,
                 event_id,
-                worktree,
-                landing,
+                evidence,
                 given,
             },
         );
@@ -222,27 +240,11 @@ async fn verdict(state: &AppState, conversation_id: i64) -> Verdict {
         );
     };
 
-    // Read under the lock and checked outside it: the check is git, and a lock
-    // held across a process would hold every other Conversation's signal behind
-    // it.
-    let found = state
-        .signals
-        .register()
-        .get(&conversation_id)
-        .filter(|expected| expected.event_id == event_id)
-        .map(|expected| {
-            (
-                expected.token,
-                expected.worktree.clone(),
-                expected.landing.clone(),
-            )
-        });
-
-    let Some((token, worktree, landing)) = found else {
+    let Some((token, evidence)) = registered(state, conversation_id, event_id).await else {
         return Verdict::Refused(unexpected(state, conversation_id).await);
     };
 
-    if let Some(missing) = crate::runner::missing(&worktree, &landing).await {
+    if let Some(missing) = missing(state, conversation_id, &evidence).await {
         return Verdict::Refused(format!(
             "this session is not done yet: {missing}. Put that right, then run `verkstead done` \
              again"
@@ -279,6 +281,68 @@ async fn verdict(state: &AppState, conversation_id: i64) -> Verdict {
     abandoned(state, conversation_id, event_id).await;
 
     Verdict::Accepted
+}
+
+/// How long a signal from a running session waits for its driver to write down
+/// what it is to be checked against, before it is refused as unexpected.
+///
+/// A driver writes its entry once the session it launched is running, so there
+/// is a moment in which a session is on the register and nothing is waiting on
+/// it yet. An agent that signals in that moment is not wrong, and refusing it as
+/// a session Verkstead ends by itself would send it off believing that. A few
+/// seconds covers the moment on a loaded machine.
+const REGISTERING: Duration = Duration::from_secs(5);
+
+/// The entry waiting on the session printing into `event_id`, as its token and
+/// what it is checked against — waited for up to [`REGISTERING`].
+///
+/// Read under the lock and checked outside it: the check is git, and a lock
+/// held across a process would hold every other Conversation's signal behind it.
+async fn registered(
+    state: &AppState,
+    conversation_id: i64,
+    event_id: i64,
+) -> Option<(u64, Evidence)> {
+    let deadline = Instant::now() + REGISTERING;
+
+    loop {
+        let found = state
+            .signals
+            .register()
+            .get(&conversation_id)
+            .filter(|expected| expected.event_id == event_id)
+            .map(|expected| (expected.token, expected.evidence.clone()));
+
+        // Given up on once the session is no longer the one running, too: a
+        // session that has ended is not one anything will start waiting on.
+        if found.is_some()
+            || Instant::now() >= deadline
+            || state.sessions.writing(conversation_id) != Some(event_id)
+        {
+            return found;
+        }
+
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+/// What `evidence` is still missing, in words an agent can act on, or `None`
+/// where it bears the signal out.
+async fn missing(state: &AppState, conversation_id: i64, evidence: &Evidence) -> Option<String> {
+    match evidence {
+        Evidence::Landed { worktree, landing } => crate::runner::missing(worktree, landing).await,
+        Evidence::Committed { already } => {
+            // Swept first rather than read as the watcher last left it: a
+            // session's `verkstead done` usually comes straight after its
+            // commit, and the watcher looks at the branch only every few
+            // seconds.
+            crate::commits::sweep_now(state, conversation_id).await;
+
+            (!crate::runner::committed_since(state, conversation_id, *already).await)
+                .then(|| "nothing has been committed since this session began".to_owned())
+        }
+        Evidence::Nothing => None,
+    }
 }
 
 /// How many uncommitted paths a refusal names before it says how many more
@@ -464,7 +528,14 @@ mod tests {
     use super::*;
 
     fn entry(signals: &Signals, event_id: i64) -> Expecting {
-        signals.expecting(7, event_id, PathBuf::from("/nowhere"), Landing::Ticked(1))
+        signals.expecting(
+            7,
+            event_id,
+            Evidence::Landed {
+                worktree: PathBuf::from("/nowhere"),
+                landing: Landing::Ticked(1),
+            },
+        )
     }
 
     /// Dropping a hold takes its entry off the register, which is what keeps a

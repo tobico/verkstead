@@ -24297,15 +24297,15 @@ async fn an_inline_session_that_goes_quiet_without_committing_is_told_and_then_s
     assert_eq!(told(&fixture, 2).await.len(), 2, "twice and no more");
 }
 
-/// And one that commits and then idles is ended on that, rather than waited out.
+/// And one that commits, says it is done and then idles is ended on that, rather
+/// than waited out.
 ///
 /// Every session here is an interactive agent that idles when its work is done
 /// rather than exiting, so a run that waited to see one exit was waiting for
-/// something that need never come. What says an inline implementation did its
-/// work is what it committed, and the grace after the commit is what lets the
-/// push and the pull request come after it.
+/// something that need never come. What ends an inline implementation is its
+/// Done signal, checked against what it committed.
 #[tokio::test]
-async fn an_inline_session_that_commits_and_idles_is_ended_on_that_and_wraps_up() {
+async fn an_inline_session_that_commits_and_says_it_is_done_is_ended_and_wraps_up() {
     let fixture = grilling(AN_INLINE_RUN_THAT_COMMITS_AND_IDLES).await;
 
     picked(&fixture, "inline").await;
@@ -24334,9 +24334,293 @@ async fn an_inline_session_that_commits_and_idles_is_ended_on_that_and_wraps_up(
 
     assert!(
         notices(&view).is_empty(),
-        "with nothing stopped on the way: a session that committed and went \
-         quiet is one that did its work: {:?}",
+        "with nothing stopped on the way: a session that committed and said so \
+         is one that did its work: {:?}",
         notices(&view),
+    );
+}
+
+/// An inline session that commits a first piece and then waits is not ended on
+/// the commit, however long it waits — and is ended once it says it is done.
+///
+/// The second of the two failures the Done signal began with: an inline run's
+/// commit used to be its ending, so a session that committed a slice and then
+/// waited on its tests was ended five seconds later with the rest uncommitted.
+#[tokio::test]
+async fn an_inline_session_that_commits_and_then_waits_is_ended_only_once_it_signals() {
+    let fixture = grilling(
+        r#"
+case "$1" in
+claude-grilling-5)
+    printf '# What we settled\n\nAn in-process counter.\n' > /tmp/verkstead/handoff.md
+    : > /tmp/verkstead/done
+    printf 'the handoff is written\n'
+    sleep 300
+    ;;
+*)
+    printf 'a limiter\n' > limiter.md
+    git add limiter.md
+    git commit --quiet -m 'feat: a first slice of the limiter'
+    printf 'waiting on the tests\n'
+    read -r TOLD
+    printf '%s\n' "$TOLD" >> /tmp/verkstead/rescues
+    while [ ! -f /tmp/verkstead/go ]; do sleep 0.05; done
+    printf 'the middleware\n' > middleware.md
+    git add middleware.md
+    git commit --quiet -m 'feat: the rest of the limiter'
+    : > /tmp/verkstead/done
+    printf 'pushed, and the pull request is open\n'
+    sleep 300
+    ;;
+esac
+"#,
+    )
+    .await;
+
+    picked(&fixture, "inline").await;
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("feat: a first slice"))
+                .then_some(())
+        })
+        .await;
+
+    // The rescue waits on a longer quiet than the grace the old ending did, so a
+    // session still there when it arrives is one its commit did not end.
+    let said = told(&fixture, 1).await;
+    let view = fixture.view().await;
+
+    assert_eq!(
+        view.state,
+        Lifecycle::Implementing,
+        "a commit and quiet is not an inline run done",
+    );
+    assert!(
+        outputs(&view).iter().any(|output| output.running),
+        "the session is left running",
+    );
+    assert!(
+        said[0].contains("run `verkstead done`"),
+        "and the rescue offers it the signal: {said:?}",
+    );
+
+    std::fs::write(handoff_directory(&fixture).join("go"), "").unwrap();
+
+    let view = fixture
+        .until(|view| {
+            (view.state == Lifecycle::Wrapping && pull_request(view).is_some())
+                .then(|| view.clone())
+        })
+        .await;
+
+    assert!(
+        commits(&view)
+            .iter()
+            .any(|commit| commit.subject.starts_with("feat: the rest")),
+        "the rest of the work landed before the session was ended",
+    );
+    assert!(
+        notices(&view).is_empty(),
+        "and nothing stopped: {:?}",
+        notices(&view),
+    );
+}
+
+/// What a stub that signals before it has committed anything does: give the
+/// signal, keep the refusal, and then commit and signal again.
+const SIGNALS_BEFORE_COMMITTING: &str = r#"    : > /tmp/verkstead/done
+    while ! grep -q 'not done yet' /tmp/verkstead/done-said 2>/dev/null; do sleep 0.05; done
+    cp /tmp/verkstead/done-said /tmp/verkstead/refused
+    printf 'a note\n' >> notes.md
+    git add -A
+    git commit --quiet -m 'docs: note the window it counts against'
+    : > /tmp/verkstead/done
+    printf 'committed, and said so again\n'
+    sleep 300"#;
+
+/// What a stub kept of the first refusal it was given, once it has one.
+async fn refused(fixture: &Grilling) -> String {
+    let refused = handoff_directory(fixture).join("refused");
+    let deadline = Instant::now() + *PATIENCE;
+
+    while !refused.is_file() {
+        assert!(Instant::now() < deadline, "the signal was never refused");
+        pause(Duration::from_millis(25)).await;
+    }
+
+    std::fs::read_to_string(&refused).unwrap()
+}
+
+/// An inline session's signal with nothing committed since it began is refused
+/// saying so, and the session is left to commit and signal again.
+#[tokio::test]
+async fn an_inline_signal_with_nothing_committed_is_refused_saying_so() {
+    let fixture = grilling(&format!(
+        r#"
+case "$1" in
+claude-grilling-5)
+    printf '# What we settled\n\nAn in-process counter.\n' > /tmp/verkstead/handoff.md
+    : > /tmp/verkstead/done
+    printf 'the handoff is written\n'
+    sleep 300
+    ;;
+*)
+{SIGNALS_BEFORE_COMMITTING}
+    ;;
+esac
+"#
+    ))
+    .await;
+
+    picked(&fixture, "inline").await;
+
+    let said = refused(&fixture).await;
+
+    assert!(
+        said.contains("nothing has been committed since this session began"),
+        "the refusal says what is missing: {said:?}",
+    );
+
+    fixture
+        .until(|view| {
+            (view.state == Lifecycle::Wrapping && pull_request(view).is_some()).then_some(())
+        })
+        .await;
+}
+
+/// And an instruction session's the same way: refused with nothing committed,
+/// and handed back to the pipeline once it has committed and signalled again.
+#[tokio::test]
+async fn an_instruction_signal_with_nothing_committed_is_refused_saying_so() {
+    let fixture = grilling_swept(&format!(
+        r#"
+case "$2" in
+*instruction/SKILL.md*)
+{SIGNALS_BEFORE_COMMITTING}
+    ;;
+*)
+    case "$1" in
+    claude-grilling-5)
+        mkdir -p .tasks
+        printf '# Rate limiting\n\n- [ ] 01: Count the requests\n' > .tasks/TODO.md
+        printf '# 01. Count the requests\n' > .tasks/01-count.md
+        git add .tasks
+        git commit --quiet -m 'chore: plan the rate limiter'
+        : > /tmp/verkstead/done
+        printf 'the backlog is written\n'
+        sleep 300
+        ;;
+    *)
+        if [ ! -f TRIED ]; then
+            printf 'once\n' > TRIED
+            printf 'this task is beyond me\n'
+            exit 1
+        else
+            printf 'prompt was: %s\n' "$2"
+            sleep 300
+        fi
+        ;;
+    esac
+    ;;
+esac
+"#
+    ))
+    .await;
+
+    picked(&fixture, "task-list").await;
+
+    fixture.stopped().await;
+
+    let before = outputs(&fixture.view().await).len();
+
+    assert_eq!(
+        fixture.steer().await,
+        SteerOpened::Opened { working: false }
+    );
+    assert_eq!(
+        fixture
+            .steer_instructed("Note the window the count is against.\n")
+            .await,
+        ConversationSteered::Steered,
+    );
+
+    let said = refused(&fixture).await;
+
+    assert!(
+        said.contains("nothing has been committed since this session began"),
+        "the refusal says what is missing: {said:?}",
+    );
+
+    let printed = fixture.printed_after(before + 1).await;
+
+    assert!(
+        printed.contains("/verkstead/skills/next-task/SKILL.md"),
+        "and once it committed and signalled again the pipeline carried on: \
+         {printed:?}",
+    );
+}
+
+/// A fix session that finds nothing to commit and says it is done is taken at
+/// its word, and the wrap-up goes on to ask GitHub about the check as before.
+///
+/// A rule that demanded a commit would leave a fix with nothing to fix unable to
+/// end: it would sit there until the rescue gave up on it. So the proof is both
+/// halves — the check asked about again and a second fix sent, and nothing ever
+/// typed into either session.
+#[tokio::test]
+async fn a_fix_session_that_commits_nothing_is_taken_at_its_signal_and_the_check_asked_again() {
+    let prompts = tempfile::tempdir().unwrap();
+    let written = prompts.path().join("fix-prompts");
+
+    let fixture = grilling_spilling(
+        prompts,
+        &format!(
+            r#"
+case "$2" in
+*addressing/SKILL.md*)
+    printf 'model=%s\n%s\n=====\n' "$1" "$2" >> {prompts}
+    printf 'having a go at the check, and it is already fixed\n'
+    : > /tmp/verkstead/done
+    while read -r TOLD; do printf '%s\n' "$TOLD" >> /tmp/verkstead/rescues; done
+    sleep 300
+    ;;
+*)
+{A_BACKLOG_OF_ONE}
+    ;;
+esac
+"#,
+            prompts = quoted(&written),
+        ),
+        &gh_checking("FAILURE"),
+    )
+    .await;
+
+    worked_to_empty(&fixture).await;
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("already fixed"),
+        "the check was asked about again after the last fix session: {:?}",
+        stopped.html,
+    );
+
+    let told = std::fs::read_to_string(&written).expect("the fix sessions wrote their prompt");
+
+    assert_eq!(
+        told.split("=====")
+            .filter(|it| !it.trim().is_empty())
+            .count(),
+        2,
+        "both goes at the check were spent, each ended on its signal: {told}",
+    );
+    assert_eq!(fixes(&fixture.view().await), 0, "with nothing committed");
+    assert!(
+        !handoff_directory(&fixture).join("rescues").exists(),
+        "and nothing was typed into either: each was ended on its signal",
     );
 }
 

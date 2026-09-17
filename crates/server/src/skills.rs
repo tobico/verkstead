@@ -1510,6 +1510,9 @@ mod tests {
             "next-stage/SKILL.md",
             "breaking-down/SKILL.md",
             "staging/SKILL.md",
+            "implementing/SKILL.md",
+            "instruction/SKILL.md",
+            "addressing/SKILL.md",
         ] {
             let skill = skill(name);
 

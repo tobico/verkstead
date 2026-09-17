@@ -23,7 +23,7 @@ describing the finished work rather than the code as any one task finds it.
 
 - [x] 01: `verkstead done` ends a session that landed its work — [details](01-done-ends-a-landed-session.md)
 - [x] 02: Done is refused over uncommitted changes, and locks an open Set — [details](02-uncommitted-changes-and-open-sets.md)
-- [ ] 03: Sessions that report through a commit — [details](03-commit-reported-sessions.md)
+- [x] 03: Sessions that report through a commit — [details](03-commit-reported-sessions.md)
 - [ ] 04: Sessions that report through their own words — [details](04-word-reported-sessions.md)
 - [ ] 05: Follow-up sessions — [details](05-follow-up-sessions.md)
 - [ ] 06: Done checks for the pull request — [details](06-pull-request-check.md)

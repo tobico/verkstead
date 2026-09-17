@@ -1306,21 +1306,24 @@ async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session,
 /// what it committed, which the branch watcher is putting on the Timeline while
 /// it runs.
 ///
-/// **Ended on committed plus quiet**, which is [`instructed`]'s rule on a
-/// session of the same shape: there is no path to watch, and a commit is the one
-/// report an agent cannot half make. Work does not always stop at the commit —
-/// the push and the pull request come after one — so the session is ended only
-/// once it has printed nothing for the grace, and anything it prints puts the
-/// whole grace back on the clock. Waiting for the process to exit instead would
-/// be waiting for something that never comes: every session here is an
-/// interactive agent that idles when its work is done.
+/// **Ended because it said it was done**, which is [`instructed`]'s rule on a
+/// session of the same shape — see [`crate::done`]. What the signal is checked
+/// against is a commit, there being no path to watch and a commit being the one
+/// report an agent cannot half make; a signal with nothing committed since the
+/// session began is refused. Nothing ends the session on the commit itself: work
+/// does not stop at the first one, and a session that commits a slice and then
+/// waits on its tests is a session still at work. Once the signal is taken the
+/// session is ended when it is next idle, so what it says on the way out is
+/// kept. Waiting for the process to exit instead would be waiting for something
+/// that never comes: every session here is an interactive agent that idles when
+/// its work is done.
 ///
-/// **And one that will not ask is spoken to**, on the same commit. Idle with
-/// nothing committed and nothing put to the human is the whole of an inline run
-/// come to nothing with a process still holding the Worktree — a Conversation
-/// nobody can move, driven so nothing sweeps it and silent so nothing says so.
-/// Told twice and then stopped where it stands, as every other driver here does
-/// it. See [`crate::rescues`].
+/// **And one that will not ask is spoken to**, until it signals. Idle with no
+/// signal given and nothing put to the human is an inline run come to nothing,
+/// or finished and not said, with a process still holding the Worktree — a
+/// Conversation nobody can move, driven so nothing sweeps it and silent so
+/// nothing says so. Told twice and then stopped where it stands, as every other
+/// driver here does it. See [`crate::rescues`].
 ///
 /// Landing is measured against what was already there rather than against zero,
 /// which is what makes a second go answerable: a first attempt that committed
@@ -1367,27 +1370,34 @@ async fn follow_inline(
     let idle = session.idle.clone();
     let pace = state.sessions.pace();
 
+    // What the session's Done signal is checked against: a commit past where the
+    // run stood. See [`crate::done`].
+    let expecting = state.signals.expecting(
+        conversation_id,
+        event_id,
+        crate::done::Evidence::Committed { already },
+    );
+    let signal = expecting.signal();
+
     let ended = tokio::select! {
         ended = session.ended() => Some(ended),
         // What an inline session that has done its work looks like from here:
-        // more on the branch than it started with, and nothing printed for the
-        // grace. Waited for rather than left to the exit, because an
-        // interactive agent idles when its work is done rather than exiting —
-        // which is [`instructed`]'s rule, on a session whose whole job is the
-        // same shape.
-        () = committed_and_quiet(&state, conversation_id, already, &idle, pace) => None,
-        // And one that is idle with nothing committed and nothing put to the
-        // human: the whole of an inline run come to nothing, with a process
-        // still holding the Worktree and nothing on the page to press. Told
-        // twice and then stopped where it stands, the commit being its
-        // done-indicator — see [`crate::rescues`].
+        // it said so, the branch bore that out, and it has been idle since.
+        // Nothing on the branch ends it, because work does not stop at the
+        // first commit — a session may commit a slice and then wait on its
+        // tests. See [`signalled_and_idle`].
+        () = signalled_and_idle(signal.clone(), &idle, pace) => None,
+        // And one that is idle with nothing open and no signal given: the whole
+        // of an inline run come to nothing, or finished and not said, with a
+        // process still holding the Worktree and nothing on the page to press.
+        // Told twice and then stopped where it stands — see [`crate::rescues`].
         () = crate::rescues::until_it_will_not_ask(
             &state,
             conversation_id,
             event_id,
             &idle,
             pace,
-            crate::rescues::Done::Committed { already },
+            crate::rescues::Done::Signalled(signal),
         ) => {
             tracing::warn!(
                 conversation_id,
@@ -1410,16 +1420,19 @@ async fn follow_inline(
         }
     };
 
-    // Committed and gone quiet, which is an inline implementation done. The
-    // session is ended rather than waited out, and what follows is the ending a
-    // landed run has always had: the skill carried the branch to a pull request
-    // on its way out, and [`to_a_pull_request`] is what finds it — or sends for
-    // it, and then stops naming what it still could not find.
+    drop(expecting);
+
+    // Said it is done over a commit, and gone quiet since, which is an inline
+    // implementation done. The session is ended rather than waited out, and what
+    // follows is the ending a landed run has always had: the skill carried the
+    // branch to a pull request on its way out, and [`to_a_pull_request`] is what
+    // finds it — or sends for it, and then stops naming what it still could not
+    // find.
     let Some(ended) = ended else {
         tracing::info!(
             conversation_id,
             event_id,
-            "an inline session has committed and gone quiet, so it is being ended",
+            "an inline session said it is done and has gone quiet since, so it is being ended",
         );
 
         state.sessions.end(conversation_id).await;
@@ -1536,13 +1549,13 @@ async fn follow_inline(
 /// with the ordinary Notice; and what follows a clean finish is [`onwards`]
 /// rather than nothing.
 ///
-/// **Ended on committed plus quiet**, which is a fix session's rule rather than
-/// a backlog step's, and for its reason: an instruction can ask for anything, so
-/// there is no path to watch and no done file to read — what there is, is a
-/// commit, which is the one report an agent cannot half make. Work does not
-/// always stop at the commit, so the session is ended only once it has printed
-/// nothing for the grace period, and anything it prints puts the whole grace
-/// back on the clock.
+/// **Ended because it said it was done**, checked against a commit — see
+/// [`crate::done`]. An instruction can ask for anything, so there is no path to
+/// watch and no done file to read — what there is, is a commit, which is the
+/// one report an agent cannot half make, and a signal with nothing committed
+/// since the session began is refused. Work does not always stop at the commit,
+/// so nothing ends the session on one; once its signal is taken it is ended when
+/// it is next idle.
 ///
 /// **And a session that commits nothing stops the Conversation**, exactly as an
 /// inline implementation that commits nothing does. An interactive agent that
@@ -1551,10 +1564,10 @@ async fn follow_inline(
 /// what is next, so a branch nothing was written to is one there is nothing
 /// honest to carry on from.
 ///
-/// **Including one that never ends at all.** Idle, with nothing committed and
+/// **Including one that never ends at all.** Idle, with no signal given and
 /// nothing put to the human, is the same instruction come to nothing with a
 /// process still holding the Worktree — so it is told twice and then stopped in
-/// the same words, the commit being its done-indicator. See [`crate::rescues`].
+/// the same words. See [`crate::rescues`].
 pub(crate) async fn instructed(
     state: AppState,
     conversation_id: i64,
@@ -1581,20 +1594,30 @@ pub(crate) async fn instructed(
     let idle = session.idle.clone();
     let pace = state.sessions.pace();
 
+    // What the session's Done signal is checked against: a commit past where the
+    // branch stood. See [`crate::done`].
+    let expecting = state.signals.expecting(
+        conversation_id,
+        event_id,
+        crate::done::Evidence::Committed { already },
+    );
+    let signal = expecting.signal();
+
     let ended = tokio::select! {
         ended = session.ended() => Some(ended),
-        () = committed_and_quiet(&state, conversation_id, already, &idle, pace) => None,
-        // Nothing committed and nothing asked, with the session sitting there:
-        // an instruction that has come to nothing and nobody to say so to.
-        // Told twice and then stopped where it stands, which is the same ending
-        // a step that would not land gets — see [`crate::rescues`].
+        () = signalled_and_idle(signal.clone(), &idle, pace) => None,
+        // No signal given and nothing asked, with the session sitting there:
+        // an instruction that has come to nothing, or finished and not said, and
+        // nobody to say so to. Told twice and then stopped where it stands,
+        // which is the same ending a step that would not land gets — see
+        // [`crate::rescues`].
         () = crate::rescues::until_it_will_not_ask(
             &state,
             conversation_id,
             event_id,
             &idle,
             pace,
-            crate::rescues::Done::Committed { already },
+            crate::rescues::Done::Signalled(signal),
         ) => {
             let _driving = driving;
 
@@ -1619,11 +1642,14 @@ pub(crate) async fn instructed(
         }
     };
 
+    drop(expecting);
+
     let Some(ended) = ended else {
         tracing::info!(
             conversation_id,
             event_id,
-            "an instruction session has committed and gone quiet, so it is being ended",
+            "an instruction session said it is done and has gone quiet since, so it is being \
+             ended",
         );
 
         state.sessions.end(conversation_id).await;
@@ -2286,12 +2312,13 @@ async fn follow_roadmap(
 /// that pushed nothing is answered by the check still being red rather than by
 /// anything read off the branch.
 ///
-/// Ended on **committed plus quiet**, the way a backlog step is ended on landed
-/// plus quiet, and for the same two reasons. A commit is the one report an agent
-/// cannot half make, so it is what says the fix is done; and work does not always
-/// stop at the commit — the push that puts it on the pull request comes after
-/// one — so the session is ended only once it has printed nothing for the grace
-/// period, with anything it prints putting the whole grace back on the clock.
+/// **Ended because it said it was done**, the way a backlog step is — see
+/// [`crate::done`] — and once it is next idle after that, so the push that puts
+/// the fix on the pull request and whatever it says after are kept. The signal
+/// is checked against nothing of a fix's own: one that finds nothing to commit
+/// is accepted, because a rule that demanded a commit would leave a fix with
+/// nothing to fix unable to end. The rules every signal has — nothing left
+/// uncommitted — still hold.
 ///
 /// Nothing is refused for and nothing is stopped. A fix session that ends having done
 /// nothing is not by itself something to stop over: what
@@ -2305,16 +2332,6 @@ async fn follow_roadmap(
 /// a stop of its own for when they run out. So the rescue ends the session and
 /// the wrap-up carries on from the check, which is still red.
 pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &str) -> Option<i64> {
-    // Read before the session starts, so it is where the branch stood before this
-    // fix rather than somewhere that includes it.
-    let already = match store::commits_landed(&state.pool, conversation_id).await {
-        Ok(landed) => landed,
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading what a Conversation had committed failed");
-            return None;
-        }
-    };
-
     let mut session = launch(
         state,
         conversation_id,
@@ -2326,10 +2343,19 @@ pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &s
     let idle = session.idle.clone();
     let pace = state.sessions.pace();
 
+    // Nothing for the signal to be checked against beyond the rules every signal
+    // has: a fix that finds nothing to commit is still a fix session done. See
+    // [`crate::done::Evidence::Nothing`].
+    let expecting =
+        state
+            .signals
+            .expecting(conversation_id, event_id, crate::done::Evidence::Nothing);
+    let signal = expecting.signal();
+
     let ended = tokio::select! {
         ended = session.ended() => Some(ended),
-        _ = committed_and_quiet(state, conversation_id, already, &idle, pace) => None,
-        // Idle, with nothing committed and nothing put to the human, which is a
+        () = signalled_and_idle(signal.clone(), &idle, pace) => None,
+        // Idle, with no signal given and nothing put to the human, which is a
         // fix nobody can move on. Told twice and then ended where it stands; the
         // stop, where there is to be one, is the wrap-up's own once the branch
         // has had its two goes.
@@ -2339,13 +2365,13 @@ pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &s
             event_id,
             &idle,
             pace,
-            crate::rescues::Done::Committed { already },
+            crate::rescues::Done::Signalled(signal),
         ) => {
             tracing::warn!(
                 conversation_id,
                 event_id,
-                "the fix session went quiet without committing anything or asking about it, \
-                 so it is being ended and the check looked at again",
+                "the fix session went quiet without saying it is done or asking about \
+                 anything, so it is being ended and the check looked at again",
             );
 
             state.sessions.end(conversation_id).await;
@@ -2354,11 +2380,13 @@ pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &s
         }
     };
 
+    drop(expecting);
+
     if ended.is_none() {
         tracing::info!(
             conversation_id,
             event_id,
-            "a fix session has committed and gone quiet, so it is being ended",
+            "a fix session said it is done and has gone quiet since, so it is being ended",
         );
 
         state.sessions.end(conversation_id).await;
@@ -2645,48 +2673,14 @@ async fn asking(state: &AppState, conversation_id: i64, event_id: i64) -> bool {
     }
 }
 
-/// Wait until the Conversation's commits stand past `already` *and* the session
-/// has been quiet for the grace period.
-///
-/// The store rather than git, unlike a backlog step's landing: the branch watcher
-/// is sweeping this branch for as long as the session runs and putting what lands
-/// on the Timeline, so the Timeline is where a fresh commit shows up first — and
-/// asking it costs one small read where asking git costs a process.
-async fn committed_and_quiet(
-    state: &AppState,
-    conversation_id: i64,
-    already: i64,
-    idle: &Idle,
-    pace: Pace,
-) {
-    loop {
-        tokio::time::sleep(pace.poll).await;
-
-        if !committed_since(state, conversation_id, already).await {
-            continue;
-        }
-
-        loop {
-            let owed = pace.grace.saturating_sub(idle.for_how_long());
-
-            if owed.is_zero() {
-                break;
-            }
-
-            tokio::time::sleep(owed).await;
-        }
-
-        return;
-    }
-}
-
 /// Whether the Conversation's commits stand past the `already` a session started
 /// over.
 ///
-/// The store rather than git, for [`committed_and_quiet`]'s reason: the branch
+/// The store rather than git, unlike a backlog step's landing: the branch
 /// watcher is sweeping this branch for as long as the session runs and putting
-/// what lands on the Timeline, so the Timeline is where a fresh commit shows up
-/// first.
+/// what lands on the Timeline, and asking it costs one small read where asking
+/// git costs a process. A reader that has to see a commit made a moment ago
+/// sweeps first — see [`crate::commits::sweep_now`].
 ///
 /// **Past rather than more than**, because a sweep takes commits off the
 /// Timeline as well as putting them on — see [`store::commits_landed`], which is
@@ -2697,9 +2691,8 @@ async fn committed_and_quiet(
 /// exactly what it was sent for.
 ///
 /// A store that will not answer reads as *nothing new*, which is the right way
-/// round for both things this decides — a session ended, and a session left
-/// alone rather than spoken to. See [`crate::rescues::Done::Committed`], which
-/// is the other reader.
+/// round for what this decides: a Done signal refused, which the session can
+/// simply give again. See [`crate::done::Evidence::Committed`].
 pub(crate) async fn committed_since(state: &AppState, conversation_id: i64, already: i64) -> bool {
     match store::commits_landed(&state.pool, conversation_id).await {
         Ok(landed) => landed > already,
@@ -2798,10 +2791,14 @@ async fn see_out(
     // What the session's Done signal is checked against, written down for as
     // long as it is being seen out — and taken away with this if the watch is
     // cancelled, which a later pick does. See [`crate::done`].
-    let expecting =
-        state
-            .signals
-            .expecting(conversation_id, event_id, worktree.clone(), landing.clone());
+    let expecting = state.signals.expecting(
+        conversation_id,
+        event_id,
+        crate::done::Evidence::Landed {
+            worktree: worktree.clone(),
+            landing: landing.clone(),
+        },
+    );
     let signal = expecting.signal();
 
     let ended = tokio::select! {

@@ -118,9 +118,9 @@ push the branch and open a draft pull request titled for the work —
 **Nothing waits on approval here either.** No gate, no confirmation and nobody
 at this terminal: the pull request opens unasked, and it opens as a *draft*
 because merging is the human's act and nothing here is allowed to look like it
-was theirs. Then stop — that is also what ends this session: Verkstead waits for
-you to go quiet, finds the pull request, and takes the Conversation on to
-wrapping it up.
+was theirs. Then run `verkstead done`, once every companion below is finished
+too — see *Saying you are done* below. Verkstead then finds the pull request
+and takes the Conversation on to wrapping it up.
 
 ### And every companion repository you committed in
 
@@ -149,6 +149,19 @@ on the branch against the handoff, finish anything it left short, and then carry
 it to the pull request exactly as above. A session that ended here saying there
 was nothing for it to do would leave the branch where the one before it did,
 which is the one ending this run cannot recover from by itself.
+
+## Saying you are done
+
+The last thing this session does, once the work is committed, pushed and on a
+pull request, and every companion is finished too, is run `verkstead done`. That
+is what ends the session, and nothing else does: not a commit, and not going
+quiet. So a session that commits a first piece and then waits on its tests, or
+on an answer, is not cut off while it waits.
+
+Verkstead checks the repository when you run it. A refusal exits non-zero and
+says on stderr what is missing — nothing committed since this session began,
+say, or changes left uncommitted — and the session carries on: put that right
+and run `verkstead done` again.
 
 ## When you need the human
 
