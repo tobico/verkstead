@@ -183,9 +183,14 @@ flowchart LR
   other backends can slot in later. The model
   list is the profile's own rather than one list shared by all of them, and it
   has no default entry: the profile says what is available and the pick is made
-  where a session is set up. Account separation works as in the
-  current scripts: the profile's pair is bind-mounted at `~/.claude` /
-  `~/.claude.json` inside the sandbox. *Which backends, settled 2026-08-29 in
+  where a session is set up. Account separation: a session is given
+  something out of the profile's own account and no other. *Refined
+  2026-09-17, building built-roots/01-claude-root*: the pair is no longer
+  bind-mounted whole. A session's `~/.claude` is a **built root** under
+  `homes/<id>` in the data directory, holding the account's credentials file
+  (linked), the Repo's and the Worktree's `projects/` entries (joined) and a
+  `settings.json` Verkstead writes; `~/.claude.json` is a copy, merged back at
+  session end. See [ADR-0011](../adr/0011-agent-backends.md). *Which backends, settled 2026-08-29 in
   [ADR-0011](../adr/0011-agent-backends.md)*: Codex, Grok Build and OpenCode
   spend the other three slots, each at full parity. A new-type profile stores
   **one** home directory rather than claude's pair — the whole account lives
@@ -435,7 +440,11 @@ flowchart LR
 
 - **bwrap, minimum surface**, evolved from `tobico-scripts/bin/sandbox`:
   - **rw:** the conversation's worktree; the repo's common `.git` directory;
-    the profile's claude pair at `~/.claude` and `~/.claude.json`
+    a built root at `~/.claude` and a copy of the profile's `.claude.json` at
+    `~/.claude.json`, both under `homes/<id>` in the data directory, with the
+    account's credentials file and the Repo's and Worktree's `projects/`
+    entries bound into the root — never the account's `~/.claude` whole
+    (*refined 2026-09-17, building built-roots/01-claude-root*)
   - **ro:** `/nix` and system paths
   - **tmpfs:** `/tmp`; everything else in HOME absent
   - `~` inside is the home of whoever runs the server, at the same path — the
@@ -565,9 +574,10 @@ flowchart LR
   whatever an earlier binary left — and every sandbox binds that directory
   read-only over `~/.claude/skills`, hiding any the account itself keeps.
   *Where, refined 2026-08-29 in [ADR-0011](../adr/0011-agent-backends.md)*:
-  the mount moves to `/verkstead/skills`, a path no backend owns, and an empty
-  directory is bound over `~/.claude/skills` in its place so the hiding is
-  kept. What
+  the mount moves to `/verkstead/skills`, a path no backend owns. *Refined
+  2026-09-17, building built-roots/01-claude-root*: nothing is bound over
+  `~/.claude/skills` any more. A session's `~/.claude` is a built root that
+  holds none of the account's skills, so there is nothing there to hide. What
   puts a session *inside* a skill is the prompt: installing one is not invoking
   one, and a sandbox has no global `CLAUDE.md` to say what the session is for,
   so the prompt names the skill by path above the Brief and the skill carries

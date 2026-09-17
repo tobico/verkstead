@@ -305,6 +305,35 @@ to reach the account. ADR-0014 built that write-back for Windows's hard links
 alone; a copy follows nothing on any platform, so it now runs on Linux and a
 Mac too.
 
+**As built for Claude**, the allowlist and the write-back came out narrower than
+the paragraph above in three places:
+
+- **The written `settings.json` carries two keys of the account's:
+  `apiKeyHelper` and `env`**, where the account's own file has them, beside
+  `skipDangerousModePermissionPrompt`. Those two are how an API-key login
+  reaches the model. Nothing else is carried — no `hooks`, `enabledPlugins`,
+  `permissions` or `statusLine` — because an allowlist stays closed when Claude
+  adds a key, and a denylist would not. An account with no `settings.json`, or
+  one that does not parse, still gets the bypass key. The file is not written
+  back.
+- **The `.claude.json` copy has `mcpServers` taken out**, at the top level and
+  under each `projects` entry. Those are the human's own MCP servers, the same
+  leak as plugins.
+- **The write-back of `.claude.json` is a merge by key, not a copy of the
+  whole file.** A copy never shares an identity with the account's file, so
+  the identity check alone would write it back after every session. Sessions
+  run in parallel, so the last to end would undo what another session, or the
+  human's own `claude`, wrote in the meantime; and a whole-file write-back of a
+  copy without `mcpServers` would delete the human's servers. So the copy as
+  given is kept as a baseline. At session end, only the top-level keys and the
+  single `projects` entries whose value changed from that baseline are written
+  into the account's file as it is by then, and a key the session removed is
+  removed. `mcpServers` is never written or removed, at either level. The trust
+  seeded into the copy reaches the account only in an entry the session itself
+  changed. A session that changed nothing leaves the account's file byte for
+  byte as it was. This narrows ADR-0014's whole-file write-back, and the human
+  approved it.
+
 Rejected: launch flags — `--setting-sources`, `--settings` — which close the
 inheritance and leave the write-through open; `--safe-mode`, which takes the
 Repo's own `CLAUDE.md`, the skills and MCP with it; and building Claude's root
@@ -333,7 +362,11 @@ seen. So the answer is written into the built root's `settings.json` by
 Verkstead — `skipDangerousModePermissionPrompt` — beside the flag on the line,
 the way Codex's Worktree trust is already said on its line. `--print` was
 suggested and is not the fix: the Screen, the Hold, quiet detection and the
-Rescue all stand on the terminal.
+Rescue all stand on the terminal. **`bypassPermissionsModeAccepted` is not
+seeded** into the `.claude.json` copy, though the roadmap first named it:
+Claude Code 2.1.268 moves that key out of `.claude.json` and into
+`settings.json` as it starts, and the settings key already answers the same
+consent.
 
 Amended: **OpenCode's bypass is `--auto` on the launch line**, rather than the
 permission configuration this paragraph first named. So every one of the four

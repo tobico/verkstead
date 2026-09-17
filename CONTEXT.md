@@ -204,7 +204,8 @@ _Avoid_: state directory, work dir, scratch space, cache
 **Sandbox**:
 What a session runs inside: its Conversation's Worktree, the Repo's git
 directory and the Conversation's handoff directory writable, the Agent
-Profile's pair at `~/.claude` and `~/.claude.json`, the system, the Skills,
+Profile's account as a **Built Root** at `~/.claude` and a copy of its
+`~/.claude.json` — never the account whole — the system, the Skills,
 the Conversation's **Attachments** and the Verkstead executable read-only in a
 directory of Verkstead's own, and nothing else of the machine at all — not
 even the checkout the Worktree was made from. The directories a session's own
@@ -216,10 +217,9 @@ link on the `PATH` into a versions directory no `PATH` names. A link leading
 anywhere else, or leading nowhere, is a name a session is not given at all,
 and nothing else of that home is. A Claude session is told not to update the
 install it runs, which is read-only inside and the human's own besides, so
-nothing a session does moves it. Nothing at all stands where the
-account's own skills would be found: they are hidden rather than merged with,
-and where the mechanism has no mount to hide one with it refuses the path
-instead. Each Companion Repo the Conversation was configured with is inside as
+nothing a session does moves it. The account's own skills are not there to be
+found: a Built Root holds none, so there is nothing to hide and nothing to
+refuse. Each Companion Repo the Conversation was configured with is inside as
 well: its Worktree and the git directory behind it, both at that companion's
 own mode, so a read-only one is read-only through both. The **Build Cache** is
 inside as well, writable, with the `sccache` it compiles through read-only
@@ -265,12 +265,14 @@ rather than Linux's, with one thing neither other platform has: the entries are
 written on the human's own directories, so they are per Conversation, they come
 off with the Worktree when it closes, and a server that stopped between the two
 sweeps them at its next startup off a record it wrote under the Data Directory.
-The path a mount would have hidden is refused instead on both of the other two —
-the seatbelt's `require-not`, and on Windows an entry in front of the account's
-own skills — and where a session's profile and the account inside it cannot be
-made out of a mount they are really made: on a Mac under the Data Directory, and
-on Windows as a profile of the Conversation's own with every directory of the
-account joined in by a junction and every file by a hard link.
+A session's profile and the Built Root inside it are really made on all three,
+under `homes/<id>` in the Data Directory. On Linux the root and the
+`.claude.json` copy are bound into the empty HOME bubblewrap makes; on a Mac
+and on Windows the profile is the session's HOME itself. What is joined into
+the root is joined by each platform's own means: a bind on Linux, a symbolic
+link on a Mac, and on Windows a junction for a directory and a hard link for a
+file. On Windows the entries are written on the root and on each thing joined
+into it, and never on the account directory as a whole.
 _Avoid_: container, jail, isolation, environment
 
 **Sandbox Configuration**:
@@ -1254,13 +1256,14 @@ A coding-agent account Verkstead can run a session under: an agent type, the
 account itself, the models that account can run, and a name where there is
 anything for one to tell apart. **The account's shape is its type's**, rather
 than one shape every Profile is assumed to have — Claude Code's is the directory
-and config file pair bind-mounted at `~/.claude` / `~/.claude.json` inside the
-sandbox, and every backend after it keeps its whole account under one
+and config file pair at `~/.claude` / `~/.claude.json`, which a session is
+given as a **Built Root** and a copy rather than whole, and every backend after it keeps its whole account under one
 relocatable home — Codex's at `~/.codex`, Grok Build's at `~/.grok`, and
 OpenCode's at neither, opencode keeping no dot-directory of its own: its home is
 the directory its XDG config and data directories sit inside, and both are bound
 at those defaults in a HOME that is fresh enough for them to resolve there.
-Whichever it is, mounting it is what keeps accounts separate. A type is offered
+Whichever it is, a session is given something out of that one account and no
+other, which is what keeps accounts separate. A type is offered
 to the human only once it can launch the real thing: one that cannot would be a
 lie in a picker, so the form offers Claude, Codex, Grok Build and OpenCode, and
 a Profile of a type whose stage has not landed is one saved over the API until
@@ -1301,6 +1304,36 @@ carries on. What has already run goes on saying so, a session's record holding
 the Profile's name rather than a pointer to its row.
 _Avoid_: account, identity, persona, agent config, default profile (**Default**
 is what an unnamed one is *called*, not one anything falls back to)
+
+**Built Root**:
+The `~/.claude` a Claude session runs in. It is a directory of Verkstead's own
+at `homes/<id>/.claude` under the Data Directory, emptied and made again as
+each of the Conversation's sessions starts. It holds an allowlist out of the
+**Agent Profile**'s account, and nothing else. **The credentials file**, linked,
+so a login or a token refresh from inside lands in the account. **Two entries
+under `projects/`**, joined read-write and made in the account first where
+missing: the Repo's main checkout's, which holds Claude's memory of the Repo,
+and the Worktree's, where the session's transcript is written — no other
+repository's. **A `settings.json` Verkstead writes**, holding the key that
+skips the bypass-permissions consent, and the account's own `apiKeyHelper` and
+`env` where the account has them, because those are how an API-key login
+reaches the model. Nothing else of the account's settings goes in: no hooks,
+plugins or permissions.
+Beside the root, in the profile, `.claude.json` is a **copy** of the account's.
+The copy has the account's MCP servers taken out, and the Repo and the Worktree
+seeded as trusted. Everything else under the account's `~/.claude` is absent:
+plugins, commands, agents, skills, the global `CLAUDE.md`, history, and whatever
+Claude adds next.
+**What a session changed is carried back as it ends**, on all three platforms.
+A credentials file the session replaced, rather than wrote through, is written
+back over the account's own; one still the same file as the account's is left
+alone. The `.claude.json` copy is merged rather than written back whole: only
+the keys and `projects` entries the session changed reach the account's file as
+it is by then, the account's MCP servers are never touched, and a session that
+changed nothing leaves the file exactly as it was.
+What a Profile stores, and how the setup wizard finds an account, do not change:
+a Built Root is what a session is *given*.
+_Avoid_: account home, joined account, claude home, mounted account
 
 **Pairing**:
 An Agent Profile and one of the models it lists, chosen together, and what a
