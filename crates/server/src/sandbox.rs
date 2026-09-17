@@ -126,9 +126,9 @@ mod closing;
 mod rendering;
 mod surface;
 
-// And what a Claude, a Codex or a Grok Build session is given of its account: a
-// `.claude`, a `.codex` or a `.grok` of Verkstead's own, built out of an
-// allowlist — see [`root`].
+// And what a session is given of its account: a `.claude`, a `.codex`, a `.grok`
+// or OpenCode's two directories of Verkstead's own, built out of an allowlist —
+// see [`root`].
 mod root;
 mod sharing;
 
@@ -412,13 +412,14 @@ const GROK_INSIDE_HOME: &str = ".grok";
 /// either shape, and this is the cheaper one); and a Profile's home is an
 /// opencode home too, being the directory left behind by running
 /// `HOME=<it> opencode` once to log the account in. So one relative path
-/// serves both ends of each bind, which is what says the two homes are the
+/// serves both ends of each join, which is what says the two homes are the
 /// same shape.
 ///
 /// **The config and the data, and not the other two.** The data directory is
 /// the account — `auth.json` and the session store are in it — and the config
-/// directory is what the human configures that account with, so both travel
-/// with the Profile. The cache and the state directories are neither: the
+/// directory is what the human configures that account with. A session is
+/// given both as a root built out of them, which carries the login, the store
+/// and the provider and none of the rest — see [`root`]. The cache and the state directories are neither: the
 /// cache holds what opencode downloaded for this machine and the state holds
 /// the TUI's own furniture, and both are derived things that a session is
 /// welcome to make fresh in the HOME it is thrown away with. What that costs
@@ -437,7 +438,9 @@ pub(crate) const OPENCODE_DATA_INSIDE_HOME: &str = ".local/share/opencode";
 /// reads this very constant.
 ///
 /// A bare filename rather than a path: opencode resolves a relative
-/// `OPENCODE_DB` against its own data directory, which is the account.
+/// `OPENCODE_DB` against whichever data directory the session has: the
+/// account's where the Profile shares its memory, and the root's own where it
+/// does not.
 ///
 /// Named for the reason the idle signature and the usage-limit phrase are: it
 /// is somebody else's spelling, and moving it costs one edit here. Read off
@@ -2046,11 +2049,12 @@ pub(crate) fn windows_names(home: &Path) -> Vec<(&'static str, OsString)> {
 /// Profile names on the host, and what it is called inside.
 ///
 /// **One place says what an account is made of**, because two things ask: the
-/// description a session is rendered from — see [`Sandbox::surface`] — and
-/// whether the account can be joined in at all on the platform whose links are
-/// hard ones — see [`across_volumes`]. A second reading of the four shapes
-/// would be a backend arriving with an account of its own and only one of them
-/// learning about it.
+/// onboarding wizard, which finds an account by these paths — see
+/// [`account_in_home`] — and whether the account can be joined in at all on the
+/// platform whose links are hard ones — see [`across_volumes`]. A second reading
+/// of the four shapes would be a backend arriving with an account of its own
+/// and only one of them learning about it. What a session is given of it is a
+/// root built out of these paths — see [`root`].
 ///
 /// Claude's pair is a directory and a file; the three after it are directories,
 /// one of them twice over. Which is exactly the distinction the Windows arm
@@ -2160,18 +2164,24 @@ fn kept_in(agent_type: store::AgentType, home: &Path) -> store::Account {
 /// one shape of account path that may not be there — an agent that has not
 /// written its config out yet.
 ///
-/// **And the login of an account a root is built from beside them**, Claude's,
-/// Codex's or Grok Build's. Such a session is given a root of its own rather
-/// than the account's directory (see [`root`]), and the login is the one file
-/// joined into it — by hard link, like the rest.
-fn across_volumes(platform: Platform, home: &Path, account: &store::Account) -> Option<PathBuf> {
+/// **And the login beside them**, where a session is given it as a file of its
+/// own. A session is given a root rather than the account's directory (see
+/// [`root`]), and the login is the one file joined into it — by hard link, like
+/// the rest. `memory` is the Profile's memory switch: an OpenCode account
+/// sharing its memory has its login inside the data directory, joined whole.
+fn across_volumes(
+    platform: Platform,
+    home: &Path,
+    account: &store::Account,
+    memory: bool,
+) -> Option<PathBuf> {
     if platform != Platform::Windows {
         return None;
     }
 
     let ours = volume(home);
 
-    let login = root::Root::login_of(account);
+    let login = root::Root::login_of(account, memory);
 
     account_inside(account, home)
         .into_iter()
@@ -2673,6 +2683,14 @@ impl Home {
     /// session's log is written when its Profile shares no memory.
     pub(crate) fn grok_sessions(&self) -> PathBuf {
         root::Root::sessions_in(&self.built.join(GROK_INSIDE_HOME))
+    }
+
+    /// And the root's own database on the host, which is where an OpenCode
+    /// session's records are written when its Profile shares no memory.
+    pub(crate) fn opencode_database(&self) -> PathBuf {
+        self.built
+            .join(OPENCODE_DATA_INSIDE_HOME)
+            .join(OPENCODE_DB_FILE)
     }
 }
 
@@ -3474,20 +3492,17 @@ pub struct Sandbox {
     ///
     /// Claude's pair is `~/.claude` and `~/.claude.json`, and travels together
     /// or not at all: the pair is what keeps accounts apart. A session is given
-    /// a root built out of the first and a copy of the second. Every type
-    /// after it is one directory that backend keeps its whole account under, and
-    /// a Codex or a Grok Build session is given a root built out of that. Which
+    /// a root built out of the first and a copy of the second. Codex and Grok
+    /// Build each keep a whole account under one directory, and OpenCode under
+    /// two in one home, and a session is given a root built out of that. Which
     /// arm this is also says which backend a session is running, which is what
     /// [`AGENT_TYPE`] carries inside.
     account: store::Account,
 
-    /// What a Claude, a Codex or a Grok Build session is given of that account
-    /// in place of the whole of `~/.claude`, `~/.codex` or `~/.grok` — see
+    /// What a session is given of that account in place of the whole of
+    /// `~/.claude`, `~/.codex`, `~/.grok` or OpenCode's two directories — see
     /// [`root`].
-    ///
-    /// `None` for the backends not given a root yet, whose account directory is
-    /// joined in whole.
-    root: Option<root::Root>,
+    root: root::Root,
 
     /// The bundled skills, read-only where a session is told to read them —
     /// see [`crate::skills`] for why they are Verkstead's rather than the
@@ -3719,7 +3734,12 @@ impl Sandbox {
         // here rather than found out as the session is rendered: a hard link
         // that will not be made is a session started into a profile with no
         // account in it, logged out with nothing saying why.
-        if let Some(elsewhere) = across_volumes(homes.platform(), home.path(), &profile.account) {
+        if let Some(elsewhere) = across_volumes(
+            homes.platform(),
+            home.path(),
+            &profile.account,
+            profile.memory,
+        ) {
             tracing::error!(
                 conversation_id = conversation.id,
                 account = %elsewhere.display(),
@@ -3734,28 +3754,23 @@ impl Sandbox {
             return None;
         }
 
-        // And a Claude, a Codex or a Grok Build session's root, whose memory
+        // And the session's root, whose memory
         // store is made in the account here where it is not there yet: each
         // directory of it is a join, and a join of nothing is a session that will
         // not start. Nothing is made where the Profile shares no memory, there
         // being no join to make. Refused the way a handoff directory that cannot
         // be made is.
         let root = match &profile.account {
-            store::Account::Claude { claude_dir, .. } => Some(root::Root::claude(
-                homes.platform(),
-                claude_dir,
-                &git_dir,
-                &worktree,
-            )),
-            store::Account::Codex { home } => Some(root::Root::codex(home)),
-            store::Account::Grok { home } => Some(root::Root::grok(home)),
-            store::Account::OpenCode { .. } => None,
+            store::Account::Claude { claude_dir, .. } => {
+                root::Root::claude(homes.platform(), claude_dir, &git_dir, &worktree)
+            }
+            store::Account::Codex { home } => root::Root::codex(home),
+            store::Account::Grok { home } => root::Root::grok(home),
+            store::Account::OpenCode { home } => root::Root::opencode(home),
         }
-        .map(|root| root.remembering(profile.memory));
+        .remembering(profile.memory);
 
-        if let Some(root) = &root
-            && let Err(error) = root.made_in_account()
-        {
+        if let Err(error) = root.made_in_account() {
             tracing::error!(
                 conversation_id = conversation.id,
                 account = %root.account().display(),
@@ -3878,13 +3893,11 @@ impl Sandbox {
         // something is running in it rather than build again from under it —
         // see [`sharing`]. Held by what is left to see to, so it is running
         // until that has been seen to.
-        if let Some(root) = &self.root
-            && self.home.built() != self.home.path()
-        {
+        if self.home.built() != self.home.path() {
             let ((rendering, closing), share) =
                 self.home
                     .sharing
-                    .launched(self.conversation, root.inside_home(), |launch| {
+                    .launched(self.conversation, self.root.named(), |launch| {
                         self.launched(argv, launch)
                     })?;
 
@@ -3939,11 +3952,7 @@ impl Sandbox {
         // And a Claude session's login, where the root it is in cannot be
         // trusted to have written it to the account by itself — see
         // [`Sandbox::credentials_closing`].
-        if let Some((host, inside, rejoin)) = self
-            .root
-            .as_ref()
-            .and_then(|root| self.credentials_closing(root, &surface))
-        {
+        if let Some((host, inside, rejoin)) = self.credentials_closing(&self.root, &surface) {
             closing = closing.and(host, inside, rejoin);
         }
 
@@ -4150,31 +4159,14 @@ impl Sandbox {
             .own(&self.worktree, Reach::ReadWrite)
             .own(&self.git_dir, Reach::ReadWrite);
 
-        // And the account, in the shape its agent type keeps one: what goes
-        // where is that type's own business, and a backend arriving with an
-        // account of its own lands here rather than in whatever the pair
-        // happened to mean. Which shape that is, is [`account_inside`]'s — the
-        // one place the four are written down, because the platform that joins
-        // an account in by hand has to know the same thing.
-        //
-        // **Except where a root is built in the account's place**, which is
-        // Claude's, Codex's and Grok Build's — see [`Sandbox::root_described`],
-        // which is what a session is given of its account's directory there,
-        // and for Claude a copy of the file half beside it — see
-        // [`Sandbox::config_described`].
-        match (&self.account, &self.root) {
-            (account, Some(root)) => {
-                self.root_described(root, builds, &mut surface);
+        // And the account, as a root built in its place — see
+        // [`Sandbox::root_described`], which is what a session is given of its
+        // account's directories — and for Claude a copy of the file half beside
+        // it — see [`Sandbox::config_described`].
+        self.root_described(&self.root, builds, &mut surface);
 
-                if let store::Account::Claude { config_file, .. } = account {
-                    self.config_described(root, config_file, builds, &mut surface);
-                }
-            }
-            (_, None) => {
-                for (host, inside) in account_inside(&self.account, self.home.path()) {
-                    surface.elsewhere(host, inside, Reach::ReadWrite);
-                }
-            }
+        if let store::Account::Claude { config_file, .. } = &self.account {
+            self.config_described(&self.root, config_file, builds, &mut surface);
         }
 
         // After the temporary filesystem and the empty HOME alike, because on
@@ -4217,10 +4209,10 @@ impl Sandbox {
         // make one, while a session was joined to the whole account. A built
         // root has none of the account's skills in it to hide — see [`root`].
         //
-        // A Codex or a Grok Build root has none of them either. No other backend
-        // covers any: OpenCode's two global paths —
-        // `~/.claude/skills` and `~/.agents/skills` — sit under a HOME that is
-        // fresh inside, so there is nothing at either to hide.
+        // A Codex, a Grok Build or an OpenCode root has none of them either.
+        // OpenCode's two global paths — `~/.claude/skills` and
+        // `~/.agents/skills` — sit under a HOME that is fresh inside, so there is
+        // nothing at either to hide.
 
         // And the binary the session asks with, in a directory of its own that
         // goes first on `PATH` — see [`Executable`]. What is on that `PATH`
@@ -4427,17 +4419,18 @@ impl Sandbox {
         surface
     }
 
-    /// What a Claude, a Codex or a Grok Build session is given of its account's
-    /// directory where a root is built for it: the root, and what is joined into
-    /// it — see [`root`].
+    /// What a session is given of its account where a root is built for it:
+    /// the root, and what is joined into it — see [`root`].
     ///
-    /// **Built on the host and joined in.** The root is emptied and made in the
-    /// Conversation's own directory under the Data Directory. Then it is put
-    /// where the harness looks, which is a bind on Linux and on a Mac is where
-    /// it already is, and the account's login and memory store are joined into
-    /// that — the store only where the Profile shares its memory, and empty
-    /// directories of the root's own where it does not. Nothing else of the
-    /// account is said, so nothing else of it is there.
+    /// **Built on the host and joined in.** Each directory the root is made of
+    /// is emptied and made in the Conversation's own directory under the Data
+    /// Directory: one for Claude, Codex and Grok Build, and up to two for
+    /// OpenCode — see [`root::Root::built`]. Each is then put where the harness
+    /// looks, which is a bind on Linux and on a Mac is where it already is, and
+    /// the account's login and memory store are joined into them — the store
+    /// only where the Profile shares its memory, and empty directories of the
+    /// root's own where it does not. Nothing else of the account is said, so
+    /// nothing else of it is there.
     ///
     /// **Except a Grok Build login on Linux, which is a copy** written into the
     /// root rather than a bind — see [`root::Root::login_copied`] — and merged
@@ -4458,20 +4451,20 @@ impl Sandbox {
     /// Linux root something of the Conversation is still running in: this
     /// launch is given it as that one has it — see [`sharing`].
     fn root_described(&self, root: &root::Root, builds: bool, surface: &mut Surface) {
-        let built = self.built_root(root);
-        let inside = self.home.path().join(root.inside_home());
+        let (built, inside) = (self.home.built(), self.home.path());
         let copied = self.login_copy(root);
 
         if builds {
-            let (path, contents) = root.written(&built);
+            for directory in root.built() {
+                surface.made(Access::Built(built.join(directory)));
+            }
 
-            surface
-                .made(Access::Built(built.clone()))
-                .made(Access::Written { path, contents });
+            let (path, contents) = root.written(built);
+            surface.made(Access::Written { path, contents });
 
             // A root that shares no memory has directories of its own, empty,
             // for the session's memory and transcript to be written into.
-            for unshared in root.unshared_in(&built) {
+            for unshared in root.unshared_in(built) {
                 surface.made(Access::Built(unshared));
             }
 
@@ -4496,9 +4489,15 @@ impl Sandbox {
             }
         }
 
-        surface.elsewhere(&built, &inside, Reach::ReadWrite);
+        for directory in root.built() {
+            surface.elsewhere(
+                built.join(directory),
+                inside.join(directory),
+                Reach::ReadWrite,
+            );
+        }
 
-        for (host, joined) in root.joined(&inside) {
+        for (host, joined) in root.joined(inside) {
             if copied.is_some() && host == root.credentials() {
                 continue;
             }
@@ -4506,8 +4505,8 @@ impl Sandbox {
             surface.elsewhere(host, joined, Reach::ReadWrite);
         }
 
-        // A directory `PATH` reaches that sits inside the root's own name was
-        // said before the root, and on Linux the root's bind would hide it:
+        // A directory `PATH` reaches that sits inside one of the root's own
+        // directories was said before the root, and on Linux the root's bind would hide it:
         // HOME inside is the server's own home there, and xAI's installer puts
         // `grok` in `~/.grok/bin`. So each is said again, over the root. A
         // bind inside the root makes its mount point in the root on the host,
@@ -4520,7 +4519,13 @@ impl Sandbox {
                     Access::Own {
                         path,
                         reach: Reach::ReadOnly,
-                    } if path.starts_with(&inside) => Some(path.clone()),
+                    } if root
+                        .built()
+                        .iter()
+                        .any(|directory| path.starts_with(inside.join(directory))) =>
+                    {
+                        Some(path.clone())
+                    }
                     _ => None,
                 })
                 .collect();
@@ -4572,11 +4577,6 @@ impl Sandbox {
         }
     }
 
-    /// Where a session's root is on the host.
-    fn built_root(&self, root: &root::Root) -> PathBuf {
-        self.home.built().join(root.inside_home())
-    }
-
     /// And where a Claude session's copy of `.claude.json` is on the host.
     fn config_copy(&self) -> PathBuf {
         self.home.built().join(CLAUDE_CONFIG_INSIDE_HOME)
@@ -4593,7 +4593,7 @@ impl Sandbox {
     /// Blocking: one `stat`.
     fn login_copy(&self, root: &root::Root) -> Option<PathBuf> {
         (root.login_copied(self.platform) && root.credentials().is_file())
-            .then(|| root.credentials_in(&self.built_root(root)))
+            .then(|| root.credentials_in(self.home.built()))
     }
 
     /// What a session's ending has to see to about a login it was given a copy
@@ -4609,7 +4609,7 @@ impl Sandbox {
         surface: &Surface,
         baseline: &sharing::Baseline,
     ) -> Option<(PathBuf, PathBuf)> {
-        let root = self.root.as_ref()?;
+        let root = &self.root;
         let copy = self.login_copy(root)?;
 
         let written = surface.reaches().iter().find_map(|access| match access {
@@ -4640,8 +4640,7 @@ impl Sandbox {
         surface: &Surface,
         baseline: &sharing::Baseline,
     ) -> Option<(PathBuf, PathBuf)> {
-        let (store::Account::Claude { config_file, .. }, Some(_)) = (&self.account, &self.root)
-        else {
+        let store::Account::Claude { config_file, .. } = &self.account else {
             return None;
         };
 
@@ -4695,17 +4694,22 @@ impl Sandbox {
     /// it joins by hard link is — see [`open`]. What is left is the login a
     /// session makes where there was none, which is then linked back into the
     /// root the way the rendering would have linked it.
+    ///
+    /// **And never where the login is not joined as a file of its own**, which
+    /// is an OpenCode root sharing its memory: the login is inside the data
+    /// directory joined whole, so whatever the session does to it is done to
+    /// the account — see [`root::Root::login_alone`].
     fn credentials_closing(
         &self,
         root: &root::Root,
         surface: &Surface,
     ) -> Option<(PathBuf, PathBuf, Rejoin)> {
-        if self.login_copy(root).is_some() {
+        if self.login_copy(root).is_some() || !root.login_alone() {
             return None;
         }
 
         let credentials = root.credentials();
-        let inside = root.credentials_in(&self.built_root(root));
+        let inside = root.credentials_in(self.home.built());
 
         let bound = surface
             .reaches()
@@ -6319,7 +6323,7 @@ mod tests {
         let elsewhere = r"D:\accounts\someone\.claude.json";
 
         assert_eq!(
-            across_volumes(Platform::Windows, profile, &claude(elsewhere)),
+            across_volumes(Platform::Windows, profile, &claude(elsewhere), true),
             Some(PathBuf::from(elsewhere)),
             "the file half is what a hard link is asked for, and it is on \
              another drive"
@@ -6329,7 +6333,8 @@ mod tests {
             across_volumes(
                 Platform::Windows,
                 profile,
-                &claude(r"C:\Users\someone\.claude.json")
+                &claude(r"C:\Users\someone\.claude.json"),
+                true
             ),
             None,
             "and one volume is the whole of what it needed"
@@ -6345,6 +6350,7 @@ mod tests {
                 r"D:\accounts\someone\.claude",
                 r"C:\Users\someone\.claude.json",
             ),
+            true,
         )
         .expect("a login on another drive is one a hard link cannot join in");
 
@@ -6361,12 +6367,27 @@ mod tests {
                 profile,
                 &store::Account::OpenCode {
                     home: account.path().to_owned(),
-                }
+                },
+                true
             ),
             None,
-            "an account that is one directory is joined in by a junction, which \
-             crosses volumes and asks nothing of either"
+            "an OpenCode account sharing its memory is joined in by junctions, which \
+             cross volumes and ask nothing of either"
         );
+
+        // With memory off, its login alone is hard-linked into a data directory of
+        // the root's own.
+        let opencode = across_volumes(
+            Platform::Windows,
+            profile,
+            &store::Account::OpenCode {
+                home: PathBuf::from(r"D:\accounts\someone"),
+            },
+            false,
+        )
+        .expect("an OpenCode login on another drive is one a hard link cannot join in");
+
+        assert_eq!(written(&opencode), Some(b"D:".to_vec()));
 
         // And a Codex account, whose root is given its login by hard link.
         let codex = across_volumes(
@@ -6375,6 +6396,7 @@ mod tests {
             &store::Account::Codex {
                 home: PathBuf::from(r"D:\accounts\someone\.codex"),
             },
+            true,
         )
         .expect("a Codex login on another drive is one a hard link cannot join in");
 
@@ -6385,7 +6407,8 @@ mod tests {
                 profile,
                 &store::Account::Codex {
                     home: PathBuf::from(r"C:\Users\someone\.codex"),
-                }
+                },
+                true
             ),
             None,
             "and one on the profile's drive joins in"
@@ -6398,6 +6421,7 @@ mod tests {
             &store::Account::Grok {
                 home: PathBuf::from(r"D:\accounts\someone\.grok"),
             },
+            true,
         )
         .expect("a Grok login on another drive is one a hard link cannot join in");
 
@@ -6407,7 +6431,8 @@ mod tests {
             across_volumes(
                 Platform::Linux,
                 Path::new("/home/verkstead"),
-                &claude(elsewhere)
+                &claude(elsewhere),
+                true
             ),
             None,
             "and the two platforms that mount or symlink a path in ask this of \

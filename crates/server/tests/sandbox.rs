@@ -87,6 +87,27 @@ screen_mode = "minimal"
 /// top-level keys are the scopes a login is for.
 const GROK_LOGIN: &str = "{\"https://auth.x.ai::the-humans\": {\"key\": \"the login\"}}\n";
 
+/// What the fixture's OpenCode account keeps in its `opencode.jsonc`, comments
+/// and all: a provider of its own, which a session needs, and the human's own
+/// MCP servers, plugins and instructions, which a session is not given.
+const OPENCODE_ACCOUNT_CONFIG: &str = r#"{
+  // The human's own proxy.
+  "provider": {
+    "proxy": {
+      "npm": "@ai-sdk/openai-compatible",
+      "options": { "baseURL": "https://proxy.example/v1" },
+    },
+  },
+  /* How the human works. */
+  "mcp": { "the-humans": { "type": "local", "command": ["npx"] } },
+  "plugin": ["the-humans-plugin"],
+  "instructions": ["RULES.md"],
+}
+"#;
+
+/// And the login it keeps.
+const OPENCODE_LOGIN: &str = "{\"opencode\": {\"type\": \"api\", \"key\": \"the login\"}}\n";
+
 /// What stands in for the server's own image: an executable that says which
 /// build it is.
 ///
@@ -416,6 +437,11 @@ fi
         self.elsewhere.path().join("grok-account/.grok")
     }
 
+    /// And the home the OpenCode Profile names.
+    fn opencode_home(&self) -> PathBuf {
+        self.elsewhere.path().join("opencode-account/opencode")
+    }
+
     /// Write `secrets.yaml` as the settings page would, so that the sandboxes
     /// built after this carry the token.
     fn configure_github_token(&self, yaml: &str) {
@@ -540,12 +566,11 @@ fi
     ///
     /// Made the way a human makes one — a `HOME=<it> opencode` run leaves
     /// exactly these — with something inside each so the test can say which
-    /// landed where. The skills among them, because an OpenCode Profile binds
-    /// nothing over anything either: its own are inside the config directory
-    /// the Profile names, and its two global paths are under HOME, where a
-    /// fresh sandbox has nothing at all.
+    /// landed where. The config directory holds the human's own skills,
+    /// plugins and an `opencode.jsonc` with comments; the data directory holds
+    /// the login and a database with its write-ahead-log siblings.
     async fn opencode_profile(&self) -> store::Profile {
-        let home = self.elsewhere.path().join("opencode-account/opencode");
+        let home = self.opencode_home();
         let config = home.join(".config/opencode");
         let data = home.join(".local/share/opencode");
 
@@ -555,9 +580,20 @@ fi
             "# what opencode found there\n",
         )
         .unwrap();
+        std::fs::create_dir_all(config.join("node_modules")).unwrap();
+        std::fs::write(config.join("package.json"), "{}\n").unwrap();
+        std::fs::write(config.join("opencode.jsonc"), OPENCODE_ACCOUNT_CONFIG).unwrap();
 
         std::fs::create_dir_all(&data).unwrap();
-        std::fs::write(data.join("auth.json"), "{}\n").unwrap();
+        for (file, contents) in [
+            ("auth.json", OPENCODE_LOGIN),
+            ("opencode.db", "the human's sessions\n"),
+            ("opencode.db-wal", "\n"),
+            ("opencode.db-shm", "\n"),
+            ("mcp-auth.json", "{}\n"),
+        ] {
+            std::fs::write(data.join(file), contents).unwrap();
+        }
 
         store::create_profile(
             &self.pool,
@@ -1559,14 +1595,12 @@ async fn a_windows_session_finds_the_profiles_account_inside_a_profile_of_its_ow
     );
 }
 
-/// And the same rule over an account that is one directory, which is what the
-/// agent types without a root of their own keep one as.
-///
-/// Asked because the rule is written over the account rather than over Claude's
-/// pair: an opencode session started into a profile with nothing joined into it
-/// would be logged out, with nothing saying why.
+/// An OpenCode session on Windows is given a root of Verkstead's own too: a
+/// config directory holding only the `opencode.json` Verkstead wrote, carrying
+/// the account's provider, and with memory on the account's data directory
+/// junctioned in whole. None of the human's skills, plugins or MCP servers.
 #[tokio::test]
-async fn an_account_that_is_one_directory_is_joined_into_the_profile_too() {
+async fn a_windows_opencode_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
     let fixture = grilling().await;
     let opencode = fixture.opencode_profile().await;
 
@@ -1576,24 +1610,84 @@ async fn an_account_that_is_one_directory_is_joined_into_the_profile_too() {
             .expect("a grilling Conversation has a worktree to build a sandbox around"),
     );
 
-    let inside = fixture.windows_profile().join(".config/opencode");
-
-    assert_eq!(
-        std::fs::read_to_string(inside.join("skills/the-accounts-own/SKILL.md")).unwrap(),
-        "# what opencode found there\n",
-        "what the Profile named should be what a session finds under the name \
-         opencode keeps an account at"
-    );
-
-    std::fs::write(inside.join("opencode.json"), "{}\n").unwrap();
+    let config = fixture.windows_profile().join(".config/opencode");
+    let data = fixture.windows_profile().join(".local/share/opencode");
 
     assert!(
-        fixture
-            .elsewhere
-            .path()
-            .join("opencode-account/opencode/.config/opencode/opencode.json")
-            .exists(),
-        "and a file written inside should be on the account"
+        !std::fs::symlink_metadata(&config).unwrap().is_symlink(),
+        "the config directory is Verkstead's own, not a junction to the account"
+    );
+    assert_eq!(listed(&config), ["opencode.json"]);
+    assert_opencode_config_carries_the_provider_alone(
+        &std::fs::read_to_string(config.join("opencode.json")).unwrap(),
+    );
+
+    assert!(
+        std::fs::symlink_metadata(&data).unwrap().is_symlink(),
+        "the data directory is the account's, joined whole"
+    );
+
+    std::fs::write(data.join("opencode.db"), "written inside\n").unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(
+            fixture
+                .opencode_home()
+                .join(".local/share/opencode/opencode.db")
+        )
+        .unwrap(),
+        "written inside\n",
+        "and a store a session writes is on the account"
+    );
+}
+
+/// With memory off, a Windows OpenCode root's data directory is its own and
+/// holds the account's login alone, hard-linked. A login the session replaces
+/// by rename is the account's once the session ends.
+#[tokio::test]
+async fn a_windows_opencode_root_without_memory_links_the_login_alone_and_hands_it_back() {
+    let fixture = grilling().await;
+    let forgetting = store::Profile {
+        memory: false,
+        ..fixture.opencode_profile().await
+    };
+    let credentials = fixture
+        .opencode_home()
+        .join(".local/share/opencode/auth.json");
+
+    let afterwards = made(
+        &fixture
+            .sandbox_on_under(&forgetting, Platform::Windows)
+            .expect("a grilling Conversation has a worktree to build a sandbox around"),
+    );
+
+    let data = fixture.windows_profile().join(".local/share/opencode");
+
+    assert!(
+        !std::fs::symlink_metadata(&data).unwrap().is_symlink(),
+        "the data directory is the root's own"
+    );
+    assert_eq!(listed(&data), ["auth.json"]);
+    assert_eq!(
+        std::fs::metadata(data.join("auth.json")).unwrap().ino(),
+        std::fs::metadata(&credentials).unwrap().ino(),
+        "the login is the account's own file, which is what a hard link is"
+    );
+
+    replaced(&data.join("auth.json"), "{\"refreshed\": \"inside\"}\n");
+
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        OPENCODE_LOGIN,
+        "the replaced login is not the account's while the session runs"
+    );
+
+    afterwards.close();
+
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{\"refreshed\": \"inside\"}\n",
+        "and is once it ends"
     );
 }
 
@@ -2768,22 +2862,24 @@ async fn a_grok_login_made_inside_an_account_with_none_is_the_accounts_once_the_
     );
 }
 
-/// And an OpenCode account lands as the two directories opencode reads, at the
-/// XDG defaults inside a fresh HOME — so nothing has to be said in the
-/// environment about where they are.
+/// An OpenCode session is given the two directories opencode reads, at the XDG
+/// defaults inside a fresh HOME — so nothing has to be said in the environment
+/// about where they are — built from an allowlist.
 ///
-/// The two of them and no more: the cache and the state directories are the
-/// sandbox's own, made fresh and thrown away with it, because neither is part
-/// of the account. The skills the account keeps are inside its config
-/// directory, and nothing is bound over them (ADR-0011) — the two paths
-/// opencode reads globally are under HOME rather than under the account, and a
-/// fresh HOME has neither.
+/// **The config directory is Verkstead's own**, holding only an `opencode.json`
+/// that carries the account's provider, read out of its `opencode.jsonc`,
+/// comments and all. None of the human's skills, plugins, MCP servers or
+/// instructions.
 ///
-/// And the store's name is pinned in the environment, so a session writes the
-/// one file Verkstead named rather than whichever one the release channel the
-/// binary came from would have chosen.
+/// **The data directory is the account's, joined whole** with memory on: the
+/// login and the database beside its write-ahead-log siblings, so what a
+/// session writes there is on the account.
+///
+/// The cache and the state directories are the sandbox's own, made fresh and
+/// thrown away with it. And the store's name is pinned in the environment, so
+/// a session writes the one file Verkstead named.
 #[tokio::test]
-async fn an_opencode_account_lands_at_the_xdg_paths_opencode_reads() {
+async fn an_opencode_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
     let fixture = grilling().await;
     let profile = fixture.opencode_profile().await;
     let sandbox = fixture.sandbox_under(&profile, LISTENING, &BuildCache::none(), vec![]);
@@ -2791,34 +2887,37 @@ async fn an_opencode_account_lands_at_the_xdg_paths_opencode_reads() {
     let reported = probe(
         &sandbox,
         r#"
-            dir "$HOME/.config/opencode" config
-            dir "$HOME/.local/share/opencode" data
-            file "$HOME/.local/share/opencode/auth.json" auth
-            file "$HOME/.config/opencode/skills/the-accounts-own/SKILL.md" the-accounts-own
+            say config "$(ls -A "$HOME/.config/opencode" | sort | tr '\n' ' ')"
+            say data "$(ls -A "$HOME/.local/share/opencode" | sort | tr '\n' ' ')"
+            say login "$(cat "$HOME/.local/share/opencode/auth.json")"
+            file "$HOME/.local/share/opencode/opencode.db" db-file
             dir "$HOME/.claude" claude-dir
             say home "$(ls -A "$HOME" | sort | tr '\n' ' ')"
             say cache "$(ls -A "$HOME/.cache" 2>/dev/null | tr '\n' ' ')"
             say db "${OPENCODE_DB-unset}"
             say agent "${VERKSTEAD_AGENT-unset}"
+            printf 'written inside\n' > "$HOME/.local/share/opencode/opencode.db"
         "#,
     );
 
     assert_eq!(
-        reported["config"], "write",
-        "a session writes the configuration of the account it runs as"
+        reported["config"], "opencode.json ",
+        "the written configuration is the whole of the config directory"
+    );
+    assert_opencode_config_carries_the_provider_alone(
+        &std::fs::read_to_string(
+            fixture
+                .windows_profile()
+                .join(".config/opencode/opencode.json"),
+        )
+        .unwrap(),
     );
     assert_eq!(
-        reported["data"], "write",
-        "and its store and its own session records beside them"
+        reported["data"], "auth.json mcp-auth.json opencode.db opencode.db-shm opencode.db-wal ",
+        "the account's data directory, whole"
     );
-    assert_eq!(
-        reported["auth"], "write",
-        "the account itself being the file in the second of the two"
-    );
-    assert_eq!(
-        reported["the-accounts-own"], "write",
-        "and the skills it keeps are left where opencode looks for them"
-    );
+    assert_eq!(reported["login"], OPENCODE_LOGIN.trim_end());
+    assert_eq!(reported["db-file"], "write");
     assert_eq!(reported["claude-dir"], "absent");
     assert_eq!(
         reported["home"], ".config .local ",
@@ -2834,6 +2933,118 @@ async fn an_opencode_account_lands_at_the_xdg_paths_opencode_reads() {
         "the store is named by Verkstead rather than by the release channel"
     );
     assert_eq!(reported["agent"], "opencode");
+
+    let data = fixture.opencode_home().join(".local/share/opencode");
+    assert_eq!(
+        std::fs::read_to_string(data.join("opencode.db")).unwrap(),
+        "written inside\n",
+        "a store a session writes is the account's, where it is looked for"
+    );
+    assert_eq!(
+        std::fs::read_to_string(
+            fixture
+                .opencode_home()
+                .join(".config/opencode/opencode.jsonc")
+        )
+        .unwrap(),
+        OPENCODE_ACCOUNT_CONFIG,
+        "and the account's own configuration is as it was"
+    );
+}
+
+/// With the Profile's memory switched off, an OpenCode session's data directory
+/// is the root's own: only the account's login is linked into it, and the
+/// database starts empty. What the session writes stays out of the account, and
+/// is in the root on the host, under the Conversation's own directory — which
+/// is where it is looked for. A login written inside is the account's as it is
+/// written, opencode writing `auth.json` in place.
+#[tokio::test]
+async fn an_opencode_root_without_memory_has_a_data_directory_of_its_own() {
+    let fixture = grilling().await;
+    let forgetting = store::Profile {
+        memory: false,
+        ..fixture.opencode_profile().await
+    };
+
+    let reported = probe(
+        &fixture.sandbox_under(&forgetting, LISTENING, &BuildCache::none(), vec![]),
+        r#"
+            say config "$(ls -A "$HOME/.config/opencode" | sort | tr '\n' ' ')"
+            say data "$(ls -A "$HOME/.local/share/opencode" | sort | tr '\n' ' ')"
+            file "$HOME/.local/share/opencode/auth.json" login
+            printf 'the session'"'"'s own\n' > "$HOME/.local/share/opencode/opencode.db"
+            printf '{"refreshed": "in place"}\n' > "$HOME/.local/share/opencode/auth.json"
+        "#,
+    );
+
+    assert_eq!(
+        reported["config"], "opencode.json ",
+        "the same config directory as with memory on"
+    );
+    assert_eq!(
+        reported["data"], "auth.json ",
+        "and of the account's data directory, the login alone"
+    );
+    assert_eq!(reported["login"], "write");
+
+    assert_eq!(
+        std::fs::read_to_string(
+            fixture
+                .windows_profile()
+                .join(".local/share/opencode/opencode.db")
+        )
+        .unwrap(),
+        "the session's own\n",
+        "the store is in the root on the host"
+    );
+
+    let data = fixture.opencode_home().join(".local/share/opencode");
+    assert_eq!(
+        std::fs::read_to_string(data.join("opencode.db")).unwrap(),
+        "the human's sessions\n",
+        "and the account's is untouched"
+    );
+    assert_eq!(
+        std::fs::read_to_string(data.join("auth.json")).unwrap(),
+        "{\"refreshed\": \"in place\"}\n",
+        "while the login written inside is the account's"
+    );
+}
+
+/// An OpenCode account with no login and memory off has no file to bind, so a
+/// session that logs in writes one into its own root — and that file is the
+/// account's once the session has ended.
+#[tokio::test]
+async fn an_opencode_login_made_inside_an_account_with_none_is_the_accounts_once_the_session_ends()
+{
+    let fixture = grilling().await;
+    let forgetting = store::Profile {
+        memory: false,
+        ..fixture.opencode_profile().await
+    };
+    let credentials = fixture
+        .opencode_home()
+        .join(".local/share/opencode/auth.json");
+    std::fs::remove_file(&credentials).unwrap();
+
+    let (reported, afterwards) = probe_closing(
+        &fixture.sandbox_under(&forgetting, LISTENING, &BuildCache::none(), vec![]),
+        r#"
+            file "$HOME/.local/share/opencode/auth.json" before
+            printf '{"logged": "in"}\n' > "$HOME/.local/share/opencode/auth.json"
+        "#,
+    );
+
+    assert_eq!(reported["before"], "absent", "there is no login to give it");
+    assert!(!credentials.exists());
+
+    afterwards.close();
+
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{\"logged\": \"in\"}\n",
+        "and the account's from then on"
+    );
 }
 
 /// And an OpenCode session's shell tool holds a command for a day rather than
@@ -3667,6 +3878,26 @@ fn listed(dir: &Path) -> Vec<String> {
     names.sort();
 
     names
+}
+
+/// That the `opencode.json` an OpenCode root was written, as `written`, carries
+/// the fixture account's provider, and none of its MCP servers, plugins or
+/// instructions.
+fn assert_opencode_config_carries_the_provider_alone(written: &str) {
+    let written: serde_json::Value = serde_json::from_str(written).unwrap();
+
+    assert_eq!(
+        written,
+        serde_json::json!({
+            "provider": {
+                "proxy": {
+                    "npm": "@ai-sdk/openai-compatible",
+                    "options": { "baseURL": "https://proxy.example/v1" },
+                },
+            },
+        }),
+        "the account's provider is carried over, and nothing else of its configuration"
+    );
 }
 
 /// That the `config.toml` a Codex root was written at `written` carries the

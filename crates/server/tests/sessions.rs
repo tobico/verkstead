@@ -1972,6 +1972,27 @@ async fn grilling_spilling_on_opencode(spill: tempfile::TempDir, stub: &str) -> 
     .await
 }
 
+/// And the same with that Profile's memory switched off, so a session's data
+/// directory is its root's own and its store is written there.
+async fn grilling_spilling_on_opencode_forgetting(
+    spill: tempfile::TempDir,
+    stub: &str,
+) -> Grilling {
+    grilling_however_started(
+        spill,
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        NOTHING_ATTACHED,
+        Pickers::EverythingOnOpenCodeForgetting,
+        Origin::None,
+        Seeded::Nothing,
+        None,
+    )
+    .await
+}
+
 /// What Verkstead is told this backend has on its Screen when it is sitting at
 /// its prompt — one line, the whole of the coupling to somebody else's display.
 const AT_THE_PROMPT: &str = "▌ ready for anything";
@@ -2232,6 +2253,10 @@ enum Pickers {
     /// Every role on a Grok Build Profile, as [`Pickers::EverythingOnGrok`],
     /// with that Profile's memory switched off.
     EverythingOnGrokForgetting,
+
+    /// Every role on an OpenCode Profile, as [`Pickers::EverythingOnOpenCode`],
+    /// with that Profile's memory switched off.
+    EverythingOnOpenCodeForgetting,
 }
 
 /// The same with a read-write companion beside it, for the tests about a
@@ -2429,6 +2454,10 @@ async fn grilling_however_started(
         Pickers::EverythingOnGrokForgetting => {
             bench.everything_on_grok(id).await;
             bench.forgetting("grok").await;
+        }
+        Pickers::EverythingOnOpenCodeForgetting => {
+            bench.everything_on_opencode(id).await;
+            bench.forgetting("opencode").await;
         }
     }
 
@@ -4734,6 +4763,74 @@ async fn an_opencode_session_follows_the_records_of_the_session_it_opened_in_its
         "and the row counts the reading the pane draws: the text put to the \
          session is the one turn of it, and the session's own row is opencode's \
          bookkeeping",
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+}
+
+/// With the Profile's memory switched off, an OpenCode session's data directory
+/// is its root's own, so its store is written there rather than in the account
+/// — and its records are found in that store and followed onto the Timeline all
+/// the same.
+///
+/// The root is on the host under the Conversation's own directory in the Data
+/// Directory, which is where the store is looked for. A store in the account
+/// holding a session of this very Worktree is not followed.
+#[tokio::test]
+async fn an_opencode_sessions_records_are_followed_out_of_its_root_where_memory_is_off() {
+    let spill = tempfile::tempdir().unwrap();
+    let ran_in = spill.path().join("ran-in");
+
+    let fixture = grilling_spilling_on_opencode_forgetting(
+        spill,
+        &format!(
+            r#"
+            printf '%s' "$(pwd)" > {ran_in}
+            printf 'Reading the brief.\n'
+            sleep 300
+            "#,
+            ran_in = ran_in.display(),
+        ),
+    )
+    .await;
+
+    let worktree = until_written(&ran_in).await;
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+
+    // The account's own store, with a session of this Worktree in it that is
+    // not this one: it is the human's memory, which this session does not have.
+    let account = opencode_store(&fixture.opencode_account()).await;
+    opencode_session(&account, "ses_the_humans", &worktree, 0).await;
+    opencode_record(
+        &account,
+        "ses_the_humans",
+        0,
+        "session.created.1",
+        r#"{"info":{"title":"The human's own."}}"#,
+    )
+    .await;
+
+    // And the root's, on the host, where this session wrote its own.
+    let root = fixture
+        .state
+        .path()
+        .join("homes")
+        .join(fixture.id.to_string());
+    let store = opencode_store(&root).await;
+    opencode_session(&store, "ses_mine", &worktree, 0).await;
+    opencode_record(
+        &store,
+        "ses_mine",
+        0,
+        "session.created.1",
+        r#"{"info":{"title":"Rate limiting"}}"#,
+    )
+    .await;
+
+    assert_eq!(
+        fixture.transcript_of(event, 1).await,
+        [r#"{"kind":"session.created.1","seq":0,"record":{"info":{"title":"Rate limiting"}}}"#],
+        "the store in the root is the one followed, and not the account's"
     );
 
     assert_eq!(fixture.close().await, ConversationClosed::Closed);

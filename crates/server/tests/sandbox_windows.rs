@@ -605,6 +605,70 @@ impl Grilling {
         self.profile_dir().join(".codex")
     }
 
+    /// Run this fixture's sessions under an OpenCode account instead, holding
+    /// what an opencode 1.18.30 account that has been used holds: a login and a
+    /// store in its data directory, and in its config directory an
+    /// `opencode.jsonc` naming a provider beside the human's MCP servers, and
+    /// the human's own skills — really there, so that a probe finding them
+    /// refused or absent has found the boundary.
+    async fn under_opencode(&mut self, memory: bool) {
+        let home = self.opencode_home();
+        let config = home.join(".config").join("opencode");
+        let data = home.join(".local").join("share").join("opencode");
+
+        std::fs::create_dir_all(config.join("skills")).unwrap();
+        std::fs::write(config.join("skills").join(MARKER), SAID).unwrap();
+        std::fs::write(
+            config.join("opencode.jsonc"),
+            "{\n  // The human's own proxy.\n  \"provider\": { \"proxy\": {} },\n  \
+             \"mcp\": { \"the-humans\": {} },\n}\n",
+        )
+        .unwrap();
+
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(data.join(AUTH), THE_LOGIN).unwrap();
+        std::fs::write(data.join("opencode.db"), SAID).unwrap();
+
+        self.profile = store::create_profile(
+            &self.pool,
+            &store::ProfileFacts {
+                name: Some("opencode".to_owned()),
+                account: store::Account::OpenCode { home },
+                models: vec!["opencode/big-pickle".to_owned()],
+                memory,
+            },
+        )
+        .await
+        .unwrap()
+        .expect("the Profile saves");
+    }
+
+    /// The home the OpenCode account is kept in on the host — see
+    /// [`Grilling::under_opencode`].
+    fn opencode_home(&self) -> PathBuf {
+        self._watched.path().join("opencode-account")
+    }
+
+    /// And the account's data directory in it.
+    fn opencode_data(&self) -> PathBuf {
+        self.opencode_home()
+            .join(".local")
+            .join("share")
+            .join("opencode")
+    }
+
+    /// And the two directories an OpenCode session is given in their place,
+    /// inside the profile: the config directory and the data directory.
+    fn opencode_inside(&self) -> [PathBuf; 2] {
+        [
+            self.profile_dir().join(".config").join("opencode"),
+            self.profile_dir()
+                .join(".local")
+                .join("share")
+                .join("opencode"),
+        ]
+    }
+
     /// Run this fixture's sessions under a Grok Build account instead, holding
     /// what a Grok Build 1.0.13 account that has been used holds: a login, a
     /// configuration reaching a model beside the human's MCP servers, a session
@@ -1903,6 +1967,133 @@ async fn a_grok_login_saved_by_rename_is_the_accounts_afterwards() {
         std::fs::read_to_string(fixture.grok_dir().join(AUTH)).unwrap(),
         "{\"refreshed\": true}",
         "and so is the login, written back as the session ended"
+    );
+}
+
+/// An OpenCode session's config directory is Verkstead's own, holding only an
+/// `opencode.json` carrying the account's provider. With memory on its data
+/// directory is the account's, junctioned in whole, so a store a session writes
+/// is on the account. The human's skills are not in the config directory, and
+/// the account's own, reached by its real path, is refused.
+#[tokio::test]
+async fn an_opencode_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
+    let mut fixture = grilling().await;
+    fixture.under_opencode(true).await;
+
+    let [config, data] = fixture.opencode_inside();
+    let account = fixture.opencode_home().join(".config").join("opencode");
+    let store = data.join("opencode.db");
+    let quoted = |path: &Path| path.display().to_string().replace('\'', "''");
+
+    let asked = [
+        directory("config", &config),
+        file("login", data.join(AUTH)),
+        file("store", &store),
+        directory("skills", config.join("skills")),
+        directory("the-accounts-skills", account.join("skills")),
+    ];
+
+    let classified = fixture.probe_running(&format!(
+        "{}{}\
+         Report 'listed' ([System.IO.Directory]::GetFileSystemEntries('{config}').Length)\r\n\
+         [System.IO.File]::WriteAllText('{store}', 'written inside')\r\n",
+        classifying(&asked),
+        reading("written", &quoted(&config.join("opencode.json"))),
+        config = quoted(&config),
+        store = quoted(&store),
+    ));
+
+    for (name, word) in [
+        ("config", "write"),
+        ("login", "write"),
+        ("store", "write"),
+        ("skills", "absent"),
+        ("the-accounts-skills", "refused"),
+        ("listed", "1"),
+    ] {
+        assert_eq!(
+            said(&classified, name),
+            word,
+            "{name} should be {word}, and the probe said: {classified:?}"
+        );
+    }
+
+    assert_eq!(
+        read_as_json(&classified, "written"),
+        serde_json::json!({ "provider": { "proxy": {} } }),
+        "the written configuration carries the provider and nothing else"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.opencode_data().join("opencode.db")).unwrap(),
+        "written inside",
+        "and a store a session writes is on the account"
+    );
+}
+
+/// With the Profile's memory switched off, an OpenCode session's data directory
+/// is the root's own, holding the account's login alone, hard-linked. The store
+/// a session writes is in the root on the host, and the account's is refused
+/// and untouched. A login the session saves by rename is the account's once the
+/// session has ended.
+#[tokio::test]
+async fn an_opencode_root_without_memory_has_a_data_directory_of_its_own() {
+    let mut fixture = grilling().await;
+    fixture.under_opencode(false).await;
+
+    let [_, data] = fixture.opencode_inside();
+    let login = data.join(AUTH);
+    let store = data.join("opencode.db");
+    let quoted = |path: &Path| path.display().to_string().replace('\'', "''");
+
+    let asked = [
+        file("login", &login),
+        file(
+            "the-accounts-store",
+            fixture.opencode_data().join("opencode.db"),
+        ),
+    ];
+
+    let classified = fixture.probe_running(&format!(
+        "{}\
+         Report 'listed' ([System.IO.Directory]::GetFileSystemEntries('{data}').Length)\r\n\
+         [System.IO.File]::WriteAllText('{store}', 'the session''s own')\r\n\
+         [System.IO.File]::WriteAllText('{login}.tmp', '{{\"refreshed\": true}}')\r\n\
+         [System.IO.File]::Delete('{login}')\r\n\
+         [System.IO.File]::Move('{login}.tmp', '{login}')\r\n\
+         Report 'renamed' 'yes'\r\n",
+        classifying(&asked),
+        data = quoted(&data),
+        store = quoted(&store),
+        login = quoted(&login),
+    ));
+
+    for (name, word) in [
+        ("login", "write"),
+        ("the-accounts-store", "refused"),
+        ("listed", "1"),
+        ("renamed", "yes"),
+    ] {
+        assert_eq!(
+            said(&classified, name),
+            word,
+            "{name} should be {word}, and the probe said: {classified:?}"
+        );
+    }
+
+    assert_eq!(
+        std::fs::read_to_string(&store).unwrap(),
+        "the session's own",
+        "the store is in the root on the host, where it is looked for"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.opencode_data().join("opencode.db")).unwrap(),
+        SAID,
+        "and the account's is untouched"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.opencode_data().join(AUTH)).unwrap(),
+        "{\"refreshed\": true}",
+        "while the login saved inside is the account's, written back as the session ended"
     );
 }
 

@@ -147,9 +147,10 @@ enum Search {
     /// see [`updates`].
     Updates { sessions: PathBuf, session: String },
 
-    /// OpenCode's: the database its account keeps its sessions in, the Worktree
-    /// this session is working in, and the moment it was launched. Codex's rule
-    /// against a store that is not a file of lines — see [`crate::records`].
+    /// OpenCode's: the database its account or its root keeps its sessions in,
+    /// the Worktree this session is working in, and the moment it was launched.
+    /// Codex's rule against a store that is not a file of lines — see
+    /// [`crate::records`].
     Records {
         database: PathBuf,
         worktree: PathBuf,
@@ -256,14 +257,19 @@ impl Tail {
             },
 
             // And where opencode keeps its sessions, which is one database
-            // under the data half of the two directories its account is. The
-            // name of the file is the one the sandbox pinned rather than the
-            // one opencode would have chosen for itself — see
-            // [`crate::sandbox`].
-            (store::Account::OpenCode { home }, Some(worktree)) => Search::Records {
-                database: home
-                    .join(crate::sandbox::OPENCODE_DATA_INSIDE_HOME)
-                    .join(crate::sandbox::OPENCODE_DB_FILE),
+            // under the data half of the two directories its account is where
+            // the Profile shares its memory, and in the session's own root on
+            // the host where it does not — the data directory being joined
+            // whole, for Codex's reason. The name of the file is the one the
+            // sandbox pinned rather than the one opencode would have chosen for
+            // itself — see [`crate::sandbox`].
+            (store::Account::OpenCode { home: account }, Some(worktree)) => Search::Records {
+                database: match profile.memory {
+                    true => account
+                        .join(crate::sandbox::OPENCODE_DATA_INSIDE_HOME)
+                        .join(crate::sandbox::OPENCODE_DB_FILE),
+                    false => home.opencode_database(),
+                },
                 worktree: worktree.to_owned(),
                 launched,
             },

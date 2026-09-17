@@ -1,5 +1,6 @@
 //! A built root: the `.claude`, the `.codex` or the `.grok` a session is given in
-//! place of the account's whole one.
+//! place of the account's whole one — or the two XDG directories an OpenCode
+//! session is given in place of its account's.
 //!
 //! **An allowlist, and nothing outside it.** What a session needs of its account
 //! is its login and the store its memory and transcripts are kept in.
@@ -27,6 +28,11 @@
 //! a bind on Linux, a symlink on a Mac, and on Windows a hard link for the login
 //! and a junction for each directory. The one exception is a Grok Build login on
 //! Linux, which is copied and merged back — see [`Root::login_copied`].
+//!
+//! **Every path a root says is said from HOME**, which is where it is put. The
+//! account's own path is the same one with the account's directory in place of
+//! HOME's `.claude`, `.codex` or `.grok`. An OpenCode account is a whole home,
+//! so its paths are the same on both sides — see [`Root::built`].
 //!
 //! **Beside a Claude root, `.claude.json` is copied rather than joined**, so the
 //! trust seeded into it is not written straight into the account, and what a
@@ -155,6 +161,43 @@ const GROK_CARRIED: [&str; 7] = [
     "endpoints.models_list_url",
 ];
 
+/// The directory OpenCode reads its configuration from, inside its home: built
+/// either way, and holding nothing but the file Verkstead writes.
+///
+/// Not the account's `node_modules/`, `package.json`, agents, commands, themes
+/// or skills, which are how the human works.
+const OPENCODE_CONFIG: &str = super::OPENCODE_CONFIG_INSIDE_HOME;
+
+/// The directory OpenCode keeps its login and its database in, inside its home.
+///
+/// **Joined whole where memory is shared, and never a file at a time.** Read
+/// off opencode 1.18.30: `opencode.db` runs in write-ahead-log mode, with
+/// `opencode.db-wal` and `opencode.db-shm` beside it, and a database linked
+/// apart from those will not open. The login, `mcp-auth.json`, snapshots and
+/// logs travel with it. Where memory is not shared, the directory is the
+/// root's own, the database in it starts empty, and the login alone is linked
+/// into it.
+const OPENCODE_DATA: &str = super::OPENCODE_DATA_INSIDE_HOME;
+
+/// The file OpenCode keeps a login in, inside its home.
+///
+/// **Written in place**, like Codex's: read off opencode 1.18.30, whose
+/// `opencode auth logout` leaves the same inode behind. So a link of it stays
+/// the account's file for the session's whole life.
+const OPENCODE_AUTH: &str = ".local/share/opencode/auth.json";
+
+/// The configuration files OpenCode reads for the user, inside its config
+/// directory, in the order it reads them: a later file's keys win.
+const OPENCODE_CONFIGS: [&str; 2] = ["opencode.json", "opencode.jsonc"];
+
+/// Of the account's own configuration, the key a root's carries over:
+/// `provider`, which says where a custom provider is and how it is reached.
+///
+/// **An allowlist**, for [`CARRIED`]'s reason. Everything else is how the human
+/// works — `mcp`, `plugin`, `agent`, `command`, `instructions`, `theme` — and
+/// none of it is a session's.
+const OPENCODE_CARRIED: &str = "provider";
+
 /// Of the account's `.claude.json`, the key its MCP servers are under: at the top
 /// level, and again under each `projects` entry.
 ///
@@ -176,8 +219,8 @@ const LONGEST: usize = 200;
 /// harness's root it is, and whether its memory is shared.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Root {
-    /// The account's own directory, which the Profile names: `~/.claude` or
-    /// `~/.codex`.
+    /// The account's own directory, which the Profile names: `~/.claude`,
+    /// `~/.codex`, `~/.grok`, or the home an OpenCode account is kept in.
     account: PathBuf,
 
     /// Which harness's allowlist this is.
@@ -213,6 +256,11 @@ enum Harness {
     /// Grok Build: `auth.json` linked, `sessions/` and `memory/` as its memory,
     /// and a `config.toml` written — see [`GROK_MEMORY`].
     Grok,
+
+    /// OpenCode: its data directory as its memory, joined whole, or built with
+    /// `auth.json` alone linked into it — see [`OPENCODE_DATA`]. And its config
+    /// directory built, with an `opencode.json` written.
+    OpenCode,
 }
 
 impl Root {
@@ -294,9 +342,22 @@ impl Root {
         }
     }
 
+    /// The OpenCode root for a session logged in as the account whose home is
+    /// `account`.
+    ///
+    /// Nothing about the Worktree is in it, for Codex's reason: opencode keeps
+    /// one database for every directory it runs in.
+    pub(crate) fn opencode(account: &Path) -> Root {
+        Root {
+            account: account.to_owned(),
+            harness: Harness::OpenCode,
+            memory: true,
+        }
+    }
+
     /// The same root, sharing the account's memory or not.
     ///
-    /// **On**, which is what [`Root::claude`], [`Root::codex`] and [`Root::grok`] make: the
+    /// **On**, which is what every constructor above makes: the
     /// memory store is made in the account and joined, so memory a session
     /// writes is the account's and its transcript is in the account's store.
     ///
@@ -309,14 +370,40 @@ impl Root {
         Root { memory, ..self }
     }
 
-    /// Where a harness looks for its account's directory, inside HOME — which is
-    /// where this root is put, and what it is called under the Conversation's
-    /// own directory on the host.
-    pub(crate) fn inside_home(&self) -> &'static str {
+    /// What this root is called among a Conversation's roots, which is what a
+    /// launch into it is registered under — see [`super::sharing`].
+    pub(crate) fn named(&self) -> &'static str {
         match self.harness {
             Harness::Claude { .. } => super::CLAUDE_DIR_INSIDE_HOME,
             Harness::Codex => super::CODEX_INSIDE_HOME,
             Harness::Grok => super::GROK_INSIDE_HOME,
+            Harness::OpenCode => "opencode",
+        }
+    }
+
+    /// Where the account's directory lands inside HOME, which is what every
+    /// path of the account's is under there: `.claude`, `.codex` or `.grok`,
+    /// and HOME itself for OpenCode, whose account is a home.
+    fn landing(&self) -> &'static Path {
+        Path::new(match self.harness {
+            Harness::Claude { .. } | Harness::Codex | Harness::Grok => self.named(),
+            Harness::OpenCode => "",
+        })
+    }
+
+    /// The directories of Verkstead's own this root is made of, each said from
+    /// HOME. Each is emptied and made on the host as a session starts, in the
+    /// Conversation's own directory, and is put at the same path inside.
+    ///
+    /// One for Claude, Codex and Grok Build: the account's directory. Two for
+    /// OpenCode where memory is not shared: its config directory and its data
+    /// directory. And the config directory alone where memory is shared, the
+    /// data directory then being the account's, joined whole.
+    pub(crate) fn built(&self) -> Vec<&'static str> {
+        match (&self.harness, self.memory) {
+            (Harness::Claude { .. } | Harness::Codex | Harness::Grok, _) => vec![self.named()],
+            (Harness::OpenCode, true) => vec![OPENCODE_CONFIG],
+            (Harness::OpenCode, false) => vec![OPENCODE_CONFIG, OPENCODE_DATA],
         }
     }
 
@@ -341,41 +428,60 @@ impl Root {
         self.account.join(self.login())
     }
 
-    /// Where the login file is in this root, built at `root`.
-    pub(crate) fn credentials_in(&self, root: &Path) -> PathBuf {
-        root.join(self.login())
+    /// Where the login file is in this root, under the HOME at `home`: the
+    /// Conversation's own directory on the host, or HOME inside.
+    pub(crate) fn credentials_in(&self, home: &Path) -> PathBuf {
+        home.join(self.landing()).join(self.login())
     }
 
-    /// The login file `account` keeps in its directory, for the harnesses whose
-    /// sessions are given a root — whether or not the file is there.
-    pub(crate) fn login_of(account: &crate::store::Account) -> Option<PathBuf> {
+    /// The login file `account` keeps, where a session is given it as a file
+    /// of its own, whether or not the file is there. `memory` is the Profile's
+    /// memory switch.
+    ///
+    /// `None` for an OpenCode account sharing its memory, whose login is inside
+    /// the data directory joined whole — see [`Root::login_alone`].
+    pub(crate) fn login_of(account: &crate::store::Account, memory: bool) -> Option<PathBuf> {
         match account {
             crate::store::Account::Claude { claude_dir, .. } => Some(claude_dir.join(CREDENTIALS)),
             crate::store::Account::Codex { home } | crate::store::Account::Grok { home } => {
                 Some(home.join(AUTH))
             }
-            crate::store::Account::OpenCode { .. } => None,
+            crate::store::Account::OpenCode { home } => (!memory).then(|| home.join(OPENCODE_AUTH)),
         }
     }
 
-    /// What the login file is called, inside the account and inside the root.
+    /// Whether the login is joined as a file of its own. It always is, except
+    /// in an OpenCode root sharing its memory: there the login is inside the
+    /// data directory joined whole, so it is the account's with nothing more
+    /// said about it and nothing to hand back.
+    pub(crate) fn login_alone(&self) -> bool {
+        !matches!((&self.harness, self.memory), (Harness::OpenCode, true))
+    }
+
+    /// Where the login file is, inside the account's directory.
     fn login(&self) -> &'static str {
         match self.harness {
             Harness::Claude { .. } => CREDENTIALS,
             Harness::Codex | Harness::Grok => AUTH,
+            Harness::OpenCode => OPENCODE_AUTH,
         }
     }
 
-    /// The configuration file a root is given, as where it goes in a root built
-    /// at `root` and what it holds: Verkstead's own, written as each session
-    /// starts, and neither joined nor written back.
+    /// The configuration file a root is given: where it goes in a root built in
+    /// the Conversation's own directory at `built`, and what it holds. It is
+    /// Verkstead's own, written as each session starts, and neither joined nor
+    /// written back.
     ///
     /// Read off the account's own file as it is at this moment, so a key the
     /// human changes reaches the next session. Claude's is a `settings.json` —
-    /// see [`settings`] — and Codex's a `config.toml` — see [`codex_config`].
+    /// see [`settings`]. Codex's and Grok Build's is a `config.toml` — see
+    /// [`toml_carrying`]. OpenCode's is an `opencode.json` — see
+    /// [`opencode_config`].
     ///
-    /// Blocking: one read.
-    pub(crate) fn written(&self, root: &Path) -> (PathBuf, Vec<u8>) {
+    /// Blocking: one read, or two for OpenCode.
+    pub(crate) fn written(&self, built: &Path) -> (PathBuf, Vec<u8>) {
+        let root = built.join(self.landing());
+
         match self.harness {
             Harness::Claude { .. } => (
                 root.join(SETTINGS),
@@ -399,6 +505,16 @@ impl Root {
                     &GROK_CARRIED,
                 ),
             ),
+            Harness::OpenCode => {
+                let config = Path::new(OPENCODE_CONFIG);
+
+                (
+                    root.join(config).join(OPENCODE_CONFIGS[0]),
+                    opencode_config(OPENCODE_CONFIGS.map(|file| {
+                        std::fs::read_to_string(self.account.join(config).join(file)).ok()
+                    })),
+                )
+            }
         }
     }
 
@@ -437,7 +553,7 @@ impl Root {
     pub(crate) fn config(&self, config_file: &Path) -> Vec<u8> {
         let trusted = match &self.harness {
             Harness::Claude { trusted, .. } => trusted.as_slice(),
-            Harness::Codex | Harness::Grok => &[],
+            Harness::Codex | Harness::Grok | Harness::OpenCode => &[],
         };
 
         config(std::fs::read(config_file).ok().as_deref(), trusted)
@@ -465,8 +581,8 @@ impl Root {
         Ok(())
     }
 
-    /// Everything joined into a root a session finds at `inside`: each as the
-    /// account's own path and the path a session finds it at.
+    /// Everything joined into a root a session finds in the HOME at `inside`:
+    /// each as the account's own path and the path a session finds it at.
     ///
     /// The login first, and only where the account has one. A join of a file
     /// that is not there is nothing on a Mac, a hard link that fails on Windows
@@ -480,33 +596,41 @@ impl Root {
 
         let credentials = self.credentials();
 
-        if credentials.is_file() {
+        if self.login_alone() && credentials.is_file() {
             joined.push((credentials, self.credentials_in(inside)));
         }
 
         for store in self.joined_store() {
-            joined.push((self.account.join(&store), inside.join(&store)));
+            joined.push((
+                self.account.join(&store),
+                inside.join(self.landing()).join(&store),
+            ));
         }
 
         joined
     }
 
-    /// The directories of a root built at `root` that are its own and made
-    /// empty as it is built: the memory store's, where memory is not shared,
-    /// and none where it is.
+    /// The directories inside a root built in the Conversation's own directory
+    /// at `built` that are its own and made empty as it is built: the memory
+    /// store's, where memory is not shared, and none where it is.
     ///
     /// Claude's is the whole of `projects/`, the entries being named inside it
     /// as the session writes them. Codex's are `sessions/` and `memories/`, and
-    /// Grok Build's `sessions/` and `memory/`.
-    pub(crate) fn unshared_in(&self, root: &Path) -> Vec<PathBuf> {
+    /// Grok Build's `sessions/` and `memory/`. OpenCode's is none: its data
+    /// directory is then one of the root's own directories already — see
+    /// [`Root::built`].
+    pub(crate) fn unshared_in(&self, built: &Path) -> Vec<PathBuf> {
         if self.memory {
             return Vec::new();
         }
 
+        let root = built.join(self.landing());
+
         match self.harness {
-            Harness::Claude { .. } => vec![Root::projects_in(root)],
+            Harness::Claude { .. } => vec![Root::projects_in(&root)],
             Harness::Codex => CODEX_MEMORY.iter().map(|store| root.join(store)).collect(),
             Harness::Grok => GROK_MEMORY.iter().map(|store| root.join(store)).collect(),
+            Harness::OpenCode => Vec::new(),
         }
     }
 
@@ -525,6 +649,129 @@ impl Root {
                 .collect(),
             Harness::Codex => CODEX_MEMORY.iter().map(PathBuf::from).collect(),
             Harness::Grok => GROK_MEMORY.iter().map(PathBuf::from).collect(),
+            Harness::OpenCode => vec![PathBuf::from(OPENCODE_DATA)],
+        }
+    }
+}
+
+/// The `opencode.json` an OpenCode root is given, out of the account's own
+/// `opencode.json` and `opencode.jsonc`, in that order, where there are any to
+/// read.
+///
+/// The account's [`OPENCODE_CARRIED`] key and nothing else. A later file's
+/// providers are merged over an earlier one's, the way opencode merges its
+/// files. A file with comments or trailing commas is read the way opencode
+/// reads it — see [`uncommented`]. An account with neither file, or none that
+/// reads as a JSON object, is given a file with no provider in it.
+fn opencode_config(account: [Option<String>; 2]) -> Vec<u8> {
+    let mut written = Object::new();
+
+    for text in account.iter().flatten() {
+        let Ok(serde_json::Value::Object(own)) = serde_json::from_str(&uncommented(text)) else {
+            continue;
+        };
+
+        if let Some(provider) = own.get(OPENCODE_CARRIED) {
+            match written.get_mut(OPENCODE_CARRIED) {
+                Some(kept) => merged_over(kept, provider),
+                None => {
+                    written.insert(OPENCODE_CARRIED.to_owned(), provider.clone());
+                }
+            }
+        }
+    }
+
+    self::written(&serde_json::Value::Object(written))
+}
+
+/// `over` merged into `into`: objects key by key, all the way down, and
+/// anything else replaced whole.
+fn merged_over(into: &mut serde_json::Value, over: &serde_json::Value) {
+    match (into, over) {
+        (serde_json::Value::Object(into), serde_json::Value::Object(over)) => {
+            for (key, value) in over {
+                match into.get_mut(key) {
+                    Some(kept) => merged_over(kept, value),
+                    None => {
+                        into.insert(key.clone(), value.clone());
+                    }
+                }
+            }
+        }
+        (into, over) => *into = over.clone(),
+    }
+}
+
+/// JSON with comments, as plain JSON: every `//` and `/* */` comment outside a
+/// string taken out, and then every comma with only a closing bracket after it.
+///
+/// That is the whole of what JSONC adds to JSON, and how opencode reads its
+/// `opencode.jsonc`. What is inside a string is kept as it is, escapes and all.
+fn uncommented(text: &str) -> String {
+    let mut plain = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => {
+                plain.push(c);
+                in_string(&mut chars, &mut plain);
+            }
+            '/' if chars.peek() == Some(&'/') => while chars.next_if(|c| *c != '\n').is_some() {},
+            '/' if chars.peek() == Some(&'*') => {
+                chars.next();
+
+                let mut last = '\0';
+
+                for c in chars.by_ref() {
+                    if last == '*' && c == '/' {
+                        break;
+                    }
+
+                    last = c;
+                }
+
+                plain.push(' ');
+            }
+            _ => plain.push(c),
+        }
+    }
+
+    // And the trailing commas, now that no comment can be between one and the
+    // bracket after it.
+    let mut kept = String::with_capacity(plain.len());
+    let mut chars = plain.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => {
+                kept.push(c);
+                in_string(&mut chars, &mut kept);
+            }
+            ',' => {
+                let after = chars.clone().find(|c| !c.is_whitespace());
+
+                if !matches!(after, Some('}' | ']')) {
+                    kept.push(c);
+                }
+            }
+            _ => kept.push(c),
+        }
+    }
+
+    kept
+}
+
+/// The rest of a JSON string whose opening quote has been read, copied from
+/// `chars` onto `onto` up to and including its closing quote.
+fn in_string(chars: &mut std::iter::Peekable<std::str::Chars<'_>>, onto: &mut String) {
+    while let Some(c) = chars.next() {
+        onto.push(c);
+
+        match c {
+            '\\' => onto.extend(chars.next()),
+            '"' => return,
+            _ => {}
         }
     }
 }
@@ -931,7 +1178,9 @@ mod tests {
     fn entries(root: &Root) -> Vec<String> {
         match &root.harness {
             Harness::Claude { entries, .. } => entries.clone(),
-            Harness::Codex | Harness::Grok => panic!("only a Claude root has `projects/` entries"),
+            Harness::Codex | Harness::Grok | Harness::OpenCode => {
+                panic!("only a Claude root has `projects/` entries")
+            }
         }
     }
 
@@ -939,7 +1188,7 @@ mod tests {
     fn trusted(root: &Root) -> Vec<String> {
         match &root.harness {
             Harness::Claude { trusted, .. } => trusted.clone(),
-            Harness::Codex | Harness::Grok => {
+            Harness::Codex | Harness::Grok | Harness::OpenCode => {
                 panic!("only a Claude root has a `.claude.json` to trust in")
             }
         }
@@ -1289,7 +1538,7 @@ mod tests {
 
         root.made_in_account().unwrap();
 
-        let joined = root.joined(Path::new("/inside/.claude"));
+        let joined = root.joined(Path::new("/inside"));
         let repo_entry = entry_named(&repo);
         let worktree_entry = entry_named(&worktree);
 
@@ -1312,7 +1561,7 @@ mod tests {
 
         std::fs::write(account.join(CREDENTIALS), "{}\n").unwrap();
         assert_eq!(
-            root.joined(Path::new("/inside/.claude"))[0],
+            root.joined(Path::new("/inside"))[0],
             (
                 account.join(CREDENTIALS),
                 PathBuf::from("/inside/.claude/.credentials.json")
@@ -1340,7 +1589,7 @@ mod tests {
         let root = Root::claude(Platform::Linux, &account, &repo.join(".git"), &worktree)
             .remembering(false);
         assert_eq!(
-            root.unshared_in(Path::new("/built/.claude")),
+            root.unshared_in(Path::new("/built")),
             [PathBuf::from("/built/.claude/projects")]
         );
 
@@ -1351,7 +1600,7 @@ mod tests {
         );
 
         assert_eq!(
-            root.joined(Path::new("/inside/.claude")),
+            root.joined(Path::new("/inside")),
             [(
                 account.join(CREDENTIALS),
                 PathBuf::from("/inside/.claude/.credentials.json")
@@ -1418,12 +1667,12 @@ mod tests {
         forgetting.made_in_account().unwrap();
 
         assert!(
-            forgetting.joined(Path::new("/inside/.codex")).is_empty(),
+            forgetting.joined(Path::new("/inside")).is_empty(),
             "no login in the account and no memory shared, so nothing is joined"
         );
         assert!(!account.join("sessions").exists() && !account.join("memories").exists());
         assert_eq!(
-            forgetting.unshared_in(Path::new("/built/.codex")),
+            forgetting.unshared_in(Path::new("/built")),
             [
                 PathBuf::from("/built/.codex/sessions"),
                 PathBuf::from("/built/.codex/memories")
@@ -1436,7 +1685,7 @@ mod tests {
         remembering.made_in_account().unwrap();
 
         assert_eq!(
-            remembering.joined(Path::new("/inside/.codex")),
+            remembering.joined(Path::new("/inside")),
             [
                 (
                     account.join(AUTH),
@@ -1453,11 +1702,7 @@ mod tests {
             ]
         );
         assert!(account.join("sessions").is_dir() && account.join("memories").is_dir());
-        assert!(
-            remembering
-                .unshared_in(Path::new("/built/.codex"))
-                .is_empty()
-        );
+        assert!(remembering.unshared_in(Path::new("/built")).is_empty());
     }
 
     fn table(bytes: &[u8]) -> toml::Table {
@@ -1527,12 +1772,12 @@ mod tests {
         forgetting.made_in_account().unwrap();
 
         assert_eq!(
-            forgetting.joined(Path::new("/inside/.grok")),
+            forgetting.joined(Path::new("/inside")),
             [(account.join(AUTH), PathBuf::from("/inside/.grok/auth.json"))]
         );
         assert!(!account.join("sessions").exists() && !account.join("memory").exists());
         assert_eq!(
-            forgetting.unshared_in(Path::new("/built/.grok")),
+            forgetting.unshared_in(Path::new("/built")),
             [
                 PathBuf::from("/built/.grok/sessions"),
                 PathBuf::from("/built/.grok/memory")
@@ -1543,7 +1788,7 @@ mod tests {
         remembering.made_in_account().unwrap();
 
         assert_eq!(
-            remembering.joined(Path::new("/inside/.grok")),
+            remembering.joined(Path::new("/inside")),
             [
                 (account.join(AUTH), PathBuf::from("/inside/.grok/auth.json")),
                 (
@@ -1557,11 +1802,7 @@ mod tests {
             ]
         );
         assert!(account.join("sessions").is_dir() && account.join("memory").is_dir());
-        assert!(
-            remembering
-                .unshared_in(Path::new("/built/.grok"))
-                .is_empty()
-        );
+        assert!(remembering.unshared_in(Path::new("/built")).is_empty());
     }
 
     /// Only a Grok Build root on Linux is given its login as a copy: grok saves
@@ -1674,5 +1915,164 @@ mod tests {
             .is_empty()
         );
         assert!(toml_carrying(Some("endpoints = \"not a table\"\n"), &GROK_CARRIED).is_empty());
+    }
+
+    /// An OpenCode root shares its data directory whole and builds its config
+    /// directory; with memory off it builds both, and links the login alone
+    /// into the data directory. Nothing is made in the account for a root that
+    /// joins none of its store.
+    #[test]
+    fn an_opencode_root_joins_its_data_directory_whole_or_its_login_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let account = dir.path().join("account");
+        std::fs::create_dir_all(account.join(".local/share")).unwrap();
+
+        let forgetting = Root::opencode(&account).remembering(false);
+        forgetting.made_in_account().unwrap();
+
+        assert_eq!(
+            forgetting.built(),
+            [".config/opencode", ".local/share/opencode"]
+        );
+        assert!(
+            forgetting.joined(Path::new("/inside")).is_empty(),
+            "no login in the account and no memory shared, so nothing is joined"
+        );
+        assert!(!account.join(".local/share/opencode").exists());
+        assert!(forgetting.unshared_in(Path::new("/built")).is_empty());
+
+        std::fs::create_dir_all(account.join(".local/share/opencode")).unwrap();
+        std::fs::write(account.join(OPENCODE_AUTH), "{}\n").unwrap();
+
+        assert!(forgetting.login_alone());
+        assert_eq!(
+            forgetting.joined(Path::new("/inside")),
+            [(
+                account.join(OPENCODE_AUTH),
+                PathBuf::from("/inside/.local/share/opencode/auth.json")
+            )]
+        );
+        assert_eq!(
+            forgetting.credentials_in(Path::new("/built")),
+            Path::new("/built/.local/share/opencode/auth.json")
+        );
+
+        let remembering = Root::opencode(&account);
+
+        assert_eq!(remembering.built(), [".config/opencode"]);
+        assert!(!remembering.login_alone());
+        assert_eq!(
+            remembering.joined(Path::new("/inside")),
+            [(
+                account.join(".local/share/opencode"),
+                PathBuf::from("/inside/.local/share/opencode")
+            )],
+            "the data directory whole, with the login inside it"
+        );
+        assert_eq!(
+            remembering.written(Path::new("/built")).0,
+            Path::new("/built/.config/opencode/opencode.json")
+        );
+
+        assert_eq!(
+            Root::login_of(
+                &crate::store::Account::OpenCode {
+                    home: account.clone()
+                },
+                true
+            ),
+            None
+        );
+        assert_eq!(
+            Root::login_of(
+                &crate::store::Account::OpenCode {
+                    home: account.clone()
+                },
+                false
+            ),
+            Some(account.join(OPENCODE_AUTH))
+        );
+    }
+
+    /// The provider comes over as it is, and nothing else of the account's.
+    #[test]
+    fn only_the_provider_is_carried_into_opencodes_config() {
+        let account = serde_json::json!({
+            "$schema": "https://opencode.ai/config.json",
+            "provider": {
+                "proxy": {
+                    "npm": "@ai-sdk/openai-compatible",
+                    "options": { "baseURL": "https://proxy.example/v1" },
+                    "models": { "gpt-5": {} },
+                },
+            },
+            "mcp": { "the-humans": { "type": "local", "command": ["npx"] } },
+            "plugin": ["the-humans-plugin"],
+            "agent": { "review": {} },
+            "command": { "ship": {} },
+            "instructions": ["RULES.md"],
+            "theme": "tokyonight",
+        });
+
+        assert_eq!(
+            read(&opencode_config([Some(account.to_string()), None])),
+            serde_json::json!({
+                "provider": {
+                    "proxy": {
+                        "npm": "@ai-sdk/openai-compatible",
+                        "options": { "baseURL": "https://proxy.example/v1" },
+                        "models": { "gpt-5": {} },
+                    },
+                },
+            })
+        );
+    }
+
+    /// An `opencode.jsonc` with comments and trailing commas still gives its
+    /// provider, merged over the `opencode.json` beside it.
+    #[test]
+    fn an_opencode_jsonc_with_comments_still_gives_its_provider() {
+        let json = r#"{ "provider": { "proxy": { "options": { "baseURL": "https://old.example", "timeout": 5 } } } }"#;
+        let jsonc = r#"
+            // The human's own proxy.
+            {
+              "provider": {
+                /* where it is */
+                "proxy": { "options": { "baseURL": "https://proxy.example/v1", }, },
+                "other": { "name": "a // not a comment, \" nor /* this */" },
+              },
+              "mcp": {},
+            }
+        "#;
+
+        assert_eq!(
+            read(&opencode_config([
+                Some(json.to_owned()),
+                Some(jsonc.to_owned())
+            ])),
+            serde_json::json!({
+                "provider": {
+                    "proxy": { "options": { "baseURL": "https://proxy.example/v1", "timeout": 5 } },
+                    "other": { "name": "a // not a comment, \" nor /* this */" },
+                },
+            })
+        );
+    }
+
+    /// An account with no config, or one that does not read, is given a file
+    /// with no provider in it.
+    #[test]
+    fn an_account_with_no_opencode_config_to_read_is_given_one_with_no_provider() {
+        let empty = serde_json::json!({});
+
+        assert_eq!(read(&opencode_config([None, None])), empty);
+        assert_eq!(
+            read(&opencode_config([Some("{ not json".to_owned()), None])),
+            empty
+        );
+        assert_eq!(
+            read(&opencode_config([None, Some("[1, 2]".to_owned())])),
+            empty
+        );
     }
 }

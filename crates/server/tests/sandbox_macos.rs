@@ -351,6 +351,11 @@ fi
         self.elsewhere.path().join("grok-account/.grok")
     }
 
+    /// And the home the OpenCode Profile names.
+    fn opencode_home(&self) -> PathBuf {
+        self.elsewhere.path().join("opencode-account/opencode")
+    }
+
     /// A Profile of the second agent type, whose whole account is one home,
     /// holding what a Codex account that has been used holds: a login, a
     /// configuration naming a provider of its own beside the human's MCP
@@ -422,14 +427,19 @@ fi
     /// directories opencode keeps an account in — made the way a human makes
     /// one, a `HOME=<it> opencode` run leaving exactly these.
     async fn opencode_profile(&self) -> store::Profile {
-        let home = self.elsewhere.path().join("opencode-account/opencode");
+        let home = self.opencode_home();
         let config = home.join(".config/opencode");
         let data = home.join(".local/share/opencode");
 
-        std::fs::create_dir_all(&config).unwrap();
-        std::fs::write(config.join("opencode.json"), "{}\n").unwrap();
+        std::fs::create_dir_all(config.join("skills")).unwrap();
+        std::fs::write(
+            config.join("opencode.jsonc"),
+            "{\n  // The human's own proxy.\n  \"provider\": { \"proxy\": { \"options\": { \"baseURL\": \"https://proxy.example/v1\" } } },\n  \"mcp\": { \"the-humans\": {} },\n}\n",
+        )
+        .unwrap();
         std::fs::create_dir_all(&data).unwrap();
         std::fs::write(data.join("auth.json"), "{}\n").unwrap();
+        std::fs::write(data.join("opencode.db"), "the human's sessions\n").unwrap();
 
         self.profile_of(
             "opencode",
@@ -2006,6 +2016,147 @@ async fn a_grok_login_saved_inside_by_rename_is_the_accounts_once_the_session_en
         std::fs::read_to_string(account.join("auth.json")).unwrap(),
         "{\"refreshed\": \"inside\"}\n",
         "and then it is"
+    );
+}
+
+/// An OpenCode session's config directory is Verkstead's own, holding only an
+/// `opencode.json` carrying the account's provider, read out of its
+/// `opencode.jsonc`. With memory on its data directory is the account's,
+/// linked whole, so the store a session writes is on the account. The
+/// account's own config directory, reached by its real path, is refused like
+/// anything else.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn an_opencode_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
+    let fixture = grilling().await;
+    let profile = fixture.opencode_profile().await;
+    let account = fixture.opencode_home();
+
+    let reported = probe(
+        &fixture.sandbox_under(&profile),
+        &format!(
+            r#"
+            say config "$(ls -A "$HOME/.config/opencode" | sort | tr '\n' ' ')"
+            say written "$(cat "$HOME/.config/opencode/opencode.json" | tr -d ' \n')"
+            file "$HOME/.local/share/opencode/auth.json" login
+            file "$HOME/.local/share/opencode/opencode.db" db
+            dir {skills} the-accounts-skills
+            printf 'written inside\n' > "$HOME/.local/share/opencode/opencode.db"
+            "#,
+            skills = quoted(&account.join(".config/opencode/skills")),
+        ),
+    );
+
+    assert_eq!(reported["config"], "opencode.json ");
+    assert_eq!(
+        reported["written"],
+        r#"{"provider":{"proxy":{"options":{"baseURL":"https://proxy.example/v1"}}}}"#,
+        "the written configuration carries the provider and nothing else"
+    );
+    assert_eq!(reported["login"], "write");
+    assert_eq!(reported["db"], "write");
+    assert_eq!(
+        reported["the-accounts-skills"], "refused",
+        "and the account's own config directory is somebody else's on this machine"
+    );
+    assert_eq!(
+        std::fs::read_to_string(account.join(".local/share/opencode/opencode.db")).unwrap(),
+        "written inside\n",
+        "a store a session writes is on the account"
+    );
+}
+
+/// With the Profile's memory switched off, an OpenCode session's data directory
+/// is the root's own, holding the account's login alone. Its store is written
+/// in the root on the host, and the account's is untouched and refused.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn an_opencode_root_without_memory_has_a_data_directory_of_its_own() {
+    let fixture = grilling().await;
+    let forgetting = store::Profile {
+        memory: false,
+        ..fixture.opencode_profile().await
+    };
+    let account = fixture.opencode_home().join(".local/share/opencode");
+
+    let reported = probe(
+        &fixture.sandbox_under(&forgetting),
+        &format!(
+            r#"
+            say data "$(ls -A "$HOME/.local/share/opencode" | sort | tr '\n' ' ')"
+            file "$HOME/.local/share/opencode/auth.json" login
+            file {db} the-accounts-db
+            printf 'the session'"'"'s own\n' > "$HOME/.local/share/opencode/opencode.db"
+            "#,
+            db = quoted(&account.join("opencode.db")),
+        ),
+    );
+
+    assert_eq!(reported["data"], "auth.json ", "the login alone");
+    assert_eq!(reported["login"], "write");
+    assert_eq!(reported["the-accounts-db"], "refused");
+
+    let home = fixture
+        .state
+        .path()
+        .join("homes")
+        .join(fixture.conversation.id.to_string());
+
+    assert_eq!(
+        std::fs::read_to_string(home.join(".local/share/opencode/opencode.db")).unwrap(),
+        "the session's own\n",
+        "the store is in the root on the host, where it is looked for"
+    );
+    assert_eq!(
+        std::fs::read_to_string(account.join("opencode.db")).unwrap(),
+        "the human's sessions\n",
+        "and the account's is untouched"
+    );
+}
+
+/// With memory off, a login saved inside by renaming a file over the link
+/// replaces the link — so it is the account's once the session has ended.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn an_opencode_login_saved_inside_by_rename_is_the_accounts_once_the_session_ends() {
+    let fixture = grilling().await;
+    let forgetting = store::Profile {
+        memory: false,
+        ..fixture.opencode_profile().await
+    };
+    let credentials = fixture
+        .opencode_home()
+        .join(".local/share/opencode/auth.json");
+
+    let (_, afterwards) = probe_closing(
+        &fixture.sandbox_under(&forgetting),
+        r#"
+            printf '{"refreshed": "inside"}\n' > "$HOME/.local/share/opencode/auth.json.saving"
+            mv "$HOME/.local/share/opencode/auth.json.saving" "$HOME/.local/share/opencode/auth.json"
+        "#,
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{}\n",
+        "the login is not the account's while the session runs"
+    );
+
+    afterwards.close();
+
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{\"refreshed\": \"inside\"}\n",
+        "and it is once the session has ended"
     );
 }
 
