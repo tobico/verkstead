@@ -32,6 +32,12 @@
 //! and costs nothing; the replacing case costs a copy rather than the session's
 //! work.
 //!
+//! **A file given as a copy is merged back rather than written back.** Claude's
+//! `.claude.json` is copied into a session's profile on every platform, so the
+//! trust seeded into it is never written straight into the account. A copy is
+//! never one file with the account's, so what the session changed in it is
+//! merged into the account's own instead — see [`super::root::merged_back`].
+//!
 //! Directories are no part of it. A junction is a path rather than a file,
 //! nothing replaces one, and what is behind it is the account itself.
 //!
@@ -74,6 +80,16 @@ pub struct Closing {
     /// the two are made one file again once it has been written back.
     linked: Vec<(PathBuf, PathBuf, Rejoin)>,
 
+    /// And the files a session was given a copy of rather than a link to: the
+    /// account's own path, where the copy is on the host, and the copy as it
+    /// was given. What the session changed in it is merged into the account's —
+    /// see [`super::root::merged_back`].
+    ///
+    /// **Apart from the linked ones**, because a copy is never one file with the
+    /// account's. Asked the identity question, it would be written back whole at
+    /// every ending and linked afterwards, which is neither what a copy is for.
+    copied: Vec<(PathBuf, PathBuf, Vec<u8>)>,
+
     /// And the Conversation's entries the session is running behind, held for
     /// as long as it runs.
     ///
@@ -101,6 +117,7 @@ impl Closing {
     pub fn nothing() -> Closing {
         Closing {
             linked: Vec::new(),
+            copied: Vec::new(),
             #[cfg(windows)]
             behind: None,
         }
@@ -114,6 +131,7 @@ impl Closing {
                 .into_iter()
                 .map(|(host, inside)| (host, inside, Rejoin::Hard))
                 .collect(),
+            copied: Vec::new(),
             #[cfg(windows)]
             behind: None,
         }
@@ -123,6 +141,14 @@ impl Closing {
     /// made of the two names afterwards.
     pub(crate) fn and(mut self, host: PathBuf, inside: PathBuf, rejoin: Rejoin) -> Closing {
         self.linked.push((host, inside, rejoin));
+
+        self
+    }
+
+    /// The same, with a file whose copy `copy` was given as `baseline` — see
+    /// the field for what is done with it.
+    pub(crate) fn merging(mut self, host: PathBuf, copy: PathBuf, baseline: Vec<u8>) -> Closing {
+        self.copied.push((host, copy, baseline));
 
         self
     }
@@ -140,6 +166,12 @@ impl Closing {
     /// at all where the rendering joined nothing in by hand.
     pub fn linked(&self) -> impl Iterator<Item = &Path> {
         self.linked.iter().map(|(_, inside, _)| inside.as_path())
+    }
+
+    /// And the copies on the host whose changes are merged back, apart from
+    /// those names — see [`Closing::merging`].
+    pub fn copied(&self) -> impl Iterator<Item = &Path> {
+        self.copied.iter().map(|(_, copy, _)| copy.as_path())
     }
 
     /// The session has gone: whatever it wrote to its account that the account
@@ -163,6 +195,24 @@ impl Closing {
                     inside = %inside.display(),
                     "a file a session wrote could not be written back to the account, so what \
                      it wrote there is only inside the session's own profile"
+                ),
+            }
+        }
+
+        for (host, copy, baseline) in self.copied {
+            match super::root::merged_back(&host, &copy, &baseline) {
+                Ok(true) => tracing::debug!(
+                    account = %host.display(),
+                    copy = %copy.display(),
+                    "what a session changed in its copy of a file was merged into the account's own"
+                ),
+                Ok(false) => {}
+                Err(error) => tracing::error!(
+                    error = ?error,
+                    account = %host.display(),
+                    copy = %copy.display(),
+                    "what a session changed in its copy of a file could not be merged into the \
+                     account's own, so it is only in the session's own profile"
                 ),
             }
         }

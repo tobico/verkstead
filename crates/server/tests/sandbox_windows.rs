@@ -562,10 +562,10 @@ impl Grilling {
     /// ask it of two different endings. Every one of them is a real directory
     /// that outlives the session: the Worktree and the git directory behind it,
     /// what of the Profile's account a session's root joins in — the two
-    /// `projects/` entries and the login, never the account's directory — and
-    /// the file half beside it, the skills, the image a session asks with, and
-    /// the two Sandbox Configuration added. What is deliberately not in it is
-    /// the session's own profile under the Data Directory, root and all:
+    /// `projects/` entries and the login, never the account's directory — the
+    /// skills, the image a session asks with, and the two Sandbox Configuration
+    /// added. What is deliberately not in it is the session's own profile
+    /// under the Data Directory, root and copy of `.claude.json` and all:
     /// Verkstead's own, and nobody's to be left alone on.
     fn granted(&self) -> Vec<PathBuf> {
         let mut granted = vec![self.worktree().to_owned(), self.git_dir()];
@@ -573,7 +573,6 @@ impl Grilling {
         granted.extend(self.joined_entries());
         granted.extend([
             self.claude_dir().join(CREDENTIALS),
-            self.account.join(".claude.json"),
             self.skills.path().to_owned(),
             self.verkstead.path().to_owned(),
             self.writable.clone(),
@@ -953,8 +952,8 @@ fn said<'a>(classified: &'a BTreeMap<String, String>, name: &str) -> &'a str {
 /// is given and the two halves and the temporary directory inside it, which are
 /// made rather than reached; its Worktree and the git directory behind it; the
 /// root built for Claude, with the login hard-linked into it and the two
-/// `projects/` entries junctioned in, and the file half of the account beside it
-/// by hard link; the handoff directory; the skills, the attached files and the
+/// `projects/` entries junctioned in, and a copy of the file half of the account
+/// beside it; the handoff directory; the skills, the attached files and the
 /// image it asks with, read-only; and the two Sandbox Configuration added, one
 /// at each reach.
 #[tokio::test]
@@ -1004,7 +1003,7 @@ async fn every_access_kind_is_classified_as_the_description_said() {
         ("an-entry", "a `projects/` entry, through its junction"),
         (
             "config",
-            "the file half of the account, through the hard link",
+            "a copy of the file half of the account, in the profile",
         ),
         (
             "handoffs",
@@ -1471,6 +1470,91 @@ async fn an_accounts_key_helper_and_environment_come_over_and_its_hooks_do_not()
         own,
         "and the account's own settings are byte for byte what they were"
     );
+}
+
+/// A Windows session's `.claude.json` is a copy with the Repo and the Worktree
+/// trusted and none of the human's MCP servers — and what the session changed
+/// in it, saved by rename as Claude saves it, is merged into the account's own
+/// file as the session ends, with the account's MCP servers kept.
+#[tokio::test]
+async fn a_sessions_config_is_a_trusted_copy_merged_into_the_account_as_it_ends() {
+    let fixture = grilling().await;
+    let account = fixture.account.join(".claude.json");
+    std::fs::write(
+        &account,
+        "{\"numStartups\": 1, \"theme\": \"dark\", \"mcpServers\": {\"the-humans\": {}}}\n",
+    )
+    .unwrap();
+
+    let config = fixture.profile_dir().join(".claude.json");
+    let quoted = config.display().to_string().replace('\'', "''");
+
+    let classified = fixture.probe_running(&format!(
+        "{CLASSIFYING}\r\n\
+         $copy = [System.IO.File]::ReadAllText('{quoted}') | ConvertFrom-Json\r\n\
+         Report 'trusted' (($copy.projects.PSObject.Properties | Where-Object {{ $_.Value.hasTrustDialogAccepted }} | ForEach-Object {{ $_.Name }}) -join ',')\r\n\
+         Report 'servers' ($null -eq $copy.mcpServers)\r\n\
+         [System.IO.File]::WriteAllText('{quoted}.tmp', '{{\"numStartups\": 2, \"theme\": \"dark\"}}')\r\n\
+         [System.IO.File]::Delete('{quoted}')\r\n\
+         [System.IO.File]::Move('{quoted}.tmp', '{quoted}')\r\n"
+    ));
+
+    let mut trusted: Vec<String> = said(&classified, "trusted")
+        .split(',')
+        .map(str::to_owned)
+        .collect();
+    trusted.sort();
+
+    let mut expected: Vec<String> = [fixture.git_dir().parent().unwrap(), fixture.worktree()]
+        .into_iter()
+        .map(|path| {
+            let resolved = std::fs::canonicalize(path).unwrap().display().to_string();
+            resolved
+                .strip_prefix(r"\\?\")
+                .unwrap_or(&resolved)
+                .replace('\\', "/")
+        })
+        .collect();
+    expected.sort();
+    expected.dedup();
+
+    assert_eq!(
+        trusted, expected,
+        "the Repo and the Worktree read as trusted inside, keyed as Claude keys them"
+    );
+    assert_eq!(
+        said(&classified, "servers"),
+        "True",
+        "and the human's MCP servers are not in the copy"
+    );
+
+    let merged: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&account).unwrap()).unwrap();
+
+    assert_eq!(
+        merged,
+        serde_json::json!({
+            "numStartups": 2,
+            "theme": "dark",
+            "mcpServers": {"the-humans": {}},
+        }),
+        "what the session changed is merged into the account's own file as it \
+         ends, and the account's MCP servers survive a copy that never had them"
+    );
+}
+
+/// A session that changed nothing in its `.claude.json` leaves the account's
+/// byte for byte as it was.
+#[tokio::test]
+async fn a_session_that_changed_nothing_leaves_the_accounts_config_as_it_was() {
+    let fixture = grilling().await;
+    let account = fixture.account.join(".claude.json");
+    let own = "{\"numStartups\":1,   \"mcpServers\": {\"the-humans\": {}}}\n";
+    std::fs::write(&account, own).unwrap();
+
+    fixture.probe_running(CLASSIFYING);
+
+    assert_eq!(std::fs::read_to_string(&account).unwrap(), own);
 }
 
 /// A live Conversation's Worktree is reachable from another Conversation's

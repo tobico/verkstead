@@ -1617,6 +1617,126 @@ async fn a_login_written_through_the_link_is_left_alone_as_the_session_ends() {
     );
 }
 
+/// The `.claude.json` a Claude session reads is a copy of the account's, with
+/// the Repo and the Worktree trusted in it and none of the human's own MCP
+/// servers.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn a_claude_sessions_config_trusts_the_repo_and_the_worktree_and_holds_no_mcp_servers() {
+    let fixture = grilling().await;
+    let account = fixture.elsewhere.path().join("account/.claude.json");
+    std::fs::write(
+        &account,
+        concat!(
+            r#"{"numStartups": 7, "mcpServers": {"the-humans": {}}, "projects": "#,
+            r#"{"/Users/you/src/something-else": {"mcpServers": {"its-own": {}}, "allowedTools": []}}}"#,
+            "\n",
+        ),
+    )
+    .unwrap();
+
+    let reported = probe(
+        &fixture.sandbox(),
+        r#"say config "$(tr -d '\n' < "$HOME/.claude.json")""#,
+    );
+    let config: serde_json::Value = serde_json::from_str(&reported["config"]).unwrap();
+
+    for trusted in [real(&fixture.repo), real(fixture.worktree())] {
+        assert_eq!(
+            config["projects"][trusted.to_string_lossy().as_ref()]["hasTrustDialogAccepted"],
+            true,
+            "{} reads as trusted inside: {config}",
+            trusted.display()
+        );
+    }
+
+    assert_eq!(
+        config["numStartups"], 7,
+        "the rest of the account's is there"
+    );
+    assert_eq!(config["mcpServers"], serde_json::Value::Null);
+    assert_eq!(
+        config["projects"]["/Users/you/src/something-else"],
+        serde_json::json!({"allowedTools": []})
+    );
+}
+
+/// What a Claude session changes in its `.claude.json`, saved by rename as
+/// Claude saves it, reaches the account as the session ends — merged into the
+/// account's file as it is by then, so a key the account changed meanwhile is
+/// kept and the human's MCP servers survive.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn what_a_session_changed_in_its_config_is_merged_into_the_accounts_as_it_ends() {
+    let fixture = grilling().await;
+    let account = fixture.elsewhere.path().join("account/.claude.json");
+    let own = r#"{"numStartups": 1, "theme": "dark", "mcpServers": {"the-humans": {}}}"#;
+    std::fs::write(&account, own).unwrap();
+
+    let (_, afterwards) = probe_closing(
+        &fixture.sandbox(),
+        r#"
+        printf '{"numStartups": 2, "theme": "dark"}\n' > "$HOME/.claude.json.tmp"
+        mv -f "$HOME/.claude.json.tmp" "$HOME/.claude.json"
+        "#,
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(&account).unwrap(),
+        own,
+        "what the session wrote is its copy, not the account's file"
+    );
+
+    std::fs::write(
+        &account,
+        r#"{"numStartups": 1, "theme": "light", "mcpServers": {"the-humans": {}}}"#,
+    )
+    .unwrap();
+
+    afterwards.close();
+
+    let merged: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&account).unwrap()).unwrap();
+
+    assert_eq!(
+        merged,
+        serde_json::json!({
+            "numStartups": 2,
+            "theme": "light",
+            "mcpServers": {"the-humans": {}},
+        })
+    );
+}
+
+/// A session that changed nothing in its `.claude.json` leaves the account's
+/// byte for byte as it was.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn a_session_that_changed_nothing_leaves_the_accounts_config_as_it_was() {
+    let fixture = grilling().await;
+    let account = fixture.elsewhere.path().join("account/.claude.json");
+    let own = "{\"numStartups\":1,   \"mcpServers\": {\"the-humans\": {}}}\n";
+    std::fs::write(&account, own).unwrap();
+
+    let (reported, afterwards) =
+        probe_closing(&fixture.sandbox(), r#"file "$HOME/.claude.json" config"#);
+
+    assert_eq!(reported["config"], "write");
+
+    afterwards.close();
+
+    assert_eq!(std::fs::read_to_string(&account).unwrap(), own);
+}
+
 /// The name Claude Code gives a path's `projects/` entry, for the paths these
 /// tests use — none long enough to be cut and hashed.
 fn entry_named(path: &Path) -> String {

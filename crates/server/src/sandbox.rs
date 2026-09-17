@@ -37,7 +37,8 @@
 //!
 //! - **read-write** — the Conversation's worktree, the Repo's common `.git`
 //!   directory, and what the Profile's account is joined in as — for Claude a
-//!   root of Verkstead's own at `~/.claude`, see [`root`], beside `~/.claude.json`
+//!   root of Verkstead's own at `~/.claude`, see [`root`], beside a copy of
+//!   `~/.claude.json` whose changes are merged back
 //! - **read-only** — `/nix` and the system paths, the bundled skills in a
 //!   directory of Verkstead's own — see [`own_directory`] — the files the human
 //!   attached to the Conversation beside them, and the executable serving all
@@ -3441,8 +3442,9 @@ pub struct Sandbox {
     /// The Profile's account, in the shape its agent type keeps one — what is
     /// mounted into HOME, and where.
     ///
-    /// Claude's pair goes over `~/.claude` and `~/.claude.json`, and travels
-    /// together or not at all: the pair is what keeps accounts apart. Every type
+    /// Claude's pair is `~/.claude` and `~/.claude.json`, and travels together
+    /// or not at all: the pair is what keeps accounts apart. A session is given
+    /// a root built out of the first and a copy of the second. Every type
     /// after it is one home over the one directory that backend keeps its whole
     /// account under. Which arm this is also says which backend a session is
     /// running, which is what [`AGENT_TYPE`] carries inside.
@@ -3871,6 +3873,12 @@ impl Sandbox {
             closing = closing.and(host, inside, rejoin);
         }
 
+        // And its `.claude.json`, which is a copy on every platform — see
+        // [`Sandbox::config_closing`].
+        if let Some((host, copy, baseline)) = self.config_closing(&surface) {
+            closing = closing.merging(host, copy, baseline);
+        }
+
         #[cfg(windows)]
         if let Some(boundary) = boundary {
             // What the machine says about the paths this description refuses,
@@ -4072,17 +4080,12 @@ impl Sandbox {
         //
         // **Except Claude's directory where a root is built in its place** —
         // see [`Sandbox::root_described`], which is what a session is given of
-        // `~/.claude` there. The file half of the pair is joined as it always
-        // was.
+        // `~/.claude` there, and a copy of the file half — see
+        // [`Sandbox::config_described`].
         match (&self.account, &self.root) {
             (store::Account::Claude { config_file, .. }, Some(root)) => {
                 self.root_described(root, &mut surface);
-
-                surface.elsewhere(
-                    config_file,
-                    self.home.path().join(CLAUDE_CONFIG_INSIDE_HOME),
-                    Reach::ReadWrite,
-                );
+                self.config_described(root, config_file, &mut surface);
             }
             _ => {
                 for (host, inside) in account_inside(&self.account, self.home.path()) {
@@ -4378,9 +4381,64 @@ impl Sandbox {
         }
     }
 
+    /// And what it is given of `~/.claude.json`: a copy of the account's own,
+    /// written as the session starts — see [`root::Root::config`].
+    ///
+    /// **Copied rather than linked**, so the trust seeded into it is written
+    /// into the session's copy and not into the account's file. What the
+    /// session changes in it is merged back as it ends — see
+    /// [`Sandbox::config_closing`].
+    ///
+    /// Written into the directory the root is built in. On a Mac and on Windows
+    /// that is the profile itself, so the copy is already where Claude looks.
+    /// On Linux it is bound over `$HOME/.claude.json`: Claude saves the file by
+    /// renaming a temporary file over it, and where a bind refuses that it
+    /// writes in place, which is into the copy on the host.
+    fn config_described(&self, root: &root::Root, config_file: &Path, surface: &mut Surface) {
+        let copy = self.config_copy();
+        let inside = self.home.path().join(CLAUDE_CONFIG_INSIDE_HOME);
+
+        surface.made(Access::Written {
+            path: copy.clone(),
+            contents: root.config(config_file),
+        });
+
+        // Only where it is somewhere else: a profile is reached whole already,
+        // and a grant on the file inside it would be one more entry to write.
+        if copy != inside {
+            surface.elsewhere(copy, inside, Reach::ReadWrite);
+        }
+    }
+
     /// Where a Claude session's root is on the host.
     fn built_root(&self) -> PathBuf {
         self.home.built().join(CLAUDE_DIR_INSIDE_HOME)
+    }
+
+    /// And where its copy of `.claude.json` is on the host.
+    fn config_copy(&self) -> PathBuf {
+        self.home.built().join(CLAUDE_CONFIG_INSIDE_HOME)
+    }
+
+    /// What a Claude session's ending has to see to about its `.claude.json`:
+    /// the copy it was given, merged into the account's own file — on every
+    /// platform, a copy following nothing on any of them.
+    ///
+    /// **The copy as it was given is read off the description** rather than
+    /// read again off the account, which may have changed since.
+    fn config_closing(&self, surface: &Surface) -> Option<(PathBuf, PathBuf, Vec<u8>)> {
+        let store::Account::Claude { config_file, .. } = &self.account else {
+            return None;
+        };
+
+        let copy = self.config_copy();
+
+        surface.reaches().iter().find_map(|access| match access {
+            Access::Written { path, contents } if *path == copy => {
+                Some((config_file.clone(), copy.clone(), contents.clone()))
+            }
+            _ => None,
+        })
     }
 
     /// What a Claude session's ending has to see to about its login, on top of

@@ -16,6 +16,10 @@
 //! a login from inside and a memory written inside both land in the account:
 //! a bind on Linux, a symlink on a Mac, and on Windows a hard link for the login
 //! and a junction for each entry.
+//!
+//! **Beside the root, `.claude.json` is copied rather than joined**, so the
+//! trust seeded into it is not written straight into the account, and what a
+//! session changes in it is merged back as it ends — see [`merged_back`].
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -44,6 +48,20 @@ const SETTINGS: &str = "settings.json";
 /// `statusLine` — and none of it is a session's.
 const CARRIED: [&str; 2] = ["apiKeyHelper", "env"];
 
+/// Of the account's `.claude.json`, the key its MCP servers are under: at the top
+/// level, and again under each `projects` entry.
+///
+/// **Never in a session's copy, and never written back.** Those are the human's
+/// own servers, the same leak as plugins — and a key a copy never had is not a
+/// key a session removed.
+const MCP_SERVERS: &str = "mcpServers";
+
+/// Of the account's `.claude.json`, the key its per-path entries are under.
+const PROJECTS_CONFIG: &str = "projects";
+
+/// What a `projects` entry says to have the trust dialog answered.
+const TRUSTED: &str = "hasTrustDialogAccepted";
+
 /// How long an entry's name is before Claude cuts it and puts a hash on the end.
 const LONGEST: usize = 200;
 
@@ -58,6 +76,11 @@ pub(crate) struct Root {
     /// checkout's first and the Worktree's after it. One where the two are the
     /// same name.
     entries: Vec<String>,
+
+    /// The same two paths as `.claude.json` keys its `projects` entries: the
+    /// plain path, with forward slashes on Windows. One where the two are the
+    /// same path.
+    trusted: Vec<String>,
 }
 
 impl Root {
@@ -83,18 +106,30 @@ impl Root {
         };
 
         let mut entries = Vec::new();
+        let mut trusted = Vec::new();
 
         for path in [main_checkout(git_dir), worktree] {
-            let entry = entry_named(&super::plainly(&path));
+            let plain = super::plainly(&path);
+            let entry = entry_named(&plain);
 
             if !entries.contains(&entry) {
                 entries.push(entry);
+            }
+
+            let key = match platform {
+                Platform::Windows => plain.to_string_lossy().replace('\\', "/"),
+                Platform::Linux | Platform::MacOs => plain.to_string_lossy().into_owned(),
+            };
+
+            if !trusted.contains(&key) {
+                trusted.push(key);
             }
         }
 
         Root {
             account: account.to_owned(),
             entries,
+            trusted,
         }
     }
 
@@ -124,6 +159,19 @@ impl Root {
     /// Blocking: one read.
     pub(crate) fn settings(&self) -> Vec<u8> {
         settings(std::fs::read(self.account.join(SETTINGS)).ok().as_deref())
+    }
+
+    /// The `.claude.json` a session is given: a copy of the account's own at
+    /// `config_file` as it is at this moment, with its MCP servers taken out
+    /// and the Repo and the Worktree trusted — see [`config`].
+    ///
+    /// Copied rather than linked, so what is seeded is written into the copy
+    /// and not into the account. What the session changes goes back as it ends
+    /// — see [`merged_back`].
+    ///
+    /// Blocking: one read.
+    pub(crate) fn config(&self, config_file: &Path) -> Vec<u8> {
+        config(std::fs::read(config_file).ok().as_deref(), &self.trusted)
     }
 
     /// Make each joined entry in the account where it is not there yet.
@@ -202,8 +250,226 @@ fn settings(account: Option<&[u8]>) -> Vec<u8> {
         }
     }
 
-    let mut bytes = serde_json::to_vec_pretty(&serde_json::Value::Object(written))
-        .expect("a map of JSON values writes as JSON");
+    self::written(&serde_json::Value::Object(written))
+}
+
+/// A JSON object, as `serde_json` holds one.
+type Object = serde_json::Map<String, serde_json::Value>;
+
+/// The `.claude.json` a session is given, out of the account's own where there
+/// is one to read.
+///
+/// **Without `mcpServers`**, at the top level and under each `projects` entry.
+///
+/// **With a `projects` entry for each of `trusted` saying
+/// `hasTrustDialogAccepted`**, beside whatever the account's entry for that path
+/// already says. Claude Code 2.1.268 asks about the Repo's main checkout first
+/// and then each directory up from the one it was started in, so a session in
+/// the Worktree is past the trust dialog, with nobody at its terminal to answer
+/// it. Not `bypassPermissionsModeAccepted`: 2.1.268 moves that key out of this
+/// file, and the settings a root is given already answer that consent — see
+/// [`settings`].
+///
+/// An account whose file is not there, or does not read as a JSON object, is
+/// given the seeding and nothing else.
+fn config(account: Option<&[u8]>, trusted: &[String]) -> Vec<u8> {
+    let mut copy = match account.and_then(|bytes| serde_json::from_slice(bytes).ok()) {
+        Some(serde_json::Value::Object(own)) => own,
+        _ => Object::new(),
+    };
+
+    copy.remove(MCP_SERVERS);
+
+    let projects = object_at(&mut copy, PROJECTS_CONFIG);
+
+    for entry in projects.values_mut() {
+        if let serde_json::Value::Object(entry) = entry {
+            entry.remove(MCP_SERVERS);
+        }
+    }
+
+    for path in trusted {
+        object_at(projects, path).insert(TRUSTED.to_owned(), serde_json::Value::Bool(true));
+    }
+
+    written(&serde_json::Value::Object(copy))
+}
+
+/// What a session changed in its copy of `.claude.json`, merged into the
+/// account's own file at `account`. `baseline` is the copy as it was given, and
+/// `copy` is where the session left it.
+///
+/// **A merge rather than a copy.** A copy is never one file with the account's,
+/// so writing it back whole would overwrite the account at every session end.
+/// Sessions run side by side, and the human runs their own `claude` besides, so
+/// the last session to end would win over whatever the others wrote in the
+/// meantime — and a copy with no `mcpServers` in it would take the human's
+/// servers away.
+///
+/// So only what the session changed goes back: each top-level key, and each
+/// `projects` entry, whose value in the copy is not what it was in `baseline`.
+/// A key the session removed is removed. `mcpServers` is neither written nor
+/// removed, at either level, and an entry written back keeps the account's own.
+/// The trust the copy was seeded with reaches the account only in an entry the
+/// session changed.
+///
+/// **Nothing is written where nothing differs**, so a session that changed
+/// nothing leaves the account's file byte for byte as it was. Where something
+/// does, the file is written beside the account's and renamed over it, with the
+/// account's mode. Says whether it was written.
+///
+/// An account with no such file is given one. A copy the session took away, or
+/// a file on either side that does not read as a JSON object, is an error:
+/// nothing is written over a file this cannot read.
+///
+/// Blocking: three reads at most, and a write and a rename where anything
+/// changed.
+pub(crate) fn merged_back(account: &Path, copy: &Path, baseline: &[u8]) -> io::Result<bool> {
+    let baseline = object(baseline, "the copy as it was given")?;
+    let now = object(&std::fs::read(copy)?, "the session's copy")?;
+
+    let own = match std::fs::read(account) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error),
+    };
+
+    let mut merged = match &own {
+        Some(bytes) => object(bytes, "the account's own")?,
+        None => Object::new(),
+    };
+
+    if !merge(&baseline, &now, &mut merged) {
+        return Ok(false);
+    }
+
+    let mut beside = account.as_os_str().to_owned();
+    beside.push(format!(".verkstead-{}", std::process::id()));
+    let beside = PathBuf::from(beside);
+
+    let replaced = std::fs::write(&beside, written(&serde_json::Value::Object(merged)))
+        .and_then(|()| match own {
+            Some(_) => std::fs::set_permissions(&beside, std::fs::metadata(account)?.permissions()),
+            None => Ok(()),
+        })
+        .and_then(|()| std::fs::rename(&beside, account));
+
+    if replaced.is_err() {
+        let _ = std::fs::remove_file(&beside);
+    }
+
+    replaced.map(|()| true)
+}
+
+/// Into `account`, what differs between `baseline` and `now` — see
+/// [`merged_back`] for the rule. Says whether anything did.
+fn merge(baseline: &Object, now: &Object, account: &mut Object) -> bool {
+    let mut changed = false;
+
+    for key in keys(baseline, now) {
+        if key == MCP_SERVERS || key == PROJECTS_CONFIG || baseline.get(key) == now.get(key) {
+            continue;
+        }
+
+        changed = true;
+
+        match now.get(key) {
+            Some(value) => account.insert(key.to_owned(), value.clone()),
+            None => account.remove(key),
+        };
+    }
+
+    let empty = Object::new();
+    let entries = |config: &'_ Object| match config.get(PROJECTS_CONFIG) {
+        Some(serde_json::Value::Object(projects)) => projects.clone(),
+        _ => empty.clone(),
+    };
+    let (was, is) = (entries(baseline), entries(now));
+
+    for path in keys(&was, &is) {
+        if was.get(path) == is.get(path) {
+            continue;
+        }
+
+        changed = true;
+
+        // An entry taken away that the account has no `projects` for is
+        // nothing to take away, and no reason to give it an empty one.
+        if !is.contains_key(path) && !account.get(PROJECTS_CONFIG).is_some_and(|p| p.is_object()) {
+            continue;
+        }
+
+        let projects = object_at(account, PROJECTS_CONFIG);
+
+        // The account's own servers for this path, which the copy never had.
+        let servers = projects
+            .get(path)
+            .and_then(|entry| entry.get(MCP_SERVERS))
+            .cloned();
+
+        let mut entry = is.get(path).cloned();
+
+        if let Some(serde_json::Value::Object(entry)) = &mut entry {
+            entry.remove(MCP_SERVERS);
+        }
+
+        if let Some(servers) = servers {
+            let kept = entry.get_or_insert_with(|| serde_json::Value::Object(Object::new()));
+
+            if let serde_json::Value::Object(kept) = kept {
+                kept.insert(MCP_SERVERS.to_owned(), servers);
+            }
+        }
+
+        match entry {
+            Some(entry) => projects.insert(path.to_owned(), entry),
+            None => projects.remove(path),
+        };
+    }
+
+    changed
+}
+
+/// The object under `key` in `object`, made an empty one first where there is
+/// nothing there or something that is not an object.
+fn object_at<'a>(object: &'a mut Object, key: &str) -> &'a mut Object {
+    let value = object
+        .entry(key)
+        .or_insert_with(|| serde_json::Value::Object(Object::new()));
+
+    if !value.is_object() {
+        *value = serde_json::Value::Object(Object::new());
+    }
+
+    value
+        .as_object_mut()
+        .expect("made an object just above where it was not one")
+}
+
+/// Every key of either object, once each.
+fn keys<'a>(one: &'a Object, other: &'a Object) -> std::collections::BTreeSet<&'a str> {
+    one.keys().chain(other.keys()).map(String::as_str).collect()
+}
+
+/// `bytes` as a JSON object, or an error saying `what` does not read as one.
+fn object(bytes: &[u8], what: &str) -> io::Result<Object> {
+    match serde_json::from_slice(bytes) {
+        Ok(serde_json::Value::Object(object)) => Ok(object),
+        Ok(_) => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{what} is JSON but not an object"),
+        )),
+        Err(error) => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{what} does not read as JSON: {error}"),
+        )),
+    }
+}
+
+/// `value` as a file: indented by two spaces, as Claude writes one, with a line
+/// ending after it.
+fn written(value: &serde_json::Value) -> Vec<u8> {
+    let mut bytes = serde_json::to_vec_pretty(value).expect("a JSON value writes as JSON");
     bytes.push(b'\n');
 
     bytes
@@ -405,6 +671,187 @@ mod tests {
                 "env": { "ANTHROPIC_BASE_URL": "https://proxy.example" },
             })
         );
+    }
+
+    /// The copy keeps the account's own entry for a trusted path and adds the
+    /// trust to it; a Windows path is keyed with forward slashes, as Claude
+    /// keys one.
+    #[test]
+    fn the_copy_trusts_each_path_beside_what_its_entry_already_says() {
+        let root = Root::of(
+            Platform::Windows,
+            Path::new(r"C:\Users\ada\.claude"),
+            Path::new(r"\\?\C:\Users\ada\src\verkstead"),
+            Path::new(r"\\?\C:\ProgramData\Verkstead\worktrees\verkstead-x"),
+        );
+
+        assert_eq!(
+            root.trusted,
+            [
+                "C:/Users/ada/src/verkstead",
+                "C:/ProgramData/Verkstead/worktrees/verkstead-x"
+            ]
+        );
+
+        let account = serde_json::json!({
+            "mcpServers": { "the-humans": {} },
+            "projects": {
+                "C:/Users/ada/src/verkstead": {
+                    "allowedTools": ["Bash"],
+                    "mcpServers": { "its-own": {} },
+                },
+            },
+        });
+
+        assert_eq!(
+            read(&config(Some(account.to_string().as_bytes()), &root.trusted)),
+            serde_json::json!({
+                "projects": {
+                    "C:/Users/ada/src/verkstead": {
+                        "allowedTools": ["Bash"],
+                        "hasTrustDialogAccepted": true,
+                    },
+                    "C:/ProgramData/Verkstead/worktrees/verkstead-x": {
+                        "hasTrustDialogAccepted": true,
+                    },
+                },
+            })
+        );
+        assert_eq!(
+            read(&config(Some(b"{ not json"), &root.trusted[..1])),
+            serde_json::json!({
+                "projects": { "C:/Users/ada/src/verkstead": { "hasTrustDialogAccepted": true } },
+            }),
+            "and an account file that does not read gives the seeding alone"
+        );
+    }
+
+    /// Merge `now` over `account`, with `baseline` as the copy was given.
+    fn merging(
+        baseline: serde_json::Value,
+        now: serde_json::Value,
+        account: serde_json::Value,
+    ) -> (bool, serde_json::Value) {
+        let mut account = account.as_object().unwrap().clone();
+        let changed = merge(
+            baseline.as_object().unwrap(),
+            now.as_object().unwrap(),
+            &mut account,
+        );
+
+        (changed, serde_json::Value::Object(account))
+    }
+
+    /// An entry the session changed goes back whole but for its MCP servers,
+    /// which stay the account's; an entry it took away leaves those behind; an
+    /// entry it did not touch is the account's as it is now.
+    #[test]
+    fn an_entry_merged_back_keeps_the_accounts_own_mcp_servers() {
+        let (changed, merged) = merging(
+            serde_json::json!({ "projects": {
+                "/changed": { "hasTrustDialogAccepted": true },
+                "/removed": { "allowedTools": [] },
+                "/untouched": { "allowedTools": [] },
+            }}),
+            serde_json::json!({ "projects": {
+                "/changed": { "hasTrustDialogAccepted": true, "lastCost": 1, "mcpServers": { "added-inside": {} } },
+                "/untouched": { "allowedTools": [] },
+            }}),
+            serde_json::json!({
+                "mcpServers": { "the-humans": {} },
+                "projects": {
+                    "/changed": { "mcpServers": { "its-own": {} } },
+                    "/removed": { "allowedTools": [], "mcpServers": { "kept": {} } },
+                    "/untouched": { "allowedTools": ["changed by the account"] },
+                },
+            }),
+        );
+
+        assert!(changed);
+        assert_eq!(
+            merged,
+            serde_json::json!({
+                "mcpServers": { "the-humans": {} },
+                "projects": {
+                    "/changed": {
+                        "hasTrustDialogAccepted": true,
+                        "lastCost": 1,
+                        "mcpServers": { "its-own": {} },
+                    },
+                    "/removed": { "mcpServers": { "kept": {} } },
+                    "/untouched": { "allowedTools": ["changed by the account"] },
+                },
+            })
+        );
+    }
+
+    /// A copy the session left as it was given changes nothing, and neither
+    /// does an `mcpServers` a session wrote into it.
+    #[test]
+    fn nothing_changed_but_mcp_servers_is_nothing_to_merge() {
+        let given = serde_json::json!({ "numStartups": 1, "projects": { "/repo": {} } });
+
+        let (changed, _) = merging(given.clone(), given.clone(), serde_json::json!({}));
+        assert!(!changed);
+
+        let (changed, merged) = merging(
+            given,
+            serde_json::json!({
+                "numStartups": 1,
+                "mcpServers": { "added-inside": {} },
+                "projects": { "/repo": {} },
+            }),
+            serde_json::json!({ "mcpServers": { "the-humans": {} } }),
+        );
+        assert!(!changed);
+        assert_eq!(
+            merged,
+            serde_json::json!({ "mcpServers": { "the-humans": {} } })
+        );
+    }
+
+    /// The write-back itself: nothing written where nothing changed, a file
+    /// given to an account with none, the mode kept, and nothing written over a
+    /// file that does not read.
+    #[cfg(unix)]
+    #[test]
+    fn a_merge_is_written_by_rename_with_the_accounts_mode_and_never_over_what_does_not_read() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let (account, copy) = (
+            dir.path().join(".claude.json"),
+            dir.path().join("copy.json"),
+        );
+        let baseline = b"{\"numStartups\": 1}\n";
+
+        std::fs::write(&copy, baseline).unwrap();
+        assert!(!merged_back(&account, &copy, baseline).unwrap());
+        assert!(!account.exists(), "nothing changed, so nothing is written");
+
+        std::fs::write(&copy, "{\"numStartups\": 2}\n").unwrap();
+        assert!(merged_back(&account, &copy, baseline).unwrap());
+        assert_eq!(
+            read(&std::fs::read(&account).unwrap()),
+            serde_json::json!({ "numStartups": 2 })
+        );
+
+        std::fs::set_permissions(&account, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::write(&copy, "{\"numStartups\": 3}\n").unwrap();
+        assert!(merged_back(&account, &copy, baseline).unwrap());
+        assert_eq!(
+            std::fs::metadata(&account).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            std::fs::read_dir(dir.path()).unwrap().count(),
+            2,
+            "and nothing is left beside it"
+        );
+
+        std::fs::write(&account, "{ half written").unwrap();
+        assert!(merged_back(&account, &copy, baseline).is_err());
+        assert_eq!(std::fs::read_to_string(&account).unwrap(), "{ half written");
     }
 
     /// A Worktree and a Repo whose entries are one name join it once.

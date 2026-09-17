@@ -1430,17 +1430,23 @@ async fn a_windows_session_finds_the_profiles_account_inside_a_profile_of_its_ow
         "a transcript a session writes should be on the account"
     );
 
-    // The file half, written the way a program writes one in place — which is
-    // the case a hard link answers whole. The other case, a file replaced by a
-    // rename, is answered as the session ends — see
-    // [`a_file_a_session_replaced_is_written_back_to_the_account_as_the_session_ends`].
+    // The file half is a copy rather than a link: written into, it is the
+    // session's own until the session ends — see
+    // [`a_windows_sessions_config_is_a_copy_merged_into_the_account_as_the_session_ends`].
+    assert_ne!(
+        std::fs::metadata(profile.join(".claude.json"))
+            .unwrap()
+            .ino(),
+        std::fs::metadata(fixture.claude_config()).unwrap().ino(),
+        "the account's config file is copied into the profile, not linked"
+    );
+
     std::fs::write(profile.join(".claude.json"), "{\"logged-in\": true}\n").unwrap();
 
     assert_eq!(
         std::fs::read_to_string(fixture.claude_config()).unwrap(),
-        "{\"logged-in\": true}\n",
-        "the account's config file and the one inside the profile should be one \
-         file, which is what a hard link is"
+        "{}\n",
+        "so what is written inside is not on the account while the session runs"
     );
 }
 
@@ -1563,56 +1569,81 @@ async fn each_session_gets_the_profile_fresh_and_the_account_untouched() {
     );
 }
 
-/// A file the session replaced rather than wrote in place is on the account
-/// once the session has ended, and the session after it finds one file again.
-///
-/// **The case a hard link cannot answer by itself.** An agent that saves its
-/// config by writing a temporary file and renaming it over the top leaves the
-/// session writing to a file of its own, with the account's copy seeing none of
-/// it — so the ending the rendering handed back is asked, and what the session
-/// wrote goes back over the account (ADR-0014).
+/// A Windows session's `.claude.json` is a copy: its Repo and Worktree trusted,
+/// the account's MCP servers taken out, and what the session changed merged
+/// into the account's own file as it ends — whether it wrote the copy in place
+/// or replaced it by rename, as Claude saves one.
 ///
 /// Asked of the description on whichever machine is running this, as everything
-/// else about that rendering is: a file is joined into the profile by a hard
-/// link on either kind of machine, and what a rename over one costs is the same
-/// fact about the filesystem either way.
+/// else about that rendering is.
 #[tokio::test]
-async fn a_file_a_session_replaced_is_written_back_to_the_account_as_the_session_ends() {
+async fn a_windows_sessions_config_is_a_copy_merged_into_the_account_as_the_session_ends() {
     let fixture = grilling().await;
+    std::fs::write(
+        fixture.claude_config(),
+        "{\"numStartups\": 1, \"theme\": \"dark\", \"mcpServers\": {\"the-humans\": {}}}\n",
+    )
+    .unwrap();
 
     let afterwards = made(&fixture.sandbox_on(Platform::Windows));
     let inside = fixture.windows_profile().join(".claude.json");
 
+    let copy: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&inside).unwrap()).unwrap();
+
+    assert_eq!(copy["mcpServers"], serde_json::Value::Null);
+    assert_eq!(copy["numStartups"], 1);
+    assert_eq!(
+        copy["projects"]
+            .as_object()
+            .unwrap()
+            .values()
+            .filter(|entry| entry["hasTrustDialogAccepted"] == true)
+            .count(),
+        2,
+        "the Repo and the Worktree are trusted in the copy: {copy}"
+    );
+    assert_eq!(
+        afterwards.copied().collect::<Vec<_>>(),
+        [inside.as_path()],
+        "and the copy is what the session's ending merges back"
+    );
+    assert!(
+        !afterwards.linked().any(|linked| linked == inside),
+        "rather than a link it writes back whole"
+    );
+
     let written = fixture.windows_profile().join(".claude.json.tmp");
-    std::fs::write(&written, "{\"logged-in\": true}\n").unwrap();
+    std::fs::write(
+        &written,
+        "{\"numStartups\": 2, \"theme\": \"dark\", \"projects\": {}}\n",
+    )
+    .unwrap();
     std::fs::rename(&written, &inside).unwrap();
 
-    assert_eq!(
-        std::fs::read_to_string(fixture.claude_config()).unwrap(),
-        "{}\n",
-        "which is the whole of the problem: the two names have stopped being one \
-         file, and the account has seen none of what the session wrote"
-    );
+    std::fs::write(
+        fixture.claude_config(),
+        "{\"numStartups\": 1, \"theme\": \"light\", \"mcpServers\": {\"the-humans\": {}}}\n",
+    )
+    .unwrap();
 
     afterwards.close();
 
+    let merged: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(fixture.claude_config()).unwrap()).unwrap();
+
     assert_eq!(
-        std::fs::read_to_string(fixture.claude_config()).unwrap(),
-        "{\"logged-in\": true}\n",
-        "so as the session ends what it wrote is written back over the account's own"
+        merged["numStartups"], 2,
+        "what the session changed is merged in"
     );
-
-    // And the session after it finds one file rather than two: the link is made
-    // fresh, so a change written in place inside is on the account without
-    // anything being copied anywhere.
-    made(&fixture.sandbox_on(Platform::Windows));
-
-    std::fs::write(&inside, "{\"logged-in\": true, \"in\": \"place\"}\n").unwrap();
-
     assert_eq!(
-        std::fs::read_to_string(fixture.claude_config()).unwrap(),
-        "{\"logged-in\": true, \"in\": \"place\"}\n",
-        "the session after a write-back is writing the account itself again"
+        merged["theme"], "light",
+        "what the account changed meanwhile is kept"
+    );
+    assert_eq!(
+        merged["mcpServers"],
+        serde_json::json!({"the-humans": {}}),
+        "and the human's MCP servers survive a copy that never had them"
     );
 }
 
@@ -1708,13 +1739,13 @@ async fn a_rendering_whose_links_follow_their_target_leaves_nothing_to_close() {
         .collect();
 
     assert!(
-        linked.contains(&fixture.windows_profile().join(".claude.json")),
+        linked.contains(&fixture.windows_profile().join(".claude/.credentials.json")),
         "and the platform that joins a file in by hard link leaves the file it \
-         joined in: {linked:?}"
+         joined in, the login in the root: {linked:?}"
     );
     assert!(
-        linked.contains(&fixture.windows_profile().join(".claude/.credentials.json")),
-        "the login in the root included: {linked:?}"
+        !linked.contains(&fixture.windows_profile().join(".claude.json")),
+        "but not `.claude.json`, which is a copy rather than a link: {linked:?}"
     );
 
     // And nothing else anywhere. A name outside the profile is a rendering
@@ -2464,6 +2495,155 @@ async fn a_login_made_inside_an_account_with_none_is_the_accounts_once_the_sessi
         std::fs::read_to_string(&credentials).unwrap(),
         "{\"logged\": \"in\"}\n",
         "and the account's from then on"
+    );
+}
+
+/// The `.claude.json` a Claude session reads is a copy of the account's, with
+/// the Repo and the Worktree trusted in it — so the session is past the trust
+/// dialog with nobody at its terminal — and with none of the human's own MCP
+/// servers in it, at the top level or under an entry.
+#[tokio::test]
+async fn a_claude_sessions_config_trusts_the_repo_and_the_worktree_and_holds_no_mcp_servers() {
+    let fixture = grilling().await;
+    std::fs::write(
+        fixture.claude_config(),
+        concat!(
+            r#"{"numStartups": 7, "mcpServers": {"the-humans": {}}, "projects": "#,
+            r#"{"/home/you/src/something-else": {"mcpServers": {"its-own": {}}, "allowedTools": []}}}"#,
+            "\n",
+        ),
+    )
+    .unwrap();
+
+    let reported = probe(
+        &fixture.sandbox(vec![]),
+        r#"say config "$(tr -d '\n' < "$HOME/.claude.json")""#,
+    );
+    let config: serde_json::Value = serde_json::from_str(&reported["config"]).unwrap();
+
+    for trusted in [fixture.repo.as_path(), fixture.worktree()] {
+        assert_eq!(
+            config["projects"][trusted.to_string_lossy().as_ref()]["hasTrustDialogAccepted"],
+            true,
+            "{} reads as trusted inside: {config}",
+            trusted.display()
+        );
+    }
+
+    assert_eq!(
+        config["numStartups"], 7,
+        "the rest of the account's is there"
+    );
+    assert_eq!(
+        config["mcpServers"],
+        serde_json::Value::Null,
+        "and not the human's MCP servers"
+    );
+    assert_eq!(
+        config["projects"]["/home/you/src/something-else"],
+        serde_json::json!({"allowedTools": []}),
+        "nor an entry's own"
+    );
+}
+
+/// What a Claude session changes in its `.claude.json` reaches the account as
+/// the session ends, merged into the account's file as it is by then: a key the
+/// account changed meanwhile is kept, and the human's MCP servers survive a copy
+/// that never had them.
+///
+/// Written the way Claude writes it: a rename, which a bind over a file refuses,
+/// and then in place.
+#[tokio::test]
+async fn what_a_session_changed_in_its_config_is_merged_into_the_accounts_as_it_ends() {
+    let fixture = grilling().await;
+    std::fs::write(
+        fixture.claude_config(),
+        r#"{"numStartups": 1, "theme": "dark", "tipsHistory": {"a": 1}, "mcpServers": {"the-humans": {}}}"#,
+    )
+    .unwrap();
+
+    let (reported, afterwards) = probe_closing(
+        &fixture.sandbox(vec![]),
+        r#"
+        printf '{"numStartups": 2, "theme": "dark"}\n' > "$HOME/.claude.json.tmp"
+        if mv -f "$HOME/.claude.json.tmp" "$HOME/.claude.json" 2>/dev/null; then
+            say renamed yes
+        else
+            say renamed refused
+        fi
+        printf '{"numStartups": 2, "theme": "dark"}\n' > "$HOME/.claude.json"
+        "#,
+    );
+
+    assert_eq!(
+        reported["renamed"], "refused",
+        "a rename onto the bound copy is refused, which sends Claude to writing \
+         in place"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_config()).unwrap(),
+        r#"{"numStartups": 1, "theme": "dark", "tipsHistory": {"a": 1}, "mcpServers": {"the-humans": {}}}"#,
+        "and what it writes is its copy, not the account's file"
+    );
+
+    std::fs::write(
+        fixture.claude_config(),
+        r#"{"numStartups": 1, "theme": "light", "tipsHistory": {"a": 1}, "mcpServers": {"the-humans": {}}}"#,
+    )
+    .unwrap();
+
+    afterwards.close();
+
+    let merged: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(fixture.claude_config()).unwrap()).unwrap();
+
+    assert_eq!(
+        merged,
+        serde_json::json!({
+            "numStartups": 2,
+            "theme": "light",
+            "mcpServers": {"the-humans": {}},
+        }),
+        "the session's change and its removal of `tipsHistory` are merged in, the \
+         account's own change of theme is kept, the MCP servers survive, and the \
+         trust seeded into the copy stays there"
+    );
+}
+
+/// A session that changed nothing in its `.claude.json` leaves the account's
+/// byte for byte as it was, and a login still one with the account's is left
+/// alone.
+#[tokio::test]
+async fn a_session_that_changed_nothing_leaves_the_accounts_config_as_it_was() {
+    let fixture = grilling().await;
+    let own = "{\"numStartups\":1,   \"mcpServers\": {\"the-humans\": {}}}\n";
+    std::fs::write(fixture.claude_config(), own).unwrap();
+
+    let credentials = fixture.claude_dir().join(".credentials.json");
+    let modified = std::fs::metadata(&credentials).unwrap().modified().unwrap();
+
+    let (reported, afterwards) = probe_closing(
+        &fixture.sandbox(vec![]),
+        r#"file "$HOME/.claude.json" config"#,
+    );
+
+    assert_eq!(reported["config"], "write");
+
+    afterwards.close();
+
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_config()).unwrap(),
+        own,
+        "nothing differs, so nothing is written"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{\"the\": \"login\"}\n"
+    );
+    assert_eq!(
+        std::fs::metadata(&credentials).unwrap().modified().unwrap(),
+        modified,
+        "and the login is not written at all"
     );
 }
 
