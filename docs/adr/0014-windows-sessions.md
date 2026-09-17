@@ -554,8 +554,12 @@ allowlists.
 — 1,289 files on the reporter's machine, and the tree a first boundary spent
 its minutes walking — becomes an entry on the built root and one on each joined
 memory entry. The other repositories' transcripts, which were most of that walk,
-are no longer in it. A hard link shares the file's own list, so the credentials
-file is reachable through the same entry it has today.
+are no longer in it. **The credentials file takes an entry of its own.** It is
+reached today through the entry on the account directory, which goes, and a hard
+link shares the file's own list rather than taking its new parent's — so
+without one the session cannot read its login. The entry is on the account's
+own file, so it is written down and taken back with the rest of the
+Conversation's entries.
 
 **Linux gains a profile directory.** A Linux session has run in a tmpfs over
 the server's home with the account bound in, and nothing under the Data

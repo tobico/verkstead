@@ -67,8 +67,12 @@ is built rather than joined*, and from the grilling that settled this roadmap.
 - **The Windows boundary grants the root, not the account.** The read-write
   entry on the whole of `~/.claude` — 1,289 files on the reporter's machine, and
   the tree a first boundary walks — becomes an entry on the built root plus one
-  on each of the two joined `projects/` entries; a hard link shares the file's own list, so the
-  credentials file is reachable as it is today. `%APPDATA%`, `%LOCALAPPDATA%`,
+  on each of the two joined `projects/` entries, **and one on the credentials
+  file itself**. Today that file is reached through the entry on `~/.claude`,
+  which goes; a hard link shares the file's own access list rather than taking
+  its new parent's, so without an entry of its own the session cannot read its
+  login. That entry is on the account's own file, so it is written down and
+  taken back with the rest of the Conversation's entries. `%APPDATA%`, `%LOCALAPPDATA%`,
   `TEMP` and the rest of the fresh profile are untouched.
 - **Detection is unchanged.** The wizard still finds an account by `~/.claude`
   and `~/.claude.json` both existing, and a Profile still stores that pair. What
@@ -107,8 +111,10 @@ is built rather than joined*, and from the grilling that settled this roadmap.
    still one with the account's is left alone.
 5. **The `.claude/skills` cover removed**, and the Windows grant narrowed to
    the root. AC: the Surface names no entry on the account directory; the
-   Windows suite's boundary is written over the root and the two `projects/`
-   entries only.
+   Windows suite's boundary is written over the root, the two `projects/`
+   entries and the credentials file only; a session reads its credentials
+   through the hard link; the credentials file's entry is gone once the
+   Conversation is closed.
 6. **The docs.** CONTEXT.md's Agent Profile and Sandbox entries, the adoption
    doc's three platform sections and its NixOS `paths` example, `docs/design`
    where it says the pair is bind-mounted. AC: no document says the account is
