@@ -53,6 +53,8 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
+use super::sharing::{Baseline, Share};
+
 /// How a file that was written back is made one with the account's again.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Rejoin {
@@ -81,14 +83,20 @@ pub struct Closing {
     linked: Vec<(PathBuf, PathBuf, Rejoin)>,
 
     /// And the files a session was given a copy of rather than a link to: the
-    /// account's own path, where the copy is on the host, and the copy as it
-    /// was given. What the session changed in it is merged into the account's —
-    /// see [`super::root::merged_back`].
+    /// account's own path, where the copy is on the host, and the copy as the
+    /// account last had it. What the session changed in it is merged into the
+    /// account's — see [`super::root::merged_back`].
     ///
     /// **Apart from the linked ones**, because a copy is never one file with the
     /// account's. Asked the identity question, it would be written back whole at
     /// every ending and linked afterwards, which is neither what a copy is for.
-    copied: Vec<(PathBuf, PathBuf, Vec<u8>)>,
+    copied: Vec<(PathBuf, PathBuf, Baseline)>,
+
+    /// And the root this launch shares with whatever else of its Conversation
+    /// is running in it, on Linux — held for as long as it runs, so the next
+    /// launch does not build the root again from under it. See
+    /// [`super::sharing`].
+    share: Option<Share>,
 
     /// And the Conversation's entries the session is running behind, held for
     /// as long as it runs.
@@ -118,6 +126,7 @@ impl Closing {
         Closing {
             linked: Vec::new(),
             copied: Vec::new(),
+            share: None,
             #[cfg(windows)]
             behind: None,
         }
@@ -132,6 +141,7 @@ impl Closing {
                 .map(|(host, inside)| (host, inside, Rejoin::Hard))
                 .collect(),
             copied: Vec::new(),
+            share: None,
             #[cfg(windows)]
             behind: None,
         }
@@ -145,10 +155,17 @@ impl Closing {
         self
     }
 
-    /// The same, with a file whose copy `copy` was given as `baseline` — see
-    /// the field for what is done with it.
-    pub(crate) fn merging(mut self, host: PathBuf, copy: PathBuf, baseline: Vec<u8>) -> Closing {
+    /// The same, with a file whose copy `copy` is merged against `baseline` —
+    /// see the field for what is done with it.
+    pub(crate) fn merging(mut self, host: PathBuf, copy: PathBuf, baseline: Baseline) -> Closing {
         self.copied.push((host, copy, baseline));
+
+        self
+    }
+
+    /// The same, holding the root this launch shares — see the field.
+    pub(crate) fn sharing(mut self, share: Share) -> Closing {
+        self.share = Some(share);
 
         self
     }
@@ -200,7 +217,14 @@ impl Closing {
         }
 
         for (host, copy, baseline) in self.copied {
-            match super::root::merged_back(&host, &copy, &baseline) {
+            // Under the baseline's lock, because a copy shared by two launches
+            // is merged by whichever ends first and then by the other, and the
+            // second is to carry only what changed after the first.
+            let Ok(mut baseline) = baseline.lock() else {
+                continue;
+            };
+
+            match super::root::merged_back(&host, &copy, &mut baseline) {
                 Ok(true) => tracing::debug!(
                     account = %host.display(),
                     copy = %copy.display(),

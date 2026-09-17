@@ -1308,7 +1308,10 @@ is what an unnamed one is *called*, not one anything falls back to)
 **Built Root**:
 The `~/.claude` a Claude session runs in. It is a directory of Verkstead's own
 at `homes/<id>/.claude` under the Data Directory, emptied and made again as
-each of the Conversation's sessions starts. It holds an allowlist out of the
+each of the Conversation's sessions starts. On Linux, a session or terminal that
+starts while another of the Conversation's is still running shares the root
+as it is instead, because emptying it would unmount what is joined into the
+running one. It holds an allowlist out of the
 **Agent Profile**'s account, and nothing else. **The credentials file**, linked,
 so a login or a token refresh from inside lands in the account. **Two entries
 under `projects/`**, joined read-write and made in the account first where

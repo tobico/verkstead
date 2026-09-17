@@ -129,6 +129,7 @@ mod surface;
 // And what a Claude session is given of its account: a `.claude` of
 // Verkstead's own, built out of an allowlist — see [`root`].
 mod root;
+mod sharing;
 
 // And what a rendering cannot say on the platform it is for: how long what it
 // started lives. Not a `cfg` at all — the platform is a value here, and both
@@ -2466,7 +2467,10 @@ const GITHUB: &str = "https://github.com";
 /// inside the namespace: as the directory a Claude session's `.claude` is built
 /// in, which a bind has to be made *from* and so has to be real — see
 /// [`root`]. Emptied and made again as each session starts, as the other two
-/// platforms' profiles are.
+/// platforms' profiles are — **except while something of the Conversation is
+/// still running in it**, which the next launch shares instead, because
+/// emptying it would unmount what is joined into that running one. See
+/// [`sharing`].
 ///
 /// One is emptied as each of that Conversation's sessions starts rather than
 /// removed when the Conversation ends. What a session left in it is nothing
@@ -2513,6 +2517,10 @@ pub struct Homes {
     /// reason [`Platform`] is one: the arm this machine will never run is still
     /// an arm a test on it can ask for.
     platform: Platform,
+
+    /// And which Conversations' Linux roots something is running in, shared by
+    /// every session and terminal this server starts — see [`sharing`].
+    sharing: sharing::Sharing,
 }
 
 impl Homes {
@@ -2546,6 +2554,7 @@ impl Homes {
             data: data_dir.to_owned(),
             account: account::named(data_dir),
             platform,
+            sharing: sharing::Sharing::default(),
         }
     }
 
@@ -2603,6 +2612,7 @@ impl Homes {
             handoffs: handoffs::inside(self.platform, &path),
             path,
             built,
+            sharing: self.sharing.clone(),
         }
     }
 }
@@ -2626,6 +2636,9 @@ pub struct Home {
     /// host: `path` itself on a Mac and on Windows, and on Linux the directory
     /// beside the namespace's HOME that a root is built in — see [`Homes`].
     built: PathBuf,
+
+    /// And the server's register of which of those something is running in.
+    sharing: sharing::Sharing,
 }
 
 impl Home {
@@ -3834,7 +3847,37 @@ impl Sandbox {
     /// and there is no unsandboxed session to fall back to. The two platforms
     /// with a wrapper never refuse here.
     pub fn command<S: AsRef<OsStr>>(&self, argv: &[S]) -> std::io::Result<(Rendering, Closing)> {
-        let surface = self.surface(argv);
+        // A Claude root on Linux, which the next launch shares for as long as
+        // something is running in it rather than build again from under it —
+        // see [`sharing`]. Held by what is left to see to, so it is running
+        // until that has been seen to.
+        if self.root.is_some() && self.home.built() != self.home.path() {
+            let ((rendering, closing), share) = self
+                .home
+                .sharing
+                .launched(self.conversation, |launch| self.launched(argv, launch))?;
+
+            return Ok((rendering, closing.sharing(share)));
+        }
+
+        self.launched(
+            argv,
+            sharing::Launch {
+                builds: true,
+                baseline: sharing::Baseline::default(),
+            },
+        )
+    }
+
+    /// The same, told whether this launch builds its root or shares one that
+    /// is already running, and the baseline its `.claude.json` copy is merged
+    /// against.
+    fn launched<S: AsRef<OsStr>>(
+        &self,
+        argv: &[S],
+        launch: sharing::Launch,
+    ) -> std::io::Result<(Rendering, Closing)> {
+        let surface = self.surface(argv, launch.builds);
 
         // Worked out before the rendering and used after it, so that a build
         // for a machine with no identity to make still says what one would be
@@ -3875,8 +3918,8 @@ impl Sandbox {
 
         // And its `.claude.json`, which is a copy on every platform — see
         // [`Sandbox::config_closing`].
-        if let Some((host, copy, baseline)) = self.config_closing(&surface) {
-            closing = closing.merging(host, copy, baseline);
+        if let Some((host, copy)) = self.config_closing(&surface, &launch.baseline) {
+            closing = closing.merging(host, copy, launch.baseline);
         }
 
         #[cfg(windows)]
@@ -4012,7 +4055,7 @@ impl Sandbox {
     /// second one — see [`surface`]. Which is why the account lands after the
     /// directory it goes inside, and why the handoff directory is after the
     /// temporary filesystem that would otherwise be over it.
-    fn surface<S: AsRef<OsStr>>(&self, argv: &[S]) -> Surface {
+    fn surface<S: AsRef<OsStr>>(&self, argv: &[S], builds: bool) -> Surface {
         // What a session searches for a program in, said once: Verkstead's own
         // directory and then the machine's own half of it — see [`path`]. Read
         // twice below, and both readings are of this one value: what a session
@@ -4084,8 +4127,8 @@ impl Sandbox {
         // [`Sandbox::config_described`].
         match (&self.account, &self.root) {
             (store::Account::Claude { config_file, .. }, Some(root)) => {
-                self.root_described(root, &mut surface);
-                self.config_described(root, config_file, &mut surface);
+                self.root_described(root, builds, &mut surface);
+                self.config_described(root, config_file, builds, &mut surface);
             }
             _ => {
                 for (host, inside) in account_inside(&self.account, self.home.path()) {
@@ -4360,21 +4403,28 @@ impl Sandbox {
     /// **And a `settings.json` of Verkstead's own is written into it**, out of
     /// the account's — see [`root::Root::settings`]. Written rather than joined,
     /// so it is never the account's file and nothing of it is written back.
-    fn root_described(&self, root: &root::Root, surface: &mut Surface) {
-        if self.home.built() != self.home.path() {
-            surface.made(Access::Built(self.home.built().to_owned()));
-        }
-
+    ///
+    /// **Neither emptied nor written where `builds` is false**, which is a
+    /// Linux root something of the Conversation is still running in: this
+    /// launch is given it as that one has it — see [`sharing`].
+    fn root_described(&self, root: &root::Root, builds: bool, surface: &mut Surface) {
         let built = self.built_root();
         let inside = self.home.path().join(CLAUDE_DIR_INSIDE_HOME);
 
-        surface
-            .made(Access::Built(built.clone()))
-            .made(Access::Written {
-                path: root::Root::settings_in(&built),
-                contents: root.settings(),
-            })
-            .elsewhere(&built, &inside, Reach::ReadWrite);
+        if builds {
+            if self.home.built() != self.home.path() {
+                surface.made(Access::Built(self.home.built().to_owned()));
+            }
+
+            surface
+                .made(Access::Built(built.clone()))
+                .made(Access::Written {
+                    path: root::Root::settings_in(&built),
+                    contents: root.settings(),
+                });
+        }
+
+        surface.elsewhere(&built, &inside, Reach::ReadWrite);
 
         for (host, joined) in root.joined(&inside) {
             surface.elsewhere(host, joined, Reach::ReadWrite);
@@ -4394,14 +4444,25 @@ impl Sandbox {
     /// On Linux it is bound over `$HOME/.claude.json`: Claude saves the file by
     /// renaming a temporary file over it, and where a bind refuses that it
     /// writes in place, which is into the copy on the host.
-    fn config_described(&self, root: &root::Root, config_file: &Path, surface: &mut Surface) {
+    ///
+    /// Not written where `builds` is false, for [`Sandbox::root_described`]'s
+    /// reason: the copy is the one already running.
+    fn config_described(
+        &self,
+        root: &root::Root,
+        config_file: &Path,
+        builds: bool,
+        surface: &mut Surface,
+    ) {
         let copy = self.config_copy();
         let inside = self.home.path().join(CLAUDE_CONFIG_INSIDE_HOME);
 
-        surface.made(Access::Written {
-            path: copy.clone(),
-            contents: root.config(config_file),
-        });
+        if builds {
+            surface.made(Access::Written {
+                path: copy.clone(),
+                contents: root.config(config_file),
+            });
+        }
 
         // Only where it is somewhere else: a profile is reached whole already,
         // and a grant on the file inside it would be one more entry to write.
@@ -4425,20 +4486,34 @@ impl Sandbox {
     /// platform, a copy following nothing on any of them.
     ///
     /// **The copy as it was given is read off the description** rather than
-    /// read again off the account, which may have changed since.
-    fn config_closing(&self, surface: &Surface) -> Option<(PathBuf, PathBuf, Vec<u8>)> {
-        let store::Account::Claude { config_file, .. } = &self.account else {
+    /// read again off the account, which may have changed since, and is what
+    /// `baseline` starts from. A launch sharing a root whose copy is already
+    /// written describes none, and merges against the baseline of the launch
+    /// that wrote it — see [`sharing`].
+    fn config_closing(
+        &self,
+        surface: &Surface,
+        baseline: &sharing::Baseline,
+    ) -> Option<(PathBuf, PathBuf)> {
+        let (store::Account::Claude { config_file, .. }, Some(_)) = (&self.account, &self.root)
+        else {
             return None;
         };
 
         let copy = self.config_copy();
 
-        surface.reaches().iter().find_map(|access| match access {
-            Access::Written { path, contents } if *path == copy => {
-                Some((config_file.clone(), copy.clone(), contents.clone()))
-            }
+        let written = surface.reaches().iter().find_map(|access| match access {
+            Access::Written { path, contents } if *path == copy => Some(contents.clone()),
             _ => None,
-        })
+        });
+
+        if let Some(contents) = written {
+            *baseline
+                .lock()
+                .expect("a baseline nothing has panicked holding") = contents;
+        }
+
+        Some((config_file.clone(), copy))
     }
 
     /// What a Claude session's ending has to see to about its login, on top of

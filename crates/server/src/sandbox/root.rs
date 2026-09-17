@@ -296,8 +296,14 @@ fn config(account: Option<&[u8]>, trusted: &[String]) -> Vec<u8> {
 }
 
 /// What a session changed in its copy of `.claude.json`, merged into the
-/// account's own file at `account`. `baseline` is the copy as it was given, and
-/// `copy` is where the session left it.
+/// account's own file at `account`. `baseline` is the copy as the account last
+/// had it, and `copy` is where the session left it.
+///
+/// **`baseline` is moved on to the copy as it was merged**, once the account
+/// has it. A copy can be shared by more than one launch — see
+/// [`super::sharing`] — and the second of them to end is to carry only what
+/// changed after the first, rather than write the first one's changes again
+/// over whatever the account has had since.
 ///
 /// **A merge rather than a copy.** A copy is never one file with the account's,
 /// so writing it back whole would overwrite the account at every session end.
@@ -324,9 +330,11 @@ fn config(account: Option<&[u8]>, trusted: &[String]) -> Vec<u8> {
 ///
 /// Blocking: three reads at most, and a write and a rename where anything
 /// changed.
-pub(crate) fn merged_back(account: &Path, copy: &Path, baseline: &[u8]) -> io::Result<bool> {
-    let baseline = object(baseline, "the copy as it was given")?;
-    let now = object(&std::fs::read(copy)?, "the session's copy")?;
+pub(crate) fn merged_back(account: &Path, copy: &Path, baseline: &mut Vec<u8>) -> io::Result<bool> {
+    let read = std::fs::read(copy)?;
+
+    let was = object(baseline, "the copy as it was given")?;
+    let now = object(&read, "the session's copy")?;
 
     let own = match std::fs::read(account) {
         Ok(bytes) => Some(bytes),
@@ -339,7 +347,9 @@ pub(crate) fn merged_back(account: &Path, copy: &Path, baseline: &[u8]) -> io::R
         None => Object::new(),
     };
 
-    if !merge(&baseline, &now, &mut merged) {
+    if !merge(&was, &now, &mut merged) {
+        *baseline = read;
+
         return Ok(false);
     }
 
@@ -356,6 +366,8 @@ pub(crate) fn merged_back(account: &Path, copy: &Path, baseline: &[u8]) -> io::R
 
     if replaced.is_err() {
         let _ = std::fs::remove_file(&beside);
+    } else {
+        *baseline = read;
     }
 
     replaced.map(|()| true)
@@ -823,14 +835,14 @@ mod tests {
             dir.path().join(".claude.json"),
             dir.path().join("copy.json"),
         );
-        let baseline = b"{\"numStartups\": 1}\n";
+        let mut baseline = b"{\"numStartups\": 1}\n".to_vec();
 
-        std::fs::write(&copy, baseline).unwrap();
-        assert!(!merged_back(&account, &copy, baseline).unwrap());
+        std::fs::write(&copy, &baseline).unwrap();
+        assert!(!merged_back(&account, &copy, &mut baseline).unwrap());
         assert!(!account.exists(), "nothing changed, so nothing is written");
 
         std::fs::write(&copy, "{\"numStartups\": 2}\n").unwrap();
-        assert!(merged_back(&account, &copy, baseline).unwrap());
+        assert!(merged_back(&account, &copy, &mut baseline).unwrap());
         assert_eq!(
             read(&std::fs::read(&account).unwrap()),
             serde_json::json!({ "numStartups": 2 })
@@ -838,7 +850,7 @@ mod tests {
 
         std::fs::set_permissions(&account, std::fs::Permissions::from_mode(0o600)).unwrap();
         std::fs::write(&copy, "{\"numStartups\": 3}\n").unwrap();
-        assert!(merged_back(&account, &copy, baseline).unwrap());
+        assert!(merged_back(&account, &copy, &mut baseline).unwrap());
         assert_eq!(
             std::fs::metadata(&account).unwrap().permissions().mode() & 0o777,
             0o600
@@ -850,8 +862,41 @@ mod tests {
         );
 
         std::fs::write(&account, "{ half written").unwrap();
-        assert!(merged_back(&account, &copy, baseline).is_err());
+        assert!(merged_back(&account, &copy, &mut baseline).is_err());
         assert_eq!(std::fs::read_to_string(&account).unwrap(), "{ half written");
+    }
+
+    /// A copy two launches share is merged as each ends, and the second merge
+    /// carries only what changed after the first — not the first one's changes
+    /// again, over what the account has had since.
+    #[test]
+    fn a_second_merge_of_one_copy_carries_only_what_changed_after_the_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let (account, copy) = (
+            dir.path().join(".claude.json"),
+            dir.path().join("copy.json"),
+        );
+        let mut baseline = b"{\"numStartups\": 1, \"theme\": \"dark\"}\n".to_vec();
+
+        std::fs::write(&account, &baseline).unwrap();
+        std::fs::write(&copy, "{\"numStartups\": 2, \"theme\": \"dark\"}\n").unwrap();
+        assert!(merged_back(&account, &copy, &mut baseline).unwrap());
+
+        // The human's own `claude` starts once more in between.
+        std::fs::write(&account, "{\"numStartups\": 5, \"theme\": \"dark\"}\n").unwrap();
+
+        assert!(
+            !merged_back(&account, &copy, &mut baseline).unwrap(),
+            "nothing changed in the copy since the first merge"
+        );
+
+        std::fs::write(&copy, "{\"numStartups\": 2, \"theme\": \"light\"}\n").unwrap();
+        assert!(merged_back(&account, &copy, &mut baseline).unwrap());
+        assert_eq!(
+            read(&std::fs::read(&account).unwrap()),
+            serde_json::json!({ "numStartups": 5, "theme": "light" }),
+            "and what did change is all that goes back"
+        );
     }
 
     /// A Worktree and a Repo whose entries are one name join it once.

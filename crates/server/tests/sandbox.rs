@@ -2713,6 +2713,65 @@ async fn the_root_is_built_under_the_data_directory_fresh_for_each_session() {
     );
 }
 
+/// A launch into a Conversation that already has something running in its root
+/// — a Conversation Terminal opened beside a session — shares that root rather
+/// than empty it: emptying it would unmount what is joined into the running
+/// one. It is built afresh once everything running in it has ended.
+#[tokio::test]
+async fn a_root_something_is_running_in_is_shared_rather_than_built_again() {
+    let fixture = grilling().await;
+    let sandbox = fixture.sandbox(vec![]);
+
+    let home = fixture
+        .state
+        .path()
+        .join("homes")
+        .join(fixture.conversation.id.to_string());
+
+    let session = made(&sandbox);
+
+    std::fs::write(home.join(".claude/written-by-the-session"), "kept\n").unwrap();
+    std::fs::write(
+        home.join(".claude.json"),
+        "{\"written\": \"by the session\"}\n",
+    )
+    .unwrap();
+
+    let terminal = made(&sandbox);
+
+    assert!(
+        home.join(".claude/written-by-the-session").is_file(),
+        "a terminal opened beside a running session leaves its root as it is"
+    );
+    assert_eq!(
+        std::fs::read_to_string(home.join(".claude.json")).unwrap(),
+        "{\"written\": \"by the session\"}\n",
+        "and its copy of `.claude.json` too"
+    );
+    assert_eq!(
+        terminal.copied().collect::<Vec<_>>(),
+        [home.join(".claude.json")],
+        "which the terminal merges back as well"
+    );
+
+    drop(session);
+    let second = made(&sandbox);
+
+    assert!(
+        home.join(".claude/written-by-the-session").is_file(),
+        "the terminal is still running in it"
+    );
+
+    drop(terminal);
+    drop(second);
+    made(&sandbox);
+
+    assert!(
+        !home.join(".claude/written-by-the-session").exists(),
+        "and once nothing is, the next launch is given it fresh"
+    );
+}
+
 /// The name Claude Code gives a path's `projects/` entry, for the paths these
 /// tests use — none of them long enough to be cut and hashed, which is the
 /// server's own unit tests' to ask.
