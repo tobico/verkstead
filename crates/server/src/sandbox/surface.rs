@@ -82,6 +82,15 @@ pub(crate) enum Access {
     /// [`super::root`]. The other two platforms really make an empty
     /// directory anyway, and make this one the same way.
     Built(PathBuf),
+
+    /// A file of Verkstead's own **on the host**, written with `contents` as a
+    /// session starts, inside a directory said [`Access::Built`] before it.
+    ///
+    /// Reached by nothing for having been said, for that directory's reason:
+    /// a session finds it through whatever reaches the directory it is in. It
+    /// is never read back — what a session does to it is thrown away with the
+    /// rest of what was built.
+    Written { path: PathBuf, contents: Vec<u8> },
 }
 
 /// The whole of what a command run inside a sandbox is given: what it may

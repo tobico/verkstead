@@ -4353,6 +4353,10 @@ impl Sandbox {
     /// and on a Mac is where it already is, and the account's credentials and
     /// two `projects/` entries are joined into that. Nothing else of the account
     /// is said, so nothing else of it is there.
+    ///
+    /// **And a `settings.json` of Verkstead's own is written into it**, out of
+    /// the account's — see [`root::Root::settings`]. Written rather than joined,
+    /// so it is never the account's file and nothing of it is written back.
     fn root_described(&self, root: &root::Root, surface: &mut Surface) {
         if self.home.built() != self.home.path() {
             surface.made(Access::Built(self.home.built().to_owned()));
@@ -4363,6 +4367,10 @@ impl Sandbox {
 
         surface
             .made(Access::Built(built.clone()))
+            .made(Access::Written {
+                path: root::Root::settings_in(&built),
+                contents: root.settings(),
+            })
             .elsewhere(&built, &inside, Reach::ReadWrite);
 
         for (host, joined) in root.joined(&inside) {

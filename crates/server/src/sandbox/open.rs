@@ -198,6 +198,10 @@ fn realise(surface: &Surface) -> Vec<(PathBuf, PathBuf)> {
             // [`Surface`].
             Access::Empty(path) | Access::Built(path) => super::emptied(path),
 
+            // And a file of Verkstead's own written into one of those, which
+            // is reached through the directory it is in.
+            Access::Written { path, contents } => std::fs::write(path, contents),
+
             // Somewhere to write a temporary file, which on this platform is a
             // directory inside that profile rather than one the machine shares
             // — made rather than emptied, the profile above it having been

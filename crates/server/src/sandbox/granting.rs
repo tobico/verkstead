@@ -197,8 +197,9 @@ pub(crate) fn entries(surface: &Surface, profile: Option<&Path>) -> Vec<Entry> {
 
             // Neither of which is a path on this platform — see this module's
             // own documentation. And a built directory is granted by what is
-            // said after it rather than by being said.
-            Access::ProcessTable | Access::Devices | Access::Built(_) => {}
+            // said after it rather than by being said, and a file written into
+            // one by the entry on the directory it is in.
+            Access::ProcessTable | Access::Devices | Access::Built(_) | Access::Written { .. } => {}
         }
     }
 

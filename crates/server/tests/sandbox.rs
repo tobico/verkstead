@@ -1369,9 +1369,16 @@ async fn a_windows_session_finds_the_profiles_account_inside_a_profile_of_its_ow
 
     assert_eq!(
         held,
-        [".credentials.json", "projects"],
-        "the login and the projects directory are the whole of the root: none of \
-         the account's settings, plugins, skills, `CLAUDE.md` or history"
+        [".credentials.json", "projects", "settings.json"],
+        "the login, the projects directory and the settings Verkstead wrote are \
+         the whole of the root: none of the account's plugins, skills, \
+         `CLAUDE.md` or history"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("settings.json")).unwrap(),
+        "{\n  \"skipDangerousModePermissionPrompt\": true\n}\n",
+        "and the settings are Verkstead's, holding the bypass key and nothing of \
+         an account whose own settings carry nothing over"
     );
 
     let mut entries: Vec<String> = std::fs::read_dir(root.join("projects"))
@@ -2211,7 +2218,6 @@ async fn a_claude_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
         r#"
         say root "$(ls -A "$HOME/.claude" | sort | tr '\n' ' ')"
         say projects "$(ls -A "$HOME/.claude/projects" | sort | tr '\n' ' ')"
-        file "$HOME/.claude/settings.json" settings
         dir "$HOME/.claude/plugins" plugins
         file "$HOME/.claude/CLAUDE.md" claude-md
         file "$HOME/.claude/history.jsonl" history
@@ -2223,8 +2229,9 @@ async fn a_claude_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
     );
 
     assert_eq!(
-        reported["root"], ".credentials.json projects ",
-        "the login and the projects directory are the whole of the root"
+        reported["root"], ".credentials.json projects settings.json ",
+        "the login, the projects directory and the settings Verkstead wrote are \
+         the whole of the root"
     );
 
     let mut entries = [entry_named(&fixture.repo), entry_named(fixture.worktree())];
@@ -2237,7 +2244,6 @@ async fn a_claude_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
     );
 
     for absent in [
-        "settings",
         "plugins",
         "claude-md",
         "history",
@@ -2254,6 +2260,78 @@ async fn a_claude_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
     assert_eq!(
         reported["credentials"], "write",
         "while the login is there, and a session can refresh it"
+    );
+}
+
+/// A Claude session's root holds a `settings.json` of Verkstead's own, and an
+/// account with none of its own still gets one — holding the key that stops a
+/// session parking for ever at the bypass-permissions consent, with nobody at
+/// its terminal to answer it.
+#[tokio::test]
+async fn a_fresh_account_is_given_settings_that_skip_the_bypass_consent() {
+    let fixture = grilling().await;
+    let settings = fixture.claude_dir().join("settings.json");
+    std::fs::remove_file(&settings).unwrap();
+
+    let (reported, closing) = probe_closing(
+        &fixture.sandbox(vec![]),
+        r#"
+        file "$HOME/.claude/settings.json" settings
+        say written "$(tr -d ' \n' < "$HOME/.claude/settings.json")"
+        "#,
+    );
+    closing.close();
+
+    assert_eq!(reported["settings"], "write");
+    assert_eq!(
+        reported["written"], r#"{"skipDangerousModePermissionPrompt":true}"#,
+        "the bypass key, and nothing else where the account had nothing to carry"
+    );
+    assert!(
+        !settings.exists(),
+        "and the account is not given a settings file for it"
+    );
+}
+
+/// Of the account's own settings, what an API-key login needs comes over and
+/// nothing else does: the human's hooks are how *they* work. And what was
+/// written into the root is Verkstead's, so the account's file is as it was
+/// once the session has ended — even where the session changed its own.
+#[tokio::test]
+async fn an_accounts_key_helper_and_environment_come_over_and_its_hooks_do_not() {
+    let fixture = grilling().await;
+    let settings = fixture.claude_dir().join("settings.json");
+    let own = concat!(
+        "{\n",
+        "  \"apiKeyHelper\": \"/usr/local/bin/print-key\",\n",
+        "  \"env\": {\"ANTHROPIC_BASE_URL\": \"https://proxy.example\"},\n",
+        "  \"hooks\": {\"Stop\": []}\n",
+        "}\n",
+    );
+    std::fs::write(&settings, own).unwrap();
+
+    let (reported, closing) = probe_closing(
+        &fixture.sandbox(vec![]),
+        r#"
+        say written "$(tr -d ' \n' < "$HOME/.claude/settings.json")"
+        printf '{"hooks": {"Stop": ["changed inside"]}}\n' > "$HOME/.claude/settings.json"
+        "#,
+    );
+    closing.close();
+
+    assert_eq!(
+        reported["written"],
+        concat!(
+            r#"{"apiKeyHelper":"/usr/local/bin/print-key","#,
+            r#""env":{"ANTHROPIC_BASE_URL":"https://proxy.example"},"#,
+            r#""skipDangerousModePermissionPrompt":true}"#,
+        ),
+        "the key helper and the environment beside the bypass key, and no hooks"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&settings).unwrap(),
+        own,
+        "and the account's own settings are byte for byte what they were"
     );
 }
 

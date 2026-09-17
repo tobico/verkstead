@@ -19,6 +19,6 @@ Roadmap stage: [01: Claude's built root](docs/roadmaps/built-roots/01-claude-roo
 
 - [x] 01: The built root on Linux and a Mac — [details](01-root-on-linux-and-mac.md)
 - [x] 02: The built root on Windows, with the grant narrowed — [details](02-root-on-windows.md)
-- [ ] 03: The written `settings.json` — [details](03-written-settings.md)
+- [x] 03: The written `settings.json` — [details](03-written-settings.md)
 - [ ] 04: `.claude.json` copied, pre-seeded and merged back — [details](04-claude-json-copy-and-merge.md)
 - [ ] 05: The docs — [details](05-docs.md)

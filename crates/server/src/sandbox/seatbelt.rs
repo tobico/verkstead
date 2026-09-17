@@ -171,7 +171,7 @@ fn policy(surface: &Surface) -> String {
 
             // And one built on the host, which grants nothing by being said:
             // what reaches it is what the description says after it.
-            Access::Built(_) => {}
+            Access::Built(_) | Access::Written { .. } => {}
 
             // And a path a session finds somewhere else, which by now is a link
             // to the path it really is. A policy is matched against what a name
@@ -223,6 +223,7 @@ fn realise(surface: &Surface) {
     for access in surface.reaches() {
         let made = match access {
             Access::Empty(path) | Access::Built(path) => super::emptied(path),
+            Access::Written { path, contents } => std::fs::write(path, contents),
             Access::Elsewhere { host, inside, .. } => linked(host, inside),
             _ => Ok(()),
         };
@@ -447,8 +448,9 @@ mod tests {
 
     /// A Claude session's root, built the way the description says one: a
     /// directory of Verkstead's own under HOME, with the login and a
-    /// `projects/` entry linked into it and the account's rest nowhere — and a
-    /// policy granting what is linked rather than the account whole.
+    /// `projects/` entry linked into it, a settings file written into it and
+    /// the account's rest nowhere — and a policy granting what is linked rather
+    /// than the account whole.
     #[test]
     fn a_root_is_really_built_with_only_what_is_joined_into_it() {
         let dir = tempfile::tempdir().unwrap();
@@ -468,6 +470,10 @@ mod tests {
         surface
             .made(Access::Empty(home.clone()))
             .made(Access::Built(root.clone()))
+            .made(Access::Written {
+                path: root.join("settings.json"),
+                contents: b"{}\n".to_vec(),
+            })
             .elsewhere(&root, &root, Reach::ReadWrite)
             .elsewhere(
                 account.join(".credentials.json"),
@@ -488,7 +494,11 @@ mod tests {
             .collect();
         held.sort();
 
-        assert_eq!(held, [".credentials.json", "projects"]);
+        assert_eq!(held, [".credentials.json", "projects", "settings.json"]);
+        assert_eq!(
+            std::fs::read_to_string(root.join("settings.json")).unwrap(),
+            "{}\n"
+        );
         assert_eq!(
             std::fs::read_link(root.join(".credentials.json")).unwrap(),
             account.join(".credentials.json")

@@ -31,6 +31,19 @@ const CREDENTIALS: &str = ".credentials.json";
 /// The directory of per-path entries Claude keeps memory and transcripts in.
 const PROJECTS: &str = "projects";
 
+/// The settings file Claude reads for the user, inside `~/.claude`.
+const SETTINGS: &str = "settings.json";
+
+/// Of the account's own settings, the keys a root's settings carry over.
+///
+/// **An allowlist rather than a denylist**, because a denylist drifts every time
+/// Claude adds a key. These two are how an API-key login reaches the model:
+/// `apiKeyHelper` is the command that prints the key, and `env` is where an
+/// account keeps `ANTHROPIC_API_KEY` and the variables beside it. Everything
+/// else is how the human works — `hooks`, `enabledPlugins`, `permissions`,
+/// `statusLine` — and none of it is a session's.
+const CARRIED: [&str; 2] = ["apiKeyHelper", "env"];
+
 /// How long an entry's name is before Claude cuts it and puts a hash on the end.
 const LONGEST: usize = 200;
 
@@ -95,6 +108,24 @@ impl Root {
         root.join(CREDENTIALS)
     }
 
+    /// Where the settings file is in a root at `root`.
+    pub(crate) fn settings_in(root: &Path) -> PathBuf {
+        root.join(SETTINGS)
+    }
+
+    /// The settings file a root is given: Verkstead's own, written as each
+    /// session starts, and neither joined nor written back.
+    ///
+    /// Read off the account's `settings.json` as it is at this moment, so a key
+    /// the human changes reaches the next session. An account with no such
+    /// file, or one that does not read as JSON, still gets the bypass key — see
+    /// [`settings`].
+    ///
+    /// Blocking: one read.
+    pub(crate) fn settings(&self) -> Vec<u8> {
+        settings(std::fs::read(self.account.join(SETTINGS)).ok().as_deref())
+    }
+
     /// Make each joined entry in the account where it is not there yet.
     ///
     /// **Made in the account rather than in the root**, because what is written
@@ -141,6 +172,41 @@ impl Root {
 
         joined
     }
+}
+
+/// The settings a root is given, out of the account's own `settings.json` where
+/// there is one to read.
+///
+/// **`skipDangerousModePermissionPrompt`**, which Claude Code 2.1.268 reads
+/// from user settings. A session runs with its permissions bypassed and nobody
+/// at its terminal, so a consent screen asking whether that is all right is a
+/// session parked for ever — which is what a fresh account's first session was.
+///
+/// And the [`CARRIED`] keys of the account's own, as they are there. Nothing
+/// else of it, and nothing at all of a file that is not a JSON object.
+fn settings(account: Option<&[u8]>) -> Vec<u8> {
+    let mut written = serde_json::Map::new();
+
+    written.insert(
+        "skipDangerousModePermissionPrompt".to_owned(),
+        serde_json::Value::Bool(true),
+    );
+
+    if let Some(serde_json::Value::Object(own)) =
+        account.and_then(|bytes| serde_json::from_slice(bytes).ok())
+    {
+        for key in CARRIED {
+            if let Some(value) = own.get(key) {
+                written.insert(key.to_owned(), value.clone());
+            }
+        }
+    }
+
+    let mut bytes = serde_json::to_vec_pretty(&serde_json::Value::Object(written))
+        .expect("a map of JSON values writes as JSON");
+    bytes.push(b'\n');
+
+    bytes
 }
 
 /// `path` resolved, or `path` as it stands where it cannot be.
@@ -285,6 +351,59 @@ mod tests {
             main_checkout(Path::new("/srv/git/verkstead.git")),
             Path::new("/srv/git/verkstead.git"),
             "and a bare repository is its own"
+        );
+    }
+
+    fn read(bytes: &[u8]) -> serde_json::Value {
+        serde_json::from_slice(bytes).unwrap()
+    }
+
+    /// An account with no settings of its own, or with some that do not read,
+    /// is the account whose first session would otherwise park at the consent.
+    #[test]
+    fn the_bypass_key_is_written_whatever_the_account_has() {
+        let bypass = serde_json::json!({ "skipDangerousModePermissionPrompt": true });
+
+        assert_eq!(read(&settings(None)), bypass, "no settings.json at all");
+        assert_eq!(
+            read(&settings(Some(b"{ not json"))),
+            bypass,
+            "one that does not parse"
+        );
+        assert_eq!(
+            read(&settings(Some(b"[1, 2]"))),
+            bypass,
+            "one that is not an object"
+        );
+        assert_eq!(
+            read(&settings(Some(
+                b"{\"skipDangerousModePermissionPrompt\": false}"
+            ))),
+            bypass,
+            "and one that says otherwise is not asked"
+        );
+    }
+
+    /// The two keys an API-key login needs come over as they are, and nothing
+    /// else of the account's does.
+    #[test]
+    fn only_the_api_key_helper_and_the_environment_are_carried_over() {
+        let account = serde_json::json!({
+            "apiKeyHelper": "/usr/local/bin/print-key",
+            "env": { "ANTHROPIC_BASE_URL": "https://proxy.example" },
+            "hooks": { "Stop": [] },
+            "enabledPlugins": { "the-humans@own": true },
+            "permissions": { "allow": ["Bash"] },
+            "statusLine": { "type": "command", "command": "true" },
+        });
+
+        assert_eq!(
+            read(&settings(Some(account.to_string().as_bytes()))),
+            serde_json::json!({
+                "skipDangerousModePermissionPrompt": true,
+                "apiKeyHelper": "/usr/local/bin/print-key",
+                "env": { "ANTHROPIC_BASE_URL": "https://proxy.example" },
+            })
         );
     }
 

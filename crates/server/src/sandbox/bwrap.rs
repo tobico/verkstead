@@ -72,8 +72,8 @@ pub(crate) fn command(surface: &Surface) -> Rendering {
             Access::Empty(path) => {
                 bwrap.arg("--dir").arg(path);
             }
-            // The one thing here made on the host rather than in the
-            // namespace, and so the one flag-less arm: a root has to be a real
+            // Made on the host rather than in the namespace, and so an arm
+            // with no flag: a root has to be a real
             // directory before anything can be bound out of it, and what
             // reaches it is the bind said after this.
             //
@@ -87,6 +87,18 @@ pub(crate) fn command(surface: &Surface) -> Rendering {
                         built = %path.display(),
                         "a directory a session's root is built in could not be made, so the \
                          session will not find what was to be built there"
+                    );
+                }
+            }
+            // And a file written into that directory, on the host for the same
+            // reason and logged for the same reason.
+            Access::Written { path, contents } => {
+                if let Err(error) = std::fs::write(path, contents) {
+                    tracing::error!(
+                        error = ?error,
+                        written = %path.display(),
+                        "a file a session's root is given could not be written, so the session \
+                         will not find it"
                     );
                 }
             }

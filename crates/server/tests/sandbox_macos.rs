@@ -1160,8 +1160,8 @@ async fn the_profiles_pair_is_the_whole_of_what_home_holds() {
         "a session writes its own session logs and settings"
     );
     assert_eq!(
-        reported["settings"], "absent",
-        "into a root of its own, which holds none of the account's settings"
+        reported["settings"], "write",
+        "into a root of its own, whose settings are the ones Verkstead wrote"
     );
     assert_eq!(reported["claude-config"], "write");
     assert_eq!(
@@ -1369,7 +1369,6 @@ async fn a_claude_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
             r#"
             say root "$(ls -A "$HOME/.claude" | sort | tr '\n' ' ')"
             say projects "$(ls -A "$HOME/.claude/projects" | sort | tr '\n' ' ')"
-            file "$HOME/.claude/settings.json" settings
             dir "$HOME/.claude/plugins" plugins
             file "$HOME/.claude/CLAUDE.md" claude-md
             dir "$HOME/.claude/projects/-Users-you-src-something-else" another-repository
@@ -1383,7 +1382,10 @@ async fn a_claude_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
         ),
     );
 
-    assert_eq!(reported["root"], ".credentials.json projects ");
+    assert_eq!(
+        reported["root"],
+        ".credentials.json projects settings.json "
+    );
 
     let mut entries = [entry_named(&fixture.repo), entry_named(fixture.worktree())];
     entries.sort();
@@ -1394,13 +1396,7 @@ async fn a_claude_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
         "and under it, this Repo's entry and this Worktree's"
     );
 
-    for absent in [
-        "settings",
-        "plugins",
-        "claude-md",
-        "another-repository",
-        "skills",
-    ] {
+    for absent in ["plugins", "claude-md", "another-repository", "skills"] {
         assert_eq!(
             reported[absent], "absent",
             "the account's {absent} is not in the root"
@@ -1413,6 +1409,92 @@ async fn a_claude_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
         "and the account's own directory is somebody else's on this machine"
     );
     assert_eq!(reported["the-accounts-plugins"], "refused");
+}
+
+/// A Claude session's root holds a `settings.json` of Verkstead's own, and an
+/// account with none of its own still gets one — holding the key that stops a
+/// session parking for ever at the bypass-permissions consent, with nobody at
+/// its terminal to answer it.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn a_fresh_account_is_given_settings_that_skip_the_bypass_consent() {
+    let fixture = grilling().await;
+    let settings = fixture
+        .elsewhere
+        .path()
+        .join("account/.claude/settings.json");
+    std::fs::remove_file(&settings).unwrap();
+
+    let (reported, closing) = probe_closing(
+        &fixture.sandbox(),
+        r#"
+        file "$HOME/.claude/settings.json" settings
+        say written "$(tr -d ' \n' < "$HOME/.claude/settings.json")"
+        "#,
+    );
+    closing.close();
+
+    assert_eq!(reported["settings"], "write");
+    assert_eq!(
+        reported["written"], r#"{"skipDangerousModePermissionPrompt":true}"#,
+        "the bypass key, and nothing else where the account had nothing to carry"
+    );
+    assert!(
+        !settings.exists(),
+        "and the account is not given a settings file for it"
+    );
+}
+
+/// Of the account's own settings, what an API-key login needs comes over and
+/// nothing else does: the human's hooks are how *they* work. And what was
+/// written into the root is Verkstead's, so the account's file is as it was
+/// once the session has ended — even where the session changed its own.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn an_accounts_key_helper_and_environment_come_over_and_its_hooks_do_not() {
+    let fixture = grilling().await;
+    let settings = fixture
+        .elsewhere
+        .path()
+        .join("account/.claude/settings.json");
+    let own = concat!(
+        "{\n",
+        "  \"apiKeyHelper\": \"/usr/local/bin/print-key\",\n",
+        "  \"env\": {\"ANTHROPIC_BASE_URL\": \"https://proxy.example\"},\n",
+        "  \"hooks\": {\"Stop\": []}\n",
+        "}\n",
+    );
+    std::fs::write(&settings, own).unwrap();
+
+    let (reported, closing) = probe_closing(
+        &fixture.sandbox(),
+        r#"
+        say written "$(tr -d ' \n' < "$HOME/.claude/settings.json")"
+        printf '{"hooks": {"Stop": ["changed inside"]}}\n' > "$HOME/.claude/settings.json"
+        "#,
+    );
+    closing.close();
+
+    assert_eq!(
+        reported["written"],
+        concat!(
+            r#"{"apiKeyHelper":"/usr/local/bin/print-key","#,
+            r#""env":{"ANTHROPIC_BASE_URL":"https://proxy.example"},"#,
+            r#""skipDangerousModePermissionPrompt":true}"#,
+        ),
+        "the key helper and the environment beside the bypass key, and no hooks"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&settings).unwrap(),
+        own,
+        "and the account's own settings are byte for byte what they were"
+    );
 }
 
 /// What a session writes under the Repo's entry and the Worktree's lands in the

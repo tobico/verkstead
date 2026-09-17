@@ -1397,6 +1397,82 @@ async fn a_login_read_through_the_link_and_saved_by_rename_is_the_accounts_after
     );
 }
 
+/// A Claude session's root holds a `settings.json` of Verkstead's own, read
+/// through the entry on the root — and an account with none of its own, which
+/// is this fixture's, still gets one holding the key that stops a session
+/// parking for ever at the bypass-permissions consent.
+#[tokio::test]
+async fn a_fresh_account_is_given_settings_that_skip_the_bypass_consent() {
+    let fixture = grilling().await;
+    let settings = fixture.root_inside().join("settings.json");
+    let quoted = settings.display().to_string().replace('\'', "''");
+
+    assert!(
+        !fixture.claude_dir().join("settings.json").exists(),
+        "the fixture's account has no settings of its own"
+    );
+
+    let classified = fixture.probe_running(&format!(
+        "{CLASSIFYING}\r\n\
+         $written = [System.IO.File]::ReadAllText('{quoted}') | ConvertFrom-Json\r\n\
+         Report 'bypass' $written.skipDangerousModePermissionPrompt\r\n\
+         Report 'keys' (($written.PSObject.Properties | ForEach-Object {{ $_.Name }}) -join ',')\r\n"
+    ));
+
+    assert_eq!(
+        said(&classified, "bypass"),
+        "True",
+        "a session reads the bypass key in the settings written into its root"
+    );
+    assert_eq!(
+        said(&classified, "keys"),
+        "skipDangerousModePermissionPrompt",
+        "and nothing else, the account having nothing to carry over"
+    );
+    assert!(
+        !fixture.claude_dir().join("settings.json").exists(),
+        "and the account is not given a settings file for it"
+    );
+}
+
+/// Of the account's own settings, what an API-key login needs comes over and
+/// nothing else does — and the account's file is as it was once the session
+/// has ended, even where the session changed its own.
+#[tokio::test]
+async fn an_accounts_key_helper_and_environment_come_over_and_its_hooks_do_not() {
+    let fixture = grilling().await;
+    let own = "{\"apiKeyHelper\": \"C:\\\\print-key.cmd\", \
+               \"env\": {\"ANTHROPIC_BASE_URL\": \"https://proxy.example\"}, \
+               \"hooks\": {\"Stop\": []}}\n";
+    let account = fixture.claude_dir().join("settings.json");
+    std::fs::write(&account, own).unwrap();
+
+    let settings = fixture.root_inside().join("settings.json");
+    let quoted = settings.display().to_string().replace('\'', "''");
+
+    let classified = fixture.probe_running(&format!(
+        "{CLASSIFYING}\r\n\
+         $written = [System.IO.File]::ReadAllText('{quoted}') | ConvertFrom-Json\r\n\
+         Report 'helper' $written.apiKeyHelper\r\n\
+         Report 'base-url' $written.env.ANTHROPIC_BASE_URL\r\n\
+         Report 'hooks' ($null -eq $written.hooks)\r\n\
+         [System.IO.File]::WriteAllText('{quoted}', '{{\"hooks\": {{}}}}')\r\n"
+    ));
+
+    assert_eq!(said(&classified, "helper"), r"C:\print-key.cmd");
+    assert_eq!(said(&classified, "base-url"), "https://proxy.example");
+    assert_eq!(
+        said(&classified, "hooks"),
+        "True",
+        "the account's hooks are how the human works, and none of a session's"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&account).unwrap(),
+        own,
+        "and the account's own settings are byte for byte what they were"
+    );
+}
+
 /// A live Conversation's Worktree is reachable from another Conversation's
 /// session, and a stopped one's is not — asked by attempting both.
 ///
