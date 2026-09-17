@@ -4461,7 +4461,8 @@ impl Sandbox {
     ///
     /// **Neither emptied nor written where `builds` is false**, which is a
     /// root something of the Conversation is still running in, on any
-    /// platform: this launch is given it as that one has it — see [`sharing`].
+    /// platform: this launch is given it as that one has it, with only a
+    /// directory of it that is missing made — see [`sharing`].
     fn root_described(&self, root: &root::Root, builds: bool, surface: &mut Surface) {
         let (built, inside) = (self.home.built(), self.home.path());
         let copied = self.login_copy(root);
@@ -4498,6 +4499,19 @@ impl Sandbox {
                          so the session starts without one"
                     ),
                 }
+            }
+        } else {
+            // Or the root as the launch running in it has it, with any
+            // directory of it that is not there made. Which is not the
+            // ordinary case — that launch built them — but is what a Profile
+            // whose memory switch has been turned off since leaves: an
+            // OpenCode root sharing its memory is its config directory alone,
+            // and one sharing none wants a data directory beside it that
+            // nothing has yet made, and a join out of a directory that is not
+            // there is a session that will not start. Made rather than
+            // emptied, everything else in the root being the running launch's.
+            for directory in root.built() {
+                surface.made(Access::Kept(built.join(directory)));
             }
         }
 

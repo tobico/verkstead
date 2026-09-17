@@ -345,10 +345,25 @@ fi
         cache: &BuildCache,
         extra: Vec<Bind>,
     ) -> Sandbox {
+        self.sandbox_in(&self.homes(), profile, listening, cache, extra)
+    }
+
+    /// And one built off a `homes` the caller holds, which is how two
+    /// sandboxes come to share a register of what is running in which root —
+    /// the server has one `Homes` and starts every session and terminal off
+    /// it, where a fixture asking twice would get two.
+    fn sandbox_in(
+        &self,
+        homes: &Homes,
+        profile: &store::Profile,
+        listening: SocketAddr,
+        cache: &BuildCache,
+        extra: Vec<Bind>,
+    ) -> Sandbox {
         Sandbox::for_conversation(
             &self.conversation,
             profile,
-            &self.homes(),
+            homes,
             &Reachable::at(listening),
             &self.skills,
             &self.verkstead,
@@ -2590,6 +2605,59 @@ async fn a_codex_root_something_is_running_in_is_shared_and_a_claude_root_beside
         "and once nothing is running in it, the next launch is given it fresh"
     );
     drop(claude_session);
+}
+
+/// A launch that shares a root builds nothing in it, but it does make a
+/// directory of that root which is not there — which is what a Profile whose
+/// memory switch was turned off while a session ran leaves behind. An OpenCode
+/// root sharing its memory is the config directory alone, and one sharing none
+/// wants a data directory of its own beside it: without one made, the terminal
+/// would be a bind out of a directory that is not there, and nothing would
+/// start.
+#[tokio::test]
+async fn a_shared_root_is_given_the_directory_a_switched_off_memory_adds_to_it() {
+    let fixture = grilling().await;
+    let remembering = fixture.opencode_profile().await;
+    let forgetting = store::Profile {
+        memory: false,
+        ..remembering.clone()
+    };
+
+    let home = fixture.windows_profile();
+    let homes = fixture.homes();
+    let session = made(&fixture.sandbox_in(
+        &homes,
+        &remembering,
+        LISTENING,
+        &BuildCache::none(),
+        vec![],
+    ));
+
+    std::fs::write(home.join(".config/opencode/written-by-opencode"), "kept\n").unwrap();
+    assert!(
+        !home.join(".local/share/opencode").exists(),
+        "a root sharing its memory has the account's data directory and none of its own"
+    );
+
+    let terminal = made(&fixture.sandbox_in(
+        &homes,
+        &forgetting,
+        LISTENING,
+        &BuildCache::none(),
+        vec![],
+    ));
+
+    assert!(
+        home.join(".local/share/opencode").is_dir(),
+        "and a terminal that shares that root is given a data directory of its own to bind"
+    );
+    assert!(
+        home.join(".config/opencode/written-by-opencode").is_file(),
+        "while the rest of the root is left as the running session has it"
+    );
+
+    drop(session);
+    drop(terminal);
 }
 
 /// A Grok Build session's `.grok` is a root of Verkstead's own, holding the
