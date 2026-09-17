@@ -97,9 +97,20 @@ impl Sharing {
     /// one more launch running there until the [`Share`] beside it is dropped.
     ///
     /// **`launch` runs under the lock**, so a launch that shares a root never
-    /// sees it half built, and two launches never both build it. Building a root
-    /// is emptying a small directory and writing two files, so every other
-    /// Conversation waits no longer than that.
+    /// sees it half built, and two launches never both build it. And the lock is
+    /// one register rather than one per Conversation, so what runs under it is
+    /// what every other Conversation's start waits for.
+    ///
+    /// **Which is the whole of a launch, and on Windows that is more than a
+    /// directory.** Building a root is emptying a small directory and writing a
+    /// file or two, and on the two platforms with a wrapper that is all there is.
+    /// On Windows the rendering joins the account in by hand and the boundary is
+    /// written after it — a logon as the session account, and an access-control
+    /// entry on every path the description names — so a second Conversation
+    /// starting at that moment waits for those as well. Held all the same:
+    /// sessions start one at a time on a machine with one human at it, and what
+    /// the lock is keeping is a profile from being emptied out from under a
+    /// session already running in it.
     pub(crate) fn launched<T>(
         &self,
         conversation: i64,
