@@ -548,24 +548,34 @@ repository's; a
 `settings.json` and an instructions file **written**; and `.claude.json`
 **copied** rather than linked, pre-seeded, and written back. Nothing else of
 the account. The other three harnesses get roots by the same rule and their own
-allowlists.
+allowlists: `homes\<id>\.codex` and `homes\<id>\.grok`, each with `auth.json`
+by a hard link and, when the switch is on, `sessions\` and `memory\` (Codex:
+`memories\`) by junctions;
+and for OpenCode a built config directory, with its data directory joined whole
+by a junction when the switch is on, or built with `auth.json` alone hard-linked
+into it when the switch is off.
 
 **What it gives the boundary.** The read-write entry on the account directory
 — 1,289 files on the reporter's machine, and the tree a first boundary spent
-its minutes walking — becomes an entry on the built root and one on each joined
-memory entry. The other repositories' transcripts, which were most of that walk,
+its minutes walking — becomes an entry on each built directory and one on each
+directory joined into it, whatever the harness. With the memory switch off,
+nothing is joined and the entries are on the built directories alone. The other repositories' transcripts, which were most of that walk,
 are no longer in it. **The credentials file takes an entry of its own.** It is
 reached today through the entry on the account directory, which goes, and a hard
 link shares the file's own list rather than taking its new parent's — so
 without one the session cannot read its login. The entry is on the account's
 own file, so it is written down and taken back with the rest of the
-Conversation's entries.
+Conversation's entries. That holds for every harness's login linked on its own;
+an OpenCode login inside a data directory joined whole is reached through the
+entry on that directory. The login is also the one thing a root joins by hard
+link, so it is what the check for another volume names.
 
 **Linux gains a profile directory.** A Linux session has run in an empty
 directory bubblewrap makes over the server's HOME, with the account bound in,
 and nothing under the Data Directory of its own. A root has to exist somewhere
 to be bound, so Linux makes `homes/<id>` as the other two platforms do, and
-binds the built `.claude` and the `.claude.json` copy into that empty HOME.
+binds the built root — `.claude` with the `.claude.json` copy, `.codex`,
+`.grok`, or OpenCode's directories — into that empty HOME.
 
 **The write-back stays**, as *The fresh profile* decided it: nothing a session
 wrote to its account is lost, and a re-login from inside a run reaches the

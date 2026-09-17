@@ -195,6 +195,14 @@ flowchart LR
   spend the other three slots, each at full parity. A new-type profile stores
   **one** home directory rather than claude's pair — the whole account lives
   under it — and the form offers a type only once its stage has landed.
+  *Refined 2026-09-18, building built-roots/02-three-roots-and-memory*: a Codex,
+  Grok Build or OpenCode session is not given that home whole either. It gets a
+  built root by the same rule as Claude's — the login linked, the memory store
+  (`sessions/` and `memories/` for Codex, `sessions/` and `memory/` for Grok
+  Build, OpenCode's whole data directory) joined, and a configuration file
+  Verkstead writes carrying only how the account reaches its model. And every
+  profile gains a **memory** switch, on by default: off, the store is the
+  root's own and empty, and the session's transcript is read out of the root.
 - **Pairings.** What runs a conversation's sessions is a profile *and* one of
   that profile's models, picked together. Each conversation fixes **two** of
   them before grilling starts: one for grilling, one for implementation work
@@ -444,7 +452,11 @@ flowchart LR
     `~/.claude.json`, both under `homes/<id>` in the data directory, with the
     account's credentials file and the Repo's and Worktree's `projects/`
     entries bound into the root — never the account's `~/.claude` whole
-    (*refined 2026-09-17, building built-roots/01-claude-root*)
+    (*refined 2026-09-17, building built-roots/01-claude-root*); likewise a
+    built `~/.codex`, `~/.grok` or OpenCode config and data directory for the
+    other three, with the memory store bound in only where the profile's memory
+    switch is on (*refined 2026-09-18, building
+    built-roots/02-three-roots-and-memory*)
   - **ro:** `/nix` and system paths
   - **tmpfs:** `/tmp`; everything else in HOME absent
   - `~` inside is the home of whoever runs the server, at the same path — the
@@ -1016,7 +1028,7 @@ Timeline events:
   both went with the grammar that made them). That card's count of entries the
   server cannot see is what the warning on it is drawn from: a bind that has
   quietly stopped resolving is what nobody goes looking for. What is on a card is
-  what a list is scanned for and the rest is in the pane — a Profile's mounted
+  what a list is scanned for and the rest is in the pane — a Profile's account
   paths, the models it lists, its agent type as a field and Remove; Language
   support's checkbox per language and the size of the Rust cache's compiled
   half. **A Profile's card is one line: the harness's mark, the harness's name,
