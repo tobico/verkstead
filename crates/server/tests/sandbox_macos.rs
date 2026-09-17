@@ -154,6 +154,29 @@ impl Grilling {
         self.composed(profile, &BuildCache::none(), vec![])
     }
 
+    /// And one built off a `homes` the caller holds, which is how two
+    /// sandboxes come to share a register of what is running in which root and
+    /// in the HOME they are both in — the server has one `Homes` and starts
+    /// every session and terminal off it, where a fixture asking twice would
+    /// get two.
+    fn sandbox_in(&self, homes: &Homes, profile: &store::Profile) -> Sandbox {
+        Sandbox::for_conversation(
+            &self.conversation,
+            profile,
+            homes,
+            &Reachable::at(LISTENING),
+            &self.skills,
+            &self.verkstead,
+            &self.handoffs,
+            &self.attachments,
+            &self.settings.secrets(),
+            &self.settings.config(),
+            &BuildCache::none(),
+            vec![],
+        )
+        .expect("a grilling Conversation has a worktree to build a sandbox around")
+    }
+
     /// One with `extra` on top of it, which is whatever Sandbox Configuration
     /// asked for.
     fn sandbox_with(&self, extra: Vec<Bind>) -> Sandbox {
@@ -483,6 +506,16 @@ fi
     /// Where the machine's own home is, which is nobody inside's.
     fn home_path(&self) -> &Path {
         self.home.path()
+    }
+
+    /// And where this Conversation's own HOME is: under the state directory,
+    /// named for the Conversation, which is the directory every root of it is
+    /// built in — see `verkstead_server::sandbox::Homes`.
+    fn session_home(&self) -> PathBuf {
+        self.state
+            .path()
+            .join("homes")
+            .join(self.conversation.id.to_string())
     }
 }
 
@@ -1694,6 +1727,76 @@ async fn a_root_without_memory_has_an_empty_projects_of_its_own() {
          where it is looked for"
     );
     assert!(!worktree.exists(), "and not in the account");
+}
+
+/// A launch into a Conversation something is already running in is given the
+/// HOME as it stands rather than emptying it — on this platform HOME is a real
+/// directory of the Conversation's, holding the root of every launch there, and
+/// emptying it as a terminal opens would delete what a running session is
+/// writing. With the Profile's memory switched off that is the only copy of
+/// its transcript and its memory there is.
+///
+/// The root of the harness that is starting is its own, and built: a terminal
+/// under a Codex account beside a Claude session is a launch into a root
+/// nothing is running in.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the HOME this is about is a real directory on a Mac and a \
+              directory inside the namespace on Linux"
+)]
+async fn a_home_something_is_running_in_is_kept_rather_than_emptied() {
+    let fixture = grilling().await;
+    let forgetting = store::Profile {
+        memory: false,
+        ..fixture.profile.clone()
+    };
+    let codex = fixture.codex_profile().await;
+
+    let homes = fixture.homes();
+    let home = fixture.session_home();
+
+    let session = made(&fixture.sandbox_in(&homes, &forgetting));
+    let transcript = home
+        .join(".claude/projects")
+        .join(entry_named(fixture.worktree()))
+        .join("the-session.jsonl");
+
+    std::fs::create_dir_all(transcript.parent().expect("a file in a directory")).unwrap();
+    std::fs::write(&transcript, "{\"turn\": 1}\n").unwrap();
+
+    let terminal = made(&fixture.sandbox_in(&homes, &codex));
+
+    assert_eq!(
+        std::fs::read_to_string(&transcript).unwrap(),
+        "{\"turn\": 1}\n",
+        "a terminal opened beside the session leaves what that session is writing"
+    );
+    assert!(
+        home.join(".codex/config.toml").is_file(),
+        "while the root it is starting in is its own, and built"
+    );
+
+    drop(session);
+    drop(terminal);
+
+    made(&fixture.sandbox_in(&homes, &forgetting));
+
+    assert!(
+        !transcript.exists(),
+        "and once nothing is running in it, the next launch is given a HOME made fresh"
+    );
+}
+
+/// Render `sandbox` and keep what its ending is left to see to, without running
+/// anything inside it: what the test above is about is what the description
+/// makes on the disk before a session starts — see `probe_closing`, which is
+/// how everything else here asks.
+fn made(sandbox: &Sandbox) -> Closing {
+    sandbox
+        .command(&[SH, "-c", "true"])
+        .expect("a rendering on a platform with no identity to make")
+        .1
 }
 
 /// A Codex session's `.codex` is a root of Verkstead's own too: the account's

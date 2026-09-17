@@ -346,8 +346,8 @@ Repo's own `CLAUDE.md`, the skills and MCP with it; and building Claude's root
 alone, which the human turned down for consistency.
 
 **As built for Codex, Grok Build and OpenCode** (2026-09-18), each allowlist
-was read off a real install. Five things are recorded beside the paragraph
-above:
+was read off a real install. Six things are recorded beside the paragraph
+above, the last of them settled in review:
 
 - **The memory switch is on every Profile, Claude's included**: a `memory`
   column beside the account, added in place by a migration, on by default and
@@ -403,6 +403,17 @@ above:
   the account. So Claude's glob of `projects/`, Codex's rollout match, Grok's
   named session and OpenCode's database each look in the account's store when
   memory is on, and in the root on the host when it is off.
+- **Nothing of a Conversation is emptied while something of it is running**,
+  on every platform rather than on Linux alone. Stage 01 shared a Linux root
+  something was running in, because emptying it would unmount what is joined
+  into the running session. On a Mac and on Windows the `homes/<id>` directory
+  *is* the HOME, holding every root of the Conversation, and a terminal
+  opening there emptied it — which with memory off deletes the only copy of a
+  running session's transcript and memory, and an OpenCode database it is
+  writing. So the register that says what is running in which root says as well
+  whether anything is running in the HOME, and a launch into one that is
+  keeps it: nothing emptied, nothing rewritten, and any directory of its own
+  root that is missing made so that what it joins has somewhere to land.
 
 A login made inside where the account had none is handed to the account at
 session end on all three platforms, for every harness. And the Windows grant

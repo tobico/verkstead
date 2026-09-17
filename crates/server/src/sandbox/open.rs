@@ -198,6 +198,12 @@ fn realise(surface: &Surface) -> Vec<(PathBuf, PathBuf)> {
             // [`Surface`].
             Access::Empty(path) | Access::Built(path) => super::emptied(path),
 
+            // Except where something of the Conversation is still running in
+            // one of them, which is made where it is missing and emptied never
+            // — see [`super::sharing`]. Emptying it here would delete what
+            // that launch is running out of.
+            Access::Kept(path) => std::fs::create_dir_all(path),
+
             // And a file of Verkstead's own written into one of those, which
             // is reached through the directory it is in.
             Access::Written { path, contents } => std::fs::write(path, contents),
@@ -655,6 +661,43 @@ mod tests {
             "an argument holding a space and a quote should arrive as the one \
              argument it was"
         );
+    }
+
+    /// A profile said [`Access::Empty`] is emptied as the description is made
+    /// true, and one said [`Access::Kept`] is left exactly as it is — which is
+    /// what a launch into a Conversation something is already running in says
+    /// about the HOME they are both in, on the platform whose HOME is a real
+    /// directory. Made where it is not there, so a launch that shares a root
+    /// still has every directory of it to join out of.
+    #[test]
+    fn a_kept_profile_is_made_where_it_is_missing_and_emptied_never() {
+        let dir = tempfile::tempdir().unwrap();
+        let (emptied, kept) = (dir.path().join("emptied"), dir.path().join("kept"));
+
+        for profile in [&emptied, &kept] {
+            std::fs::create_dir_all(profile).unwrap();
+            std::fs::write(profile.join("written-by-the-session"), "kept\n").unwrap();
+        }
+
+        let missing = dir.path().join("kept/the-roots-own");
+        let mut surface = described(dir.path(), &["the-agent"]);
+
+        surface
+            .made(Access::Empty(emptied.clone()))
+            .made(Access::Kept(kept.clone()))
+            .made(Access::Kept(missing.clone()));
+
+        command(&surface);
+
+        assert!(
+            !emptied.join("written-by-the-session").exists(),
+            "what the last launch left in a profile it empties is gone"
+        );
+        assert!(
+            kept.join("written-by-the-session").is_file(),
+            "while what a running launch has in one that is kept is left alone"
+        );
+        assert!(missing.is_dir(), "and a directory that is not there is made");
     }
 
     /// Run what `surface` describes and hand back what it printed.

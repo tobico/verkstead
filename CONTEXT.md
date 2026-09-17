@@ -1322,11 +1322,14 @@ harness: the `~/.claude` a Claude session runs in, the `~/.codex` a Codex one
 does, the `~/.grok` a Grok Build one does, and the config and data directories
 under `~/.config/opencode` and `~/.local/share/opencode` an OpenCode one does.
 Each is a directory of Verkstead's own at `homes/<id>` under the Data
-Directory, emptied and made again as each of the Conversation's sessions starts.
-On Linux, a session or terminal that starts while another of the Conversation's
-is still running in the same root shares it as it is instead, because emptying
-it would unmount what is joined into the running one; a Codex terminal beside a
-Claude session has a root of its own, and builds it.
+Directory, emptied and made again as each of the Conversation's sessions starts
+— except while something of the Conversation is still running in what would be
+emptied, which the next session or terminal is given as it stands instead. That
+is the root on Linux, where emptying it would unmount what is joined into the
+running session, and on a Mac and on Windows the `homes/<id>` directory too,
+which holds every root of the Conversation and is what a launch there would
+delete. A Codex terminal beside a Claude session has a root of its own, and
+builds it.
 **One rule for every harness, in three parts**, each harness's own files filling
 them:
 **The login, linked**, so a login or a token refresh from inside lands in the

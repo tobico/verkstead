@@ -2473,20 +2473,24 @@ const GITHUB: &str = "https://github.com";
 ///
 /// **And Linux has one under the Data Directory too**, beside the HOME made
 /// over the server's own. Not as HOME itself, which stays the empty directory
-/// inside the namespace: as the directory a Claude session's `.claude` is built
-/// in, which a bind has to be made *from* and so has to be real — see
-/// [`root`]. Emptied and made again as each session starts, as the other two
-/// platforms' profiles are — **except while something of the Conversation is
-/// still running in it**, which the next launch shares instead, because
-/// emptying it would unmount what is joined into that running one. See
-/// [`sharing`].
+/// inside the namespace: as the directory a session's root is built in, which a
+/// bind has to be made *from* and so has to be real — see [`root`].
+///
+/// **Emptied as each session starts — except while something of the
+/// Conversation is still running in what would be emptied**, which the next
+/// launch is given as it stands instead. On Linux that is the root, where
+/// emptying it would unmount what is joined into the running session; on the
+/// other two it is the profile as well, which is the one directory every root
+/// of the Conversation sits in, so emptying it as a terminal starts would
+/// delete the root a session is running out of. See [`sharing`].
 ///
 /// One is emptied as each of that Conversation's sessions starts rather than
 /// removed when the Conversation ends. What a session left in it is nothing
 /// anything reads — the account is linked in rather than copied, so what is
-/// there is the session's own leavings — and a Conversation's id is never
-/// handed out twice, so the only thing a directory left behind can ever be
-/// given to is the Conversation it already belonged to.
+/// there is the session's own leavings — and a Conversation's id is never handed
+/// out twice,
+/// so the only thing a directory left behind can ever be given to is the
+/// Conversation it already belonged to.
 #[derive(Debug, Clone)]
 pub struct Homes {
     /// The home of whoever is running the server, which is what `~` means
@@ -2527,8 +2531,9 @@ pub struct Homes {
     /// an arm a test on it can ask for.
     platform: Platform,
 
-    /// And which Conversations' Linux roots something is running in, shared by
-    /// every session and terminal this server starts — see [`sharing`].
+    /// And which Conversations' roots something is running in, shared by every
+    /// session and terminal this server starts — which is also what says
+    /// whether a profile may be emptied at all. See [`sharing`].
     sharing: sharing::Sharing,
 }
 
@@ -3889,28 +3894,20 @@ impl Sandbox {
     /// and there is no unsandboxed session to fall back to. The two platforms
     /// with a wrapper never refuse here.
     pub fn command<S: AsRef<OsStr>>(&self, argv: &[S]) -> std::io::Result<(Rendering, Closing)> {
-        // A root on Linux, which the next launch into it shares for as long as
-        // something is running in it rather than build again from under it —
-        // see [`sharing`]. Held by what is left to see to, so it is running
-        // until that has been seen to.
-        if self.home.built() != self.home.path() {
-            let ((rendering, closing), share) =
-                self.home
-                    .sharing
-                    .launched(self.conversation, self.root.named(), |launch| {
-                        self.launched(argv, launch)
-                    })?;
+        // The root, which the next launch into it shares for as long as
+        // something is running in it rather than build again from under it,
+        // and the HOME it is in, which is emptied only while nothing of the
+        // Conversation is running in any root of it — see [`sharing`]. Held by
+        // what is left to see to, so it is running until that has been seen
+        // to.
+        let ((rendering, closing), share) =
+            self.home
+                .sharing
+                .launched(self.conversation, self.root.named(), |launch| {
+                    self.launched(argv, launch)
+                })?;
 
-            return Ok((rendering, closing.sharing(share)));
-        }
-
-        self.launched(
-            argv,
-            sharing::Launch {
-                builds: true,
-                baseline: sharing::Baseline::default(),
-            },
-        )
+        Ok((rendering, closing.sharing(share)))
     }
 
     /// The same, told whether this launch builds its root or shares one that
@@ -3921,7 +3918,7 @@ impl Sandbox {
         argv: &[S],
         launch: sharing::Launch,
     ) -> std::io::Result<(Rendering, Closing)> {
-        let surface = self.surface(argv, launch.builds);
+        let surface = self.surface(argv, &launch);
 
         // Worked out before the rendering and used after it, so that a build
         // for a machine with no identity to make still says what one would be
@@ -4100,7 +4097,7 @@ impl Sandbox {
     /// second one — see [`surface`]. Which is why the account lands after the
     /// directory it goes inside, and why the handoff directory is after the
     /// temporary filesystem that would otherwise be over it.
-    fn surface<S: AsRef<OsStr>>(&self, argv: &[S], builds: bool) -> Surface {
+    fn surface<S: AsRef<OsStr>>(&self, argv: &[S], launch: &sharing::Launch) -> Surface {
         // What a session searches for a program in, said once: Verkstead's own
         // directory and then the machine's own half of it — see [`path`]. Read
         // twice below, and both readings are of this one value: what a session
@@ -4116,7 +4113,15 @@ impl Sandbox {
         // HOME before anything that goes inside it: the directory has to be
         // there for the account to land in, and everything else about it stays
         // absent.
-        surface.made(Access::Empty(self.home.path().to_owned()));
+        //
+        // **Emptied only where nothing of the Conversation is still running in
+        // it** — see [`sharing`]. On Linux it is a directory made inside the
+        // namespace, so nothing of the host's goes with it and every launch
+        // says the same thing; on the other two it is the Conversation's own
+        // directory on the host, holding the root of every launch there, and a
+        // terminal starting beside a session would empty that session's root
+        // out from under it.
+        surface.made(self.emptied_or_kept(self.home.path().to_owned(), launch));
 
         // And the rest of the profile on the platform that has one: its two
         // halves, and the temporary directory inside the second — where a
@@ -4125,9 +4130,16 @@ impl Sandbox {
         // under it and what emptied that would take them with it. See
         // [`windows_profile`], and [`on_the_machine`] for the two platforms
         // that say the temporary one before ever reaching here.
+        //
+        // Kept rather than emptied where the profile above it is, and for its
+        // reason: they are inside it, so what the running launch has in them is
+        // its own.
         if self.platform == Platform::Windows {
             for made in windows_profile(self.home.path()) {
-                surface.made(made);
+                surface.made(match made {
+                    Access::Empty(path) => self.emptied_or_kept(path, launch),
+                    made => made,
+                });
             }
         }
 
@@ -4163,10 +4175,10 @@ impl Sandbox {
         // [`Sandbox::root_described`], which is what a session is given of its
         // account's directories — and for Claude a copy of the file half beside
         // it — see [`Sandbox::config_described`].
-        self.root_described(&self.root, builds, &mut surface);
+        self.root_described(&self.root, launch.builds, &mut surface);
 
         if let store::Account::Claude { config_file, .. } = &self.account {
-            self.config_described(&self.root, config_file, builds, &mut surface);
+            self.config_described(&self.root, config_file, launch.builds, &mut surface);
         }
 
         // After the temporary filesystem and the empty HOME alike, because on
@@ -4448,8 +4460,8 @@ impl Sandbox {
     /// back.
     ///
     /// **Neither emptied nor written where `builds` is false**, which is a
-    /// Linux root something of the Conversation is still running in: this
-    /// launch is given it as that one has it — see [`sharing`].
+    /// root something of the Conversation is still running in, on any
+    /// platform: this launch is given it as that one has it — see [`sharing`].
     fn root_described(&self, root: &root::Root, builds: bool, surface: &mut Surface) {
         let (built, inside) = (self.home.built(), self.home.path());
         let copied = self.login_copy(root);
@@ -4533,6 +4545,27 @@ impl Sandbox {
             for path in covered {
                 surface.own(path, Reach::ReadOnly);
             }
+        }
+    }
+
+    /// A directory of the session's own at `path`, emptied as this launch
+    /// starts or left exactly as it is.
+    ///
+    /// **Left as it is where something of the Conversation is still running
+    /// inside it** — see [`sharing`], which is what `launch` was told. That is
+    /// the HOME on the two platforms that make a real one, and the halves of a
+    /// Windows profile under it: one directory per Conversation, holding the
+    /// root of every launch there, so emptying it as a terminal starts would
+    /// take a running session's transcript, its memory and its login with it.
+    ///
+    /// **On Linux it is always emptied**, which is to say always made: HOME
+    /// there is a directory inside the namespace and nothing of the host's is
+    /// under it, so there is nothing for a launch to lose and nothing for the
+    /// next one to keep — see [`Homes`].
+    fn emptied_or_kept(&self, path: PathBuf, launch: &sharing::Launch) -> Access {
+        match launch.empties || self.home.built() != self.home.path() {
+            true => Access::Empty(path),
+            false => Access::Kept(path),
         }
     }
 

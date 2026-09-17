@@ -80,6 +80,20 @@ pub(crate) fn command(surface: &Surface) -> Rendering {
             // **Failures are logged rather than raised**, for the reason the
             // Mac's own making is: a rendering cannot refuse, and a root that
             // could not be made is a bind that fails saying which path.
+            // And one of those that something of the Conversation is still
+            // running in, which is made where it is missing and emptied never
+            // — see [`super::sharing`]. The ordinary case is a directory that
+            // is already there, holding what the running launch was given.
+            Access::Kept(path) => {
+                if let Err(error) = std::fs::create_dir_all(path) {
+                    tracing::error!(
+                        error = ?error,
+                        built = %path.display(),
+                        "a directory a session's root is shared in could not be made, so the \
+                         session will not find what was to be there"
+                    );
+                }
+            }
             Access::Built(path) => {
                 if let Err(error) = super::emptied(path) {
                     tracing::error!(

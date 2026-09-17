@@ -609,7 +609,9 @@ to fall back to, and the log says which of the three it was.
 
 **The profile a session runs in is the Conversation's own**, under
 `%APPDATA%\Verkstead\homes`, emptied and made again as each of that
-Conversation's sessions starts. `USERPROFILE` and `HOME` point at it, and
+Conversation's sessions starts — except while another session or terminal of it
+is still running in there, which is given the profile as it stands rather than
+having it deleted out from under it. `USERPROFILE` and `HOME` point at it, and
 `APPDATA`, `LOCALAPPDATA`, `TEMP` and `TMP` point inside it — so what npm
 caches, what a tool writes down and what either of them throws away lands there
 rather than in your own profile.

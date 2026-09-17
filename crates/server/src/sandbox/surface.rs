@@ -71,6 +71,16 @@ pub(crate) enum Access {
     /// of a Windows profile inside that HOME is before anything writes there.
     Empty(PathBuf),
 
+    /// A directory that is really there and left exactly as it is: made where
+    /// it is missing, and emptied never.
+    ///
+    /// What [`Access::Empty`] and [`Access::Built`] become where something of
+    /// the Conversation is still running in what they would empty — see
+    /// [`super::sharing`]. It grants what [`Access::Empty`] grants, so a HOME
+    /// said this way is as reachable as one emptied, and what is inside it is
+    /// the running launch's.
+    Kept(PathBuf),
+
     /// A directory of Verkstead's own **on the host**, emptied and made again
     /// as a session starts, and reached by nothing for having been said: what
     /// is built in it is reached through what the description says after it.

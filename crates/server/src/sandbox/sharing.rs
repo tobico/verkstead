@@ -1,14 +1,21 @@
-//! A root on Linux that something is still running in, shared by the next
-//! launch rather than built again under it.
+//! A root something is still running in, shared by the next launch rather than
+//! built again under it — and, on the two platforms whose HOME is a real
+//! directory, that HOME as well.
 //!
-//! **Why Linux alone.** On Linux a root is a directory under the Data Directory
-//! that the namespace binds in, and what is joined into it is bound onto mount
-//! points inside it. Emptying that directory as a Conversation Terminal starts
-//! would unlink those mount points from under a session still running, which
-//! the kernel answers by unmounting them inside that session: its transcript,
-//! its memory and its login would all be gone from where it writes them. And
-//! a Claude session's `.claude.json` copy would be a deleted file, whose
-//! changes are merged against a copy it never had.
+//! **What emptying a root would take with it.** On Linux a root is a directory
+//! under the Data Directory that the namespace binds in, and what is joined
+//! into it is bound onto mount points inside it. Emptying that directory as a
+//! Conversation Terminal starts would unlink those mount points from under a
+//! session still running, which the kernel answers by unmounting them inside
+//! that session: its transcript, its memory and its login would all be gone
+//! from where it writes them. And a Claude session's `.claude.json` copy would
+//! be a deleted file, whose changes are merged against a copy it never had.
+//!
+//! On a Mac and on Windows nothing is mounted, so emptying a root does not
+//! unmount anything — it deletes. Where the Profile shares no memory that is
+//! worse rather than better: the root holds the session's own store, which is
+//! the only copy there is of its memory and its transcript, and an OpenCode
+//! root holds the database it is writing — see [`super::root`].
 //!
 //! So a launch into a root that already has something running in it is given
 //! that root as it is: nothing emptied, nothing written, and the same copy of
@@ -22,8 +29,14 @@
 //! `.codex`, side by side in the Conversation's directory. A launch into one is
 //! nothing to the other.
 //!
-//! On a Mac and on Windows the profile is the HOME itself, and is emptied as it
-//! always was — see [`super::Homes`].
+//! **And the HOME the roots are in is one Conversation's**, which is why a
+//! launch is told whether it may empty that too — see [`Launch::empties`]. On
+//! Linux it is a directory made inside the namespace and nothing of the host's
+//! is removed with it, so there is nothing there to keep. On the other two it
+//! is the Conversation's own directory, holding every root of it: emptying it
+//! as a terminal starts would take the running session's root away whichever
+//! harness that terminal is under, so nothing of the Conversation may be
+//! running in it. See [`super::Homes`].
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -53,12 +66,19 @@ struct Running {
     baseline: Baseline,
 }
 
-/// What a launch is given: whether it builds the root or shares one, and the
-/// baseline its copy is merged against either way.
+/// What a launch is given: whether it builds the root or shares one, whether
+/// it may empty the HOME that root is in, and the baseline its copy is merged
+/// against either way.
 pub(crate) struct Launch {
     /// `true` where nothing else is running in the root, so this launch
     /// empties and builds it.
     pub(crate) builds: bool,
+
+    /// `true` where nothing else is running in *any* of the Conversation's
+    /// roots, so the HOME holding them may be emptied — which on the two
+    /// platforms that make a real one is what would take a running session's
+    /// root with it.
+    pub(crate) empties: bool,
 
     pub(crate) baseline: Baseline,
 }
@@ -88,10 +108,20 @@ impl Sharing {
     ) -> std::io::Result<(T, Share)> {
         let mut held = self.0.lock().expect("the root register is not poisoned");
         let root = (conversation, named);
+
+        // Whether anything of the Conversation is running in any root of it,
+        // which is what says whether the HOME they are all in may be emptied.
+        // Asked before the entry below, which would count this launch's own
+        // root as running in a moment.
+        let empties = !held
+            .iter()
+            .any(|((held, _), running)| *held == conversation && running.launches > 0);
+
         let running = held.entry(root).or_default();
 
         let launched = launch(Launch {
             builds: running.launches == 0,
+            empties,
             baseline: running.baseline.clone(),
         })?;
 
