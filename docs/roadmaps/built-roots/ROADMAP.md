@@ -87,7 +87,7 @@ first; 05 carries the release gate, which matters before `v0.1.2` is tagged.
 
 ## Stages
 
-- [ ] 01: Claude's built root — [brief](01-claude-root.md) *(in progress: `built-roots/01-claude-root`)*
+- [x] 01: Claude's built root — [brief](01-claude-root.md)
 - [ ] 02: The other three roots and the memory switch — [brief](02-three-roots-and-memory.md)
 - [ ] 03: The instructions text — [brief](03-instructions-text.md)
 - [ ] 04: What the reporter could not see — [brief](04-what-the-reporter-could-not-see.md)
