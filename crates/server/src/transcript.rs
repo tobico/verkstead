@@ -241,12 +241,17 @@ impl Tail {
             // given up on rather than guessed at.
             (store::Account::Codex { .. }, None) => Search::Nowhere,
 
-            // And where grok keeps its sessions, under the one directory its
-            // account is. Grok Build names its session at launch, so the log is
+            // And where grok keeps its sessions: under the one directory its
+            // account is where the Profile shares its memory, and under the
+            // session's own root on the host where it does not, for Codex's
+            // reason. Grok Build names its session at launch, so the log is
             // named rather than found — the Worktree and the moment are
             // nothing to it.
-            (store::Account::Grok { home }, _) => Search::Updates {
-                sessions: home.join(SESSIONS),
+            (store::Account::Grok { home: account }, _) => Search::Updates {
+                sessions: match profile.memory {
+                    true => account.join(SESSIONS),
+                    false => home.grok_sessions(),
+                },
                 session: session.to_owned(),
             },
 

@@ -1,5 +1,5 @@
-//! A built root: the `.claude` or the `.codex` a session is given in place of
-//! the account's whole one.
+//! A built root: the `.claude`, the `.codex` or the `.grok` a session is given in
+//! place of the account's whole one.
 //!
 //! **An allowlist, and nothing outside it.** What a session needs of its account
 //! is its login and the store its memory and transcripts are kept in.
@@ -25,12 +25,14 @@
 //! [`super::Access::Built`]. What goes into it is joined rather than copied, so
 //! a login from inside and a memory written inside both land in the account:
 //! a bind on Linux, a symlink on a Mac, and on Windows a hard link for the login
-//! and a junction for each directory.
+//! and a junction for each directory. The one exception is a Grok Build login on
+//! Linux, which is copied and merged back — see [`Root::login_copied`].
 //!
 //! **Beside a Claude root, `.claude.json` is copied rather than joined**, so the
 //! trust seeded into it is not written straight into the account, and what a
 //! session changes in it is merged back as it ends — see [`merged_back`]. Codex
 //! has no such file: its Worktree trust is said on the launch line (ADR-0011).
+//! Nor has Grok Build.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -70,6 +72,13 @@ const AUTH: &str = "auth.json";
 /// The configuration file Codex reads for the user, inside `~/.codex`.
 const CODEX_CONFIG: &str = "config.toml";
 
+/// What Codex and Grok Build both call the directory their sessions write their
+/// logs under, inside the account's directory.
+const SESSIONS: &str = "sessions";
+
+/// The configuration file Grok Build reads for the user, inside `~/.grok`.
+const GROK_CONFIG: &str = "config.toml";
+
 /// The two directories Codex's memory is kept in, inside `~/.codex`: the
 /// rollouts every session writes, and the memory files — `MEMORY.md` and
 /// `memory_summary.md` — its memories feature writes and reads.
@@ -88,7 +97,7 @@ const CODEX_CONFIG: &str = "config.toml";
 /// memories feature's two phases, and `codex features list` says `memories` is
 /// off unless `[features]` in `config.toml` turns it on — which the file a root
 /// is written never carries, see [`CODEX_CARRIED`].
-const CODEX_MEMORY: [&str; 2] = ["sessions", "memories"];
+const CODEX_MEMORY: [&str; 2] = [SESSIONS, "memories"];
 
 /// Of the account's own `config.toml`, the keys a root's carries over.
 ///
@@ -98,6 +107,53 @@ const CODEX_MEMORY: [&str; 2] = ["sessions", "memories"];
 /// `mcp_servers`, `profiles`, `projects`, hooks, `notify`, `[features]` — and
 /// none of it is a session's.
 const CODEX_CARRIED: [&str; 2] = ["model_provider", "model_providers"];
+
+/// The two directories Grok Build's memory is kept in, inside `~/.grok`: the
+/// sessions every run writes, and the memory files its memory feature writes
+/// and searches.
+///
+/// **Directories rather than files, which is what grok 1.0.13 keeps.** Read off
+/// a real run: `memory/` holds a global `MEMORY.md` and a directory per
+/// repository, each with a `MEMORY.md` of its own and an `index.sqlite` beside
+/// it; `sessions/` holds a directory per working directory, the session logs
+/// inside them, and a `session_search.sqlite` at the top.
+///
+/// **Both databases are in write-ahead-log mode**: grok picks the mode by the
+/// filesystem, and on a local disk a run leaves `index.sqlite-wal` and
+/// `index.sqlite-shm` beside the file, and `session_search.sqlite` says version
+/// 2 in its header. A database joined a file at a time would lose those
+/// siblings and not open. Each is inside a directory joined whole, so it comes
+/// with its siblings and is never linked on its own.
+///
+/// Not `skills/`, `plugins/`, `agents/`, `workflows/`, `logs/`, `docs/` or
+/// `pager.toml`, which are the human's or grok's own furniture.
+const GROK_MEMORY: [&str; 2] = [SESSIONS, "memory"];
+
+/// Of the account's own `config.toml`, what a Grok root's carries over: each a
+/// top-level key, or a `table.key` inside one.
+///
+/// **An allowlist**, for [`CARRIED`]'s reason. Grok has no one key that names a
+/// provider, so these are the ones its configuration reference gives to
+/// reaching a model and signing in to one: `model` holds custom model
+/// definitions and overrides, with their endpoints and keys; `model_providers`
+/// names providers a model points at; `auth_provider` names the credential
+/// helpers a model mints its token with. `auth`, and `grok_com_config` which is
+/// the same table under another name, say how the account signs in — an
+/// enterprise identity provider or an external auth command — without which a
+/// login from one cannot be refreshed. And of `endpoints`, only where models
+/// are listed and reached; the rest of that table is feedback and trace upload.
+///
+/// Everything else is how the human works — `mcp_servers`, `hooks`, `skills`,
+/// `plugins`, `permission`, `memory`, `ui` — and none of it is a session's.
+const GROK_CARRIED: [&str; 7] = [
+    "model",
+    "model_providers",
+    "auth_provider",
+    "auth",
+    "grok_com_config",
+    "endpoints.models_base_url",
+    "endpoints.models_list_url",
+];
 
 /// Of the account's `.claude.json`, the key its MCP servers are under: at the top
 /// level, and again under each `projects` entry.
@@ -153,6 +209,10 @@ enum Harness {
     /// Codex: `auth.json` linked, `sessions/` and `memories/` as its memory,
     /// and a `config.toml` written — see [`CODEX_MEMORY`].
     Codex,
+
+    /// Grok Build: `auth.json` linked, `sessions/` and `memory/` as its memory,
+    /// and a `config.toml` written — see [`GROK_MEMORY`].
+    Grok,
 }
 
 impl Root {
@@ -222,9 +282,21 @@ impl Root {
         }
     }
 
+    /// The Grok Build root for a session logged in as the account at `account`.
+    ///
+    /// Nothing about the Worktree is in it, for Codex's reason: grok keeps one
+    /// `sessions/` and one `memory/` for every directory it runs in.
+    pub(crate) fn grok(account: &Path) -> Root {
+        Root {
+            account: account.to_owned(),
+            harness: Harness::Grok,
+            memory: true,
+        }
+    }
+
     /// The same root, sharing the account's memory or not.
     ///
-    /// **On**, which is what [`Root::claude`] and [`Root::codex`] make: the
+    /// **On**, which is what [`Root::claude`], [`Root::codex`] and [`Root::grok`] make: the
     /// memory store is made in the account and joined, so memory a session
     /// writes is the account's and its transcript is in the account's store.
     ///
@@ -244,6 +316,7 @@ impl Root {
         match self.harness {
             Harness::Claude { .. } => super::CLAUDE_DIR_INSIDE_HOME,
             Harness::Codex => super::CODEX_INSIDE_HOME,
+            Harness::Grok => super::GROK_INSIDE_HOME,
         }
     }
 
@@ -252,9 +325,10 @@ impl Root {
         root.join(PROJECTS)
     }
 
-    /// Where Codex's rollouts are in a Codex root at `root`.
+    /// Where a Codex root at `root` keeps its rollouts, and a Grok Build root its
+    /// sessions.
     pub(crate) fn sessions_in(root: &Path) -> PathBuf {
-        root.join(CODEX_MEMORY[0])
+        root.join(SESSIONS)
     }
 
     /// The account's own directory.
@@ -277,8 +351,10 @@ impl Root {
     pub(crate) fn login_of(account: &crate::store::Account) -> Option<PathBuf> {
         match account {
             crate::store::Account::Claude { claude_dir, .. } => Some(claude_dir.join(CREDENTIALS)),
-            crate::store::Account::Codex { home } => Some(home.join(AUTH)),
-            crate::store::Account::Grok { .. } | crate::store::Account::OpenCode { .. } => None,
+            crate::store::Account::Codex { home } | crate::store::Account::Grok { home } => {
+                Some(home.join(AUTH))
+            }
+            crate::store::Account::OpenCode { .. } => None,
         }
     }
 
@@ -286,7 +362,7 @@ impl Root {
     fn login(&self) -> &'static str {
         match self.harness {
             Harness::Claude { .. } => CREDENTIALS,
-            Harness::Codex => AUTH,
+            Harness::Codex | Harness::Grok => AUTH,
         }
     }
 
@@ -307,13 +383,46 @@ impl Root {
             ),
             Harness::Codex => (
                 root.join(CODEX_CONFIG),
-                codex_config(
+                toml_carrying(
                     std::fs::read_to_string(self.account.join(CODEX_CONFIG))
                         .ok()
                         .as_deref(),
+                    &CODEX_CARRIED,
+                ),
+            ),
+            Harness::Grok => (
+                root.join(GROK_CONFIG),
+                toml_carrying(
+                    std::fs::read_to_string(self.account.join(GROK_CONFIG))
+                        .ok()
+                        .as_deref(),
+                    &GROK_CARRIED,
                 ),
             ),
         }
+    }
+
+    /// Whether a session on `platform` is given a copy of the login rather
+    /// than a link to it: a Grok Build root on Linux, and no other.
+    ///
+    /// **Grok saves its login by renaming a file over it, and nothing else.**
+    /// Read off grok 1.0.13: a save writes a temporary file beside `auth.json`
+    /// and renames it over the top, and falls back to writing in place only
+    /// when the disk is full. A bind refuses the rename — `grok logout` inside
+    /// bubblewrap over a bound `auth.json` fails with *Resource busy* — so a
+    /// session given one could never save a login or a refreshed token. Claude
+    /// falls back to writing in place whenever the rename is refused, and Codex
+    /// writes in place to begin with, so a bind serves both of them.
+    ///
+    /// **A copy, merged back as the session ends**, the way Claude's
+    /// `.claude.json` is — see [`merged_back`]. The top-level keys of Grok's
+    /// `auth.json` are its login scopes, so a scope the session refreshed goes
+    /// back and one it did not touch stays as the account has it, whatever the
+    /// human's own `grok` wrote there meanwhile. On a Mac and on Windows the
+    /// rename replaces the link instead, which is handed back as it ends — see
+    /// [`super::closing`].
+    pub(crate) fn login_copied(&self, platform: Platform) -> bool {
+        matches!((&self.harness, platform), (Harness::Grok, Platform::Linux))
     }
 
     /// The `.claude.json` a Claude session is given: a copy of the account's own
@@ -328,7 +437,7 @@ impl Root {
     pub(crate) fn config(&self, config_file: &Path) -> Vec<u8> {
         let trusted = match &self.harness {
             Harness::Claude { trusted, .. } => trusted.as_slice(),
-            Harness::Codex => &[],
+            Harness::Codex | Harness::Grok => &[],
         };
 
         config(std::fs::read(config_file).ok().as_deref(), trusted)
@@ -387,7 +496,8 @@ impl Root {
     /// and none where it is.
     ///
     /// Claude's is the whole of `projects/`, the entries being named inside it
-    /// as the session writes them. Codex's are `sessions/` and `memories/`.
+    /// as the session writes them. Codex's are `sessions/` and `memories/`, and
+    /// Grok Build's `sessions/` and `memory/`.
     pub(crate) fn unshared_in(&self, root: &Path) -> Vec<PathBuf> {
         if self.memory {
             return Vec::new();
@@ -396,6 +506,7 @@ impl Root {
         match self.harness {
             Harness::Claude { .. } => vec![Root::projects_in(root)],
             Harness::Codex => CODEX_MEMORY.iter().map(|store| root.join(store)).collect(),
+            Harness::Grok => GROK_MEMORY.iter().map(|store| root.join(store)).collect(),
         }
     }
 
@@ -413,24 +524,46 @@ impl Root {
                 .map(|entry| Path::new(PROJECTS).join(entry))
                 .collect(),
             Harness::Codex => CODEX_MEMORY.iter().map(PathBuf::from).collect(),
+            Harness::Grok => GROK_MEMORY.iter().map(PathBuf::from).collect(),
         }
     }
 }
 
-/// The `config.toml` a Codex root is given, out of the account's own where
-/// there is one to read.
+/// The `config.toml` a Codex or a Grok Build root is given, out of the
+/// account's own where there is one to read.
 ///
-/// The [`CODEX_CARRIED`] keys of the account's own, as they are there, and
-/// nothing else. An account with no such file, or one that does not read as
-/// TOML, is given an empty file: a session on OpenAI's own provider needs
-/// nothing said.
-fn codex_config(account: Option<&str>) -> Vec<u8> {
+/// The `carried` keys of the account's own, as they are there, and nothing
+/// else — [`CODEX_CARRIED`] or [`GROK_CARRIED`]. A key written `table.key` is
+/// that one key of the table, in a table of the same name. An account with no
+/// such file, or one that does not read as TOML, is given an empty file: a
+/// session on the vendor's own provider needs nothing said.
+fn toml_carrying(account: Option<&str>, carried: &[&str]) -> Vec<u8> {
     let mut written = toml::Table::new();
 
     if let Some(own) = account.and_then(|text| text.parse::<toml::Table>().ok()) {
-        for key in CODEX_CARRIED {
-            if let Some(value) = own.get(key) {
-                written.insert(key.to_owned(), value.clone());
+        for key in carried {
+            match key.split_once('.') {
+                None => {
+                    if let Some(value) = own.get(*key) {
+                        written.insert((*key).to_owned(), value.clone());
+                    }
+                }
+                Some((table, inner)) => {
+                    let Some(value) = own
+                        .get(table)
+                        .and_then(toml::Value::as_table)
+                        .and_then(|own| own.get(inner))
+                    else {
+                        continue;
+                    };
+
+                    if let toml::Value::Table(kept) = written
+                        .entry(table)
+                        .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+                    {
+                        kept.insert(inner.to_owned(), value.clone());
+                    }
+                }
             }
         }
     }
@@ -516,6 +649,10 @@ fn config(account: Option<&[u8]>, trusted: &[String]) -> Vec<u8> {
 /// What a session changed in its copy of `.claude.json`, merged into the
 /// account's own file at `account`. `baseline` is the copy as the account last
 /// had it, and `copy` is where the session left it.
+///
+/// **And a Grok Build session's copy of `auth.json` on Linux**, by the same rule
+/// — see [`Root::login_copied`]. Its top-level keys are login scopes, so a
+/// scope is what is merged, and neither of the keys below is ever one of them.
 ///
 /// **`baseline` is moved on to the copy as it was merged**, once the account
 /// has it. A copy can be shared by more than one launch — see
@@ -794,7 +931,7 @@ mod tests {
     fn entries(root: &Root) -> Vec<String> {
         match &root.harness {
             Harness::Claude { entries, .. } => entries.clone(),
-            Harness::Codex => panic!("a Codex root has no `projects/` entries"),
+            Harness::Codex | Harness::Grok => panic!("only a Claude root has `projects/` entries"),
         }
     }
 
@@ -802,7 +939,9 @@ mod tests {
     fn trusted(root: &Root) -> Vec<String> {
         match &root.harness {
             Harness::Claude { trusted, .. } => trusted.clone(),
-            Harness::Codex => panic!("a Codex root has no `.claude.json` to trust in"),
+            Harness::Codex | Harness::Grok => {
+                panic!("only a Claude root has a `.claude.json` to trust in")
+            }
         }
     }
 
@@ -1353,7 +1492,7 @@ mod tests {
         "#;
 
         assert_eq!(
-            table(&codex_config(Some(account))),
+            table(&toml_carrying(Some(account), &CODEX_CARRIED)),
             toml::toml! {
                 model_provider = "proxy"
 
@@ -1369,8 +1508,171 @@ mod tests {
     /// empty one.
     #[test]
     fn an_account_with_no_codex_config_to_read_is_given_an_empty_one() {
-        assert!(codex_config(None).is_empty());
-        assert!(codex_config(Some("model_provider = ")).is_empty());
-        assert!(codex_config(Some("model = \"gpt-5-codex\"\n")).is_empty());
+        assert!(toml_carrying(None, &CODEX_CARRIED).is_empty());
+        assert!(toml_carrying(Some("model_provider = "), &CODEX_CARRIED).is_empty());
+        assert!(toml_carrying(Some("model = \"gpt-5-codex\"\n"), &CODEX_CARRIED).is_empty());
+    }
+
+    /// A Grok Build root joins the login and its two memory directories, made
+    /// in the account first; with memory off, the login alone, nothing made in
+    /// the account, and the two directories the root's own.
+    #[test]
+    fn a_grok_root_joins_its_login_and_its_memory_by_the_switch() {
+        let dir = tempfile::tempdir().unwrap();
+        let account = dir.path().join("account/.grok");
+        std::fs::create_dir_all(&account).unwrap();
+        std::fs::write(account.join(AUTH), "{}\n").unwrap();
+
+        let forgetting = Root::grok(&account).remembering(false);
+        forgetting.made_in_account().unwrap();
+
+        assert_eq!(
+            forgetting.joined(Path::new("/inside/.grok")),
+            [(account.join(AUTH), PathBuf::from("/inside/.grok/auth.json"))]
+        );
+        assert!(!account.join("sessions").exists() && !account.join("memory").exists());
+        assert_eq!(
+            forgetting.unshared_in(Path::new("/built/.grok")),
+            [
+                PathBuf::from("/built/.grok/sessions"),
+                PathBuf::from("/built/.grok/memory")
+            ]
+        );
+
+        let remembering = Root::grok(&account);
+        remembering.made_in_account().unwrap();
+
+        assert_eq!(
+            remembering.joined(Path::new("/inside/.grok")),
+            [
+                (account.join(AUTH), PathBuf::from("/inside/.grok/auth.json")),
+                (
+                    account.join("sessions"),
+                    PathBuf::from("/inside/.grok/sessions")
+                ),
+                (
+                    account.join("memory"),
+                    PathBuf::from("/inside/.grok/memory")
+                ),
+            ]
+        );
+        assert!(account.join("sessions").is_dir() && account.join("memory").is_dir());
+        assert!(
+            remembering
+                .unshared_in(Path::new("/built/.grok"))
+                .is_empty()
+        );
+    }
+
+    /// Only a Grok Build root on Linux is given its login as a copy: grok saves
+    /// one by a rename a bind refuses, and the other harnesses and platforms are
+    /// served by a link.
+    #[test]
+    fn only_a_grok_login_on_linux_is_copied() {
+        let account = Path::new("/home/you/.grok");
+        let grok = Root::grok(account);
+
+        assert!(grok.login_copied(Platform::Linux));
+        assert!(!grok.login_copied(Platform::MacOs));
+        assert!(!grok.login_copied(Platform::Windows));
+        assert!(!Root::codex(Path::new("/home/you/.codex")).login_copied(Platform::Linux));
+        assert!(
+            !Root::claude(
+                Platform::Linux,
+                Path::new("/home/you/.claude"),
+                Path::new("/home/you/src/repo/.git"),
+                Path::new("/home/you/src/repo"),
+            )
+            .login_copied(Platform::Linux)
+        );
+    }
+
+    /// What reaches a model and signs in to one comes over as it is, the models
+    /// endpoints alone of their table, and nothing else of the account's.
+    #[test]
+    fn only_what_reaches_a_model_is_carried_into_groks_config() {
+        let account = r#"
+            [models]
+            default = "the-proxy"
+
+            [model.the-proxy]
+            model = "gpt-5"
+            base_url = "https://proxy.example/v1"
+            env_key = "PROXY_API_KEY"
+            auth_provider = "vault"
+
+            [model_providers.proxy]
+            base_url = "https://proxy.example/v1"
+
+            [auth_provider.vault]
+            command = "/usr/local/bin/print-token"
+
+            [auth]
+            auth_provider_command = "/usr/local/bin/sign-in"
+
+            [grok_com_config.oidc]
+            issuer = "https://id.example"
+
+            [endpoints]
+            models_base_url = "https://proxy.example/v1"
+            models_list_url = "https://proxy.example/v1/models"
+            trace_upload_bucket = "s3://the-humans"
+
+            [mcp_servers.the-humans]
+            command = "npx"
+
+            [memory]
+            enabled = true
+
+            [ui]
+            screen_mode = "minimal"
+
+            [[hooks.Stop]]
+            command = "notify-send"
+        "#;
+
+        assert_eq!(
+            table(&toml_carrying(Some(account), &GROK_CARRIED)),
+            toml::toml! {
+                [model.the-proxy]
+                model = "gpt-5"
+                base_url = "https://proxy.example/v1"
+                env_key = "PROXY_API_KEY"
+                auth_provider = "vault"
+
+                [model_providers.proxy]
+                base_url = "https://proxy.example/v1"
+
+                [auth_provider.vault]
+                command = "/usr/local/bin/print-token"
+
+                [auth]
+                auth_provider_command = "/usr/local/bin/sign-in"
+
+                [grok_com_config.oidc]
+                issuer = "https://id.example"
+
+                [endpoints]
+                models_base_url = "https://proxy.example/v1"
+                models_list_url = "https://proxy.example/v1/models"
+            }
+        );
+    }
+
+    /// An account with no `config.toml`, one that does not read, or one with
+    /// nothing a model is reached by, is given an empty one — and an
+    /// `endpoints` table with none of the two keys is not written at all.
+    #[test]
+    fn an_account_with_nothing_to_carry_into_groks_config_is_given_an_empty_one() {
+        assert!(toml_carrying(None, &GROK_CARRIED).is_empty());
+        assert!(toml_carrying(Some("[model"), &GROK_CARRIED).is_empty());
+        assert!(
+            toml_carrying(
+                Some("[endpoints]\ntrace_upload_bucket = \"s3://x\"\n"),
+                &GROK_CARRIED
+            )
+            .is_empty()
+        );
+        assert!(toml_carrying(Some("endpoints = \"not a table\"\n"), &GROK_CARRIED).is_empty());
     }
 }

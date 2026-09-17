@@ -94,6 +94,15 @@ const BESIDE_THE_VERSIONS: &str = ".local/share/claude/what-the-human-keeps-ther
 /// nothing without.
 const VERKSTEAD_INSTALL: &str = ".verkstead/bin";
 
+/// And where xAI's installer puts `grok`: inside `~/.grok`, the directory a
+/// Grok Build account is kept in — which a Grok session is given a root of
+/// Verkstead's own over, and which must not hide the install.
+const GROK_INSTALL: &str = ".grok/bin";
+
+/// The `grok` it put there, and what it says when it runs.
+const A_GROK: &str = "#!/bin/sh\nprintf '%s\\n' 'the grok xAI installed'\n";
+const GROK_SAYS: &str = "the grok xAI installed";
+
 /// The `codex` it put there, and what it says when it runs.
 const A_CODEX: &str = "#!/bin/sh\nprintf '%s\\n' 'the harness Verkstead installed'\n";
 const CODEX_SAYS: &str = "the harness Verkstead installed";
@@ -141,8 +150,15 @@ struct Standing {
     /// whole of the reason a session ever looks in.
     installed: PathBuf,
 
+    /// And where xAI's went, inside the human's own Grok Build account.
+    grok_install: PathBuf,
+
     conversation: store::Conversation,
     profile: store::Profile,
+
+    /// A Grok Build Profile over the human's own `~/.grok`, which that install
+    /// is inside.
+    grok_profile: store::Profile,
     skills: Skills,
     verkstead: Executable,
     handoffs: Handoffs,
@@ -153,9 +169,14 @@ struct Standing {
 impl Standing {
     /// The sandbox this Conversation's session would run in.
     fn sandbox(&self) -> Sandbox {
+        self.sandbox_under(&self.profile)
+    }
+
+    /// And the one it would run in under `profile`.
+    fn sandbox_under(&self, profile: &store::Profile) -> Sandbox {
         Sandbox::for_conversation(
             &self.conversation,
-            &self.profile,
+            profile,
             &Homes::on(
                 Platform::HERE,
                 self.home.path().to_owned(),
@@ -214,6 +235,13 @@ async fn standing() -> Standing {
     std::fs::create_dir_all(&installed).unwrap();
     program(&installed.join("codex"), A_CODEX);
 
+    // And what xAI's installer left, inside the human's own Grok Build account
+    // beside the login it keeps.
+    let grok_install = home.path().join(GROK_INSTALL);
+    std::fs::create_dir_all(&grok_install).unwrap();
+    program(&grok_install.join("grok"), A_GROK);
+    std::fs::write(home.path().join(".grok/auth.json"), "{}\n").unwrap();
+
     // The machine's own `PATH` stays on the end of it: what the *server*
     // process runs — git, and the wrapper a session is rendered behind — is
     // found on this one, and only a session's is composed from it.
@@ -238,7 +266,11 @@ async fn standing() -> Standing {
     let settings = Settings::in_data_dir(state.path());
     std::fs::write(
         settings.config_path(),
-        format!("session_path:\n  - {}\n", installed.display()),
+        format!(
+            "session_path:\n  - {}\n  - {}\n",
+            installed.display(),
+            grok_install.display()
+        ),
     )
     .unwrap();
     verkstead_server::sandbox::hold_session_path(&settings);
@@ -280,6 +312,21 @@ async fn standing() -> Standing {
                 config_file,
             },
             models: vec!["claude-opus-5".to_owned()],
+            memory: true,
+        },
+    )
+    .await
+    .unwrap()
+    .expect("the Profile saves");
+
+    let grok_profile = store::create_profile(
+        &pool,
+        &store::ProfileFacts {
+            name: Some("grok".to_owned()),
+            account: store::Account::Grok {
+                home: home.path().join(".grok"),
+            },
+            models: vec!["grok-4.6".to_owned()],
             memory: true,
         },
     )
@@ -340,8 +387,10 @@ async fn standing() -> Standing {
         version,
         outside,
         installed,
+        grok_install,
         conversation,
         profile,
+        grok_profile,
         skills,
         verkstead,
         handoffs,
@@ -500,6 +549,38 @@ async fn the_harness_under_the_servers_home_is_what_a_linux_session_runs() {
         String::from_utf8_lossy(&output.stdout).trim(),
         CODEX_SAYS,
         "and what ran was that install rather than something else of the name",
+    );
+
+    // And xAI's `grok`, run by name in a session under the Grok Build account
+    // it was installed inside: that session's `~/.grok` is a root of
+    // Verkstead's own, bound over the directory the install is in, and the
+    // install has to be there all the same.
+    let (rendering, _closing) = standing
+        .sandbox_under(&standing.grok_profile)
+        .command(&["grok"])
+        .expect("a rendering on a platform with no identity to make");
+    let output = started(&rendering);
+
+    assert!(
+        output.status.success(),
+        "the grok installed inside the account's own directory did not run inside \
+         a Grok session, whose root is bound over that directory: {}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        GROK_SAYS,
+        "and what ran was that install rather than something else of the name",
+    );
+
+    let reported = probe(
+        &standing.sandbox_under(&standing.grok_profile),
+        &format!("dir {} grok-install", quoted(&standing.grok_install)),
+    );
+
+    assert_eq!(
+        reported["grok-install"], "read",
+        "and it is read-only there, as every install a `PATH` names is",
     );
 
     let reported = probe(

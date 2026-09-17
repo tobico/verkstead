@@ -346,6 +346,11 @@ fi
         self.elsewhere.path().join("codex-account/.codex")
     }
 
+    /// And the one the Grok Build Profile names.
+    fn grok_dir(&self) -> PathBuf {
+        self.elsewhere.path().join("grok-account/.grok")
+    }
+
     /// A Profile of the second agent type, whose whole account is one home,
     /// holding what a Codex account that has been used holds: a login, a
     /// configuration naming a provider of its own beside the human's MCP
@@ -380,10 +385,34 @@ fi
     }
 
     /// And one of the third, whose account is one home as the second's is.
+    ///
+    /// Holding what a Grok Build 1.0.13 account that has been used holds: a
+    /// login, a configuration reaching a model of its own beside the human's MCP
+    /// servers, a session's log, a memory, and the human's own skills and
+    /// interface settings.
     async fn grok_profile(&self) -> store::Profile {
-        let home = self.elsewhere.path().join("grok-account/.grok");
-        std::fs::create_dir_all(&home).unwrap();
-        std::fs::write(home.join("user-settings.json"), "{}\n").unwrap();
+        let home = self.grok_dir();
+
+        for dir in ["sessions/%2Fsrc/019-the-humans", "memory", "skills"] {
+            std::fs::create_dir_all(home.join(dir)).unwrap();
+        }
+
+        for (file, contents) in [
+            (
+                "auth.json",
+                "{\"https://auth.x.ai::the-humans\": {\"key\": \"the login\"}}\n",
+            ),
+            (
+                "config.toml",
+                "[model.the-proxy]\nbase_url = \"https://proxy.example/v1\"\n\n\
+                 [mcp_servers.the-humans]\ncommand = \"npx\"\n",
+            ),
+            ("sessions/%2Fsrc/019-the-humans/updates.jsonl", "{}\n"),
+            ("memory/MEMORY.md", "remembered\n"),
+            ("pager.toml", "# the human's\n"),
+        ] {
+            std::fs::write(home.join(file), contents).unwrap();
+        }
 
         self.profile_of("grok", store::Account::Grok { home }, "grok-4.6")
             .await
@@ -1816,6 +1845,167 @@ async fn a_codex_login_written_inside_is_the_accounts() {
         std::fs::read_to_string(&credentials).unwrap(),
         "{\"logged\": \"in\"}\n",
         "and a login made where there was none is the account's afterwards"
+    );
+}
+
+/// A Grok Build session's `.grok` is a root of Verkstead's own too: the
+/// account's login, its `sessions/` and `memory/`, and a `config.toml`
+/// Verkstead wrote carrying what reaches the model and none of its MCP servers.
+/// The human's skills and interface settings are not in it, and the account
+/// itself, reached by its real path, is refused like anything else.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn a_grok_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
+    let fixture = grilling().await;
+    let profile = fixture.grok_profile().await;
+    let account = fixture.grok_dir();
+
+    let reported = probe(
+        &fixture.sandbox_under(&profile),
+        &format!(
+            r#"
+            say root "$(ls -A "$HOME/.grok" | sort | tr '\n' ' ')"
+            say config "$(cat "$HOME/.grok/config.toml" | tr '\n' ' ')"
+            file "$HOME/.grok/auth.json" login
+            file "$HOME/.grok/sessions/%2Fsrc/019-the-humans/updates.jsonl" log
+            file "$HOME/.grok/memory/MEMORY.md" memory
+            dir "$HOME/.grok/skills" skills
+            file "$HOME/.grok/pager.toml" pager
+            file {pager} the-accounts-pager
+            mkdir -p "$HOME/.grok/sessions/%2Fwork/019-the-session"
+            printf '{{}}\n' > "$HOME/.grok/sessions/%2Fwork/019-the-session/updates.jsonl"
+            "#,
+            pager = quoted(&account.join("pager.toml")),
+        ),
+    );
+
+    assert_eq!(reported["root"], "auth.json config.toml memory sessions ");
+
+    for write in ["login", "log", "memory"] {
+        assert_eq!(reported[write], "write", "the account's {write} is there");
+    }
+
+    for absent in ["skills", "pager"] {
+        assert_eq!(
+            reported[absent], "absent",
+            "the account's {absent} is not in the root"
+        );
+    }
+
+    assert_eq!(
+        reported["the-accounts-pager"], "refused",
+        "and the account's own directory is somebody else's on this machine"
+    );
+    assert!(
+        reported["config"].contains("[model.the-proxy]")
+            && !reported["config"].contains("mcp_servers"),
+        "the written configuration carries the model and nothing else: {}",
+        reported["config"]
+    );
+    assert!(
+        account
+            .join("sessions/%2Fwork/019-the-session/updates.jsonl")
+            .is_file(),
+        "and a log a session writes is on the account"
+    );
+}
+
+/// With the Profile's memory switched off, a Grok Build session's `sessions/`
+/// and `memory/` are the root's own and start empty, and the log it writes is
+/// in the root on the host rather than in the account.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn a_grok_root_without_memory_has_a_store_of_its_own() {
+    let fixture = grilling().await;
+    let forgetting = store::Profile {
+        memory: false,
+        ..fixture.grok_profile().await
+    };
+    let account = fixture.grok_dir();
+
+    let reported = probe(
+        &fixture.sandbox_under(&forgetting),
+        &format!(
+            r#"
+            say root "$(ls -A "$HOME/.grok" | sort | tr '\n' ' ')"
+            say sessions "$(ls -A "$HOME/.grok/sessions" | tr '\n' ' ')"
+            say memory "$(ls -A "$HOME/.grok/memory" | tr '\n' ' ')"
+            file "$HOME/.grok/auth.json" login
+            dir {sessions} the-accounts-sessions
+            mkdir -p "$HOME/.grok/sessions/%2Fwork/019-the-session"
+            printf '{{}}\n' > "$HOME/.grok/sessions/%2Fwork/019-the-session/updates.jsonl"
+            "#,
+            sessions = quoted(&account.join("sessions")),
+        ),
+    );
+
+    assert_eq!(reported["root"], "auth.json config.toml memory sessions ");
+    assert_eq!(reported["sessions"], "", "its `sessions/` starts empty");
+    assert_eq!(reported["memory"], "", "and so does its `memory/`");
+    assert_eq!(reported["the-accounts-sessions"], "refused");
+    assert_eq!(reported["login"], "write", "while the login is linked");
+
+    let home = fixture
+        .state
+        .path()
+        .join("homes")
+        .join(fixture.conversation.id.to_string());
+
+    assert!(
+        home.join(".grok/sessions/%2Fwork/019-the-session/updates.jsonl")
+            .is_file(),
+        "the log is in the root on the host, where it is looked for"
+    );
+    assert!(!account.join("sessions/%2Fwork").exists());
+}
+
+/// A login grok saves inside, by writing a temporary file and renaming it over
+/// the link, replaces the link — so it is the account's once the session has
+/// ended, and not before. A `MEMORY.md` saved the same way is inside a joined
+/// directory, so it is the account's as it is saved.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn a_grok_login_saved_inside_by_rename_is_the_accounts_once_the_session_ends() {
+    let fixture = grilling().await;
+    let profile = fixture.grok_profile().await;
+    let account = fixture.grok_dir();
+
+    let (_, afterwards) = probe_closing(
+        &fixture.sandbox_under(&profile),
+        r#"
+            printf '{"refreshed": "inside"}\n' > "$HOME/.grok/auth.json.saving"
+            mv "$HOME/.grok/auth.json.saving" "$HOME/.grok/auth.json"
+            printf 'remembered inside\n' > "$HOME/.grok/memory/MEMORY.md.saving"
+            mv "$HOME/.grok/memory/MEMORY.md.saving" "$HOME/.grok/memory/MEMORY.md"
+        "#,
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(account.join("memory/MEMORY.md")).unwrap(),
+        "remembered inside\n",
+        "the memory is the account's as it is saved"
+    );
+    assert_ne!(
+        std::fs::read_to_string(account.join("auth.json")).unwrap(),
+        "{\"refreshed\": \"inside\"}\n",
+        "while the login is not, until the session ends"
+    );
+
+    afterwards.close();
+
+    assert_eq!(
+        std::fs::read_to_string(account.join("auth.json")).unwrap(),
+        "{\"refreshed\": \"inside\"}\n",
+        "and then it is"
     );
 }
 

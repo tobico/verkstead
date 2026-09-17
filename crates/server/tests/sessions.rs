@@ -1910,6 +1910,24 @@ async fn grilling_on_grok(stub: &str) -> Grilling {
     .await
 }
 
+/// And the third backend again, with that Profile's memory switched off, so a
+/// session's `sessions/` is its root's own and its log is written there.
+async fn grilling_on_grok_forgetting(stub: &str) -> Grilling {
+    grilling_however_started(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        NOTHING_ATTACHED,
+        Pickers::EverythingOnGrokForgetting,
+        Origin::None,
+        Seeded::Nothing,
+        None,
+    )
+    .await
+}
+
 /// And the same again on the fourth, whose account is one home as well — two
 /// directories inside it rather than the directory itself, which is what
 /// [`Bench::everything_on_opencode`] makes.
@@ -2210,6 +2228,10 @@ enum Pickers {
     /// The grilling role on a Codex Profile, as [`Pickers::GrillingOnCodex`],
     /// with that Profile's memory switched off.
     GrillingOnCodexForgetting,
+
+    /// Every role on a Grok Build Profile, as [`Pickers::EverythingOnGrok`],
+    /// with that Profile's memory switched off.
+    EverythingOnGrokForgetting,
 }
 
 /// The same with a read-write companion beside it, for the tests about a
@@ -2403,6 +2425,10 @@ async fn grilling_however_started(
         Pickers::GrillingOnCodexForgetting => {
             bench.grilling_on_codex(id).await;
             bench.forgetting("codex").await;
+        }
+        Pickers::EverythingOnGrokForgetting => {
+            bench.everything_on_grok(id).await;
+            bench.forgetting("grok").await;
         }
     }
 
@@ -4481,6 +4507,84 @@ async fn a_grok_session_follows_the_log_it_was_named_for() {
         ),
         "the pane should draw what has been stored: {:?}",
         drawn.turns
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+}
+
+/// With the Profile's memory switched off, a Grok session's log is written into
+/// its root's own `sessions/` rather than the account's — and it is found under
+/// the name Verkstead gave it and followed from there onto the Timeline all the
+/// same.
+///
+/// The root is on the host under the Conversation's own directory in the Data
+/// Directory, which is where the log is looked for; the account's `sessions/`
+/// holds nothing of this session's.
+#[tokio::test]
+async fn a_grok_sessions_log_is_followed_out_of_its_root_where_memory_is_off() {
+    let fixture = grilling_on_grok_forgetting(
+        r#"
+        name=
+        while [ $# -gt 0 ]; do
+            if [ "$1" = --session-id ]; then name=$2; fi
+            shift
+        done
+
+        mine=$HOME/.grok/sessions/$(pwd | sed 's|/|%2F|g')/$name
+        mkdir -p "$mine"
+        printf '{"method":"session/update","params":{"sessionId":"%s","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Rate limiting"}}}}\n' "$name" \
+            > "$mine/updates.jsonl"
+        printf 'named=%s\n' "$name"
+
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+    let transcript = fixture.transcript_of(event, 1).await;
+
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+    let name = said
+        .lines()
+        .find_map(|line| line.strip_prefix("named="))
+        .expect("the session says what it was named");
+
+    assert_eq!(
+        transcript,
+        [format!(
+            r#"{{"method":"session/update","params":{{"sessionId":"{name}","update":{{"sessionUpdate":"user_message_chunk","content":{{"type":"text","text":"Rate limiting"}}}}}}}}"#
+        )],
+        "the log in the root is followed onto the Transcript"
+    );
+
+    let logs = |sessions: PathBuf| {
+        std::fs::read_dir(sessions)
+            .map(|groups| {
+                groups
+                    .flatten()
+                    .filter(|group| group.path().join(name).join("updates.jsonl").is_file())
+                    .count()
+            })
+            .unwrap_or(0)
+    };
+
+    assert_eq!(
+        logs(
+            fixture
+                .state
+                .path()
+                .join("homes")
+                .join(fixture.id.to_string())
+                .join(".grok/sessions")
+        ),
+        1,
+        "the log is in the root on the host"
+    );
+    assert_eq!(
+        logs(fixture._elsewhere.path().join("grok/.grok/sessions")),
+        0,
+        "and not in the account"
     );
 
     assert_eq!(fixture.close().await, ConversationClosed::Closed);

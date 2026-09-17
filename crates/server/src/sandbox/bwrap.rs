@@ -92,8 +92,14 @@ pub(crate) fn command(surface: &Surface) -> Rendering {
             }
             // And a file written into that directory, on the host for the same
             // reason and logged for the same reason.
+            //
+            // **Readable by its owner alone**, because what is written here is
+            // a login or a configuration that can hold an API key: a Grok Build
+            // login is a copy on this platform — see
+            // [`super::root::Root::login_copied`] — and grok keeps its own at
+            // that mode.
             Access::Written { path, contents } => {
-                if let Err(error) = std::fs::write(path, contents) {
+                if let Err(error) = owner_only(path, contents) {
                     tracing::error!(
                         error = ?error,
                         written = %path.display(),
@@ -113,6 +119,30 @@ pub(crate) fn command(surface: &Surface) -> Rendering {
     bwrap.args(surface.argv());
 
     bwrap
+}
+
+/// `contents` written to a new file at `path`, readable and writable by its
+/// owner and nobody else.
+#[cfg(unix)]
+fn owner_only(path: &std::path::Path, contents: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?
+        .write_all(contents)
+}
+
+/// And plainly where there are no Unix modes, which is a Windows build of the
+/// suite asking this rendering what it says — see the module list in
+/// [`super`].
+#[cfg(not(unix))]
+fn owner_only(path: &std::path::Path, contents: &[u8]) -> std::io::Result<()> {
+    std::fs::write(path, contents)
 }
 
 /// The flag that makes a bind what the description said it is.

@@ -136,7 +136,7 @@ const THEIR_SKILL: &str = "# what the account would have been grilled by\n";
 const CREDENTIALS: &str = ".credentials.json";
 const THE_LOGIN: &str = "{\"the\": \"login\"}";
 
-/// And where Codex keeps one inside `~/.codex`.
+/// And where Codex keeps one inside `~/.codex`, and Grok Build inside `~/.grok`.
 const AUTH: &str = "auth.json";
 
 /// Another repository's `projects/` entry in the account, which is no session's
@@ -603,6 +603,54 @@ impl Grilling {
     /// And the root a Codex session is given in its place, inside the profile.
     fn codex_root_inside(&self) -> PathBuf {
         self.profile_dir().join(".codex")
+    }
+
+    /// Run this fixture's sessions under a Grok Build account instead, holding
+    /// what a Grok Build 1.0.13 account that has been used holds: a login, a
+    /// configuration reaching a model beside the human's MCP servers, a session
+    /// store and a memory, and the human's own skills — really there, so that a
+    /// probe finding them refused or absent has found the boundary.
+    async fn under_grok(&mut self, memory: bool) {
+        let grok = self.grok_dir();
+
+        for dir in ["sessions", "memory", "skills"] {
+            std::fs::create_dir_all(grok.join(dir)).unwrap();
+            std::fs::write(grok.join(dir).join(MARKER), SAID).unwrap();
+        }
+
+        std::fs::write(grok.join(AUTH), THE_LOGIN).unwrap();
+        std::fs::write(grok.join("pager.toml"), "# the human's own\n").unwrap();
+        std::fs::write(
+            grok.join("config.toml"),
+            "[model.the-proxy]\nbase_url = \"https://proxy.example/v1\"\n\n\
+             [mcp_servers.the-humans]\ncommand = \"npx\"\n",
+        )
+        .unwrap();
+
+        self.profile = store::create_profile(
+            &self.pool,
+            &store::ProfileFacts {
+                name: Some("grok".to_owned()),
+                account: store::Account::Grok { home: grok },
+                models: vec!["grok-4.6".to_owned()],
+                memory,
+            },
+        )
+        .await
+        .unwrap()
+        .expect("the Profile saves");
+    }
+
+    /// The Grok Build account's own `~/.grok` on the host — see
+    /// [`Grilling::under_grok`].
+    fn grok_dir(&self) -> PathBuf {
+        self._watched.path().join("grok-account/.grok")
+    }
+
+    /// And the root a Grok Build session is given in its place, inside the
+    /// profile.
+    fn grok_root_inside(&self) -> PathBuf {
+        self.profile_dir().join(".grok")
     }
 
     /// The directories of the human's and the machine's own that this
@@ -1699,6 +1747,162 @@ async fn a_codex_login_written_inside_is_the_accounts() {
         std::fs::read_to_string(fixture.codex_dir().join(AUTH)).unwrap(),
         "{\"refreshed\": true}",
         "the login written inside is the account's"
+    );
+}
+
+/// A Grok Build session's `.grok` is a root of Verkstead's own: the login
+/// hard-linked in with an entry of its own, `sessions/` and `memory/`
+/// junctioned in, and a `config.toml` Verkstead wrote carrying what reaches the
+/// model and none of the human's MCP servers. The human's skills and interface
+/// settings are not in it, and nothing grants the account's own directory — so
+/// reached by its real path, it is refused.
+#[tokio::test]
+async fn a_grok_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
+    let mut fixture = grilling().await;
+    fixture.under_grok(true).await;
+
+    let root = fixture.grok_root_inside();
+    let account = fixture.grok_dir();
+    let config = root.join("config.toml");
+    let log = root.join("sessions").join("updates.jsonl");
+    let quoted = |path: &Path| path.display().to_string().replace('\'', "''");
+
+    let asked = [
+        directory("root", &root),
+        file("login", root.join(AUTH)),
+        directory("sessions", root.join("sessions")),
+        directory("memory", root.join("memory")),
+        directory("skills", root.join("skills")),
+        file("pager", root.join("pager.toml")),
+        directory("the-accounts-own", &account),
+        directory("the-accounts-skills", account.join("skills")),
+    ];
+
+    let classified = fixture.probe_running(&format!(
+        "{}{}\
+         [System.IO.File]::WriteAllText('{log}', '{{}}')\r\n",
+        classifying(&asked),
+        reading("config", &quoted(&config)),
+        log = quoted(&log),
+    ));
+
+    for (name, word) in [
+        ("root", "write"),
+        ("login", "write"),
+        ("sessions", "write"),
+        ("memory", "write"),
+        ("skills", "absent"),
+        ("pager", "absent"),
+        ("the-accounts-own", "refused"),
+        ("the-accounts-skills", "refused"),
+    ] {
+        assert_eq!(
+            said(&classified, name),
+            word,
+            "{name} should be {word}, and the probe said: {classified:?}"
+        );
+    }
+
+    let config = said(&classified, "config");
+    assert!(
+        config.contains("[model.the-proxy]") && !config.contains("mcp_servers"),
+        "the written configuration carries the model and nothing else: {config}"
+    );
+    assert!(
+        account.join("sessions").join("updates.jsonl").is_file(),
+        "and a log a session writes is on the account"
+    );
+}
+
+/// With the Profile's memory switched off, a Grok Build root's `sessions/` and
+/// `memory/` are its own and empty, and nothing is granted on the account's —
+/// so they are refused like the rest of the account. The log a session writes
+/// is in the root on the host, where it is looked for.
+#[tokio::test]
+async fn a_grok_root_without_memory_has_a_store_of_its_own() {
+    let mut fixture = grilling().await;
+    fixture.under_grok(false).await;
+
+    let root = fixture.grok_root_inside();
+    let account = fixture.grok_dir();
+    let sessions = root.join("sessions");
+    let log = sessions.join("updates.jsonl");
+    let quoted = |path: &Path| path.display().to_string().replace('\'', "''");
+
+    let asked = [
+        directory("sessions", &sessions),
+        directory("memory", root.join("memory")),
+        file("login", root.join(AUTH)),
+        directory("the-accounts-sessions", account.join("sessions")),
+    ];
+
+    let classified = fixture.probe_running(&format!(
+        "{}\
+         Report 'listed' ([System.IO.Directory]::GetFileSystemEntries('{sessions}').Length)\r\n\
+         [System.IO.File]::WriteAllText('{log}', '{{}}')\r\n",
+        classifying(&asked),
+        sessions = quoted(&sessions),
+        log = quoted(&log),
+    ));
+
+    for (name, word) in [
+        ("sessions", "write"),
+        ("memory", "write"),
+        ("login", "write"),
+        ("the-accounts-sessions", "refused"),
+        ("listed", "0"),
+    ] {
+        assert_eq!(
+            said(&classified, name),
+            word,
+            "{name} should be {word}, and the probe said: {classified:?}"
+        );
+    }
+
+    assert!(log.is_file(), "the log is in the root on the host");
+    assert!(
+        !account.join("sessions").join("updates.jsonl").exists(),
+        "and not in the account"
+    );
+}
+
+/// A Grok Build login saved inside the way grok 1.0.13 saves one — a temporary
+/// file renamed over it — is the account's once the session has ended. A
+/// `MEMORY.md` saved the same way is inside a junctioned directory, so it is the
+/// account's as it is saved.
+#[tokio::test]
+async fn a_grok_login_saved_by_rename_is_the_accounts_afterwards() {
+    let mut fixture = grilling().await;
+    fixture.under_grok(true).await;
+
+    let login = fixture.grok_root_inside().join(AUTH);
+    let memory = fixture.grok_root_inside().join("memory").join("MEMORY.md");
+    let quoted = |path: &Path| path.display().to_string().replace('\'', "''");
+
+    let classified = fixture.probe_running(&format!(
+        "{CLASSIFYING}\r\n\
+         Report 'read' ([System.IO.File]::ReadAllText('{login}'))\r\n\
+         [System.IO.File]::WriteAllText('{login}.tmp', '{{\"refreshed\": true}}')\r\n\
+         [System.IO.File]::Delete('{login}')\r\n\
+         [System.IO.File]::Move('{login}.tmp', '{login}')\r\n\
+         [System.IO.File]::WriteAllText('{memory}.tmp', 'remembered inside')\r\n\
+         [System.IO.File]::Move('{memory}.tmp', '{memory}')\r\n\
+         Report 'renamed' 'yes'\r\n",
+        login = quoted(&login),
+        memory = quoted(&memory),
+    ));
+
+    assert_eq!(said(&classified, "read"), THE_LOGIN);
+    assert_eq!(said(&classified, "renamed"), "yes");
+    assert_eq!(
+        std::fs::read_to_string(fixture.grok_dir().join("memory").join("MEMORY.md")).unwrap(),
+        "remembered inside",
+        "the memory saved inside is the account's"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.grok_dir().join(AUTH)).unwrap(),
+        "{\"refreshed\": true}",
+        "and so is the login, written back as the session ended"
     );
 }
 

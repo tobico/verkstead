@@ -126,8 +126,9 @@ mod closing;
 mod rendering;
 mod surface;
 
-// And what a Claude or a Codex session is given of its account: a `.claude` or
-// a `.codex` of Verkstead's own, built out of an allowlist — see [`root`].
+// And what a Claude, a Codex or a Grok Build session is given of its account: a
+// `.claude`, a `.codex` or a `.grok` of Verkstead's own, built out of an
+// allowlist — see [`root`].
 mod root;
 mod sharing;
 
@@ -2159,10 +2160,10 @@ fn kept_in(agent_type: store::AgentType, home: &Path) -> store::Account {
 /// one shape of account path that may not be there — an agent that has not
 /// written its config out yet.
 ///
-/// **And the login of an account a root is built from beside them**, Claude's or
-/// Codex's. Such a session is given a root of its own rather than the account's
-/// directory (see [`root`]), and the login is the one file joined into it — by
-/// hard link, like the rest.
+/// **And the login of an account a root is built from beside them**, Claude's,
+/// Codex's or Grok Build's. Such a session is given a root of its own rather
+/// than the account's directory (see [`root`]), and the login is the one file
+/// joined into it — by hard link, like the rest.
 fn across_volumes(platform: Platform, home: &Path, account: &store::Account) -> Option<PathBuf> {
     if platform != Platform::Windows {
         return None;
@@ -2666,6 +2667,12 @@ impl Home {
     /// session's rollout is written when its Profile shares no memory.
     pub(crate) fn codex_sessions(&self) -> PathBuf {
         root::Root::sessions_in(&self.built.join(CODEX_INSIDE_HOME))
+    }
+
+    /// And the root's own `sessions/` on the host, which is where a Grok Build
+    /// session's log is written when its Profile shares no memory.
+    pub(crate) fn grok_sessions(&self) -> PathBuf {
+        root::Root::sessions_in(&self.built.join(GROK_INSIDE_HOME))
     }
 }
 
@@ -3469,13 +3476,14 @@ pub struct Sandbox {
     /// or not at all: the pair is what keeps accounts apart. A session is given
     /// a root built out of the first and a copy of the second. Every type
     /// after it is one directory that backend keeps its whole account under, and
-    /// a Codex session is given a root built out of that. Which arm this is also
-    /// says which backend a session is running, which is what [`AGENT_TYPE`]
-    /// carries inside.
+    /// a Codex or a Grok Build session is given a root built out of that. Which
+    /// arm this is also says which backend a session is running, which is what
+    /// [`AGENT_TYPE`] carries inside.
     account: store::Account,
 
-    /// What a Claude or a Codex session is given of that account in place of the
-    /// whole of `~/.claude` or `~/.codex` — see [`root`].
+    /// What a Claude, a Codex or a Grok Build session is given of that account
+    /// in place of the whole of `~/.claude`, `~/.codex` or `~/.grok` — see
+    /// [`root`].
     ///
     /// `None` for the backends not given a root yet, whose account directory is
     /// joined in whole.
@@ -3726,11 +3734,12 @@ impl Sandbox {
             return None;
         }
 
-        // And a Claude or a Codex session's root, whose memory store is made in
-        // the account here where it is not there yet: each directory of it is a
-        // join, and a join of nothing is a session that will not start. Nothing
-        // is made where the Profile shares no memory, there being no join to
-        // make. Refused the way a handoff directory that cannot be made is.
+        // And a Claude, a Codex or a Grok Build session's root, whose memory
+        // store is made in the account here where it is not there yet: each
+        // directory of it is a join, and a join of nothing is a session that will
+        // not start. Nothing is made where the Profile shares no memory, there
+        // being no join to make. Refused the way a handoff directory that cannot
+        // be made is.
         let root = match &profile.account {
             store::Account::Claude { claude_dir, .. } => Some(root::Root::claude(
                 homes.platform(),
@@ -3739,7 +3748,8 @@ impl Sandbox {
                 &worktree,
             )),
             store::Account::Codex { home } => Some(root::Root::codex(home)),
-            store::Account::Grok { .. } | store::Account::OpenCode { .. } => None,
+            store::Account::Grok { home } => Some(root::Root::grok(home)),
+            store::Account::OpenCode { .. } => None,
         }
         .map(|root| root.remembering(profile.memory));
 
@@ -3938,8 +3948,13 @@ impl Sandbox {
         }
 
         // And its `.claude.json`, which is a copy on every platform — see
-        // [`Sandbox::config_closing`].
-        if let Some((host, copy)) = self.config_closing(&surface, &launch.baseline) {
+        // [`Sandbox::config_closing`]. Or a Grok Build login on Linux, which is
+        // a copy too — see [`Sandbox::login_closing`]. Never both, a root being
+        // one harness's.
+        if let Some((host, copy)) = self
+            .config_closing(&surface, &launch.baseline)
+            .or_else(|| self.login_closing(&surface, &launch.baseline))
+        {
             closing = closing.merging(host, copy, launch.baseline);
         }
 
@@ -4143,9 +4158,10 @@ impl Sandbox {
         // an account in by hand has to know the same thing.
         //
         // **Except where a root is built in the account's place**, which is
-        // Claude's and Codex's — see [`Sandbox::root_described`], which is what
-        // a session is given of `~/.claude` or `~/.codex` there, and for Claude
-        // a copy of the file half beside it — see [`Sandbox::config_described`].
+        // Claude's, Codex's and Grok Build's — see [`Sandbox::root_described`],
+        // which is what a session is given of its account's directory there,
+        // and for Claude a copy of the file half beside it — see
+        // [`Sandbox::config_described`].
         match (&self.account, &self.root) {
             (account, Some(root)) => {
                 self.root_described(root, builds, &mut surface);
@@ -4201,10 +4217,8 @@ impl Sandbox {
         // make one, while a session was joined to the whole account. A built
         // root has none of the account's skills in it to hide — see [`root`].
         //
-        // A Codex root has none of them either. No other backend covers any:
-        // Grok Build's `~/.grok/skills` is inside the account home itself, so
-        // covering it would hide the skills grok ships as well as the ones the
-        // account added (ADR-0011). OpenCode's two global paths —
+        // A Codex or a Grok Build root has none of them either. No other backend
+        // covers any: OpenCode's two global paths —
         // `~/.claude/skills` and `~/.agents/skills` — sit under a HOME that is
         // fresh inside, so there is nothing at either to hide.
 
@@ -4413,9 +4427,9 @@ impl Sandbox {
         surface
     }
 
-    /// What a Claude or a Codex session is given of its account's directory
-    /// where a root is built for it: the root, and what is joined into it — see
-    /// [`root`].
+    /// What a Claude, a Codex or a Grok Build session is given of its account's
+    /// directory where a root is built for it: the root, and what is joined into
+    /// it — see [`root`].
     ///
     /// **Built on the host and joined in.** The root is emptied and made in the
     /// Conversation's own directory under the Data Directory. Then it is put
@@ -4424,6 +4438,10 @@ impl Sandbox {
     /// that — the store only where the Profile shares its memory, and empty
     /// directories of the root's own where it does not. Nothing else of the
     /// account is said, so nothing else of it is there.
+    ///
+    /// **Except a Grok Build login on Linux, which is a copy** written into the
+    /// root rather than a bind — see [`root::Root::login_copied`] — and merged
+    /// back as the session ends — see [`Sandbox::login_closing`].
     ///
     /// **Only the root is emptied on Linux**, and not the Conversation's
     /// directory it is in, where HOME is made inside the namespace instead. A
@@ -4442,6 +4460,7 @@ impl Sandbox {
     fn root_described(&self, root: &root::Root, builds: bool, surface: &mut Surface) {
         let built = self.built_root(root);
         let inside = self.home.path().join(root.inside_home());
+        let copied = self.login_copy(root);
 
         if builds {
             let (path, contents) = root.written(&built);
@@ -4455,12 +4474,60 @@ impl Sandbox {
             for unshared in root.unshared_in(&built) {
                 surface.made(Access::Built(unshared));
             }
+
+            // A login given as a copy is written as the account has it now.
+            // One that cannot be read is not given at all, and the session is
+            // logged out rather than handed half a file.
+            if let Some(copy) = &copied {
+                match std::fs::read(root.credentials()) {
+                    Ok(contents) => {
+                        surface.made(Access::Written {
+                            path: copy.clone(),
+                            contents,
+                        });
+                    }
+                    Err(error) => tracing::error!(
+                        error = ?error,
+                        account = %root.credentials().display(),
+                        "the account's login could not be read to copy into a session's root, \
+                         so the session starts without one"
+                    ),
+                }
+            }
         }
 
         surface.elsewhere(&built, &inside, Reach::ReadWrite);
 
         for (host, joined) in root.joined(&inside) {
+            if copied.is_some() && host == root.credentials() {
+                continue;
+            }
+
             surface.elsewhere(host, joined, Reach::ReadWrite);
+        }
+
+        // A directory `PATH` reaches that sits inside the root's own name was
+        // said before the root, and on Linux the root's bind would hide it:
+        // HOME inside is the server's own home there, and xAI's installer puts
+        // `grok` in `~/.grok/bin`. So each is said again, over the root. A
+        // bind inside the root makes its mount point in the root on the host,
+        // which is Verkstead's own directory and emptied with it.
+        if self.platform == Platform::Linux {
+            let covered: Vec<PathBuf> = surface
+                .reaches()
+                .iter()
+                .filter_map(|access| match access {
+                    Access::Own {
+                        path,
+                        reach: Reach::ReadOnly,
+                    } if path.starts_with(&inside) => Some(path.clone()),
+                    _ => None,
+                })
+                .collect();
+
+            for path in covered {
+                surface.own(path, Reach::ReadOnly);
+            }
         }
     }
 
@@ -4515,6 +4582,50 @@ impl Sandbox {
         self.home.built().join(CLAUDE_CONFIG_INSIDE_HOME)
     }
 
+    /// And where a session's copy of its login is on the host, where it is
+    /// given one: a root whose login is copied on this platform, for an account
+    /// that has a login to copy — see [`root::Root::login_copied`].
+    ///
+    /// An account with none is given nothing, and the login a session makes is
+    /// handed back as any root's own file is — see
+    /// [`Sandbox::credentials_closing`].
+    ///
+    /// Blocking: one `stat`.
+    fn login_copy(&self, root: &root::Root) -> Option<PathBuf> {
+        (root.login_copied(self.platform) && root.credentials().is_file())
+            .then(|| root.credentials_in(&self.built_root(root)))
+    }
+
+    /// What a session's ending has to see to about a login it was given a copy
+    /// of: the copy, merged into the account's own file — the way a Claude
+    /// session's `.claude.json` is, and for its reason.
+    ///
+    /// **The copy as it was given is read off the description**, for
+    /// [`Sandbox::config_closing`]'s reason. The two never share a baseline:
+    /// a Claude root has no login copy and a Grok Build root no `.claude.json`,
+    /// and each root is registered apart — see [`sharing`].
+    fn login_closing(
+        &self,
+        surface: &Surface,
+        baseline: &sharing::Baseline,
+    ) -> Option<(PathBuf, PathBuf)> {
+        let root = self.root.as_ref()?;
+        let copy = self.login_copy(root)?;
+
+        let written = surface.reaches().iter().find_map(|access| match access {
+            Access::Written { path, contents } if *path == copy => Some(contents.clone()),
+            _ => None,
+        });
+
+        if let Some(contents) = written {
+            *baseline
+                .lock()
+                .expect("a baseline nothing has panicked holding") = contents;
+        }
+
+        Some((root.credentials(), copy))
+    }
+
     /// What a Claude session's ending has to see to about its `.claude.json`:
     /// the copy it was given, merged into the account's own file — on every
     /// platform, a copy following nothing on any of them.
@@ -4558,8 +4669,9 @@ impl Sandbox {
     /// [`closing`] — so a login written through the link is left alone, and
     /// only one the session replaced, or made where there was none, is written
     /// back. Claude saves its login by writing a temporary file and renaming it
-    /// over the top. Codex 0.154 writes `auth.json` in place, so a link of it
-    /// stays the account's file — see [`root`].
+    /// over the top, and so does Grok Build 1.0.13. Codex 0.154 writes
+    /// `auth.json` in place, so a link of it stays the account's file — see
+    /// [`root`].
     ///
     /// **A Mac always.** A symbolic link is written through, and replaced by a
     /// rename — so a login saved by one inside is on the account only once it
@@ -4573,6 +4685,11 @@ impl Sandbox {
     /// Where a bind was made, the file in the root on the host is the empty name
     /// the bind was made over, and is nothing to write back.
     ///
+    /// **And never where the login was given as a copy**, which is merged back
+    /// rather than written back whole — see [`Sandbox::login_closing`]. A copy is
+    /// never the account's file, so the identity question would write it over
+    /// the account at every ending.
+    ///
     /// **Windows likewise only where the account had no file to link.** A file
     /// that was linked is already handed back by the rendering, as every file
     /// it joins by hard link is — see [`open`]. What is left is the login a
@@ -4583,6 +4700,10 @@ impl Sandbox {
         root: &root::Root,
         surface: &Surface,
     ) -> Option<(PathBuf, PathBuf, Rejoin)> {
+        if self.login_copy(root).is_some() {
+            return None;
+        }
+
         let credentials = root.credentials();
         let inside = root.credentials_in(&self.built_root(root));
 
@@ -6229,11 +6350,16 @@ mod tests {
 
         assert_eq!(written(&found), Some(b"D:".to_vec()));
 
+        // OpenCode's account is two directories inside the one its Profile names.
+        for inside in [OPENCODE_CONFIG_INSIDE_HOME, OPENCODE_DATA_INSIDE_HOME] {
+            std::fs::create_dir_all(account.path().join(inside)).unwrap();
+        }
+
         assert_eq!(
             across_volumes(
                 Platform::Windows,
                 profile,
-                &store::Account::Grok {
+                &store::Account::OpenCode {
                     home: account.path().to_owned(),
                 }
             ),
@@ -6264,6 +6390,18 @@ mod tests {
             None,
             "and one on the profile's drive joins in"
         );
+
+        // And a Grok Build account, whose root is given its login the same way.
+        let grok = across_volumes(
+            Platform::Windows,
+            profile,
+            &store::Account::Grok {
+                home: PathBuf::from(r"D:\accounts\someone\.grok"),
+            },
+        )
+        .expect("a Grok login on another drive is one a hard link cannot join in");
+
+        assert_eq!(written(&grok), Some(b"D:".to_vec()));
 
         assert_eq!(
             across_volumes(
