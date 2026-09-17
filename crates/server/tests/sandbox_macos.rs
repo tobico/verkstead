@@ -341,13 +341,39 @@ fi
         self.repo.join(".git")
     }
 
+    /// The directory the Codex Profile names.
+    fn codex_dir(&self) -> PathBuf {
+        self.elsewhere.path().join("codex-account/.codex")
+    }
+
     /// A Profile of the second agent type, whose whole account is one home,
-    /// with something of the account's inside it — so that "the account is
-    /// there" is a claim about a directory with contents.
+    /// holding what a Codex account that has been used holds: a login, a
+    /// configuration naming a provider of its own beside the human's MCP
+    /// servers, a rollout and a memory, and the human's own rules, skills and
+    /// instructions — so that what a session's root leaves out is a claim about
+    /// files that are there.
     async fn codex_profile(&self) -> store::Profile {
-        let home = self.elsewhere.path().join("codex-account/.codex");
-        std::fs::create_dir_all(&home).unwrap();
-        std::fs::write(home.join("config.toml"), "# the account's own\n").unwrap();
+        let home = self.codex_dir();
+
+        for dir in ["sessions/2026/09/01", "memories", "rules", "skills"] {
+            std::fs::create_dir_all(home.join(dir)).unwrap();
+        }
+
+        for (file, contents) in [
+            ("auth.json", "{\"the\": \"login\"}\n"),
+            (
+                "config.toml",
+                "model_provider = \"proxy\"\n\n[model_providers.proxy]\n\
+                 base_url = \"https://proxy.example/v1\"\n\n\
+                 [mcp_servers.the-humans]\ncommand = \"npx\"\n",
+            ),
+            ("sessions/2026/09/01/rollout-the-humans.jsonl", "{}\n"),
+            ("memories/MEMORY.md", "remembered\n"),
+            ("rules/default.rules", "# the human's\n"),
+            ("AGENTS.md", "# the human's\n"),
+        ] {
+            std::fs::write(home.join(file), contents).unwrap();
+        }
 
         self.profile_of("codex", store::Account::Codex { home }, "gpt-5-codex")
             .await
@@ -1629,6 +1655,168 @@ async fn a_root_without_memory_has_an_empty_projects_of_its_own() {
          where it is looked for"
     );
     assert!(!worktree.exists(), "and not in the account");
+}
+
+/// A Codex session's `.codex` is a root of Verkstead's own too: the account's
+/// login, its `sessions/` and `memories/`, and a `config.toml` Verkstead wrote
+/// carrying the account's provider and none of its MCP servers. The human's
+/// rules, skills and instructions are not in it, and the account itself,
+/// reached by its real path, is refused like anything else on the machine.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn a_codex_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
+    let fixture = grilling().await;
+    let profile = fixture.codex_profile().await;
+    let account = fixture.codex_dir();
+
+    let reported = probe(
+        &fixture.sandbox_under(&profile),
+        &format!(
+            r#"
+            say root "$(ls -A "$HOME/.codex" | sort | tr '\n' ' ')"
+            say config "$(cat "$HOME/.codex/config.toml" | tr '\n' ' ')"
+            file "$HOME/.codex/auth.json" login
+            file "$HOME/.codex/sessions/2026/09/01/rollout-the-humans.jsonl" rollout
+            file "$HOME/.codex/memories/MEMORY.md" memory
+            dir "$HOME/.codex/rules" rules
+            dir "$HOME/.codex/skills" skills
+            file "$HOME/.codex/AGENTS.md" agents-md
+            file {agents_md} the-accounts-agents-md
+            printf '{{}}\n' > "$HOME/.codex/sessions/rollout-the-session.jsonl"
+            "#,
+            agents_md = quoted(&account.join("AGENTS.md")),
+        ),
+    );
+
+    assert_eq!(reported["root"], "auth.json config.toml memories sessions ");
+
+    for write in ["login", "rollout", "memory"] {
+        assert_eq!(reported[write], "write", "the account's {write} is there");
+    }
+
+    for absent in ["rules", "skills", "agents-md"] {
+        assert_eq!(
+            reported[absent], "absent",
+            "the account's {absent} is not in the root"
+        );
+    }
+
+    assert_eq!(
+        reported["the-accounts-agents-md"], "refused",
+        "and the account's own directory is somebody else's on this machine"
+    );
+    assert!(
+        reported["config"].contains("model_provider = \"proxy\"")
+            && reported["config"].contains("[model_providers.proxy]")
+            && !reported["config"].contains("mcp_servers"),
+        "the written configuration carries the provider and nothing else: {}",
+        reported["config"]
+    );
+    assert!(
+        account.join("sessions/rollout-the-session.jsonl").is_file(),
+        "and a rollout a session writes is on the account"
+    );
+}
+
+/// With the Profile's memory switched off, a Codex session's `sessions/` and
+/// `memories/` are the root's own and start empty, and the rollout it writes is
+/// in the root on the host rather than in the account.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn a_codex_root_without_memory_has_a_store_of_its_own() {
+    let fixture = grilling().await;
+    let forgetting = store::Profile {
+        memory: false,
+        ..fixture.codex_profile().await
+    };
+    let account = fixture.codex_dir();
+
+    let reported = probe(
+        &fixture.sandbox_under(&forgetting),
+        &format!(
+            r#"
+            say root "$(ls -A "$HOME/.codex" | sort | tr '\n' ' ')"
+            say sessions "$(ls -A "$HOME/.codex/sessions" | tr '\n' ' ')"
+            say memories "$(ls -A "$HOME/.codex/memories" | tr '\n' ' ')"
+            file "$HOME/.codex/auth.json" login
+            dir {sessions} the-accounts-sessions
+            printf '{{}}\n' > "$HOME/.codex/sessions/rollout-the-session.jsonl"
+            "#,
+            sessions = quoted(&account.join("sessions")),
+        ),
+    );
+
+    assert_eq!(reported["root"], "auth.json config.toml memories sessions ");
+    assert_eq!(reported["sessions"], "", "its `sessions/` starts empty");
+    assert_eq!(reported["memories"], "", "and so do its `memories/`");
+    assert_eq!(reported["the-accounts-sessions"], "refused");
+    assert_eq!(reported["login"], "write", "while the login is linked");
+
+    let home = fixture
+        .state
+        .path()
+        .join("homes")
+        .join(fixture.conversation.id.to_string());
+
+    assert!(
+        home.join(".codex/sessions/rollout-the-session.jsonl")
+            .is_file(),
+        "the rollout is in the root on the host, where it is looked for"
+    );
+    assert!(!account.join("sessions/rollout-the-session.jsonl").exists());
+}
+
+/// A Codex login is written in place, through the link, so it is the
+/// account's as it is written and there is nothing to copy back; and a login
+/// made in an account with none is the account's once the session has ended.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn a_codex_login_written_inside_is_the_accounts() {
+    let fixture = grilling().await;
+    let profile = fixture.codex_profile().await;
+    let credentials = fixture.codex_dir().join("auth.json");
+
+    let (_, afterwards) = probe_closing(
+        &fixture.sandbox_under(&profile),
+        r#"printf '{"in": "place"}\n' > "$HOME/.codex/auth.json""#,
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{\"in\": \"place\"}\n"
+    );
+
+    std::fs::write(&credentials, "{\"the human\": \"logged in again\"}\n").unwrap();
+    afterwards.close();
+
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{\"the human\": \"logged in again\"}\n",
+        "nothing is copied over a file the session never stopped sharing"
+    );
+
+    std::fs::remove_file(&credentials).unwrap();
+
+    let (_, afterwards) = probe_closing(
+        &fixture.sandbox_under(&profile),
+        r#"printf '{"logged": "in"}\n' > "$HOME/.codex/auth.json""#,
+    );
+    afterwards.close();
+
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{\"logged\": \"in\"}\n",
+        "and a login made where there was none is the account's afterwards"
+    );
 }
 
 /// A login Claude saves inside, by writing a temporary file and renaming it

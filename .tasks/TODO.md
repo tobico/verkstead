@@ -17,7 +17,7 @@ Roadmap stage: [02: The other three roots and the memory switch](docs/roadmaps/b
 ## Tasks
 
 - [x] 01: The memory switch, end to end on Claude — [details](01-memory-switch-on-claude.md)
-- [ ] 02: Codex's built root — [details](02-codex-root.md)
+- [x] 02: Codex's built root — [details](02-codex-root.md)
 - [ ] 03: Grok Build's built root — [details](03-grok-root.md)
 - [ ] 04: OpenCode's built root — [details](04-opencode-root.md)
 - [ ] 05: The docs — [details](05-docs.md)

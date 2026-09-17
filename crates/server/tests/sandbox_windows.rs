@@ -136,6 +136,9 @@ const THEIR_SKILL: &str = "# what the account would have been grilled by\n";
 const CREDENTIALS: &str = ".credentials.json";
 const THE_LOGIN: &str = "{\"the\": \"login\"}";
 
+/// And where Codex keeps one inside `~/.codex`.
+const AUTH: &str = "auth.json";
+
 /// Another repository's `projects/` entry in the account, which is no session's
 /// business.
 const ANOTHER_REPOSITORY: &str = "C--somewhere-else";
@@ -552,6 +555,54 @@ impl Grilling {
         );
 
         entries
+    }
+
+    /// Run this fixture's sessions under a Codex account instead, holding what
+    /// a Codex account that has been used holds: a login, a configuration
+    /// naming a provider beside the human's MCP servers, a rollout and a memory,
+    /// and the human's own rules and instructions — really there, so that a
+    /// probe finding them refused or absent has found the boundary.
+    async fn under_codex(&mut self, memory: bool) {
+        let codex = self.codex_dir();
+
+        for dir in ["sessions", "memories", "rules"] {
+            std::fs::create_dir_all(codex.join(dir)).unwrap();
+            std::fs::write(codex.join(dir).join(MARKER), SAID).unwrap();
+        }
+
+        std::fs::write(codex.join(AUTH), THE_LOGIN).unwrap();
+        std::fs::write(codex.join("AGENTS.md"), "# the human's own\n").unwrap();
+        std::fs::write(
+            codex.join("config.toml"),
+            "model_provider = \"proxy\"\n\n[model_providers.proxy]\n\
+             base_url = \"https://proxy.example/v1\"\n\n\
+             [mcp_servers.the-humans]\ncommand = \"npx\"\n",
+        )
+        .unwrap();
+
+        self.profile = store::create_profile(
+            &self.pool,
+            &store::ProfileFacts {
+                name: Some("codex".to_owned()),
+                account: store::Account::Codex { home: codex },
+                models: vec!["gpt-5-codex".to_owned()],
+                memory,
+            },
+        )
+        .await
+        .unwrap()
+        .expect("the Profile saves");
+    }
+
+    /// The Codex account's own `~/.codex` on the host — see
+    /// [`Grilling::under_codex`].
+    fn codex_dir(&self) -> PathBuf {
+        self._watched.path().join("codex-account/.codex")
+    }
+
+    /// And the root a Codex session is given in its place, inside the profile.
+    fn codex_root_inside(&self) -> PathBuf {
+        self.profile_dir().join(".codex")
     }
 
     /// The directories of the human's and the machine's own that this
@@ -1498,6 +1549,156 @@ async fn a_root_without_memory_has_an_empty_projects_of_its_own() {
     assert!(
         !entries[0].join("the-session.jsonl").exists(),
         "and not in the account"
+    );
+}
+
+/// A Codex session's `.codex` is a root of Verkstead's own: the login hard-linked
+/// in with an entry of its own, `sessions/` and `memories/` junctioned in, and a
+/// `config.toml` Verkstead wrote carrying the account's provider and none of its
+/// MCP servers. The human's rules and instructions are not in it, and nothing
+/// grants the account's own directory — so reached by its real path, it is
+/// refused.
+#[tokio::test]
+async fn a_codex_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
+    let mut fixture = grilling().await;
+    fixture.under_codex(true).await;
+
+    let root = fixture.codex_root_inside();
+    let account = fixture.codex_dir();
+    let config = root.join("config.toml");
+    let rollout = root.join("sessions").join("rollout-the-session.jsonl");
+    let quoted = |path: &Path| path.display().to_string().replace('\'', "''");
+
+    let asked = [
+        directory("root", &root),
+        file("login", root.join(AUTH)),
+        directory("sessions", root.join("sessions")),
+        directory("memories", root.join("memories")),
+        directory("rules", root.join("rules")),
+        file("agents-md", root.join("AGENTS.md")),
+        directory("the-accounts-own", &account),
+        directory("the-accounts-rules", account.join("rules")),
+    ];
+
+    let classified = fixture.probe_running(&format!(
+        "{}{}\
+         [System.IO.File]::WriteAllText('{rollout}', '{{}}')\r\n",
+        classifying(&asked),
+        reading("config", &quoted(&config)),
+        rollout = quoted(&rollout),
+    ));
+
+    for (name, word) in [
+        ("root", "write"),
+        ("login", "write"),
+        ("sessions", "write"),
+        ("memories", "write"),
+        ("rules", "absent"),
+        ("agents-md", "absent"),
+        ("the-accounts-own", "refused"),
+        ("the-accounts-rules", "refused"),
+    ] {
+        assert_eq!(
+            said(&classified, name),
+            word,
+            "{name} should be {word}, and the probe said: {classified:?}"
+        );
+    }
+
+    let config = said(&classified, "config");
+    assert!(
+        config.contains("model_provider = \"proxy\"")
+            && config.contains("[model_providers.proxy]")
+            && !config.contains("mcp_servers"),
+        "the written configuration carries the provider and nothing else: {config}"
+    );
+    assert!(
+        account
+            .join("sessions")
+            .join("rollout-the-session.jsonl")
+            .is_file(),
+        "and a rollout a session writes is on the account"
+    );
+}
+
+/// With the Profile's memory switched off, a Codex root's `sessions/` and
+/// `memories/` are its own and empty, and nothing is granted on the account's —
+/// so they are refused like the rest of the account. The rollout a session
+/// writes is in the root on the host, where it is looked for.
+#[tokio::test]
+async fn a_codex_root_without_memory_has_a_store_of_its_own() {
+    let mut fixture = grilling().await;
+    fixture.under_codex(false).await;
+
+    let root = fixture.codex_root_inside();
+    let account = fixture.codex_dir();
+    let sessions = root.join("sessions");
+    let rollout = sessions.join("rollout-the-session.jsonl");
+    let quoted = |path: &Path| path.display().to_string().replace('\'', "''");
+
+    let asked = [
+        directory("sessions", &sessions),
+        directory("memories", root.join("memories")),
+        file("login", root.join(AUTH)),
+        directory("the-accounts-sessions", account.join("sessions")),
+    ];
+
+    let classified = fixture.probe_running(&format!(
+        "{}\
+         Report 'listed' ([System.IO.Directory]::GetFileSystemEntries('{sessions}').Length)\r\n\
+         [System.IO.File]::WriteAllText('{rollout}', '{{}}')\r\n",
+        classifying(&asked),
+        sessions = quoted(&sessions),
+        rollout = quoted(&rollout),
+    ));
+
+    for (name, word) in [
+        ("sessions", "write"),
+        ("memories", "write"),
+        ("login", "write"),
+        ("the-accounts-sessions", "refused"),
+        ("listed", "0"),
+    ] {
+        assert_eq!(
+            said(&classified, name),
+            word,
+            "{name} should be {word}, and the probe said: {classified:?}"
+        );
+    }
+
+    assert!(rollout.is_file(), "the rollout is in the root on the host");
+    assert!(
+        !account
+            .join("sessions")
+            .join("rollout-the-session.jsonl")
+            .exists(),
+        "and not in the account"
+    );
+}
+
+/// A Codex login written inside, in place as codex writes it, is the account's
+/// login through the hard link and its entry.
+#[tokio::test]
+async fn a_codex_login_written_inside_is_the_accounts() {
+    let mut fixture = grilling().await;
+    fixture.under_codex(true).await;
+
+    let login = fixture.codex_root_inside().join(AUTH);
+    let quoted = login.display().to_string().replace('\'', "''");
+
+    let classified = fixture.probe_running(&format!(
+        "{CLASSIFYING}\r\n\
+         Report 'read' ([System.IO.File]::ReadAllText('{quoted}'))\r\n\
+         [System.IO.File]::WriteAllText('{quoted}', '{{\"refreshed\": true}}')\r\n\
+         Report 'written' 'yes'\r\n"
+    ));
+
+    assert_eq!(said(&classified, "read"), THE_LOGIN);
+    assert_eq!(said(&classified, "written"), "yes");
+    assert_eq!(
+        std::fs::read_to_string(fixture.codex_dir().join(AUTH)).unwrap(),
+        "{\"refreshed\": true}",
+        "the login written inside is the account's"
     );
 }
 

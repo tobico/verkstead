@@ -1797,6 +1797,24 @@ async fn grilling_on_codex(stub: &str) -> Grilling {
     .await
 }
 
+/// And the grilling role on a Codex Profile whose memory is switched off, so a
+/// session's `sessions/` is its root's own and its rollout is written there.
+async fn grilling_on_codex_forgetting(stub: &str) -> Grilling {
+    grilling_however_started(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        NOTHING_ATTACHED,
+        Pickers::GrillingOnCodexForgetting,
+        Origin::None,
+        Seeded::Nothing,
+        None,
+    )
+    .await
+}
+
 /// The same with every role on that Profile, spilling what its sessions were
 /// told somewhere that outlives their worktrees and with a `gh` of the caller's
 /// choosing — which is what a wrap-up on the second backend needs.
@@ -2186,8 +2204,12 @@ enum Pickers {
     EverythingOnOpenCode,
 
     /// Every role under a Pairing of its own, and the grilling Profile's memory
-    /// switched off — see [`Bench::grilling_forgetting`].
+    /// switched off — see [`Bench::forgetting`].
     GrillingForgetting,
+
+    /// The grilling role on a Codex Profile, as [`Pickers::GrillingOnCodex`],
+    /// with that Profile's memory switched off.
+    GrillingOnCodexForgetting,
 }
 
 /// The same with a read-write companion beside it, for the tests about a
@@ -2377,7 +2399,11 @@ async fn grilling_however_started(
         Pickers::EverythingOnCodex => bench.everything_on_codex(id).await,
         Pickers::EverythingOnGrok => bench.everything_on_grok(id).await,
         Pickers::EverythingOnOpenCode => bench.everything_on_opencode(id).await,
-        Pickers::GrillingForgetting => bench.grilling_forgetting().await,
+        Pickers::GrillingForgetting => bench.forgetting("grilling").await,
+        Pickers::GrillingOnCodexForgetting => {
+            bench.grilling_on_codex(id).await;
+            bench.forgetting("codex").await;
+        }
     }
 
     // While it is still drafting, which is the only time a companion can be
@@ -2516,24 +2542,24 @@ impl Bench {
         }
     }
 
-    /// And switch the grilling Profile's memory off, which is the one thing the
-    /// form changes about it: the same account and models, saved again with the
-    /// switch unticked.
-    async fn grilling_forgetting(&self) {
+    /// And switch the memory off on the Profile called `name`, which is the one
+    /// thing the form changes about it: the same account and models, saved again
+    /// with the switch unticked.
+    async fn forgetting(&self, name: &str) {
         let profiles: Vec<verkstead_render::ProfileEntry> =
             get(&self.app, "/api/ui/profiles").await;
-        let grilling = profiles
+        let forgetting = profiles
             .into_iter()
-            .find(|profile| profile.name.as_deref() == Some("grilling"))
-            .expect("every role has a Profile of its own");
+            .find(|profile| profile.name.as_deref() == Some(name))
+            .expect("the Profile is saved before its memory is switched off");
 
         let saved: ProfileSaved = post(
             &self.app,
-            &format!("/api/ui/profiles/{}", grilling.id),
+            &format!("/api/ui/profiles/{}", forgetting.id),
             &serde_json::json!({
-                "name": grilling.name,
-                "account": grilling.account,
-                "models": grilling.models,
+                "name": forgetting.name,
+                "account": forgetting.account,
+                "models": forgetting.models,
                 "memory": false,
             }),
         )
@@ -4056,8 +4082,10 @@ async fn a_session_on_a_second_backend_runs_from_its_home_with_the_capture_as_it
 /// **The account is configured from the line rather than from its directory.**
 /// The credential store is file-backed because there is no keyring inside the
 /// sandbox, and the Worktree is trusted so that no version of codex stops at a
-/// trust prompt in front of nobody — and the Profile's own home is left exactly
-/// as the account keeps it, which is what the last of these reads.
+/// trust prompt in front of nobody — and what a session finds at `~/.codex` is a
+/// root holding a configuration Verkstead wrote beside the account's memory
+/// store, with nothing about trust written into it, which is what the last of
+/// these reads.
 #[tokio::test]
 async fn a_codex_session_is_launched_with_the_line_codex_takes() {
     let fixture = grilling_on_codex(
@@ -4118,8 +4146,10 @@ async fn a_codex_session_is_launched_with_the_line_codex_takes() {
         "codex takes no session id, so it is told none: {said:?}"
     );
     assert!(
-        said.contains("account=\n"),
-        "and Verkstead writes nothing into the Profile's own directory: {said:?}"
+        said.contains("account=config.toml memories sessions \n"),
+        "and its `.codex` is a root holding the configuration Verkstead wrote and \
+         the account's memory store, with no login where the account has none: \
+         {said:?}"
     );
 }
 
@@ -4193,6 +4223,73 @@ async fn a_codex_session_follows_the_rollout_that_names_its_own_worktree() {
         "the rollout naming this session's own Worktree is the one followed, and its \
          lines should be kept exactly as codex wrote them — a line caught half-written \
          waiting for the rest of itself"
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+}
+
+/// With the Profile's memory switched off, a Codex session's rollout is written
+/// into its root's own `sessions/` rather than the account's — and it is found
+/// and followed from there onto the Timeline all the same.
+///
+/// The root is on the host under the Conversation's own directory in the Data
+/// Directory, which is where the rollout is looked for; the account's
+/// `sessions/` holds nothing of this session's.
+#[tokio::test]
+async fn a_codex_sessions_rollout_is_followed_out_of_its_root_where_memory_is_off() {
+    let fixture = grilling_on_codex_forgetting(
+        r#"
+        day=$HOME/.codex/sessions/$(date +%Y/%m/%d)
+        mkdir -p "$day"
+
+        log=$day/rollout-2026-09-17T17-47-02-cccc.jsonl
+        printf '{"type":"session_meta","payload":{"cwd":"%s"}}\n' "$(pwd)" > "$log"
+        printf 'where=%s\n' "$(pwd)"
+
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+    let transcript = fixture.transcript_of(event, 1).await;
+
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+    let worktree = said
+        .lines()
+        .find_map(|line| line.strip_prefix("where="))
+        .expect("the session says where it ran");
+
+    assert_eq!(
+        transcript,
+        vec![format!(
+            r#"{{"type":"session_meta","payload":{{"cwd":"{worktree}"}}}}"#
+        )],
+        "the rollout in the root is followed onto the Transcript"
+    );
+
+    let rollouts = |sessions: PathBuf| {
+        std::fs::read_dir(sessions)
+            .map(|years| years.count())
+            .unwrap_or(0)
+    };
+
+    assert_eq!(
+        rollouts(
+            fixture
+                .state
+                .path()
+                .join("homes")
+                .join(fixture.id.to_string())
+                .join(".codex/sessions")
+        ),
+        1,
+        "the rollout is in the root on the host"
+    );
+    assert_eq!(
+        rollouts(fixture._elsewhere.path().join("codex/.codex/sessions")),
+        0,
+        "and not in the account"
     );
 
     assert_eq!(fixture.close().await, ConversationClosed::Closed);

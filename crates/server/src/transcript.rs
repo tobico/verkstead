@@ -221,10 +221,15 @@ impl Tail {
                 session: session.to_owned(),
             },
 
-            // And where codex keeps its rollouts, under the one directory its
-            // account is.
-            (store::Account::Codex { home }, Some(worktree)) => Search::Rollout {
-                sessions: home.join(ROLLOUTS),
+            // And where codex keeps its rollouts: under the one directory its
+            // account is where the Profile shares its memory, and under the
+            // session's own root on the host where it does not — for Claude's
+            // reason above, `sessions/` being joined whole rather than by entry.
+            (store::Account::Codex { home: account }, Some(worktree)) => Search::Rollout {
+                sessions: match profile.memory {
+                    true => account.join(ROLLOUTS),
+                    false => home.codex_sessions(),
+                },
                 worktree: worktree.to_owned(),
                 launched: to_the_second(launched),
             },

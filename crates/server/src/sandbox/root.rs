@@ -1,30 +1,36 @@
-//! Claude's built root: the `.claude` a session is given in place of the
-//! account's whole one.
+//! A built root: the `.claude` or the `.codex` a session is given in place of
+//! the account's whole one.
 //!
-//! **An allowlist, and nothing outside it.** What a Claude session needs of its
-//! account is its login and two entries under `projects/` — the Repo's main
-//! checkout's, which holds Claude's per-Repo memory, and the Worktree's, where
-//! the session's transcript is written. Everything else under `~/.claude` is
-//! the human's own way of working: plugins, hooks, commands, a global
-//! `CLAUDE.md`, the history, and every other repository's transcripts. None of
-//! that is a session's, so none of it is in the root, and whatever Claude adds
-//! next is absent from it too without anybody having to notice.
+//! **An allowlist, and nothing outside it.** What a session needs of its account
+//! is its login and the store its memory and transcripts are kept in.
+//! Everything else in the account's directory is the human's own way of
+//! working: plugins, hooks, rules, skills, a global instructions file, the
+//! history, and every other repository's transcripts. None of that is a
+//! session's, so none of it is in the root, and whatever a harness adds next is
+//! absent from it too without anybody having to notice.
+//!
+//! **One shape for every harness**, in three parts. Which files and directories
+//! each part is, is the harness's own — see [`Harness`]:
+//!
+//! - **The login, linked**, where the account has one.
+//! - **The memory store, joined only where the Profile's memory switch is on.**
+//!   Off, each of its directories is the root's own and starts empty, so the
+//!   session has fresh memory and none of the human's transcripts, and its own
+//!   transcript is written into the root — see [`Root::remembering`].
+//! - **A configuration file Verkstead writes**, carrying only what the
+//!   account's own says about reaching a model — see [`Root::written`].
 //!
 //! **The root is Verkstead's own directory**, under the Conversation's profile
 //! in the Data Directory, emptied and made again as each session starts — see
 //! [`super::Access::Built`]. What goes into it is joined rather than copied, so
 //! a login from inside and a memory written inside both land in the account:
 //! a bind on Linux, a symlink on a Mac, and on Windows a hard link for the login
-//! and a junction for each entry.
+//! and a junction for each directory.
 //!
-//! **The two entries are joined only where the Profile's memory switch is on.**
-//! Off, the root's `projects/` is its own and starts empty, so the session has
-//! fresh memory and none of the human's transcripts, and its own transcript is
-//! written into the root — see [`Root::remembering`].
-//!
-//! **Beside the root, `.claude.json` is copied rather than joined**, so the
+//! **Beside a Claude root, `.claude.json` is copied rather than joined**, so the
 //! trust seeded into it is not written straight into the account, and what a
-//! session changes in it is merged back as it ends — see [`merged_back`].
+//! session changes in it is merged back as it ends — see [`merged_back`]. Codex
+//! has no such file: its Worktree trust is said on the launch line (ADR-0011).
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -53,6 +59,46 @@ const SETTINGS: &str = "settings.json";
 /// `statusLine` — and none of it is a session's.
 const CARRIED: [&str; 2] = ["apiKeyHelper", "env"];
 
+/// The file Codex keeps a login in, inside `~/.codex`.
+///
+/// **Written in place**, which is what makes a link of it the account's file
+/// for a session's whole life: read off codex 0.154, whose `codex login` over
+/// an `auth.json` already there leaves the same inode behind. The launch line
+/// says `cli_auth_credentials_store=file`, so this file is where the login is.
+const AUTH: &str = "auth.json";
+
+/// The configuration file Codex reads for the user, inside `~/.codex`.
+const CODEX_CONFIG: &str = "config.toml";
+
+/// The two directories Codex's memory is kept in, inside `~/.codex`: the
+/// rollouts every session writes, and the memory files — `MEMORY.md` and
+/// `memory_summary.md` — its memories feature writes and reads.
+///
+/// **And not the rest of what is beside them.** `archived_sessions/` is the
+/// human's, and so is every SQLite database at the top of `~/.codex` —
+/// `state_5.sqlite`, `memories_1.sqlite`, `thread_history_1.sqlite`,
+/// `logs_2.sqlite`, `goals_1.sqlite`, `queue_1.sqlite` in codex 0.154. A
+/// database linked a file at a time loses its write-ahead-log siblings and
+/// will not open, so each is the session's own and starts empty.
+///
+/// **A fresh state database beside shared `sessions/` does no paid work**,
+/// checked on codex 0.154. Codex fills a fresh `state_5.sqlite` from the
+/// rollouts under `sessions/` as it starts (its `backfill_state`), which reads
+/// files and calls no model. What would summarise those rollouts is the
+/// memories feature's two phases, and `codex features list` says `memories` is
+/// off unless `[features]` in `config.toml` turns it on — which the file a root
+/// is written never carries, see [`CODEX_CARRIED`].
+const CODEX_MEMORY: [&str; 2] = ["sessions", "memories"];
+
+/// Of the account's own `config.toml`, the keys a root's carries over.
+///
+/// **An allowlist**, for [`CARRIED`]'s reason. These two are how an account on
+/// a provider of its own reaches the model: `model_provider` names it, and
+/// `model_providers` says where it is. Everything else is how the human works —
+/// `mcp_servers`, `profiles`, `projects`, hooks, `notify`, `[features]` — and
+/// none of it is a session's.
+const CODEX_CARRIED: [&str; 2] = ["model_provider", "model_providers"];
+
 /// Of the account's `.claude.json`, the key its MCP servers are under: at the top
 /// level, and again under each `projects` entry.
 ///
@@ -70,31 +116,48 @@ const TRUSTED: &str = "hasTrustDialogAccepted";
 /// How long an entry's name is before Claude cuts it and puts a hash on the end.
 const LONGEST: usize = 200;
 
-/// What a Claude session is given of its account: the account's own directory,
-/// and the names of the `projects/` entries joined from it.
+/// What a session is given of its account: the account's own directory, which
+/// harness's root it is, and whether its memory is shared.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Root {
-    /// The account's own `~/.claude`, which the Profile names.
+    /// The account's own directory, which the Profile names: `~/.claude` or
+    /// `~/.codex`.
     account: PathBuf,
 
-    /// The entries joined, in the order they are said: the Repo's main
-    /// checkout's first and the Worktree's after it. One where the two are the
-    /// same name.
-    entries: Vec<String>,
+    /// Which harness's allowlist this is.
+    harness: Harness,
 
-    /// The same two paths as `.claude.json` keys its `projects` entries: the
-    /// plain path, with forward slashes on Windows. One where the two are the
-    /// same path.
-    trusted: Vec<String>,
-
-    /// Whether the entries are joined at all: the Profile's memory switch — see
-    /// [`Root::remembering`].
+    /// Whether the memory store is joined at all: the Profile's memory switch —
+    /// see [`Root::remembering`].
     memory: bool,
 }
 
+/// Which harness a root is for, and what that harness's allowlist is made of.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Harness {
+    /// Claude Code: `.credentials.json` linked, two entries under `projects/`
+    /// as its memory, and a `settings.json` written.
+    Claude {
+        /// The `projects/` entries joined, in the order they are said: the
+        /// Repo's main checkout's first, which holds Claude's per-Repo memory,
+        /// and the Worktree's after it, where the session's transcript is
+        /// written. One where the two are the same name.
+        entries: Vec<String>,
+
+        /// The same two paths as `.claude.json` keys its `projects` entries:
+        /// the plain path, with forward slashes on Windows. One where the two
+        /// are the same path.
+        trusted: Vec<String>,
+    },
+
+    /// Codex: `auth.json` linked, `sessions/` and `memories/` as its memory,
+    /// and a `config.toml` written — see [`CODEX_MEMORY`].
+    Codex,
+}
+
 impl Root {
-    /// The root for a session in `worktree`, whose Repo's common git directory
-    /// is `git_dir`, logged in as the account at `account`.
+    /// The Claude root for a session in `worktree`, whose Repo's common git
+    /// directory is `git_dir`, logged in as the account at `account`.
     ///
     /// **Each path as Claude will read it inside**, because the name is the
     /// path's. The main checkout is what Claude reads back out of the
@@ -108,7 +171,12 @@ impl Root {
     /// **And plain**, because resolving a path on Windows writes `\\?\` in
     /// front of it, and Claude names an entry from the path it was started in,
     /// which has no such prefix — see [`super::plainly`].
-    pub(crate) fn of(platform: Platform, account: &Path, git_dir: &Path, worktree: &Path) -> Root {
+    pub(crate) fn claude(
+        platform: Platform,
+        account: &Path,
+        git_dir: &Path,
+        worktree: &Path,
+    ) -> Root {
         let worktree = match platform {
             Platform::Linux => worktree.to_owned(),
             Platform::MacOs | Platform::Windows => resolved(worktree),
@@ -137,71 +205,119 @@ impl Root {
 
         Root {
             account: account.to_owned(),
-            entries,
-            trusted,
+            harness: Harness::Claude { entries, trusted },
+            memory: true,
+        }
+    }
+
+    /// The Codex root for a session logged in as the account at `account`.
+    ///
+    /// Nothing about the Worktree is in it: Codex keeps one `sessions/` for
+    /// every directory it runs in, and its trust is said on the launch line.
+    pub(crate) fn codex(account: &Path) -> Root {
+        Root {
+            account: account.to_owned(),
+            harness: Harness::Codex,
             memory: true,
         }
     }
 
     /// The same root, sharing the account's memory or not.
     ///
-    /// **On**, which is what [`Root::of`] makes: the two `projects/` entries are
-    /// made in the account and joined, so memory a session writes is the
-    /// account's and its transcript is in the account's store.
+    /// **On**, which is what [`Root::claude`] and [`Root::codex`] make: the
+    /// memory store is made in the account and joined, so memory a session
+    /// writes is the account's and its transcript is in the account's store.
     ///
-    /// **Off**: nothing under the account's `projects/` is made or joined. The
-    /// root's `projects/` is a directory of its own, empty as the session
-    /// starts, and Claude writes the session's memory and transcript there — see
-    /// [`Root::shares_memory`]. The credentials, the settings and the
-    /// `.claude.json` copy are the same either way.
+    /// **Off**: nothing of the account's store is made or joined. Each of its
+    /// directories is a directory of the root's own, empty as the session
+    /// starts, and the harness writes the session's memory and transcript there
+    /// — see [`Root::unshared_in`]. The login and the written configuration are
+    /// the same either way.
     pub(crate) fn remembering(self, memory: bool) -> Root {
         Root { memory, ..self }
     }
 
-    /// Whether the account's `projects/` entries are joined into this root.
-    ///
-    /// Where they are not, the root's own `projects/` is made empty as it is
-    /// built — see [`Root::projects_in`] — and a transcript is looked for there
-    /// rather than in the account.
-    pub(crate) fn shares_memory(&self) -> bool {
-        self.memory
+    /// Where a harness looks for its account's directory, inside HOME — which is
+    /// where this root is put, and what it is called under the Conversation's
+    /// own directory on the host.
+    pub(crate) fn inside_home(&self) -> &'static str {
+        match self.harness {
+            Harness::Claude { .. } => super::CLAUDE_DIR_INSIDE_HOME,
+            Harness::Codex => super::CODEX_INSIDE_HOME,
+        }
     }
 
-    /// Where the directory of `projects/` entries is in a root at `root`.
+    /// Where the directory of `projects/` entries is in a Claude root at `root`.
     pub(crate) fn projects_in(root: &Path) -> PathBuf {
         root.join(PROJECTS)
     }
 
-    /// The account's credentials file, whether or not there is one.
+    /// Where Codex's rollouts are in a Codex root at `root`.
+    pub(crate) fn sessions_in(root: &Path) -> PathBuf {
+        root.join(CODEX_MEMORY[0])
+    }
+
+    /// The account's own directory.
+    pub(crate) fn account(&self) -> &Path {
+        &self.account
+    }
+
+    /// The account's login file, whether or not there is one.
     pub(crate) fn credentials(&self) -> PathBuf {
-        self.account.join(CREDENTIALS)
+        self.account.join(self.login())
     }
 
-    /// Where the credentials file is in a root at `root`.
-    pub(crate) fn credentials_in(root: &Path) -> PathBuf {
-        root.join(CREDENTIALS)
+    /// Where the login file is in this root, built at `root`.
+    pub(crate) fn credentials_in(&self, root: &Path) -> PathBuf {
+        root.join(self.login())
     }
 
-    /// Where the settings file is in a root at `root`.
-    pub(crate) fn settings_in(root: &Path) -> PathBuf {
-        root.join(SETTINGS)
+    /// The login file `account` keeps in its directory, for the harnesses whose
+    /// sessions are given a root — whether or not the file is there.
+    pub(crate) fn login_of(account: &crate::store::Account) -> Option<PathBuf> {
+        match account {
+            crate::store::Account::Claude { claude_dir, .. } => Some(claude_dir.join(CREDENTIALS)),
+            crate::store::Account::Codex { home } => Some(home.join(AUTH)),
+            crate::store::Account::Grok { .. } | crate::store::Account::OpenCode { .. } => None,
+        }
     }
 
-    /// The settings file a root is given: Verkstead's own, written as each
-    /// session starts, and neither joined nor written back.
+    /// What the login file is called, inside the account and inside the root.
+    fn login(&self) -> &'static str {
+        match self.harness {
+            Harness::Claude { .. } => CREDENTIALS,
+            Harness::Codex => AUTH,
+        }
+    }
+
+    /// The configuration file a root is given, as where it goes in a root built
+    /// at `root` and what it holds: Verkstead's own, written as each session
+    /// starts, and neither joined nor written back.
     ///
-    /// Read off the account's `settings.json` as it is at this moment, so a key
-    /// the human changes reaches the next session. An account with no such
-    /// file, or one that does not read as JSON, still gets the bypass key — see
-    /// [`settings`].
+    /// Read off the account's own file as it is at this moment, so a key the
+    /// human changes reaches the next session. Claude's is a `settings.json` —
+    /// see [`settings`] — and Codex's a `config.toml` — see [`codex_config`].
     ///
     /// Blocking: one read.
-    pub(crate) fn settings(&self) -> Vec<u8> {
-        settings(std::fs::read(self.account.join(SETTINGS)).ok().as_deref())
+    pub(crate) fn written(&self, root: &Path) -> (PathBuf, Vec<u8>) {
+        match self.harness {
+            Harness::Claude { .. } => (
+                root.join(SETTINGS),
+                settings(std::fs::read(self.account.join(SETTINGS)).ok().as_deref()),
+            ),
+            Harness::Codex => (
+                root.join(CODEX_CONFIG),
+                codex_config(
+                    std::fs::read_to_string(self.account.join(CODEX_CONFIG))
+                        .ok()
+                        .as_deref(),
+                ),
+            ),
+        }
     }
 
-    /// The `.claude.json` a session is given: a copy of the account's own at
-    /// `config_file` as it is at this moment, with its MCP servers taken out
+    /// The `.claude.json` a Claude session is given: a copy of the account's own
+    /// at `config_file` as it is at this moment, with its MCP servers taken out
     /// and the Repo and the Worktree trusted — see [`config`].
     ///
     /// Copied rather than linked, so what is seeded is written into the copy
@@ -210,24 +326,31 @@ impl Root {
     ///
     /// Blocking: one read.
     pub(crate) fn config(&self, config_file: &Path) -> Vec<u8> {
-        config(std::fs::read(config_file).ok().as_deref(), &self.trusted)
+        let trusted = match &self.harness {
+            Harness::Claude { trusted, .. } => trusted.as_slice(),
+            Harness::Codex => &[],
+        };
+
+        config(std::fs::read(config_file).ok().as_deref(), trusted)
     }
 
-    /// Make each joined entry in the account where it is not there yet.
+    /// Make each directory of the memory store in the account where it is not
+    /// there yet.
     ///
     /// **Made in the account rather than in the root**, because what is written
     /// under one is the account's: memory a later session reads, and the
-    /// transcript Verkstead follows. An entry that is not there is the ordinary
-    /// case for a Repo nobody has run Claude in yet, and a join of nothing is a
-    /// session that will not start.
+    /// transcript Verkstead follows. A directory that is not there is the
+    /// ordinary case — a Repo nobody has run Claude in yet, a Codex account
+    /// that has never written a memory — and a join of nothing is a session
+    /// that will not start.
     ///
     /// **Nothing at all where memory is off**: nothing is joined, so nothing of
     /// the account's is written to make a join of.
     ///
     /// Blocking.
     pub(crate) fn made_in_account(&self) -> io::Result<()> {
-        for entry in self.joined_entries() {
-            std::fs::create_dir_all(self.account.join(PROJECTS).join(entry))?;
+        for store in self.joined_store() {
+            std::fs::create_dir_all(self.account.join(store))?;
         }
 
         Ok(())
@@ -236,12 +359,11 @@ impl Root {
     /// Everything joined into a root a session finds at `inside`: each as the
     /// account's own path and the path a session finds it at.
     ///
-    /// The credentials file first, and only where the account has one. A join
-    /// of a file that is not there is nothing on a Mac, a hard link that fails on
-    /// Windows and a bind that will not start on Linux — so a root for an
-    /// account with no file has none, and the file a session logs in and writes
-    /// is handed back as it ends instead.
-    /// See [`super::Sandbox::command`].
+    /// The login first, and only where the account has one. A join of a file
+    /// that is not there is nothing on a Mac, a hard link that fails on Windows
+    /// and a bind that will not start on Linux — so a root for an account with
+    /// no file has none, and the file a session logs in and writes is handed
+    /// back as it ends instead. See [`super::Sandbox::command`].
     ///
     /// Blocking: one `stat`.
     pub(crate) fn joined(&self, inside: &Path) -> Vec<(PathBuf, PathBuf)> {
@@ -250,27 +372,72 @@ impl Root {
         let credentials = self.credentials();
 
         if credentials.is_file() {
-            joined.push((credentials, Root::credentials_in(inside)));
+            joined.push((credentials, self.credentials_in(inside)));
         }
 
-        for entry in self.joined_entries() {
-            joined.push((
-                self.account.join(PROJECTS).join(entry),
-                inside.join(PROJECTS).join(entry),
-            ));
+        for store in self.joined_store() {
+            joined.push((self.account.join(&store), inside.join(&store)));
         }
 
         joined
     }
 
-    /// The `projects/` entries joined from the account: all of them where
-    /// memory is shared, and none where it is not.
-    fn joined_entries(&self) -> &[String] {
-        match self.memory {
-            true => &self.entries,
-            false => &[],
+    /// The directories of a root built at `root` that are its own and made
+    /// empty as it is built: the memory store's, where memory is not shared,
+    /// and none where it is.
+    ///
+    /// Claude's is the whole of `projects/`, the entries being named inside it
+    /// as the session writes them. Codex's are `sessions/` and `memories/`.
+    pub(crate) fn unshared_in(&self, root: &Path) -> Vec<PathBuf> {
+        if self.memory {
+            return Vec::new();
+        }
+
+        match self.harness {
+            Harness::Claude { .. } => vec![Root::projects_in(root)],
+            Harness::Codex => CODEX_MEMORY.iter().map(|store| root.join(store)).collect(),
         }
     }
+
+    /// The memory store joined from the account, each as a path relative to
+    /// the account's directory: all of it where memory is shared, and none of
+    /// it where it is not.
+    fn joined_store(&self) -> Vec<PathBuf> {
+        if !self.memory {
+            return Vec::new();
+        }
+
+        match &self.harness {
+            Harness::Claude { entries, .. } => entries
+                .iter()
+                .map(|entry| Path::new(PROJECTS).join(entry))
+                .collect(),
+            Harness::Codex => CODEX_MEMORY.iter().map(PathBuf::from).collect(),
+        }
+    }
+}
+
+/// The `config.toml` a Codex root is given, out of the account's own where
+/// there is one to read.
+///
+/// The [`CODEX_CARRIED`] keys of the account's own, as they are there, and
+/// nothing else. An account with no such file, or one that does not read as
+/// TOML, is given an empty file: a session on OpenAI's own provider needs
+/// nothing said.
+fn codex_config(account: Option<&str>) -> Vec<u8> {
+    let mut written = toml::Table::new();
+
+    if let Some(own) = account.and_then(|text| text.parse::<toml::Table>().ok()) {
+        for key in CODEX_CARRIED {
+            if let Some(value) = own.get(key) {
+                written.insert(key.to_owned(), value.clone());
+            }
+        }
+    }
+
+    toml::to_string(&written)
+        .expect("a TOML table read off TOML writes as TOML")
+        .into_bytes()
 }
 
 /// The settings a root is given, out of the account's own `settings.json` where
@@ -623,6 +790,22 @@ fn base36(mut number: u64) -> String {
 mod tests {
     use super::*;
 
+    /// A Claude root's `projects/` entries.
+    fn entries(root: &Root) -> Vec<String> {
+        match &root.harness {
+            Harness::Claude { entries, .. } => entries.clone(),
+            Harness::Codex => panic!("a Codex root has no `projects/` entries"),
+        }
+    }
+
+    /// And the paths its `.claude.json` copy trusts.
+    fn trusted(root: &Root) -> Vec<String> {
+        match &root.harness {
+            Harness::Claude { trusted, .. } => trusted.clone(),
+            Harness::Codex => panic!("a Codex root has no `.claude.json` to trust in"),
+        }
+    }
+
     /// The name of the entry this very checkout's memory is under, which is
     /// the shape every entry has.
     #[test]
@@ -741,7 +924,7 @@ mod tests {
     /// keys one.
     #[test]
     fn the_copy_trusts_each_path_beside_what_its_entry_already_says() {
-        let root = Root::of(
+        let root = Root::claude(
             Platform::Windows,
             Path::new(r"C:\Users\ada\.claude"),
             Path::new(r"\\?\C:\Users\ada\src\verkstead"),
@@ -749,7 +932,7 @@ mod tests {
         );
 
         assert_eq!(
-            root.trusted,
+            trusted(&root),
             [
                 "C:/Users/ada/src/verkstead",
                 "C:/ProgramData/Verkstead/worktrees/verkstead-x"
@@ -767,7 +950,10 @@ mod tests {
         });
 
         assert_eq!(
-            read(&config(Some(account.to_string().as_bytes()), &root.trusted)),
+            read(&config(
+                Some(account.to_string().as_bytes()),
+                &trusted(&root)
+            )),
             serde_json::json!({
                 "projects": {
                     "C:/Users/ada/src/verkstead": {
@@ -781,7 +967,7 @@ mod tests {
             })
         );
         assert_eq!(
-            read(&config(Some(b"{ not json"), &root.trusted[..1])),
+            read(&config(Some(b"{ not json"), &trusted(&root)[..1])),
             serde_json::json!({
                 "projects": { "C:/Users/ada/src/verkstead": { "hasTrustDialogAccepted": true } },
             }),
@@ -960,7 +1146,7 @@ mod tests {
         std::fs::create_dir_all(&worktree).unwrap();
 
         let account = dir.path().join("account/.claude");
-        let root = Root::of(Platform::Linux, &account, &repo.join(".git"), &worktree);
+        let root = Root::claude(Platform::Linux, &account, &repo.join(".git"), &worktree);
 
         root.made_in_account().unwrap();
 
@@ -994,8 +1180,8 @@ mod tests {
             )
         );
 
-        let same = Root::of(Platform::Linux, &account, &worktree.join(".git"), &worktree);
-        assert_eq!(same.entries, [worktree_entry]);
+        let same = Root::claude(Platform::Linux, &account, &worktree.join(".git"), &worktree);
+        assert_eq!(entries(&same), [worktree_entry]);
     }
 
     /// With memory off, only the credentials are joined, and nothing is made
@@ -1012,9 +1198,12 @@ mod tests {
         std::fs::create_dir_all(&account).unwrap();
         std::fs::write(account.join(CREDENTIALS), "{}\n").unwrap();
 
-        let root =
-            Root::of(Platform::Linux, &account, &repo.join(".git"), &worktree).remembering(false);
-        assert!(!root.shares_memory());
+        let root = Root::claude(Platform::Linux, &account, &repo.join(".git"), &worktree)
+            .remembering(false);
+        assert_eq!(
+            root.unshared_in(Path::new("/built/.claude")),
+            [PathBuf::from("/built/.claude/projects")]
+        );
 
         root.made_in_account().unwrap();
         assert!(
@@ -1035,7 +1224,7 @@ mod tests {
     /// named from the plain path a session is started in.
     #[test]
     fn a_verbatim_path_is_named_as_the_plain_path_it_spells() {
-        let root = Root::of(
+        let root = Root::claude(
             Platform::Windows,
             Path::new(r"C:\Users\ada\.claude"),
             Path::new(r"\\?\C:\Users\ada\src\verkstead"),
@@ -1043,7 +1232,7 @@ mod tests {
         );
 
         assert_eq!(
-            root.entries,
+            entries(&root),
             [
                 "C--Users-ada-src-verkstead",
                 "C--ProgramData-Verkstead-worktrees-verkstead-x"
@@ -1068,12 +1257,120 @@ mod tests {
         let through = linked.join("worktree");
 
         assert_eq!(
-            Root::of(Platform::Linux, &account, &git_dir, &through).entries[1],
+            entries(&Root::claude(Platform::Linux, &account, &git_dir, &through))[1],
             entry_named(&through)
         );
         assert_eq!(
-            Root::of(Platform::MacOs, &account, &git_dir, &through).entries[1],
+            entries(&Root::claude(Platform::MacOs, &account, &git_dir, &through))[1],
             entry_named(&real.canonicalize().unwrap())
         );
+    }
+
+    /// A Codex root joins the login and the two memory directories, made in
+    /// the account first; with memory off, the login alone, nothing made in the
+    /// account, and the two directories the root's own.
+    #[test]
+    fn a_codex_root_joins_its_login_and_its_memory_by_the_switch() {
+        let dir = tempfile::tempdir().unwrap();
+        let account = dir.path().join("account/.codex");
+        std::fs::create_dir_all(&account).unwrap();
+
+        let forgetting = Root::codex(&account).remembering(false);
+        forgetting.made_in_account().unwrap();
+
+        assert!(
+            forgetting.joined(Path::new("/inside/.codex")).is_empty(),
+            "no login in the account and no memory shared, so nothing is joined"
+        );
+        assert!(!account.join("sessions").exists() && !account.join("memories").exists());
+        assert_eq!(
+            forgetting.unshared_in(Path::new("/built/.codex")),
+            [
+                PathBuf::from("/built/.codex/sessions"),
+                PathBuf::from("/built/.codex/memories")
+            ]
+        );
+
+        std::fs::write(account.join(AUTH), "{}\n").unwrap();
+
+        let remembering = Root::codex(&account);
+        remembering.made_in_account().unwrap();
+
+        assert_eq!(
+            remembering.joined(Path::new("/inside/.codex")),
+            [
+                (
+                    account.join(AUTH),
+                    PathBuf::from("/inside/.codex/auth.json")
+                ),
+                (
+                    account.join("sessions"),
+                    PathBuf::from("/inside/.codex/sessions")
+                ),
+                (
+                    account.join("memories"),
+                    PathBuf::from("/inside/.codex/memories")
+                ),
+            ]
+        );
+        assert!(account.join("sessions").is_dir() && account.join("memories").is_dir());
+        assert!(
+            remembering
+                .unshared_in(Path::new("/built/.codex"))
+                .is_empty()
+        );
+    }
+
+    fn table(bytes: &[u8]) -> toml::Table {
+        std::str::from_utf8(bytes).unwrap().parse().unwrap()
+    }
+
+    /// The two keys a custom provider needs come over as they are, and nothing
+    /// else of the account's does.
+    #[test]
+    fn only_the_model_provider_keys_are_carried_into_codexs_config() {
+        let account = r#"
+            model = "gpt-5-codex"
+            model_provider = "proxy"
+            notify = ["notify-send"]
+
+            [model_providers.proxy]
+            name = "The proxy"
+            base_url = "https://proxy.example/v1"
+            env_key = "PROXY_API_KEY"
+
+            [mcp_servers.the-humans]
+            command = "npx"
+
+            [profiles.fast]
+            model = "gpt-5-mini"
+
+            [projects."/home/you/src/verkstead"]
+            trust_level = "trusted"
+
+            [features]
+            memories = true
+        "#;
+
+        assert_eq!(
+            table(&codex_config(Some(account))),
+            toml::toml! {
+                model_provider = "proxy"
+
+                [model_providers.proxy]
+                name = "The proxy"
+                base_url = "https://proxy.example/v1"
+                env_key = "PROXY_API_KEY"
+            }
+        );
+    }
+
+    /// An account with no `config.toml`, or one that does not read, is given an
+    /// empty one.
+    #[test]
+    fn an_account_with_no_codex_config_to_read_is_given_an_empty_one() {
+        assert!(codex_config(None).is_empty());
+        assert!(codex_config(Some("model_provider = ")).is_empty());
+        assert!(codex_config(Some("model = \"gpt-5-codex\"\n")).is_empty());
     }
 }

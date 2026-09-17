@@ -1,5 +1,5 @@
-//! A Claude root on Linux that something is still running in, shared by the
-//! next launch rather than built again under it.
+//! A root on Linux that something is still running in, shared by the next
+//! launch rather than built again under it.
 //!
 //! **Why Linux alone.** On Linux a root is a directory under the Data Directory
 //! that the namespace binds in, and what is joined into it is bound onto mount
@@ -7,13 +7,20 @@
 //! would unlink those mount points from under a session still running, which
 //! the kernel answers by unmounting them inside that session: its transcript,
 //! its memory and its login would all be gone from where it writes them. And
-//! the `.claude.json` copy it is bound to would be a deleted file, whose
+//! a Claude session's `.claude.json` copy would be a deleted file, whose
 //! changes are merged against a copy it never had.
 //!
-//! So a launch into a Conversation that already has something running in its
-//! root is given that root as it is: nothing emptied, nothing written, and the
-//! same copy of `.claude.json` with the same baseline to merge against. The
-//! root is built afresh only once everything running in it has ended.
+//! So a launch into a root that already has something running in it is given
+//! that root as it is: nothing emptied, nothing written, and the same copy of
+//! `.claude.json` with the same baseline to merge against. The root is built
+//! afresh only once everything running in it has ended.
+//!
+//! **One register entry per Conversation and root**, rather than per
+//! Conversation. A Conversation's grilling session and its terminal can run
+//! under Profiles of two harnesses — a Claude session with a terminal under a
+//! Codex account beside it — and each is given a root of its own, `.claude` and
+//! `.codex`, side by side in the Conversation's directory. A launch into one is
+//! nothing to the other.
 //!
 //! On a Mac and on Windows the profile is the HOME itself, and is emptied as it
 //! always was — see [`super::Homes`].
@@ -30,11 +37,15 @@ use std::sync::{Arc, Mutex};
 /// changed after it.
 pub(crate) type Baseline = Arc<Mutex<Vec<u8>>>;
 
-/// How many launches are running in each Conversation's root, and the baseline
-/// their copy is merged against. One per server, shared by every session and
-/// every terminal.
+/// How many launches are running in each of a Conversation's roots, and the
+/// baseline their copy is merged against. One per server, shared by every
+/// session and every terminal.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct Sharing(Arc<Mutex<HashMap<i64, Running>>>);
+pub(crate) struct Sharing(Arc<Mutex<HashMap<Root, Running>>>);
+
+/// Which root: the Conversation's id, and what the root is called in its
+/// directory — `.claude` or `.codex`.
+type Root = (i64, &'static str);
 
 #[derive(Debug, Default)]
 struct Running {
@@ -52,18 +63,18 @@ pub(crate) struct Launch {
     pub(crate) baseline: Baseline,
 }
 
-/// One launch running in a Conversation's root, until this is dropped — which
-/// is when the [`super::Closing`] holding it has been seen to.
+/// One launch running in one of a Conversation's roots, until this is dropped —
+/// which is when the [`super::Closing`] holding it has been seen to.
 #[derive(Debug)]
 pub(crate) struct Share {
     sharing: Sharing,
-    conversation: i64,
+    root: Root,
 }
 
 impl Sharing {
-    /// Launch into `conversation`'s root: `launch` is told whether it builds the
-    /// root or shares it, and what it comes back with is held as one more launch
-    /// running there until the [`Share`] beside it is dropped.
+    /// Launch into `conversation`'s root called `named`: `launch` is told whether
+    /// it builds the root or shares it, and what it comes back with is held as
+    /// one more launch running there until the [`Share`] beside it is dropped.
     ///
     /// **`launch` runs under the lock**, so a launch that shares a root never
     /// sees it half built, and two launches never both build it. Building a root
@@ -72,10 +83,12 @@ impl Sharing {
     pub(crate) fn launched<T>(
         &self,
         conversation: i64,
+        named: &'static str,
         launch: impl FnOnce(Launch) -> std::io::Result<T>,
     ) -> std::io::Result<(T, Share)> {
         let mut held = self.0.lock().expect("the root register is not poisoned");
-        let running = held.entry(conversation).or_default();
+        let root = (conversation, named);
+        let running = held.entry(root).or_default();
 
         let launched = launch(Launch {
             builds: running.launches == 0,
@@ -88,7 +101,7 @@ impl Sharing {
             launched,
             Share {
                 sharing: self.clone(),
-                conversation,
+                root,
             },
         ))
     }
@@ -100,7 +113,7 @@ impl Drop for Share {
             return;
         };
 
-        if let Some(running) = held.get_mut(&self.conversation) {
+        if let Some(running) = held.get_mut(&self.root) {
             running.launches = running.launches.saturating_sub(1);
         }
     }
@@ -116,7 +129,7 @@ mod tests {
 
         let builds = |sharing: &Sharing, conversation| {
             sharing
-                .launched(conversation, |launch| Ok(launch.builds))
+                .launched(conversation, ".claude", |launch| Ok(launch.builds))
                 .unwrap()
         };
 
@@ -142,17 +155,41 @@ mod tests {
         assert!(built, "and once nothing is, it is built afresh");
     }
 
+    /// A terminal under a Codex account beside a Claude session is a launch
+    /// into a root nothing is running in, so it builds its own.
+    #[test]
+    fn two_roots_of_one_conversation_are_built_apart() {
+        let sharing = Sharing::default();
+
+        let (built, _session) = sharing
+            .launched(7, ".claude", |launch| Ok(launch.builds))
+            .unwrap();
+        assert!(built);
+
+        let (built, _terminal) = sharing
+            .launched(7, ".codex", |launch| Ok(launch.builds))
+            .unwrap();
+        assert!(
+            built,
+            "nothing is running in the Codex root, so it is built"
+        );
+    }
+
     #[test]
     fn a_launch_that_fails_is_not_left_running() {
         let sharing = Sharing::default();
 
         assert!(
             sharing
-                .launched(7, |_| Err::<(), _>(std::io::Error::other("refused")))
+                .launched(7, ".claude", |_| Err::<(), _>(std::io::Error::other(
+                    "refused"
+                )))
                 .is_err()
         );
 
-        let (built, _) = sharing.launched(7, |launch| Ok(launch.builds)).unwrap();
+        let (built, _) = sharing
+            .launched(7, ".claude", |launch| Ok(launch.builds))
+            .unwrap();
         assert!(built);
     }
 
@@ -160,10 +197,14 @@ mod tests {
     fn every_launch_in_one_root_is_given_one_baseline() {
         let sharing = Sharing::default();
 
-        let (first, _one) = sharing.launched(7, |launch| Ok(launch.baseline)).unwrap();
+        let (first, _one) = sharing
+            .launched(7, ".claude", |launch| Ok(launch.baseline))
+            .unwrap();
         *first.lock().unwrap() = b"given\n".to_vec();
 
-        let (second, _two) = sharing.launched(7, |launch| Ok(launch.baseline)).unwrap();
+        let (second, _two) = sharing
+            .launched(7, ".claude", |launch| Ok(launch.baseline))
+            .unwrap();
         assert_eq!(*second.lock().unwrap(), b"given\n");
     }
 }
