@@ -858,7 +858,15 @@ fn the_guide_says_how_a_session_ends() {
 
     let ending = section(&guide, "## Ending the session");
 
-    for phrase in ["verkstead done", "Run it last", "Refused", "again"] {
+    for phrase in [
+        "verkstead done",
+        "Run it last",
+        "Refused",
+        "again",
+        "uncommitted",
+        "closed unanswered",
+        "--deferred",
+    ] {
         assert!(
             ending.contains(phrase),
             "the section on ending a session should say {phrase:?}, got:\n{ending}"

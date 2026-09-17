@@ -85,7 +85,10 @@ pub(crate) async fn compose(pool: &SqlitePool, conversation_id: i64) -> Vec<Repo
 /// carried onto the block: a clean Worktree contributes none, so where the
 /// work's own repository comes in the list is not something a reader of the
 /// blocks could work out for itself.
-fn writable(conversation: &store::Conversation) -> Vec<Reading> {
+///
+/// Shared with [`crate::done`], whose signal is refused over uncommitted changes
+/// in exactly these repositories.
+pub(crate) fn writable(conversation: &store::Conversation) -> Vec<Reading> {
     let mut worktrees = Vec::new();
 
     if let Some(worktree) = conversation.worktree.clone() {
@@ -114,10 +117,10 @@ fn writable(conversation: &store::Conversation) -> Vec<Reading> {
 }
 
 /// One Worktree to read, and what the block read out of it is to say for itself.
-struct Reading {
-    repo: String,
-    own: bool,
-    worktree: PathBuf,
+pub(crate) struct Reading {
+    pub(crate) repo: String,
+    pub(crate) own: bool,
+    pub(crate) worktree: PathBuf,
 }
 
 /// The blocks those Worktrees come to, in the order they were given. Blocking,

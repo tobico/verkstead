@@ -22551,6 +22551,222 @@ async fn a_session_that_lands_its_step_and_then_asks_is_left_alive_through_the_a
         .await;
 }
 
+/// A signal over uncommitted changes in the Worktree is refused naming each
+/// file — modified, staged and untracked alike — and taken once they are
+/// committed. An ignored file is none of those, and is neither named nor in the
+/// way.
+///
+/// The stub lands its step first, so the refusal is about the changes and
+/// nothing else, then commits what it was told about: the run reaching its
+/// finish is the same signal taken.
+#[tokio::test]
+async fn a_signal_over_uncommitted_changes_is_refused_naming_them_until_they_are_committed() {
+    let fixture = grilling(&a_backlog_that_says_so(
+        "printf '*.log\\n' > .gitignore",
+        "printf 'more\\n' >> limiter.md\n        \
+         printf 'staged\\n' > staged.md\n        \
+         git add staged.md\n        \
+         printf 'stray\\n' > stray.md\n        \
+         printf 'noise\\n' > build.log\n        \
+         : > /tmp/verkstead/done\n        \
+         while ! grep -q 'uncommitted' /tmp/verkstead/done-said 2>/dev/null; do sleep 0.05; done\n        \
+         cp /tmp/verkstead/done-said /tmp/verkstead/refused\n        \
+         git add -A\n        \
+         git commit --quiet -m 'feat: what was left over'",
+    ))
+    .await;
+
+    picked_through_to_the_task(&fixture).await;
+
+    let said = refusal(&fixture).await;
+
+    for named in ["`limiter.md`", "`staged.md`", "`stray.md`"] {
+        assert!(
+            said.contains(named),
+            "the refusal names {named} among the uncommitted changes: {said:?}",
+        );
+    }
+    assert!(
+        said.contains("the Worktree"),
+        "and says where they are: {said:?}",
+    );
+    assert!(
+        !said.contains("build.log"),
+        "an ignored file is not an uncommitted change: {said:?}",
+    );
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("chore: finish"))
+                .then_some(())
+        })
+        .await;
+}
+
+/// The same over a read-write companion, named by its repository; and a
+/// read-only companion with a stray file in it is not looked at.
+#[tokio::test]
+async fn a_signal_over_a_writable_companions_changes_is_refused_naming_the_repo() {
+    let fixture = grilling_building_in(
+        &a_backlog_that_says_so(
+            "",
+            "(cd ../askance-* && printf 'the other half\\n' > halves.md)\n        \
+             : > /tmp/verkstead/done\n        \
+             while ! grep -q 'uncommitted' /tmp/verkstead/done-said 2>/dev/null; do sleep 0.05; done\n        \
+             cp /tmp/verkstead/done-said /tmp/verkstead/refused\n        \
+             (cd ../askance-* && git add halves.md && git commit --quiet -m 'feat: the other half')",
+        ),
+        "askance",
+    )
+    .await;
+
+    picked_through_to_the_task(&fixture).await;
+
+    let said = refusal(&fixture).await;
+
+    assert!(
+        said.contains("the companion repo `askance`") && said.contains("`halves.md`"),
+        "the refusal names the companion and the file in it: {said:?}",
+    );
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("chore: finish"))
+                .then_some(())
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_read_only_companions_stray_file_does_not_refuse_a_signal() {
+    let fixture = grilling_alongside(
+        &a_backlog_that_says_so("", ": > /tmp/verkstead/done"),
+        "askance",
+    )
+    .await;
+
+    let worktree = PathBuf::from(
+        fixture
+            .view()
+            .await
+            .worktree
+            .expect("a grilling Conversation has a worktree")
+            .path,
+    );
+    let companion = std::fs::read_dir(worktree.parent().unwrap())
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("askance-"))
+        })
+        .expect("the read-only companion is checked out beside the worktree");
+
+    std::fs::write(companion.join("stray.md"), "stray\n").unwrap();
+
+    picked_through_to_the_task(&fixture).await;
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("chore: finish"))
+                .then_some(())
+        })
+        .await;
+}
+
+/// What the relay was last told when a stub copied it aside, once it has.
+async fn refusal(fixture: &Grilling) -> String {
+    let refused = handoff_directory(fixture).join("refused");
+    let deadline = Instant::now() + *PATIENCE;
+
+    while !refused.is_file() {
+        assert!(Instant::now() < deadline, "the signal was never refused");
+        pause(Duration::from_millis(25)).await;
+    }
+
+    std::fs::read_to_string(&refused).unwrap()
+}
+
+/// An accepted signal locks the blocking Set the session left open, as a
+/// relaunch locks one, and leaves its Deferred Ask open and answerable.
+///
+/// The session has said it is finished, so nothing will read the blocking one's
+/// Answer — but a Deferred Ask never had a reader, and its Answers reach a later
+/// session by design.
+#[tokio::test]
+async fn a_taken_signal_locks_the_sessions_open_set_and_leaves_its_deferred_ask() {
+    let fixture = grilling(&a_backlog_that_says_so(
+        "",
+        "while [ ! -f /tmp/verkstead/go ]; do sleep 0.05; done\n        \
+         : > /tmp/verkstead/done",
+    ))
+    .await;
+
+    let (_, task) = picked_through_to_the_task(&fixture).await;
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("feat: count"))
+                .then_some(())
+        })
+        .await;
+
+    let blocking = fixture.ask(A_FOLLOW_UP_ROUND).await;
+    let deferred = fixture.ask_deferred(DEFERRED).await;
+
+    std::fs::write(handoff_directory(&fixture).join("go"), "").unwrap();
+
+    let view = fixture
+        .until(|view| {
+            matches!(
+                where_it_stands(view, blocking),
+                Some(verkstead_render::Standing::LockedUnanswered(_))
+            )
+            .then(|| view.clone())
+        })
+        .await;
+
+    assert!(
+        matches!(
+            where_it_stands(&view, deferred),
+            Some(verkstead_render::Standing::Waiting(
+                verkstead_schema::Liveness::Deferred
+            )),
+        ),
+        "the Deferred Ask is still the human's to answer: {:?}",
+        where_it_stands(&view, deferred),
+    );
+
+    fixture
+        .until(|view| {
+            commits(view)
+                .iter()
+                .any(|commit| commit.subject.starts_with("chore: finish"))
+                .then_some(())
+        })
+        .await;
+
+    assert!(
+        !running(&fixture, task).await,
+        "the session that signalled was ended",
+    );
+    assert_eq!(
+        fixture.answer(deferred).await,
+        Submitted::Accepted,
+        "and the Deferred Ask takes its Answer",
+    );
+}
+
 /// What a rescued session was told, waited for from the file the stub writes
 /// each line typed into it to.
 ///
@@ -23966,6 +24182,17 @@ async fn an_opencode_session_holding_a_blocking_ask_is_neither_ended_nor_prodded
     .await;
 
     picked(&fixture, "task-list").await;
+
+    // Asked once the step session is running, as a real one can only ask then.
+    // A Set posted while the grilling is still the session is the grilling's,
+    // and its Done signal locks it unanswered.
+    fixture
+        .until(|view| {
+            let outputs = outputs(view);
+            (outputs.len() >= 2 && outputs.last().is_some_and(|output| output.running))
+                .then_some(())
+        })
+        .await;
 
     // The step session's own Set, and then the marker that tells the stub it is
     // up — which is what puts the ask before the silence, as it is on a real

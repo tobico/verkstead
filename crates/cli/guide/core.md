@@ -427,5 +427,15 @@ Verkstead checks the repository at that moment:
   ticked and committed, a document not written, no Direction picked yet. The
   session carries on. Put right what it names, then run `verkstead done` again.
 
+**Commit or discard every change before you signal.** A signal is refused
+while the Worktree, or a companion repo you may write in, has uncommitted
+changes — modified, staged, or untracked and not ignored. The refusal names the
+files.
+
+**Do not signal with a question you still want answered.** Once the signal is
+accepted, nothing will read the Answer, so a Set of yours that is still waiting
+on one is closed unanswered. A Set asked with `--deferred` stays open: its
+Answers reach a later session.
+
 Being unable to finish is not a kind of done. That is a Question for the human,
 asked with `verkstead ask`.

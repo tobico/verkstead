@@ -249,9 +249,13 @@ async fn verdict(state: &AppState, conversation_id: i64) -> Verdict {
         ));
     }
 
+    if let Some(uncommitted) = uncommitted(state, conversation_id).await {
+        return Verdict::Refused(uncommitted);
+    }
+
     // The same entry the check was made for, rather than whichever is there now:
     // one put there in the meantime is a driver waiting on something else.
-    match state
+    let taken = match state
         .signals
         .register()
         .get(&conversation_id)
@@ -259,14 +263,173 @@ async fn verdict(state: &AppState, conversation_id: i64) -> Verdict {
     {
         Some(expected) => {
             expected.given.send_replace(true);
-            Verdict::Accepted
+            true
         }
-        None => Verdict::Refused(
+        None => false,
+    };
+
+    if !taken {
+        return Verdict::Refused(
             "what this session was sent for changed while the signal was being checked, so run \
              `verkstead done` again"
                 .to_owned(),
-        ),
+        );
     }
+
+    abandoned(state, conversation_id, event_id).await;
+
+    Verdict::Accepted
+}
+
+/// How many uncommitted paths a refusal names before it says how many more
+/// there are: enough to act on, few enough that the agent reads to the end.
+const NAMED: usize = 10;
+
+/// Why a signal is refused over uncommitted changes, or `None` where every
+/// repository the session may write in is clean.
+///
+/// The repositories are the Diff's — see [`crate::diffs::writable`]: the
+/// Worktree, then each read-write companion. A read-only companion is not looked
+/// at, because nothing a session did can be in it. Read through
+/// [`crate::repos::git`], without optional locks, because the session may be
+/// committing at this very moment.
+///
+/// A repository that will not answer refuses the signal, saying so: the session
+/// is alive and can simply signal again, where a signal taken over a Worktree
+/// nobody could read would end a session over work nobody saw committed.
+async fn uncommitted(state: &AppState, conversation_id: i64) -> Option<String> {
+    let conversation = match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return None,
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                conversation_id,
+                "reading a Conversation to check its session's signal failed"
+            );
+            return Some(
+                "Verkstead could not read this Conversation to check for uncommitted changes, \
+                 so run `verkstead done` again in a moment"
+                    .to_owned(),
+            );
+        }
+    };
+
+    let readings = crate::diffs::writable(&conversation);
+
+    let found = tokio::task::spawn_blocking(move || {
+        readings
+            .into_iter()
+            .filter_map(|reading| {
+                let place = if reading.own {
+                    "the Worktree".to_owned()
+                } else {
+                    format!("the companion repo `{}`", reading.repo)
+                };
+
+                match changed(&reading.worktree) {
+                    Some(paths) if paths.is_empty() => None,
+                    Some(paths) => Some(format!(
+                        "{place} has uncommitted changes: {}",
+                        listed(&paths)
+                    )),
+                    None => Some(format!(
+                        "git would not say whether {place} has uncommitted changes"
+                    )),
+                }
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    .unwrap_or_else(|_| vec!["git would not say whether there are uncommitted changes".to_owned()]);
+
+    (!found.is_empty()).then(|| {
+        format!(
+            "this session is not done yet: {}. Commit those changes or discard them, then run \
+             `verkstead done` again",
+            found.join("; ")
+        )
+    })
+}
+
+/// Every path git sees as changed in `worktree` — modified, staged, or untracked
+/// and not ignored — or `None` where git will not answer.
+fn changed(worktree: &std::path::Path) -> Option<Vec<String>> {
+    let status = crate::repos::git(
+        worktree,
+        &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    )?;
+
+    let mut paths = Vec::new();
+    let mut entries = status.split('\0').filter(|entry| !entry.is_empty());
+
+    while let Some(entry) = entries.next() {
+        let Some((code, path)) = entry.split_at_checked(3) else {
+            continue;
+        };
+
+        // A rename or a copy is followed by the path it came from, which is
+        // the same change rather than another one.
+        if code.starts_with(['R', 'C']) {
+            entries.next();
+        }
+
+        paths.push(path.to_owned());
+    }
+
+    Some(paths)
+}
+
+/// `paths` as a refusal names them: in backticks, cut short after [`NAMED`].
+fn listed(paths: &[String]) -> String {
+    let mut said = paths
+        .iter()
+        .take(NAMED)
+        .map(|path| format!("`{path}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    if paths.len() > NAMED {
+        said.push_str(&format!(" and {} more", paths.len() - NAMED));
+    }
+
+    said
+}
+
+/// Lock the Sets the session that signalled was idling on, now that nothing will
+/// read their Answers.
+///
+/// Its own, read the way the runner reads them — every Set that landed after the
+/// session's Event, one Worktree holding one agent — and the ones it was idling
+/// on: a Blocking Ask, and a store-and-nudge one it stood behind. A Deferred Ask
+/// is left standing, nothing having ever waited on one, and its Answers reach a
+/// later session by design. The locking is [`crate::sets::lock`], the same a
+/// relaunched grilling does, so the human sees one kind of locked Set.
+async fn abandoned(state: &AppState, conversation_id: i64, event_id: i64) {
+    let timeline = match store::timeline(&state.pool, conversation_id).await {
+        Ok(timeline) => timeline,
+        Err(error) => {
+            tracing::error!(
+                error = ?error,
+                conversation_id,
+                "reading what a session that said it is done left open failed"
+            );
+            return;
+        }
+    };
+
+    let since = timeline
+        .into_iter()
+        .filter(|event| event.id > event_id)
+        .collect::<Vec<_>>();
+
+    crate::sets::lock(
+        state,
+        conversation_id,
+        &crate::sets::open(&since, crate::sets::Open::Idled),
+        "the session that asked it said it is done",
+    )
+    .await;
 }
 
 /// Why a session nothing is waiting on a signal from was refused.
@@ -326,6 +489,58 @@ mod tests {
         drop(first);
 
         assert_eq!(signals.register().get(&7).map(|e| e.event_id), Some(2));
+    }
+
+    /// A long list of uncommitted paths is cut short, saying how many more.
+    #[test]
+    fn a_long_list_of_changes_is_cut_short_saying_how_many_more() {
+        let paths = (1..=13).map(|n| format!("{n}.md")).collect::<Vec<_>>();
+
+        let said = listed(&paths);
+
+        assert!(said.starts_with("`1.md`, `2.md`"), "{said}");
+        assert!(said.contains("`10.md`"), "{said}");
+        assert!(!said.contains("`11.md`"), "{said}");
+        assert!(said.ends_with(" and 3 more"), "{said}");
+    }
+
+    /// Git's reading of a Worktree: modified, staged, untracked and renamed each
+    /// named once, and an ignored file not at all.
+    #[test]
+    fn every_kind_of_uncommitted_change_is_read_and_an_ignored_file_is_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = dir.path();
+        let run = |args: &[&str]| crate::repos::run(at, args).unwrap();
+
+        run(&["init", "--quiet"]);
+        std::fs::write(at.join(".gitignore"), "*.log\n").unwrap();
+        std::fs::write(at.join("kept.md"), "kept\n").unwrap();
+        std::fs::write(at.join("moved.md"), "moved\n").unwrap();
+        run(&["add", "-A"]);
+        run(&[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "--quiet",
+            "-m",
+            "first",
+        ]);
+
+        assert_eq!(changed(at), Some(Vec::new()), "a clean Worktree has none");
+
+        std::fs::write(at.join("kept.md"), "changed\n").unwrap();
+        std::fs::write(at.join("staged.md"), "staged\n").unwrap();
+        run(&["add", "staged.md"]);
+        run(&["mv", "moved.md", "renamed.md"]);
+        std::fs::write(at.join("stray.md"), "stray\n").unwrap();
+        std::fs::write(at.join("build.log"), "noise\n").unwrap();
+
+        let mut found = changed(at).unwrap();
+        found.sort();
+
+        assert_eq!(found, ["kept.md", "renamed.md", "staged.md", "stray.md"]);
     }
 
     /// A signal given reaches whoever holds a copy of it.
