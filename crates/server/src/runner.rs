@@ -337,6 +337,21 @@ impl Step {
         }
     }
 
+    /// Whether the step's session is done only once its branch has a pull
+    /// request open as well: the finish and a roadmap's own session, which are
+    /// the two a run ends on. See [`crate::done::Ends`].
+    fn ends(&self) -> crate::done::Ends {
+        match self {
+            Step::Finish | Step::Staging(_) => crate::done::Ends::OnAPullRequest,
+            Step::Planning
+            | Step::PlanningStage
+            | Step::Handoff(_)
+            | Step::Task { .. }
+            | Step::Broken { .. }
+            | Step::Nothing => crate::done::Ends::WithItsWork,
+        }
+    }
+
     /// What the step was, in the words the Timeline draws.
     ///
     /// The sentence rather than the word above it: the two are read by different
@@ -1204,13 +1219,15 @@ async fn submitted(state: &AppState, conversation_id: i64) -> Option<i64> {
     let idle = session.idle.clone();
     let pace = state.sessions.pace();
 
-    // Nothing for the signal to be checked against beyond the rules every signal
-    // has: what this session does is GitHub's to say. See
-    // [`crate::done::Evidence::Nothing`].
-    let expecting =
-        state
-            .signals
-            .expecting(conversation_id, event_id, crate::done::Evidence::Nothing);
+    // Nothing on the branch for the signal to be checked against: what this
+    // session does is GitHub's to say, so GitHub is what it is checked against.
+    // See [`crate::done::Evidence::Nothing`] and [`crate::done::Ends`].
+    let expecting = state.signals.expecting(
+        conversation_id,
+        event_id,
+        crate::done::Evidence::Nothing,
+        crate::done::Ends::OnAPullRequest,
+    );
     let signal = expecting.signal();
 
     let ended = tokio::select! {
@@ -1401,11 +1418,12 @@ async fn follow_inline(
     let pace = state.sessions.pace();
 
     // What the session's Done signal is checked against: a commit past where the
-    // run stood. See [`crate::done`].
+    // run stood, and a pull request open on the branch. See [`crate::done`].
     let expecting = state.signals.expecting(
         conversation_id,
         event_id,
         crate::done::Evidence::Committed { already },
+        crate::done::Ends::OnAPullRequest,
     );
     let signal = expecting.signal();
 
@@ -1630,6 +1648,7 @@ pub(crate) async fn instructed(
         conversation_id,
         event_id,
         crate::done::Evidence::Committed { already },
+        crate::done::Ends::WithItsWork,
     );
     let signal = expecting.signal();
 
@@ -1937,6 +1956,7 @@ pub(crate) async fn following_up(
         conversation_id,
         event_id,
         crate::done::Evidence::NothingElse,
+        crate::done::Ends::WithItsWork,
     );
     let signal = expecting.signal();
 
@@ -2322,10 +2342,12 @@ pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &s
     // Nothing for the signal to be checked against beyond the rules every signal
     // has: a fix that finds nothing to commit is still a fix session done. See
     // [`crate::done::Evidence::Nothing`].
-    let expecting =
-        state
-            .signals
-            .expecting(conversation_id, event_id, crate::done::Evidence::Nothing);
+    let expecting = state.signals.expecting(
+        conversation_id,
+        event_id,
+        crate::done::Evidence::Nothing,
+        crate::done::Ends::WithItsWork,
+    );
     let signal = expecting.signal();
 
     let ended = tokio::select! {
@@ -2489,10 +2511,12 @@ async fn proposing(
     // Nothing for the signal to be checked against beyond the rules every signal
     // has: a review that finds nothing, or a batch that asks for nothing, is
     // still one done. See [`crate::done::Evidence::Nothing`].
-    let expecting =
-        state
-            .signals
-            .expecting(conversation_id, event_id, crate::done::Evidence::Nothing);
+    let expecting = state.signals.expecting(
+        conversation_id,
+        event_id,
+        crate::done::Evidence::Nothing,
+        crate::done::Ends::WithItsWork,
+    );
     let signal = expecting.signal();
 
     let ended = tokio::select! {
@@ -2687,6 +2711,7 @@ async fn see_out(
             worktree: worktree.clone(),
             landing: landing.clone(),
         },
+        step.ends(),
     );
     let signal = expecting.signal();
 

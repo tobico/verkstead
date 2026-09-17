@@ -160,8 +160,8 @@ on an answer, is not cut off while it waits.
 
 Verkstead checks the repository when you run it. A refusal exits non-zero and
 says on stderr what is missing — nothing committed since this session began,
-say, or changes left uncommitted — and the session carries on: put that right
-and run `verkstead done` again.
+changes left uncommitted, or a branch with no open pull request — and the
+session carries on: put that right and run `verkstead done` again.
 
 ## When you need the human
 

@@ -1559,6 +1559,38 @@ mod tests {
         );
     }
 
+    /// The sessions a run ends on are refused while their branch has no pull
+    /// request open, so their skills say so, and put the push and the pull
+    /// request before the signal rather than after it. See ADR-0018.
+    #[test]
+    fn the_skills_ended_on_a_pull_request_open_it_before_they_signal() {
+        for name in [
+            "next-task/SKILL.md",
+            "implementing/SKILL.md",
+            "staging/SKILL.md",
+            "submitting/SKILL.md",
+        ] {
+            let skill = flowed(name);
+
+            assert!(
+                skill.contains("no open pull request"),
+                "{name} has to say a signal is refused without a pull request: {skill}"
+            );
+
+            let pushed = skill
+                .find("git push -u origin HEAD")
+                .unwrap_or_else(|| panic!("{name} pushes the branch"));
+            let signalled = skill
+                .rfind("run `verkstead done`")
+                .unwrap_or_else(|| panic!("{name} ends on `verkstead done`"));
+
+            assert!(
+                pushed < signalled,
+                "{name} has to push and open the pull request before the signal: {skill}"
+            );
+        }
+    }
+
     /// No gate anywhere in the implementation: the agent commits on its own,
     /// and feedback consolidates when the branch is reviewed as a whole.
     #[test]

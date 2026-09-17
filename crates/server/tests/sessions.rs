@@ -6402,8 +6402,11 @@ async fn the_pinned_task_list_ticks_along_as_the_runner_works_it() {
 /// The finish step here does what the bundled fork tells a session to do:
 /// commits the removal of `TODO.md`, and pushes and opens a pull request through
 /// its own `gh`. There is no remote to push to in these fixtures, so the stub
-/// says it and stops there — what Verkstead does next is ask the *host's* `gh`,
-/// which is the half under test.
+/// says it and signals — what Verkstead does next is ask the *host's* `gh`,
+/// which is the half under test. Where that `gh` finds no pull request the
+/// signal is refused, and the stub gives up and exits, which is a session that
+/// stopped short of its push: the one the session sent for the pull request is
+/// the net under.
 const A_BACKLOG_OF_ONE: &str = r#"
 case "$1" in
 claude-grilling-5|gpt-5-codex-grilling)
@@ -6435,7 +6438,14 @@ claude-grilling-5|gpt-5-codex-grilling)
     else
         git rm --quiet -r .tasks
         git commit --quiet -m 'chore: finish rate-limiting'
+        rm -f /tmp/verkstead/done-said
         : > /tmp/verkstead/done
+        while [ ! -s /tmp/verkstead/done-said ]; do sleep 0.05; done
+        if grep -q 'no open pull request' /tmp/verkstead/done-said; then
+            rm -f /tmp/verkstead/done
+            printf 'committed, and there was nowhere to push it\n'
+            exit 0
+        fi
         printf 'pushed, and the pull request is open\n'
     fi
     sleep 300
@@ -7546,6 +7556,303 @@ async fn a_quiet_session_sent_for_the_pull_request_is_ended_only_once_it_signals
         .await;
 
     assert_eq!(view.blocked_on, None, "and nothing is waiting on the human",);
+}
+
+/// What a session that ends on a pull request does when its signal is refused
+/// for want of one: keeps what the server said, opens the pull request, and
+/// waits for the relay to signal again.
+///
+/// `opened` is the pull request appearing on GitHub, as in
+/// [`gh_opened_by_hand`]. The signal comes first, so the refusal is the proof
+/// that GitHub was asked, and the pull request arriving afterwards is the proof
+/// that a refusal is something the session can put right in the same turn.
+fn opens_its_pull_request_once_refused(opened: &Path) -> String {
+    format!(
+        r#"
+    rm -f /tmp/verkstead/done-said
+    : > /tmp/verkstead/done
+    while ! grep -q 'no open pull request' /tmp/verkstead/done-said 2>/dev/null; do sleep 0.05; done
+    cp /tmp/verkstead/done-said /tmp/verkstead/refused
+    printf 'https://github.com/tobico/verkstead/pull/41\n' > {opened}
+    printf 'pushed, and the pull request is open\n'
+    sleep 300
+"#,
+        opened = quoted(opened),
+    )
+}
+
+/// What the refusal said, once the stub has kept it.
+async fn refused_for_a_pull_request(fixture: &Grilling) -> String {
+    let refused = handoff_directory(fixture).join("refused");
+    let deadline = Instant::now() + *PATIENCE;
+
+    while !refused.is_file() {
+        assert!(
+            Instant::now() < deadline,
+            "the signal was never refused for want of a pull request: {}",
+            standing(&fixture.view().await),
+        );
+        pause(Duration::from_millis(25)).await;
+    }
+
+    std::fs::read_to_string(&refused).unwrap()
+}
+
+/// The Conversation wrapping up the pull request the session opened itself, with
+/// no session sent for it afterwards.
+async fn wrapped_up_unsent(fixture: &Grilling) {
+    let found = fixture
+        .until(|view| {
+            (view.state == Lifecycle::Wrapping)
+                .then(|| pull_request(view).cloned())
+                .flatten()
+        })
+        .await;
+
+    assert_eq!(found.number, 41, "the pull request the session opened");
+    assert_eq!(
+        sessions_on(fixture, "submitting/SKILL.md").await,
+        0,
+        "and nothing was sent for it: the refusal caught it in the same turn",
+    );
+}
+
+/// A finish step's signal is refused while its branch has no pull request open,
+/// and taken once it has one — so the run wraps up without a second session.
+///
+/// The grilling that writes the backlog and the task step signal against the
+/// same `gh`, which has no pull request to find while they do: the run reaching
+/// its finish is the proof neither of them was asked about one.
+#[tokio::test]
+async fn a_finish_signal_is_refused_until_its_pull_request_is_open() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-by-the-finish");
+
+    let finish = "        rm -f /tmp/verkstead/done-said
+        : > /tmp/verkstead/done
+        while [ ! -s /tmp/verkstead/done-said ]; do sleep 0.05; done
+        if grep -q 'no open pull request' /tmp/verkstead/done-said; then
+            rm -f /tmp/verkstead/done
+            printf 'committed, and there was nowhere to push it\\n'
+            exit 0
+        fi
+        printf 'pushed, and the pull request is open\\n'
+";
+    assert!(A_BACKLOG_OF_ONE.contains(finish), "the finish to replace");
+    let stub = format!(
+        "printf 'prompt was: %s\\n' \"$2\"\n{}",
+        A_BACKLOG_OF_ONE.replace(finish, &opens_its_pull_request_once_refused(&opened)),
+    );
+
+    let fixture = grilling_spilling(spill, &stub, &gh_opened_by_hand(&opened)).await;
+
+    worked_to_empty(&fixture).await;
+
+    let said = refused_for_a_pull_request(&fixture).await;
+
+    assert!(
+        said.contains("has no open pull request")
+            && said.contains("the repository's own review process"),
+        "the refusal says what is missing and how to put it right: {said:?}",
+    );
+
+    wrapped_up_unsent(&fixture).await;
+}
+
+/// An inline run's signal is refused while the branch has no pull request open,
+/// and taken once it has one. The handoff before it signals against the same
+/// `gh` and is taken, a handoff not being asked about a pull request.
+#[tokio::test]
+async fn an_inline_signal_is_refused_until_its_pull_request_is_open() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-by-the-session");
+
+    let stub = format!(
+        r#"
+printf 'prompt was: %s\n' "$2"
+case "$2" in
+*reviewing/SKILL.md*)
+    printf 'I read the whole branch and found nothing worth raising\n'
+    exit 0
+    ;;
+*implementing/SKILL.md*)
+    printf 'a limiter\n' > limiter.md
+    git add limiter.md
+    git commit --quiet -m 'feat: rate limiting'
+{opens}
+    ;;
+*)
+    printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+    : > /tmp/verkstead/done
+    printf 'the handoff is written\n'
+    sleep 300
+    ;;
+esac
+"#,
+        opens = opens_its_pull_request_once_refused(&opened),
+    );
+
+    let fixture = grilling_spilling(spill, &stub, &gh_opened_by_hand(&opened)).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    let said = refused_for_a_pull_request(&fixture).await;
+
+    assert!(said.contains("has no open pull request"), "{said:?}");
+
+    wrapped_up_unsent(&fixture).await;
+}
+
+/// A roadmap's own session is refused while the branch has no pull request open,
+/// and taken once it has one.
+#[tokio::test]
+async fn a_roadmap_signal_is_refused_until_its_pull_request_is_open() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-by-the-session");
+
+    let stub = format!(
+        r#"
+printf 'prompt was: %s\n' "$2"
+case "$2" in
+*grilling/SKILL.md*)
+    printf 'grilling\n'
+    mkdir -p docs/roadmaps/rate-limiting
+    printf '# Rate limiting roadmap\n\n## Stages\n\n- [ ] 01: Count the requests — [brief](01-counter.md)\n' > docs/roadmaps/rate-limiting/ROADMAP.md
+    printf '# 01. Count the requests\n' > docs/roadmaps/rate-limiting/01-counter.md
+    git add -A
+    git commit --quiet -m 'docs: stage the rate-limiting roadmap'
+{opens}
+    ;;
+*reviewing/SKILL.md*)
+    printf 'I read the whole branch and found nothing worth raising\n'
+    exit 0
+    ;;
+*)
+    sleep 300
+    ;;
+esac
+"#,
+        opens = opens_its_pull_request_once_refused(&opened),
+    );
+
+    let fixture = grilling_spilling(spill, &stub, &gh_opened_by_hand(&opened)).await;
+
+    staged(&fixture).await;
+
+    let said = refused_for_a_pull_request(&fixture).await;
+
+    assert!(said.contains("has no open pull request"), "{said:?}");
+
+    wrapped_up_unsent(&fixture).await;
+}
+
+/// The session sent to open the pull request is refused until it has, too: the
+/// finish before it exits without one, and it signals before it opens it.
+#[tokio::test]
+async fn the_session_sent_for_the_pull_request_is_refused_until_it_is_open() {
+    let spill = tempfile::tempdir().unwrap();
+    let opened = spill.path().join("opened-when-asked");
+
+    let stub = format!(
+        r#"
+printf 'prompt was: %s\n' "$2"
+case "$2" in
+*submitting/SKILL.md*)
+{opens}
+    ;;
+*)
+{A_BACKLOG_OF_ONE}
+    ;;
+esac
+"#,
+        opens = opens_its_pull_request_once_refused(&opened),
+    );
+
+    let fixture = grilling_spilling(spill, &stub, &gh_opened_by_hand(&opened)).await;
+
+    worked_to_empty(&fixture).await;
+
+    let view = fixture
+        .until(|view| {
+            (view.state == Lifecycle::Wrapping && pull_request(view).is_some())
+                .then(|| view.clone())
+        })
+        .await;
+
+    let said = refused_for_a_pull_request(&fixture).await;
+
+    assert!(said.contains("has no open pull request"), "{said:?}");
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        1,
+        "one session sent, and it opened the pull request once refused",
+    );
+    assert_eq!(view.blocked_on, None);
+}
+
+/// Where GitHub cannot be asked, a signal that would be checked for its pull
+/// request is taken: the session is not held hostage by somebody else's outage,
+/// and what comes after it asks again and stops saying why.
+#[tokio::test]
+async fn a_signal_is_taken_where_github_cannot_say_whether_there_is_a_pull_request() {
+    let fixture = grilling_asking(
+        r#"
+printf 'prompt was: %s\n' "$2"
+case "$2" in
+*implementing/SKILL.md*)
+    printf 'a limiter\n' > limiter.md
+    git add limiter.md
+    git commit --quiet -m 'feat: rate limiting'
+    rm -f /tmp/verkstead/done-said
+    : > /tmp/verkstead/done
+    while [ ! -s /tmp/verkstead/done-said ]; do sleep 0.05; done
+    cp /tmp/verkstead/done-said /tmp/verkstead/answered
+    printf 'pushed, and the pull request is open\n'
+    sleep 300
+    ;;
+*)
+    printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+    : > /tmp/verkstead/done
+    printf 'the handoff is written\n'
+    sleep 300
+    ;;
+esac
+"#,
+        NOTHING_ASKABLE,
+    )
+    .await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    let stopped = fixture.stopped().await;
+
+    let answered = std::fs::read_to_string(handoff_directory(&fixture).join("answered"))
+        .expect("the session was answered before it was ended");
+
+    assert!(
+        answered.contains("accepted"),
+        "the signal was taken: {answered:?}",
+    );
+    assert!(
+        stopped.html.contains("not logged in"),
+        "and the stop after it is the one GitHub's silence has always given: {:?}",
+        stopped.html,
+    );
+    assert_eq!(
+        sessions_on(&fixture, "submitting/SKILL.md").await,
+        0,
+        "with nothing sent into a `gh` a session could not reach either",
+    );
 }
 
 /// And what happens when the session sent for it opens none either — no `gh`, no

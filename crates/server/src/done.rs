@@ -65,6 +65,7 @@ struct Expected {
     token: u64,
     event_id: i64,
     evidence: Evidence,
+    ends: Ends,
     given: watch::Sender<bool>,
 }
 
@@ -95,6 +96,23 @@ pub(crate) enum Evidence {
     NothingElse,
 }
 
+/// Whether a session is done with its work alone, or only once its branch is on
+/// a pull request as well.
+///
+/// The second is every session a run ends on: a backlog's finish step, an inline
+/// implementation, a roadmap's own session, and the session sent to open the
+/// pull request one of those did not. Each commits its work and then pushes and
+/// opens the pull request, so each can land everything it was sent for and stop
+/// short of the one act that makes the work reviewable. Refused there, that is
+/// caught in the same turn rather than by a second session sent afterwards — see
+/// [`crate::runner`]'s `to_a_pull_request`, which stays as the net under a
+/// session that exits without signalling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Ends {
+    WithItsWork,
+    OnAPullRequest,
+}
+
 /// A driver's hold on its entry, for as long as it is seeing the session out.
 ///
 /// A guard rather than a pair of calls, for the reason [`crate::drivers`]'s
@@ -121,7 +139,8 @@ impl Signals {
     }
 
     /// Write down that the session printing into `event_id` is to be ended on
-    /// its Done signal, once `evidence` bears it out.
+    /// its Done signal, once `evidence` bears it out — and, where it `ends` on
+    /// one, once its branch has a pull request open.
     ///
     /// Replaces whatever the Conversation had written down: one Worktree holds
     /// one session, and the driver seeing it out now is the one that knows what
@@ -131,6 +150,7 @@ impl Signals {
         conversation_id: i64,
         event_id: i64,
         evidence: Evidence,
+        ends: Ends,
     ) -> Expecting {
         let token = self.issued.fetch_add(1, Ordering::Relaxed);
         let (given, receiver) = watch::channel(false);
@@ -141,6 +161,7 @@ impl Signals {
                 token,
                 event_id,
                 evidence,
+                ends,
                 given,
             },
         );
@@ -211,7 +232,9 @@ enum Verdict {
 /// 200 where the work has landed by its kind's own reading, and the session is
 /// ended once it is next idle. 409 otherwise, with the reason in words the agent
 /// can act on in the same turn: what is missing, no session here to end, no
-/// Direction picked yet, or a follow-up the human has not said is over. The session is left exactly as it was.
+/// Direction picked yet, a follow-up the human has not said is over, or a
+/// session a run ends on whose branch has no pull request open. The session is
+/// left exactly as it was.
 pub(crate) async fn signal(
     State(state): State<AppState>,
     Path(conversation_id): Path<i64>,
@@ -247,7 +270,7 @@ async fn verdict(state: &AppState, conversation_id: i64) -> Verdict {
         );
     };
 
-    let Some((token, evidence)) = registered(state, conversation_id, event_id).await else {
+    let Some((token, evidence, ends)) = registered(state, conversation_id, event_id).await else {
         return Verdict::Refused(unexpected(state, conversation_id).await);
     };
 
@@ -272,6 +295,14 @@ async fn verdict(state: &AppState, conversation_id: i64) -> Verdict {
 
     if let Some(uncommitted) = uncommitted(state, conversation_id).await {
         return Verdict::Refused(uncommitted);
+    }
+
+    // After the commit rather than before it, which is the order the work goes
+    // in: a pull request is opened on what was committed and pushed.
+    if ends == Ends::OnAPullRequest
+        && let Some(unopened) = unopened(state, conversation_id).await
+    {
+        return Verdict::Refused(unopened);
     }
 
     // The same entry the check was made for, rather than whichever is there now:
@@ -321,7 +352,7 @@ async fn registered(
     state: &AppState,
     conversation_id: i64,
     event_id: i64,
-) -> Option<(u64, Evidence)> {
+) -> Option<(u64, Evidence, Ends)> {
     let deadline = Instant::now() + REGISTERING;
 
     loop {
@@ -330,7 +361,7 @@ async fn registered(
             .register()
             .get(&conversation_id)
             .filter(|expected| expected.event_id == event_id)
-            .map(|expected| (expected.token, expected.evidence.clone()));
+            .map(|expected| (expected.token, expected.evidence.clone(), expected.ends));
 
         // Given up on once the session is no longer the one running, too: a
         // session that has ended is not one anything will start waiting on.
@@ -480,6 +511,48 @@ fn listed(paths: &[String]) -> String {
     said
 }
 
+/// Why a signal is refused over a branch with no pull request open, or `None`
+/// where it has one — or where GitHub could not be asked.
+///
+/// Asked the way the runner asks once one of these sessions is over — see
+/// [`crate::wrapping::asked`] — in the Conversation's repository and under the
+/// name the branch was pushed as, so that in a stack it is this branch's own
+/// pull request that is asked about.
+///
+/// **GitHub out of reach reads as accepted.** No `gh`, no account, no remote, a
+/// rate limit or an answer nobody can read: none of them is GitHub saying there
+/// is no pull request, and a session is not to be held hostage by somebody
+/// else's outage. What comes after the session asks again either way.
+async fn unopened(state: &AppState, conversation_id: i64) -> Option<String> {
+    let Some((_, branch, found)) = crate::wrapping::asked(state, conversation_id).await else {
+        tracing::warn!(
+            conversation_id,
+            "whether the branch has a pull request could not be checked, so the Done signal is \
+             taken without it"
+        );
+        return None;
+    };
+
+    match found {
+        Ok(_) => None,
+        Err(crate::github::Trouble::NoPullRequest) => Some(format!(
+            "this session is not done yet: the branch `{branch}` has no open pull request. Push \
+             it and open one the way the repository's own review process says, then run \
+             `verkstead done` again"
+        )),
+        Err(trouble) => {
+            tracing::warn!(
+                conversation_id,
+                branch,
+                why = trouble.why(),
+                "whether the branch has a pull request could not be checked, so the Done signal \
+                 is taken without it"
+            );
+            None
+        }
+    }
+}
+
 /// Lock the Sets the session that signalled was idling on, now that nothing will
 /// read their Answers.
 ///
@@ -555,6 +628,7 @@ mod tests {
                 worktree: PathBuf::from("/nowhere"),
                 landing: Landing::Ticked(1),
             },
+            Ends::WithItsWork,
         )
     }
 

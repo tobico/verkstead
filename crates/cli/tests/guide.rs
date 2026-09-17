@@ -865,7 +865,8 @@ fn the_guide_says_how_a_session_ends() {
         "again",
         "uncommitted",
         "closed unanswered",
-        "--deferred",
+        "Open the pull request before you signal",
+        "cannot reach GitHub",
     ] {
         assert!(
             ending.contains(phrase),

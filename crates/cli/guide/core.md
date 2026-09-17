@@ -432,6 +432,13 @@ while the Worktree, or a companion repo you may write in, has uncommitted
 changes — modified, staged, or untracked and not ignored. The refusal names the
 files.
 
+**Open the pull request before you signal, where the session ends on one.** A
+backlog's finish step, an inline implementation, a roadmap's own session and a
+session sent to open a pull request are refused while their branch has no open
+pull request. Push it and open one the way the repository's own review process
+says, then signal. Where Verkstead cannot reach GitHub to check, the signal is
+taken.
+
 **Do not signal with a question you still want answered.** Once the signal is
 accepted, nothing will read the Answer, so a Set of yours that is still waiting
 on one is closed unanswered. A Set asked with `--deferred` stays open: its

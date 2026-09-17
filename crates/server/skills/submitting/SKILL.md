@@ -28,8 +28,9 @@ Read the log and the diff against the branch this one came off, and the
   carries no summary body.
 
 If the branch genuinely holds nothing — no commits of its own since it came off
-its base — then there is nothing to open a pull request for. Say so plainly and
-run `verkstead done`, rather than pushing an empty branch.
+its base — then there is nothing to open a pull request for. Do not push an empty
+branch: put that to the human as a Set with `verkstead ask`, saying so plainly.
+See *When you need the human* below.
 
 ## 2. Get the branch reviewed, the way this repository does it
 
@@ -72,25 +73,29 @@ it up.
 
 **And say what happened, either way.** If you cannot open one — `gh` missing,
 not logged in, the push refused — say what stopped you, and then run `verkstead
-done`. What you said is what the human reads on the Timeline when Verkstead
-finds no pull request a second time.
+done`. Where Verkstead cannot reach GitHub either, the signal is taken, and what
+you said is what the human reads on the Timeline when Verkstead finds no pull
+request a second time. Where it can, the signal is refused, and what stopped you
+goes to the human as a Set instead — see *When you need the human* below.
 
 ## Saying you are done
 
-The last thing this session does, once the pull request is open or you have said
-why it could not be, is run `verkstead done`. That is what ends the session, and
-nothing else does: not the push, and not going quiet. So a session that waits on
-a push, or on an answer, is not cut off while it waits.
+The last thing this session does, once the pull request is open, is run
+`verkstead done`. That is what ends the session, and nothing else does: not the
+push, and not going quiet. So a session that waits on a push, or on an answer,
+is not cut off while it waits.
 
-Verkstead checks the repository when you run it. A refusal exits non-zero and
-says on stderr what is missing — changes left uncommitted, say — and the session
-carries on: put that right and run `verkstead done` again.
+Verkstead checks the repository and GitHub when you run it. A refusal exits
+non-zero and says on stderr what is missing — changes left uncommitted, or a
+branch with no open pull request — and the session carries on: put that right
+and run `verkstead done` again.
 
 ## When you need the human
 
-Only when the pull request genuinely cannot be opened without them: a decision
-about the branch that would be expensive to unpick. Everything about *how* to
-open one is in the repository's own file.
+Only when the pull request genuinely cannot be opened without them: a branch
+with nothing on it to open one for, a push GitHub refuses, or a decision about
+the branch that would be expensive to unpick. Everything about *how* to open one
+is in the repository's own file.
 
 - **Read `verkstead guide` before the first ask**, and put the Question Set
   through `verkstead ask`. It ships inside the binary, so nothing else has to be

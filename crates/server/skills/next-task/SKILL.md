@@ -212,6 +212,10 @@ Verkstead checks the repository when you run it. A refusal exits non-zero and
 says on stderr what is missing — a box not ticked and committed, say — and the
 session carries on: put that right and run `verkstead done` again.
 
+The finish step is checked for its pull request too: its signal is refused while
+the branch has no open pull request. So push and open it first, the way the
+repository's own review process says, and signal after.
+
 ## When you need the human
 
 Only when the work genuinely cannot go on without them: something the task file,

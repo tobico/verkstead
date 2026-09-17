@@ -229,8 +229,8 @@ The last thing this session does, once the roadmap is committed and the branch
 is on a pull request, is run `verkstead done`. That is what ends the session,
 and nothing else does: not the commit, and not going quiet. Verkstead checks the
 repository when you run it. A refusal exits non-zero and says on stderr what is
-missing — the roadmap not committed, say — and the session carries on: put that
-right and run `verkstead done` again.
+missing — the roadmap not committed, or a branch with no open pull request — and
+the session carries on: put that right and run `verkstead done` again.
 
 ## How the questions reach them
 
