@@ -1168,9 +1168,14 @@ _Avoid_: shell (what runs in it), console, Screen (a session's), tty
 **Idle**:
 A running session that has stopped — not gone, but sitting there with its turn
 over and nothing to do. One judgement, read by everything that acts on one: the
-mark on the sidebar card and the Timeline row, the grace every ender waits out
-before it ends a session, and the **Rescue** — both the silence it waits on and
-the proof that a line it typed arrived.
+mark on the sidebar card and the Timeline row, the moment a session that has
+given its **Done signal** is ended, and the **Rescue** — both the silence it
+waits on and the proof that a line it typed arrived.
+
+**A session with a Declared wait standing is not Idle**, whatever it prints and
+whatever its screen says: it has said it is waiting on work of its own, and it
+reads as at work to everything above until the wait is over. See **Declared
+wait**.
 
 **How it is judged is the backend's.** Claude Code draws inline and repaints
 while it works, so three seconds with nothing printed is a session that has
@@ -1190,12 +1195,55 @@ otherwise be reaped out from under its own work.
 
 **With a long silence behind it as the long-stop.** A signature that has drifted
 reads as a session that never stops, and nothing else here would catch one: the
-Rescue waits on idle, every ender waits on idle, and no session carries a cap on
-its life. So a session judged on its screen that has printed nothing at all for
-five minutes is idle whatever its screen says, and what the human gets is the
-ordinary would-not-ask stop — one slow round rather than never.
+Rescue waits on idle, a signalled session is ended on idle, and no session
+carries a cap on its life. So a session judged on its screen that has printed
+nothing at all for five minutes is idle whatever its screen says, and what the
+human gets is the ordinary Rescue — one slow round rather than never.
 _Avoid_: quiet (one backend's answer, not the question), silent, asleep, stalled
 (that is a Conversation nothing is driving)
+
+**Done signal**:
+A session saying its work is finished, by running `verkstead done` — the one
+thing that ends a session on purpose, for every kind of session on every
+backend. Nothing on the branch ends one and neither does quiet: a session that
+commits and then waits on its tests, or lands an artifact and then asks a
+question, is one still at work.
+
+A bare verb, because Verkstead knows which session is running in the Worktree
+and what it was sent for. **The repository is read at that moment and only
+then**, and what it is read for is the kind's own — a **Step**'s box ticked and
+committed, the picked **Direction**'s artifact, a new commit for an inline run
+or an instruction, the human's Nothing-else mark for a follow-up. A fix session
+alone is asked for nothing, GitHub's check being what judges a fix.
+
+**A signal the evidence does not bear out is refused**: the command exits
+non-zero saying what is missing, the session stays alive, and the agent puts it
+right in the same turn. Refused too over uncommitted changes, in the Worktree or
+in any companion repo the Conversation may write in, naming the files — and, for
+a session meant to end on a pull request, while the branch has none open, GitHub
+out of reach reading as accepted.
+
+A Blocking Ask of the session's own still open does not refuse it: the Set is
+locked unanswered, nothing being left to read the Answer. An accepted signal
+ends the session once it is next **Idle**, so its closing words reach the
+Transcript. A session that exits by itself without signalling is read off the
+repository once, as it always was. See ADR-0018.
+_Avoid_: exit, finish (that is a backlog's last Step), completion, proceed signal
+
+**Declared wait**:
+A session saying it is about to end its turn with work of its own still running
+in the background — a build, a test run — by running `verkstead waiting 45m`.
+The agent names the length: at most an hour, fifteen minutes where it names
+none, and a longer one is refused naming the maximum. It can always be declared
+again, so the maximum bounds only how long a wait whose background task died
+sits before the **Rescue** asks.
+
+**A waiting session is active, not Idle** — see **Idle**, which is the one
+judgement this changes — so it shows the spinner and is never spoken to. Over
+when its time runs out, when the session is next seen working after it went
+idle, or on the **Done signal**. A statement rather than a command: it returns
+at once, where `verkstead ask` blocks.
+_Avoid_: wait (reads as a command that blocks), pause, hold, busy, sleep
 
 **Agent Profile**:
 A coding-agent account Verkstead can run a session under: an agent type, the
@@ -1386,15 +1434,18 @@ How a Conversation's work gets built — **inline**, **task list** or **roadmap*
 three and never a mixture: the choice is which pipeline runs the work, and a
 Conversation that had picked two would be two pieces of work.
 
-The pick informs the agent; artifacts move the machine. A pick is delivered to
-the grilling session with the rest of the Response, and what proceeds from it
-is that session producing the picked Direction's artifact — the handoff for
-inline, the committed backlog for a task list, the committed roadmap for a
-staged one. Verkstead moves on the artifact landing and the session going
-quiet, never on the answer itself, so between pick and artifact the session may
-come back with another Set instead, and a later Proposal's pick supersedes:
-the latest pick is the one watched for. The answered Set is the record of the
-choice — no Event of its own, and no state to sit in.
+The pick informs the agent; the agent's signal moves the machine. A pick is
+delivered to the grilling session with the rest of the Response, and what
+proceeds from it is that session producing the picked Direction's artifact — the
+handoff for inline, the committed backlog for a task list, the committed roadmap
+for a staged one — and then giving its **Done signal**, which is checked against
+that artifact. Verkstead moves on the signal, never on the answer itself and
+never on the artifact alone, so between pick and signal the session may come
+back with another Set instead, whether or not the artifact is written, and a
+later Proposal's pick supersedes: the latest pick is the one the signal is
+checked against. The answered Set is the record of the choice — no Event of its
+own, and no state to sit in. See ADR-0008, and ADR-0018, which revises its
+second half.
 _Avoid_: mode, strategy, plan, execution path
 
 **Proposal**:
@@ -1429,8 +1480,8 @@ knows is written down or it is gone. A task list or roadmap needs none: the
 committed backlog or roadmap is the plan, written by the context that settled
 it. Written after the choice rather than before it, so a refused Proposal
 costs no rewrite and the human's words beside the pick shape what is written.
-The handoff is the inline tail's artifact: its presence, plus quiet, is what
-ends the grilling session.
+The handoff is the inline tail's artifact: what the grilling session's **Done
+signal** is checked against after an inline pick.
 
 Verkstead's document rather than the project's, so it is written outside the
 Worktree — in a directory of the Conversation's own under the Data Directory,
@@ -1461,10 +1512,11 @@ step's `.tasks/` taken away. A session reports through the repository, being an
 ordinary interactive one, and a commit is the one report it cannot half make — a
 box ticked but not committed is a session still mid-Step.
 
-Its session is ended once the Step is done **and** the session has gone quiet for
-a grace period, never on done alone: work does not always stop at the commit, and
-output arriving puts the whole grace back on the clock. A session that keeps
-talking is never ended. One Step per session and one session per Step — a fresh
+Its session is ended once it gives its **Done signal**, and never on done alone:
+work does not always stop at the commit — a push, a test run waited on in the
+background — and only the session knows when it has. Done is what the signal is
+checked against, so one given over a Step that is not done is refused and says
+what is missing. One Step per session and one session per Step — a fresh
 context each time, which is what the backlog was broken into slices for.
 
 **A Step can be done and still be short**, because what a run's last Step is for
@@ -1820,12 +1872,12 @@ to them as one Set. Nothing about the state makes its Sets special: the agent
 writes an ordinary Preface, ordinary Questions and an ordinary Postscript, and
 it never asks whether there is anything else.
 
-**What ends it is the human's mark and the session's silence together**: the
-newest round they answered carries **Nothing else**, nothing is left open on
-the Conversation, and the session has printed nothing for the grace. The mark
-alone would end a follow-up in the middle of the work the last round asked for;
-quiet alone would reap a session idling on a Blocking Ask, which is one doing
-exactly what it should. Then the session is ended and the Conversation is
+**What ends it is the human's mark and the session's Done signal together**: the
+newest round they answered carries **Nothing else**, and the session, having
+seen it, says it is done. The mark alone would end a follow-up in the middle of
+the work the last round asked for, and a signal without the mark is refused —
+whether there is anything else is the human's to say. Then the session is ended
+and the Conversation is
 Wrapping again over the pull request it was opened about, with the checks put
 back to waiting where the follow-up pushed anything — *back to Done* being that
 wrap-up's own settling rule rather than anything a follow-up decides.
@@ -1999,37 +2051,38 @@ the only place, and the **Git** section of the settings is where it is picked.
 _Avoid_: merge strategy, conflict policy, force push setting
 
 **Rescue**:
-The canned line Verkstead types into a session that has gone quiet without
-asking anything or finishing what it was sent for. A session reaches the human
-in exactly one way — the Question Set it sends — so one sitting there with its
-turn over, nothing open on the Conversation and nothing to show for itself
-leaves a Conversation nobody can move. So it is spoken to, through the terminal
-a watcher's keystrokes go through, and told the one thing it cannot see from
-inside: that nothing it prints reaches anybody, and that a Set is the whole of
-how the human is spoken to.
+The canned line Verkstead types into a session that has gone **Idle** without
+asking anything, saying it is done or declaring a wait. A session reaches the
+human in exactly one way — the Question Set it sends — and ends in exactly one
+way, the **Done signal**, so one sitting there with its turn over and neither
+made leaves a Conversation nobody can move. So it is spoken to, through the
+terminal a watcher's keystrokes go through, and offered the three moves that
+would end the silence: carry on with its next step, run `verkstead done` if the
+work is finished, or put where it has got to to the human as a Set — and told to
+declare a wait where work of its own is still running in the background.
 
 **Three things at once**, and none of them is enough alone: **Idle** for the
-grace, nothing open on the Conversation, and nothing landed. A session still at
-work is at work — which is its backend's judgement rather than one rule for all
-of them — one sitting on a Blocking Ask is waiting on the human, for as long as
-they take, and one that has landed what it was sent for is already being ended by
-the driver beside this. An answer arriving, or a line typed in, starts the grace
-again, and the session being seen at work after it is what says the line landed.
+grace, nothing open on the Conversation, and no **Declared wait** standing. A
+session still at work is at work — which is its backend's judgement rather than
+one rule for all of them — one sitting on a Blocking Ask is waiting on the human,
+for as long as they take, and one that has declared a wait is not Idle at all.
+An answer arriving, or a line typed in, starts the grace again, and the session
+being seen at work after it is what says the line landed. What the session has
+landed is no part of it: work landed and not signalled is exactly a session to
+speak to, the signal being the one thing that ends it.
 
-**Every session Verkstead launches**, one loop with the state's own
-done-indicator as its parameter: a grilling's artifact, a backlog Step's task
-file, an inline implementation's, an instruction's or a fix's commit, a
-follow-up's Nothing-else mark. What differs from one state to the next is only
-what *finished* looks like.
+**Every session Verkstead launches**, one loop and one condition, whatever the
+session was sent for.
 
-**Twice at most**, the second silence being evidence rather than bad luck. A
-session still saying nothing after the second is ended where it stands and the
-Conversation **Stopped**, with a Notice saying it would not ask and **Resume**
-for the human to press — except a fix session, which is ended and its check
-looked at again, the wrap-up's two goes at a check being the stop it already
-has. Nothing goes on the Timeline for the rescue itself: it is Verkstead
-prodding an agent rather than anything the work has got to, and the line is in
-the session's own Capture.
+**It escalates, and never stops a session.** A Rescue the session answers puts
+the count back to nothing. After three in a row with no answer Verkstead tells
+the human instead — a Notice on the Timeline and a push to their devices, which
+is what a stop sends, without the stop. The session stays alive, the card reads
+*blocked on you*, and the Rescue holds off until the session is seen working
+again; what happens next is the human's, typing into the Screen, steering or
+pressing **Stop**. Nothing goes on the Timeline for a rescue itself: it is
+Verkstead prodding an agent rather than anything the work has got to, and the
+line is in the session's own Capture. See ADR-0018.
 _Avoid_: Nudge (that is the viewer's signal), retry, reminder, ping, poke
 
 **Stalled**:
@@ -2158,7 +2211,7 @@ ordinary ask is is the backend's fact rather than the Set's: the CLI asks the
 same way everywhere, and the server reads the agent type of the session that
 asked. What the human sees is a deferred-shaped ask, because nothing is holding
 a connection open on it; what differs is underneath, where everything that
-decides a session's fate — the quiet grace, the Rescue, a wrap-up's proposals,
+decides a session's fate — the Rescue, a wrap-up's proposals,
 the locking of what a gone session left open — counts it as a question somebody
 is standing behind.
 
