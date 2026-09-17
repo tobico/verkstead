@@ -2485,12 +2485,15 @@ const GITHUB: &str = "https://github.com";
 /// delete the root a session is running out of. See [`sharing`].
 ///
 /// One is emptied as each of that Conversation's sessions starts rather than
-/// removed when the Conversation ends. What a session left in it is nothing
-/// anything reads — the account is linked in rather than copied, so what is
-/// there is the session's own leavings — and a Conversation's id is never handed
-/// out twice,
-/// so the only thing a directory left behind can ever be given to is the
-/// Conversation it already belonged to.
+/// removed when the Conversation ends. What a session left in it is read where
+/// its Profile shares no memory — the root is then the session's own store, and
+/// its transcript is followed out of it (see [`crate::transcript`]), which is
+/// why it stands until the next session of that Conversation starts. Where the
+/// Profile shares its memory there is nothing in it to read: the account is
+/// joined in rather than copied, so what is left is the session's own leavings.
+/// And a Conversation's id is never handed out twice, so the only thing a
+/// directory left behind can ever be given to is the Conversation it already
+/// belonged to.
 #[derive(Debug, Clone)]
 pub struct Homes {
     /// The home of whoever is running the server, which is what `~` means

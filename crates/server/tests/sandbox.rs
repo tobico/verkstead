@@ -2625,13 +2625,8 @@ async fn a_shared_root_is_given_the_directory_a_switched_off_memory_adds_to_it()
 
     let home = fixture.windows_profile();
     let homes = fixture.homes();
-    let session = made(&fixture.sandbox_in(
-        &homes,
-        &remembering,
-        LISTENING,
-        &BuildCache::none(),
-        vec![],
-    ));
+    let session =
+        made(&fixture.sandbox_in(&homes, &remembering, LISTENING, &BuildCache::none(), vec![]));
 
     std::fs::write(home.join(".config/opencode/written-by-opencode"), "kept\n").unwrap();
     assert!(
@@ -2639,13 +2634,8 @@ async fn a_shared_root_is_given_the_directory_a_switched_off_memory_adds_to_it()
         "a root sharing its memory has the account's data directory and none of its own"
     );
 
-    let terminal = made(&fixture.sandbox_in(
-        &homes,
-        &forgetting,
-        LISTENING,
-        &BuildCache::none(),
-        vec![],
-    ));
+    let terminal =
+        made(&fixture.sandbox_in(&homes, &forgetting, LISTENING, &BuildCache::none(), vec![]));
 
     assert!(
         home.join(".local/share/opencode").is_dir(),

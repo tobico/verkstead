@@ -697,7 +697,10 @@ mod tests {
             kept.join("written-by-the-session").is_file(),
             "while what a running launch has in one that is kept is left alone"
         );
-        assert!(missing.is_dir(), "and a directory that is not there is made");
+        assert!(
+            missing.is_dir(),
+            "and a directory that is not there is made"
+        );
     }
 
     /// Run what `surface` describes and hand back what it printed.
