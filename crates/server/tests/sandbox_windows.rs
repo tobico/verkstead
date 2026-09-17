@@ -939,6 +939,27 @@ fn said<'a>(classified: &'a BTreeMap<String, String>, name: &str) -> &'a str {
         .unwrap_or_else(|| panic!("the probe said nothing about {name}. It said: {classified:?}"))
 }
 
+/// The probe's line reporting the text of the file at `quoted` as `name`, on
+/// one line so the report stays one line per thing said.
+///
+/// **The text rather than what PowerShell makes of it.** `ConvertFrom-Json`
+/// fails inside the boundary on Windows PowerShell 5.1, refused a path it has
+/// no business with, so the file is read as the session reads it and the JSON
+/// is parsed out here — see [`read_as_json`].
+fn reading(name: &str, quoted: &str) -> String {
+    format!(
+        "Report '{name}' ([System.IO.File]::ReadAllText('{quoted}') -replace '\\r?\\n', ' ')\r\n"
+    )
+}
+
+/// And what the probe reported as `name`, as the JSON it is.
+fn read_as_json(classified: &BTreeMap<String, String>, name: &str) -> serde_json::Value {
+    let text = said(classified, name);
+
+    serde_json::from_str(text)
+        .unwrap_or_else(|error| panic!("{name} does not read as JSON ({error}): {text}"))
+}
+
 /// Every access kind a description can name, classified by attempting it — and
 /// each of them what the description said it would be.
 ///
@@ -1411,22 +1432,14 @@ async fn a_fresh_account_is_given_settings_that_skip_the_bypass_consent() {
         "the fixture's account has no settings of its own"
     );
 
-    let classified = fixture.probe_running(&format!(
-        "{CLASSIFYING}\r\n\
-         $written = [System.IO.File]::ReadAllText('{quoted}') | ConvertFrom-Json\r\n\
-         Report 'bypass' $written.skipDangerousModePermissionPrompt\r\n\
-         Report 'keys' (($written.PSObject.Properties | ForEach-Object {{ $_.Name }}) -join ',')\r\n"
-    ));
+    let classified =
+        fixture.probe_running(&format!("{CLASSIFYING}\r\n{}", reading("written", &quoted)));
 
     assert_eq!(
-        said(&classified, "bypass"),
-        "True",
-        "a session reads the bypass key in the settings written into its root"
-    );
-    assert_eq!(
-        said(&classified, "keys"),
-        "skipDangerousModePermissionPrompt",
-        "and nothing else, the account having nothing to carry over"
+        read_as_json(&classified, "written"),
+        serde_json::json!({ "skipDangerousModePermissionPrompt": true }),
+        "a session reads the bypass key in the settings written into its root, \
+         and nothing else, the account having nothing to carry over"
     );
     assert!(
         !fixture.claude_dir().join("settings.json").exists(),
@@ -1450,19 +1463,20 @@ async fn an_accounts_key_helper_and_environment_come_over_and_its_hooks_do_not()
     let quoted = settings.display().to_string().replace('\'', "''");
 
     let classified = fixture.probe_running(&format!(
-        "{CLASSIFYING}\r\n\
-         $written = [System.IO.File]::ReadAllText('{quoted}') | ConvertFrom-Json\r\n\
-         Report 'helper' $written.apiKeyHelper\r\n\
-         Report 'base-url' $written.env.ANTHROPIC_BASE_URL\r\n\
-         Report 'hooks' ($null -eq $written.hooks)\r\n\
-         [System.IO.File]::WriteAllText('{quoted}', '{{\"hooks\": {{}}}}')\r\n"
+        "{CLASSIFYING}\r\n{}\
+         [System.IO.File]::WriteAllText('{quoted}', '{{\"hooks\": {{}}}}')\r\n",
+        reading("written", &quoted)
     ));
 
-    assert_eq!(said(&classified, "helper"), r"C:\print-key.cmd");
-    assert_eq!(said(&classified, "base-url"), "https://proxy.example");
+    let written = read_as_json(&classified, "written");
+
+    assert_eq!(written["apiKeyHelper"], r"C:\print-key.cmd");
     assert_eq!(
-        said(&classified, "hooks"),
-        "True",
+        written["env"]["ANTHROPIC_BASE_URL"],
+        "https://proxy.example"
+    );
+    assert!(
+        written.get("hooks").is_none(),
         "the account's hooks are how the human works, and none of a session's"
     );
     assert_eq!(
@@ -1490,18 +1504,21 @@ async fn a_sessions_config_is_a_trusted_copy_merged_into_the_account_as_it_ends(
     let quoted = config.display().to_string().replace('\'', "''");
 
     let classified = fixture.probe_running(&format!(
-        "{CLASSIFYING}\r\n\
-         $copy = [System.IO.File]::ReadAllText('{quoted}') | ConvertFrom-Json\r\n\
-         Report 'trusted' (($copy.projects.PSObject.Properties | Where-Object {{ $_.Value.hasTrustDialogAccepted }} | ForEach-Object {{ $_.Name }}) -join ',')\r\n\
-         Report 'servers' ($null -eq $copy.mcpServers)\r\n\
+        "{CLASSIFYING}\r\n{}\
          [System.IO.File]::WriteAllText('{quoted}.tmp', '{{\"numStartups\": 2, \"theme\": \"dark\"}}')\r\n\
          [System.IO.File]::Delete('{quoted}')\r\n\
-         [System.IO.File]::Move('{quoted}.tmp', '{quoted}')\r\n"
+         [System.IO.File]::Move('{quoted}.tmp', '{quoted}')\r\n",
+        reading("copy", &quoted)
     ));
 
-    let mut trusted: Vec<String> = said(&classified, "trusted")
-        .split(',')
-        .map(str::to_owned)
+    let copy = read_as_json(&classified, "copy");
+
+    let mut trusted: Vec<String> = copy["projects"]
+        .as_object()
+        .expect("the copy has a `projects` object")
+        .iter()
+        .filter(|(_, entry)| entry["hasTrustDialogAccepted"] == true)
+        .map(|(path, _)| path.clone())
         .collect();
     trusted.sort();
 
@@ -1522,9 +1539,8 @@ async fn a_sessions_config_is_a_trusted_copy_merged_into_the_account_as_it_ends(
         trusted, expected,
         "the Repo and the Worktree read as trusted inside, keyed as Claude keys them"
     );
-    assert_eq!(
-        said(&classified, "servers"),
-        "True",
+    assert!(
+        copy.get("mcpServers").is_none(),
         "and the human's MCP servers are not in the copy"
     );
 

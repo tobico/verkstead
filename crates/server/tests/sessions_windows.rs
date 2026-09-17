@@ -1633,7 +1633,7 @@ async fn force_stop_ends_a_session_where_it_stands() {
 /// inside one directory under the Data Directory; the two halves they name are
 /// really there; what a session throws away lands in it; and the account the
 /// Profile named is really there: its login hard-linked into the `.claude`
-/// root built for Claude, and the file half of the pair hard-linked beside it.
+/// root built for Claude, and a copy of the file half of the pair beside it.
 ///
 /// **All five are the value Verkstead composed**, which is one of the things
 /// that got simpler when the boundary stopped being an AppContainer: a session
@@ -1724,10 +1724,25 @@ async fn a_session_runs_in_a_profile_of_the_conversations_own() {
         "and the login inside is the one the Profile named, hard-linked into \
          the root the rendering builds",
     );
+    let config: serde_json::Value = serde_json::from_str(&fixture.written("config").await)
+        .expect("the copy of the file half reads as JSON");
+
     assert_eq!(
-        fixture.written("config").await,
-        "{}\n",
-        "and so is the file half of it, joined in by a hard link",
+        config
+            .as_object()
+            .map(|keys| keys.keys().map(String::as_str).collect::<Vec<_>>()),
+        Some(vec!["projects"]),
+        "and the file half of it is a copy of the account's own, which is empty, \
+         with nothing added but the trust seeded into it: {config}",
+    );
+    assert!(
+        config["projects"]
+            .as_object()
+            .is_some_and(|entries| !entries.is_empty()
+                && entries
+                    .values()
+                    .all(|entry| entry["hasTrustDialogAccepted"] == true)),
+        "the Repo and the Worktree trusted in it: {config}",
     );
 
     // Read from the host rather than from inside, which is the other half of
