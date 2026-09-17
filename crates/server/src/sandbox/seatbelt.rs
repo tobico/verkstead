@@ -191,6 +191,10 @@ fn policy(surface: &Surface) -> String {
             // is for.
             Access::Empty(path) => policy.push_str(&reaching(path, Reach::ReadWrite, &refused)),
 
+            // And one built on the host, which grants nothing by being said:
+            // what reaches it is what the description says after it.
+            Access::Built(_) => {}
+
             // And a path a session finds somewhere else, which by now is a link
             // to the path it really is. A policy is matched against what a name
             // resolves to, so what is said about it is said about the host's
@@ -259,7 +263,7 @@ fn policy(surface: &Surface) -> String {
 fn realise(surface: &Surface) {
     for access in surface.reaches() {
         let made = match access {
-            Access::Empty(path) => super::emptied(path),
+            Access::Empty(path) | Access::Built(path) => super::emptied(path),
             Access::Elsewhere { host, inside, .. } => linked(host, inside),
             _ => Ok(()),
         };
@@ -511,6 +515,76 @@ mod tests {
             )),
             "and so is the account it is logged in as, at the path it really \
              is — which is what a policy matches against:\n{policy}",
+        );
+    }
+
+    /// A Claude session's root, built the way the description says one: a
+    /// directory of Verkstead's own under HOME, with the login and a
+    /// `projects/` entry linked into it and the account's rest nowhere — and a
+    /// policy granting what is linked rather than the account whole.
+    #[test]
+    fn a_root_is_really_built_with_only_what_is_joined_into_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let account = dir.path().join("account/.claude");
+        let entry = account.join("projects/-Users-you-src-verkstead");
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(&entry).unwrap();
+        std::fs::create_dir_all(account.join("plugins")).unwrap();
+        std::fs::write(account.join(".credentials.json"), "{}\n").unwrap();
+
+        // What the session before this one left in its root.
+        std::fs::create_dir_all(home.join(".claude/left-behind")).unwrap();
+
+        let root = home.join(".claude");
+
+        let mut surface = Surface::starting_in(dir.path().to_owned());
+        surface
+            .made(Access::Empty(home.clone()))
+            .made(Access::Built(root.clone()))
+            .elsewhere(&root, &root, Reach::ReadWrite)
+            .elsewhere(
+                account.join(".credentials.json"),
+                root.join(".credentials.json"),
+                Reach::ReadWrite,
+            )
+            .elsewhere(
+                &entry,
+                root.join("projects/-Users-you-src-verkstead"),
+                Reach::ReadWrite,
+            );
+
+        realise(&surface);
+
+        let mut held: Vec<String> = std::fs::read_dir(&root)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        held.sort();
+
+        assert_eq!(held, [".credentials.json", "projects"]);
+        assert_eq!(
+            std::fs::read_link(root.join(".credentials.json")).unwrap(),
+            account.join(".credentials.json")
+        );
+        assert_eq!(
+            std::fs::read_link(root.join("projects/-Users-you-src-verkstead")).unwrap(),
+            entry
+        );
+
+        let policy = policy(&surface);
+
+        for granted in [account.join(".credentials.json"), entry.clone()] {
+            assert!(
+                policy.contains(&format!(
+                    "(allow file-write* (subpath {}))",
+                    quoted(&real(&granted))
+                )),
+                "what is joined into the root is the session's to write:\n{policy}",
+            );
+        }
+        assert!(
+            !policy.contains(&format!("(subpath {})", quoted(&real(&account)))),
+            "and the account itself is granted nowhere:\n{policy}",
         );
     }
 

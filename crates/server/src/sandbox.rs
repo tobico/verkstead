@@ -36,10 +36,11 @@
 //! What is inside:
 //!
 //! - **read-write** — the Conversation's worktree, the Repo's common `.git`
-//!   directory, and the Profile's pair at `~/.claude` and `~/.claude.json`
+//!   directory, and what the Profile's account is joined in as — for Claude a
+//!   root of Verkstead's own at `~/.claude`, see [`root`], beside `~/.claude.json`
 //! - **read-only** — `/nix` and the system paths, the bundled skills in a
 //!   directory of Verkstead's own — see [`own_directory`] — the files the human
-//!   attached to the Conversation beside them, nothing at all where the
+//!   attached to the Conversation beside them, on Windows nothing at all where the
 //!   account's own skills would be found, and the executable serving all this,
 //!   as `verkstead`
 //! - **tmpfs** — `/tmp`, and everything else in HOME simply absent
@@ -118,12 +119,16 @@ pub(crate) mod granting;
 pub mod account;
 // And the three ends of what a renderer is: the description going in, the
 // process coming out, and what is left to see to once that process has gone.
-// The last of those is nothing on the two platforms whose links follow their
+// The last of those is little on the two platforms whose links follow their
 // own target, which is why it is a value here rather than a `cfg` — see
 // [`closing`].
 mod closing;
 mod rendering;
 mod surface;
+
+// And what a Claude session is given of its account on the two Unix platforms:
+// a `.claude` of Verkstead's own, built out of an allowlist — see [`root`].
+mod root;
 
 // And what a rendering cannot say on the platform it is for: how long what it
 // started lives. Not a `cfg` at all — the platform is a value here, and both
@@ -168,6 +173,7 @@ pub(crate) use surface::{Access, Reach, Surface};
 // [`crate::terminal`] this machine has — and beside it what is left to see to
 // once that session has gone, which is held by whoever is holding the session.
 pub use closing::Closing;
+use closing::Rejoin;
 pub use rendering::Rendering;
 
 use crate::attachments::{self, Attachments};
@@ -2447,6 +2453,13 @@ const GITHUB: &str = "https://github.com";
 /// rest of the machine is the identity it runs as and what that identity has
 /// been granted — see [`account`] and [`entries`].
 ///
+/// **And Linux has one under the Data Directory too**, beside the HOME made
+/// over the server's own. Not as HOME itself, which stays the empty directory
+/// inside the namespace: as the directory a Claude session's `.claude` is built
+/// in, which a bind has to be made *from* and so has to be real — see
+/// [`root`]. Emptied and made again as each session starts, as the other two
+/// platforms' profiles are.
+///
 /// One is emptied as each of that Conversation's sessions starts rather than
 /// removed when the Conversation ends. What a session left in it is nothing
 /// anything reads — the account is linked in rather than copied, so what is
@@ -2571,14 +2584,17 @@ impl Homes {
     /// handoff directory is under it rather than at a `/tmp` every Conversation
     /// on the machine would be sharing. See [`handoffs::inside`].
     pub(crate) fn for_conversation(&self, conversation_id: i64) -> Home {
+        let built = self.root.join(conversation_id.to_string());
+
         let path = match self.platform {
-            Platform::MacOs | Platform::Windows => self.root.join(conversation_id.to_string()),
+            Platform::MacOs | Platform::Windows => built.clone(),
             Platform::Linux => self.servers.clone(),
         };
 
         Home {
             handoffs: handoffs::inside(self.platform, &path),
             path,
+            built,
         }
     }
 }
@@ -2597,6 +2613,11 @@ pub struct Home {
     /// session and a directory under `path` where none does — see
     /// [`handoffs::inside`], which is where the whole of that difference is.
     handoffs: PathBuf,
+
+    /// And the Conversation's own directory under the Data Directory, on the
+    /// host: `path` itself on a Mac and on Windows, and on Linux the directory
+    /// beside the namespace's HOME that a root is built in — see [`Homes`].
+    built: PathBuf,
 }
 
 impl Home {
@@ -2608,6 +2629,12 @@ impl Home {
     /// And where this Conversation's handoff directory is inside.
     pub(crate) fn handoffs(&self) -> &Path {
         &self.handoffs
+    }
+
+    /// And the directory of Verkstead's own on the host that what a session is
+    /// built out of goes in.
+    pub(crate) fn built(&self) -> &Path {
+        &self.built
     }
 }
 
@@ -3414,6 +3441,13 @@ pub struct Sandbox {
     /// running, which is what [`AGENT_TYPE`] carries inside.
     account: store::Account,
 
+    /// What a Claude session is given of that account in place of the whole of
+    /// `~/.claude`, on the two platforms that build one — see [`root`].
+    ///
+    /// `None` for every other backend, and for Claude on Windows, which is still
+    /// joined to the whole account.
+    root: Option<root::Root>,
+
     /// The bundled skills, read-only where a session is told to read them —
     /// see [`crate::skills`] for why they are Verkstead's rather than the
     /// account's, why they are read-only, and why the path is nobody's. And the
@@ -3661,6 +3695,32 @@ impl Sandbox {
             return None;
         }
 
+        // And a Claude session's root, whose `projects/` entries are made in the
+        // account here where they are not there yet: each is a join, and a join
+        // of nothing is a session that will not start. Refused the way a
+        // handoff directory that cannot be made is.
+        let root = match &profile.account {
+            store::Account::Claude { claude_dir, .. } if homes.platform() != Platform::Windows => {
+                let root = root::Root::of(homes.platform(), claude_dir, &git_dir, &worktree);
+
+                if let Err(error) = root.made_in_account() {
+                    tracing::error!(
+                        conversation_id = conversation.id,
+                        account = %claude_dir.display(),
+                        error = ?error,
+                        "the account's entries for this Repo and this Worktree could not be made \
+                         under its `projects/`, so a session's memory and transcript would have \
+                         nowhere to go and none was started"
+                    );
+
+                    return None;
+                }
+
+                Some(root)
+            }
+            _ => None,
+        };
+
         let mut binds = companion_binds(conversation)?;
         binds.extend(extra);
 
@@ -3679,6 +3739,7 @@ impl Sandbox {
             worktree,
             git_dir,
             account: profile.account.clone(),
+            root,
             skills: skills.clone(),
             verkstead: verkstead.clone(),
             handoff_dir,
@@ -3753,8 +3814,9 @@ impl Sandbox {
     /// do about a file the session replaced rather than wrote. Whoever started
     /// the process is who holds it — a session's relay and a Conversation
     /// Terminal's follow loop, the two things that know when what they started
-    /// is over. Nothing at all on the two platforms whose links follow their own
-    /// target; see [`Closing`].
+    /// is over. On the two platforms whose links follow their own target it is
+    /// at most a Claude session's login — see [`Sandbox::credentials_closing`]
+    /// and [`Closing`].
     ///
     /// **And it can refuse**, on the platform whose boundary is an identity: an
     /// account this machine has never heard of, an account nothing holds a
@@ -3793,6 +3855,17 @@ impl Sandbox {
         // a path nothing has put there yet.
         #[allow(unused_mut)]
         let (mut rendering, mut closing) = rendered(self.platform, &surface);
+
+        // And a Claude session's login, where the root it is in cannot be
+        // trusted to have written it to the account by itself — see
+        // [`Sandbox::credentials_closing`].
+        if let Some((host, inside, rejoin)) = self
+            .root
+            .as_ref()
+            .and_then(|root| self.credentials_closing(root, &surface))
+        {
+            closing = closing.and(host, inside, rejoin);
+        }
 
         #[cfg(windows)]
         if let Some(boundary) = boundary {
@@ -3994,8 +4067,26 @@ impl Sandbox {
         // happened to mean. Which shape that is, is [`account_inside`]'s — the
         // one place the four are written down, because the platform that joins
         // an account in by hand has to know the same thing.
-        for (host, inside) in account_inside(&self.account, self.home.path()) {
-            surface.elsewhere(host, inside, Reach::ReadWrite);
+        //
+        // **Except Claude's directory where a root is built in its place** —
+        // see [`Sandbox::root_described`], which is what a session is given of
+        // `~/.claude` there. The file half of the pair is joined as it always
+        // was.
+        match (&self.account, &self.root) {
+            (store::Account::Claude { config_file, .. }, Some(root)) => {
+                self.root_described(root, &mut surface);
+
+                surface.elsewhere(
+                    config_file,
+                    self.home.path().join(CLAUDE_CONFIG_INSIDE_HOME),
+                    Reach::ReadWrite,
+                );
+            }
+            _ => {
+                for (host, inside) in account_inside(&self.account, self.home.path()) {
+                    surface.elsewhere(host, inside, Reach::ReadWrite);
+                }
+            }
         }
 
         // After the temporary filesystem and the empty HOME alike, because on
@@ -4061,7 +4152,11 @@ impl Sandbox {
         // And the account's type at all, rather than every home there is,
         // because covering a home no session is running under would cover
         // nothing and make a directory the account never had.
-        if matches!(self.account, store::Account::Claude { .. }) {
+        //
+        // **And only where Claude is still joined to the whole account**, which
+        // is Windows alone. A built root has no skills of the account's in it
+        // to cover — see [`root`].
+        if matches!(self.account, store::Account::Claude { .. }) && self.root.is_none() {
             surface.nothing(
                 self.home.path().join(skills::CLAUDE_INSIDE_HOME),
                 self.skills.nothing(),
@@ -4271,6 +4366,73 @@ impl Sandbox {
         surface.running(argv);
 
         surface
+    }
+
+    /// What a Claude session is given of `~/.claude` where a root is built for
+    /// it: the root, and what is joined into it — see [`root`].
+    ///
+    /// **Built on the host and joined in.** The Conversation's own directory
+    /// under the Data Directory is emptied where it is not HOME already — on
+    /// Linux, where HOME is made inside the namespace — and the root is made
+    /// in it. Then the root is put where Claude looks, which is a bind on Linux
+    /// and on a Mac is where it already is, and the account's credentials and
+    /// two `projects/` entries are joined into that. Nothing else of the account
+    /// is said, so nothing else of it is there.
+    fn root_described(&self, root: &root::Root, surface: &mut Surface) {
+        if self.home.built() != self.home.path() {
+            surface.made(Access::Built(self.home.built().to_owned()));
+        }
+
+        let built = self.built_root();
+        let inside = self.home.path().join(CLAUDE_DIR_INSIDE_HOME);
+
+        surface
+            .made(Access::Built(built.clone()))
+            .elsewhere(&built, &inside, Reach::ReadWrite);
+
+        for (host, joined) in root.joined(&inside) {
+            surface.elsewhere(host, joined, Reach::ReadWrite);
+        }
+    }
+
+    /// Where a Claude session's root is on the host.
+    fn built_root(&self) -> PathBuf {
+        self.home.built().join(CLAUDE_DIR_INSIDE_HOME)
+    }
+
+    /// What a Claude session's ending has to see to about its login, on top of
+    /// whatever the rendering left: the credentials file in its root, where
+    /// what the session writes there is not already the account's.
+    ///
+    /// **A Mac always.** A symbolic link is written through, and replaced by
+    /// the rename Claude saves a login with — so a login saved inside is on the
+    /// account only once it has been written back. And where the account had
+    /// no file to link, the one a session makes is the account's from then on.
+    ///
+    /// **Linux only where the account had no file to bind.** A bind takes a
+    /// token refresh in place: Claude falls back to writing the file where it
+    /// is when the rename onto a bind is refused. What is left is an account
+    /// with no login, whose first session logs in and writes a file into the
+    /// root itself. Where a bind was made, the file in the root on the host is
+    /// the empty name the bind was made over, and is nothing to write back.
+    fn credentials_closing(
+        &self,
+        root: &root::Root,
+        surface: &Surface,
+    ) -> Option<(PathBuf, PathBuf, Rejoin)> {
+        let credentials = root.credentials();
+        let inside = root::Root::credentials_in(&self.built_root());
+
+        let bound = surface
+            .reaches()
+            .iter()
+            .any(|access| matches!(access, Access::Elsewhere { host, .. } if *host == credentials));
+
+        match self.platform {
+            Platform::MacOs => Some((credentials, inside, Rejoin::Symbolic)),
+            Platform::Linux if !bound => Some((credentials, inside, Rejoin::Not)),
+            Platform::Linux | Platform::Windows => None,
+        }
     }
 
     /// Every `key = value` git is configured with inside, in the order the

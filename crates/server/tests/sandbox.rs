@@ -573,6 +573,24 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
     )
     .unwrap();
 
+    // And the rest of what a human's account holds that a session is not given:
+    // a login, which it is, beside plugins, a global CLAUDE.md, a history and
+    // another repository's transcripts, which it is not.
+    std::fs::write(
+        claude_dir.join(".credentials.json"),
+        "{\"the\": \"login\"}\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(claude_dir.join("plugins/the-accounts-own")).unwrap();
+    std::fs::write(claude_dir.join("CLAUDE.md"), "# the human's own\n").unwrap();
+    std::fs::write(claude_dir.join("history.jsonl"), "{}\n").unwrap();
+    std::fs::create_dir_all(claude_dir.join("projects/-home-you-src-something-else")).unwrap();
+    std::fs::write(
+        claude_dir.join("projects/-home-you-src-something-else/another.jsonl"),
+        "{}\n",
+    )
+    .unwrap();
+
     let profile = store::create_profile(
         &pool,
         &store::ProfileFacts {
@@ -815,13 +833,19 @@ file() {
 
 /// Run `script` inside `sandbox` and read back what it reported.
 fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
+    probe_closing(sandbox, script).0
+}
+
+/// The same, keeping what the session's ending is left to see to — which is
+/// what the tests about a login written inside have to close themselves.
+fn probe_closing(sandbox: &Sandbox, script: &str) -> (BTreeMap<String, String>, Closing) {
     let whole = format!("{PROBE}\n{script}\n");
 
-    let rendered = sandbox
+    let (rendering, closing) = sandbox
         .command(&[SH, "-c", &whole])
         .expect("a rendering on a platform with no identity to make");
 
-    let output = Command::try_from(&rendered.0)
+    let output = Command::try_from(&rendering)
         .expect("a rendering with no container")
         .stdin(Stdio::null())
         .output()
@@ -833,11 +857,13 @@ fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
         "the probe failed inside the sandbox: {stderr}"
     );
 
-    String::from_utf8_lossy(&output.stdout)
+    let reported = String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter_map(|line| line.split_once('='))
         .map(|(key, value)| (key.to_owned(), value.to_owned()))
-        .collect()
+        .collect();
+
+    (reported, closing)
 }
 
 /// And what the process a sandbox renders to is actually handed, read off the
@@ -1518,12 +1544,15 @@ async fn a_file_a_session_replaced_is_written_back_to_the_account_as_the_session
 }
 
 /// And what each rendering leaves to be seen to, which is nothing at all on the
-/// platform whose links follow their own target.
+/// platform whose links follow their own target — for an account with a login
+/// to bind, which is the fixture's. See
+/// [`a_login_made_inside_an_account_with_none_is_the_accounts_once_the_session_ends`]
+/// for the one that has none.
 ///
 /// A Conversation Terminal holds one of these as a session does — it is a shell
-/// in the same profile under the same account — and on Linux what either of
-/// them holds is empty. The Mac's is asked of the rendering itself, in the
-/// server's own tests, because a Mac sandbox is not one this machine can build.
+/// in the same profile under the same account. The Mac's is asked of the
+/// rendering itself, in the server's own tests, because a Mac sandbox is not
+/// one this machine can build.
 #[tokio::test]
 async fn a_rendering_whose_links_follow_their_target_leaves_nothing_to_close() {
     let fixture = grilling().await;
@@ -2029,41 +2058,284 @@ fn installed_on_the_host(skills: &Skills) -> String {
     names.iter().map(|name| format!("{name} ")).collect()
 }
 
-/// The mount that hid the account's own skills has moved to a path of
-/// Verkstead's own, so an empty directory stands where it did.
+/// A Claude session's `.claude` is a root of Verkstead's own, holding the
+/// account's login and this Repo's and this Worktree's `projects/` entries —
+/// and nothing else of the account's at all.
 ///
 /// A Profile is an account to run as rather than a second opinion about how to
-/// work, and the case that guards is an older fork of the skills Verkstead ships
-/// sitting in the account's directory. The rest of the pair is the account's as
-/// it always was: what is covered is the one directory.
+/// work: the human's plugins, hooks, global `CLAUDE.md` and history are how
+/// *they* work, and another repository's transcripts are no session's business.
+/// So none of it is covered over or refused. It is simply never put there.
 #[tokio::test]
-async fn the_accounts_own_skills_are_covered_by_nothing_at_all() {
+async fn a_claude_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
     let fixture = grilling().await;
     let sandbox = fixture.sandbox(vec![]);
 
     let reported = probe(
         &sandbox,
         r#"
-        file "$HOME/.claude/skills/the-accounts-own/SKILL.md" the-accounts-own
-        dir "$HOME/.claude/skills" skills-dir
-        say inside "$(ls -A "$HOME/.claude/skills" | tr '\n' ' ')"
+        say root "$(ls -A "$HOME/.claude" | sort | tr '\n' ' ')"
+        say projects "$(ls -A "$HOME/.claude/projects" | sort | tr '\n' ' ')"
         file "$HOME/.claude/settings.json" settings
+        dir "$HOME/.claude/plugins" plugins
+        file "$HOME/.claude/CLAUDE.md" claude-md
+        file "$HOME/.claude/history.jsonl" history
+        dir "$HOME/.claude/projects/-home-you-src-something-else" another-repository
+        dir "$HOME/.claude/skills" skills
+        file "$HOME/.claude/skills/the-accounts-own/SKILL.md" the-accounts-own
+        file "$HOME/.claude/.credentials.json" credentials
         "#,
     );
 
     assert_eq!(
-        reported["the-accounts-own"], "absent",
-        "what a session is grilled by is the product's, not whatever the account keeps"
+        reported["root"], ".credentials.json projects ",
+        "the login and the projects directory are the whole of the root"
+    );
+
+    let mut entries = [entry_named(&fixture.repo), entry_named(fixture.worktree())];
+    entries.sort();
+
+    assert_eq!(
+        reported["projects"],
+        format!("{} {} ", entries[0], entries[1]),
+        "and under it, this Repo's entry and this Worktree's"
+    );
+
+    for absent in [
+        "settings",
+        "plugins",
+        "claude-md",
+        "history",
+        "another-repository",
+        "skills",
+        "the-accounts-own",
+    ] {
+        assert_eq!(
+            reported[absent], "absent",
+            "the account's {absent} is none of a session's business"
+        );
+    }
+
+    assert_eq!(
+        reported["credentials"], "write",
+        "while the login is there, and a session can refresh it"
+    );
+}
+
+/// What a session writes under the Repo's entry and the Worktree's lands in the
+/// account, which is what makes a memory outlive the session and a transcript
+/// something Verkstead can follow — and an entry the account did not have yet
+/// is made there first.
+///
+/// The transcript is found by walking one level of the account's `projects/`
+/// for `<session-id>.jsonl`, so the file being at that path in the account is
+/// the file being found.
+#[tokio::test]
+async fn memory_and_a_transcript_written_inside_land_in_the_account() {
+    let fixture = grilling().await;
+
+    let projects = fixture.claude_dir().join("projects");
+    let (repo, worktree) = (
+        projects.join(entry_named(&fixture.repo)),
+        projects.join(entry_named(fixture.worktree())),
+    );
+
+    assert!(
+        !repo.exists() && !worktree.exists(),
+        "nobody has run Claude in this Repo yet, so the account has neither entry"
+    );
+
+    let sandbox = fixture.sandbox(vec![]);
+
+    assert!(
+        repo.is_dir() && worktree.is_dir(),
+        "so both are made in the account before a session is given them"
+    );
+
+    probe(
+        &sandbox,
+        &format!(
+            r#"
+            mkdir -p "$HOME/.claude/projects/{repo}/memory"
+            printf 'remembered\n' > "$HOME/.claude/projects/{repo}/memory/MEMORY.md"
+            printf '{{"turn": 1}}\n' > "$HOME/.claude/projects/{worktree}/the-session.jsonl"
+            "#,
+            repo = entry_named(&fixture.repo),
+            worktree = entry_named(fixture.worktree()),
+        ),
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(repo.join("memory/MEMORY.md")).unwrap(),
+        "remembered\n",
+        "the Repo's memory is the account's"
     );
     assert_eq!(
-        reported["skills-dir"], "read",
-        "and the directory covering it is no more a session's to fill in than the skills are"
+        std::fs::read_to_string(worktree.join("the-session.jsonl")).unwrap(),
+        "{\"turn\": 1}\n",
+        "and so is the session's transcript, one level under `projects/` where it \
+         is looked for"
     );
-    assert_eq!(reported["inside"], "", "there is nothing in it to read");
+}
+
+/// A login refreshed inside is the account's login, as it is written.
+///
+/// Linux binds the file over its name in the root, and Claude saves it by
+/// writing a temporary file and renaming it — a rename a bind refuses, which is
+/// when Claude writes the file where it is instead. Both halves are asked here:
+/// the rename is refused, and the write in place lands.
+#[tokio::test]
+async fn a_login_refreshed_inside_is_the_accounts_as_it_is_written() {
+    let fixture = grilling().await;
+    let sandbox = fixture.sandbox(vec![]);
+
+    let (reported, afterwards) = probe_closing(
+        &sandbox,
+        r#"
+        printf '{"refreshed": "renamed"}\n' > "$HOME/.claude/.credentials.json.tmp"
+        if mv -f "$HOME/.claude/.credentials.json.tmp" "$HOME/.claude/.credentials.json" 2>/dev/null; then
+            say renamed yes
+        else
+            say renamed refused
+        fi
+        printf '{"refreshed": "in place"}\n' > "$HOME/.claude/.credentials.json"
+        "#,
+    );
+
     assert_eq!(
-        reported["settings"], "write",
-        "while the rest of the Profile's own directory is writable as before"
+        reported["renamed"], "refused",
+        "a rename onto a bound file is refused, which is what sends Claude to \
+         writing in place"
     );
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_dir().join(".credentials.json")).unwrap(),
+        "{\"refreshed\": \"in place\"}\n",
+        "and what it writes in place is the account's login"
+    );
+    assert_eq!(
+        afterwards.linked().count(),
+        0,
+        "so there is nothing to write back as the session ends"
+    );
+}
+
+/// An account with no login has no file to bind, so a session that logs in
+/// writes one into its own root — and that file is the account's once the
+/// session has ended.
+#[tokio::test]
+async fn a_login_made_inside_an_account_with_none_is_the_accounts_once_the_session_ends() {
+    let fixture = grilling().await;
+    let credentials = fixture.claude_dir().join(".credentials.json");
+    std::fs::remove_file(&credentials).unwrap();
+
+    let sandbox = fixture.sandbox(vec![]);
+
+    let (reported, afterwards) = probe_closing(
+        &sandbox,
+        r#"
+        file "$HOME/.claude/.credentials.json" before
+        printf '{"logged": "in"}\n' > "$HOME/.claude/.credentials.json.tmp"
+        mv -f "$HOME/.claude/.credentials.json.tmp" "$HOME/.claude/.credentials.json"
+        "#,
+    );
+
+    assert_eq!(reported["before"], "absent", "there is no login to give it");
+    assert!(
+        !credentials.exists(),
+        "and what it wrote is in its root until the session has ended"
+    );
+
+    afterwards.close();
+
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{\"logged\": \"in\"}\n",
+        "and the account's from then on"
+    );
+}
+
+/// The root is a directory under the Data Directory, the Conversation's own,
+/// and every session is given it fresh: what the last one left is gone, and
+/// the account behind it is untouched.
+///
+/// And nothing a session writes under HOME lands anywhere on the host but
+/// through a bind: a file beside `.claude` is in the namespace and gone with
+/// it, where one inside `.claude` is in the root.
+#[tokio::test]
+async fn the_root_is_built_under_the_data_directory_fresh_for_each_session() {
+    let fixture = grilling().await;
+    let sandbox = fixture.sandbox(vec![]);
+
+    let home = fixture
+        .state
+        .path()
+        .join("homes")
+        .join(fixture.conversation.id.to_string());
+
+    probe(
+        &sandbox,
+        r#"
+        printf 'left\n' > "$HOME/.claude/left-in-the-root"
+        printf 'left\n' > "$HOME/left-beside-it"
+        "#,
+    );
+
+    assert!(
+        home.join(".claude/projects").is_dir(),
+        "the root is built in the Conversation's own directory under the Data \
+         Directory"
+    );
+    assert!(
+        home.join(".claude/left-in-the-root").is_file(),
+        "and what a session writes in `.claude` is written there"
+    );
+    assert!(
+        !fixture.home_path().join("left-beside-it").exists()
+            && !home.join("left-beside-it").exists(),
+        "while what it writes beside `.claude` lands nowhere on the host"
+    );
+
+    std::fs::write(home.join("left-in-the-home"), "left\n").unwrap();
+
+    made(&sandbox);
+
+    assert!(
+        !home.join(".claude/left-in-the-root").exists() && !home.join("left-in-the-home").exists(),
+        "a session is given the root fresh, with nothing of the one before it"
+    );
+    assert!(
+        home.join(".claude").is_dir(),
+        "and made again, for the binds a session starts with to be made into"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_dir().join(".credentials.json")).unwrap(),
+        "{\"the\": \"login\"}\n",
+        "and the account behind it is untouched by the emptying"
+    );
+    assert!(
+        fixture
+            .claude_dir()
+            .join("plugins/the-accounts-own")
+            .is_dir()
+    );
+}
+
+/// The name Claude Code gives a path's `projects/` entry, for the paths these
+/// tests use — none of them long enough to be cut and hashed, which is the
+/// server's own unit tests' to ask.
+fn entry_named(path: &Path) -> String {
+    path.canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .chars()
+        .map(|kept| {
+            if kept.is_ascii_alphanumeric() {
+                kept
+            } else {
+                '-'
+            }
+        })
+        .collect()
 }
 
 /// `verkstead` inside is the executable serving the session, and it is what a

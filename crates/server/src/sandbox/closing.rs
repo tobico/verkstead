@@ -7,12 +7,19 @@
 //! the same profile under the same account, and what is true of one session's
 //! ending is true of the other's.
 //!
-//! **It is nothing at all on the two Unix platforms.** A bind and a symbolic
-//! link are names that follow whatever happens at the far end of them, so a
-//! session that ends leaves nothing to see to. What this exists for is the
-//! platform whose links are hard ones — see [`super::open`], which joins a
-//! file into a session's profile that way because a file symbolic link there
-//! wants a privilege a per-user install has not got.
+//! **It began as the platform whose links are hard ones** — see
+//! [`super::open`], which joins a file into a session's profile that way
+//! because a file symbolic link there wants a privilege a per-user install has
+//! not got. A bind and a symbolic link are names that follow whatever happens
+//! at the far end of them, so on the two Unix platforms most of what a session
+//! was given leaves nothing to see to.
+//!
+//! **Most, and not Claude's credentials file.** A rename over a symbolic link
+//! replaces the link rather than writing through it, which is what Claude does
+//! to its login on a Mac; and on Linux an account with no login has nothing to
+//! bind, so the file a session logs in and writes is a file of the root's own.
+//! Both are handed back here beside the Windows links — see
+//! [`super::Sandbox::command`].
 //!
 //! **And a hard link is one file only while everything writes in place.** An
 //! agent that saves its config by writing a temporary file and renaming it over
@@ -40,16 +47,32 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
+/// How a file that was written back is made one with the account's again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Rejoin {
+    /// By a hard link, which is how the Windows rendering joined it.
+    Hard,
+
+    /// By a symbolic link, which is how a Mac joined it.
+    Symbolic,
+
+    /// Not at all. Linux binds the file where the account has one, and a bind
+    /// is not a thing to make outside a namespace — so a file of the root's own
+    /// stays the session's, and the next session is bound to the account's.
+    Not,
+}
+
 /// What a rendering left to be seen to once what it started has gone.
 ///
-/// Made by the renderer rather than composed by a caller: which paths are in it
-/// is a fact about how that platform joined an account into a profile, and the
-/// two renderings that join nothing in by hand hand back [`Closing::nothing`].
+/// Made by the renderer, which knows how its platform joined an account into a
+/// profile, and added to by [`super::Sandbox::command`], which knows which file
+/// is a login that a rename can take away.
 #[derive(Debug)]
 pub struct Closing {
-    /// The files joined into a session's profile by a hard link, the account's
-    /// own path first and the name inside the profile second.
-    linked: Vec<(PathBuf, PathBuf)>,
+    /// The files a session was given that it may replace rather than write:
+    /// the account's own path, the name the session found it under, and how
+    /// the two are made one file again once it has been written back.
+    linked: Vec<(PathBuf, PathBuf, Rejoin)>,
 
     /// And the Conversation's entries the session is running behind, held for
     /// as long as it runs.
@@ -87,10 +110,21 @@ impl Closing {
     /// own path and the name a session found it under.
     pub(crate) fn of_links(linked: Vec<(PathBuf, PathBuf)>) -> Closing {
         Closing {
-            linked,
+            linked: linked
+                .into_iter()
+                .map(|(host, inside)| (host, inside, Rejoin::Hard))
+                .collect(),
             #[cfg(windows)]
             behind: None,
         }
+    }
+
+    /// The same, with one more file to write back — see [`Rejoin`] for what is
+    /// made of the two names afterwards.
+    pub(crate) fn and(mut self, host: PathBuf, inside: PathBuf, rejoin: Rejoin) -> Closing {
+        self.linked.push((host, inside, rejoin));
+
+        self
     }
 
     /// The same, holding the entries the session runs behind — see the field,
@@ -105,7 +139,7 @@ impl Closing {
     /// The names inside the profile this has anything left to do about — none
     /// at all where the rendering joined nothing in by hand.
     pub fn linked(&self) -> impl Iterator<Item = &Path> {
-        self.linked.iter().map(|(_, inside)| inside.as_path())
+        self.linked.iter().map(|(_, inside, _)| inside.as_path())
     }
 
     /// The session has gone: whatever it wrote to its account that the account
@@ -114,8 +148,8 @@ impl Closing {
     /// Blocks — it is a file copy at worst and two questions of the filesystem
     /// at best — so it is called off the runtime by whoever holds it.
     pub fn close(self) {
-        for (host, inside) in self.linked {
-            match written_back(&host, &inside) {
+        for (host, inside, rejoin) in self.linked {
+            match written_back(&host, &inside, rejoin) {
                 Ok(true) => tracing::debug!(
                     account = %host.display(),
                     inside = %inside.display(),
@@ -148,7 +182,7 @@ impl Closing {
 /// it is the case a fresh Profile starts in: the link could not be made because
 /// there was nothing to link, and the first thing the session does is log in
 /// and write one. That file is the account's.
-fn written_back(host: &Path, inside: &Path) -> io::Result<bool> {
+fn written_back(host: &Path, inside: &Path, rejoin: Rejoin) -> io::Result<bool> {
     let Some(ours) = identity(inside)? else {
         return Ok(false);
     };
@@ -166,7 +200,17 @@ fn written_back(host: &Path, inside: &Path) -> io::Result<bool> {
     // And one file again, so that the session after this reads and writes the
     // account rather than a copy of it. A rendering makes the link afresh
     // anyway; making it here is what keeps the profile true in between.
-    super::open::joined(host, inside)?;
+    match rejoin {
+        Rejoin::Hard => super::open::joined(host, inside)?,
+        #[cfg(unix)]
+        Rejoin::Symbolic => {
+            std::fs::remove_file(inside)?;
+            std::os::unix::fs::symlink(host, inside)?;
+        }
+        #[cfg(not(unix))]
+        Rejoin::Symbolic => {}
+        Rejoin::Not => {}
+    }
 
     Ok(true)
 }
@@ -263,7 +307,7 @@ mod tests {
         replaced(&inside, "what the session wrote\n");
 
         assert!(
-            written_back(&host, &inside).unwrap(),
+            written_back(&host, &inside, Rejoin::Hard).unwrap(),
             "a file that is no longer the account's own has to be written back"
         );
         assert_eq!(
@@ -290,7 +334,7 @@ mod tests {
         std::fs::write(&inside, "written in place\n").unwrap();
 
         assert!(
-            !written_back(&host, &inside).unwrap(),
+            !written_back(&host, &inside, Rejoin::Hard).unwrap(),
             "the two are one file, so there is nothing to write back"
         );
         assert_eq!(
@@ -310,7 +354,7 @@ mod tests {
 
         std::fs::remove_file(&inside).unwrap();
 
-        assert!(!written_back(&host, &inside).unwrap());
+        assert!(!written_back(&host, &inside, Rejoin::Hard).unwrap());
         assert_eq!(
             std::fs::read_to_string(&host).unwrap(),
             "the account's own\n"
@@ -332,7 +376,67 @@ mod tests {
 
         std::fs::write(&inside, "logged in\n").unwrap();
 
-        assert!(written_back(&host, &inside).unwrap());
+        assert!(written_back(&host, &inside, Rejoin::Hard).unwrap());
         assert_eq!(std::fs::read_to_string(&host).unwrap(), "logged in\n");
+    }
+
+    /// A login joined in by a symbolic link, as a Mac joins one, and replaced
+    /// by the rename Claude saves it with: written back, and linked again.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_replaced_over_a_symbolic_link_is_written_back_and_linked_again() {
+        let account = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let (host, inside) = (
+            account.path().join(".credentials.json"),
+            root.path().join(".credentials.json"),
+        );
+
+        std::fs::write(&host, "the account's own\n").unwrap();
+        std::os::unix::fs::symlink(&host, &inside).unwrap();
+
+        Closing::nothing()
+            .and(host.clone(), inside.clone(), Rejoin::Symbolic)
+            .close();
+
+        assert_eq!(
+            std::fs::read_to_string(&host).unwrap(),
+            "the account's own\n",
+            "a link nothing replaced is the account's file, and nothing is copied"
+        );
+
+        replaced(&inside, "refreshed\n");
+
+        Closing::nothing()
+            .and(host.clone(), inside.clone(), Rejoin::Symbolic)
+            .close();
+
+        assert_eq!(std::fs::read_to_string(&host).unwrap(), "refreshed\n");
+        assert_eq!(
+            std::fs::read_link(&inside).unwrap(),
+            host,
+            "and the root links the account's file again"
+        );
+    }
+
+    /// And a file of the root's own on Linux, where there was no login to bind:
+    /// written back, and left where it is.
+    #[test]
+    fn a_file_the_root_made_is_written_back_and_left_as_it_is() {
+        let account = tempfile::tempdir().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let (host, inside) = (
+            account.path().join(".credentials.json"),
+            root.path().join(".credentials.json"),
+        );
+
+        std::fs::write(&inside, "logged in\n").unwrap();
+
+        assert!(written_back(&host, &inside, Rejoin::Not).unwrap());
+        assert_eq!(std::fs::read_to_string(&host).unwrap(), "logged in\n");
+        assert!(
+            !std::fs::symlink_metadata(&inside).unwrap().is_symlink(),
+            "a file of its own, still"
+        );
     }
 }

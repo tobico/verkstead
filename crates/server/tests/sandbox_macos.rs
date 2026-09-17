@@ -26,17 +26,12 @@
 //! not there comes to: the entry is skipped, and what a session finds at that
 //! name is nothing rather than a refusal.
 //!
-//! **The account's own skills are refused like anything else**, which is not
-//! the exception it was written as. A mount stands an empty directory on them
-//! and a policy cannot, so what was expected here was a denial total enough to
-//! hide the name as well — and this platform does not offer one: the floor
-//! makes every name on the machine `stat`-able, which is what "refuses rather
-//! than hides" *means*, and one path cannot opt out of the sentence the whole
-//! boundary is written in. A session can see that its account has a `skills`
-//! directory and cannot read a byte of it, exactly as it can see the home
-//! directory of whoever owns the Mac. What the design asks for is that a
-//! Conversation is grilled by the product's skills rather than the account's,
-//! and that holds either way.
+//! **A Claude session's `.claude` is a third, and it is absent in both
+//! senses.** It is a root of Verkstead's own, built out of an allowlist, so
+//! what the account keeps beside the allowlist — its settings, its plugins, its
+//! own skills — is not at `~/.claude` at all. The account's own directory is
+//! still on the machine, and reached by its real path it is refused like
+//! anything else.
 //!
 //! **Built on both Unixes and run on one machine.** Every test here is compiled
 //! on the Linux runner and *ignored* there rather than left out of the build:
@@ -62,7 +57,7 @@ use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
 use verkstead_server::platform::Platform;
 use verkstead_server::sandbox::{
-    Bind, Executable, Homes, Reachable, Rendering, Sandbox, SandboxConfig,
+    Bind, Closing, Executable, Homes, Reachable, Rendering, Sandbox, SandboxConfig,
 };
 use verkstead_server::settings::{RustBuildCache, Settings};
 use verkstead_server::skills::Skills;
@@ -483,6 +478,18 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
     )
     .unwrap();
 
+    // And the rest of what a human's account holds: a login, which a session is
+    // given, beside plugins, a global CLAUDE.md and another repository's
+    // transcripts, which it is not.
+    std::fs::write(
+        claude_dir.join(".credentials.json"),
+        "{\"the\": \"login\"}\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(claude_dir.join("plugins/the-accounts-own")).unwrap();
+    std::fs::write(claude_dir.join("CLAUDE.md"), "# the human's own\n").unwrap();
+    std::fs::create_dir_all(claude_dir.join("projects/-Users-you-src-something-else")).unwrap();
+
     let profile = store::create_profile(
         &pool,
         &store::ProfileFacts {
@@ -717,8 +724,14 @@ file() {
 /// two look identical from an exit code alone, and the policy is what either of
 /// them is about.
 fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
+    probe_closing(sandbox, script).0
+}
+
+/// The same, keeping what the session's ending is left to see to — which is
+/// what the tests about a login written inside have to close themselves.
+fn probe_closing(sandbox: &Sandbox, script: &str) -> (BTreeMap<String, String>, Closing) {
     let whole = format!("{PROBE}\n{script}\n");
-    let (rendering, _) = sandbox
+    let (rendering, closing) = sandbox
         .command(&[SH, "-c", &whole])
         .expect("a rendering on a platform with no identity to make");
 
@@ -741,11 +754,13 @@ fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
         policy_of(&rendering),
     );
 
-    String::from_utf8_lossy(&output.stdout)
+    let reported = String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter_map(|line| line.split_once('='))
         .map(|(key, value)| (key.to_owned(), value.to_owned()))
-        .collect()
+        .collect();
+
+    (reported, closing)
 }
 
 /// The policy `command` applies, read back off the argument it carries it in.
@@ -1145,8 +1160,8 @@ async fn the_profiles_pair_is_the_whole_of_what_home_holds() {
         "a session writes its own session logs and settings"
     );
     assert_eq!(
-        reported["settings"], "write",
-        "and what the account already kept there is there to be read"
+        reported["settings"], "absent",
+        "into a root of its own, which holds none of the account's settings"
     );
     assert_eq!(reported["claude-config"], "write");
     assert_eq!(
@@ -1319,12 +1334,9 @@ async fn the_skills_inside_are_the_bundled_ones_and_only_those() {
         "there is no global CLAUDE.md in here to say how to reach the human"
     );
     assert_eq!(
-        reported["the-accounts-own"], "refused",
-        "and what the account keeps under its own skills is not a session's to \
-         read — which the fixture put a skill in to be able to say. Refused \
-         rather than absent, as the machine itself is: a policy hides no name, \
-         and what the design asks is that a Conversation is grilled by the \
-         product's skills rather than the account's"
+        reported["the-accounts-own"], "absent",
+        "and the account's own skills are not in the root a session is given — \
+         which the fixture put a skill in to be able to say"
     );
 
     assert!(
@@ -1335,6 +1347,208 @@ async fn the_skills_inside_are_the_bundled_ones_and_only_those() {
             .is_file(),
         "while nothing of the account's own was written over to do it",
     );
+}
+
+/// A Claude session's `.claude` is a root of Verkstead's own, holding the
+/// account's login and this Repo's and this Worktree's `projects/` entries and
+/// nothing else of the account's — and the account itself, reached by its real
+/// path, is refused like anything else on the machine.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn a_claude_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
+    let fixture = grilling().await;
+    let sandbox = fixture.sandbox();
+    let account = fixture.elsewhere.path().join("account/.claude");
+
+    let reported = probe(
+        &sandbox,
+        &format!(
+            r#"
+            say root "$(ls -A "$HOME/.claude" | sort | tr '\n' ' ')"
+            say projects "$(ls -A "$HOME/.claude/projects" | sort | tr '\n' ' ')"
+            file "$HOME/.claude/settings.json" settings
+            dir "$HOME/.claude/plugins" plugins
+            file "$HOME/.claude/CLAUDE.md" claude-md
+            dir "$HOME/.claude/projects/-Users-you-src-something-else" another-repository
+            dir "$HOME/.claude/skills" skills
+            file "$HOME/.claude/.credentials.json" credentials
+            file {settings} the-accounts-settings
+            dir {plugins} the-accounts-plugins
+            "#,
+            settings = quoted(&account.join("settings.json")),
+            plugins = quoted(&account.join("plugins")),
+        ),
+    );
+
+    assert_eq!(reported["root"], ".credentials.json projects ");
+
+    let mut entries = [entry_named(&fixture.repo), entry_named(fixture.worktree())];
+    entries.sort();
+
+    assert_eq!(
+        reported["projects"],
+        format!("{} {} ", entries[0], entries[1]),
+        "and under it, this Repo's entry and this Worktree's"
+    );
+
+    for absent in [
+        "settings",
+        "plugins",
+        "claude-md",
+        "another-repository",
+        "skills",
+    ] {
+        assert_eq!(
+            reported[absent], "absent",
+            "the account's {absent} is not in the root"
+        );
+    }
+
+    assert_eq!(reported["credentials"], "write", "while the login is");
+    assert_eq!(
+        reported["the-accounts-settings"], "refused",
+        "and the account's own directory is somebody else's on this machine"
+    );
+    assert_eq!(reported["the-accounts-plugins"], "refused");
+}
+
+/// What a session writes under the Repo's entry and the Worktree's lands in the
+/// account, and an entry the account did not have yet is made there first.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn memory_and_a_transcript_written_inside_land_in_the_account() {
+    let fixture = grilling().await;
+
+    let projects = fixture.elsewhere.path().join("account/.claude/projects");
+    let (repo, worktree) = (
+        projects.join(entry_named(&fixture.repo)),
+        projects.join(entry_named(fixture.worktree())),
+    );
+
+    assert!(!repo.exists() && !worktree.exists());
+
+    let sandbox = fixture.sandbox();
+
+    probe(
+        &sandbox,
+        &format!(
+            r#"
+            mkdir -p "$HOME/.claude/projects/{repo}/memory"
+            printf 'remembered\n' > "$HOME/.claude/projects/{repo}/memory/MEMORY.md"
+            printf '{{"turn": 1}}\n' > "$HOME/.claude/projects/{worktree}/the-session.jsonl"
+            "#,
+            repo = entry_named(&fixture.repo),
+            worktree = entry_named(fixture.worktree()),
+        ),
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(repo.join("memory/MEMORY.md")).unwrap(),
+        "remembered\n",
+        "the Repo's memory is the account's"
+    );
+    assert_eq!(
+        std::fs::read_to_string(worktree.join("the-session.jsonl")).unwrap(),
+        "{\"turn\": 1}\n",
+        "and so is the transcript, one level under `projects/` where it is looked for"
+    );
+}
+
+/// A login Claude saves inside, by writing a temporary file and renaming it
+/// over the link, replaces the link rather than writing through it — so it is
+/// the account's once the session has ended, and not before.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn a_login_saved_by_rename_inside_is_the_accounts_once_the_session_ends() {
+    let fixture = grilling().await;
+    let credentials = fixture
+        .elsewhere
+        .path()
+        .join("account/.claude/.credentials.json");
+    let sandbox = fixture.sandbox();
+
+    let (_, afterwards) = probe_closing(
+        &sandbox,
+        r#"
+        printf '{"refreshed": true}\n' > "$HOME/.claude/.credentials.json.tmp"
+        mv -f "$HOME/.claude/.credentials.json.tmp" "$HOME/.claude/.credentials.json"
+        "#,
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{\"the\": \"login\"}\n",
+        "the rename took the link away, so the account has not seen it yet"
+    );
+
+    afterwards.close();
+
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{\"refreshed\": true}\n",
+        "and it has once the session has ended"
+    );
+}
+
+/// And a file still one with the account's is left as it is: a login written
+/// through the link is already the account's.
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "the boundary this probes is a Mac's"
+)]
+async fn a_login_written_through_the_link_is_left_alone_as_the_session_ends() {
+    let fixture = grilling().await;
+    let credentials = fixture
+        .elsewhere
+        .path()
+        .join("account/.claude/.credentials.json");
+    let sandbox = fixture.sandbox();
+
+    let (_, afterwards) = probe_closing(
+        &sandbox,
+        r#"printf '{"in": "place"}\n' > "$HOME/.claude/.credentials.json""#,
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{\"in\": \"place\"}\n"
+    );
+
+    std::fs::write(&credentials, "{\"the human\": \"logged in again\"}\n").unwrap();
+
+    afterwards.close();
+
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{\"the human\": \"logged in again\"}\n",
+        "nothing is copied over a file the session never stopped sharing"
+    );
+}
+
+/// The name Claude Code gives a path's `projects/` entry, for the paths these
+/// tests use — none long enough to be cut and hashed.
+fn entry_named(path: &Path) -> String {
+    real(path)
+        .to_string_lossy()
+        .chars()
+        .map(|kept| {
+            if kept.is_ascii_alphanumeric() {
+                kept
+            } else {
+                '-'
+            }
+        })
+        .collect()
 }
 
 /// The skill names as they sit on the host, in the shape the probe reports them

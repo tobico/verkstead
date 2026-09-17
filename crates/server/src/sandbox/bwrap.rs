@@ -78,6 +78,24 @@ pub(crate) fn command(surface: &Surface) -> Rendering {
             Access::Empty(path) => {
                 bwrap.arg("--dir").arg(path);
             }
+            // The one thing here made on the host rather than in the
+            // namespace, and so the one flag-less arm: a root has to be a real
+            // directory before anything can be bound out of it, and what
+            // reaches it is the bind said after this.
+            //
+            // **Failures are logged rather than raised**, for the reason the
+            // Mac's own making is: a rendering cannot refuse, and a root that
+            // could not be made is a bind that fails saying which path.
+            Access::Built(path) => {
+                if let Err(error) = super::emptied(path) {
+                    tracing::error!(
+                        error = ?error,
+                        built = %path.display(),
+                        "a directory a session's root is built in could not be made, so the \
+                         session will not find what was to be built there"
+                    );
+                }
+            }
         }
     }
 

@@ -205,7 +205,7 @@ fn realise(surface: &Surface) -> Vec<(PathBuf, PathBuf)> {
             // The profile itself, and then whatever goes inside it: the order
             // is the description's, and emptying comes first in it — see
             // [`Surface`].
-            Access::Empty(path) => super::emptied(path),
+            Access::Empty(path) | Access::Built(path) => super::emptied(path),
 
             // Somewhere to write a temporary file, which on this platform is a
             // directory inside that profile rather than one the machine shares

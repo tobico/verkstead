@@ -82,6 +82,18 @@ pub(crate) enum Access {
     /// session's HOME is before the account lands in it — and what each half
     /// of a Windows profile inside that HOME is before anything writes there.
     Empty(PathBuf),
+
+    /// A directory of Verkstead's own **on the host**, emptied and made again
+    /// as a session starts, and reached by nothing for having been said: what
+    /// is built in it is reached through what the description says after it.
+    ///
+    /// Apart from [`Access::Empty`] for Linux's sake, where an empty HOME is a
+    /// directory made inside the namespace and nowhere on the host. A root a
+    /// session is given has to be somewhere a bind can be made *from*, which
+    /// is a real directory under the Data Directory — see
+    /// [`super::root`]. The other two platforms really make an empty
+    /// directory anyway, and make this one the same way.
+    Built(PathBuf),
 }
 
 /// The whole of what a command run inside a sandbox is given: what it may
