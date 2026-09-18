@@ -1510,24 +1510,40 @@ impl Running {
     /// The rescue's reading of this session, where it has gone quiet without
     /// asking: how long it has been idle, and how many times it has been told.
     ///
-    /// `None` until it is idle past `grace`, which is the runner's own — see
-    /// [`Pace::proposing`], the threshold the rescue arms on. The short idle the
-    /// sidebar's mark is drawn from is a different reading and a much quicker
-    /// one: a session between two lines of its own output is idle by that and
-    /// working by every other measure.
+    /// **`None` until the Rescue has actually spoken to it**, and until it is
+    /// idle past `grace` besides — which is the runner's own, see
+    /// [`Pace::proposing`]. The short idle the sidebar's mark is drawn from is a
+    /// different reading and a much quicker one: a session between two lines of
+    /// its own output is idle by that and working by every other measure.
+    ///
+    /// **Spoken to first, because idle alone is not the rescue's reading of a
+    /// session and reads worse than nothing.** The idle clock counts from the
+    /// session's last byte and nothing resets it when a Set is answered — an
+    /// answer comes back through the CLI's long poll rather than being typed,
+    /// so nothing echoes — and the rescue holds off for that exact reason, up
+    /// to [`Pace::waking`], until it has seen the session at work since it was
+    /// last stirred. Drawn on idle alone, the condition would come up the
+    /// moment the human picked and say *idle 12 min* about a session handed its
+    /// answer a second ago, the twelve minutes being the human's own
+    /// deliberation. The count is the register's proof that the hold-off is
+    /// over: the rescue has looked at this session, decided it was sitting
+    /// there, and said so — and the line it typed echoes, so the span from
+    /// there on is the silence since Verkstead spoke rather than since the
+    /// human did.
     ///
     /// Nothing else of the rescue's condition is asked here, because neither
-    /// half of it is the register's. Whether anything is waiting on the human is
-    /// the store's and is folded in by the caller — see `crate::ui` — and
-    /// whether the work has landed is a sweep of a worktree, which is the
-    /// driver's to run at its own pace rather than something a page read can
-    /// afford per row. What the last of those leaves is a moment: a session that
-    /// has landed its work and gone quiet wears the condition until the driver
-    /// beside it ends the session, which is one poll of the runner's.
+    /// half of what is left is the register's. Whether anything is waiting on
+    /// the human is the store's and is folded in by the caller — see
+    /// `crate::ui` — and whether the work has landed is a sweep of a worktree,
+    /// which is the driver's to run at its own pace rather than something a
+    /// page read can afford per row. What the last of those leaves is a moment:
+    /// a session that has landed its work and gone quiet wears the condition
+    /// until the driver beside it ends the session, which is one poll of the
+    /// runner's.
     fn parked(&self, grace: Duration) -> Option<Parked> {
         let idle_for = self.idle.for_how_long();
 
-        (idle_for >= grace).then_some(Parked {
+        (self.spoken_to > 0 && idle_for >= grace).then_some(Parked {
             idle_for,
             spoken_to: self.spoken_to,
         })
@@ -1546,7 +1562,9 @@ pub(crate) struct Parked {
     /// How long it has been idle, by its backend's own judgement of idle.
     pub(crate) idle_for: Duration,
 
-    /// And how many times the Rescue has typed its line into it.
+    /// And how many times the Rescue has typed its line into it, which is at
+    /// least once wherever there is a [`Parked`] at all — see
+    /// [`Running::parked`].
     pub(crate) spoken_to: u32,
 }
 
@@ -1835,7 +1853,7 @@ impl Sessions {
 
     /// The rescue's reading of a Conversation's running session — see
     /// [`Running::parked`] — or `None` where it has none, or has one that is at
-    /// work or not yet past the grace.
+    /// work, not yet past the grace, or not yet spoken to.
     ///
     /// What the Conversation's own page draws the condition from, beside
     /// [`Sessions::idling`] and read the same way: a question about a process,

@@ -181,15 +181,12 @@ describe("the status word", () => {
     });
   });
 
-  /// The span alone before anything has been said to it, which is the
-  /// condition's first minute: the rescue arms on the same grace this is drawn
-  /// past, so every parked session wears it this way for a poll or two.
-  it("says the span alone before the Rescue has spoken to it", () => {
-    expect(
-      status(
-        like({ working: true, parked: { idle_seconds: 61, spoken_to: 0 } }),
-      ).word,
-    ).toBe("idle 1 min");
+  /// And a running session with no condition on it is the plain word, which is
+  /// every session until the Rescue has spoken to it: the server draws the
+  /// condition on having spoken rather than on the idle clock alone, so a
+  /// session wearing none reads as it always did.
+  it("says Running where there is no condition on the session", () => {
+    expect(status(like({ working: true, parked: null })).word).toBe("Running");
   });
 
   /// And under everything above it, because those are about the human: a

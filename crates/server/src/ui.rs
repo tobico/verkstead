@@ -976,8 +976,9 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
     let idling = state.sessions.idle();
 
     // And which of *those* the rescue is watching sit there: idle long past the
-    // grace rather than for the moment between two lines of output, with the
-    // count of what it has been told beside it. A third read of the one
+    // grace rather than for the moment between two lines of output, and spoken
+    // to about it at least once, which is what says the rescue's own hold-off
+    // is over rather than that an idle clock has passed a number. A third read of the one
     // register, for the same reason the second is one — see
     // [`crate::sessions::Sessions::all_parked`].
     let sitting = state.sessions.all_parked();

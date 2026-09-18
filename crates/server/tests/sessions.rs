@@ -25147,10 +25147,26 @@ async fn a_session_that_sits_there_without_asking_says_so_on_the_card_and_the_ro
 
     assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
 
-    // Told once, and the count says so. The condition is up before this — the
-    // rescue arms on the same grace it is drawn past, so a session wears the
-    // span alone for the poll before the line goes in — but that first moment is
-    // a poll long and this is the one worth waiting for.
+    // And not the moment they answer, either. The session has been quiet the
+    // whole time the Set was in front of them — far past the grace by now —
+    // and nothing resets the idle clock when an answer goes in, because an
+    // answer comes back through the CLI's long poll rather than being typed.
+    // So a condition drawn on the span alone would come up here saying *idle*
+    // over the human's own deliberation, which is the reading this is for.
+    // The rescue holds off for exactly that long, up to [`BRISKLY.waking`], and
+    // nothing is drawn until it has actually spoken.
+    let answered = fixture
+        .until(|view| (!view.waiting).then(|| view.parked))
+        .await;
+
+    assert!(
+        answered.is_none(),
+        "a session handed its answer a moment ago is not one sitting there, \
+         however long it was quiet while the human was deciding: {answered:?}",
+    );
+
+    // Told once, and the count says so — which is the first moment there is a
+    // condition at all.
     let told_once = fixture
         .until(|view| view.parked.filter(|parked| parked.spoken_to == 1))
         .await;

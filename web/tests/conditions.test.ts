@@ -23,10 +23,11 @@ describe("what a session sitting there is said in", () => {
     expect(sat(260, 2)).toBe("idle 4 min, spoken to twice");
   });
 
-  /// Nothing said about the count until there is one. The rescue arms on the
-  /// same grace the condition is drawn past, so every session wears the span
-  /// alone for a poll or two before it is spoken to at all.
-  it("says the span alone before anything has been said to it", () => {
+  /// The span alone for a count this viewer should never see. The condition is
+  /// drawn on the Rescue having spoken, so a nought is a server that does not
+  /// agree with this one about what the condition is — and *spoken to no times*
+  /// is a sentence about nothing.
+  it("says the span alone for a count it should never see", () => {
     expect(sat(260, 0)).toBe("idle 4 min");
   });
 

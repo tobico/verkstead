@@ -29,8 +29,10 @@ export const WAITING_ON_CHECKS = "Waiting on checks";
 ///
 /// Both halves, because either alone leaves the reader guessing: the span says
 /// how long this has been going on, and the count says that Verkstead has
-/// noticed and is doing something about it. The count is left off before the
-/// first line is typed — *spoken to no times* is a sentence about nothing.
+/// noticed and is doing something about it. There is always a count — the
+/// server draws the condition on the Rescue having spoken rather than on the
+/// span alone, because an idle clock by itself counts the human's own wait on a
+/// Set as the session's silence.
 ///
 /// Minutes past the first, because the number is read rather than timed: a
 /// condition counting seconds redraws every second and says no more for it. The
@@ -39,9 +41,10 @@ export const WAITING_ON_CHECKS = "Waiting on checks";
 export function parked(condition: Parked): string {
   const idle = `idle ${span(condition.idle_seconds)}`;
 
-  // Nothing said about the count until there is one. The rescue arms on the
-  // same grace this is drawn past, so every session wears the span alone for a
-  // poll or two before it is spoken to at all.
+  // The span alone for a count this viewer should never see: the condition is
+  // drawn on having been spoken to, so a nought here is a server that does not
+  // agree with this one about what the condition is. Said rather than made into
+  // *spoken to no times*, which is a sentence about nothing.
   if (condition.spoken_to === 0) {
     return idle;
   }

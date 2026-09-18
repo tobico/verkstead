@@ -2237,6 +2237,15 @@ a Set never wears it, that being a human with something in front of them rather
 than a Conversation nobody can move. Without it a parked agent and one hard at
 work read alike, which is ten minutes somebody spent watching a session that was
 never going to say a word.
+
+**It comes up when the Rescue has spoken rather than when the clock passes.**
+The idle clock counts from the session's last byte and nothing resets it when a
+Set is answered, so a condition drawn on the span alone would open with *idle 12
+min* the moment the human picked, the twelve minutes being their own
+deliberation — which is why the rescue holds off until it has seen the session
+at work since it was last stirred. The count is the register's proof that the
+hold-off is over, and the line the rescue typed echoes, so the span from then on
+is the silence since Verkstead spoke.
 _Avoid_: Nudge (that is the viewer's signal), retry, reminder, ping, poke
 
 **Stalled**:

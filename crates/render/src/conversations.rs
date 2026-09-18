@@ -165,9 +165,15 @@ pub struct ConversationEntry {
 /// The rescue's own reading of a session, which nothing else here has. The mark
 /// beside `idle` is the backend's short judgement of a session mid-turn; this is
 /// the long one the rescue arms on — idle past the runner's grace, with nothing
-/// open on the Conversation and nothing to show for itself. A session wearing it
-/// is one nobody can move and nothing was saying anything about, which is what a
-/// first Windows run left somebody watching for ten minutes.
+/// open on the Conversation, nothing to show for itself, and **the Rescue
+/// having already spoken to it at least once**. A session wearing it is one
+/// nobody can move and nothing was saying anything about, which is what a first
+/// Windows run left somebody watching for ten minutes.
+///
+/// The count is what says the rescue's own hold-off is over rather than a
+/// number beside the span: an idle clock alone counts the human's wait on a Set
+/// as the session's silence, so a condition drawn off one would open with *idle
+/// 12 min* the moment they answered. See the server's `Running::parked`.
 ///
 /// A condition rather than a state, for the reason *Waiting on checks* is one:
 /// the lifecycle is untouched, nothing is written down, and both halves are read
@@ -184,9 +190,13 @@ pub struct Parked {
     /// judgement of idle — see the server's `Idle`.
     pub idle_seconds: u64,
 
-    /// And how many times the Rescue has typed its line into it: none yet, once,
-    /// or twice, which is as many times as a session is ever spoken to before it
-    /// is stopped where it stands.
+    /// And how many times the Rescue has typed its line into it: once or twice,
+    /// which is as many times as a session is ever spoken to before it is
+    /// stopped where it stands.
+    ///
+    /// Never none. A session nothing has said anything to yet wears no
+    /// condition at all, so the count is what the condition is drawn on rather
+    /// than a number it carries.
     pub spoken_to: u32,
 }
 
