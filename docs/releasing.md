@@ -1,7 +1,8 @@
 # Releasing
 
 A release is a tag and nothing else.
-[`release.yml`](../.github/workflows/release.yml) fires on `v*`: it builds the
+[`release.yml`](../.github/workflows/release.yml) fires on `v*`: it reads the
+tag against the workspace manifest and stops there if they disagree, builds the
 viewer once, then the bare CLI binary for each platform on a runner of that
 platform's own architecture, and beside them one desktop app per desktop
 platform — the Linux one as `Verkstead-x86_64.AppImage`, the macOS one as
@@ -101,19 +102,23 @@ between a tag that ships and one that only rehearses the pipeline: GitHub keeps
 a pre-release off `releases/latest`, which is the url an install command asks
 for.
 
-**Nothing has been released under this name yet.** The manifest on `main` ships
-with its `systems` empty, which is why `packages.verkstead` is the source build
-for now — see the note in [`flake.nix`](../flake.nix). The first run of this
-workflow writes a real manifest and switches it over with nothing to undo.
+**The manifest on `main` names the last release**, which is what
+`packages.verkstead` downloads — see the note in [`flake.nix`](../flake.nix),
+which falls back to the source build on any system the manifest has no entry
+for.
 
 ## Before you tag
 
-- **The version in [`Cargo.toml`](../Cargo.toml) matches the tag without its
-  `v`.** Nothing checks this. The manifest takes its version from the tag while
+- **Bump the version in [`Cargo.toml`](../Cargo.toml) to the tag without its
+  `v`, and land that commit.** The manifest takes its version from the tag while
   the binary reports the one it was compiled with, so a mismatch ships a binary
   that disagrees with the flake about what it is — and, where the tag is the
   higher of the two, an Update Notice naming an update that is already
-  installed.
+  installed. `v0.1.1` shipped exactly that, which is why the run's first job
+  compares the two and fails before anything is built, naming both numbers. A
+  tag is compared up to its hyphen, so `v0.1.0-rc.1` wants a manifest reading
+  `0.1.0` — the same rule the Windows Installer version forces from the other
+  end.
 - **The commit is already on `main`.** The manifest job checks out `main` rather
   than the tag, so a tag on a branch publishes a Release whose manifest lands on
   a `main` that does not contain the code.
