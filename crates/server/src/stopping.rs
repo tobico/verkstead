@@ -525,7 +525,7 @@ const SAID_NOTHING: &str = "It said nothing at all.";
 ///
 /// Only where the session said nothing, and never over what it did say: an
 /// agent's own prose is better evidence than an exit code, and this displaces
-/// none of it. **Which the row itself is what says** — see
+/// none of it. **And the row is what says which** — see
 /// [`store::Ended::printed`], the relay's reading of the session's own bytes —
 /// rather than an empty Capture, a Capture being a record Verkstead writes into
 /// as well. And only in the evidence block — the reason the Notice opens with

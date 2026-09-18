@@ -25156,7 +25156,7 @@ async fn a_session_that_sits_there_without_asking_says_so_on_the_card_and_the_ro
     // The rescue holds off for exactly that long, up to [`BRISKLY.waking`], and
     // nothing is drawn until it has actually spoken.
     let answered = fixture
-        .until(|view| (!view.waiting).then(|| view.parked))
+        .until(|view| (!view.waiting).then_some(view.parked))
         .await;
 
     assert!(
