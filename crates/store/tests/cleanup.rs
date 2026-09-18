@@ -200,7 +200,7 @@ async fn printed(pool: &SqlitePool, id: i64, session: &str, said: &str) -> i64 {
     .await
     .unwrap();
 
-    end_session(pool, event, Some(1), Duration::from_millis(400))
+    end_session(pool, event, Some(1), Duration::from_millis(400), true)
         .await
         .unwrap();
 

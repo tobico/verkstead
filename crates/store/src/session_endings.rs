@@ -1,7 +1,8 @@
-//! How each session ended: what its process exited with and how long it lived,
-//! by the Timeline Event that session printed into.
+//! How each session ended: what its process exited with, how long it lived, and
+//! whether it ever printed a byte — by the Timeline Event that session printed
+//! into.
 //!
-//! Two facts the relay has in hand at the moment it reaps a child and nothing
+//! Three facts the relay has in hand at the moment it reaps a child and nothing
 //! else ever has again — the process is gone, and a restarted server has no
 //! sessions at all. They are written down here because of where they are read:
 //! a stop's Notice draws its evidence from what the session *said*, and a
@@ -9,6 +10,15 @@
 //! nothing at all* — true, and pointing nowhere. An instant exit named as an
 //! instant exit points at the binary. See the server's `stopping` module, which
 //! is what puts it into a sentence.
+//!
+//! **And `printed` is what says the session is the one with nothing to show**,
+//! rather than an empty Capture. A Capture is no longer the session's alone: on
+//! the platform whose boundary is written, Verkstead opens one with two lines of
+//! its own about the boundary before the agent has a terminal at all — see the
+//! server's `sessions::verkstead_says` — so a Windows session that printed
+//! nothing leaves a Capture that is not empty and evidence that is not its own.
+//! The relay is the one thing that ever knows the difference, because it is what
+//! reads the session's own bytes, and this is where it says so.
 //!
 //! **Beside the Event rather than threaded through the stop.** Every caller
 //! that writes a stop already says which Event the last session was printing
@@ -55,6 +65,16 @@ pub struct Ended {
     /// launcher that was never going to run at all, and tenths of a second is
     /// the answer to that.
     pub lived: Duration,
+
+    /// And whether the session itself ever printed a byte.
+    ///
+    /// The relay's own reading — see the server's `Idle::said_anything`, where
+    /// every byte counts whatever the idle judgement makes of it. What it is for
+    /// is telling the session's evidence from Verkstead's: a Capture may hold
+    /// lines of Verkstead's own about the launch, so a session that printed
+    /// nothing has nothing in its Capture worth showing the human however full
+    /// that Capture looks.
+    pub printed: bool,
 }
 
 /// The table the endings live in.
@@ -63,7 +83,8 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
         "CREATE TABLE IF NOT EXISTS session_endings (
              event_id INTEGER PRIMARY KEY REFERENCES timeline_events(id),
              code     INTEGER,
-             lived_ms INTEGER NOT NULL
+             lived_ms INTEGER NOT NULL,
+             printed  INTEGER NOT NULL
          ) STRICT",
     )
     .execute(pool)
@@ -88,13 +109,16 @@ pub async fn end_session(
     event_id: i64,
     code: Option<i32>,
     lived: Duration,
+    printed: bool,
 ) -> Result<()> {
     sqlx::query(
-        "INSERT OR IGNORE INTO session_endings (event_id, code, lived_ms) VALUES (?, ?, ?)",
+        "INSERT OR IGNORE INTO session_endings (event_id, code, lived_ms, printed) \
+         VALUES (?, ?, ?, ?)",
     )
     .bind(event_id)
     .bind(code.map(i64::from))
     .bind(i64::try_from(lived.as_millis()).unwrap_or(i64::MAX))
+    .bind(printed)
     .execute(pool)
     .await
     .with_context(|| format!("recording how the session of Event {event_id} ended"))?;
@@ -113,8 +137,8 @@ pub async fn session_ending(
     conversation_id: i64,
     event_id: i64,
 ) -> Result<Option<Ended>> {
-    let found: Option<(Option<i64>, i64)> = sqlx::query_as(
-        "SELECT s.code, s.lived_ms
+    let found: Option<(Option<i64>, i64, bool)> = sqlx::query_as(
+        "SELECT s.code, s.lived_ms, s.printed
          FROM session_endings s
          JOIN timeline_events e ON e.id = s.event_id
          WHERE s.event_id = ? AND e.conversation_id = ?",
@@ -125,8 +149,9 @@ pub async fn session_ending(
     .await
     .with_context(|| format!("reading how the session of Event {event_id} ended"))?;
 
-    Ok(found.map(|(code, lived_ms)| Ended {
+    Ok(found.map(|(code, lived_ms, printed)| Ended {
         code,
         lived: Duration::from_millis(lived_ms.unsigned_abs()),
+        printed,
     }))
 }

@@ -458,6 +458,10 @@ impl Escalation {
             crate::stopping::evidence(
                 &crate::stopping::worktree_status(&self.pool, conversation_id).await,
                 &crate::stopping::session_tail(&self.pool, conversation_id, Some(event_id)).await,
+                // The session is still alive to be escalated over, so there is
+                // no ending to tell its own silence from Verkstead's reading
+                // of it — see [`crate::stopping::evidence`].
+                None,
             ),
         );
 

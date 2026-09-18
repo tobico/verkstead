@@ -350,21 +350,19 @@ async fn land(
     writing: Option<i64>,
     asked: bool,
 ) -> Result<store::Stopping> {
+    // What the session's records hold, and how it ended where that was written
+    // down — see [`ended_instead`]. Which of the two the evidence block is
+    // drawn from is [`said`]'s, so that the whole of that reading is one thing
+    // and a testable one.
     let tail = session_tail(pool, conversation_id, writing).await;
-
-    // And, where the session said nothing at all, how it ended instead — see
-    // [`ended_instead`], which is the whole of why that is worth saying.
-    let nothing = match tail.is_empty() {
-        true => ended_instead(pool, conversation_id, writing).await,
-        false => None,
-    };
+    let ended = ended_instead(pool, conversation_id, writing).await;
 
     let said = said(
         what,
         how,
         &worktree_status(pool, conversation_id).await,
         &tail,
-        nothing.as_deref().unwrap_or(SAID_NOTHING),
+        ended.as_ref(),
     );
 
     let stopped = match asked {
@@ -446,29 +444,65 @@ async fn land(
 /// empty. Evidence the human cannot tell is missing is worse than none: a stop
 /// with no *Worktree* heading reads as a stop nobody looked into.
 ///
-/// `nothing` is what stands where the session said nothing at all — see
-/// [`ended_instead`]. A parameter rather than the sentence written here, because
-/// there is one thing worth saying about a session with nothing to show and it
-/// is not the same thing every time.
-fn said(what: &str, how: &str, git_status: &str, tail: &str, nothing: &str) -> String {
+/// `tail` is what the session's records hold and `ended` is how it ended, where
+/// that was written down — see [`ended_instead`]. Which of the two the evidence
+/// block is drawn from is decided here, because it is one reading rather than
+/// two facts that happen to arrive together.
+///
+/// **A session that printed nothing left nothing here, whatever its records
+/// hold.** A Capture is not the session's alone: on the platform whose boundary
+/// is written, Verkstead opens one with two lines of its own about the boundary
+/// before the agent has a terminal at all — see
+/// [`crate::sessions::verkstead_says`] — so the Windows session this whole
+/// sentence exists for is one whose Capture is not empty and whose evidence is
+/// not its own. What says which is [`store::Ended::printed`], the relay's
+/// reading of the session's own bytes, rather than an empty record.
+///
+/// The whole `tail` rather than its Capture half, because a session that
+/// printed no bytes kept no Transcript either: an agent writes one as it prints
+/// the other, having got as far as working.
+fn said(
+    what: &str,
+    how: &str,
+    git_status: &str,
+    tail: &str,
+    ended: Option<&store::Ended>,
+) -> String {
     format!(
         "**{}** stopped.\n\n{how}\n\n{}",
         opening(what),
-        evidence(git_status, tail),
+        evidence(git_status, tail, ended),
     )
 }
 
 /// The two pieces of evidence under their headings, for a Notice that is not a
 /// stop's and carries what one does — see [`crate::rescues`], which tells the
 /// human about a session it could not talk round.
-pub(crate) fn evidence(git_status: &str, tail: &str) -> String {
+///
+/// `ended` is how the session ended where that was written down, which is what
+/// tells a session that left nothing of its own from one Verkstead never heard
+/// print at all: a caller whose session is still running has none to hand over.
+pub(crate) fn evidence(git_status: &str, tail: &str, ended: Option<&store::Ended>) -> String {
+    let itself = match ended.is_none_or(|ended| ended.printed) {
+        true => tail,
+        false => "",
+    };
+
+    // So how it ended stands in the block wherever the session left nothing of
+    // its own, and the sentence that points nowhere only where there is no
+    // ending on the record either.
+    let nothing = match itself.is_empty() {
+        true => ended.map(how_it_ended),
+        false => None,
+    };
+
     format!(
         "### The worktree\n\n{}\n\n### What the last session said\n\n{}\n",
         indented(
             git_status,
             "Git had nothing pending, or the repository would not answer.",
         ),
-        indented(tail, nothing),
+        indented(itself, nothing.as_deref().unwrap_or(SAID_NOTHING)),
     )
 }
 
@@ -479,8 +513,9 @@ pub(crate) fn evidence(git_status: &str, tail: &str) -> String {
 /// ended itself, and every stop with no session behind it at all.
 const SAID_NOTHING: &str = "It said nothing at all.";
 
-/// And what stands there instead where the ending *was* written down: how the
-/// session ended, in place of the sentence above.
+/// And how the last session ended, where that was written down: what stands in
+/// the evidence block, in place of the sentence above, wherever the session
+/// left nothing of its own there.
 ///
 /// *It said nothing at all* is true of a session that printed nothing and
 /// points nowhere. A desktop-app launcher starts, prints nothing and exits
@@ -490,9 +525,12 @@ const SAID_NOTHING: &str = "It said nothing at all.";
 ///
 /// Only where the session said nothing, and never over what it did say: an
 /// agent's own prose is better evidence than an exit code, and this displaces
-/// none of it. And only in the evidence block — the reason the Notice opens
-/// with is the same sentence it has always been, worded where the ways of
-/// ending badly are still told apart. See [`crate::sessions::Ended::badly`].
+/// none of it. **Which the row itself is what says** — see
+/// [`store::Ended::printed`], the relay's reading of the session's own bytes —
+/// rather than an empty Capture, a Capture being a record Verkstead writes into
+/// as well. And only in the evidence block — the reason the Notice opens with
+/// is the same sentence it has always been, worded where the ways of ending
+/// badly are still told apart. See [`crate::sessions::Ended::badly`].
 ///
 /// `None` where there is no ending on the record, which is [`SAID_NOTHING`]'s
 /// three cases — and where the store would not answer, a stop being written
@@ -501,11 +539,11 @@ async fn ended_instead(
     pool: &SqlitePool,
     conversation_id: i64,
     writing: Option<i64>,
-) -> Option<String> {
+) -> Option<store::Ended> {
     let event_id = writing?;
 
     match store::session_ending(pool, conversation_id, event_id).await {
-        Ok(ended) => ended.as_ref().map(how_it_ended),
+        Ok(ended) => ended,
         Err(error) => {
             tracing::error!(error = ?error, conversation_id, event_id, "reading how a stopped session ended failed");
             None
@@ -757,7 +795,7 @@ mod tests {
             "nothing is driving it: no session is running",
             "## rate-limiting\n M limiter.md",
             "the task is beyond me",
-            SAID_NOTHING,
+            None,
         );
 
         assert_eq!(
@@ -781,7 +819,7 @@ mod tests {
             "the checks are red",
             "",
             "```\nrm -rf\n```",
-            SAID_NOTHING,
+            None,
         );
 
         assert!(
@@ -795,13 +833,7 @@ mod tests {
     /// looked into.
     #[test]
     fn evidence_nobody_could_gather_says_that_it_is_missing() {
-        let said = said(
-            "grilling the work",
-            "nothing is driving it",
-            "",
-            "",
-            SAID_NOTHING,
-        );
+        let said = said("grilling the work", "nothing is driving it", "", "", None);
 
         assert!(
             said.contains("Git had nothing pending, or the repository would not answer."),
@@ -820,9 +852,10 @@ mod tests {
             "the session exited with status 1",
             "## rate-limiting",
             "",
-            &how_it_ended(&store::Ended {
+            Some(&store::Ended {
                 code: Some(1),
                 lived: Duration::from_millis(400),
+                printed: false,
             }),
         );
 
@@ -840,6 +873,68 @@ mod tests {
         );
     }
 
+    /// And a Capture holding nothing but Verkstead's own lines is a session
+    /// that said nothing, however full it looks.
+    ///
+    /// **Which is the Windows session this sentence was written for.** A
+    /// boundary being written puts two lines of Verkstead's own into a Capture
+    /// before the agent has a terminal at all — see
+    /// [`crate::sessions::verkstead_says`] — so the launcher that starts, prints
+    /// nothing and exits leaves a record that is not empty and evidence that is
+    /// not its own. Read as the session's, it would put the boundary in the
+    /// evidence block and the exit code nowhere, which is the hour of diagnosis
+    /// this was all for.
+    #[test]
+    fn a_capture_holding_only_verksteads_own_lines_is_still_a_session_that_said_nothing() {
+        let said = said(
+            "implementing the work",
+            "the session exited with status 1",
+            "",
+            "Verkstead is writing this session's boundary: 60 access-control entries on this \
+             machine's own directories. The agent starts once they are written.\n\
+             Verkstead wrote this session's boundary in 112.0 s.",
+            Some(&store::Ended {
+                code: Some(1),
+                lived: Duration::from_millis(400),
+                printed: false,
+            }),
+        );
+
+        assert!(
+            said.contains("It exited with code 1 after 0.4 s, having printed nothing.\n"),
+            "the ending stands in the block: {said:?}",
+        );
+        assert!(
+            !said.contains("boundary"),
+            "and Verkstead's own account of the launch is not the session's account of \
+             itself, so it is not what the evidence block shows: {said:?}",
+        );
+    }
+
+    /// And a session that *did* print keeps its own words, whatever else is in
+    /// the record beside them: an agent's prose is better evidence than an exit
+    /// code, and this displaces none of it.
+    #[test]
+    fn a_session_that_spoke_keeps_its_own_words() {
+        let said = said(
+            "implementing the work",
+            "the session exited with status 1",
+            "",
+            "the task is beyond me",
+            Some(&store::Ended {
+                code: Some(1),
+                lived: Duration::from_secs(90),
+                printed: true,
+            }),
+        );
+
+        assert!(said.contains("    the task is beyond me\n"), "{said:?}");
+        assert!(
+            !said.contains("having printed nothing"),
+            "said of a session that printed something, it would be false: {said:?}",
+        );
+    }
+
     /// A process something else killed has no code to name, and the half of the
     /// account that is left is still worth having.
     #[test]
@@ -848,6 +943,7 @@ mod tests {
             how_it_ended(&store::Ended {
                 code: None,
                 lived: Duration::from_secs(95),
+                printed: false,
             }),
             "It was killed after 95.0 s, having printed nothing.",
         );

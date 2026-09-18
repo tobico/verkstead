@@ -1101,6 +1101,13 @@ struct Silence {
     /// it was launched where it has had none.
     at: Instant,
 
+    /// Whether the session itself has said anything since it started.
+    ///
+    /// Set by what comes off the terminal and by nothing else, so a Capture
+    /// Verkstead wrote a line of its own into does not read as a session that
+    /// spoke — see [`Idle::said_anything`].
+    spoke: bool,
+
     /// When the judgement last said the session had stopped, and `None` while it
     /// says the session is at work.
     ///
@@ -1145,6 +1152,7 @@ impl Idle {
             judged,
             silence: Arc::new(Mutex::new(Silence {
                 at: now,
+                spoke: false,
                 idling_since: undrawn.then_some(now),
                 wait: None,
             })),
@@ -1185,6 +1193,7 @@ impl Idle {
         let now = Instant::now();
 
         silence.at = now;
+        silence.spoke = true;
 
         if at_rest {
             silence.idling_since.get_or_insert(now);
@@ -1285,6 +1294,22 @@ impl Idle {
             Some(wait) => crossing.max(wait.until),
             None => crossing,
         }
+    }
+
+    /// Whether the session itself ever printed a byte.
+    ///
+    /// What tells a session's own evidence from Verkstead's — see
+    /// [`store::Ended::printed`], which is where the relay writes this down, and
+    /// [`crate::stopping::evidence`], which reads it. A Capture is not the
+    /// session's alone: Verkstead writes a line of its own into one before the
+    /// agent has a terminal, on the platform whose boundary is written, so a
+    /// full-looking Capture is no longer what says the session spoke.
+    ///
+    /// Every byte counts here, whatever the judgement makes of it: what this
+    /// asks is whether the session ever got going, and a frame drawn is a
+    /// session that did.
+    pub(crate) fn said_anything(&self) -> bool {
+        self.silence().spoke
     }
 
     /// When it was last seen at work, for whoever wants to know whether that was
@@ -2856,11 +2881,19 @@ async fn relay(
     // its lifetime as the only evidence there is — see [`store::end_session`],
     // and [`crate::stopping`], which is what reads it.
     //
+    // **And whether it ever printed a byte**, which is the half of it only this
+    // can say. A Capture is not the session's alone — Verkstead writes a line of
+    // its own into one before the agent has a terminal, on the platform whose
+    // boundary is written — so an empty Capture is no longer what tells a
+    // session with nothing to show. What is read here is the session's own
+    // bytes and nothing else: [`Idle`] is told about what came off the terminal
+    // and never about [`verkstead_says`].
+    //
     // Not for a session Verkstead ended itself, which is the one ending that is
     // not a session going wrong: its step had landed, or the human pressed
     // something, and how it exited is no part of either.
     //
-    // A store that will not take it costs the two numbers rather than anything
+    // A store that will not take it costs the three facts rather than anything
     // else: what is happening here is a session ending, and the ending stands
     // whatever this row says.
     if !ended.on_purpose() {
@@ -2869,7 +2902,9 @@ async fn relay(
             .ok()
             .and_then(std::process::ExitStatus::code);
 
-        if let Err(error) = store::end_session(pool, event_id, code, lived).await {
+        if let Err(error) =
+            store::end_session(pool, event_id, code, lived, idle.said_anything()).await
+        {
             tracing::error!(error = ?error, event_id, "recording how a session ended failed");
         }
     }
