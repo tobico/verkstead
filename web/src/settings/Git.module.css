@@ -41,6 +41,13 @@
   font-size: 0.9rem;
 }
 
+/* What a token has to be able to do, under the section's heading and above
+   everything about the one that is saved — see `scopes.tsx`, which is where the
+   words are. Only the spacing is this pane's. */
+.tokenScopes {
+  margin: 0 0 0.85rem;
+}
+
 /* What is known about the saved token, which is everything but the token. Said
    in both panes, because the card's line and the form's are the same line: on
    the card it is what is configured, and in the form it is what Replace and

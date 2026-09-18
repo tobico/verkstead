@@ -471,6 +471,17 @@ menu, and the uninstall entry in **Installed apps** beside everything else you
 installed. A newer msi replaces the copy that is there rather than standing
 beside it.
 
+**One thing about that install lands in the wrong list, and it is known.** On a
+fresh machine the uninstall entry was registered under the machine's own
+`HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall` rather than under
+your `HKCU`, so **Installed apps** offers it to everybody who signs in to this
+machine instead of only to you. Nothing else moved with it: the files, the Start
+menu entry and the `PATH` entry are all in your profile, and the install still
+asked nobody for anything. It is **parked rather than fixed** — finding what
+makes Windows Installer register it there wants a Windows machine to work on,
+and what it costs is an entry in the wrong list rather than an install that
+touched the machine. Uninstalling from **Installed apps** works either way.
+
 **And the install directory goes on your `PATH`**, which is the half of this
 download that is not the icon at all: `verkstead ask`, `verkstead guide` and
 the rest work in a terminal opened *after* the install. One that was already
@@ -745,7 +756,13 @@ and every model this build knows for that agent — and there is a form under th
 for an account elsewhere. **Who the work is committed as** asks for the git
 author, prefilled from `git config --global`, with the GitHub token optional and
 prefilled from `GH_TOKEN`, `GITHUB_TOKEN` or the host `gh`'s own login, each
-field labelled with where its value came from. The last Next takes the mode
+field labelled with where its value came from. Above the token field is what one
+has to be able to do — `repo` and `workflow` on a classic token, and `gist` as
+well to publish a share; Contents, Pull requests, Issues and Workflows to write
+and Actions to read on a fine-grained one — because the push that needs them is
+made by a session inside the sandbox, where a refusal for a missing scope names
+none of them. The settings page says the same above its own token field. The
+last Next takes the mode
 off and lands you on the compose page. There is no skip and no going back
 through it: the verdict is reached once, at startup, so a machine that already
 has all three opens the workbench and never sees the wizard. What it does not do

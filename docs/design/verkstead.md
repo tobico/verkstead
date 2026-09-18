@@ -1001,7 +1001,17 @@ Timeline events:
   `CONTEXT.md` rather than beside the choice). The token field is write-only:
   what is shown of a saved one is its last four characters and when it was
   written, with replace and clear as presses of their own, and the account
-  GitHub verified it as after a save. With either setting missing the page says
+  GitHub verified it as after a save.
+  *Refined 2026-09-18, building built-roots/05-first-run-hygiene*: above the
+  field is what a token has to be able to do — `repo` and `workflow` on a
+  classic one and `gist` as well for a share, Contents, Pull requests, Issues
+  and Workflows to write and Actions to read on a fine-grained one. It stands
+  whether or not a token has been saved, which is what tells it from the lines
+  under it about the one that was; it is the same words on the wizard's git
+  step, drawn from one module; and it is on the page rather than in `CONTEXT.md`
+  because the push that needs those scopes is a session's, made inside the
+  sandbox, so a refusal for a missing one comes back naming no scope at all.
+  With either setting missing the page says
   so and says what it costs: sessions that cannot reach GitHub, commits that
   fail asking who the author is.
   Under the Git section are the Agent Profiles and the Repos, which had pages of

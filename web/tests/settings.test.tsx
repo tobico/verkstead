@@ -57,6 +57,7 @@ import repoList from "../src/repos/RepoList.module.css";
 import card from "../src/CardButton.module.css";
 import { GitCard, GitPane } from "../src/settings/Git";
 import styles from "../src/settings/Git.module.css";
+import scopes from "../src/settings/scopes.module.css";
 import instructions from "../src/settings/Instructions.module.css";
 import languages from "../src/settings/Languages.module.css";
 import binds from "../src/settings/SandboxBinds.module.css";
@@ -174,6 +175,17 @@ function sent(fetching: ReturnType<typeof serving>): unknown {
 }
 
 const TOKEN = "ghp_fedcba9876543210";
+
+/// What the scopes block says a token has to be able to do, a line per flavour
+/// of token — the classic one first, as the block draws them.
+///
+/// Read off the block rather than through `getByText`, because each line is
+/// part words and part `code`: what is being asked is what the whole line says.
+function wanted(container: HTMLElement): string[] {
+  return [...container.querySelectorAll(`.${scopes.scopes} li`)].map(
+    (line) => line.textContent ?? "",
+  );
+}
 
 describe("the card", () => {
   it("says of a saved token its last four characters and when it was written", async () => {
@@ -350,7 +362,9 @@ describe("the form", () => {
   /// what a gist is published as and what a pattern matches are all written
   /// down elsewhere, and a page that said them again was a page nobody read.
   /// A computed line is not one of these — what the machine is doing stays
-  /// wherever it was, which is what the warnings above prove.
+  /// wherever it was, which is what the warnings above prove. Neither are the
+  /// scopes below: they say what the *value* has to be able to do, which is
+  /// nowhere else and is what the next test is about.
   it("carries no note explaining a control", async () => {
     theSettings(TOLD);
     const { container } = mountPane();
@@ -358,6 +372,38 @@ describe("the form", () => {
     await waitFor(() => screen.getByLabelText("Name"));
 
     expect(container.querySelectorAll(`.${notices.note}`)).toHaveLength(0);
+  });
+
+  /// What a token has to be able to do, in both flavours GitHub issues one in.
+  /// A push a scope is missing for is made inside a session, so the refusal
+  /// that comes back names no scope — this is the only place the boxes to tick
+  /// are named.
+  it("names the scopes a token needs, in both flavours", async () => {
+    theSettings(TOLD);
+    const { container } = mountPane();
+
+    await waitFor(() => screen.getByText(/Tick these on GitHub/));
+
+    const [classic, fine] = wanted(container);
+    expect(classic).toContain("repo");
+    expect(classic).toContain("workflow");
+    expect(classic).toContain("gist");
+
+    expect(fine).toContain("Contents");
+    expect(fine).toContain("Pull requests");
+    expect(fine).toContain("Issues");
+    expect(fine).toContain("Workflows");
+    expect(fine).toContain("Actions");
+  });
+
+  /// And they stand before there is anything to say them about: this is what to
+  /// tick *before* pasting one, where the lines about the account and the scope
+  /// GitHub withheld are about a token that has been saved.
+  it("names them with no token configured", async () => {
+    theSettings(UNSET);
+    mountPane();
+
+    await waitFor(() => screen.getByText(/Tick these on GitHub/));
   });
 
   /// The way out of a details pane is the way back its head draws, hidden by the
