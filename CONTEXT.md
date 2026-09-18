@@ -550,8 +550,10 @@ link a session could not follow, or standing as the Claude Code **desktop app**
 rather than the CLI — because the first two are a `PATH` to fix rather than a
 program to install, and the third is Claude Code already on the machine with no
 CLI on the end of that name. The desktop app is recognised by shape and nothing
-is run to find out: a `claude` under `%LOCALAPPDATA%\AnthropicClaude`, beside
-Squirrel's `Update.exe`, or standing as a `WindowsApps` alias. Its row says
+is run to find out: a `claude` under `%LOCALAPPDATA%\AnthropicClaude`, or beside
+Squirrel's `Update.exe`. Two shapes and both of them seen — a shape guessed at
+would refuse a session on a machine it was wrong about, with nothing on the
+Profile to overrule it. Its row says
 which of the two programs the file is and leaves the install to the row's own
 instruction beneath it, and a session whose Profile resolves to one is refused
 rather than started, with the same line in the log and in its Capture — that

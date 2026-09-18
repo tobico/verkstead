@@ -1370,7 +1370,7 @@ pub(crate) enum Standing {
 
     /// The name is where a session looks and the file there is Claude Code's
     /// **desktop app** rather than its CLI — see [`desktop_app`], which is the
-    /// three shapes that say so.
+    /// two shapes that say so.
     ///
     /// A file that really is there and really would run, which is what makes
     /// this worth a variant of its own: a session handed it printed nothing and
@@ -1393,21 +1393,23 @@ pub(crate) enum Standing {
 /// so this is `stat`s and path reading, and every arm of it is a unit test on a
 /// machine that is not Windows.
 ///
-/// Three shapes, and the platform is a value rather than a `cfg`:
+/// Two shapes, and the platform is a value rather than a `cfg`:
 ///
 /// - an ancestor directory named [`ANTHROPIC_CLAUDE`], which is where the app a
 ///   person downloads installs itself under `%LOCALAPPDATA%` — the versioned
 ///   `app-x.y.z` it really runs out of is under the same directory;
 /// - a sibling [`SQUIRREL_UPDATE`], which is Squirrel's updater standing beside
-///   the app it updates;
-/// - a parent directory named [`WINDOWS_APPS`], which is where an
-///   app-execution alias stands and where the MSIX package Anthropic ships for
-///   deployment puts one.
+///   the app it updates.
 ///
-/// The third is defensive: that route is documented and its alias has not been
-/// seen on a machine from here. It costs nothing, because the only name this
-/// answers for is Claude's own — a `git` alias standing in the same directory
-/// is somebody's git, and every other name leaves by the first line.
+/// **Two, and both of them seen.** A third was written and taken out again: a
+/// parent directory called `WindowsApps`, where an app-execution alias stands
+/// and where an MSIX package would put one. No machine here has ever had that
+/// alias, and the cost of guessing wrong is not a row's wrong sentence — this
+/// answer refuses a session outright, with nothing on the Profile to overrule
+/// it, so a `claude.exe` alias standing in the directory every Windows user
+/// already has on their `PATH` would stop the product on that machine and tell
+/// the human to install what they have. A shape goes in here when somebody has
+/// seen it.
 fn desktop_app(platform: Platform, program: &str, at: &Path) -> bool {
     if platform != Platform::Windows || program != crate::sessions::binary(store::AgentType::Claude)
     {
@@ -1425,9 +1427,6 @@ fn desktop_app(platform: Platform, program: &str, at: &Path) -> bool {
         .filter_map(Path::file_name)
         .any(|name| called(name, ANTHROPIC_CLAUDE))
         || directory.join(SQUIRREL_UPDATE).is_file()
-        || directory
-            .file_name()
-            .is_some_and(|name| called(name, WINDOWS_APPS))
 }
 
 /// Whether a path component is `against`, the way Windows reads one: without
@@ -1443,10 +1442,6 @@ const ANTHROPIC_CLAUDE: &str = "AnthropicClaude";
 
 /// Squirrel's updater, which stands beside the app it updates.
 const SQUIRREL_UPDATE: &str = "Update.exe";
-
-/// And the directory an app-execution alias stands in, which is what an MSIX
-/// package puts on the `PATH`.
-const WINDOWS_APPS: &str = "WindowsApps";
 
 /// Where `program` was seen on the `PATH` the server itself was started with,
 /// in a directory a session's own does not hold.
@@ -6226,11 +6221,17 @@ mod tests {
     /// than found: it is a program that really runs, and a session handed it
     /// prints nothing and exits.
     ///
-    /// The three shapes, each on its own — the app a person downloads under
-    /// `%LOCALAPPDATA%`, Squirrel's updater standing beside it, and the
-    /// app-execution alias the MSIX package puts on the `PATH`. Every one of
-    /// them is `stat`s and path reading, so every one of them is a test on a
-    /// machine that is not Windows: what decides it is [`Platform`] as a value.
+    /// The two shapes, each on its own — the app a person downloads under
+    /// `%LOCALAPPDATA%`, and Squirrel's updater standing beside it. Both are
+    /// `stat`s and path reading, so both are a test on a machine that is not
+    /// Windows: what decides it is [`Platform`] as a value.
+    ///
+    /// **And the directory every Windows `PATH` already has is not one of
+    /// them**, which is the other half of this: `WindowsApps` is where an
+    /// app-execution alias stands, nobody here has seen Claude's there, and
+    /// this answer refuses a session rather than drawing a sentence. A shape
+    /// nobody has seen is a shape that stops the product on a machine it
+    /// guessed wrong about.
     ///
     /// The extension is spelled the way `%PATHEXT%` spells it, as the resolving
     /// test above spells it: a Windows filesystem has no case where the one the
@@ -6248,7 +6249,8 @@ mod tests {
         // standing beside what it updates.
         let squirrel = machine.path().join("Vendor");
 
-        // And the alias an MSIX package leaves on the `PATH`.
+        // And the directory app-execution aliases stand in, which is on every
+        // Windows `PATH` and says nothing about what is standing there.
         let alias = local.join("Microsoft/WindowsApps");
 
         for directory in [&app, &squirrel, &alias] {
@@ -6275,7 +6277,6 @@ mod tests {
                 "the directory the app a person downloads installs into",
             ),
             (&squirrel, "the updater standing beside the app it updates"),
-            (&alias, "the directory an app-execution alias stands in"),
         ] {
             assert_eq!(
                 said(directory, "claude"),
@@ -6287,15 +6288,27 @@ mod tests {
             );
         }
 
-        // A `git.EXE` alias is somebody's git rather than an Electron app: the
-        // only name this is ever asked about is Claude's own.
-        std::fs::write(alias.join("git.EXE"), "git\n").unwrap();
+        assert_eq!(
+            said(&alias, "claude"),
+            Standing::Found {
+                at: alias.join("claude.EXE"),
+                landed: alias.join("claude.EXE"),
+                through: Vec::new(),
+            },
+            "while a `claude` standing where the aliases do is taken at its \
+             word: refusing it would stop every session on a machine whose \
+             CLI happens to be reached that way",
+        );
+
+        // A `git.EXE` is somebody's git rather than an Electron app: the only
+        // name this is ever asked about is Claude's own.
+        std::fs::write(squirrel.join("git.EXE"), "git\n").unwrap();
 
         assert_eq!(
-            said(&alias, GIT),
+            said(&squirrel, GIT),
             Standing::Found {
-                at: alias.join("git.EXE"),
-                landed: alias.join("git.EXE"),
+                at: squirrel.join("git.EXE"),
+                landed: squirrel.join("git.EXE"),
                 through: Vec::new(),
             },
             "and a name that is not Claude's is never the Claude Code desktop \
@@ -6330,7 +6343,7 @@ mod tests {
                     landed: directory.join("claude.EXE"),
                     through: Vec::new(),
                 },
-                "a harness in a directory of none of the three shapes is the \
+                "a harness in a directory of neither shape is the \
                  command-line tool, and the row ticks",
             );
         }
