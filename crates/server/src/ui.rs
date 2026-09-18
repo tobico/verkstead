@@ -1208,13 +1208,21 @@ pub(crate) async fn conversation_view(
     // The read above closes the window at a session's end; this one closes the
     // window at its start, which is the same mistake from the other side.
     //
-    // A session's Event is opened by [`store::start_capture`] a moment before
-    // the register learns of the session writing into it — see
-    // [`crate::sessions::Sessions::start`], where the two are a few lines
-    // apart. A Timeline read in between carries an Event the read above cannot
-    // name, and drawing it as stopped is the `0 lines` and nothing this whole
-    // ordering exists to prevent: a page saying a session never said anything,
-    // about one that has only just started saying it.
+    // A session's Event is opened by [`store::start_capture`] before the
+    // register learns of the session writing into it — see
+    // [`crate::sessions::Sessions::start`], where the two are a whole launch
+    // apart, and on the platform whose boundary is written, minutes of one. A
+    // Timeline read in between carries an Event the read above cannot name, and
+    // drawing it as stopped is the `0 lines` and nothing this whole ordering
+    // exists to prevent: a page saying a session never said anything, about one
+    // that has only just started saying it.
+    //
+    // Which is why the launch itself names the Event as soon as it has one —
+    // see [`crate::sessions::Launching::printing_into`], which is what makes
+    // [`crate::sessions::Sessions::writing`] answer through that whole stretch
+    // rather than only through the moment either side of it. What is left for
+    // the two reads below to close is the gap at a session's end and the gap
+    // between the launch note going and the register having it.
     //
     // Either read naming it is enough, because both windows are wrong the same
     // way round — a live session drawn as a finished one — and the cost of

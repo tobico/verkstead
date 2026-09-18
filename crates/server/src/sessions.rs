@@ -791,17 +791,20 @@ pub(crate) struct Sessions {
 
     running: Arc<Mutex<HashMap<i64, Running>>>,
 
-    /// And the backend of the session each Conversation is *launching*, held
-    /// from before its process exists until it is on the register above — see
+    /// And the session each Conversation is *launching*, held from before its
+    /// Capture exists until it is on the register above — see
     /// [`Sessions::launching`].
     ///
-    /// The register cannot answer for that stretch, and there is one thing that
-    /// has to be answered in it: how a session asks. A process is spawned and
-    /// then written down, and between the two it is running and already able to
-    /// reach the server — so a Set it sends in that window would be read as one
-    /// from outside a session and waited on, on a backend whose sessions cannot
-    /// wait. See [`Sessions::channel`], which is the whole of what this is for.
-    launching: Arc<Mutex<HashMap<i64, store::AgentType>>>,
+    /// The register cannot answer for that stretch, and there are two things
+    /// that have to be answered in it. **How a session asks**: a process is
+    /// running before it is written down, and a Set it sends in that window
+    /// would be read as one from outside a session and waited on, on a backend
+    /// whose sessions cannot wait — see [`Sessions::channel`]. And **which
+    /// Event is being written into**: the Capture opens before the sandbox is
+    /// built, which on the platform whose boundary is written is minutes, and
+    /// an Event nothing claims is one the Timeline draws as a session that
+    /// finished without saying anything — see [`Sessions::writing`].
+    launching: Arc<Mutex<HashMap<i64, Launch>>>,
 
     /// Whose turn it is in each Conversation's Worktree — see [`Sessions::turn`].
     turns: Arc<Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>>,
@@ -814,6 +817,19 @@ pub(crate) struct Sessions {
 /// the working.
 pub(crate) type Turn = tokio::sync::OwnedMutexGuard<()>;
 
+/// What is known about a session while it is being launched, which is less than
+/// the register holds and more than nothing.
+#[derive(Debug, Clone, Copy)]
+struct Launch {
+    /// Which backend it will be, known before there is anything to launch.
+    agent_type: store::AgentType,
+
+    /// And the Timeline Event it is already being written into, from the
+    /// moment the Capture is opened — `None` for the stretch before that, which
+    /// is a launch with nothing to show yet.
+    event_id: Option<i64>,
+}
+
 /// The note that a Conversation is launching a session, held for as long as the
 /// launch takes — see [`Sessions::launching`].
 ///
@@ -822,8 +838,30 @@ pub(crate) type Turn = tokio::sync::OwnedMutexGuard<()>;
 /// and the one that worked. Only the last of them leaves anything on the
 /// register, and none of them should leave this behind.
 struct Launching {
-    launching: Arc<Mutex<HashMap<i64, store::AgentType>>>,
+    launching: Arc<Mutex<HashMap<i64, Launch>>>,
     conversation_id: i64,
+}
+
+impl Launching {
+    /// Say which Event this launch is writing into, as soon as there is one.
+    ///
+    /// **Which is well before there is a process.** The Capture opens ahead of
+    /// the sandbox so that a launch has somewhere to say what it is doing — the
+    /// boundary being written, the reason one failed — and until this was said
+    /// the only thing that could name the Event was the register, which does
+    /// not learn of the session until the relay is up. A whole launch apart,
+    /// that left the Timeline drawing an Event being written into as a session
+    /// that had finished and said nothing.
+    fn printing_into(&self, event_id: i64) {
+        if let Some(launch) = self
+            .launching
+            .lock()
+            .expect("the launching registry is not poisoned")
+            .get_mut(&self.conversation_id)
+        {
+            launch.event_id = Some(event_id);
+        }
+    }
 }
 
 impl Drop for Launching {
@@ -1670,12 +1708,35 @@ impl Sessions {
     /// Asked per Event rather than per Conversation because that is what the
     /// answer is about: a Timeline holds every session a Conversation has ever
     /// had, and only one of them can still be talking.
+    ///
+    /// **Or the launch that has not reached the register yet**, for
+    /// [`Sessions::channel`]'s reason one question along. A session's Capture is
+    /// opened before its sandbox is built — which is where a launch says what it
+    /// is doing, and on the platform whose boundary is written is minutes of it
+    /// — and the register does not learn of the session until its relay is up.
+    /// An Event neither of them names is one the Timeline draws as a session
+    /// that finished without saying anything, which is the `0 lines` and nothing
+    /// that every reading here exists to prevent. So the launch names it from
+    /// the moment the Capture opens — see [`Launching::printing_into`].
+    ///
+    /// The register first where both have it, which is the window between the
+    /// relay starting and [`Sessions::start`] returning: one Event either way,
+    /// and the running session is the better answer about a running session.
     pub(crate) fn writing(&self, conversation_id: i64) -> Option<i64> {
-        self.running
+        let running = self
+            .running
             .lock()
             .expect("the sessions registry is not poisoned")
             .get(&conversation_id)
-            .map(|running| running.event_id)
+            .map(|running| running.event_id);
+
+        running.or_else(|| {
+            self.launching
+                .lock()
+                .expect("the launching registry is not poisoned")
+                .get(&conversation_id)
+                .and_then(|launch| launch.event_id)
+        })
     }
 
     /// How a Conversation's running session asks: the channel its backend's
@@ -1688,12 +1749,13 @@ impl Sessions {
     ///
     /// The register **or the launch that has not reached it yet**, because a
     /// session is running before it is written down: [`Sessions::start`] spawns
-    /// the process and then opens the Capture it prints into, and an agent that
-    /// asks in between would be asking from a Conversation the register says has
-    /// nothing running. It is the fixture's stub that does that every time and a
-    /// loaded machine that lets a real one, and the answer is wrong either way —
-    /// so the backend is written down before there is a process to ask, and taken
-    /// off again when the register has it. See [`Sessions::launching`].
+    /// the process and only has it on the register once its relay is up, and an
+    /// agent that asks in between would be asking from a Conversation the
+    /// register says has nothing running. It is the fixture's stub that does
+    /// that every time and a loaded machine that lets a real one, and the answer
+    /// is wrong either way — so the backend is written down before there is a
+    /// process to ask, and taken off again when the register has it. See
+    /// [`Sessions::launching`].
     ///
     /// [`store::Channel::Blocking`] where neither has one, which is what a Set
     /// arriving from outside a session is: a router with no agents at all, and
@@ -1715,7 +1777,7 @@ impl Sessions {
                     .lock()
                     .expect("the launching registry is not poisoned")
                     .get(&conversation_id)
-                    .copied()
+                    .map(|launch| launch.agent_type)
             })
             .map(store::AgentType::channel)
             .unwrap_or(store::Channel::Blocking)
@@ -1724,15 +1786,24 @@ impl Sessions {
     /// Write down that this Conversation is launching a session on `agent_type`,
     /// and hand back the note to hold while it does.
     ///
-    /// Taken before the process is spawned and dropped when [`Sessions::start`]
-    /// returns, which is after the session is on the register — so the two
-    /// answers meet rather than leaving a gap, and a launch that failed leaves
-    /// nothing behind for the next Set to read.
+    /// Taken ahead of everything a launch does and dropped when
+    /// [`Sessions::start`] returns, which is after the session is on the
+    /// register — so the two answers meet rather than leaving a gap, and a
+    /// launch that failed leaves nothing behind for the next Set to read.
+    ///
+    /// The Event it is writing into is not known yet and is said as soon as it
+    /// is — see [`Launching::printing_into`].
     fn launching(&self, conversation_id: i64, agent_type: store::AgentType) -> Launching {
         self.launching
             .lock()
             .expect("the launching registry is not poisoned")
-            .insert(conversation_id, agent_type);
+            .insert(
+                conversation_id,
+                Launch {
+                    agent_type,
+                    event_id: None,
+                },
+            );
 
         Launching {
             launching: self.launching.clone(),
@@ -2057,7 +2128,7 @@ impl Sessions {
         // spawn: the window it covers is the one that got longer when the Event
         // moved up, and a guard that started after the sandbox was built would
         // be one with a boundary's worth of launch in front of it.
-        let _launching = self.launching(conversation_id, pairing.profile.agent_type());
+        let launching = self.launching(conversation_id, pairing.profile.agent_type());
 
         // The Event this session prints into, stamped as it opens with the name
         // Verkstead gave the session and with the Pairing it is being launched
@@ -2080,6 +2151,15 @@ impl Sessions {
             conversation_id,
             event_id,
         };
+
+        // And on the launch note as well, which is what anything asking about
+        // this Conversation reads until the register has the session — a whole
+        // launch away, and on the platform whose boundary is written, minutes
+        // of one. Without it the Timeline draws an Event being written into as
+        // a session that finished and said nothing, which is the one reading
+        // every reader of the register here is arranged to prevent. See
+        // [`Launching::printing_into`].
+        launching.printing_into(event_id);
 
         // What the Capture is read by, from its first line to its last: the
         // lines below and every byte the session goes on to print are counted
@@ -3895,5 +3975,56 @@ exit 1
         idle.arrived(true);
 
         assert!(idle.idling());
+    }
+
+    /// A launch names the Event it is writing into from the moment the Capture
+    /// is open, rather than leaving it to the register.
+    ///
+    /// **Because the two are a whole launch apart.** The Capture is opened
+    /// before the sandbox is built, so that a launch has somewhere to say what
+    /// it is doing, and the register does not learn of the session until its
+    /// relay is up — which on the platform whose boundary is written is minutes
+    /// later. An Event neither of them names is one the Timeline draws as a
+    /// session that finished without saying anything, for the whole of the
+    /// stretch its Capture is being written in.
+    ///
+    /// And it goes with the launch: a launch that left no session left a
+    /// finished one on the Timeline, which is what it is.
+    #[test]
+    fn a_launch_names_the_event_it_is_writing_into_before_the_register_has_it() {
+        let sessions = Sessions::none();
+
+        assert_eq!(
+            sessions.writing(CONVERSATION),
+            None,
+            "nothing is writing into anything before a launch has begun",
+        );
+
+        {
+            let launching = sessions.launching(CONVERSATION, store::AgentType::Claude);
+
+            assert_eq!(
+                sessions.writing(CONVERSATION),
+                None,
+                "and nothing yet where the launch has no Capture open",
+            );
+
+            launching.printing_into(31);
+
+            assert_eq!(
+                sessions.writing(CONVERSATION),
+                Some(31),
+                "and the Event from the moment there is one, which is what keeps \
+                 the Timeline from drawing it as a session that finished and said \
+                 nothing",
+            );
+        }
+
+        assert_eq!(
+            sessions.writing(CONVERSATION),
+            None,
+            "and nothing again once the launch is over, a launch that left no \
+             session having left a finished one",
+        );
     }
 }
