@@ -15389,6 +15389,82 @@ async fn a_session_that_exits_badly_halts_the_run_with_a_notice() {
     );
 }
 
+/// And a session that said nothing at all says how it ended instead: the exit
+/// code and the tenths of a second it lived.
+///
+/// The shape a desktop-app launcher has. It starts, prints nothing and exits
+/// immediately — everything wrong with it is in the exit code and the lifetime,
+/// and *It said nothing at all* is true of it and points nowhere. The reporter
+/// who met one spent an hour finding out what this sentence says in a line.
+///
+/// Its reason is unchanged, which is the other half of the promise: the words
+/// the log used for the ending open the Notice exactly as they did. And the
+/// grilling session beside it is the third thing asked about — Verkstead ended
+/// that one itself once its handoff had landed, which is not a session that
+/// went wrong, so nothing was written down about how it exited and a stop over
+/// one would say what it always said.
+#[tokio::test]
+async fn a_session_that_printed_nothing_says_how_it_ended_in_its_notice() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            : > /tmp/verkstead/done
+            printf 'the handoff is written\n'
+            sleep 300
+            ;;
+        *)
+            exit 1
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    let grilled = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("the session exited with status 1"),
+        "the reason the Notice opens with is the one it always was: {:?}",
+        stopped.html,
+    );
+    assert!(
+        !stopped.html.contains("It said nothing at all."),
+        "and the evidence block is no longer the sentence that pointed nowhere: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("It exited with code 1 after 0."),
+        "it is the exit code and a lifetime in tenths of a second: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("s, having printed nothing."),
+        "and that there was nothing else to show: {:?}",
+        stopped.html,
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    assert!(
+        verkstead_store::session_ending(&pool, fixture.id, grilled)
+            .await
+            .unwrap()
+            .is_none(),
+        "and the grilling session Verkstead ended itself once its handoff had \
+         landed has no ending on the record: that is not a session that went \
+         wrong, and how it exited says nothing about anything",
+    );
+}
+
 /// And where the session kept a log, the evidence is what it said rather than
 /// what its terminal was drawing.
 ///

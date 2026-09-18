@@ -350,11 +350,21 @@ async fn land(
     writing: Option<i64>,
     asked: bool,
 ) -> Result<store::Stopping> {
+    let tail = session_tail(pool, conversation_id, writing).await;
+
+    // And, where the session said nothing at all, how it ended instead — see
+    // [`ended_instead`], which is the whole of why that is worth saying.
+    let nothing = match tail.is_empty() {
+        true => ended_instead(pool, conversation_id, writing).await,
+        false => None,
+    };
+
     let said = said(
         what,
         how,
         &worktree_status(pool, conversation_id).await,
-        &session_tail(pool, conversation_id, writing).await,
+        &tail,
+        nothing.as_deref().unwrap_or(SAID_NOTHING),
     );
 
     let stopped = match asked {
@@ -435,7 +445,12 @@ async fn land(
 /// Both blocks are always drawn, empty or not, and an empty one says why it is
 /// empty. Evidence the human cannot tell is missing is worse than none: a stop
 /// with no *Worktree* heading reads as a stop nobody looked into.
-fn said(what: &str, how: &str, git_status: &str, tail: &str) -> String {
+///
+/// `nothing` is what stands where the session said nothing at all — see
+/// [`ended_instead`]. A parameter rather than the sentence written here, because
+/// there is one thing worth saying about a session with nothing to show and it
+/// is not the same thing every time.
+fn said(what: &str, how: &str, git_status: &str, tail: &str, nothing: &str) -> String {
     format!(
         "**{}** stopped.\n\n{how}\n\n{}",
         opening(what),
@@ -453,8 +468,71 @@ pub(crate) fn evidence(git_status: &str, tail: &str) -> String {
             git_status,
             "Git had nothing pending, or the repository would not answer.",
         ),
-        indented(tail, "It said nothing at all."),
+        indented(tail, nothing),
     )
+}
+
+/// What stands in the evidence block where the session said nothing at all and
+/// nothing was written down about how it ended.
+///
+/// Every session before [`store::end_session`] existed, every one Verkstead
+/// ended itself, and every stop with no session behind it at all.
+const SAID_NOTHING: &str = "It said nothing at all.";
+
+/// And what stands there instead where the ending *was* written down: how the
+/// session ended, in place of the sentence above.
+///
+/// *It said nothing at all* is true of a session that printed nothing and
+/// points nowhere. A desktop-app launcher starts, prints nothing and exits
+/// immediately, and the reporter who met one spent an hour on it: everything
+/// wrong was in the exit code and the tenths of a second, and neither reached
+/// the Notice. An instant exit named as an instant exit points at the binary.
+///
+/// Only where the session said nothing, and never over what it did say: an
+/// agent's own prose is better evidence than an exit code, and this displaces
+/// none of it. And only in the evidence block — the reason the Notice opens
+/// with is the same sentence it has always been, worded where the ways of
+/// ending badly are still told apart. See [`crate::sessions::Ended::badly`].
+///
+/// `None` where there is no ending on the record, which is [`SAID_NOTHING`]'s
+/// three cases — and where the store would not answer, a stop being written
+/// either way.
+async fn ended_instead(
+    pool: &SqlitePool,
+    conversation_id: i64,
+    writing: Option<i64>,
+) -> Option<String> {
+    let event_id = writing?;
+
+    match store::session_ending(pool, conversation_id, event_id).await {
+        Ok(ended) => ended.as_ref().map(how_it_ended),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, event_id, "reading how a stopped session ended failed");
+            None
+        }
+    }
+}
+
+/// The ending in a sentence: what it exited with, how long it lived, and that
+/// it printed nothing.
+///
+/// Seconds to a decimal place, the way every other span a person reads here is
+/// said — an instant exit reads as *0.4 s* and a session that ran for a while
+/// before going quietly reads as the minutes it was.
+///
+/// A process something else killed has no code to name, and neither has a relay
+/// that could not reap one at all: what is true of both is that it was not the
+/// session's own choosing, and the lifetime is the half of it that still says
+/// something.
+fn how_it_ended(ended: &store::Ended) -> String {
+    let lived = ended.lived.as_secs_f64();
+
+    match ended.code {
+        Some(code) => {
+            format!("It exited with code {code} after {lived:.1} s, having printed nothing.")
+        }
+        None => format!("It was killed after {lived:.1} s, having printed nothing."),
+    }
 }
 
 /// Why a run stopped when the account it was spending ran out: which account,
@@ -620,6 +698,8 @@ pub(crate) fn shorten(said: &str, keep: usize, what: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
     /// Evidence the human cannot tell is partial is worse than less of it, so
@@ -677,6 +757,7 @@ mod tests {
             "nothing is driving it: no session is running",
             "## rate-limiting\n M limiter.md",
             "the task is beyond me",
+            SAID_NOTHING,
         );
 
         assert_eq!(
@@ -700,6 +781,7 @@ mod tests {
             "the checks are red",
             "",
             "```\nrm -rf\n```",
+            SAID_NOTHING,
         );
 
         assert!(
@@ -713,12 +795,61 @@ mod tests {
     /// looked into.
     #[test]
     fn evidence_nobody_could_gather_says_that_it_is_missing() {
-        let said = said("grilling the work", "nothing is driving it", "", "");
+        let said = said(
+            "grilling the work",
+            "nothing is driving it",
+            "",
+            "",
+            SAID_NOTHING,
+        );
 
         assert!(
             said.contains("Git had nothing pending, or the repository would not answer."),
             "{said:?}",
         );
         assert!(said.contains("It said nothing at all."), "{said:?}");
+    }
+
+    /// And where the ending was written down, that stands in its place: an
+    /// instant exit named as an instant exit points at the binary, where *it
+    /// said nothing at all* points nowhere.
+    #[test]
+    fn a_session_that_printed_nothing_says_how_it_ended_instead() {
+        let said = said(
+            "implementing the work",
+            "the session exited with status 1",
+            "## rate-limiting",
+            "",
+            &how_it_ended(&store::Ended {
+                code: Some(1),
+                lived: Duration::from_millis(400),
+            }),
+        );
+
+        assert!(
+            said.contains("It exited with code 1 after 0.4 s, having printed nothing.\n"),
+            "the exit code and the lifetime, in prose rather than in a block: {said:?}",
+        );
+        assert!(
+            !said.contains("It said nothing at all."),
+            "in place of the sentence that pointed nowhere, rather than beside it: {said:?}",
+        );
+        assert!(
+            said.contains("the session exited with status 1"),
+            "and the reason the Notice opens with is the one it always was: {said:?}",
+        );
+    }
+
+    /// A process something else killed has no code to name, and the half of the
+    /// account that is left is still worth having.
+    #[test]
+    fn a_session_nothing_could_read_a_code_off_says_the_rest_of_it() {
+        assert_eq!(
+            how_it_ended(&store::Ended {
+                code: None,
+                lived: Duration::from_secs(95),
+            }),
+            "It was killed after 95.0 s, having printed nothing.",
+        );
     }
 }

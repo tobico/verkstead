@@ -1404,6 +1404,9 @@ impl Idle {
 /// process, and the Screen is the terminal read as a grid. The terminal has to
 /// outlive the process, because the last thing a session says is said on its way
 /// out.
+///
+/// And the moment it started, which is the fourth and is only ever read once:
+/// how long the session lived is a thing nothing can work out after the fact.
 struct Launched {
     /// The terminal it was started on, which is where everything it prints
     /// arrives.
@@ -1420,6 +1423,17 @@ struct Launched {
     /// What it is drawing, fed the same text the Capture is written from — see
     /// [`Live`].
     screen: Live,
+
+    /// When the process was spawned, so that how long it lived can be said once
+    /// it has been reaped — see [`store::end_session`], which is where that
+    /// goes.
+    ///
+    /// Taken at the spawn rather than at the top of the launch: a sandbox is
+    /// built and a terminal opened before there is a process at all — on the
+    /// platform that writes a boundary, minutes of it — and a lifetime that
+    /// counted those in would say a session lived two minutes when it lived for
+    /// none of them.
+    spawned: Instant,
 }
 
 /// One running session, as whatever wants to stop it sees it.
@@ -2191,6 +2205,10 @@ impl Sessions {
             }
         };
 
+        // The moment the process starts, for the lifetime a stop's Notice says
+        // where the session said nothing at all — see [`Launched::spawned`].
+        let spawned = Instant::now();
+
         let child = match terminal.spawn(&command) {
             Ok(child) => child,
             Err(error) => {
@@ -2236,6 +2254,7 @@ impl Sessions {
             terminal,
             child,
             screen: screen.clone(),
+            spawned,
         };
 
         // The log the agent keeps of itself is followed inside the directory of
@@ -2639,6 +2658,7 @@ async fn relay(
         terminal,
         child,
         screen,
+        spawned,
     } = session;
 
     let mut buffer = vec![0u8; CHUNK];
@@ -2802,9 +2822,15 @@ async fn relay(
     // stop written here would be the run stopped on two things at once, with
     // Resume launching nothing.
 
+    // Reaped, and how long it lived read off the same moment: what the two
+    // together are for is the session that printed nothing, where there is
+    // nothing else to say what it did with its life.
+    let reaped = child.wait().await;
+    let lived = spawned.elapsed();
+
     // `ending` first, because a session Verkstead killed exits by a signal and
     // that is not a session that went wrong: it is the step having landed.
-    let ended = match child.wait().await {
+    let ended = match &reaped {
         Ok(_) if ending => Ended::Stopped,
         Ok(status) if status.success() => Ended::Well,
         Ok(status) => {
@@ -2824,6 +2850,29 @@ async fn relay(
             Ended::Unknown
         }
     };
+
+    // And written down against the Event, for the stop somebody may be about to
+    // write off it: a session that said nothing at all leaves its exit code and
+    // its lifetime as the only evidence there is — see [`store::end_session`],
+    // and [`crate::stopping`], which is what reads it.
+    //
+    // Not for a session Verkstead ended itself, which is the one ending that is
+    // not a session going wrong: its step had landed, or the human pressed
+    // something, and how it exited is no part of either.
+    //
+    // A store that will not take it costs the two numbers rather than anything
+    // else: what is happening here is a session ending, and the ending stands
+    // whatever this row says.
+    if !ended.on_purpose() {
+        let code = reaped
+            .as_ref()
+            .ok()
+            .and_then(std::process::ExitStatus::code);
+
+        if let Err(error) = store::end_session(pool, event_id, code, lived).await {
+            tracing::error!(error = ?error, event_id, "recording how a session ended failed");
+        }
+    }
 
     // And the last of the log, after the process that was writing it has been
     // reaped rather than when its terminal closed: an agent's final lines are

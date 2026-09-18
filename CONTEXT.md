@@ -1111,7 +1111,11 @@ The session's own record of its conversation — the agent's prose, its tool
 use, its reasoning, and what was put to it — kept word for word as the agent's
 backend wrote it, and rendered readable in the details pane. What summaries and a
 stop Notice's evidence draw from, falling back to the Capture when a session
-left none.
+left none — and, where both are empty, to **how the session ended**: the code it
+exited with and how long it lived, which is all there is to say about a session
+that printed nothing at all. Kept for a session that stopped without being asked
+to and for no other, a session Verkstead ended itself being one whose exit says
+nothing about anything.
 
 **Which record it is read from is the backend's to say.** A backend that takes
 a session id at launch — Claude Code and Grok Build both do — is told the name
