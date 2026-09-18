@@ -3999,7 +3999,9 @@ mod tests {
 
         assert_eq!(
             lacking(path, &Landing::Ticked(1)),
-            Some(format!("task 1's box in `{named}` is not ticked and committed")),
+            Some(format!(
+                "task 1's box in `{named}` is not ticked and committed"
+            )),
         );
 
         let list = path.join(BACKLOG).join(TODO);
@@ -4010,7 +4012,9 @@ mod tests {
 
         assert_eq!(
             lacking(path, &Landing::Ticked(1)),
-            Some(format!("task 1's box in `{named}` is ticked but not committed")),
+            Some(format!(
+                "task 1's box in `{named}` is ticked but not committed"
+            )),
         );
 
         run(path, &["commit", "-am", "feat: a task"]);

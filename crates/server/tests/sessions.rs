@@ -8231,7 +8231,8 @@ async fn a_committed_in_companion_without_a_pull_request_refuses_the_signal_nami
         .await;
 
     assert_eq!(
-        found, [41, 7],
+        found,
+        [41, 7],
         "one pull request per repository the work committed in",
     );
     assert_eq!(
