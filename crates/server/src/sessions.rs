@@ -3666,17 +3666,24 @@ mod tests {
     /// which is under the profile Windows gives a Conversation.
     ///
     /// Composed the way the server composes it rather than by joining the names
-    /// again here. What a session is told is a path it can *open*, so the
-    /// handoff directory inside a HOME is spelled with a forward slash whichever
-    /// machine composed it — see [`crate::sandbox::under`] — and a `join` here
-    /// would put this machine's own separator where that one is and match
-    /// nothing.
+    /// again here — both halves of it. What a session is told is a path it can
+    /// *open*, so the handoff directory inside a HOME is spelled with a forward
+    /// slash whichever machine composed it, and so is the file under it — see
+    /// [`crate::sandbox::under`].
+    ///
+    /// **A `join` for the file was the bug this helper hid.** It puts the
+    /// *host's* separator on, which on Linux is the same character and on
+    /// Windows is not — so the helper and the server agreed on either machine
+    /// while the line a Windows session was really given had one path with both
+    /// characters in it.
     fn opened_at(state: &std::path::Path) -> PathBuf {
-        crate::handoffs::inside(
-            Platform::Windows,
-            &state.join("homes").join(CONVERSATION.to_string()),
+        crate::sandbox::under(
+            &crate::handoffs::inside(
+                Platform::Windows,
+                &state.join("homes").join(CONVERSATION.to_string()),
+            ),
+            "prompt.md",
         )
-        .join("prompt.md")
     }
 
     /// A prompt with everything a real one carries: what the builders above put

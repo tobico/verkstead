@@ -188,6 +188,14 @@ impl Handoffs {
     /// *session* will open it at rather than the one the server wrote it at.
     /// The two are one directory on the far side of a junction.
     ///
+    /// **And the file is composed onto it the way the directory was**, through
+    /// [`crate::sandbox::under`] rather than [`Path::join`]: `inside` is a path
+    /// for the session to read and is spelled with a forward slash for that
+    /// reason, so a `join` here would put the *host's* separator after it and
+    /// the line would name one path with both characters in it. It opens either
+    /// way on Windows — what it costs is a human reading their own log and a
+    /// session being told a path in prose that looks like two halves.
+    ///
     /// `None` where the directory could not be made or the file could not be
     /// written, which is a session that has nothing to be started on: the
     /// caller starts none, the way it starts none for a sandbox it could not
@@ -214,7 +222,7 @@ impl Handoffs {
             return None;
         }
 
-        Some(started_on(&inside.join(PROMPT)))
+        Some(started_on(&crate::sandbox::under(inside, PROMPT)))
     }
 
     /// Where a Conversation's handoff document is written, seen from outside its
@@ -318,9 +326,20 @@ mod tests {
 
     /// The skill names one path and the sandbox mounts another half of it, and
     /// the two have to be the same file.
+    ///
+    /// Composed through [`crate::sandbox::under`], the way the prompt file
+    /// beside it is and for the same reason: this is a path a *session* opens,
+    /// so a `join` here would spell it with the separator of whichever host ran
+    /// the suite and the skill's own sentence would stop being what a session
+    /// is told.
     #[test]
     fn the_path_the_skill_names_is_the_directory_that_is_mounted() {
-        assert_eq!(Path::new(INSIDE).join(HANDOFF), Path::new(HANDOFF_INSIDE));
+        assert_eq!(
+            crate::sandbox::under(Path::new(INSIDE), HANDOFF)
+                .display()
+                .to_string(),
+            HANDOFF_INSIDE,
+        );
     }
 
     /// And where no mount can make that path, it is under the session's own
@@ -462,8 +481,10 @@ mod tests {
             "# Rate limiting\n",
         );
         assert!(
-            started_on.contains(&inside.join(PROMPT).display().to_string()),
-            "{started_on:?} does not name the file the session will open",
+            started_on.contains(&format!("{}/{PROMPT}", inside.display())),
+            "{started_on:?} does not name the file the session will open — the \
+             file is composed onto the directory the way the directory was, \
+             rather than with this host's own separator after it",
         );
         assert!(
             !started_on.contains("Rate limiting"),

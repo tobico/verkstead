@@ -21,4 +21,4 @@ Roadmap stage: [05: First-run hygiene](docs/roadmaps/built-roots/05-first-run-hy
 - [x] 02: The desktop's log file — [details](02-the-desktops-log-file.md)
 - [x] 03: The release gate — [details](03-the-release-gate.md)
 - [x] 04: The token note and the docs — [details](04-the-token-note-and-the-docs.md)
-- [ ] 05: The sweep's warning and the prompt path — [details](05-the-sweeps-warning-and-the-prompt-path.md)
+- [x] 05: The sweep's warning and the prompt path — [details](05-the-sweeps-warning-and-the-prompt-path.md)
