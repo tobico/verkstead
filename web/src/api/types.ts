@@ -3675,7 +3675,18 @@ sandbox_binds: Array<string>,
  * not about the rules says nothing about them, and the ones on disk are
  * left exactly where they are.
  */
-ignored_comments: IgnoredCommentsEdit, };
+ignored_comments: IgnoredCommentsEdit, 
+/**
+ * And the text every session is given, as a value again — the plainest one
+ * here. What is sent is what `config.yaml` holds afterwards, so a box
+ * cleared on the page is the key taken out of the file.
+ *
+ * Nothing about it can be turned down. It is a paragraph of somebody's
+ * prose for an agent to read: there is no grammar to get wrong, nothing to
+ * compile and nobody to ask about it, so a save carrying it cannot fail
+ * the way one carrying a rule can.
+ */
+instructions: string, };
 
 /**
  * What became of a save.
@@ -3762,7 +3773,21 @@ paths: PathsView,
  * included: this is what the editor draws back into its rows, and a rule
  * quietly left out of the read would be one the human could not correct.
  */
-ignored_comments: Array<IgnoreRule>, };
+ignored_comments: Array<IgnoreRule>, 
+/**
+ * And the one text every session is given, whatever harness runs it —
+ * empty on a Verkstead nobody has typed one into, which is a session told
+ * nothing beyond what its Repo carries.
+ *
+ * A string rather than an optional, and empty for nothing, the way the
+ * author's two halves are: the box on the page holds a string either way,
+ * and clearing it is how the text is taken off.
+ *
+ * Verbatim, line breaks and leading spaces and all. What a harness is
+ * handed is these words, so what comes back here has to be the ones that
+ * were typed rather than a tidied copy of them.
+ */
+instructions: string, };
 
 /**
  * What became of sharing a Conversation to the pull requests its work is on.

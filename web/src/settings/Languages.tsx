@@ -62,7 +62,7 @@ import type { BuildCacheView, SettingsSaved, SettingsView } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
-import { heldCache, heldCleanup, heldPaths } from "./held";
+import { heldCache, heldCleanup, heldInstructions, heldPaths } from "./held";
 import styles from "./Languages.module.css";
 
 /// What the section is called, wherever it names itself: the card's heading and
@@ -243,6 +243,9 @@ export function LanguagesPane(props: {
         // says what the file holds afterwards, so a list left out is a list
         // emptied — see [`heldPaths`].
         ...heldPaths(told()),
+        // And the text every session is given, likewise — see
+        // [`heldInstructions`].
+        ...heldInstructions(told()),
         // And the ignore rules left exactly where they are. Alone among the
         // settings they travel as an action rather than a value: this form has
         // nothing to say about them, and one that spoke for them could have its

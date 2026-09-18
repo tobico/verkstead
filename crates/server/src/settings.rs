@@ -41,6 +41,8 @@
 //! ignored_comments:
 //!   - author: coderabbitai
 //!     body: billing
+//! instructions: |
+//!   Prefer the smallest change that does the job.
 //! ```
 //!
 //! Who a session commits as is said here for the reason the token is: it used
@@ -607,6 +609,31 @@ pub struct Config {
         skip_serializing_if = "Vec::is_empty"
     )]
     ignored_comments: Vec<IgnoreRule>,
+
+    /// And the one text every session is given, whatever harness runs it: what
+    /// a human would have put in their own global `CLAUDE.md`, said once here
+    /// because a Built Root holds none of the account's own files.
+    ///
+    /// One text for the whole installation rather than one per Agent Profile,
+    /// which is why it is in this file rather than beside a Profile in the
+    /// store: it is a thing Verkstead is *told*, like the author above it and
+    /// the binds beside it, and it is read afresh the moment a session needs it
+    /// — a change on the settings page reaches the next session, and a running
+    /// one keeps what it started with.
+    ///
+    /// Nothing here can be wrong. It is a paragraph of somebody's prose, so
+    /// there is nothing to parse and nothing to refuse: an absent key, an
+    /// absent file and one nothing can read all mean an empty text, which is a
+    /// session told nothing beyond what its Repo carries. An `Option` for that
+    /// reason and written away when it is nothing, so that clearing the box
+    /// takes the key out of the file rather than leaving an empty one behind.
+    ///
+    /// Kept exactly as it was typed, which is the one thing in this file not
+    /// put through [`blank_is_nothing`] — see [`prose_written`]. What the
+    /// setting is for is the words a harness reads, and a text a save quietly
+    /// reshaped would be one the human did not write.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    instructions: Option<String>,
 }
 
 impl Config {
@@ -637,6 +664,9 @@ impl Config {
             sandbox_binds: entries_written(config.sandbox_binds),
             session_path: entries_written(config.session_path),
             ignored_comments: rules_kept(config.ignored_comments),
+            // Whitespace and all, bar a text that is nothing but whitespace —
+            // see [`prose_written`].
+            instructions: config.instructions.and_then(prose_written),
         })
     }
 
@@ -654,6 +684,7 @@ impl Config {
         share_on_done: bool,
         sandbox_binds: Vec<String>,
         ignored_comments: Vec<IgnoreRule>,
+        instructions: String,
     ) -> Config {
         Config {
             git_author,
@@ -684,6 +715,10 @@ impl Config {
             // and dropping one here would be a save that quietly wrote fewer
             // rules than the page sent.
             ignored_comments,
+            // As it was typed, and away altogether where the box was cleared:
+            // there is nothing to configure in an empty text, and a key holding
+            // one would read as a setting somebody made.
+            instructions: prose_written(instructions),
         }
     }
 
@@ -773,6 +808,17 @@ impl Config {
     /// is every comment on every pull request being somebody's to address.
     pub fn ignored_comments(&self) -> &[IgnoreRule] {
         &self.ignored_comments
+    }
+
+    /// And the text every session is given, which is empty where nobody has
+    /// typed one — a session told nothing beyond what its Repo carries.
+    ///
+    /// A `&str` rather than an `Option`, because the two states a caller could
+    /// tell apart are the same state: nothing configured and a text of nothing
+    /// are both nothing to say, and every caller of this asks the one question
+    /// of whether there is anything to say at all.
+    pub fn instructions(&self) -> &str {
+        self.instructions.as_deref().unwrap_or_default()
     }
 }
 
@@ -1234,6 +1280,20 @@ fn blank_is_nothing(value: String) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }
 
+/// And a configured *text* that is only whitespace is no text — with everything
+/// else kept exactly as it was typed.
+///
+/// The one value in either file read this way. [`blank_is_nothing`] trims,
+/// because what it reads are names, addresses and paths, and a stray space
+/// around one of those is a typo. What this reads is the human's own prose for
+/// an agent, where the leading spaces of an indented list and the blank line
+/// that ends a paragraph are the writing rather than slips in it — and a
+/// harness is handed this verbatim, so a save that tidied it would be one
+/// nobody asked for.
+fn prose_written(text: String) -> Option<String> {
+    (!text.trim().is_empty()).then_some(text)
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
@@ -1465,6 +1525,7 @@ mod tests {
                 false,
                 vec![],
                 vec![],
+                String::new(),
             ))
             .unwrap();
 
@@ -1482,6 +1543,7 @@ mod tests {
                 false,
                 vec![],
                 vec![],
+                String::new(),
             ))
             .unwrap();
 
@@ -1560,6 +1622,7 @@ mod tests {
                 true,
                 vec![],
                 vec![],
+                String::new(),
             ))
             .unwrap();
 
@@ -1574,6 +1637,7 @@ mod tests {
                 false,
                 vec![],
                 vec![],
+                String::new(),
             ))
             .unwrap();
 
@@ -1694,6 +1758,7 @@ mod tests {
                 false,
                 vec![],
                 vec![],
+                String::new(),
             ))
             .unwrap();
 
@@ -1730,6 +1795,7 @@ mod tests {
                 false,
                 vec![],
                 vec![],
+                String::new(),
             ))
             .unwrap();
 
@@ -1954,6 +2020,7 @@ mod tests {
                 false,
                 vec![],
                 vec![],
+                String::new(),
             ))
             .unwrap();
 
@@ -1986,6 +2053,7 @@ mod tests {
                 false,
                 vec![],
                 vec![],
+                String::new(),
             ))
             .unwrap();
 
@@ -2016,6 +2084,7 @@ mod tests {
                 false,
                 vec![],
                 vec![],
+                String::new(),
             ))
             .unwrap();
 
@@ -2039,6 +2108,7 @@ mod tests {
                 false,
                 vec![],
                 vec![],
+                String::new(),
             ))
             .unwrap();
 
@@ -2107,6 +2177,7 @@ mod tests {
                 false,
                 vec![],
                 vec![],
+                String::new(),
             ))
             .unwrap();
 
@@ -2138,6 +2209,7 @@ mod tests {
                 false,
                 vec![],
                 vec![],
+                String::new(),
             ))
             .unwrap();
 
@@ -2201,6 +2273,7 @@ mod tests {
                 false,
                 vec!["/var/cache/verkstead-node".to_owned()],
                 vec![],
+                String::new(),
             ))
             .unwrap();
 
@@ -2220,6 +2293,7 @@ mod tests {
                 false,
                 vec![],
                 vec![],
+                String::new(),
             ))
             .unwrap();
 
@@ -2302,6 +2376,7 @@ mod tests {
             false,
             vec![],
             vec![],
+            String::new(),
         );
 
         settings
@@ -2319,6 +2394,115 @@ mod tests {
             Some("Ada"),
             "and what the page did send is what the file holds",
         );
+    }
+
+    /// The text every session is given is what the file says, and the three
+    /// ways of having said nothing all say nothing.
+    #[test]
+    fn the_instructions_are_what_the_config_file_says() {
+        assert_eq!(
+            Config::read("instructions: Prefer the smallest change.\n")
+                .unwrap()
+                .instructions(),
+            "Prefer the smallest change.",
+        );
+
+        assert_eq!(
+            Config::read("git_author:\n  name: Ada\n")
+                .unwrap()
+                .instructions(),
+            "",
+            "a file with no such key is a session told nothing",
+        );
+
+        assert_eq!(
+            Config::read("instructions: '   '\n")
+                .unwrap()
+                .instructions(),
+            "",
+            "and so is a text that is nothing but whitespace",
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        assert_eq!(
+            settings.config().instructions(),
+            "",
+            "and so is a Data Directory with no config file in it at all",
+        );
+
+        std::fs::write(settings.config_path(), "instructions: [oh\n").unwrap();
+
+        assert_eq!(
+            settings.config().instructions(),
+            "",
+            "and so is a file nothing can parse",
+        );
+    }
+
+    /// And a text that is nothing but whitespace is nothing at all, including in
+    /// the file a save leaves behind: an empty key would read as a setting
+    /// somebody made.
+    #[test]
+    fn instructions_cleared_are_written_away_rather_than_written_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        settings
+            .save_config(&config_saying("Prefer the smallest change."))
+            .unwrap();
+
+        assert!(
+            std::fs::read_to_string(settings.config_path())
+                .unwrap()
+                .contains("instructions"),
+            "the text somebody typed is in the file",
+        );
+
+        settings.save_config(&config_saying("")).unwrap();
+
+        let written = std::fs::read_to_string(settings.config_path()).unwrap();
+
+        assert!(
+            !written.contains("instructions"),
+            "and clearing the box takes the key out rather than leaving an \
+             empty one: {written}",
+        );
+        assert_eq!(settings.config().instructions(), "");
+    }
+
+    /// And what goes through the file comes back as it was typed — the blank
+    /// line between two paragraphs, the indent of a list, and all.
+    ///
+    /// This is the whole of what the setting is for: a harness is handed these
+    /// words, so a save that reflowed them would be handing it something nobody
+    /// wrote.
+    #[test]
+    fn the_instructions_go_through_the_file_verbatim() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = Settings::in_data_dir(dir.path());
+
+        let text = "Prefer the smallest change that does the job.\n\nAnd:\n  - run the tests\n  - say what broke\n";
+
+        settings.save_config(&config_saying(text)).unwrap();
+
+        assert_eq!(settings.config().instructions(), text);
+    }
+
+    /// A config holding nothing but a text, which is what the three tests above
+    /// save.
+    fn config_saying(instructions: &str) -> Config {
+        Config::of(
+            GitAuthor::default(),
+            RustBuildCache::default(),
+            Cleanup::default(),
+            ConflictResolution::Merge,
+            false,
+            vec![],
+            vec![],
+            instructions.to_owned(),
+        )
     }
 
     #[test]
@@ -2395,6 +2579,7 @@ mod tests {
                     Some("coderabbitai".to_owned()),
                     Some("billing".to_owned()),
                 )],
+                String::new(),
             ))
             .unwrap();
 

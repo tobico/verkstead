@@ -1,10 +1,11 @@
-//! The paths and the Cleanup a save carries when the form in front of the human
-//! is not about them.
+//! The paths, the Cleanup and the instructions a save carries when the form in
+//! front of the human is not about them.
 //!
 //! One request writes the whole of `config.yaml`, so every section's save sends
-//! every value in it — the author, the build cache, the share-on-Done switch and
-//! the sandbox binds. A section that left the list out would be a section that
-//! emptied it: what is sent is what the file holds afterwards.
+//! every value in it — the author, the build cache, the share-on-Done switch,
+//! the sandbox binds and the text every session is given. A section that left
+//! one out would be a section that emptied it: what is sent is what the file
+//! holds afterwards.
 //!
 //! Only the settings' own go back. The installation's entries come back on every
 //! read labelled as the unit's word, they were never in this file, and sending
@@ -45,7 +46,26 @@ export function heldConfig(told: SettingsView | undefined) {
     // And the binds the settings hold, again for that reason — a list a form
     // left out would be a list it emptied. See [`heldPaths`].
     ...heldPaths(told),
+    // And the text every session is given, likewise: a form that left it out
+    // would be a form that cleared it.
+    ...heldInstructions(told),
   };
+}
+
+/// And the instructions every session is given, as they stand, ready to be
+/// spread into a save.
+///
+/// Empty where the read has not landed, which is what the server writes for a
+/// Verkstead nobody has told anything — and what a form sending it would ask
+/// for is the state the file is already in.
+///
+/// Verbatim, because verbatim is what a harness is handed: a form riding this
+/// along has nothing to say about the words in it, and is not entitled to trim
+/// them on the way past.
+export function heldInstructions(told: SettingsView | undefined): {
+  instructions: string;
+} {
+  return { instructions: told?.instructions ?? "" };
 }
 
 /// And the build cache as it stands, ready to be sent by a section that is not

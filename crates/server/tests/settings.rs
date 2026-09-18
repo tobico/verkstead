@@ -1,8 +1,12 @@
 //! What Verkstead is told, over the viewer's namespace: reading the git author,
 //! the presence of a GitHub token, how the shared Rust build cache is set, what
 //! the Cleanup does to an archived Conversation, whether Done shares the record
-//! to the pull request and what paths it has been given, and writing any of
-//! them.
+//! to the pull request, what paths it has been given and the one text every
+//! session is given, and writing any of them.
+//!
+//! That last is the one setting here written for something other than Verkstead
+//! to read — a harness is handed the words — so what those tests ask is whether
+//! it survives the round trip as it was typed, blank lines and indents and all.
 //!
 //! The paths are the one thing here said in two places at once — the
 //! installation's flags and the file this page writes — so what those tests ask
@@ -124,6 +128,7 @@ async fn save_author(app: &Router, name: &str, email: &str) -> SettingsSaved {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "instructions": "",
         }),
     )
     .await
@@ -143,6 +148,7 @@ async fn save_token(app: &Router, token: &str) -> SettingsSaved {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "instructions": "",
         }),
     )
     .await
@@ -160,6 +166,7 @@ async fn clear_token(app: &Router) -> SettingsSaved {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "instructions": "",
         }),
     )
     .await
@@ -197,6 +204,7 @@ async fn save_cleanup(app: &Router, trim: (bool, &str), delete: (bool, &str)) ->
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "instructions": "",
         }),
     )
     .await
@@ -273,6 +281,11 @@ async fn a_verkstead_nobody_has_told_anything_says_so() {
     assert_eq!(settings.git_author.name, "");
     assert_eq!(settings.git_author.email, "");
     assert_eq!(settings.github_token, None);
+    assert_eq!(
+        settings.instructions, "",
+        "and nothing every session is to be told, which is the section drawn \
+         with an empty box rather than an error",
+    );
 }
 
 #[tokio::test]
@@ -313,6 +326,7 @@ async fn the_token_appears_in_no_answer_this_endpoint_gives() {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "instructions": "",
         }),
     )
     .await;
@@ -539,6 +553,7 @@ async fn a_save_carrying_the_binds_as_they_stand_leaves_them() {
             "share_on_done": false,
             "sandbox_binds": ["/var/cache/verkstead-node"],
             "ignored_comments": "Keep",
+            "instructions": "",
         }),
     )
     .await;
@@ -613,6 +628,7 @@ async fn the_build_cache_switch_and_size_go_in_and_come_back() {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "instructions": "",
         }),
     )
     .await;
@@ -754,6 +770,7 @@ async fn a_save_carrying_the_cleanup_as_it_stands_leaves_it() {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "instructions": "",
         }),
     )
     .await;
@@ -796,6 +813,7 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "instructions": "",
         }),
     )
     .await;
@@ -831,6 +849,7 @@ async fn how_a_conflict_is_resolved_goes_in_and_comes_back() {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "instructions": "",
         }),
     )
     .await;
@@ -872,6 +891,7 @@ async fn sharing_on_done_goes_in_and_comes_back() {
             "share_on_done": true,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "instructions": "",
         }),
     )
     .await;
@@ -912,6 +932,7 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
             "share_on_done": true,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "instructions": "",
         }),
     )
     .await;
@@ -929,12 +950,141 @@ async fn a_save_carrying_the_switch_as_it_stands_leaves_it() {
             "share_on_done": true,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "instructions": "",
         }),
     )
     .await;
 
     assert_eq!(saved.settings.rust_build_cache.size, "5G");
     assert!(saved.settings.share_on_done, "the switch stands");
+}
+
+/// The text every session is given goes into the file and comes back off it,
+/// line breaks and all — through a restart, because a session reads this file
+/// afresh rather than reading anything the server has been holding.
+///
+/// The one setting on this page written for something other than Verkstead to
+/// read: what is in the box is handed to a harness, so what survives the round
+/// trip has to be the words that were typed rather than a tidied copy of them.
+#[tokio::test]
+async fn the_instructions_go_in_and_come_back_verbatim() {
+    let (dir, app) = app().await;
+
+    let text = "Prefer the smallest change that does the job.\n\nAnd:\n  - run the tests\n  - say what broke\n";
+
+    let saved = save_instructions(&app, text).await;
+
+    assert_eq!(saved.settings.instructions, text);
+    assert!(
+        saved.refused.is_empty(),
+        "there is nothing in a paragraph of prose to be refused over",
+    );
+
+    assert_eq!(settings(&app).await.instructions, text);
+
+    // And to a server that has just come up on the same Data Directory, which
+    // is what the next session reading this file looks like from here.
+    let restarted = restarted(dir.path()).await;
+    assert_eq!(settings(&restarted).await.instructions, text);
+}
+
+/// And clearing the box takes the key out of the file rather than leaving an
+/// empty one behind: a key holding nothing would read as a setting somebody
+/// made.
+#[tokio::test]
+async fn clearing_the_instructions_writes_the_key_away() {
+    let (dir, app) = app().await;
+
+    save_instructions(&app, "Prefer the smallest change.").await;
+
+    let config = dir.path().join("config.yaml");
+    assert!(
+        std::fs::read_to_string(&config)
+            .unwrap()
+            .contains("instructions"),
+        "the text somebody typed is in config.yaml",
+    );
+
+    let saved = save_instructions(&app, "").await;
+
+    assert_eq!(saved.settings.instructions, "");
+
+    let written = std::fs::read_to_string(&config).unwrap();
+    assert!(
+        !written.contains("instructions"),
+        "and clearing it takes the key away: {written}",
+    );
+}
+
+/// And a save from another section leaves it where it is — the same contract
+/// every other value on this page is saved under, because one request writes
+/// the whole of `config.yaml`.
+///
+/// `session_path` rides along too, and it is the one key here no section has a
+/// field for: a save built out of what a page sent would take away the
+/// directory a harness Verkstead installed is really in.
+#[tokio::test]
+async fn a_save_carrying_the_instructions_as_they_stand_leaves_them() {
+    let (dir, app) = app().await;
+
+    // The one key the page cannot send, written the way an install writes it.
+    hand_edit(
+        dir.path(),
+        "config.yaml",
+        "session_path:\n  - /home/you/.local/bin\n",
+    );
+
+    save_instructions(&app, "Prefer the smallest change.").await;
+
+    // The build cache section's own save, which is about the size and carries
+    // everything else as the page last read it.
+    let saved = save(
+        &app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "rust_build_cache": { "enabled": true, "size": "5G" },
+            "cleanup": cleanup_unset(),
+            "conflict_resolution": "Merge",
+            "share_on_done": false,
+            "sandbox_binds": [],
+            "ignored_comments": "Keep",
+            "instructions": "Prefer the smallest change.",
+        }),
+    )
+    .await;
+
+    assert_eq!(saved.settings.rust_build_cache.size, "5G");
+    assert_eq!(
+        saved.settings.instructions, "Prefer the smallest change.",
+        "the text stands",
+    );
+
+    let written = std::fs::read_to_string(dir.path().join("config.yaml")).unwrap();
+    assert!(
+        written.contains("/home/you/.local/bin"),
+        "and so does the one key no section has a field for: {written}",
+    );
+}
+
+/// Save a text and leave everything else alone, which is what the instructions
+/// pane's own press sends.
+async fn save_instructions(app: &Router, instructions: &str) -> SettingsSaved {
+    save(
+        app,
+        &serde_json::json!({
+            "git_author": { "name": "", "email": "" },
+            "github_token": "Keep",
+            "rust_build_cache": { "enabled": true, "size": "" },
+            "cleanup": cleanup_unset(),
+            "conflict_resolution": "Merge",
+            "share_on_done": false,
+            "sandbox_binds": [],
+            "ignored_comments": "Keep",
+            "instructions": instructions,
+        }),
+    )
+    .await
 }
 
 /// A second server on the same Data Directory, which is what a restart looks
@@ -972,6 +1122,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "instructions": "",
         }),
     )
     .await;
@@ -987,6 +1138,7 @@ async fn a_size_cleared_is_the_default_again_and_not_a_size_of_nothing() {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": "Keep",
+            "instructions": "",
         }),
     )
     .await;
@@ -1037,6 +1189,7 @@ async fn save_paths(app: &Router, binds: &[&str]) -> SettingsSaved {
             "share_on_done": false,
             "sandbox_binds": binds,
             "ignored_comments": "Keep",
+            "instructions": "",
         }),
     )
     .await
@@ -1265,6 +1418,7 @@ async fn save_rules(app: &Router, rules: serde_json::Value) -> SettingsSaved {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": { "Set": { "rules": rules } },
+            "instructions": "",
         }),
     )
     .await
@@ -1427,6 +1581,7 @@ async fn a_refused_save_writes_nothing_at_all() {
             "share_on_done": false,
             "sandbox_binds": [],
             "ignored_comments": { "Set": { "rules": [rule("", "[oh")] } },
+            "instructions": "",
         }),
     )
     .await;

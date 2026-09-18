@@ -18,6 +18,6 @@ Roadmap stage: [03: The instructions text](docs/roadmaps/built-roots/03-instruct
 
 ## Tasks
 
-- [ ] 01: The setting — [details](01-the-setting.md)
+- [x] 01: The setting — [details](01-the-setting.md)
 - [ ] 02: The file in every root — [details](02-the-file-in-every-root.md)
 - [ ] 03: The docs — [details](03-the-docs.md)

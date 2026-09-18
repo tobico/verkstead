@@ -9,12 +9,12 @@
 //! Two shapes under the settings, because there are two kinds of thing the
 //! pane draws:
 //!
-//! - `git`, `languages`, `sandbox-binds`, `cleanup`, `remote` and `repos` —
-//!   everything git is told, the languages a session gets build support for,
-//!   the extra paths every sandbox gets, what becomes of an archived
-//!   Conversation, whether this machine can be reached from a phone, and the
-//!   Repos that are registered, each named by a word. There is one of each of
-//!   them, and a word says so.
+//! - `git`, `languages`, `instructions`, `sandbox-binds`, `cleanup`,
+//!   `remote` and `repos` — everything git is told, the languages a session
+//!   gets build support for, the text every session is given, the extra paths
+//!   every sandbox gets, what becomes of an archived Conversation, whether this
+//!   machine can be reached from a phone, and the Repos that are registered,
+//!   each named by a word. There is one of each of them, and a word says so.
 //! - `profiles/:id` — an Agent Profile, which arrives with an id of its own,
 //!   and `profiles/new` for the blank form that adds one.
 //!
@@ -39,10 +39,10 @@
 //! picked rather than a promise that it is still there.
 
 /// The openings named by a word rather than by an id: everything git is told,
-/// the languages a session gets build support for, the extra paths every
-/// sandbox gets, what becomes of an archived Conversation, how this machine is
-/// reached from a phone and which Repos are registered — the things there is
-/// exactly one of on this page.
+/// the languages a session gets build support for, the text every session is
+/// given, the extra paths every sandbox gets, what becomes of an archived
+/// Conversation, how this machine is reached from a phone and which Repos are
+/// registered — the things there is exactly one of on this page.
 ///
 /// A list rather than a word written wherever one is needed, because three
 /// separate things read it and all three have to agree: the [`Opening`] below is
@@ -58,6 +58,7 @@
 export const WORDS = [
   "git",
   "languages",
+  "instructions",
   "sandbox-binds",
   "cleanup",
   "remote",
