@@ -880,8 +880,13 @@ fn the_log_file_holds_the_servers_own_startup_line() {
 /// into it is a login for anybody reading over their shoulder — where the
 /// daemon's journal, which `serve.rs` asserts still carries the whole link, is
 /// the one place a headless machine has to hand one over at all.
+///
+/// **Asked of the line rather than of the file**, because there is one other
+/// line this app may write a link on and it is a line these runs always reach —
+/// see the test below, which is that one. What ADR-0015 settled is what the
+/// *startup* line says, so that is what this reads.
 #[test]
-fn the_log_file_carries_no_workbench_key() {
+fn the_startup_line_carries_no_workbench_key() {
     let tmp = tempfile::tempdir().unwrap();
     let opener = Opener::in_dir(tmp.path());
     let home = tmp.path().join("home");
@@ -901,18 +906,72 @@ fn the_log_file_carries_no_workbench_key() {
         .expect("the app writes its key as it starts")
         .secret();
 
-    let logged = std::fs::read_to_string(log_file(&home)).unwrap();
+    let line = said(&home, "verkstead is listening");
 
     assert!(
-        !logged.contains(&secret) && !logged.contains("?key="),
-        "the log the tray opens should hold no way into the workbench, got:\n{logged}"
+        !line.contains(&secret) && !line.contains("?key="),
+        "the line the tray's app comes up on should hold no way into the \
+         workbench, got:\n{line}"
     );
     assert!(
-        logged.contains(&format!("127.0.0.1:{port}")),
-        "and it should still say where Verkstead came up, got:\n{logged}"
+        line.contains(&format!("127.0.0.1:{port}")),
+        "and it should still say where Verkstead came up, got:\n{line}"
     );
 
     app.stop();
+}
+
+/// **And where there is no tray, the app says the link after all** — because at
+/// that point nothing else is going to.
+///
+/// The startup line leaves the key off on the reasoning that this install hands
+/// the link over itself, and the whole of that handing over is the browser at
+/// startup and the tray's **Open**. A run with no screen has no tray, and one
+/// with no screen and `--no-open` has had neither: the address alone would leave
+/// it serving a workbench nobody on the machine can get into, which is the
+/// redacting-everywhere ADR-0015 turned down. So the app falls back to the
+/// daemon's way exactly where it has become the daemon.
+///
+/// Every test in this file is such a run — there is no tray under a test — so
+/// this is asked of the line that says so.
+#[test]
+fn a_run_with_no_tray_says_the_link_itself() {
+    let tmp = tempfile::tempdir().unwrap();
+    let opener = Opener::in_dir(tmp.path());
+    let home = tmp.path().join("home");
+    let data_dir = tmp.path().join("data");
+    let port = free_port();
+
+    let flags = flags(port, &data_dir);
+    let mut args = as_args(&flags);
+    args.push("--no-open");
+    let mut app = App::start(port, Some(&opener), &home, &args, &[]);
+
+    let link = verkstead_server::key::WorkbenchKey::issued(&data_dir)
+        .expect("the app writes its key as it starts")
+        .link(&format!("http://127.0.0.1:{port}"));
+
+    let line = said(&home, "no tray to press Open in");
+
+    assert!(
+        line.contains(&link),
+        "a run nobody can press Open in should carry the whole login link, \
+         got:\n{line}"
+    );
+
+    app.stop();
+}
+
+/// The one line of the log carrying `marker`, waited for and returned.
+///
+/// The app writes from the runtime's threads and from its own, so a line a test
+/// is about may still be on its way when the server starts answering.
+fn said(home: &Path, marker: &str) -> String {
+    await_log(home, |logged| logged.contains(marker))
+        .lines()
+        .find(|line| line.contains(marker))
+        .expect("await_log only returns once the marker is there")
+        .to_owned()
 }
 
 /// **Nor when the browser would not open**, which is the other place the app has
@@ -942,21 +1001,16 @@ fn the_log_carries_no_workbench_key_where_the_browser_would_not_open() {
         .expect("the app writes its key as it starts")
         .secret();
 
-    // Said twice by the time this passes — once as the server came up and once
-    // for the browser that would not open — which is what says the warning has
-    // reached the file rather than still being on its way there.
-    let workbench = format!("workbench=http://127.0.0.1:{port}");
-    let logged = await_log(&home, |logged| logged.matches(&workbench).count() >= 2);
+    let line = said(&home, "in a browser");
 
     assert!(
-        logged.contains("in a browser"),
-        "the two should be the startup line and the browser that would not \
-         open, got:\n{logged}"
+        !line.contains(&secret) && !line.contains("?key="),
+        "a browser that would not open should be reported without the login \
+         link, got:\n{line}"
     );
     assert!(
-        !logged.contains(&secret) && !logged.contains("?key="),
-        "and a browser that would not open should be reported without the \
-         login link, got:\n{logged}"
+        line.contains(&format!("workbench=http://127.0.0.1:{port}")),
+        "and with the address, which is what a reader of it needed, got:\n{line}"
     );
     assert!(
         opener.asked_for().is_none(),
@@ -973,7 +1027,6 @@ fn the_log_carries_no_workbench_key_where_the_browser_would_not_open() {
 /// refusal from the main one, so the two land in whichever order the machine
 /// runs them in: a read taken the moment the server answers is a read that may
 /// be one line early.
-#[cfg(unix)]
 fn await_log(home: &Path, until: impl Fn(&str) -> bool) -> String {
     let deadline = Instant::now() + PATIENCE;
 

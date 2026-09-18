@@ -201,7 +201,11 @@ there is no link to keep anywhere, and nothing to type. Started with
 address and no key, because **View Logs** opens a file on your desk and a
 workbench key written into it would be a login for anybody reading over your
 shoulder. The journal a `verkstead serve` writes is the other case, and still
-carries the link: a host with no tray has nowhere else to be handed one.
+carries the link: a host with no tray has nowhere else to be handed one. **And
+so does an app that finds no tray to raise** — over SSH, in a container, or
+where the desktop will not give it an icon: there is no **Open** to press
+there, so the link goes in the log rather than leaving you with a workbench and
+no way into it.
 
 **Answering from your phone is the workbench's own settings**, under **Remote
 access**: it reads what this machine's Tailscale is doing, a checkbox puts the

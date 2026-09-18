@@ -456,9 +456,15 @@ press, and what somebody reading the journal pastes is the whole link. The
 desktop app's does not, naming the address alone: it has handed the link over
 already, and its log is the file the tray's **View Logs** opens on somebody's
 desk — a key written there is a login for anybody reading over their shoulder.
-A session cannot read that file either way, the log living in the human's own
-local application data and a session running as a local account of Verkstead's
-own.
+**Unless there turned out to be no tray**, which is a machine over SSH, in a
+container, or one whose desktop would not give Verkstead an icon: the app's
+handing over is the browser and **Open**, so a run with neither says the link
+itself rather than serving a workbench nobody can get into. And a browser that
+would not open is reported by the address, at startup and at a press alike — a
+line about a failure is that file on that desk, and is nobody's only way in.
+A session cannot read the file whatever is in it, the log living in the human's
+own local application data and a session running as a local account of
+Verkstead's own.
 **Reset key**, at the foot of **Remote Access**, re-issues it: everything
 holding the old one meets a 401 on its next request, and the browser that
 pressed stays in — a reset made from the phone is a reset made from the only

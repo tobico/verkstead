@@ -189,6 +189,13 @@ impl Desktop {
         // address alone — the log file **View Logs** opens is a file on
         // somebody's desk, and a workbench key in it is a login anybody reading
         // over a shoulder has (ADR-0015).
+        //
+        // **Said here because the line is written before the tray is raised**,
+        // and a tray that cannot be raised is not known about until it is
+        // tried. Where that happens the app says the link itself, below, rather
+        // than leaving a machine with nothing to log in with: this is what the
+        // install *intends*, and the fallback is what it does where the
+        // intention turns out not to hold.
         let serving = runtime.spawn(verkstead_server::run_on_keyed(
             listener,
             self.server,
@@ -226,6 +233,23 @@ impl Desktop {
             // No tray to be in, so this is `verkstead serve` with a browser
             // opened: the main thread waits on the server, and the process is
             // stopped the way that one is.
+            //
+            // **And with the link, because there is no longer anybody to hand
+            // it over.** The startup line names the address alone on the
+            // reasoning that this install hands the link out itself — and the
+            // whole of that handing out is the browser above and the tray's
+            // **Open**. A run that reached here has no tray, and one that
+            // reached here with `--no-open` or a browser that would not start
+            // has had neither: leaving the link off *here* would be the
+            // redacting-everywhere that ADR-0015 rejected, and would leave a
+            // machine serving a workbench nobody can get into. So this is the
+            // daemon's way, taken by the app exactly where the app has become
+            // the daemon.
+            tracing::info!(
+                workbench = %login_link(listen, &key),
+                "there is no tray to press Open in, so this is the way in",
+            );
+
             return runtime
                 .block_on(serving)
                 .context("the thread the server was running on ended")?;
