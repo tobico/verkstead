@@ -124,6 +124,25 @@ impl Opener {
         Opener { bin, opened }
     }
 
+    /// And a machine with no browser on it at all, which is what a *failed*
+    /// open is: a `PATH` with none of the programs the opener knows on it.
+    ///
+    /// **An opener that ran and exited non-zero is not one**, which is worth
+    /// saying because it is the obvious way to write this and it does not work:
+    /// the app hands the url over detached and never waits for what it started,
+    /// so a browser that failed after it was launched is an open that succeeded.
+    /// What fails is the launch, and nothing to launch is how to make it.
+    #[cfg(unix)]
+    fn refusing(dir: &Path) -> Opener {
+        let bin = dir.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+
+        Opener {
+            bin,
+            opened: dir.join("opened"),
+        }
+    }
+
     #[cfg(not(unix))]
     fn in_dir(dir: &Path) -> Opener {
         let bin = dir.join("bin");
@@ -894,6 +913,83 @@ fn the_log_file_carries_no_workbench_key() {
     );
 
     app.stop();
+}
+
+/// **Nor when the browser would not open**, which is the other place the app has
+/// ever had the link in its hand.
+///
+/// A machine with no browser on it is not a machine to stop serving on — the
+/// tray's **Open** is still there, and so is every other device on the tailnet —
+/// so the app says so and carries on. What it says is the address, because a
+/// warning is as much the file **View Logs** opens as the startup line is: a
+/// line that named the link would put the key in the log by the one route the
+/// test above cannot take, `--no-open` being the arm where the link is never
+/// built at all.
+#[cfg(unix)]
+#[test]
+fn the_log_carries_no_workbench_key_where_the_browser_would_not_open() {
+    let tmp = tempfile::tempdir().unwrap();
+    let opener = Opener::refusing(tmp.path());
+    let home = tmp.path().join("home");
+    let data_dir = tmp.path().join("data");
+    let port = free_port();
+
+    let flags = flags(port, &data_dir);
+    let args = as_args(&flags);
+    let mut app = App::start(port, Some(&opener), &home, &args, &[]);
+
+    let secret = verkstead_server::key::WorkbenchKey::issued(&data_dir)
+        .expect("the app writes its key as it starts")
+        .secret();
+
+    // Said twice by the time this passes — once as the server came up and once
+    // for the browser that would not open — which is what says the warning has
+    // reached the file rather than still being on its way there.
+    let workbench = format!("workbench=http://127.0.0.1:{port}");
+    let logged = await_log(&home, |logged| logged.matches(&workbench).count() >= 2);
+
+    assert!(
+        logged.contains("in a browser"),
+        "the two should be the startup line and the browser that would not \
+         open, got:\n{logged}"
+    );
+    assert!(
+        !logged.contains(&secret) && !logged.contains("?key="),
+        "and a browser that would not open should be reported without the \
+         login link, got:\n{logged}"
+    );
+    assert!(
+        opener.asked_for().is_none(),
+        "nothing on this run's PATH could have opened one",
+    );
+
+    app.stop();
+}
+
+/// The log file once it says what a test is waiting for, or a panic with the
+/// whole of it where it never does.
+///
+/// The app writes the startup line from the runtime's thread and the browser's
+/// refusal from the main one, so the two land in whichever order the machine
+/// runs them in: a read taken the moment the server answers is a read that may
+/// be one line early.
+#[cfg(unix)]
+fn await_log(home: &Path, until: impl Fn(&str) -> bool) -> String {
+    let deadline = Instant::now() + PATIENCE;
+
+    loop {
+        let logged = std::fs::read_to_string(log_file(home)).unwrap_or_default();
+
+        if until(&logged) {
+            return logged;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the log never said what this test is about, and what it said was:\n{logged}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
 /// And what is written there is filtered the way `verkstead serve`'s stdout is:

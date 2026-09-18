@@ -84,7 +84,7 @@ use std::sync::mpsc::sync_channel;
 use anyhow::{Context, Result};
 use tray_icon::TrayIcon;
 use verkstead_server::Config;
-use verkstead_server::key::{HandsOverTheLink, WorkbenchKey, login_link};
+use verkstead_server::key::{HandsOverTheLink, WorkbenchKey, login_link, workbench_address};
 
 /// What Verkstead is called wherever a platform asks for an identifier rather
 /// than a name (ADR-0012).
@@ -203,13 +203,22 @@ impl Desktop {
         // waits in the socket's own queue rather than being refused.
         if !self.no_open {
             // Not being able to open a browser is not a reason to stop serving:
-            // the same link is in the server's own startup line, a browser
-            // pointed at it by hand reaches the same viewer, and so does every
-            // other device on the tailnet.
-            let viewer = login_link(listen, &key);
+            // the tray's **Open** hands the same link over at every press, a
+            // browser pointed at it by hand reaches the same viewer, and so
+            // does every other device on the tailnet.
+            //
+            // **And what is said about it is the address rather than the
+            // link.** The link is the whole of logging in, so a line carrying
+            // one is the secret in the log — which is the thing this install
+            // keeps out of the file **View Logs** opens, and a warning is as
+            // much that file as the startup line is (ADR-0015). What a reader
+            // of it needs is which Verkstead would not open and why, and the
+            // address is that — the error's own account of what it was opening
+            // included, which is why the opener is told what to name.
+            let workbench = workbench_address(listen);
 
-            if let Err(error) = opener::url(&viewer) {
-                tracing::warn!(%viewer, "{error:#}");
+            if let Err(error) = opener::url_reported_as(&login_link(listen, &key), &workbench) {
+                tracing::warn!(%workbench, "{error:#}");
             }
         }
 
@@ -325,12 +334,16 @@ fn raise(
             // press months after the browser forgot the cookie has to be as good
             // as the first one.
             let viewer = login_link(listen, &key);
+            let workbench = workbench_address(listen);
 
             // Said and carried on, for the reason the open at startup is: the
             // viewer is reachable from every browser on the tailnet, and a
             // desktop that would not open one is no reason to stop serving them.
-            if let Err(error) = opener::url(&viewer) {
-                tracing::warn!(%viewer, "{error:#}");
+            // Said as the address rather than as the link, for the reason the
+            // open at startup is too — a press that failed is a line in the
+            // very file this install keeps the key out of.
+            if let Err(error) = opener::url_reported_as(&viewer, &workbench) {
+                tracing::warn!(%workbench, "{error:#}");
             }
         }
         tray::Chosen::ViewLogs => match &logging {
