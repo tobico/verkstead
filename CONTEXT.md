@@ -551,9 +551,11 @@ rather than the CLI — because the first two are a `PATH` to fix rather than a
 program to install, and the third is Claude Code already on the machine with no
 CLI on the end of that name. The desktop app is recognised by shape and nothing
 is run to find out: a `claude` under `%LOCALAPPDATA%\AnthropicClaude`, beside
-Squirrel's `Update.exe`, or standing as a `WindowsApps` alias. Its row names the
-npm install, and a session whose Profile resolves to one is refused rather than
-started, with the same line in the log and in its Capture. A name on no list at
+Squirrel's `Update.exe`, or standing as a `WindowsApps` alias. Its row says
+which of the two programs the file is and leaves the install to the row's own
+instruction beneath it, and a session whose Profile resolves to one is refused
+rather than started, with the same line in the log and in its Capture — that
+line naming an install, having no row under it to read one off. A name on no list at
 all is absent with nothing said. And where a session looks is the composed list
 itself, drawn
 above the rows on every platform, a session's `PATH` being the server's own

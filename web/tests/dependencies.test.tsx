@@ -846,9 +846,18 @@ describe("where each program was found", () => {
     );
     expect(note.textContent).toContain("installed separately");
 
-    // And the row goes on saying what to install, which is the CLI: the
-    // install under it is unchanged by the file above it being there.
-    expect(claude.textContent).toContain(
+    // And it names no command of its own, because the row's own instruction is
+    // directly under it — which on the one tab this row can appear on leads
+    // with Anthropic's installer and keeps npm as the alternative beneath it.
+    // A command in the sentence would put the row's second choice above its
+    // first.
+    expect(note.textContent).not.toContain("npm install");
+    expect(note.textContent).not.toContain("install.ps1");
+
+    expect(GUIDES.Windows.rows.Claude.command).toBe(
+      "irm https://claude.ai/install.ps1 | iex",
+    );
+    expect(GUIDES.Windows.rows.Claude.alternative?.command).toBe(
       "npm install -g @anthropic-ai/claude-code",
     );
   });

@@ -146,16 +146,6 @@ const RESTART =
 /// Homebrew, which is what every command under it is run with.
 const FIRST = "What every command below is run with:";
 
-/// The install that puts the Claude Code CLI beside the desktop app, named in
-/// the one sentence that has somebody looking at the desktop app.
-///
-/// Written here rather than read off the tab's own instruction: the sentence it
-/// is in is drawn on the screen before the tabs, where there is no tab to read
-/// one off, and it is the same line the server writes into a refused session's
-/// Capture. The one install that is every platform's, npm being how the CLI
-/// ships everywhere.
-const CLAUDE_CODE_CLI = "npm install -g @anthropic-ai/claude-code";
-
 /// Which rows are a harness, so that the row wears the same mark the rest of the
 /// app draws that backend with.
 const HARNESSES: Partial<Record<Dependency, AgentType>> = {
@@ -857,12 +847,15 @@ function Where(props: { of: Found }): JSX.Element {
 /// standing where the CLI would. A row with none of them saw the name nowhere
 /// at all, and what it says is the instruction under it.
 ///
-/// The desktop app is the one of the four that is really there and really
-/// runs, so its sentence names the install rather than leaving it to the screen
-/// after this one: a row saying only that the file is the wrong program is a
-/// row somebody has to go and look something up about. It is the same line a
-/// session refused under such a Profile writes — see `sessions::desktop_app`,
-/// the server's half of the same answer.
+/// The desktop app is the one of the four that is really there and really runs,
+/// so its sentence says which of the two programs the file is and leaves the
+/// install to the row's own instruction directly beneath it. **Naming a command
+/// here would name the wrong one**: the only platform this row appears on is
+/// Windows, where the row leads with Anthropic's own installer and keeps npm as
+/// the alternative under it, so a sentence with `npm install` in it would put
+/// the row's second choice above the row's first. The server's half of the same
+/// answer does name a command — see `sessions::desktop_app` — because a Notice
+/// has no row under it to read one off.
 function Seen(props: { at: SeenSomewhere }): JSX.Element {
   return (
     <Note class={styles.seen}>
@@ -888,8 +881,7 @@ function Seen(props: { at: SeenSomewhere }): JSX.Element {
         <Show when={props.at.seen === "Desktop"}>
           <code>{props.at.at}</code> is the Claude Code desktop app rather than
           the command-line tool. The desktop app includes Claude Code, and the
-          CLI is installed separately —{" "}
-          <code>{CLAUDE_CODE_CLI}</code> — to use claude from a terminal.
+          CLI is installed separately — below is how.
         </Show>
       </span>
     </Note>
