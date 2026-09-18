@@ -1901,8 +1901,14 @@ impl Sessions {
     /// All three are logged, because each of them means a Conversation that is
     /// grilling with nothing grilling it.
     ///
-    /// The Timeline Event is made after the process is, so that a session that
-    /// never started leaves no Capture of nothing.
+    /// **The Timeline Event is made before the sandbox is**, which is the other
+    /// way round from how this used to run. What a launch does before there is
+    /// a process is the long part of it on the platform whose boundary is
+    /// written rather than wrapped, and an Event opened afterwards left that
+    /// time with nothing on the Timeline to say what was happening. So the
+    /// Event comes first and what a launch has to say goes into its Capture —
+    /// the boundary being written, and the reason where a launch fails, which
+    /// used to reach the log and nowhere else.
     pub(crate) async fn start(
         &self,
         pool: &SqlitePool,
@@ -1981,6 +1987,57 @@ impl Sessions {
 
         let conversation_id = conversation.id;
 
+        // And which backend this Conversation is launching on, put down before
+        // there is a process that could ask anything. It is off the register
+        // that a Set is read for how the session that sent it asks, and the
+        // register does not learn of this one until it is running — so a
+        // process that starts talking in the meantime is a session asking as
+        // some other backend would. Held until this returns, by which time the
+        // register has it or there is no session to have. See
+        // [`Sessions::channel`].
+        //
+        // **Ahead of everything a launch does**, rather than only ahead of the
+        // spawn: the window it covers is the one that got longer when the Event
+        // moved up, and a guard that started after the sandbox was built would
+        // be one with a boundary's worth of launch in front of it.
+        let _launching = self.launching(conversation_id, pairing.profile.agent_type());
+
+        // The Event this session prints into, stamped as it opens with the name
+        // Verkstead gave the session and with the Pairing it is being launched
+        // under — see [`store::start_capture`]. Both are in hand here, which is
+        // what lets it open this early.
+        //
+        // **Before the sandbox rather than after the process**, which is the
+        // whole of why anything below can be said to the human at all: on the
+        // platform whose boundary is written rather than wrapped, building the
+        // sandbox is the long part of a start — and a session that spent two
+        // minutes there used to do it with no Event to write into and so with
+        // nothing whatever on the Timeline. What that costs is an Event for a
+        // launch that then fails, which is the point rather than the price: the
+        // reason goes in its Capture — see [`verkstead_says`] — where until now
+        // a refused launch left the log and nothing else.
+        let event_id =
+            store::start_capture(pool, conversation_id, session.as_deref(), Some(pairing)).await?;
+
+        let printing = Printing {
+            conversation_id,
+            event_id,
+        };
+
+        // What the Capture is read by, from its first line to its last: the
+        // lines below and every byte the session goes on to print are counted
+        // and summarised by the one reading, so a Timeline row does not start
+        // over when the agent gets its terminal. See [`relay`], which is handed
+        // this.
+        let mut reading = Reading::default();
+
+        // On the Timeline as of now, empty: whoever is watching should see the
+        // session appear as it is being built rather than once it says
+        // something.
+        nudges.announce(Nudge::Conversation {
+            conversation: conversation_id,
+        });
+
         // The sandbox asks git where the worktree's object database is, and the
         // dev-shell question is a `nix eval` or two. The line itself blocks on
         // the platform that writes the prompt to a file — see [`Agents::argv`].
@@ -2011,6 +2068,18 @@ impl Sessions {
                 "there is nothing to run a session on — no sandbox to run it in, or no \
                  prompt it could be started on — so none was started"
             );
+
+            verkstead_says(
+                pool,
+                nudges,
+                printing,
+                &mut reading,
+                "Verkstead could not build a sandbox for this session — the Conversation has \
+                 no worktree to run in, or no prompt could be written for it — so no session \
+                 was started.",
+            )
+            .await;
+
             return Ok(None);
         };
 
@@ -2026,6 +2095,19 @@ impl Sessions {
                     conversation_id,
                     "a session's terminal could not be opened, so none was started"
                 );
+
+                verkstead_says(
+                    pool,
+                    nudges,
+                    printing,
+                    &mut reading,
+                    &format!(
+                        "Verkstead could not open a terminal for this session, so none was \
+                         started: {error}"
+                    ),
+                )
+                .await;
+
                 return Ok(None);
             }
         };
@@ -2036,16 +2118,6 @@ impl Sessions {
         // than the log it is meant to be earlier than, which would be a session
         // that never found its own record. See [`crate::transcript`].
         let at_launch = SystemTime::now();
-
-        // And which backend this Conversation is launching on, put down before
-        // there is a process that could ask anything. It is off the register
-        // that a Set is read for how the session that sent it asks, and the
-        // register does not learn of this one until its Capture is open — which
-        // is a database write away, and a process that starts talking in the
-        // meantime is a session asking as some other backend would. Held until
-        // this returns, by which time the register has it or there is no session
-        // to have. See [`Sessions::channel`].
-        let _launching = self.launching(conversation_id, pairing.profile.agent_type());
 
         // `argv` inside the sandbox with nothing between the two, and the three
         // streams left to the terminal — which is the whole of what says a
@@ -2064,7 +2136,37 @@ impl Sessions {
         // written. Refused rather than started anyway, which is the whole of
         // ADR-0014's Q18: there is no unsandboxed session to fall back to, the
         // way there is no session at all where `bwrap` is missing on Linux.
-        let (command, afterwards) = match sandbox.command(&argv) {
+        //
+        // **On a blocking thread, with what it says about itself read off as it
+        // arrives.** On the platform whose boundary is written rather than
+        // wrapped this is the long part of a start — a first one took 112 s —
+        // and it says so as it begins and again as it ends, in lines meant to
+        // be read while the human is waiting rather than afterwards. So the
+        // writing goes where blocking costs nothing and the loop below carries
+        // each line into the Capture the moment it is said. Nothing is said at
+        // all on the two platforms with a wrapper, where the loop runs dry and
+        // this is the call it always was. See
+        // [`crate::sandbox::Sandbox::command_saying`].
+        let (saying, mut said) = tokio::sync::mpsc::unbounded_channel::<String>();
+
+        let rendered = tokio::task::spawn_blocking({
+            let sandbox = sandbox.clone();
+
+            move || {
+                sandbox.command_saying(&argv, &|line| {
+                    // A line nobody is listening for is a launch that has
+                    // already been given up on, which is not this function's to
+                    // do anything about.
+                    let _ = saying.send(line.to_owned());
+                })
+            }
+        });
+
+        while let Some(line) = said.recv().await {
+            verkstead_says(pool, nudges, printing, &mut reading, &line).await;
+        }
+
+        let (command, afterwards) = match rendered.await? {
             Ok(rendered) => rendered,
             Err(error) => {
                 tracing::error!(
@@ -2072,6 +2174,19 @@ impl Sessions {
                     conversation_id,
                     "a grilling session's sandbox could not be made, so none was started"
                 );
+
+                verkstead_says(
+                    pool,
+                    nudges,
+                    printing,
+                    &mut reading,
+                    &format!(
+                        "Verkstead could not make this session's sandbox, so none was \
+                         started: {error}"
+                    ),
+                )
+                .await;
+
                 return Ok(None);
             }
         };
@@ -2084,6 +2199,16 @@ impl Sessions {
                     conversation_id,
                     "a grilling session could not be started"
                 );
+
+                verkstead_says(
+                    pool,
+                    nudges,
+                    printing,
+                    &mut reading,
+                    &format!("Verkstead could not start this session: {error}"),
+                )
+                .await;
+
                 return Ok(None);
             }
         };
@@ -2112,13 +2237,6 @@ impl Sessions {
             child,
             screen: screen.clone(),
         };
-
-        // The Event this session prints into, stamped as it opens with the name
-        // Verkstead gave the session and with the Pairing it is being launched
-        // under — see [`store::start_capture`]. Both are in hand exactly here
-        // and nowhere afterwards.
-        let event_id =
-            store::start_capture(pool, conversation_id, session.as_deref(), Some(pairing)).await?;
 
         // The log the agent keeps of itself is followed inside the directory of
         // the Profile it is running under, or the session's own root where that
@@ -2223,11 +2341,9 @@ impl Sessions {
                     let ended = relay(
                         &pool,
                         &nudges,
-                        Printing {
-                            conversation_id,
-                            event_id,
-                        },
+                        printing,
                         &mut launched,
+                        reading,
                         &idle,
                         tail,
                         limits,
@@ -2335,9 +2451,9 @@ impl Sessions {
             );
         }
 
-        // The Event is on the Timeline as of now, empty. Whoever is watching
-        // should see the session appear rather than see it once it says
-        // something.
+        // The session is running as of now, which is a different thing from the
+        // Event appearing: that was announced as the Capture opened, and this
+        // is the row saying *Running* rather than being built.
         nudges.announce(Nudge::Conversation {
             conversation: conversation_id,
         });
@@ -2462,6 +2578,13 @@ struct Printing {
 /// amount of the session's talking. `tail` is `None` where there is no log to
 /// look for, which is every session Verkstead could not name.
 ///
+/// `reading` arrives part-written rather than fresh, because the Capture is
+/// older than the session: it may already hold a line of Verkstead's own about
+/// the boundary that was written before the agent got its terminal — see
+/// [`verkstead_says`]. Carried in rather than started here so that the count
+/// and the last line the Timeline shows go on from what is there instead of
+/// beginning again at the agent's first byte.
+///
 /// `idle` is told about everything read rather than everything written down:
 /// what it is judging is whether the session is still working, and a redraw the
 /// summariser throws away is a session working.
@@ -2501,6 +2624,7 @@ async fn relay(
     nudges: &Nudges,
     printing: Printing,
     session: &mut Launched,
+    mut reading: Reading,
     idle: &Idle,
     mut tail: Option<Tail>,
     mut limits: crate::limits::Watch,
@@ -2517,7 +2641,6 @@ async fn relay(
         screen,
     } = session;
 
-    let mut reading = Reading::default();
     let mut buffer = vec![0u8; CHUNK];
     let mut pending = String::new();
     let mut flushed = Instant::now();
@@ -2745,6 +2868,51 @@ fn told(tail: &Option<Tail>) -> Told<'_> {
             said: tail.latest(),
         },
         None => Told::default(),
+    }
+}
+
+/// Put one line of Verkstead's own into a session's Capture.
+///
+/// **Which is a thing a Capture holds, and the only one** — see CONTEXT.md's
+/// **Capture**, which allows for it. Everything else in one came off the
+/// session's terminal, the Rescue's typed line included, and this is Verkstead
+/// saying something *about* the session where the human is already looking: the
+/// boundary being written before the agent has a terminal at all, and the
+/// reason a launch that failed has nothing else to show for itself. Both are
+/// things the log has always said and nobody opens a log from a phone.
+///
+/// Through the same [`Reading`] the terminal's bytes go through, so the line is
+/// counted and summarised like anything else the Event holds and the row reads
+/// it while there is nothing else to read. Ended the way a terminal ends a line,
+/// because what the Capture is played back through is one.
+///
+/// A store that will not take it costs the line rather than the launch: what is
+/// happening here is a session starting, and nothing about it turns on this.
+async fn verkstead_says(
+    pool: &SqlitePool,
+    nudges: &Nudges,
+    printing: Printing,
+    reading: &mut Reading,
+    line: &str,
+) {
+    let Printing {
+        conversation_id,
+        event_id,
+    } = printing;
+
+    let text = reading.take(format!("{line}\r\n").as_bytes());
+
+    match store::append_capture(pool, event_id, &text, &reading.summary(Told::default())).await {
+        Err(error) => {
+            tracing::error!(error = ?error, event_id, "keeping Verkstead's own line about a session failed")
+        }
+
+        // The Conversation's own kind rather than the Screen's: there is no
+        // Screen yet — this is said before the session has a terminal — and
+        // what moved is the Timeline and the row over it.
+        Ok(()) => nudges.announce(Nudge::Conversation {
+            conversation: conversation_id,
+        }),
     }
 }
 

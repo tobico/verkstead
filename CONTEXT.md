@@ -1153,6 +1153,14 @@ The terminal bytes of a session, kept byte for byte, escapes and all — how it
 looked rather than what it said. What says a printing session has gone **Idle**,
 what the Screen replays, and the record of last resort for a session that left no
 Transcript.
+**And it may hold a line of Verkstead's own about the session**, which is the
+one thing in it no terminal printed. A Capture is opened before the sandbox is
+built, so that what a launch does before there is anything to print into it has
+somewhere to be said: on Windows the boundary being written, over how many
+access-control entries and how long it took — a first one took 112 s with
+nothing anywhere saying so — and, wherever a launch fails, why, which used to
+reach the log and nowhere else. The one record the human already opens is where
+both belong.
 _Avoid_: transcript (that is the readable record), raw output, tape
 
 **Screen**:

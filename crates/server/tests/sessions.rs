@@ -630,9 +630,21 @@ impl Grilling {
     /// The last one on the Timeline: a Conversation collects notices over a long
     /// run — a stage adopted, a roadmap finished — and what a stop writes is the
     /// newest thing Verkstead had to say.
+    ///
+    /// An escalation is passed over, being the one Notice that is not a stop:
+    /// the Rescue tells the human about a session it could not talk round and
+    /// leaves it running — see [`escalated`], which is how those are asked for.
+    /// A test waiting on a stop while a session beside it goes quiet would
+    /// otherwise be handed the wrong one.
     async fn stopped(&self) -> NoticeEvent {
-        self.until(|view| said(view).last().map(|notice| (*notice).clone()))
-            .await
+        self.until(|view| {
+            said(view)
+                .into_iter()
+                .filter(|notice| !escalation(notice))
+                .next_back()
+                .map(|notice| (*notice).clone())
+        })
+        .await
     }
 
     /// Who stopped it, which is the half of a stop the Timeline does not draw.
@@ -6240,6 +6252,97 @@ async fn a_sandbox_that_will_not_start_says_why_on_the_capture() {
         lines > 0 && !latest.is_empty(),
         "so the Timeline says what happened rather than `0 lines` and nothing: \
          {lines} lines, latest {latest:?}"
+    );
+}
+
+/// And a launch that never got as far as a process says why in the same place.
+///
+/// The Capture is opened before the sandbox is built rather than after the
+/// process is spawned, which is what gives a failed launch somewhere to say
+/// anything at all: until it moved, a session with no sandbox to run in left
+/// the Timeline empty and the reason in a log at a level nobody has turned on —
+/// the same complaint the boundary lines beside this exist for.
+///
+/// Provoked through the account the *next* session would run under: a file
+/// where its directory goes is a memory store that cannot be made in it, which
+/// is one of the handful of things that refuse a sandbox before it is built.
+/// The grilling's own account, worktree and handoff are all left alone, so what
+/// fails is the building of the second session's sandbox and nothing else —
+/// a launch that stops before there is a terminal, a boundary or a process.
+///
+/// **And the Linux half of the boundary lines is here too**: a session on this
+/// platform hides behind a wrapper with no access-control entries in it, so its
+/// Capture says nothing about a boundary. The one that does is asked on the
+/// machine that writes them — see `tests/sandbox_windows.rs`.
+#[tokio::test]
+async fn a_launch_that_could_not_build_a_sandbox_says_so_on_the_capture() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf 'the grilling is running\n'
+            while [ ! -f /tmp/verkstead/go ]; do sleep 0.1; done
+            printf '# What we settled\n\nAn in-process counter.\n' > /tmp/verkstead/handoff.md
+            : > /tmp/verkstead/done
+            printf 'the handoff is written\n'
+            sleep 300
+            ;;
+        *)
+            printf 'this session never gets to run\n'
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    // The grilling holds off writing its handoff until the test says so, for
+    // the reason the test above holds one: what makes the *next* launch fail
+    // has to be in place before that launch, and the handoff is what starts it.
+    let grilled = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    // A file where the implementation Profile's account is. Whatever the
+    // grilling is running under is untouched: what this refuses is the launch
+    // that follows it.
+    let account = fixture._elsewhere.path().join("implementation/.claude");
+    std::fs::remove_dir_all(&account).unwrap();
+    std::fs::write(&account, "not a directory\n").unwrap();
+
+    std::fs::write(handoff_directory(&fixture).join("go"), "").unwrap();
+
+    let refused = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id != grilled && !output.running)
+                .map(|output| (output.id, output.lines, output.latest.clone()))
+        })
+        .await;
+
+    let (event, lines, latest) = refused;
+    let said = fixture.capture(event).await;
+
+    assert!(
+        said.contains("could not build a sandbox"),
+        "a launch that failed before there was a process leaves an Event with the \
+         reason in its Capture: {said:?}"
+    );
+    assert!(
+        lines > 0 && !latest.is_empty(),
+        "and the Timeline row reads that rather than `0 lines` and nothing: \
+         {lines} lines, latest {latest:?}"
+    );
+
+    let grilling = fixture.capture(grilled).await;
+
+    assert!(
+        !grilling.contains("boundary"),
+        "and a session on this platform, whose sandbox is a wrapper with no \
+         access-control entries in it, is told nothing about a boundary: {grilling:?}"
     );
 }
 
@@ -17257,6 +17360,13 @@ fn narrowing(notice: &NoticeEvent) -> bool {
     notice.html.contains("Waiting on checks")
 }
 
+/// And whether a Notice is the Rescue's escalation rather than a stop — the one
+/// Notice a session goes on running past. Told by what it opens with, the way
+/// [`narrowing`] is.
+fn escalation(notice: &NoticeEvent) -> bool {
+    notice.html.contains("has gone idle without finishing")
+}
+
 /// The whole of stage auto-continue: a settled wrap-up on a roadmap Conversation
 /// starts the next stage, with nobody asked.
 ///
@@ -25097,7 +25207,7 @@ async fn escalated(fixture: &Grilling) -> NoticeEvent {
         let found = said(&view)
             .into_iter()
             .rev()
-            .find(|notice| notice.html.contains("has gone idle without finishing"))
+            .find(|notice| escalation(notice))
             .cloned();
 
         if let Some(notice) = found {

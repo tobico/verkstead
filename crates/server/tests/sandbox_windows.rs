@@ -1432,6 +1432,73 @@ async fn a_machine_with_no_account_or_no_password_refuses_the_session() {
     );
 }
 
+/// A boundary being written says so where the human is looking: one line as it
+/// starts, naming how many entries there are, and one as it ends, naming how
+/// long the whole of it took.
+///
+/// **Because a first one took 112 s and the workbench had nothing to say about
+/// it.** A session that has been started and has printed nothing reads exactly
+/// like a session sitting idle, and the only account of what was happening was
+/// in the log — which is no answer at all to somebody watching from a phone. So
+/// the two lines go into the session's own Capture, the one record the human
+/// already opens; what carries them there is a session start, and this is the
+/// half of it that is a fact about the boundary.
+///
+/// **Said as they happen rather than handed back at the end**, which is what
+/// [`Sandbox::command_saying`] is for and what nothing here can observe: this
+/// blocks until the boundary is written, so what it can ask is that both lines
+/// were said and what they said. That the first one reaches the store while the
+/// writing is still going is the session start's own doing — see the server's
+/// `sessions` module, which reads them off as they arrive.
+///
+/// Nothing runs behind the boundary here. What the entries come to is every
+/// other test in this file, and what this one is about is the pair of sentences
+/// beside them.
+#[tokio::test]
+async fn a_boundary_being_written_says_so_at_its_start_and_at_its_end() {
+    let fixture = grilling().await;
+
+    let said = std::sync::Mutex::new(Vec::new());
+
+    let (_rendering, closing) = fixture
+        .sandbox()
+        .command_saying(&[POWERSHELL], &|line| {
+            said.lock()
+                .expect("nothing else holds what the boundary said")
+                .push(line.to_owned());
+        })
+        .expect("this machine to have the account a session runs as");
+
+    closing.close();
+
+    let said = said
+        .into_inner()
+        .expect("nothing else holds what the boundary said");
+
+    assert_eq!(
+        said.len(),
+        2,
+        "a boundary says one line as it starts and one as it ends, and it said: {said:?}"
+    );
+
+    let entries: usize = said[0]
+        .split_whitespace()
+        .find_map(|word| word.parse().ok())
+        .unwrap_or_else(|| panic!("the opening line names how many entries: {:?}", said[0]));
+
+    assert!(
+        entries > 0 && said[0].contains("boundary"),
+        "the opening line says a boundary is being written and over how many entries, \
+         and it said: {:?}",
+        said[0]
+    );
+    assert!(
+        said[1].contains("boundary") && said[1].contains(" s."),
+        "and the closing line says how long it took, and it said: {:?}",
+        said[1]
+    );
+}
+
 /// And what the description does not name is refused rather than absent, with
 /// a name nobody ever made told apart from both.
 ///
