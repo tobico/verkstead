@@ -23358,11 +23358,23 @@ async fn signal_done(fixture: &Grilling) -> (StatusCode, String) {
 /// wait on work of its own: it asks the test to declare the wait for it, says a
 /// word as the declaring turn does, writes down every line typed into it from
 /// then on, and — where `then` says to — does something more.
+///
+/// **The reader takes the terminal through a descriptor of its own**, and that
+/// is not a flourish. This is the one stub here that reads what is typed into
+/// it from the background, because it has to go on watching for its work at the
+/// same time — and a shell starting a background job with job control off gives
+/// that job `/dev/null` for its standard input. bash reads a `<&0` on the job as
+/// reason not to; dash opens `/dev/null` first, so the `<&0` re-opens nothing
+/// and the reader is handed an immediate end of file. A reader written that way
+/// records every line on a developer's machine and not one line on CI, whose
+/// `/bin/sh` is dash. A descriptor duplicated *before* the job starts is left
+/// alone by both.
 fn waits_in_the_background(then: &str) -> String {
     format!(
         ": > /tmp/verkstead/wait-now\n        \
          while [ ! -f /tmp/verkstead/declared ]; do sleep 0.05; done\n        \
-         ( while read -r TOLD; do printf '%s\\n' \"$TOLD\" >> /tmp/verkstead/rescues; done ) <&0 &\n        \
+         exec 3<&0\n        \
+         ( while read -r TOLD <&3; do printf '%s\\n' \"$TOLD\" >> /tmp/verkstead/rescues; done ) &\n        \
          printf 'the tests are running in the background\\n'\n        \
          {then}"
     )
