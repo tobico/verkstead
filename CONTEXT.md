@@ -2210,6 +2210,18 @@ again; what happens next is the human's, typing into the Screen, steering or
 pressing **Stop**. Nothing goes on the Timeline for a rescue itself: it is
 Verkstead prodding an agent rather than anything the work has got to, and the
 line is in the session's own Capture. See ADR-0018.
+
+**What the human sees of it is a condition** rather than an Event — *idle 4 min,
+spoken to once* — drawn beside the lifecycle word on the card and in the row's
+label, the way *Waiting on checks* is. Its two halves are the rescue's own
+reading of the session, read as the page is drawn and stored nowhere: how long
+it has been **Idle**, against the same grace the rescue arms on, and how many
+times it has been spoken to. So it goes the moment the session says anything, an
+answer is put in front of the human, or the run ends — and a session sitting on
+a Set never wears it, that being a human with something in front of them rather
+than a Conversation nobody can move. Without it a parked agent and one hard at
+work read alike, which is ten minutes somebody spent watching a session that was
+never going to say a word.
 _Avoid_: Nudge (that is the viewer's signal), retry, reminder, ping, poke
 
 **Stalled**:

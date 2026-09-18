@@ -382,6 +382,13 @@ pub(crate) async fn watched(
         if rescue(state, conversation_id, event_id, LINE).await {
             unanswered += 1;
 
+            // And the same count beside the session on the register, which is
+            // where anything outside this loop can read it: a driver is not a
+            // thing a page can look at, and what the human is shown while this
+            // goes on is the condition those two numbers make — see
+            // [`crate::sessions::Sessions::parked`].
+            state.sessions.spoken_to(conversation_id, event_id);
+
             // Once what was typed has finished arriving back, rather than as it
             // was typed — see [`after_the_echo`]. A terminal echoes, so a stir
             // taken at the last keystroke is one the keystrokes answer

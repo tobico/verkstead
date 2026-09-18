@@ -15224,6 +15224,44 @@ describe("a wrap-up waiting on its checks", () => {
   });
 });
 
+/// A session the Rescue is watching sit there: idle long past the grace, with
+/// nothing open on the conversation and nothing to show for itself.
+///
+/// The other condition, and a running session's rather than a wrap-up's. It is
+/// said *beside* the lifecycle word rather than in place of it — the run is
+/// still implementing, and this is something true of it — and it is a label
+/// like the one above: what to do about a parked agent is Verkstead's, and it
+/// is already doing it.
+describe("a session sitting there without asking", () => {
+  /// The reading a parked agent used to get was the reading a working one gets:
+  /// the same card, the same mark, and *Running* over both. Somebody watched
+  /// one for ten minutes before concluding nothing was being captured.
+  it("is on the sidebar row's label beside its state", async () => {
+    theSidebar(
+      { state: "Implementing", working: true, waiting: false },
+      {
+        state: "Implementing",
+        working: true,
+        waiting: false,
+        parked: { idle_seconds: 260, spoken_to: 1 },
+      },
+    );
+    const { container } = mount();
+
+    const [busy, sitting] = await cards(container);
+
+    const label = (row: HTMLElement) =>
+      row.querySelector("button")!.getAttribute("aria-label")!;
+
+    expect(label(busy!)).not.toContain("idle");
+    expect(label(sitting!)).toContain("idle 4 min, spoken to once");
+
+    // Beside the state rather than in place of it: the run is still
+    // implementing, and the condition is something true of that.
+    expect(label(sitting!)).toContain("Implementing");
+  });
+});
+
 /// And the other end of the ladder, where the word is the state itself rather
 /// than a condition of one.
 ///

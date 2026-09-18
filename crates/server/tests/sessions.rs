@@ -24925,6 +24925,125 @@ async fn a_grilling_that_goes_idle_without_its_artifact_is_told_and_then_put_to_
     assert_eq!(view.blocked_on, Some(escalated.id));
 }
 
+/// And while it sits there, the card and the sidebar row say so: how long it has
+/// been idle, and how many times it has been spoken to.
+///
+/// A condition rather than an Event — nothing is written down, and the lifecycle
+/// word is untouched — drawn beside that word the way *Waiting on checks* is.
+/// Which is the whole of what a parked session was missing: a card saying
+/// *Running* about an agent with its turn over reads exactly like a card saying
+/// *Running* about one hard at work, and somebody watched one for ten minutes
+/// before concluding nothing was being captured.
+#[tokio::test]
+async fn a_session_that_sits_there_without_asking_says_so_on_the_card_and_the_row() {
+    let fixture = grilling(&a_grilling_that_never_writes_the_backlog()).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+
+    // A session with a Set of its own open is not sitting there, however long it
+    // has been quiet: it is waiting on the human, for as long as they take. So
+    // nothing is drawn beside the state while the pick is in front of them —
+    // the disc that says *waiting on you* is the whole of what it has to say.
+    pause(BRISKLY.proposing * 2).await;
+
+    assert!(
+        fixture.view().await.parked.is_none(),
+        "a session waiting on a pick is waiting rather than parked",
+    );
+    assert!(
+        fixture.row().await.parked.is_none(),
+        "and the row says as much as the card does about that",
+    );
+
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    // Told once, and the count says so. The condition is up before this — the
+    // rescue arms on the same grace it is drawn past, so a session wears the
+    // span alone for the poll before the line goes in — but that first moment is
+    // a poll long and this is the one worth waiting for.
+    let told_once = fixture
+        .until(|view| view.parked.filter(|parked| parked.spoken_to == 1))
+        .await;
+
+    assert_eq!(
+        told_once.spoken_to, 1,
+        "the card says it has been spoken to, which is what says Verkstead has \
+         noticed: {told_once:?}",
+    );
+
+    let row = fixture
+        .row_until(|row| row.parked.filter(|parked| parked.spoken_to == 1))
+        .await;
+
+    assert_eq!(
+        row.spoken_to, told_once.spoken_to,
+        "and the row it is found by carries the same condition as the card it \
+         opens, off the same register rather than a reading of its own: \
+         {row:?}",
+    );
+
+    // And the count rises with the second line rather than staying where it
+    // was: what the human is reading is how far this has got, and *spoken to
+    // twice* is the last of it before they are told.
+    let told_twice = fixture
+        .until(|view| view.parked.filter(|parked| parked.spoken_to == 2))
+        .await;
+
+    assert_eq!(
+        told_twice.spoken_to, 2,
+        "twice, and the condition says so rather than staying at one: \
+         {told_twice:?}",
+    );
+
+    // And it goes the moment the human is told, which is an answer put in front
+    // of them — see [`escalated`]. The disc that says *waiting on you* is the
+    // whole of what the row has to say from there: a session Verkstead has
+    // given up talking round is the human's to look at rather than a condition
+    // for them to watch tick over, and the session is left running for them to
+    // walk into.
+    escalated(&fixture).await;
+
+    let told = fixture
+        .until(|view| view.waiting.then_some(view.parked))
+        .await;
+
+    assert!(
+        told.is_none(),
+        "a session the human has been told about is one they are looking at \
+         rather than one sitting there: {told:?}",
+    );
+    assert!(
+        fixture.row().await.parked.is_none(),
+        "and the row says as much as the card does about that",
+    );
+    assert!(
+        fixture.view().await.working,
+        "the session is left running, a rescue having never been a stop",
+    );
+
+    // And it goes with the run besides. Nothing is stored for it, so a session
+    // that is no longer there has no condition rather than a stale one — and
+    // the press is the human's, a rescue leaving the ending to them.
+    fixture.force_stop().await;
+
+    let ended = fixture
+        .row_until(|row| (!row.working).then(|| row.clone()))
+        .await;
+
+    assert!(
+        ended.parked.is_none(),
+        "a session that is not there is not sitting there either: {ended:?}",
+    );
+    assert!(
+        fixture.view().await.parked.is_none(),
+        "and the card says as much as the row does about that",
+    );
+}
+
 /// And a backlog step that goes quiet without the commit that finishes it is
 /// told and put to the human the same way.
 ///

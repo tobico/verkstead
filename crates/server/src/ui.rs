@@ -37,13 +37,13 @@ use verkstead_render::{
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, Creation, Cursor, GrillingStarted, IgnoreRule,
     IgnoredCommentsEdit, InstallPress, Lifecycle, Locked, Merging, MissedOut, NewAdoption,
-    NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption, ProfileChoice, ProfileEdit,
-    ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
-    RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress,
-    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
-    SharedCommit, SharedConversation, ShowArchived, ShowingArchived, Standing, SteerOpened,
-    SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalOpened, TimelineEvent,
-    TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption, Parked, ProfileChoice,
+    ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice,
+    RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit,
+    ServePress, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
+    SharePublished, SharedCommit, SharedConversation, ShowArchived, ShowingArchived, Standing,
+    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalOpened,
+    TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -975,6 +975,13 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
     // fact about the few rows in it.
     let idling = state.sessions.idle();
 
+    // And which of *those* the rescue is watching sit there: idle long past the
+    // grace rather than for the moment between two lines of output, with the
+    // count of what it has been told beside it. A third read of the one
+    // register, for the same reason the second is one — see
+    // [`crate::sessions::Sessions::all_parked`].
+    let sitting = state.sessions.all_parked();
+
     let rows: Vec<ConversationEntry> = conversations
         .into_iter()
         .map(|conversation| {
@@ -999,6 +1006,20 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
                 // say. A fix session working a red check draws as plain
                 // Wrapping — waiting is what a wrap-up with nobody in it does.
                 waiting_on_checks: conversation.narrowed_to_checks && !working,
+                // And the rescue's own reading of the session, paired with
+                // `working` for the reason `idle` above is: the two reads are a
+                // moment apart, and a row saying a session that has gone is
+                // sitting there would be the pair contradicting itself.
+                //
+                // And not where something is waiting on the human, which is the
+                // middle third of the rescue's own condition read from the
+                // store instead of the register — a session sitting on a Set is
+                // waiting for an answer rather than parked, and the disc
+                // already says so.
+                parked: (working && !conversation.waiting)
+                    .then(|| sitting.get(&conversation.id))
+                    .flatten()
+                    .map(parked),
                 // And whether Verkstead has told the human something about it
                 // they have not looked at yet, which is the store's alone: it is
                 // written down rather than read off anything here, being a fact
@@ -1167,6 +1188,12 @@ pub(crate) async fn conversation_view(
     // than per Event: there is at most one session running on a Conversation,
     // so the answer cannot differ between the Events it is drawn against.
     let idling = state.sessions.idling(id);
+
+    // And the same register once more for the long silence behind that one: the
+    // rescue's reading of a session sitting there without asking, which is what
+    // the card draws its condition from — see
+    // [`crate::sessions::Sessions::parked`].
+    let sitting = state.sessions.parked(id);
 
     let timeline = match store::timeline(&state.pool, id).await {
         Ok(timeline) => timeline,
@@ -1737,6 +1764,11 @@ pub(crate) async fn conversation_view(
         // with it, so the label is drawn only where nothing is running — the
         // same reading `working` below is.
         waiting_on_checks: narrowed_to_checks && writing.is_none() && writing_now.is_none(),
+        // And the other condition, which is the one a running session can be in:
+        // idle past the grace with the rescue watching it, said in the same
+        // numbers the sidebar row carries — and not while anything is waiting on
+        // the human, for the reason the row above gives.
+        parked: sitting.filter(|_| !waiting).as_ref().map(parked),
         resets,
         archived,
         trimmed,
@@ -3943,6 +3975,20 @@ fn row_state(id: i64, state: store::RowState) -> Lifecycle {
 
             Lifecycle::Draft
         }
+    }
+}
+
+/// The register's reading of a session sitting there without asking, as the
+/// viewer receives it — see [`crate::sessions::Parked`].
+///
+/// Whole seconds, because the words it comes out in count minutes: a condition
+/// that said *idle 4 min* one second and *idle 4 min* the next off a number that
+/// had moved is a redraw nobody can see. What those words are is the viewer's
+/// and said once there — see `conditions.ts`.
+fn parked(sitting: &crate::sessions::Parked) -> Parked {
+    Parked {
+        idle_seconds: sitting.idle_for.as_secs(),
+        spoken_to: sitting.spoken_to,
     }
 }
 

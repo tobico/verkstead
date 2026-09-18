@@ -1218,6 +1218,19 @@ waiting: boolean,
  */
 waiting_on_checks: boolean, 
 /**
+ * The session on this row having gone quiet without asking — see
+ * [`Parked`] — or `null` where it has not.
+ *
+ * A second condition beside the one above and the same kind of thing: a
+ * fact read off a running session at the moment the list is drawn, said in
+ * numbers here and in words by the viewer.
+ *
+ * Always `null` where nothing is working, which keeps it a pair with
+ * `idle` for the reason `idle` is a pair with `working`: only a running
+ * session can be sitting there.
+ */
+parked: Parked | null, 
+/**
  * Whether Verkstead has told the human something about this Conversation
  * that they have not looked at yet.
  *
@@ -1571,6 +1584,15 @@ waiting: boolean,
  * derived from and the only place it can hold.
  */
 waiting_on_checks: boolean, 
+/**
+ * The session running on this Conversation having gone quiet without
+ * asking — see [`Parked`] — or `null` where none is or none has.
+ *
+ * The same condition the sidebar row carries, read off the same register
+ * in the same breath, so the card and the row it opens cannot come to
+ * disagree about the one session.
+ */
+parked: Parked | null, 
 /**
  * What the stop shows about the account that ran out coming back, and
  * `null` on every stop that is not a usage window's — which is nearly all
@@ -2394,6 +2416,39 @@ export type PairingView = { profile: ProfileEntry,
  * here has to say — its Pairings are fixed and there is no picking left.
  */
 model: string | null, };
+
+/**
+ * A running session that has gone quiet without asking: how long it has been
+ * sitting there, and how many times the Rescue has spoken to it.
+ *
+ * The rescue's own reading of a session, which nothing else here has. The mark
+ * beside `idle` is the backend's short judgement of a session mid-turn; this is
+ * the long one the rescue arms on — idle past the runner's grace, with nothing
+ * open on the Conversation and nothing to show for itself. A session wearing it
+ * is one nobody can move and nothing was saying anything about, which is what a
+ * first Windows run left somebody watching for ten minutes.
+ *
+ * A condition rather than a state, for the reason *Waiting on checks* is one:
+ * the lifecycle is untouched, nothing is written down, and both halves are read
+ * off the register at the moment the page is drawn — the idle clock the session
+ * already carries, and the count the rescue keeps beside it.
+ *
+ * Numbers rather than words, because the words are the viewer's and are said
+ * once there: the same condition is drawn on the card the human opens and on
+ * the row they find it by.
+ */
+export type Parked = { 
+/**
+ * How long it has been idle, in whole seconds and by its backend's own
+ * judgement of idle — see the server's `Idle`.
+ */
+idle_seconds: number, 
+/**
+ * And how many times the Rescue has typed its line into it: none yet, once,
+ * or twice, which is as many times as a session is ever spoken to before it
+ * is stopped where it stands.
+ */
+spoken_to: number, };
 
 /**
  * Whether the server can see what an entry names, at the moment it was asked.

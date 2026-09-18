@@ -162,6 +162,51 @@ describe("the status word", () => {
     expect(status(quiet).word).toBe("Running");
   });
 
+  /// A session the Rescue is watching sit there is the other thing, and it takes
+  /// the word: idle long past the grace with nothing open and nothing to show
+  /// for itself is a run nobody can move, and it read as *Running* because
+  /// nothing was ever drawn for it.
+  it("says how long a parked session has sat there and what it was told", () => {
+    expect(
+      status(
+        like({
+          working: true,
+          parked: { idle_seconds: 260, spoken_to: 1 },
+        }),
+      ),
+    ).toEqual({
+      word: "idle 4 min, spoken to once",
+      state: "Implementing",
+      attention: false,
+    });
+  });
+
+  /// The span alone before anything has been said to it, which is the
+  /// condition's first minute: the rescue arms on the same grace this is drawn
+  /// past, so every parked session wears it this way for a poll or two.
+  it("says the span alone before the Rescue has spoken to it", () => {
+    expect(
+      status(
+        like({ working: true, parked: { idle_seconds: 61, spoken_to: 0 } }),
+      ).word,
+    ).toBe("idle 1 min");
+  });
+
+  /// And under everything above it, because those are about the human: a
+  /// Conversation with something waiting on them is not one to report the
+  /// agent's silence over.
+  it("says what is waiting over a session sitting there", () => {
+    expect(
+      status(
+        like({
+          waiting: true,
+          working: true,
+          parked: { idle_seconds: 260, spoken_to: 2 },
+        }),
+      ).word,
+    ).toBe("Waiting on you");
+  });
+
   /// And the moment between one step of a backlog and the next: nothing is
   /// running, and something of Verkstead's own is still holding it.
   it("says Driven where nothing runs and something still drives", () => {

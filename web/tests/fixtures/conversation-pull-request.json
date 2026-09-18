@@ -21,6 +21,7 @@
   "id": 2,
   "implementation_pairing": null,
   "naming": false,
+  "parked": null,
   "pinned": [],
   "ready_to_continue": false,
   "ready_to_grill": false,

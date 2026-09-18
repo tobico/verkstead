@@ -1455,6 +1455,60 @@ struct Running {
     /// Which backend it is, so that a Set it asks is stored the way that backend
     /// asks — see [`Sessions::channel`].
     agent_type: store::AgentType,
+
+    /// How many times the Rescue has typed its line into it — see
+    /// [`Sessions::spoken_to`].
+    ///
+    /// The count the rescue loop keeps anyway, kept here as well because the
+    /// loop is a driver and a driver is not a thing a page can read. Beside the
+    /// session rather than in the store, for the reason the idle clock is: it is
+    /// a fact about a process this server is holding, and a server that came
+    /// back up without the process has no count to keep.
+    spoken_to: u32,
+}
+
+impl Running {
+    /// The rescue's reading of this session, where it has gone quiet without
+    /// asking: how long it has been idle, and how many times it has been told.
+    ///
+    /// `None` until it is idle past `grace`, which is the runner's own — see
+    /// [`Pace::proposing`], the threshold the rescue arms on. The short idle the
+    /// sidebar's mark is drawn from is a different reading and a much quicker
+    /// one: a session between two lines of its own output is idle by that and
+    /// working by every other measure.
+    ///
+    /// Nothing else of the rescue's condition is asked here, because neither
+    /// half of it is the register's. Whether anything is waiting on the human is
+    /// the store's and is folded in by the caller — see `crate::ui` — and
+    /// whether the work has landed is a sweep of a worktree, which is the
+    /// driver's to run at its own pace rather than something a page read can
+    /// afford per row. What the last of those leaves is a moment: a session that
+    /// has landed its work and gone quiet wears the condition until the driver
+    /// beside it ends the session, which is one poll of the runner's.
+    fn parked(&self, grace: Duration) -> Option<Parked> {
+        let idle_for = self.idle.for_how_long();
+
+        (idle_for >= grace).then_some(Parked {
+            idle_for,
+            spoken_to: self.spoken_to,
+        })
+    }
+}
+
+/// A running session that has gone quiet without asking, as the page that draws
+/// it sees it.
+///
+/// Both halves are read at the moment a page is drawn and neither is stored: the
+/// idle clock is the session's own, and the count is the one the rescue keeps
+/// beside it. What the words are is the viewer's — see `conditions.ts`, where
+/// the same condition is said once for the card and the row alike.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Parked {
+    /// How long it has been idle, by its backend's own judgement of idle.
+    pub(crate) idle_for: Duration,
+
+    /// And how many times the Rescue has typed its line into it.
+    pub(crate) spoken_to: u32,
 }
 
 impl Sessions {
@@ -1738,6 +1792,67 @@ impl Sessions {
             .filter(|(_, running)| running.idle.idling())
             .map(|(conversation_id, _)| *conversation_id)
             .collect()
+    }
+
+    /// The rescue's reading of a Conversation's running session — see
+    /// [`Running::parked`] — or `None` where it has none, or has one that is at
+    /// work or not yet past the grace.
+    ///
+    /// What the Conversation's own page draws the condition from, beside
+    /// [`Sessions::idling`] and read the same way: a question about a process,
+    /// answered as of the moment it was asked.
+    pub(crate) fn parked(&self, conversation_id: i64) -> Option<Parked> {
+        let grace = self.pace().proposing;
+
+        self.running
+            .lock()
+            .expect("the sessions registry is not poisoned")
+            .get(&conversation_id)
+            .and_then(|running| running.parked(grace))
+    }
+
+    /// And the same for the whole sidebar at once, for the reason
+    /// [`Sessions::working`] is read that way: one lock for the list rather than
+    /// one per row.
+    ///
+    /// The Conversations with nothing sitting there are left out rather than
+    /// carried as absences, which is what makes it a map: what the sidebar asks
+    /// of each row is whether this one holds an answer for it.
+    pub(crate) fn all_parked(&self) -> HashMap<i64, Parked> {
+        let grace = self.pace().proposing;
+
+        self.running
+            .lock()
+            .expect("the sessions registry is not poisoned")
+            .iter()
+            .filter_map(|(conversation_id, running)| {
+                Some((*conversation_id, running.parked(grace)?))
+            })
+            .collect()
+    }
+
+    /// Count a line the Rescue has just typed into a session, so that the page
+    /// can say how many times it has been spoken to.
+    ///
+    /// By the Event as well as by the Conversation, for the reason every other
+    /// reader here is: a Timeline holds every session a Conversation has had,
+    /// and a count belongs to the one that was told rather than to whatever is
+    /// running now.
+    ///
+    /// A session that has ended in the meantime is counted against nothing,
+    /// which is the same answer the rescue itself gets — see
+    /// [`crate::rescues::rescue`], where a line typed into a session that is no
+    /// longer there is a rescue that had nothing to rescue.
+    pub(crate) fn spoken_to(&self, conversation_id: i64, event_id: i64) {
+        if let Some(running) = self
+            .running
+            .lock()
+            .expect("the sessions registry is not poisoned")
+            .get_mut(&conversation_id)
+            .filter(|running| running.event_id == event_id)
+        {
+            running.spoken_to += 1;
+        }
     }
 
     /// Whether this server can launch an agent at all.
@@ -2215,6 +2330,7 @@ impl Sessions {
                     ended: ended.clone(),
                     gone,
                     agent_type: pairing.profile.agent_type(),
+                    spoken_to: 0,
                 },
             );
         }

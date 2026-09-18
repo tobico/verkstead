@@ -91,7 +91,7 @@ import { SPOKEN } from "./Mark";
 // so a ring means the same thing in the list that it means on the row it
 // opens.
 import marks from "./Mark.module.css";
-import { WAITING_ON_CHECKS } from "./conditions";
+import { WAITING_ON_CHECKS, parked } from "./conditions";
 import { titled } from "./naming";
 import { STATE } from "./states";
 import { Wordmark } from "./Wordmark";
@@ -597,6 +597,13 @@ const DISC = {
 /// saying both would be saying it twice. The words are [`WAITING_ON_CHECKS`],
 /// which the Timeline's own header draws from the same constant.
 ///
+/// And a session the Rescue is watching sit there is said *beside* that word
+/// rather than in place of it: *idle 4 min, spoken to once* is something true
+/// of a run that is still Implementing. The words are [`parked`], which the
+/// card this row opens says the same condition in — and this is the only place
+/// the row says it at all, the ring that marks the quiet being nothing to
+/// anybody reading by ear.
+///
 /// And a Conversation nobody has named is called a Draft, which is the word its
 /// state is said in as well — so where the name and the state are the one word
 /// it is said once rather than twice over. Whatever is drawn on the card is
@@ -614,7 +621,13 @@ function spoken(entry: ConversationEntry): string {
         ? SPOKEN[which]
         : null;
 
-  return [name, entry.repo, name === where ? null : where, marked]
+  return [
+    name,
+    entry.repo,
+    name === where ? null : where,
+    entry.parked ? parked(entry.parked) : null,
+    marked,
+  ]
     .filter((part) => part !== null)
     .join(", ");
 }
