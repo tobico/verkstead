@@ -17,7 +17,7 @@ Roadmap stage: [05: First-run hygiene](docs/roadmaps/built-roots/05-first-run-hy
 
 ## Tasks
 
-- [ ] 01: The desktop app refused — [details](01-the-desktop-app-refused.md)
+- [x] 01: The desktop app refused — [details](01-the-desktop-app-refused.md)
 - [ ] 02: The desktop's log file — [details](02-the-desktops-log-file.md)
 - [ ] 03: The release gate — [details](03-the-release-gate.md)
 - [ ] 04: The token note and the docs — [details](04-the-token-note-and-the-docs.md)

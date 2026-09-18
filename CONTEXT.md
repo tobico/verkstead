@@ -525,10 +525,17 @@ the name resolved to and the file that path lands on, where it is a link: a
 distribution's `claude` too old to connect and the human's own under
 `~/.local/bin` are the same tick and two different programs. One that is not
 there says where the name was seen, where it was seen at all — on an entry of
-the server's own `PATH` that a session's is not composed with, or at the end of
-a link a session could not follow — because each of those is a `PATH` to fix
-rather than a program to install. A name on no list at all is absent with
-nothing said. And where a session looks is the composed list itself, drawn
+the server's own `PATH` that a session's is not composed with, at the end of a
+link a session could not follow, or standing as the Claude Code **desktop app**
+rather than the CLI — because the first two are a `PATH` to fix rather than a
+program to install, and the third is Claude Code already on the machine with no
+CLI on the end of that name. The desktop app is recognised by shape and nothing
+is run to find out: a `claude` under `%LOCALAPPDATA%\AnthropicClaude`, beside
+Squirrel's `Update.exe`, or standing as a `WindowsApps` alias. Its row names the
+npm install, and a session whose Profile resolves to one is refused rather than
+started, with the same line in the log and in its Capture. A name on no list at
+all is absent with nothing said. And where a session looks is the composed list
+itself, drawn
 above the rows on every platform, a session's `PATH` being the server's own
 rather than anything the wizard could write down.
 

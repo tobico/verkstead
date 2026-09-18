@@ -23,7 +23,7 @@
 //! reading back a live one out of a database.
 
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
@@ -43,7 +43,7 @@ use crate::platform::Platform;
 use crate::runner::Pace;
 use crate::sandbox::account;
 use crate::sandbox::outliving;
-use crate::sandbox::{Executable, Homes, Reachable, Sandbox, SandboxConfig, under_dev_shell};
+use crate::sandbox::{self, Executable, Homes, Reachable, Sandbox, SandboxConfig, under_dev_shell};
 use crate::screen::Live;
 use crate::settings::Settings;
 use crate::skills::{self, Skills};
@@ -344,6 +344,44 @@ impl Agents {
             sandbox,
             under_dev_shell(self.homes.platform(), &worktree, argv),
         ))
+    }
+
+    /// The Claude Code **desktop app** standing where a Profile of `agent_type`
+    /// would find its harness, and `None` for every other answer a name has —
+    /// see [`sandbox::desktop_app`], which is the shape it is recognised by and
+    /// is reads rather than a run.
+    ///
+    /// **Asked before a session is started rather than read off one that
+    /// stopped.** The desktop app is a real program that really runs: a session
+    /// launched on it printed nothing, exited, and left a Timeline row saying
+    /// nothing whatever and a log saying no more. So the launch is refused with
+    /// the file named, the way one with no sandbox to run in is — see
+    /// [`Sessions::start`], which is where that is said.
+    ///
+    /// **Nothing at all where something stands where every type's binary
+    /// goes** — see [`Agents::agent`]. What the suite puts there is an agent by
+    /// construction, and asking the machine about the name it stands in for
+    /// would be asking about a program that is not the one being run.
+    ///
+    /// Blocks: a `PATH` walk and a handful of `stat`s.
+    fn desktop_app(&self, agent_type: store::AgentType) -> Option<PathBuf> {
+        if self.agent.is_some() {
+            return None;
+        }
+
+        let platform = self.homes.platform();
+
+        match sandbox::standing(
+            platform,
+            binary(agent_type),
+            Some(&sandbox::machine_path(platform)),
+            None,
+            std::env::var_os("PATHEXT").as_deref(),
+            None,
+        ) {
+            sandbox::Standing::Desktop { at } => Some(at),
+            _ => None,
+        }
     }
 
     /// What a session of `conversation_id` under `pairing` on `prompt`, named
@@ -2174,6 +2212,39 @@ impl Sessions {
         nudges.announce(Nudge::Conversation {
             conversation: conversation_id,
         });
+
+        // And before anything is built or spawned: the name this Profile's
+        // harness resolves to, where that name is the Claude Code desktop app
+        // rather than the CLI. It is a program that runs, so nothing here would
+        // fail — it would print nothing and exit, which is the launch this is
+        // written for. A handful of `stat`s, which is why it is asked here
+        // rather than handed to the blocking thread below.
+        if let Some(desktop) = agents.desktop_app(pairing.profile.agent_type()) {
+            let at = desktop.display();
+
+            tracing::error!(
+                conversation_id,
+                desktop = %at,
+                "the claude a session would run is the Claude Code desktop app rather than \
+                 the command-line tool, so no session was started",
+            );
+
+            verkstead_says(
+                pool,
+                nudges,
+                printing,
+                &mut reading,
+                &format!(
+                    "Verkstead did not start a session: {at} is the Claude Code desktop app \
+                     rather than the command-line tool. The desktop app includes Claude Code, \
+                     and the CLI is installed separately — npm install -g \
+                     @anthropic-ai/claude-code — to use claude from a terminal.",
+                ),
+            )
+            .await;
+
+            return Ok(None);
+        }
 
         // The sandbox asks git where the worktree's object database is, and the
         // dev-shell question is a `nix eval` or two. The line itself blocks on
