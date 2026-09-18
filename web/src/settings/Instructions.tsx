@@ -5,8 +5,8 @@
 //! of the account's files — so the global instructions a human has spent a year
 //! refining are not there, and a session starts knowing only what its Repo
 //! carries. This is what takes their place: one text, written into each root as
-//! the file that harness reads, and given to any harness that has no such file
-//! as a section of its prompt.
+//! the file that harness reads — `.claude/CLAUDE.md`, `.codex/AGENTS.md`,
+//! `.grok/AGENTS.md`, or `AGENTS.md` in OpenCode's config directory.
 //!
 //! **One text for every Agent Profile**, rather than one per Profile. It is a
 //! thing Verkstead is *told* — like the git author and the sandbox binds, and
