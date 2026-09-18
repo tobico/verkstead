@@ -521,6 +521,21 @@ impl Grilling {
         self.home.path().join("Documents")
     }
 
+    /// And the desktop app's own log file, which the tray's **View Logs** opens
+    /// and which nothing in a description names either.
+    ///
+    /// In the human's local application data, where the desktop binary's Log
+    /// Directory resolves to on this platform — see
+    /// `verkstead_server::platform::default_log_dir`.
+    fn desktop_log(&self) -> PathBuf {
+        self.home
+            .path()
+            .join("AppData")
+            .join("Local")
+            .join("Verkstead")
+            .join("verkstead.log")
+    }
+
     /// The local account this machine's Verkstead runs its sessions as, which
     /// is what every entry in this fixture's boundary is written for.
     ///
@@ -883,6 +898,15 @@ async fn grilling() -> Grilling {
         "the human's own\n",
     )
     .unwrap();
+
+    // And the desktop app's own log file in the same profile, which the tray's
+    // **View Logs** opens. Its startup line names the address alone (ADR-0015),
+    // but the boundary is the claim worth having whatever the line says: the
+    // file is the human's, and a session runs as a local account of Verkstead's
+    // own.
+    let logs = home.path().join("AppData").join("Local").join("Verkstead");
+    std::fs::create_dir_all(&logs).unwrap();
+    std::fs::write(logs.join("verkstead.log"), "verkstead is listening\n").unwrap();
 
     let repo = repository(watched.path().join("verkstead"));
     let sibling = repository(watched.path().join("something-else"));
@@ -1504,7 +1528,9 @@ async fn a_boundary_being_written_says_so_at_its_start_and_at_its_end() {
 ///
 /// The whole point of there being a boundary at all, and the one thing a coarser
 /// test would pass without: the human's own Documents, which no description
-/// mentions; another checkout on the same machine, which is somebody else's
+/// mentions; the desktop app's own log file beside them, which the tray's
+/// **View Logs** opens for the human and for nobody inside; another checkout on
+/// the same machine, which is somebody else's
 /// work; Verkstead's own record of every Conversation, which is nobody's
 /// business inside; the account's own `~/.claude` and everything in it that a
 /// root does not join in — its skills, its plugins, its global `CLAUDE.md` and
@@ -1534,6 +1560,7 @@ async fn what_no_description_names_is_refused_and_a_name_nobody_made_is_absent()
             account.join("projects").join(ANOTHER_REPOSITORY),
         ),
         directory("documents", fixture.documents()),
+        file("desktop-log", fixture.desktop_log()),
         directory("sibling", &fixture.sibling),
         file("verksteads-own", fixture.state.path().join("verkstead.db")),
         file(
@@ -1574,6 +1601,11 @@ async fn what_no_description_names_is_refused_and_a_name_nobody_made_is_absent()
         (
             "documents",
             "the human's own Documents, which no description names",
+        ),
+        (
+            "desktop-log",
+            "the desktop app's own log file, which is in the human's local \
+             application data and which the tray opens for them alone",
         ),
         (
             "sibling",
@@ -1627,6 +1659,10 @@ async fn what_no_description_names_is_refused_and_a_name_nobody_made_is_absent()
     assert!(
         fixture.documents().join(MARKER).is_file(),
         "and so are the human's own Documents",
+    );
+    assert!(
+        fixture.desktop_log().is_file(),
+        "and so is the log file the tray opens",
     );
 }
 

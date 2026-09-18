@@ -84,6 +84,18 @@ the daemon's way. Neither a `verkstead` subcommand nor a wizard step: the first
 would be a second place to print one line, and the second would put a step
 nothing gates in front of somebody who has not yet seen a Conversation.
 
+Amended: **the startup line carries the link on the install where that line
+*is* the handing over, and the address alone where it is not.** The desktop app
+was doing both — opening a browser on the link, and logging the same line the
+daemon logs, key and all, into the file the tray's **View Logs** opens. A
+journal read by whoever the machine lets read it is one thing; a file on
+somebody's desk that a menu item opens is another. So `verkstead serve` is
+unchanged, a headless host having nothing else and a key redacted there leaving
+a machine started from a unit file with no way in at all; the desktop app's
+line names the address alone, and the app is the one caller that arrives
+holding the key before there is a server to ask one of. Rejected with the
+subcommand above: redacting everywhere.
+
 What stays open: the Share Viewer, which other people open from a gist link
 and which reads nothing of the API; `/api/v1/health`; and the
 Conversation-scoped session API, which is a session's own and scoped already.

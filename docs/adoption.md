@@ -197,7 +197,11 @@ where no session can reach it — so what the app opens is the login link, the
 address with the key on the end of it. **Open** composes it afresh at every
 press, which is what to reach for when a browser has forgotten the cookie:
 there is no link to keep anywhere, and nothing to type. Started with
-`--no-open`, the same link is on the startup line in **View Logs**.
+`--no-open`, **Open** is the whole of it — the app's own startup line names the
+address and no key, because **View Logs** opens a file on your desk and a
+workbench key written into it would be a login for anybody reading over your
+shoulder. The journal a `verkstead serve` writes is the other case, and still
+carries the link: a host with no tray has nowhere else to be handed one.
 
 **Answering from your phone is the workbench's own settings**, under **Remote
 access**: it reads what this machine's Tailscale is doing, a checkbox puts the
@@ -342,7 +346,8 @@ there leaves the box ticked and the plist where it was.
 **The browser it opens is logged in**, as it is on Linux: what the app opens is
 the login link rather than the bare address, and **Open** composes it afresh at
 every press, which is what a browser that has forgotten the cookie wants.
-Started with `--no-open`, the same link is on the startup line in **View Logs**.
+Started with `--no-open`, **Open** is the whole of it: the app's own startup
+line names the address and no key, **View Logs** opening a file on your desk.
 
 **Answering from your phone is the settings page's Remote access section**, as
 it is on Linux, and Tailscale itself is the Mac's own. What differs is the
@@ -532,8 +537,9 @@ than this describes.
 **The browser it opens is logged in**, as on the other two: what the app opens
 is the login link rather than the bare address, and **Open** composes it afresh
 at every press, which is what a browser that has forgotten the cookie wants.
-Started from a terminal with `--no-open`, the same link is on the startup line
-printed there and in **View Logs**.
+Started from a terminal with `--no-open`, **Open** is the whole of it: the
+app's own startup line names the address and no key, **View Logs** opening a
+file under your own `%LOCALAPPDATA%` that anybody at the screen can read.
 
 **Answering from your phone is the settings page's Remote access section**, as
 it is on the other two, and Tailscale itself is the machine's own. What differs

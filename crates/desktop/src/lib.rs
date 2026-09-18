@@ -84,7 +84,7 @@ use std::sync::mpsc::sync_channel;
 use anyhow::{Context, Result};
 use tray_icon::TrayIcon;
 use verkstead_server::Config;
-use verkstead_server::key::{WorkbenchKey, login_link};
+use verkstead_server::key::{HandsOverTheLink, WorkbenchKey, login_link};
 
 /// What Verkstead is called wherever a platform asks for an identifier rather
 /// than a name (ADR-0012).
@@ -182,11 +182,19 @@ impl Desktop {
             .build()
             .context("starting the async runtime")?;
 
+        // And handed over with it: holding the key already is the same fact as
+        // handing the link out here rather than leaving it to a log line. The
+        // browser below is opened on it and the tray's **Open** opens another
+        // whenever it is pressed, so the server's startup line names the
+        // address alone — the log file **View Logs** opens is a file on
+        // somebody's desk, and a workbench key in it is a login anybody reading
+        // over a shoulder has (ADR-0015).
         let serving = runtime.spawn(verkstead_server::run_on_keyed(
             listener,
             self.server,
             key.clone(),
             escalation(screen::there_is_one()),
+            HandsOverTheLink::TheCaller,
         ));
 
         // After the socket is bound and before the server is up, which is the

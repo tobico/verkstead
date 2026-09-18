@@ -240,15 +240,55 @@ impl WorkbenchKey {
     }
 }
 
+/// Who hands the login link over on this install, which is what the startup
+/// line carries and what it leaves off (ADR-0015).
+///
+/// The link is the whole of logging in, so a line carrying one is a line with
+/// the secret in it — and where that line goes is a fact about the install
+/// rather than about the server. A journal read by whoever the machine lets
+/// read it is one thing; a file a menu item opens on somebody's desk is
+/// another.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandsOverTheLink {
+    /// Nothing but the startup line, which is the daemon's way: a machine
+    /// started from a unit file or a shell has no tray to press **Open** in,
+    /// and what somebody reading the journal pastes is the whole link. A key
+    /// redacted there would leave such a machine with no way in at all.
+    TheStartupLine,
+    /// The caller, which is the desktop app: it opens a browser on the link as
+    /// it comes up, and the tray's **Open** opens another whenever it is
+    /// pressed. So the line names the address alone, and the secret stays out
+    /// of the log file **View Logs** opens.
+    TheCaller,
+}
+
+impl HandsOverTheLink {
+    /// What the startup line says the workbench is: the whole login link where
+    /// that line is the handing over, and the address alone where the caller
+    /// has already done it.
+    pub fn startup_line(self, listen: SocketAddr, key: &WorkbenchKey) -> String {
+        match self {
+            HandsOverTheLink::TheStartupLine => login_link(listen, key),
+            HandsOverTheLink::TheCaller => workbench_address(listen),
+        }
+    }
+}
+
 /// The login link for a browser on the machine Verkstead is running on: what
-/// the startup line carries, and what the desktop app opens.
+/// the daemon's startup line carries, and what the desktop app opens.
 ///
 /// The address as it was given, unless that is the unspecified one — bound to
 /// `0.0.0.0` the server answers on every interface this machine has, and what
 /// a browser *here* is pointed at is the loopback rather than a literal
 /// `0.0.0.0` a URL bar has nothing to do with.
 pub fn login_link(listen: SocketAddr, key: &WorkbenchKey) -> String {
-    key.link(&format!("http://{}", browsable(listen)))
+    key.link(&workbench_address(listen))
+}
+
+/// The same address with no key on it: what a startup line says where the link
+/// was handed over somewhere else.
+pub fn workbench_address(listen: SocketAddr) -> String {
+    format!("http://{}", browsable(listen))
 }
 
 /// `listen` as an address a browser on this machine can be pointed at.

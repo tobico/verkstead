@@ -852,6 +852,50 @@ fn the_log_file_holds_the_servers_own_startup_line() {
     app.stop();
 }
 
+/// And that line names the address rather than the login link, because this
+/// install hands the link over itself: a browser opened as the app comes up, and
+/// the tray's **Open** at every press after it (ADR-0015).
+///
+/// The file is the point. **View Logs** is a menu item on somebody's desk, the
+/// log lives in their own local application data, and a workbench key written
+/// into it is a login for anybody reading over their shoulder — where the
+/// daemon's journal, which `serve.rs` asserts still carries the whole link, is
+/// the one place a headless machine has to hand one over at all.
+#[test]
+fn the_log_file_carries_no_workbench_key() {
+    let tmp = tempfile::tempdir().unwrap();
+    let opener = Opener::in_dir(tmp.path());
+    let home = tmp.path().join("home");
+    let data_dir = tmp.path().join("data");
+    let port = free_port();
+
+    let flags = flags(port, &data_dir);
+    let mut args = as_args(&flags);
+    args.push("--no-open");
+    let mut app = App::start(port, Some(&opener), &home, &args, &[]);
+
+    // The key this run is gated on, read back the way a second start would read
+    // it rather than scraped out of what was logged — a test that looked for
+    // the secret in the log by its shape would pass against a log that had one
+    // spelled some other way.
+    let secret = verkstead_server::key::WorkbenchKey::issued(&data_dir)
+        .expect("the app writes its key as it starts")
+        .secret();
+
+    let logged = std::fs::read_to_string(log_file(&home)).unwrap();
+
+    assert!(
+        !logged.contains(&secret) && !logged.contains("?key="),
+        "the log the tray opens should hold no way into the workbench, got:\n{logged}"
+    );
+    assert!(
+        logged.contains(&format!("127.0.0.1:{port}")),
+        "and it should still say where Verkstead came up, got:\n{logged}"
+    );
+
+    app.stop();
+}
+
 /// And what is written there is filtered the way `verkstead serve`'s stdout is:
 /// where the events go is the verb's call, and which of them are worth writing
 /// is `RUST_LOG`'s.
