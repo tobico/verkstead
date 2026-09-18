@@ -1443,7 +1443,10 @@ async fn the_skills_inside_are_the_bundled_ones_and_only_those() {
     );
     assert_eq!(
         reported["claude-md"], "absent",
-        "there is no global CLAUDE.md in here to say how to reach the human"
+        "and no global CLAUDE.md is in here to say how to reach the human — this \
+         fixture has no instructions text configured, and the one a root holds \
+         where there is one is the human's own words rather than anywhere \
+         Verkstead says how to ask"
     );
     assert_eq!(
         reported["the-accounts-own"], "absent",

@@ -3520,8 +3520,9 @@ async fn a_session_runs_the_grilling_profiles_agent_on_the_brief_in_the_worktree
     );
     assert!(
         said.contains("/verkstead/skills/grilling/SKILL.md"),
-        "the session is sent into the bundled grilling skill by the prompt, there being no \
-         global CLAUDE.md inside to say what it is for: {said:?}"
+        "the session is sent into the bundled grilling skill by the prompt, nothing inside \
+         saying what the session is for — a global instructions file there holds the \
+         human's own text and never Verkstead's: {said:?}"
     );
     assert!(
         said.contains(BRIEF),
