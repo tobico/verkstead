@@ -246,7 +246,7 @@ comments named. Every other branch — in this repository and in every companion
 beside it — belongs to somebody else's piece of feedback. The pull request
 exists, and merging is the human's act.
 
-Then say what you did and what you left, and stop.
+Then say what you did and what you left, and run `verkstead done`.
 
 ## 7. A batch with nothing to do
 
@@ -257,7 +257,7 @@ already on the branch.
 **Ask nothing** where that is the whole batch.
 **Say plainly, as the last thing you print, what was said and why none of it
 needs a change** — that line is what the human sees on the Timeline, and it is
-the only report that any of it was read at all.
+the only report that any of it was read at all. Then run `verkstead done`.
 
 A Set with nothing in it is a row for them to dismiss, and the point of asking
 at all is to spend their attention only where there is a decision. Having
@@ -266,4 +266,27 @@ is not.
 
 The same holds at the other end: a batch whose every proposal was declined has
 nothing to commit, and committing nothing is the right end to it. Say what you
-put and what they left, and stop.
+put and what they left, and run `verkstead done`.
+
+## 8. Say you are done
+
+The last thing this session does, once what they accepted is committed and
+pushed, is run `verkstead done`. That is what ends the session, and nothing else
+does: not the commit, not the push, and not going quiet. So a batch session that
+waits on a test run, or on an answer, is not cut off while it waits.
+
+A batch with nothing to do, or whose every proposal was declined, runs it too:
+committing nothing is the right end to one of those, and Verkstead does not ask
+it for a commit.
+
+Verkstead checks the repository when you run it. A refusal exits non-zero and
+says on stderr what is missing — changes left uncommitted, say — and the session
+carries on: put that right and run `verkstead done` again.
+
+## Waiting on work in the background
+
+Before you end a turn with work of your own still running in the background — a
+build, a test run — run `verkstead waiting` with how long you expect it to take,
+such as `verkstead waiting 20m`, and declare it again if the work runs over.
+Otherwise Verkstead takes the session as stopped and prompts it. An ask needs no
+declaration. The Guide's *Waiting in the background* section has the details.

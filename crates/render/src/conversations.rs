@@ -584,21 +584,28 @@ pub struct ConversationView {
     pub direction: Option<Direction>,
 
     /// Which Event the Conversation is blocked on, or `null` where nothing is
-    /// stopping it.
+    /// holding it up.
     ///
-    /// The Event id and not a flag, so that the Notice a run stopped at can be
-    /// marked where it stands on the record — a Timeline is long by the time a
-    /// run gets far enough to stop, and the status button at the head of it
-    /// saying the work has stopped is half an answer without somewhere to read
-    /// why.
+    /// The Event id and not a flag, so that the Notice can be marked where it
+    /// stands on the record — a Timeline is long by the time a run gets far
+    /// enough to stop, and the status button at the head of it saying the work
+    /// has stopped is half an answer without somewhere to read why.
     ///
-    /// Being stopped is a condition of an active state and never a state of its
+    /// Being blocked is a condition of an active state and never a state of its
     /// own, which is why this sits beside `state` rather than in it.
     ///
-    /// Set for every stop, however it stopped. Which word the status button
-    /// says over it is `stopped_by_hand` below; the Notice is the same Notice
-    /// either way, a stop the human has to find being no different on the
+    /// **Set for every stop, however it stopped** — the Notice is the same
+    /// Notice either way, a stop the human has to find being no different on the
     /// record from a stop they made themselves.
+    ///
+    /// **And for a session escalated over, where nothing has stopped**: one gone
+    /// idle that the Rescue spoke to three times without an answer, told to the
+    /// human and left running with its worktree. Not a stop — nothing stopped,
+    /// nothing is offered to resume — but the one thing on the record they are
+    /// waiting on the session over, so the mark points at it. A stop wins where
+    /// there is one, there being only one mark.
+    ///
+    /// Which word the status button says over it is `stopped_by_hand` below.
     pub blocked_on: Option<i64>,
 
     /// Whether that stop is the human's own press, or a row from before the
@@ -612,8 +619,10 @@ pub struct ConversationView {
     /// follows the same rule from its own end of the wire, where the row's
     /// `waiting` has already folded it in.
     ///
-    /// `false` where nothing has stopped, which is the ordinary Conversation:
-    /// there is no word to choose between.
+    /// `false` where nothing has stopped, which is the ordinary Conversation and
+    /// also a session escalated over: neither is a stop, so there is no word to
+    /// choose between — and the second is *Waiting on you* by `waiting` below,
+    /// which the status button reads first.
     pub stopped_by_hand: bool,
 
     /// Whether something about this Conversation is waiting on the human: an ask

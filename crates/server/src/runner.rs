@@ -1,10 +1,10 @@
 //! The auto-advancing task runner: once there is a backlog, it works itself.
 //!
-//! A fresh session per task, launched the moment the one before it has landed,
+//! A fresh session per task, launched the moment the one before it is over,
 //! with no gate between them and nobody asked. That is the whole of it — and
-//! everything difficult about it is in the two questions it has to answer from
-//! the repository alone, because the sessions are ordinary interactive ones and
-//! the repository is the only thing they report through.
+//! everything difficult about it is in the two questions it has to answer:
+//! what is next, which the repository says, and when a step is over, which the
+//! session says and the repository checks.
 //!
 //! **What is next** is [`next_step`]: the lowest-numbered entry of `TODO.md`
 //! whose box is not ticked, or the finish step once every box is. Read off the
@@ -13,55 +13,63 @@
 //! one list. An unticked entry naming a file nobody wrote is neither, and stops
 //! the run rather than putting a session at nothing to work from.
 //!
-//! **When a step is over** is [`Landing`]: an entry ticked in `TODO.md`, or a
-//! path gone from the Worktree or arrived in it — and, either way, committed as
-//! it stands. A box ticked but not committed is a session still mid-task, and a
-//! commit is the one report an agent cannot half make. The poll never takes
-//! `index.lock` — everything here
-//! goes through [`crate::repos::git`], which passes `--no-optional-locks`,
-//! because what it is reading is a repository a session is committing in and a
-//! watcher that tripped the session's own `git add` would break the step it is
-//! waiting for.
+//! **What a finished step looks like** is [`Landing`]: an entry ticked in
+//! `TODO.md`, or a path gone from the Worktree or arrived in it — and, either
+//! way, committed as it stands. A box ticked but not committed is a session
+//! still mid-task, and a commit is the one report an agent cannot half make.
+//! The read never takes `index.lock` — everything here goes through
+//! [`crate::repos::git`], which passes `--no-optional-locks`, because what it is
+//! reading is a repository a session is committing in, and a read that tripped
+//! the session's own `git add` would break the step it is reading.
 //!
-//! A session is then ended on **done plus quiet**, never on done alone. Work
-//! does not always stop at the commit — a message, a summary, the tidying after
-//! — so the session is ended only once it has printed nothing for the grace
-//! period, and anything it prints in the meantime puts the whole grace back on
-//! the clock. A session that keeps talking is never killed blind.
+//! **When a step is over is the session's to say** — see [`crate::done`], and
+//! ADR-0018. Every session here is an ordinary interactive agent, which idles
+//! when its work is over rather than exiting, so something has to end it, and
+//! what ends it is its `verkstead done`. The landing is what that signal is
+//! checked against, at that moment and only then: a signal the branch does not
+//! bear out is refused, and a session that commits and then waits on its tests,
+//! or asks a question, is a session still at work however long it is quiet.
+//! Once the signal is taken the session is ended when it is next idle, and has
+//! been for [`Pace::grace`], so what it says on the way out is kept — see
+//! [`signalled_and_idle`].
 //!
-//! **Every kind of session is ended by Verkstead**, and none of them by itself:
-//! they are ordinary interactive agents, which idle when their work is done
-//! rather than exiting, so waiting to see one exit is waiting for something that
-//! never comes. What differs between the kinds is what *done* is read off. A
-//! propose-then-fix session — the wrap-up's review, and each batch of comments —
-//! reports through nothing but its own words, so its rule is quiet with nothing
-//! pending: see [`proposing`].
+//! What differs between the kinds of session is only what their signal is
+//! checked against — see [`crate::done::Evidence`]. A step's is its landing, an
+//! inline run's or an instruction's a new commit, a follow-up's the human's own
+//! *Nothing else* mark. A propose-then-fix session — the wrap-up's review, and
+//! each batch of comments — reports through nothing but its own words, and a
+//! fix through a check GitHub is asked about once it is over, so theirs is
+//! checked against nothing of its own: see [`proposing`] and [`address`].
 //!
-//! A step whose session ends without landing it stops the run where it is, and
-//! what it stops at is a **stop**: the Conversation records that nothing is
-//! driving it any more, and a Notice carrying the evidence goes on the Timeline
-//! — see [`crate::stopping`]. The run does not go round again from there; getting
-//! going is a press of Resume, because a runner that relaunched a step nothing
-//! had moved would spend an account on the same failure with nobody watching.
+//! A step whose session exits by itself without landing it stops the run where
+//! it is, and what it stops at is a **stop**: the Conversation records that
+//! nothing is driving it any more, and a Notice carrying the evidence goes on
+//! the Timeline — see [`crate::stopping`]. The repository is asked once first,
+//! because an agent that landed its step and then exited has done the step. The
+//! run does not go round again from a stop; getting going is a press of Resume,
+//! because a runner that relaunched a step nothing had moved would spend an
+//! account on the same failure with nobody watching.
 //!
-//! **And one whose session never ends at all** is spoken to before it is stopped
-//! over. A session that goes idle with nothing open and nothing landed has not
-//! ended and has not finished: it is sitting there with the turn over and no way
-//! of knowing that the screen it printed to has nobody in front of it. So it is
-//! told, twice, and then stopped where it stands — see [`crate::rescues`], which
-//! is one loop over every driver here and takes what *done* is read off as its
+//! **And a session that never signals is spoken to, and never stopped over.**
+//! One idle with nothing open, no wait declared and no signal given has not
+//! finished as far as anything here can tell: it is sitting there with the turn
+//! over and no way of knowing that the screen it printed to has nobody in front
+//! of it. So it is told, and where it will not answer the human is told
+//! instead, with the session left running for them — see [`crate::rescues`],
+//! which is one loop over every driver here and takes the signal as its
 //! parameter.
 //!
 //! **The pull request is the one thing that gets a second go.** Every run here
 //! ends on one — a backlog's finish step, an inline implementation, a roadmap's
 //! own session — and each of them commits its work and then pushes and opens the
-//! pull request after the commit. So each of them can land everything it was
-//! sent for and still stop short of the one act that makes the work readable,
-//! leaving it built, committed and unreviewable. That is not a step to run
-//! again: it is one push and one `gh pr create`, so it is asked for on its own,
-//! by a session sent for nothing else, and what follows is GitHub asked again
-//! and the ordinary stop where the answer has not changed. See
-//! [`to_a_pull_request`].
+//! pull request after the commit. A session that signals before the pull request
+//! is open is refused for it, so it puts that right in the same turn; but one
+//! that exits by itself can still land everything it was sent for and stop short
+//! of the one act that makes the work readable, leaving it built, committed and
+//! unreviewable. That is not a step to run again: it is one push and one
+//! `gh pr create`, so it is asked for on its own, by a session sent for nothing
+//! else, and what follows is GitHub asked again and the ordinary stop where the
+//! answer has not changed. See [`to_a_pull_request`].
 //!
 //! **And Resume takes the same go**, which is what makes pressing it worth
 //! anything here: a run that stopped at its push is a Conversation whose work is
@@ -100,8 +108,15 @@ pub struct Pace {
     /// short git read a couple of times a minute.
     pub poll: Duration,
 
-    /// How long a session must have printed nothing, its step landed, before it
-    /// is ended.
+    /// How long a session that has said it is done must have printed nothing
+    /// before it is ended.
+    ///
+    /// Counted from the signal as well as from the last thing printed, so the
+    /// closing words an agent writes once `verkstead done` comes back reach the
+    /// Transcript rather than being cut off under it — see
+    /// [`signalled_and_idle`]. Nothing is read off the branch while it runs: the
+    /// signal was checked when it was given, and this is only the pause that
+    /// keeps the last few lines.
     pub grace: Duration,
 
     /// How often a wrapping Conversation's pull request is asked about.
@@ -111,18 +126,18 @@ pub struct Pace {
     /// them at once — see [`crate::checks::ASKED_EVERY`] for what it costs.
     pub checks: Duration,
 
-    /// And how long a session that proposes and then fixes must have printed
-    /// nothing, with nothing of its own left for the human to answer, before it
-    /// is ended — see [`proposing`].
+    /// And how long a session must have been idle — with nothing open, no wait
+    /// declared and no Done signal given — before the Rescue speaks to it; see
+    /// [`crate::rescues`].
     ///
-    /// Distinctly longer than [`Pace::grace`], because it is carrying more
-    /// weight. A backlog step is ended on quiet *and* a landing read off the
-    /// repository, so quiet is the second of two signals; one of these reports
-    /// through nothing but its own words, and quiet is the only signal there
-    /// is. Cutting a review off early leaves what it had got to standing as the
-    /// whole of it, which on the Timeline reads as a review that found nothing
-    /// — and a minute of silence is the shortest an agent still at work
-    /// reliably breaks.
+    /// The Rescue's grace, and the whole of what this is: no session is ended on
+    /// quiet any more, so the only thing silence buys is a line typed into the
+    /// session. Named for the propose-then-fix sessions it was once the ending of
+    /// as well — see ADR-0018 for why that ending went.
+    ///
+    /// Distinctly longer than [`Pace::grace`], because a line typed into a
+    /// session still at work costs it a turn: a minute of silence is the shortest
+    /// an agent still at work reliably breaks.
     pub proposing: Duration,
 
     /// And how long a session that has just been stirred — launched, handed an
@@ -153,8 +168,9 @@ pub struct Pace {
     /// because a backend that repaints leaves gaps a few seconds long in the
     /// middle of its work and a session reaped inside one would be reaped at
     /// work. What it is for is a signature that has drifted, which is a session
-    /// nothing else here catches — Rescue's precondition is quiet, every ender
-    /// gates on the same judgement, and no session carries a cap on its life —
+    /// nothing else here catches — Rescue's precondition is idle, the ending a
+    /// signal earns waits on the same judgement, and no session carries a cap on
+    /// its life —
     /// so what this decides is not how fast that is noticed but whether it ever
     /// is.
     ///
@@ -337,6 +353,21 @@ impl Step {
         }
     }
 
+    /// Whether the step's session is done only once its branch has a pull
+    /// request open as well: the finish and a roadmap's own session, which are
+    /// the two a run ends on. See [`crate::done::Ends`].
+    fn ends(&self) -> crate::done::Ends {
+        match self {
+            Step::Finish | Step::Staging(_) => crate::done::Ends::OnAPullRequest,
+            Step::Planning
+            | Step::PlanningStage
+            | Step::Handoff(_)
+            | Step::Task { .. }
+            | Step::Broken { .. }
+            | Step::Nothing => crate::done::Ends::WithItsWork,
+        }
+    }
+
     /// What the step was, in the words the Timeline draws.
     ///
     /// The sentence rather than the word above it: the two are read by different
@@ -412,9 +443,9 @@ async fn nothing_to_work_from(state: &AppState, conversation_id: i64, step: &Ste
 ///
 /// Nothing is launched: the session is the one that proposed, idling on the
 /// blocking ask the Response is being delivered through, and it goes on from
-/// there with the whole thread still in its context. What this is, is the watcher
-/// — the artifact landing, plus quiet, is what ends the session and moves the
-/// Conversation on.
+/// there with the whole thread still in its context. What this is, is the watch:
+/// the session's Done signal, checked against the artifact the pick asked for, is
+/// what ends it and moves the Conversation on.
 ///
 /// The three tails differ in what the artifact is and in where landing it leaves
 /// the Conversation. A backlog is the start of a run — the tasks it names are
@@ -1179,20 +1210,18 @@ async fn asked_for_a_pull_request(state: &AppState, conversation_id: i64) {
 /// Run the one session sent to open a pull request the finish step did not, and
 /// wait until it is over.
 ///
-/// **Ended on quiet with nothing of its own open**, which is the review's rule
-/// rather than a step's, and here for a reason of its own: what this session is
-/// sent to do happens on GitHub rather than in the repository, so there is no
-/// path to watch and no commit it has to make — a branch that only wanted pushing
-/// is one it finishes without writing a line. What is left is silence, and every
-/// session here is an interactive agent that idles when its work is done rather
-/// than exiting. Anything it prints puts the whole grace back on the clock, and a
-/// Set of its own left open holds it for as long as the human takes.
+/// **Ended because it said it was done** — see [`crate::done`] — and once it is
+/// next idle after that. What this session is sent to do happens on GitHub
+/// rather than in the repository, so there is no path to check the signal
+/// against and no commit it has to make — a branch that only wanted pushing is
+/// one it finishes without writing a line. What holds is what every signal has:
+/// nothing left uncommitted, and a Set of its own still open locked as it is
+/// taken. Nothing ends it on quiet, so one that waits on a slow push is left to
+/// finish it.
 ///
-/// **No rescue on this one**, alone among the sessions here. The rescue is for a
-/// session nothing else can move on from — but this is already the second go at
-/// the same missing thing, and what follows it either way is GitHub asked and the
-/// Conversation wrapped up or stopped. Prodding it a third time would put the
-/// Notice off rather than save the human from it.
+/// **And one that will not ask is spoken to**, until it signals — see
+/// [`crate::rescues`], which tells the human where it will not answer and leaves
+/// the session running for them to move.
 ///
 /// The Timeline Event it printed into, or `None` where nothing ran: no session
 /// could be started, or the run was stopped from outside while this one did. Both
@@ -1204,21 +1233,45 @@ async fn submitted(state: &AppState, conversation_id: i64) -> Option<i64> {
     let idle = session.idle.clone();
     let pace = state.sessions.pace();
 
+    // Nothing on the branch for the signal to be checked against: what this
+    // session does is GitHub's to say, so GitHub is what it is checked against.
+    // See [`crate::done::Evidence::Nothing`] and [`crate::done::Ends`].
+    let expecting = state.signals.expecting(
+        conversation_id,
+        event_id,
+        crate::done::Evidence::Nothing,
+        crate::done::Ends::OnAPullRequest,
+    );
+    let signal = expecting.signal();
+
     let ended = tokio::select! {
         ended = session.ended() => Some(ended),
-        () = quiet_and_nothing_asked(state, conversation_id, event_id, &idle, pace) => None,
+        () = signalled_and_idle(signal.clone(), &idle, pace) => None,
+        // No signal given and nothing open, with the session sitting there.
+        // Spoken to, and the human told where it will not answer — see
+        // [`crate::rescues`].
+        never = crate::rescues::watched(
+            state,
+            conversation_id,
+            event_id,
+            &idle,
+            pace,
+            signal,
+            "opening the pull request",
+        ) => match never {},
     };
 
+    drop(expecting);
+
     match ended {
-        // Quiet with nothing of its own open, which is as much as a session whose
-        // work happened on GitHub can report from in here. Ended rather than left
-        // holding the Worktree, and what it did is GitHub's to say.
+        // Said it is done and gone quiet since. Ended rather than left holding
+        // the Worktree, and what it did is GitHub's to say.
         None => {
             tracing::info!(
                 conversation_id,
                 event_id,
-                "the session sent to open the pull request has gone quiet, so it is \
-                 being ended",
+                "the session sent to open the pull request said it is done and has gone \
+                 quiet since, so it is being ended",
             );
 
             state.sessions.end(conversation_id).await;
@@ -1266,9 +1319,10 @@ async fn submitted(state: &AppState, conversation_id: i64) -> Option<i64> {
 /// accounts the Conversation fixed separately and a session cannot change the
 /// one it is running as, which is the whole reason the handoff exists.
 ///
-/// A session that goes quiet without writing one stops, the way every other step
-/// does: nothing is driving the Conversation and a Notice says so, and starting
-/// it again is Resume's.
+/// A session that goes without writing one stops, the way every other step does:
+/// nothing is driving the Conversation and a Notice says so, and starting it
+/// again is Resume's. One still sitting there without it is refused its signal
+/// and spoken to instead, which is the same rule read a moment earlier.
 ///
 /// The registration is held across all of it — the watch, the move, and the run
 /// on the other side of it — so there is no moment between the handoff landing
@@ -1304,31 +1358,36 @@ async fn follow_handoff(state: AppState, conversation_id: i64, writing: Session,
 /// what it committed, which the branch watcher is putting on the Timeline while
 /// it runs.
 ///
-/// **Ended on committed plus quiet**, which is [`instructed`]'s rule on a
-/// session of the same shape: there is no path to watch, and a commit is the one
-/// report an agent cannot half make. Work does not always stop at the commit —
-/// the push and the pull request come after one — so the session is ended only
-/// once it has printed nothing for the grace, and anything it prints puts the
-/// whole grace back on the clock. Waiting for the process to exit instead would
-/// be waiting for something that never comes: every session here is an
-/// interactive agent that idles when its work is done.
+/// **Ended because it said it was done**, which is [`instructed`]'s rule on a
+/// session of the same shape — see [`crate::done`]. What the signal is checked
+/// against is a commit, there being no path to watch and a commit being the one
+/// report an agent cannot half make; a signal with nothing committed since the
+/// session began is refused. Nothing ends the session on the commit itself: work
+/// does not stop at the first one, and a session that commits a slice and then
+/// waits on its tests is a session still at work. Once the signal is taken the
+/// session is ended when it is next idle, so what it says on the way out is
+/// kept. Waiting for the process to exit instead would be waiting for something
+/// that never comes: every session here is an interactive agent that idles when
+/// its work is done.
 ///
-/// **And one that will not ask is spoken to**, on the same commit. Idle with
-/// nothing committed and nothing put to the human is the whole of an inline run
-/// come to nothing with a process still holding the Worktree — a Conversation
-/// nobody can move, driven so nothing sweeps it and silent so nothing says so.
-/// Told twice and then stopped where it stands, as every other driver here does
-/// it. See [`crate::rescues`].
+/// **And one that will not ask is spoken to**, until it signals. Idle with no
+/// signal given and nothing put to the human is an inline run come to nothing,
+/// or finished and not said, with a process still holding the Worktree — a
+/// Conversation nobody can move, driven so nothing sweeps it and silent so
+/// nothing says so. Where it will not answer the human is told, and the session
+/// left running, as every other driver here does it. See [`crate::rescues`].
 ///
-/// Landing is measured against what was already there rather than against zero,
-/// which is what makes a second go answerable: a first attempt that committed
-/// twice and then died leaves two commits behind, and a second that commits
-/// nothing has still landed nothing.
+/// Committing is measured against what was already there rather than against
+/// zero, which is what makes a second go answerable: a first attempt that
+/// committed twice and then died leaves two commits behind, and a second that
+/// commits nothing has committed nothing. What such a second session is sent for
+/// is the pull request, so that is what its signal is checked against instead —
+/// see [`crate::done`]'s `missing`.
 ///
 /// What follows a session that landed something is the same ending a backlog's
-/// finish step has: the session followed the repository's own review process on
-/// its way out, so the branch is pushed and on a pull request by the time it
-/// goes quiet, and [`to_a_pull_request`] is what finds that pull request and
+/// finish step has: the session followed the repository's own review process
+/// before it signalled, so the branch is pushed and on a pull request by then,
+/// and [`to_a_pull_request`] is what finds that pull request and
 /// moves the Conversation on — or, where the session stopped short of the push,
 /// sends for the one thing missing before anything stops. An inline
 /// implementation is work like any other work and goes for review like any other
@@ -1365,59 +1424,53 @@ async fn follow_inline(
     let idle = session.idle.clone();
     let pace = state.sessions.pace();
 
+    // What the session's Done signal is checked against: a commit past where the
+    // run stood, and a pull request open on the branch. See [`crate::done`].
+    let expecting = state.signals.expecting(
+        conversation_id,
+        event_id,
+        crate::done::Evidence::Committed { already },
+        crate::done::Ends::OnAPullRequest,
+    );
+    let signal = expecting.signal();
+
     let ended = tokio::select! {
         ended = session.ended() => Some(ended),
         // What an inline session that has done its work looks like from here:
-        // more on the branch than it started with, and nothing printed for the
-        // grace. Waited for rather than left to the exit, because an
-        // interactive agent idles when its work is done rather than exiting —
-        // which is [`instructed`]'s rule, on a session whose whole job is the
-        // same shape.
-        () = committed_and_quiet(&state, conversation_id, already, &idle, pace) => None,
-        // And one that is idle with nothing committed and nothing put to the
-        // human: the whole of an inline run come to nothing, with a process
-        // still holding the Worktree and nothing on the page to press. Told
-        // twice and then stopped where it stands, the commit being its
-        // done-indicator — see [`crate::rescues`].
-        () = crate::rescues::until_it_will_not_ask(
+        // it said so, the branch bore that out, and it has been idle since.
+        // Nothing on the branch ends it, because work does not stop at the
+        // first commit — a session may commit a slice and then wait on its
+        // tests. See [`signalled_and_idle`].
+        () = signalled_and_idle(signal.clone(), &idle, pace) => None,
+        // And one that is idle with nothing open and no signal given: the whole
+        // of an inline run come to nothing, or finished and not said, with a
+        // process still holding the Worktree and nothing on the page to press.
+        // Spoken to, and the human told where it will not answer — see
+        // [`crate::rescues`].
+        never = crate::rescues::watched(
             &state,
             conversation_id,
             event_id,
             &idle,
             pace,
-            crate::rescues::Done::Committed { already },
-        ) => {
-            tracing::warn!(
-                conversation_id,
-                event_id,
-                "the inline session went quiet without committing anything or asking \
-                 about it, so the Conversation stops here",
-            );
-
-            state.sessions.end(conversation_id).await;
-
-            return stop(
-                &state,
-                conversation_id,
-                crate::stopping::Decided::Verkstead,
-                "implementing the work inline",
-                crate::rescues::WOULD_NOT_ASK,
-                Some(event_id),
-            )
-            .await;
-        }
+            signal,
+            "implementing the work inline",
+        ) => match never {},
     };
 
-    // Committed and gone quiet, which is an inline implementation done. The
-    // session is ended rather than waited out, and what follows is the ending a
-    // landed run has always had: the skill carried the branch to a pull request
-    // on its way out, and [`to_a_pull_request`] is what finds it — or sends for
-    // it, and then stops naming what it still could not find.
+    drop(expecting);
+
+    // Said it is done over a commit, and gone quiet since, which is an inline
+    // implementation done. The session is ended rather than waited out, and what
+    // follows is the ending a landed run has always had: the skill carried the
+    // branch to a pull request on its way out, and [`to_a_pull_request`] is what
+    // finds it — or sends for it, and then stops naming what it still could not
+    // find.
     let Some(ended) = ended else {
         tracing::info!(
             conversation_id,
             event_id,
-            "an inline session has committed and gone quiet, so it is being ended",
+            "an inline session said it is done and has gone quiet since, so it is being ended",
         );
 
         state.sessions.end(conversation_id).await;
@@ -1534,13 +1587,13 @@ async fn follow_inline(
 /// with the ordinary Notice; and what follows a clean finish is [`onwards`]
 /// rather than nothing.
 ///
-/// **Ended on committed plus quiet**, which is a fix session's rule rather than
-/// a backlog step's, and for its reason: an instruction can ask for anything, so
-/// there is no path to watch and no done file to read — what there is, is a
-/// commit, which is the one report an agent cannot half make. Work does not
-/// always stop at the commit, so the session is ended only once it has printed
-/// nothing for the grace period, and anything it prints puts the whole grace
-/// back on the clock.
+/// **Ended because it said it was done**, checked against a commit — see
+/// [`crate::done`]. An instruction can ask for anything, so there is no path to
+/// watch and no done file to read — what there is, is a commit, which is the
+/// one report an agent cannot half make, and a signal with nothing committed
+/// since the session began is refused. Work does not always stop at the commit,
+/// so nothing ends the session on one; once its signal is taken it is ended when
+/// it is next idle.
 ///
 /// **And a session that commits nothing stops the Conversation**, exactly as an
 /// inline implementation that commits nothing does. An interactive agent that
@@ -1549,10 +1602,10 @@ async fn follow_inline(
 /// what is next, so a branch nothing was written to is one there is nothing
 /// honest to carry on from.
 ///
-/// **Including one that never ends at all.** Idle, with nothing committed and
+/// **Including one that never ends at all.** Idle, with no signal given and
 /// nothing put to the human, is the same instruction come to nothing with a
-/// process still holding the Worktree — so it is told twice and then stopped in
-/// the same words, the commit being its done-indicator. See [`crate::rescues`].
+/// process still holding the Worktree — so it is spoken to, and the human told
+/// where it will not answer. See [`crate::rescues`].
 pub(crate) async fn instructed(
     state: AppState,
     conversation_id: i64,
@@ -1579,49 +1632,42 @@ pub(crate) async fn instructed(
     let idle = session.idle.clone();
     let pace = state.sessions.pace();
 
+    // What the session's Done signal is checked against: a commit past where the
+    // branch stood. See [`crate::done`].
+    let expecting = state.signals.expecting(
+        conversation_id,
+        event_id,
+        crate::done::Evidence::Committed { already },
+        crate::done::Ends::WithItsWork,
+    );
+    let signal = expecting.signal();
+
     let ended = tokio::select! {
         ended = session.ended() => Some(ended),
-        () = committed_and_quiet(&state, conversation_id, already, &idle, pace) => None,
-        // Nothing committed and nothing asked, with the session sitting there:
-        // an instruction that has come to nothing and nobody to say so to.
-        // Told twice and then stopped where it stands, which is the same ending
-        // a step that would not land gets — see [`crate::rescues`].
-        () = crate::rescues::until_it_will_not_ask(
+        () = signalled_and_idle(signal.clone(), &idle, pace) => None,
+        // No signal given and nothing asked, with the session sitting there:
+        // an instruction that has come to nothing, or finished and not said, and
+        // nobody to say so to. Spoken to, and the human told where it will not
+        // answer — see [`crate::rescues`].
+        never = crate::rescues::watched(
             &state,
             conversation_id,
             event_id,
             &idle,
             pace,
-            crate::rescues::Done::Committed { already },
-        ) => {
-            let _driving = driving;
-
-            tracing::warn!(
-                conversation_id,
-                event_id,
-                "the instruction session went quiet without committing anything or asking \
-                 about it, so the Conversation stops here",
-            );
-
-            state.sessions.end(conversation_id).await;
-
-            return stop(
-                &state,
-                conversation_id,
-                crate::stopping::Decided::Verkstead,
-                "doing what the instruction said",
-                crate::rescues::WOULD_NOT_ASK,
-                Some(event_id),
-            )
-            .await;
-        }
+            signal,
+            "doing what the instruction said",
+        ) => match never {},
     };
+
+    drop(expecting);
 
     let Some(ended) = ended else {
         tracing::info!(
             conversation_id,
             event_id,
-            "an instruction session has committed and gone quiet, so it is being ended",
+            "an instruction session said it is done and has gone quiet since, so it is being \
+             ended",
         );
 
         state.sessions.end(conversation_id).await;
@@ -1801,15 +1847,20 @@ async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: D
 /// **Nothing is watched for on the branch.** A follow-up is rounds of asking
 /// rather than a step with a landing: what it commits is the human's to have
 /// asked for, and a round that was a question and an answer commits nothing at
-/// all. So there is no committed-and-quiet to end it on and no artifact to read.
+/// all. So there is no commit to check a signal against and no artifact to read.
 ///
-/// **What ends it is the human's own mark**, on the newest round they answered,
-/// with the session idle and nothing left open — see [`nothing_else_and_quiet`],
-/// which is the three of those waited on together. Then the session is ended and
-/// the Conversation goes back to Wrapping over the pull request it was opened
-/// about, with the wrap-up's watchers started over whatever the branch now
-/// holds. *Back to Done* is the wrap-up's own settling rule and nothing this
-/// decides — see [`over`].
+/// **What ends it is its Done signal, checked against the human's own mark** —
+/// see [`crate::done`], and ADR-0018. Whether there is anything else is the
+/// human's to say, on the newest round they answered, so a signal without the
+/// mark is refused and the next round goes to them as a Set: a follow-up cannot
+/// end itself. With the mark, the signal is taken and the session is ended once
+/// it is next idle — and never on the mark alone, because the work the last
+/// round asked for comes after it, nor on quiet, because a follow-up that pushes
+/// and then waits on its checks in the background is still at work. Then the
+/// Conversation goes back to Wrapping over the pull request it was opened about,
+/// with the wrap-up's watchers started over whatever the branch now holds.
+/// *Back to Done* is the wrap-up's own settling rule and nothing this decides —
+/// see [`over`].
 ///
 /// **And a session that is gone is a stop**, which is the responding rule: no
 /// other session is ever sent to finish somebody else's, so what it had got to,
@@ -1827,9 +1878,8 @@ async fn onwards(state: AppState, conversation_id: i64, writing: i64, driving: D
 ///
 /// **So is one that will not ask.** A session that goes idle without a Set open
 /// leaves the human holding a Conversation they can neither answer nor end, so
-/// it is spoken to — twice, and then stopped where it stands. Nothing it left
-/// open goes off with that one: there being nothing open is half of what said it
-/// was stuck.
+/// it is spoken to, and the human told where it will not answer. The session is
+/// left running for them to move.
 pub(crate) async fn following_up(
     state: AppState,
     conversation_id: i64,
@@ -1868,38 +1918,34 @@ pub(crate) async fn following_up(
     let idle = session.idle.clone();
     let pace = state.sessions.pace();
 
+    // The signal is checked against the human's mark rather than anything on the
+    // branch: see [`crate::done::Evidence::NothingElse`].
+    let expecting = state.signals.expecting(
+        conversation_id,
+        event_id,
+        crate::done::Evidence::NothingElse,
+        crate::done::Ends::WithItsWork,
+    );
+    let signal = expecting.signal();
+
     let ended = tokio::select! {
         ended = session.ended() => Some(ended),
-        () = nothing_else_and_quiet(&state, conversation_id, &idle, pace) => None,
-        // The session is still there and still saying nothing, having been asked
-        // twice to say it where the human would hear. So it is ended here rather
-        // than waited on any longer, and the stop written over it is one the
-        // human presses Resume on — which starts a fresh follow-up session on
-        // the same brief. Nothing it left open goes off with it: there being
-        // nothing open is half of what said it was stuck.
-        () = crate::rescues::until_it_will_not_ask(
+        () = signalled_and_idle(signal.clone(), &idle, pace) => None,
+        // The session is still there and saying nothing, with nothing put to
+        // the human. Spoken to, and the human told where it will not answer —
+        // see [`crate::rescues`].
+        never = crate::rescues::watched(
             &state,
             conversation_id,
             event_id,
             &idle,
             pace,
-            crate::rescues::Done::NothingElse,
-        ) => {
-            let _driving = driving;
-
-            state.sessions.end(conversation_id).await;
-
-            return stop(
-                &state,
-                conversation_id,
-                crate::stopping::Decided::Verkstead,
-                "following the work up",
-                crate::rescues::WOULD_NOT_ASK,
-                Some(event_id),
-            )
-            .await;
-        }
+            signal,
+            "following the work up",
+        ) => match never {},
     };
+
+    drop(expecting);
 
     let Some(ended) = ended else {
         return over(&state, conversation_id, already, driving).await;
@@ -1927,8 +1973,7 @@ pub(crate) async fn following_up(
     // is read as a follow-up nobody is left to have, exactly as an instruction
     // session's commits are asked for again where it ends first.
     //
-    // The same two questions [`nothing_else_and_quiet`] asks, and asked in the
-    // same order: a Set still standing is the human holding a question, and one
+    // A Set still standing is asked about first: it is the human holding a question, and one
     // is worth closing and stopping over whatever the newest answer said. Both
     // read the safe way round for this — a store that will not answer reads as
     // open and as not marked — so a record that cannot be asked leaves the stop
@@ -2087,81 +2132,12 @@ async fn left_open(state: &AppState, conversation_id: i64) {
     }
 }
 
-/// Wait until the follow-up is over: the human has marked their newest answer
-/// *Nothing else*, nothing is left open on the Conversation, and the session has
-/// printed nothing for [`Pace::proposing`].
-///
-/// All three, and none of them is enough alone. **The mark alone** would end a
-/// follow-up in the middle of the work the last round asked for — the human
-/// answers and the agent goes off and does it, which is the whole point of the
-/// state. **Quiet alone** would reap a session idling on a Blocking Ask, which is
-/// a session doing exactly what it should: the ask blocks for as long as the
-/// human takes, and that may be the next morning. **Nothing open alone** would end
-/// every follow-up the moment it started, none of them having asked anything yet.
-///
-/// The grace is asked first because it is the cheap half, exactly as
-/// [`quiet_and_nothing_asked`] asks it: a session still talking is not one to ask
-/// the store about, and anything it prints puts the whole grace back on the
-/// clock. An answer arriving does the same — a session that has just been told
-/// what to do has everything it asked for and nothing done yet — so the grace
-/// runs again from the last time a Set was open, and this returns only once both
-/// are spent.
-///
-/// **The mark is read last and every time round**, which is what makes the
-/// latest Response the one that decides: a Set asked after an end-marked one puts
-/// the follow-up back to running through the open-Set arm above, and its own
-/// answer is what this reads when it comes.
-///
-/// **And a follow-up whose human never says *nothing else* is rescued rather
-/// than waited on for ever.** That is this condition read the other way round —
-/// quiet, nothing open and no mark — and it is watched for beside this rather
-/// than here, by the one loop that watches for it in every state. See
-/// [`crate::rescues::until_it_will_not_ask`], which takes the mark as its
-/// done-indicator.
-async fn nothing_else_and_quiet(state: &AppState, conversation_id: i64, idle: &Idle, pace: Pace) {
-    // When a Set of the Conversation's was last seen open. An answer arriving is
-    // something the session has just been given to act on, and one that has just
-    // been given something has had no time to act on it yet — so the grace runs
-    // again from here. `None` while it has asked nothing at all.
-    let mut asked: Option<Instant> = None;
-
-    loop {
-        let owed = pace.proposing.saturating_sub(idle.for_how_long());
-
-        if !owed.is_zero() {
-            tokio::time::sleep(owed).await;
-            continue;
-        }
-
-        if open(state, conversation_id).await {
-            asked = Some(Instant::now());
-            tokio::time::sleep(pace.poll).await;
-            continue;
-        }
-
-        let owed = asked
-            .map(|at| pace.proposing.saturating_sub(at.elapsed()))
-            .unwrap_or_default();
-
-        if !owed.is_zero() {
-            tokio::time::sleep(owed).await;
-            continue;
-        }
-
-        if marked(state, conversation_id).await {
-            return;
-        }
-
-        tokio::time::sleep(pace.poll).await;
-    }
-}
-
 /// Whether anything on the Conversation is still waiting on the human.
 ///
 /// The Conversation's rather than any one session's, which is the question both
 /// its readers are really asking: what matters is whether the human is left
 /// holding something to answer, and something to answer is one whoever put it
-/// up. See [`crate::rescues::until_it_will_not_ask`], which is the other reader
+/// up. See [`crate::rescues::watched`], which is the other reader
 /// — a session with a question standing in front of the human is not one to
 /// prod, whichever session wrote it.
 ///
@@ -2223,7 +2199,7 @@ async fn follow_staging(state: AppState, conversation_id: i64, writing: Session,
 /// plans are Conversations of their own — so there is no next step to launch.
 /// What there is, is the same ending a backlog's last step has: the session
 /// commits the roadmap and then follows the repository's own finish sequence, so
-/// the branch is pushed and on a pull request by the time it goes quiet. A
+/// the branch is pushed and on a pull request by the time it signals. A
 /// roadmap is work like any other work and goes for review like any other work.
 ///
 /// So the ladder for a roadmap Conversation is Grilling to Wrapping, with nothing
@@ -2284,12 +2260,13 @@ async fn follow_roadmap(
 /// that pushed nothing is answered by the check still being red rather than by
 /// anything read off the branch.
 ///
-/// Ended on **committed plus quiet**, the way a backlog step is ended on landed
-/// plus quiet, and for the same two reasons. A commit is the one report an agent
-/// cannot half make, so it is what says the fix is done; and work does not always
-/// stop at the commit — the push that puts it on the pull request comes after
-/// one — so the session is ended only once it has printed nothing for the grace
-/// period, with anything it prints putting the whole grace back on the clock.
+/// **Ended because it said it was done**, the way a backlog step is — see
+/// [`crate::done`] — and once it is next idle after that, so the push that puts
+/// the fix on the pull request and whatever it says after are kept. The signal
+/// is checked against nothing of a fix's own: one that finds nothing to commit
+/// is accepted, because a rule that demanded a commit would leave a fix with
+/// nothing to fix unable to end. The rules every signal has — nothing left
+/// uncommitted — still hold.
 ///
 /// Nothing is refused for and nothing is stopped. A fix session that ends having done
 /// nothing is not by itself something to stop over: what
@@ -2297,22 +2274,9 @@ async fn follow_roadmap(
 /// had its two goes at it — see [`crate::checks`].
 ///
 /// **A session that will not ask is still spoken to**, which is the one thing
-/// the rescue does here that it does everywhere — see [`crate::rescues`]. What
-/// it does *not* do here is write the stop the other callers write: a fix
-/// session is one of two goes at one check, and the state that dispatched it has
-/// a stop of its own for when they run out. So the rescue ends the session and
-/// the wrap-up carries on from the check, which is still red.
+/// the rescue does here that it does everywhere — see [`crate::rescues`]: the
+/// human is told where it will not answer, and the session left running.
 pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &str) -> Option<i64> {
-    // Read before the session starts, so it is where the branch stood before this
-    // fix rather than somewhere that includes it.
-    let already = match store::commits_landed(&state.pool, conversation_id).await {
-        Ok(landed) => landed,
-        Err(error) => {
-            tracing::error!(error = ?error, conversation_id, "reading what a Conversation had committed failed");
-            return None;
-        }
-    };
-
     let mut session = launch(
         state,
         conversation_id,
@@ -2324,39 +2288,41 @@ pub(crate) async fn address(state: &AppState, conversation_id: i64, feedback: &s
     let idle = session.idle.clone();
     let pace = state.sessions.pace();
 
+    // Nothing for the signal to be checked against beyond the rules every signal
+    // has: a fix that finds nothing to commit is still a fix session done. See
+    // [`crate::done::Evidence::Nothing`].
+    let expecting = state.signals.expecting(
+        conversation_id,
+        event_id,
+        crate::done::Evidence::Nothing,
+        crate::done::Ends::WithItsWork,
+    );
+    let signal = expecting.signal();
+
     let ended = tokio::select! {
         ended = session.ended() => Some(ended),
-        _ = committed_and_quiet(state, conversation_id, already, &idle, pace) => None,
-        // Idle, with nothing committed and nothing put to the human, which is a
-        // fix nobody can move on. Told twice and then ended where it stands; the
-        // stop, where there is to be one, is the wrap-up's own once the branch
-        // has had its two goes.
-        () = crate::rescues::until_it_will_not_ask(
+        () = signalled_and_idle(signal.clone(), &idle, pace) => None,
+        // Idle, with no signal given and nothing put to the human, which is a
+        // fix nobody can move on. Spoken to, and the human told where it will
+        // not answer — see [`crate::rescues`].
+        never = crate::rescues::watched(
             state,
             conversation_id,
             event_id,
             &idle,
             pace,
-            crate::rescues::Done::Committed { already },
-        ) => {
-            tracing::warn!(
-                conversation_id,
-                event_id,
-                "the fix session went quiet without committing anything or asking about it, \
-                 so it is being ended and the check looked at again",
-            );
-
-            state.sessions.end(conversation_id).await;
-
-            return Some(event_id);
-        }
+            signal,
+            "fixing the check",
+        ) => match never {},
     };
+
+    drop(expecting);
 
     if ended.is_none() {
         tracing::info!(
             conversation_id,
             event_id,
-            "a fix session has committed and gone quiet, so it is being ended",
+            "a fix session said it is done and has gone quiet since, so it is being ended",
         );
 
         state.sessions.end(conversation_id).await;
@@ -2374,9 +2340,9 @@ pub(crate) enum Reviewed {
     /// found nothing worth raising finishes the same way, having said so as the
     /// last thing it printed.
     ///
-    /// Which is nearly always Verkstead ending it on quiet with nothing pending
-    /// rather than the session exiting — an interactive agent idles when its work
-    /// is done. Both are this: see [`proposing`].
+    /// Which is nearly always Verkstead ending it on its Done signal rather than
+    /// the session exiting — an interactive agent idles when its work is done.
+    /// Both are this: see [`proposing`].
     Done,
 
     /// It ended, and not well. Which is not a session with nothing left to do —
@@ -2436,37 +2402,33 @@ pub(crate) async fn respond(state: &AppState, conversation_id: i64, said: &str) 
 
 /// Run one session that proposes and then fixes, and wait until it is over.
 ///
-/// **Ended on quiet with nothing pending**, which is a rule of its own. Every
-/// other session here reports through the repository and is ended on what landed
-/// plus quiet; one of these puts what it would do to the human in the middle of
-/// its work and has the rest of that work to do afterwards, so there is no
-/// landing to watch for and no commit it must make — a review that fixes nothing
-/// is a review that did its job. What is left is silence, and every session is an
-/// interactive agent that idles when its work is done rather than exiting, so
-/// waiting to see one exit is waiting for something that never comes.
+/// **Ended because it said it was done** — see [`crate::done`], and ADR-0018 —
+/// and once it is next idle after that, so what it says on the way out is kept.
+/// One of these puts what it would do to the human in the middle of its work and
+/// has the rest of that work to do afterwards, so there is no landing to check
+/// the signal against and no commit it must make: a review that fixes nothing is
+/// a review that did its job. What holds is what every signal has — nothing
+/// left uncommitted, and a Set of its own still open locked as it is taken.
 ///
-/// So it is quiet for [`Pace::proposing`] *and* nothing of its own left for the
-/// human to answer, or it is left where it is. `verkstead ask` blocks for as long
-/// as they take, and a session idling on a Blocking Ask is one working rather
-/// than one stuck — quiet alone would reap it mid-question, however carefully the
-/// grace was chosen. A Deferred Ask idles nobody and so holds nothing open: its
-/// Answers reach a later session by design, and waiting on one would be waiting
-/// for the human to answer something nothing was waiting for. Anything the
-/// session prints puts the whole grace back on the clock, so one still talking is
-/// never cut off. The Turn the caller is holding keeps the Worktree this
-/// session's across the whole of it, the wait on the human included.
+/// **Nothing ends one on quiet.** It used to be ended on a minute of silence
+/// with nothing of its own open, that being the only report there was, and a
+/// review that started a background check run and ended its turn was ended
+/// mid-review — leaving what it had got to standing as the whole of it. Now a
+/// quiet one is left running, however long the quiet, and a session idling on
+/// a Blocking Ask of its own is left alone as it always was: `verkstead ask`
+/// blocks for as long as the human takes.
 ///
-/// A session ended that way **is a session that finished**: it is
-/// [`Reviewed::Done`], exactly as one that saw itself out is — as long as it said
-/// something. A session ended on its own quiet is one being taken at its word,
-/// and one that never said a word gave none, so that is a stop rather than a
-/// review: see [`SAID_NOTHING`]. Where the session
-/// ends first, how it ended is read exactly as an inline run's is: cleanly means
-/// it did what it was sent to do, and anything else means it did not. Nothing is
-/// refused for and nothing is stopped here — what to do about either of those is
-/// the caller's, and both callers ask the same further question first: whether
-/// anything the human accepted was left unlanded. See [`crate::review`] and
-/// [`crate::responding`].
+/// **And one that will not ask is spoken to**, until it signals — see
+/// [`crate::rescues`], which tells the human where it will not answer and leaves
+/// the session running.
+///
+/// A session ended on its signal **is a session that finished**: it is
+/// [`Reviewed::Done`], exactly as one that saw itself out cleanly is. Where the
+/// session ends first, how it ended is read exactly as an inline run's is:
+/// cleanly means it did what it was sent to do, and anything else means it did
+/// not. What to do about either is the caller's, and both callers ask the same
+/// further question first: whether anything the human accepted was left
+/// unlanded. See [`crate::review`] and [`crate::responding`].
 ///
 /// `what` names the session in the log, which is the one place the two differ
 /// here.
@@ -2484,37 +2446,46 @@ async fn proposing(
     let idle = session.idle.clone();
     let pace = state.sessions.pace();
 
+    // Nothing for the signal to be checked against beyond the rules every signal
+    // has: a review that finds nothing, or a batch that asks for nothing, is
+    // still one done. See [`crate::done::Evidence::Nothing`].
+    let expecting = state.signals.expecting(
+        conversation_id,
+        event_id,
+        crate::done::Evidence::Nothing,
+        crate::done::Ends::WithItsWork,
+    );
+    let signal = expecting.signal();
+
     let ended = tokio::select! {
         ended = session.ended() => ended,
-        () = quiet_and_nothing_asked(state, conversation_id, event_id, &idle, pace) => {
-            // Whether that was a session finishing or one that never got going,
-            // which is the whole of what its own words can be asked. Ended
-            // either way — a session with nothing to say is not one to leave
-            // holding the Worktree — and the difference is in what is made of
-            // it.
-            let said_anything = idle.said_anything();
-
+        () = signalled_and_idle(signal.clone(), &idle, pace) => {
             tracing::info!(
                 conversation_id,
                 event_id,
                 what,
-                said_anything,
-                "the session has gone quiet with nothing of its own open, so it is \
-                 being ended",
+                "the session said it is done and has gone quiet since, so it is being ended",
             );
 
             state.sessions.end(conversation_id).await;
 
-            if !said_anything {
-                return Reviewed::Stopped {
-                    how: SAID_NOTHING.to_owned(),
-                    writing: event_id,
-                };
-            }
-
             return Reviewed::Done;
         }
+        // No signal given and nothing open, with the session sitting there: a
+        // review or a batch nobody can move on. Spoken to, and the human told
+        // where it will not answer — see [`crate::rescues`].
+        never = crate::rescues::watched(
+            state,
+            conversation_id,
+            event_id,
+            &idle,
+            pace,
+            signal,
+            what,
+        ) => match never {},
     };
+
+    drop(expecting);
 
     // Verkstead ended it — the human closed or force-stopped the Conversation
     // out from under the wrap-up, or the account ran out of window. Either way
@@ -2539,152 +2510,14 @@ async fn proposing(
     }
 }
 
-/// How a session that was ended on quiet without ever having said a word is
-/// recorded.
-///
-/// Read as ending badly rather than as ending, which is the one place this rule
-/// needs a second signal. Every other ending here pairs quiet with something the
-/// session produced — a commit, a backlog, a handoff — so a session that came up
-/// and did nothing satisfies none of them and stops the run. Quiet with nothing
-/// pending is satisfied by pure silence, and a review is exactly the session
-/// whose whole report is its own words: taking silence as *it found nothing* would
-/// settle the review and carry a wrap-up to Done over a branch nobody read, with
-/// nothing on the Timeline saying so.
-///
-/// So it is the human's to look at, and the Notice already says the rest of it —
-/// what the last session said, which is nothing at all.
-const SAID_NOTHING: &str =
-    "the session never said anything, so nothing here says the work was done";
-
-/// Wait until the session has printed nothing for [`Pace::proposing`] *and* has
-/// no Question Set of its own still waiting to be answered.
-///
-/// Both, and neither on its own is enough. Quiet alone would reap a session
-/// idling on a Blocking Ask, which is a session doing exactly what it should —
-/// the ask blocks until the human answers, and that may be the next morning.
-/// Nothing-open alone would end every session the moment it started, none of them
-/// having asked anything yet.
-///
-/// The grace is asked first because it is the cheap half: a session still talking
-/// is not one to ask the store about. And anything it prints puts the whole grace
-/// back on the clock — see [`crate::sessions::Idle`] — so a session mid-sentence
-/// is never one this ends, however long it goes on for.
-///
-/// An Answer arriving does the same, which is the other half of that rule: a
-/// session that has just been told what to do has everything it asked for and
-/// nothing done yet, and reaping it in the moment between the Response landing
-/// and the agent finding its voice again would throw away the whole of what the
-/// human decided. So the grace runs again from the last time an ask of its own
-/// was open, and the session is ended only once both are spent.
-async fn quiet_and_nothing_asked(
-    state: &AppState,
-    conversation_id: i64,
-    event_id: i64,
-    idle: &Idle,
-    pace: Pace,
-) {
-    // When it was last seen with an ask of its own open, and `None` while it has
-    // asked nothing at all.
-    let mut asked: Option<Instant> = None;
-
-    loop {
-        let owed = pace.proposing.saturating_sub(idle.for_how_long());
-
-        if !owed.is_zero() {
-            tokio::time::sleep(owed).await;
-            continue;
-        }
-
-        if asking(state, conversation_id, event_id).await {
-            asked = Some(Instant::now());
-            tokio::time::sleep(pace.poll).await;
-            continue;
-        }
-
-        let owed = asked
-            .map(|at| pace.proposing.saturating_sub(at.elapsed()))
-            .unwrap_or_default();
-
-        if !owed.is_zero() {
-            tokio::time::sleep(owed).await;
-            continue;
-        }
-
-        return;
-    }
-}
-
-/// Whether the session is idling on an ask of its own that nothing has
-/// answered.
-///
-/// Its own, which is what the Event id says: nothing on the record names the
-/// session a Set was asked by, and nothing has to — one Worktree holds one agent,
-/// so every Set that landed after this session's Event is this session's. A
-/// Deferred Ask is not one of them, and neither is a Set the human closed
-/// unanswered: both are Sets nobody is idling on. A store-and-nudge one is,
-/// stored though it is — the session that sent it has its turn ended and is
-/// waiting to be nudged. See [`store::unanswered_set_since`].
-///
-/// A store that will not answer reads as *asking*, which is the right way round
-/// for the one thing this decides: a session is ended on the strength of it, and
-/// ending one mid-question would take the answer away from an agent that asked
-/// for it.
-async fn asking(state: &AppState, conversation_id: i64, event_id: i64) -> bool {
-    match store::unanswered_set_since(&state.pool, conversation_id, event_id).await {
-        Ok(open) => open.is_some(),
-        Err(error) => {
-            tracing::error!(
-                error = ?error,
-                conversation_id,
-                "reading whether a session that proposes was still asking failed"
-            );
-            true
-        }
-    }
-}
-
-/// Wait until the Conversation's commits stand past `already` *and* the session
-/// has been quiet for the grace period.
-///
-/// The store rather than git, unlike a backlog step's landing: the branch watcher
-/// is sweeping this branch for as long as the session runs and putting what lands
-/// on the Timeline, so the Timeline is where a fresh commit shows up first — and
-/// asking it costs one small read where asking git costs a process.
-async fn committed_and_quiet(
-    state: &AppState,
-    conversation_id: i64,
-    already: i64,
-    idle: &Idle,
-    pace: Pace,
-) {
-    loop {
-        tokio::time::sleep(pace.poll).await;
-
-        if !committed_since(state, conversation_id, already).await {
-            continue;
-        }
-
-        loop {
-            let owed = pace.grace.saturating_sub(idle.for_how_long());
-
-            if owed.is_zero() {
-                break;
-            }
-
-            tokio::time::sleep(owed).await;
-        }
-
-        return;
-    }
-}
-
 /// Whether the Conversation's commits stand past the `already` a session started
 /// over.
 ///
-/// The store rather than git, for [`committed_and_quiet`]'s reason: the branch
+/// The store rather than git, unlike a backlog step's landing: the branch
 /// watcher is sweeping this branch for as long as the session runs and putting
-/// what lands on the Timeline, so the Timeline is where a fresh commit shows up
-/// first.
+/// what lands on the Timeline, and asking it costs one small read where asking
+/// git costs a process. A reader that has to see a commit made a moment ago
+/// sweeps first — see [`crate::commits::sweep_now`].
 ///
 /// **Past rather than more than**, because a sweep takes commits off the
 /// Timeline as well as putting them on — see [`store::commits_landed`], which is
@@ -2695,9 +2528,8 @@ async fn committed_and_quiet(
 /// exactly what it was sent for.
 ///
 /// A store that will not answer reads as *nothing new*, which is the right way
-/// round for both things this decides — a session ended, and a session left
-/// alone rather than spoken to. See [`crate::rescues::Done::Committed`], which
-/// is the other reader.
+/// round for what this decides: a Done signal refused, which the session can
+/// simply give again. See [`crate::done::Evidence::Committed`].
 pub(crate) async fn committed_since(state: &AppState, conversation_id: i64, already: i64) -> bool {
     match store::commits_landed(&state.pool, conversation_id).await {
         Ok(landed) => landed > already,
@@ -2750,8 +2582,13 @@ async fn stop(
     }
 }
 
-/// See one step's session out: end it once the step has landed and the session
-/// has gone quiet, and say whether the step landed at all.
+/// See one step's session out: end it once it has said it is done and gone
+/// quiet since, and say whether the step landed at all.
+///
+/// What its Done signal is checked against is the step's own [`Landing`],
+/// written down for the length of the watch — see [`crate::done`]. A session
+/// that lands its step and says nothing is left running, and the rescue is what
+/// speaks to it.
 ///
 /// `None` is a session that is over with its step not done. That is a crash, a
 /// hang given up on, or an agent that stopped short — which of them is not
@@ -2762,9 +2599,9 @@ async fn stop(
 /// **A session that hangs is one of those**, and until it is spoken to it is
 /// none of them: it has not crashed and it has not stopped short, it is sitting
 /// there with the turn finished. So it is told what it cannot see from inside —
-/// twice, and then ended where it stands and stopped over like any other step
-/// that did not land. See [`crate::rescues`], whose done-indicator here is the
-/// step's own [`Landing`].
+/// and where it will not answer the human is told, the session left running.
+/// See [`crate::rescues`], whose done-indicator here is the
+/// session's own Done signal.
 ///
 /// `Some` is the Timeline Event the session printed into. The step landed, and
 /// what comes after it may still want the session's own last words — the finish
@@ -2788,54 +2625,47 @@ async fn see_out(
     let idle = session.idle.clone();
     let pace = state.sessions.pace();
 
+    // What the session's Done signal is checked against, written down for as
+    // long as it is being seen out — and taken away with this if the watch is
+    // cancelled, which a later pick does. See [`crate::done`].
+    let expecting = state.signals.expecting(
+        conversation_id,
+        event_id,
+        crate::done::Evidence::Landed {
+            worktree: worktree.clone(),
+            landing: landing.clone(),
+        },
+        step.ends(),
+    );
+    let signal = expecting.signal();
+    let what = step.what();
+
     let ended = tokio::select! {
         ended = session.ended() => Some(ended),
-        _ = landed_and_quiet(&worktree, &landing, &idle, pace) => None,
-        // The step is not landing and the session is not asking about it: it has
-        // gone idle with nothing open and nothing on the branch, which is a run
-        // nobody can move. Told twice and then stopped where it stands — see
-        // [`crate::rescues`], whose loop this is one of five callers of.
-        () = crate::rescues::until_it_will_not_ask(
+        () = signalled_and_idle(signal.clone(), &idle, pace) => None,
+        // The session has not said it is done and is not asking about anything:
+        // it has gone idle with nothing open, which is a run nobody can move.
+        // Spoken to, and the human told where it will not answer — see
+        // [`crate::rescues`]. Never an ending of its own.
+        never = crate::rescues::watched(
             state,
             conversation_id,
             event_id,
             &idle,
             pace,
-            crate::rescues::Done::Landed {
-                worktree: worktree.clone(),
-                landing: landing.clone(),
-            },
-        ) => {
-            tracing::warn!(
-                conversation_id,
-                event_id,
-                step = ?step,
-                "a session went quiet without finishing its step or asking about it, so the \
-                 backlog stops here",
-            );
-
-            state.sessions.end(conversation_id).await;
-
-            stop(
-                state,
-                conversation_id,
-                crate::stopping::Decided::Verkstead,
-                &step.what(),
-                crate::rescues::WOULD_NOT_ASK,
-                Some(event_id),
-            )
-            .await;
-
-            return None;
-        }
+            signal,
+            &what,
+        ) => match never {},
     };
+
+    drop(expecting);
 
     let Some(ended) = ended else {
         tracing::info!(
             conversation_id,
             event_id,
             step = ?step,
-            "a step has landed and its session has gone quiet, so it is being ended",
+            "a session said its step is done and has gone quiet since, so it is being ended",
         );
 
         state.sessions.end(conversation_id).await;
@@ -2896,32 +2726,35 @@ async fn see_out(
     None
 }
 
-/// Wait until `landing` has landed and the session has been quiet for the grace
-/// period.
+/// Wait until the session has given its Done signal and been accepted, and is
+/// idle again since.
 ///
-/// Two loops rather than one condition, because the second is not a poll: once
-/// the step is done, what is left is sleeping out whatever quiet is still owed
-/// and looking again. Output arriving in the meantime lengthens the wait rather
-/// than ending it, and there is no cap on how long that may go on for.
-async fn landed_and_quiet(worktree: &Path, landing: &Landing, idle: &Idle, pace: Pace) {
+/// Idle by the judgement everything here reads, which is its backend's own — see
+/// [`crate::sessions::Idle`] — and [`Pace::grace`] out since the signal too, so the
+/// closing words an agent prints once the command comes back reach the
+/// Transcript rather than being cut off under it. Output arriving in the
+/// meantime lengthens the wait rather than ending it.
+///
+/// Nothing on the branch is read here. The signal was checked against the
+/// repository when it was given, and that is the only reading there is: a
+/// session that lands its step and says nothing is a session still at work, and
+/// the rescue is what speaks to it.
+async fn signalled_and_idle(signal: crate::done::Signal, idle: &Idle, pace: Pace) {
+    signal.arrived().await;
+
+    let signalled = Instant::now();
+
     loop {
-        tokio::time::sleep(pace.poll).await;
+        let owed = pace
+            .grace
+            .saturating_sub(idle.for_how_long())
+            .max(pace.grace.saturating_sub(signalled.elapsed()));
 
-        if !check(worktree, landing).await {
-            continue;
+        if owed.is_zero() {
+            return;
         }
 
-        loop {
-            let owed = pace.grace.saturating_sub(idle.for_how_long());
-
-            if owed.is_zero() {
-                break;
-            }
-
-            tokio::time::sleep(owed).await;
-        }
-
-        return;
+        tokio::time::sleep(owed).await;
     }
 }
 
@@ -2947,6 +2780,27 @@ pub(crate) async fn check(worktree: &Path, landing: &Landing) -> bool {
 /// way round for the one thing this decides: a session is ended on the strength
 /// of this, and a git that was briefly busy is no reason to end one.
 fn landed(worktree: &Path, landing: &Landing) -> bool {
+    lacking(worktree, landing).is_none()
+}
+
+/// What `landing` is still missing, in words an agent can act on, or `None`
+/// where it has landed — see [`crate::done`], which refuses a Done signal with
+/// exactly this.
+pub(crate) async fn missing(worktree: &Path, landing: &Landing) -> Option<String> {
+    let worktree = worktree.to_owned();
+    let landing = landing.clone();
+
+    match tokio::task::spawn_blocking(move || lacking(&worktree, &landing)).await {
+        Ok(missing) => missing,
+        Err(error) => {
+            tracing::error!(error = ?error, "asking a Worktree what a step is missing failed");
+            Some("the repository could not be read, so try again in a moment".to_owned())
+        }
+    }
+}
+
+/// The same, blocking, and the one reading [`landed`] is made of.
+fn lacking(worktree: &Path, landing: &Landing) -> Option<String> {
     let (path, wanted) = match landing {
         Landing::Gone(path) => (path, false),
         Landing::Arrived(path) => (path, true),
@@ -2959,27 +2813,67 @@ fn landed(worktree: &Path, landing: &Landing) -> bool {
                     .any(|entry| entry.number == *number && entry.checked)
             });
 
-            return ticked && pending(worktree, &todo()) == Some(false);
+            return match (ticked, pending(worktree, &todo())) {
+                (true, Some(false)) => None,
+                (false, _) => Some(format!(
+                    "task {number}'s box in `{}` is not ticked and committed",
+                    todo().display(),
+                )),
+                (true, _) => Some(format!(
+                    "task {number}'s box in `{}` is ticked but not committed",
+                    todo().display(),
+                )),
+            };
         }
         // Not a path this branch was told about but one it went and wrote, so
         // what is asked is which roadmaps it has touched — the same reading the
         // pinned stage list is drawn by, so the list the human is watching and
         // the step the runner is waiting on cannot disagree.
         Landing::Roadmap(base) => {
-            return !crate::stages::touched(worktree, base).is_empty()
-                && pending(worktree, Path::new(crate::stages::ROADMAPS)) == Some(false);
+            if crate::stages::touched(worktree, base).is_empty() {
+                return Some(format!(
+                    "this branch has not written a roadmap under `{}`",
+                    crate::stages::ROADMAPS,
+                ));
+            }
+
+            return match pending(worktree, Path::new(crate::stages::ROADMAPS)) {
+                Some(false) => None,
+                _ => Some(format!(
+                    "the roadmap under `{}` is not committed",
+                    crate::stages::ROADMAPS,
+                )),
+            };
         }
         // And this one is not in the Worktree at all, so there is no commit to
         // wait for: the document being there with something in it is the whole
         // of it, read by exactly the rule that will take it.
-        Landing::Handoff(path) => return crate::handoffs::written(path),
+        Landing::Handoff(path) => {
+            // Named the way the skill names it rather than by this path, which
+            // is where the document is from outside the session and nowhere the
+            // session can see.
+            return (!crate::handoffs::written(path)).then(|| {
+                "the handoff document has not been written where the grilling skill says to \
+                 write it"
+                    .to_owned()
+            });
+        }
     };
 
     if worktree.join(path).exists() != wanted {
-        return false;
+        return Some(match wanted {
+            true => format!("`{}` has not been written", path.display()),
+            false => format!("`{}` has not been taken away", path.display()),
+        });
     }
 
-    pending(worktree, path) == Some(false)
+    match pending(worktree, path) {
+        Some(false) => None,
+        _ => Some(match wanted {
+            true => format!("`{}` is not committed", path.display()),
+            false => format!("taking `{}` away is not committed", path.display()),
+        }),
+    }
 }
 
 /// Whether git has any pending change for `path`, or `None` where it cannot say.
@@ -4089,6 +3983,48 @@ mod tests {
         run(path, &["commit", "-m", "docs: stage the mvp roadmap"]);
 
         assert!(landed(path, &landing), "written and committed");
+    }
+
+    /// A Done signal refused over a step that has not landed says which half is
+    /// missing, in words the agent can act on: the box, or the commit.
+    ///
+    /// The list is named the way its own platform writes a path, because that is
+    /// what the agent reading the refusal is looking at — so what is expected
+    /// here is written the same way rather than with a separator of its own.
+    #[test]
+    fn what_a_task_is_missing_is_said_by_which_half_it_is() {
+        let dir = worktree(&list(0), &DOCUMENTS);
+        let path = dir.path();
+        let named = todo().display().to_string();
+
+        assert_eq!(
+            lacking(path, &Landing::Ticked(1)),
+            Some(format!(
+                "task 1's box in `{named}` is not ticked and committed"
+            )),
+        );
+
+        let list = path.join(BACKLOG).join(TODO);
+        let ticked = std::fs::read_to_string(&list)
+            .unwrap()
+            .replace("- [ ] 01:", "- [x] 01:");
+        std::fs::write(&list, ticked).unwrap();
+
+        assert_eq!(
+            lacking(path, &Landing::Ticked(1)),
+            Some(format!(
+                "task 1's box in `{named}` is ticked but not committed"
+            )),
+        );
+
+        run(path, &["commit", "-am", "feat: a task"]);
+
+        assert_eq!(lacking(path, &Landing::Ticked(1)), None);
+
+        assert_eq!(
+            lacking(path, &Landing::Gone(todo())),
+            Some(format!("`{named}` has not been taken away")),
+        );
     }
 
     /// The repository being polled is one a session is committing in, and the

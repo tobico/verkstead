@@ -4,7 +4,7 @@ description: Start a roadmap stage: re-ground its brief against the code, quiz t
 ---
 
 Turn the stage brief in the prompt into a sequential `.tasks/` backlog in this
-worktree, commit it, and stop.
+worktree, commit it, and say you are done with `verkstead done`.
 
 The brief was written when the roadmap was staged, out of a whole grilling. It is
 the agreement about *what this stage is for* — but its task chunking is
@@ -66,8 +66,9 @@ questions are read against. Then ask about it: whether the granularity is right,
 whether anything should be merged, split or reordered, whether anything is
 missing — plus whatever drift step 1 turned up.
 
-Iterate until they approve the breakdown. Every round is an ordinary Set:
-nothing in this session ends anything.
+Iterate until they approve the breakdown. Every round is an ordinary Set, and
+nothing you send ends anything. What ends this session is `verkstead done`,
+once the plan commit below is on the branch.
 
 ## 4. Put the branch in the stack, if the prompt says it is stacked
 
@@ -164,9 +165,16 @@ If the re-grounding turned up changes to `CONTEXT.md`, the ADRs under
 `docs/adr/`, or other project documentation, include them too — they belong on
 the branch beside the plan that motivated them.
 
-Then stop. **Do not start on task 01**, and do not say anything about clearing a
-context — Verkstead reads `.tasks/` back off the branch and runs a session of its
-own per task.
+**Do not start on task 01**, and do not say anything about clearing a context —
+Verkstead reads `.tasks/` back off the branch and runs a session of its own per
+task.
+
+The last thing this session does, once that commit is on the branch, is run
+`verkstead done`. That is what ends the session, and nothing else does: not the
+commit, and not going quiet. Verkstead checks the repository when you run it. A
+refusal exits non-zero and says on stderr what is missing — `TODO.md` not
+committed, say — and the session carries on: put that right and run
+`verkstead done` again.
 
 ## How the questions reach them
 
@@ -187,3 +195,11 @@ nobody will ever see.
   unreachable, any non-zero exit that is not a refused Set — say so and stop.
   Approving your own breakdown decides in their place the very thing worth
   asking about.
+
+## Waiting on work in the background
+
+Before you end a turn with work of your own still running in the background — a
+build, a test run — run `verkstead waiting` with how long you expect it to take,
+such as `verkstead waiting 20m`, and declare it again if the work runs over.
+Otherwise Verkstead takes the session as stopped and prompts it. An ask needs no
+declaration. The Guide's *Waiting in the background* section has the details.

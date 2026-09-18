@@ -1,5 +1,11 @@
 # The pick informs the agent; artifacts move the machine
 
+**Status: revised by [ADR-0018](0018-a-session-says-it-is-done.md)** — the pick
+still informs the agent, but an artifact no longer moves the machine by landing.
+The session says it is done, and the artifact is what that signal is checked
+against. The explicit signal rejected under *Considered Options* below is the
+one adopted there.
+
 Choosing a direction used to be two presses and a beheading: accepting the
 wrap-up proposal ended the grilling session on the spot, and the human walked
 back to the Timeline to press a separate chooser, which launched a fresh agent

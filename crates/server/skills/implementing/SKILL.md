@@ -118,9 +118,9 @@ push the branch and open a draft pull request titled for the work —
 **Nothing waits on approval here either.** No gate, no confirmation and nobody
 at this terminal: the pull request opens unasked, and it opens as a *draft*
 because merging is the human's act and nothing here is allowed to look like it
-was theirs. Then stop — that is also what ends this session: Verkstead waits for
-you to go quiet, finds the pull request, and takes the Conversation on to
-wrapping it up.
+was theirs. Then run `verkstead done`, once every companion below is finished
+too — see *Saying you are done* below. Verkstead then finds the pull request
+and takes the Conversation on to wrapping it up.
 
 ### And every companion repository you committed in
 
@@ -137,9 +137,9 @@ needs nothing at all, and a read-only one could hold nothing to begin with —
 `git log --oneline <base>..HEAD` in its worktree, against the commit its branch
 was cut from, is what says which is which.
 
-Verkstead asks GitHub about each of them once you have gone quiet, so a
-companion holding commits and no pull request stops the run rather than being
-carried on past.
+Verkstead asks GitHub about each of them when you run `verkstead done`, so a
+companion holding commits and no pull request refuses the signal, naming the
+repository. Open the missing one and run it again.
 
 ### A session that finds the work already done
 
@@ -149,6 +149,20 @@ on the branch against the handoff, finish anything it left short, and then carry
 it to the pull request exactly as above. A session that ended here saying there
 was nothing for it to do would leave the branch where the one before it did,
 which is the one ending this run cannot recover from by itself.
+
+## Saying you are done
+
+The last thing this session does, once the work is committed, pushed and on a
+pull request, and every companion is finished too, is run `verkstead done`. That
+is what ends the session, and nothing else does: not a commit, and not going
+quiet. So a session that commits a first piece and then waits on its tests, or
+on an answer, is not cut off while it waits.
+
+Verkstead checks the repository when you run it. A refusal exits non-zero and
+says on stderr what is missing — nothing committed since this session began,
+changes left uncommitted, or a branch with no open pull request, this one's or a
+companion's — and the session carries on: put that right and run
+`verkstead done` again.
 
 ## When you need the human
 
@@ -166,3 +180,11 @@ expensive to unpick.
   so either way, do only work their answer cannot invalidate.
 - **Never answer on their behalf.** If the ask itself fails — the server
   unreachable, any non-zero exit that is not a refused Set — say so and stop.
+
+## Waiting on work in the background
+
+Before you end a turn with work of your own still running in the background — a
+build, a test run — run `verkstead waiting` with how long you expect it to take,
+such as `verkstead waiting 20m`, and declare it again if the work runs over.
+Otherwise Verkstead takes the session as stopped and prompts it. An ask needs no
+declaration. The Guide's *Waiting in the background* section has the details.

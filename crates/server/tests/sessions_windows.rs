@@ -267,7 +267,7 @@ static COUNTING: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(|| tokio::sync
 /// stop are asked about, and it keeps a pace with all three inside a test's
 /// life to ask them. What these want is the opposite: a session that says its
 /// piece and then sits there is a session the tests can go on reading, rather
-/// than one prodded and stopped out from under an assertion because a two-core
+/// than one prodded out from under an assertion because a two-core
 /// runner took a moment over the poll before it.
 ///
 /// So the two that are short are the two that drive rather than end: the poll

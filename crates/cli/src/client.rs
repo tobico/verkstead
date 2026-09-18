@@ -169,6 +169,65 @@ impl Client {
         }
     }
 
+    /// Say this session's work is finished.
+    ///
+    /// No retry, for [`Client::submit`]'s reason turned round: a refusal is the
+    /// server saying what is missing, and the agent is owed that straight away
+    /// rather than a loop that asks again over the same repository.
+    pub fn done(&self) -> Result<()> {
+        let mut reply = self
+            .agent
+            .post(format!("{}/api/v1/done", self.base))
+            .send_empty()
+            .with_context(|| format!("telling {} this session is done", self.said))?;
+
+        let status = reply.status().as_u16();
+        let text = reply
+            .body_mut()
+            .read_to_string()
+            .context("reading the server's reply")?;
+
+        match status {
+            200 => Ok(()),
+            404 => bail!(
+                "the server at {} has no Done signal to take — it may be older than this \
+                 command",
+                self.said
+            ),
+            _ => bail!("the server refused: {}", refusal(&text)),
+        }
+    }
+
+    /// Say this session is waiting on work of its own for `length` — the
+    /// server's default where `None` — and hand back what the server made of it.
+    ///
+    /// No retry, for [`Client::done`]'s reason: a refusal is a length to put
+    /// right, and a declaration that did not arrive is said so at once rather
+    /// than after the turn it was meant to cover has ended.
+    pub fn waiting(&self, length: Option<&str>) -> Result<String> {
+        let mut reply = self
+            .agent
+            .post(format!("{}/api/v1/waiting", self.base))
+            .send(length.unwrap_or_default())
+            .with_context(|| format!("telling {} this session is waiting", self.said))?;
+
+        let status = reply.status().as_u16();
+        let text = reply
+            .body_mut()
+            .read_to_string()
+            .context("reading the server's reply")?;
+
+        match status {
+            200 => Ok(text.trim().to_owned()),
+            404 => bail!(
+                "the server at {} has no Declared wait to take — it may be older than this \
+                 command",
+                self.said
+            ),
+            _ => bail!("the server refused: {}", refusal(&text)),
+        }
+    }
+
     /// Block until Set `id` has been answered, reconnecting for as long as it
     /// takes. Retries are reported on stderr, so stdout carries the Response
     /// and nothing else — and as a YAML comment, so that a harness merging the

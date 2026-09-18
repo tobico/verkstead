@@ -181,6 +181,12 @@ pub(crate) enum News {
     /// phone and the Timeline say the same thing about the same stop.
     Stopped { stopped: String },
 
+    /// A session went Idle and would not answer the Rescue, so the human is
+    /// told instead — see [`crate::rescues`]. Not a stop: the session is still
+    /// running. `idle` is what it ought to have been doing, first letter up, as
+    /// the Notice opens with it.
+    Escalated { idle: String },
+
     /// The account a run was spending ran out of window, which is a stop like
     /// the one above it, said in the words that decide whether the human gets
     /// up for it — see [`crate::limits`].
@@ -228,6 +234,9 @@ impl News {
             // stopped is what decides whether the human gets up, and the
             // evidence underneath it is one tap away.
             News::Stopped { stopped } => format!("{stopped} stopped on {branch}"),
+            // The same step, and the word that says nothing stopped: the session
+            // is sitting there, and the human is the one to move it.
+            News::Escalated { idle } => format!("{idle} has gone idle on {branch}"),
             // The account and when it comes back, because those are the two
             // things that decide whether the human does anything about it: an
             // account back in twenty minutes is one to leave alone.
@@ -261,6 +270,7 @@ impl News {
     fn about(&self) -> &'static str {
         match self {
             News::Stopped { .. } => "the stop",
+            News::Escalated { .. } => "the session gone idle",
             News::OutOfWindow { .. } => "the stop for a window",
             News::OnAPullRequest { .. } => "the pull request",
             News::StageStarted { .. } => "the stage that started",
@@ -516,6 +526,9 @@ mod tests {
         vec![
             News::Stopped {
                 stopped: "Implementing the work".to_owned(),
+            },
+            News::Escalated {
+                idle: "Implementing the work".to_owned(),
             },
             News::OutOfWindow {
                 profile: "implementation".to_owned(),

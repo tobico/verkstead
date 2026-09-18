@@ -1389,7 +1389,7 @@ mod tests {
              {grilling}"
         );
         assert!(
-            grilling.contains("Do not start\ntask 01"),
+            flowed("grilling/SKILL.md").contains("Do not start task 01"),
             "the backlog is where this session stops: the tasks are the runner's, \
              a fresh session each: {grilling}"
         );
@@ -1495,6 +1495,137 @@ mod tests {
                 !branch.contains(crate::handoffs::HANDOFF_INSIDE),
                 "a {named} pick writes the plan into the repository and no handoff \
                  anywhere: {branch}"
+            );
+        }
+    }
+
+    /// The sessions ended on the Done signal are told to give it, and nothing in
+    /// what they read says they are ended by going quiet — which is the guess
+    /// the signal replaced, and a session that believed it would idle waiting to
+    /// be ended. See ADR-0018.
+    #[test]
+    fn the_skills_ended_on_the_done_signal_say_to_give_it() {
+        for name in [
+            "next-task/SKILL.md",
+            "next-stage/SKILL.md",
+            "breaking-down/SKILL.md",
+            "staging/SKILL.md",
+            "implementing/SKILL.md",
+            "instruction/SKILL.md",
+            "addressing/SKILL.md",
+            "reviewing/SKILL.md",
+            "responding/SKILL.md",
+            "submitting/SKILL.md",
+            "following-up/SKILL.md",
+        ] {
+            let skill = skill(name);
+
+            assert!(
+                flowed(name).contains("run `verkstead done`"),
+                "{name} has to tell the session to run `verkstead done`"
+            );
+            assert!(
+                !skill.contains("go quiet") && !skill.contains("gone quiet"),
+                "and nothing in {name} says quiet ends a session: {skill}"
+            );
+        }
+
+        let grilling = skill("grilling/SKILL.md");
+        let (_, picked) = grilling
+            .split_once("### After they pick")
+            .expect("the grilling skill carries what follows a pick");
+
+        for branch in [
+            "### When they pick inline",
+            "### When they pick a task list",
+            "### When they pick a roadmap",
+        ] {
+            let (_, rest) = picked
+                .split_once(branch)
+                .unwrap_or_else(|| panic!("the grilling skill carries {branch:?}"));
+            let this = rest.split("\n### ").next().unwrap();
+
+            assert!(
+                this.split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .contains("run `verkstead done`"),
+                "{branch} has to end on `verkstead done`: {this}"
+            );
+        }
+        assert!(
+            !grilling.contains("go quiet") && !grilling.contains("going quiet"),
+            "and nothing in the grilling skill says quiet ends a session: {grilling}"
+        );
+    }
+
+    /// Any session may run a build in the background, so every skill points at
+    /// the Guide's section on declaring a wait. See ADR-0018.
+    #[test]
+    fn every_skill_says_to_declare_a_wait_on_background_work() {
+        for name in NAMED {
+            let skill = flowed(name);
+
+            assert!(
+                skill.contains("run `verkstead waiting`")
+                    && skill.contains("*Waiting in the background*"),
+                "{name} has to point at declaring a wait: {skill}"
+            );
+        }
+    }
+
+    /// The sessions a run ends on are refused while their branch has no pull
+    /// request open, so their skills say so, and put the push and the pull
+    /// request before the signal rather than after it. See ADR-0018.
+    #[test]
+    fn the_skills_ended_on_a_pull_request_open_it_before_they_signal() {
+        for name in [
+            "next-task/SKILL.md",
+            "implementing/SKILL.md",
+            "staging/SKILL.md",
+            "submitting/SKILL.md",
+        ] {
+            let skill = flowed(name);
+
+            assert!(
+                skill.contains("no open pull request"),
+                "{name} has to say a signal is refused without a pull request: {skill}"
+            );
+
+            let pushed = skill
+                .find("git push -u origin HEAD")
+                .unwrap_or_else(|| panic!("{name} pushes the branch"));
+            let signalled = skill
+                .rfind("run `verkstead done`")
+                .unwrap_or_else(|| panic!("{name} ends on `verkstead done`"));
+
+            assert!(
+                pushed < signalled,
+                "{name} has to push and open the pull request before the signal: {skill}"
+            );
+        }
+    }
+
+    /// And a companion's pull request is asked for at the signal rather than
+    /// once the session is over, so the session that could open a missing one is
+    /// still there to — see ADR-0018. The skills that send a session into a
+    /// companion say so.
+    #[test]
+    fn the_skills_that_list_companions_say_their_pull_requests_are_asked_for_at_the_signal() {
+        for name in [
+            "next-task/SKILL.md",
+            "implementing/SKILL.md",
+            "staging/SKILL.md",
+        ] {
+            let skill = flowed(name);
+
+            assert!(
+                skill.contains("asks GitHub about each of them when you run `verkstead done`"),
+                "{name} has to say the companions are asked about at the signal: {skill}"
+            );
+            assert!(
+                !skill.contains("about each of them once this session is over"),
+                "and not once the session that could open a missing one has gone: {skill}"
             );
         }
     }
@@ -2116,9 +2247,10 @@ mod tests {
             "a companion nobody committed in is nothing to carry anywhere: {block}"
         );
         assert!(
-            block.contains("stops the run"),
-            "and one committed in and left without a pull request is a stop rather \
-         than something wrap-up carries on past: {block}"
+            block.contains("refuses the signal"),
+            "and one committed in and left without a pull request is a refusal the \
+         session is still there to put right, rather than something wrap-up carries \
+         on past: {block}"
         );
     }
 
@@ -3132,16 +3264,23 @@ mod tests {
         );
     }
 
-    /// How a follow-up ends is the system's business: the mark rides the human's
-    /// Response and never reaches the agent, so the skill has nothing to say
-    /// about it and must not invent a mechanism of its own.
+    /// Whether a follow-up is over is the human's to say: the mark rides their
+    /// Response and never reaches the agent, so the skill says only to give the
+    /// Done signal when there is nothing left, and that a refusal means another
+    /// round — never the mark itself, nor a mechanism of its own.
     #[test]
     fn the_following_up_skill_says_nothing_about_how_a_follow_up_ends() {
         let following_up = skill("following-up/SKILL.md");
 
         assert!(
-            following_up.contains("finish your turn"),
-            "it simply stops asking when it has nothing to ask: {following_up}"
+            flowed("following-up/SKILL.md").contains("nothing to do and nothing to ask")
+                && flowed("following-up/SKILL.md").contains("run `verkstead done`"),
+            "it gives the signal when it has nothing left to do or ask: {following_up}"
+        );
+        assert!(
+            flowed("following-up/SKILL.md").contains("put the next round to them as a Set"),
+            "and a refusal is the human not having finished, so it goes round again: \
+             {following_up}"
         );
         for ending in ["Nothing else", "Wrapping", "Done"] {
             assert!(

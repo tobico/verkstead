@@ -1,6 +1,6 @@
-//! Deferred Asks in the store: what marks one, what it does to the reading a
-//! driver makes of a quiet session, and the folding of its Answers into a later
-//! session's prompt.
+//! Deferred Asks in the store: what marks one, what it does to the reading made
+//! of an idle session, and the folding of its Answers into a later session's
+//! prompt.
 //!
 //! The folding is the half worth reading twice. It is a record rather than a
 //! reading of what happens to be answered — so what these ask is that a Set is
@@ -12,8 +12,8 @@ use std::path::Path;
 use sqlx::SqlitePool;
 use verkstead_schema::{Answer, Question, QuestionOption, QuestionSet, Response};
 use verkstead_store::{
-    Ask, Event, Settlements, ask, insert_response, lock_set, open_database, record_folded,
-    register_repo, start_conversation, submit_response, timeline, unanswered_set_since, unfolded,
+    Ask, Event, Settlements, ask, insert_response, lock_set, open_database, open_set,
+    record_folded, register_repo, start_conversation, submit_response, timeline, unfolded,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -157,35 +157,27 @@ async fn the_timeline_tells_a_deferred_set_from_a_blocking_one() {
     );
 }
 
-/// What the difference is *for*, on the store's side: a session that has gone
-/// quiet behind a Deferred Ask has finished, where one behind a blocking Ask is
-/// mid-question and must not be reaped.
+/// What the difference is *for*, on the store's side: a session idle behind a
+/// Deferred Ask is idle with nothing open, where one behind a blocking Ask is
+/// mid-question and must not be prodded.
 #[tokio::test]
 async fn a_deferred_set_is_not_a_session_still_asking() {
     let (_dir, pool) = fresh_pool().await;
     let conversation = conversation(&pool).await;
 
-    // Everything asked after the Conversation's own first Event, which is what
-    // "this session's" means here.
-    let since = 0;
-
     let deferred = asked(&pool, conversation, "deferred", Ask::Deferred).await;
 
     assert_eq!(
-        unanswered_set_since(&pool, conversation, since)
-            .await
-            .unwrap(),
+        open_set(&pool, conversation).await.unwrap(),
         None,
-        "nothing is idling on a Deferred Ask, so nothing is waiting to be answered \
-         before the session can be ended",
+        "nothing is idling on a Deferred Ask, so the human is holding nothing that \
+         should hold the rescue off",
     );
 
     let blocking = asked(&pool, conversation, "blocking", Ask::Blocking).await;
 
     assert_eq!(
-        unanswered_set_since(&pool, conversation, since)
-            .await
-            .unwrap(),
+        open_set(&pool, conversation).await.unwrap(),
         Some(blocking),
         "and a blocking one is exactly that",
     );
@@ -196,9 +188,9 @@ async fn a_deferred_set_is_not_a_session_still_asking() {
 /// And a store-and-nudge ask is a session still asking, stored though it is.
 ///
 /// The whole point of the third state. Its session has ended its turn and is
-/// waiting for the line Verkstead types when the Response lands, so a driver
-/// that read the row beside it as *nobody is waiting* would end that session on
-/// quiet and leave the Answer with nothing to nudge.
+/// waiting for the line Verkstead types when the Response lands, so a reader
+/// that took the row beside it as *nobody is waiting* would type a rescue into
+/// that session in the middle of a wait that is working.
 #[tokio::test]
 async fn a_store_and_nudge_set_is_a_session_still_asking() {
     let (_dir, pool) = fresh_pool().await;
@@ -207,9 +199,9 @@ async fn a_store_and_nudge_set_is_a_session_still_asking() {
     let stored = asked(&pool, conversation, "stored", Ask::StoreAndNudge).await;
 
     assert_eq!(
-        unanswered_set_since(&pool, conversation, 0).await.unwrap(),
+        open_set(&pool, conversation).await.unwrap(),
         Some(stored),
-        "a session is idling on it, so its own session is not one to end",
+        "a session is idling on it, so its own session is not one to prod",
     );
 
     submit_response(&pool, &Settlements::new(4), stored, &picked())
@@ -217,7 +209,7 @@ async fn a_store_and_nudge_set_is_a_session_still_asking() {
         .unwrap();
 
     assert_eq!(
-        unanswered_set_since(&pool, conversation, 0).await.unwrap(),
+        open_set(&pool, conversation).await.unwrap(),
         None,
         "and answering it settles it as it settles any other",
     );

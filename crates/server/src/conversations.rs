@@ -503,8 +503,9 @@ pub(crate) async fn settle_a_proposal(
 /// Nothing is started: the session is the one that proposed, it is idling on the
 /// blocking ask the Response is being delivered through, and it goes on from
 /// there with the whole thread still in its context. What is armed here is the
-/// watcher — the artifact landing, plus quiet, is what ends the session and moves
-/// the Conversation on. Which artifact each direction ends on is
+/// watch — the session's Done signal, checked against the artifact the pick asked
+/// for, is what ends it and moves the Conversation on. Which artifact each
+/// direction ends on is
 /// [`crate::runner::follow_the_tail`]'s.
 ///
 /// **Armed through the register, so exactly one watcher is live.** A pick lets

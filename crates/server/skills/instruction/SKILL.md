@@ -1,10 +1,10 @@
 ---
 name: instruction
-description: Do the one thing the human steered this Conversation into Implementing to have done, commit it, and stop. Use when a session has been dispatched with a steer's instruction under the documents the work started from.
+description: Do the one thing the human steered this Conversation into Implementing to have done, commit it, and say you are done. Use when a session has been dispatched with a steer's instruction under the documents the work started from.
 ---
 
 Do what the instruction at the end of this prompt says, commit what you change,
-and stop. That instruction is the whole of this session's job: this session has
+and say you are done with `verkstead done`. That instruction is the whole of this session's job: this session has
 none of the context of the ones before it, and the next one will have none of
 yours.
 
@@ -21,7 +21,7 @@ it the way the rest of this branch was done.
 Implementing and wrote the instruction as the way in; what follows you is
 Verkstead's rather than yours. So there is nothing here to hand back and nothing
 to line up for whoever is next: commit what you changed, say what you did, and
-stop.
+run `verkstead done`.
 
 ## 1. Read what was asked
 
@@ -97,13 +97,25 @@ Trailers go at the end as usual; the workbench takes them off what it shows.
       class throttle removed
     ```
 
-## 4. Stop
+## 4. Say you are done
 
-Then **stop**. Do not go looking for more to do, do not start the next task of
-any backlog, and do not push or open a pull request: what happens to this branch
-next is the pipeline's, and it reads the branch for itself the moment you are
-quiet. Work of yours that ran on into the step after this one would put two
-steps in one commit and one step's worth of context in the wrong session.
+Then **run `verkstead done`**, and stop there. Do not go looking for more to do,
+do not start the next task of any backlog, and do not push or open a pull
+request: what happens to this branch next is the pipeline's, and it reads the
+branch for itself once this session is over. Work of yours that ran on into the
+step after this one would put two steps in one commit and one step's worth of
+context in the wrong session.
+
+`verkstead done` is the last thing this session does, once what you changed is
+committed and anything else the instruction asked for is finished. That is what
+ends the session, and nothing else does: not the commit, and not going quiet. So
+a session that commits and then waits on its tests, or on an answer, is not cut
+off while it waits.
+
+Verkstead checks the repository when you run it. A refusal exits non-zero and
+says on stderr what is missing — nothing committed since this session began,
+say, or changes left uncommitted — and the session carries on: put that right
+and run `verkstead done` again.
 
 ## When you need the human
 
@@ -121,3 +133,11 @@ a decision that would be expensive to unpick.
   so either way, do only work their answer cannot invalidate.
 - **Never answer on their behalf.** If the ask itself fails — the server
   unreachable, any non-zero exit that is not a refused Set — say so and stop.
+
+## Waiting on work in the background
+
+Before you end a turn with work of your own still running in the background — a
+build, a test run — run `verkstead waiting` with how long you expect it to take,
+such as `verkstead waiting 20m`, and declare it again if the work runs over.
+Otherwise Verkstead takes the session as stopped and prompts it. An ask needs no
+declaration. The Guide's *Waiting in the background* section has the details.

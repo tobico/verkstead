@@ -166,13 +166,32 @@ arrives.
 Then round again from step 2: do it, commit it, push it, and put the next Set.
 A follow-up is as many rounds as they want it to be.
 
-## 5. Finishing your turn
+## 5. Say you are done
 
-When a Response leaves you with nothing to do and nothing to ask, say what you
-did and **finish your turn**. That is all: no closing line to anybody, no
-summing-up of the follow-up, nothing to hand on.
+When a Response leaves you with nothing to do and nothing to ask, make sure
+everything that round asked for is committed and pushed, say what you did, and
+run `verkstead done`. That is all: no closing line to anybody, no summing-up of
+the follow-up, nothing to hand on.
+
+That command is what ends this session, and nothing else does: not the push, and
+not the end of your turn. So a round that pushes and then waits on its checks in
+the background is not cut off while it waits.
+
+**Whether there is anything else is the human's to say, not yours.** Verkstead
+knows whether they have said it, and checks when you run the command. Where they
+have not, it is refused: the command exits non-zero, says so on stderr, and the
+session carries on. Then go round again from step 3 and put the next round to
+them as a Set. It is refused over changes left uncommitted too: commit or discard
+them, and run `verkstead done` again.
 
 **What becomes of this Conversation is not yours.** Do not mark the pull request
-ready, do not merge it, do not move the work anywhere, and do not decide that
-the follow-up is over — Verkstead reads how this session stands rather than
-anything you say about it, and it knows what comes next.
+ready, do not merge it, and do not move the work anywhere — Verkstead knows what
+comes next.
+
+## Waiting on work in the background
+
+Before you end a turn with work of your own still running in the background — a
+build, a test run — run `verkstead waiting` with how long you expect it to take,
+such as `verkstead waiting 20m`, and declare it again if the work runs over.
+Otherwise Verkstead takes the session as stopped and prompts it. An ask needs no
+declaration. The Guide's *Waiting in the background* section has the details.

@@ -401,3 +401,73 @@ omission, and there is nothing there to follow up:
 A Response of nothing but `unanswered` entries plus a `comment` is a valid
 counter-question. It means the human is not answering as asked — take the
 discussion back a step rather than putting the same Set again.
+
+## Waiting in the background
+
+A session that ends its turn looks, from outside, like one that has stopped.
+Verkstead speaks to a stopped session to get it moving, and tells the human
+when that does not work. So **before ending a turn with work of your own still
+running** — a build, a test run, anything started in the background that will
+wake you when it finishes — say so, with how long you expect it to take:
+
+```
+verkstead waiting 45m
+```
+
+- The length is seconds, minutes or hours: `90s`, `45m`, `1h`. It is **at most
+  an hour**, and **fifteen minutes** where you give none. A longer length, or
+  one that does not parse, is refused with a non-zero exit naming the maximum.
+- It returns at once. End your turn as you meant to.
+- **Declare again if the work runs over.** A new declaration replaces the one
+  standing, so the wait never has to be guessed right the first time.
+- The wait is over when its time runs out, when you are next seen working after
+  going quiet behind it, or when `verkstead done` is accepted.
+
+**An ask needs none.** A Question Set waiting on the human already keeps the
+session from being taken as stopped.
+
+## Ending the session
+
+A session Verkstead launched is ended by **`verkstead done`**, and by nothing
+else: not by the work arriving on the branch, and not by going quiet. So a
+session can commit, start a test run, ask a question or wait on anything else
+without being ended in the middle of it.
+
+**Run it last** — once the work is committed and everything after it is
+finished: the push, the pull request, whatever the skill being followed says
+comes after the commit. It takes no arguments, because Verkstead already knows
+what this session was sent to do.
+
+```
+verkstead done
+```
+
+Verkstead checks the repository at that moment:
+
+- **Accepted** — it prints a confirmation and exits 0, and the session is ended
+  once it next stops. Anything still to say can be said straight after; it is
+  kept.
+- **Refused** — it exits non-zero and says on stderr what is missing: a box not
+  ticked and committed, a document not written, no Direction picked yet. The
+  session carries on. Put right what it names, then run `verkstead done` again.
+
+**Commit or discard every change before you signal.** A signal is refused
+while the Worktree, or a companion repo you may write in, has uncommitted
+changes — modified, staged, or untracked and not ignored. The refusal names the
+files.
+
+**Open the pull request before you signal, where the session ends on one.** A
+backlog's finish step, an inline implementation, a roadmap's own session and a
+session sent to open a pull request are refused while their branch has no open
+pull request — **and while any companion repository the work committed in has
+none**, the refusal naming the repository and the branch. Push each and open one
+the way that repository's own review process says, then signal. Where Verkstead
+cannot reach GitHub to check, the signal is taken.
+
+**Do not signal with a question you still want answered.** Once the signal is
+accepted, nothing will read the Answer, so a Set of yours that is still waiting
+on one is closed unanswered. A Set asked with `--deferred` stays open: its
+Answers reach a later session.
+
+Being unable to finish is not a kind of done. That is a Question for the human,
+asked with `verkstead ask`.

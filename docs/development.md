@@ -564,13 +564,13 @@ wall clock. That makes it the one suite whose result depends on what else the
 machine is doing, so it has two knobs of its own.
 
 `VERKSTEAD_TEST_PACE` is a multiplier over everything time-shaped in it — the
-budgets a session is ended by, how long a wait gives up after, and every window a
-test holds open to prove nothing happened. Unset is `1.0`. CI sets `2`, because a
-two-core runner building the workspace alongside the run cannot meet a
-developer's machine's budgets, and a session descheduled past one is ended by the
-wrong rule and fails a test that is not about the code. Raise it locally if the
-suite fails on a busy machine and passes on a quiet one; the file's own `PACE`
-explains the rest.
+budgets a session is judged idle, rescued and ended by, how long a wait gives
+up after, and every window a test holds open to prove nothing happened. Unset
+is `1.0`. CI sets `2`, because a two-core runner building the workspace
+alongside the run cannot meet a developer's machine's budgets, and a session
+descheduled past one is judged by the wrong rule and fails a test that is not
+about the code. Raise it locally if the suite fails on a busy machine and passes
+on a quiet one; the file's own `PACE` explains the rest.
 
 Nothing needs setting for the concurrency: the suite caps how many fixtures stand
 at once by itself, at twice the cores it can see.

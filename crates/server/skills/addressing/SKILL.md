@@ -58,9 +58,9 @@ Read the feedback whole before changing anything, then go and see for yourself.
   the base's work on the branch, and it is what GitHub reads next.
 
 If it is already fixed — a check that failed on a commit the branch has since
-moved past, a comment answered by work that landed after it — say so and stop.
-Committing nothing is a fine outcome; inventing a change so that something
-happened is not.
+moved past, a comment answered by work that landed after it — say so and run
+`verkstead done`. Committing nothing is a fine outcome; inventing a change so
+that something happened is not.
 
 ## 2. Fix the cause
 
@@ -171,7 +171,19 @@ branch — in this repository and in every companion beside it — belongs to
 somebody else's piece of feedback. The pull request exists, and merging is the
 human's act.
 
-Then stop.
+## 4. Say you are done
+
+The last thing this session does, once the fix is committed and pushed, is run
+`verkstead done`. That is what ends the session, and nothing else does: not the
+commit, not the push, and not going quiet. So a session that waits on a test
+run, or on an answer, is not cut off while it waits.
+
+A fix that found nothing to commit runs it too: what judges the fix is the check
+on GitHub, which Verkstead asks about again once this session is over.
+
+Verkstead checks the repository when you run it. A refusal exits non-zero and
+says on stderr what is missing — changes left uncommitted, say — and the session
+carries on: put that right and run `verkstead done` again.
 
 ## When you need the human
 
@@ -188,3 +200,11 @@ what the work was for, or a fix that would be expensive to unpick.
   so either way, do only work their answer cannot invalidate.
 - **Never answer on their behalf.** If the ask itself fails — the server
   unreachable, any non-zero exit that is not a refused Set — say so and stop.
+
+## Waiting on work in the background
+
+Before you end a turn with work of your own still running in the background — a
+build, a test run — run `verkstead waiting` with how long you expect it to take,
+such as `verkstead waiting 20m`, and declare it again if the work runs over.
+Otherwise Verkstead takes the session as stopped and prompts it. An ask needs no
+declaration. The Guide's *Waiting in the background* section has the details.

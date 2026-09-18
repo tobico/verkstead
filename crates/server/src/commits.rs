@@ -85,6 +85,28 @@ pub(crate) async fn watch(
     sweep(&pool, &nudges, conversation_id, &branch).await;
 }
 
+/// Sweep every branch a session running for the Conversation can commit on,
+/// once and now, rather than waiting for its watcher's next look.
+///
+/// For a reader that has to know about a commit made a moment ago: a session's
+/// Done signal, which usually comes straight after its last commit — see
+/// [`crate::done`]. Beside the watcher rather than instead of it, which costs
+/// nothing to be wrong about: a commit two sweeps both record is recorded once.
+pub(crate) async fn sweep_now(state: &crate::AppState, conversation_id: i64) {
+    let conversation = match store::load_conversation(&state.pool, conversation_id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id, "reading a Conversation to sweep its branches failed");
+            return;
+        }
+    };
+
+    for branch in watched(&conversation) {
+        sweep(&state.pool, &state.nudges, conversation_id, &branch).await;
+    }
+}
+
 /// Where a Conversation's commits are read from: the repository, the branch the
 /// work is on, the commit it started from, and the branch that commit was
 /// resolved through.
