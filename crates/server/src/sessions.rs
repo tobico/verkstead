@@ -3665,25 +3665,22 @@ mod tests {
     /// And where the session opens it: the same directory reached from inside,
     /// which is under the profile Windows gives a Conversation.
     ///
-    /// Composed the way the server composes it rather than by joining the names
-    /// again here — both halves of it. What a session is told is a path it can
-    /// *open*, so the handoff directory inside a HOME is spelled with a forward
-    /// slash whichever machine composed it, and so is the file under it — see
-    /// [`crate::sandbox::under`].
+    /// Composed by asking [`crate::handoffs::inside`] rather than by spelling
+    /// the directory out again here, so that a helper cannot agree with a
+    /// server that has moved.
     ///
-    /// **A `join` for the file was the bug this helper hid.** It puts the
-    /// *host's* separator on, which on Linux is the same character and on
-    /// Windows is not — so the helper and the server agreed on either machine
-    /// while the line a Windows session was really given had one path with both
-    /// characters in it.
+    /// **And what it cannot ask is the spelling.** A profile path is the
+    /// host's, and both halves go onto it with the host's own separator — so a
+    /// suite running on Linux writes the same characters whichever tool the
+    /// server used, and could not tell a line spelled one way from a line
+    /// spelled two. That claim is asserted where a Windows machine runs it; see
+    /// `tests/sessions_windows.rs`.
     fn opened_at(state: &std::path::Path) -> PathBuf {
-        crate::sandbox::under(
-            &crate::handoffs::inside(
-                Platform::Windows,
-                &state.join("homes").join(CONVERSATION.to_string()),
-            ),
-            "prompt.md",
+        crate::handoffs::inside(
+            Platform::Windows,
+            &state.join("homes").join(CONVERSATION.to_string()),
         )
+        .join("prompt.md")
     }
 
     /// A prompt with everything a real one carries: what the builders above put

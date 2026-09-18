@@ -66,7 +66,15 @@ pub(crate) const SAID_INSIDE_HOME: &str = "$HOME/verkstead";
 /// ask for, and this one decides a path a session is told about in prose.
 pub(crate) fn inside(platform: Platform, home: &Path) -> PathBuf {
     match platform {
-        Platform::MacOs | Platform::Windows => crate::sandbox::under(home, INSIDE_HOME),
+        // [`Path::join`] rather than [`crate::sandbox::under`], because `home`
+        // here is a path of the *host's* own — the profile Windows gave this
+        // Conversation, spelled the way Windows spells it — and what goes on
+        // the end of one of those is the host's own separator. `under` is for
+        // composing onto a path that is POSIX by construction, the way the arm
+        // below is: a forward slash put after a `C:\Users\…` would spell one
+        // path with both characters in it, which is what a human reading their
+        // own log sees and what a session is told in prose.
+        Platform::MacOs | Platform::Windows => home.join(INSIDE_HOME),
         Platform::Linux => PathBuf::from(INSIDE),
     }
 }
@@ -188,13 +196,13 @@ impl Handoffs {
     /// *session* will open it at rather than the one the server wrote it at.
     /// The two are one directory on the far side of a junction.
     ///
-    /// **And the file is composed onto it the way the directory was**, through
-    /// [`crate::sandbox::under`] rather than [`Path::join`]: `inside` is a path
-    /// for the session to read and is spelled with a forward slash for that
-    /// reason, so a `join` here would put the *host's* separator after it and
-    /// the line would name one path with both characters in it. It opens either
-    /// way on Windows — what it costs is a human reading their own log and a
-    /// session being told a path in prose that looks like two halves.
+    /// **And the file is composed onto it the way the directory was.** This is
+    /// only ever called on Windows — see [`crate::sessions::Agents::argv`] —
+    /// where `inside` is a native path under the profile, so the file goes on
+    /// with [`Path::join`] and the whole line is spelled one way. It opens
+    /// either way on Windows; what one path with both characters in it costs is
+    /// a human reading their own log, and a session being told a path in prose
+    /// that looks like two halves.
     ///
     /// `None` where the directory could not be made or the file could not be
     /// written, which is a session that has nothing to be started on: the
@@ -222,7 +230,7 @@ impl Handoffs {
             return None;
         }
 
-        Some(started_on(&crate::sandbox::under(inside, PROMPT)))
+        Some(started_on(&inside.join(PROMPT)))
     }
 
     /// Where a Conversation's handoff document is written, seen from outside its
@@ -327,11 +335,12 @@ mod tests {
     /// The skill names one path and the sandbox mounts another half of it, and
     /// the two have to be the same file.
     ///
-    /// Composed through [`crate::sandbox::under`], the way the prompt file
-    /// beside it is and for the same reason: this is a path a *session* opens,
-    /// so a `join` here would spell it with the separator of whichever host ran
-    /// the suite and the skill's own sentence would stop being what a session
-    /// is told.
+    /// Composed through [`crate::sandbox::under`], because what it is composed
+    /// onto is [`INSIDE`] — a POSIX path by construction, and the Linux arm's.
+    /// A `join` would spell it with the separator of whichever host ran the
+    /// suite, and the skill's own sentence would stop being what a session is
+    /// told. The prompt file is composed with a `join` for the opposite half of
+    /// the same rule: what *it* goes onto is a path of the host's own.
     #[test]
     fn the_path_the_skill_names_is_the_directory_that_is_mounted() {
         assert_eq!(
@@ -480,11 +489,15 @@ mod tests {
             std::fs::read_to_string(state.path().join("handoffs/7/prompt.md")).unwrap(),
             "# Rate limiting\n",
         );
+        // Composed the way the directory was, which is all this machine can
+        // ask: `join` puts the *host's* separator on, so a suite running on
+        // Linux composes the same characters whichever tool is used and cannot
+        // tell one spelling from the other. That the line a Windows session
+        // really gets is spelled one way throughout is asserted where a Windows
+        // machine runs it — see `tests/sessions_windows.rs`.
         assert!(
-            started_on.contains(&format!("{}/{PROMPT}", inside.display())),
-            "{started_on:?} does not name the file the session will open — the \
-             file is composed onto the directory the way the directory was, \
-             rather than with this host's own separator after it",
+            started_on.contains(&inside.join(PROMPT).display().to_string()),
+            "{started_on:?} does not name the file the session will open",
         );
         assert!(
             !started_on.contains("Rate limiting"),
