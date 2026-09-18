@@ -3956,8 +3956,24 @@ impl Sandbox {
         // the filesystem: the profile is emptied, the account junctioned in and
         // the temporary directory made here, and an entry cannot be written on
         // a path nothing has put there yet.
+        //
+        // Timed where a boundary follows it: emptying a profile and making the
+        // junctions is the first stretch of a slow Windows start, and it is
+        // outside every clock the writing keeps — see
+        // [`granting::writing::stretch`], which is what says so in the log.
+        #[cfg(windows)]
+        let rendering_began = std::time::Instant::now();
+
         #[allow(unused_mut)]
         let (mut rendering, mut closing) = rendered(self.platform, &surface);
+
+        #[cfg(windows)]
+        if boundary.is_some() {
+            granting::writing::stretch(
+                "profile emptied and junctions made for its entries to go on",
+                rendering_began,
+            );
+        }
 
         // And a Claude session's login, where the root it is in cannot be
         // trusted to have written it to the account by itself — see
@@ -3994,7 +4010,14 @@ impl Sandbox {
             // an access-control list in the meantime is something this reading
             // would then be answering about rather than about the machine as
             // the session found it.
+            //
+            // And timed, like each of the four below it: every one of them is
+            // work a boundary does before an entry is written, and a slow start
+            // that went into one of them said nothing about which — see
+            // [`granting::writing::stretch`].
+            let began = std::time::Instant::now();
             let cut = granting::writing::inheriting(&boundary.entries);
+            granting::writing::stretch("paths read for which of them were inheriting", began);
 
             // The identity, resolved rather than made: there is one account for
             // the whole installation — see [`account`] — so what a session start
@@ -4002,35 +4025,43 @@ impl Sandbox {
             // back the SID every entry below is written for. A machine with no
             // such account, or nothing holding its password, refuses the session
             // in words that name the verb to run.
+            let began = std::time::Instant::now();
             let account = self.session_account()?;
+            granting::writing::stretch("session account resolved on the machine", began);
 
+            let began = std::time::Instant::now();
             let entries = entries::Entries::of_conversation(
                 boundary.data_dir,
                 boundary.conversation,
                 account.name(),
                 account.sid().text(),
             )?;
+            granting::writing::stretch("Conversation's record of its entries opened", began);
 
             // Remembered before it is written, and remembered by the
             // Conversation's entries rather than by the session: an entry is
             // this Conversation's and comes off when its work stops — see
             // [`entries::Entries::wrote`], which is also where the order is.
+            let began = std::time::Instant::now();
             entries.wrote(
                 granting::written_down(&boundary.entries, &boundary.standing),
                 cut.clone(),
             )?;
+            granting::writing::stretch("entries written down before they were written", began);
 
             // And the other half of the same list, in the machine's own record
             // rather than this Conversation's: nothing sweeps a standing entry,
             // so removing the account is the one thing that ever takes one off
             // and this is what it reads — see
             // [`granting::remembering::standing_wrote`].
+            let began = std::time::Instant::now();
             granting::remembering::standing_wrote(
                 boundary.data_dir,
                 account.name(),
                 account.sid().text(),
                 &granting::standing_among(&boundary.entries, &boundary.standing),
             )?;
+            granting::writing::stretch("machine's record of the standing entries written", began);
 
             granting::writing::write(&boundary.entries, account.sid().text(), &cut)?;
 

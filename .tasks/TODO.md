@@ -19,6 +19,6 @@ Roadmap stage: [04: What the reporter could not see](docs/roadmaps/built-roots/0
 ## Tasks
 
 - [x] 01: The idle condition — [details](01-the-idle-condition.md)
-- [ ] 02: The boundary's accounting — [details](02-the-boundarys-accounting.md)
+- [x] 02: The boundary's accounting — [details](02-the-boundarys-accounting.md)
 - [ ] 03: The boundary lines in the Capture — [details](03-the-boundary-lines-in-the-capture.md)
 - [ ] 04: The Notice's last sentence — [details](04-the-notices-last-sentence.md)
