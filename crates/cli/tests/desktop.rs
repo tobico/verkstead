@@ -932,8 +932,17 @@ fn the_startup_line_carries_no_workbench_key() {
 /// redacting-everywhere ADR-0015 turned down. So the app falls back to the
 /// daemon's way exactly where it has become the daemon.
 ///
-/// Every test in this file is such a run — there is no tray under a test — so
-/// this is asked of the line that says so.
+/// Every test in this file is such a run on a machine whose screen is named in
+/// the environment — there is no tray under a test there — so this is asked of
+/// the line that says so.
+///
+/// **Not on Windows**, where a screen is asked of the window station rather than
+/// read off the environment: a test on a logged-in runner is on `WinSta0` like
+/// any other process, raises a tray, and never reaches the line. Nothing about
+/// the fallback is Windows's own — it is the same branch of the same function —
+/// so what is lost by leaving it to the other platforms is the premise, not the
+/// coverage. See `crate::screen`.
+#[cfg(not(windows))]
 #[test]
 fn a_run_with_no_tray_says_the_link_itself() {
     let tmp = tempfile::tempdir().unwrap();

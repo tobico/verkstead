@@ -393,13 +393,18 @@ mod tests {
 
     /// The variable a skill names it through is that same path, said the one way
     /// a string written before any Conversation exists can say it.
+    ///
+    /// Compared as paths rather than as the strings they are spelled with,
+    /// because the spelling is the host's and the question is not. A `Path`
+    /// composed on Windows joins with a backslash whichever [`Platform`] it is
+    /// being asked about — the separator comes from the build, not the
+    /// argument — so the two are the same place written two ways there, and
+    /// only a comparison by components says so.
     #[test]
     fn what_a_skill_says_is_what_a_sessions_home_makes() {
         assert_eq!(
-            SAID_INSIDE_HOME.replace("$HOME", "/data/homes/7"),
-            inside(Platform::MacOs, Path::new("/data/homes/7"))
-                .display()
-                .to_string(),
+            Path::new(&SAID_INSIDE_HOME.replace("$HOME", "/data/homes/7")),
+            inside(Platform::MacOs, Path::new("/data/homes/7")),
         );
     }
 
