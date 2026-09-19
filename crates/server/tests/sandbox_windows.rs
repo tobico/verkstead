@@ -129,6 +129,20 @@ const MARKER: &str = "what-is-in-here.txt";
 /// bytes could be reached at all.
 const SAID: &str = "the description named this directory\n";
 
+/// What the settings page's Instructions card was given, as `config.yaml` holds
+/// it: one key, in the block scalar that keeps a paragraph's blank line and a
+/// list's indent.
+const THE_INSTRUCTIONS_CONFIGURED: &str =
+    "instructions: |\n  Say what you changed.\n\n  - And why.\n";
+
+/// And the text itself — `"Say what you changed.\n\n- And why.\n"` — as the
+/// probe reads it back out of a root, every line break a space, which is how
+/// the text in a root is asserted on this platform — see [`reading`].
+const THE_INSTRUCTIONS_READ: &str = "Say what you changed.  - And why.";
+
+/// And the Repo's own instructions, in the Worktree, which are the Repo's.
+const THE_REPOS_OWN: &str = "# what this repository says about itself\n";
+
 /// The account's own skills, which a session's root does not hold.
 const THEIR_SKILL: &str = "# what the account would have been grilled by\n";
 
@@ -618,6 +632,7 @@ impl Grilling {
 
         std::fs::create_dir_all(config.join("skills")).unwrap();
         std::fs::write(config.join("skills").join(MARKER), SAID).unwrap();
+        std::fs::write(config.join("AGENTS.md"), "# the human's own\n").unwrap();
         std::fs::write(
             config.join("opencode.jsonc"),
             "{\n  // The human's own proxy.\n  \"provider\": { \"proxy\": {} },\n  \
@@ -684,6 +699,7 @@ impl Grilling {
 
         std::fs::write(grok.join(AUTH), THE_LOGIN).unwrap();
         std::fs::write(grok.join("pager.toml"), "# the human's own\n").unwrap();
+        std::fs::write(grok.join("AGENTS.md"), "# the human's own\n").unwrap();
         std::fs::write(
             grok.join("config.toml"),
             "[model.the-proxy]\nbase_url = \"https://proxy.example/v1\"\n\n\
@@ -715,6 +731,13 @@ impl Grilling {
     /// profile.
     fn grok_root_inside(&self) -> PathBuf {
         self.profile_dir().join(".grok")
+    }
+
+    /// `config.yaml`, which among other things is the one text every session
+    /// is given — read as each sandbox is built, so a test writes it before
+    /// asking for one.
+    fn configure(&self, yaml: &str) {
+        std::fs::write(self.settings.config_path(), yaml).unwrap();
     }
 
     /// The directories of the human's and the machine's own that this
@@ -1838,6 +1861,7 @@ async fn a_grok_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
         directory("memory", root.join("memory")),
         directory("skills", root.join("skills")),
         file("pager", root.join("pager.toml")),
+        file("agents-md", root.join("AGENTS.md")),
         directory("the-accounts-own", &account),
         directory("the-accounts-skills", account.join("skills")),
     ];
@@ -1857,6 +1881,7 @@ async fn a_grok_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
         ("memory", "write"),
         ("skills", "absent"),
         ("pager", "absent"),
+        ("agents-md", "absent"),
         ("the-accounts-own", "refused"),
         ("the-accounts-skills", "refused"),
     ] {
@@ -1990,6 +2015,7 @@ async fn an_opencode_session_is_given_a_root_of_the_allowlist_and_nothing_else()
         file("login", data.join(AUTH)),
         file("store", &store),
         directory("skills", config.join("skills")),
+        file("agents-md", config.join("AGENTS.md")),
         directory("the-accounts-skills", account.join("skills")),
     ];
 
@@ -2008,6 +2034,7 @@ async fn an_opencode_session_is_given_a_root_of_the_allowlist_and_nothing_else()
         ("login", "write"),
         ("store", "write"),
         ("skills", "absent"),
+        ("agents-md", "absent"),
         ("the-accounts-skills", "refused"),
         ("listed", "1"),
     ] {
@@ -2028,6 +2055,109 @@ async fn an_opencode_session_is_given_a_root_of_the_allowlist_and_nothing_else()
         "written inside",
         "and a store a session writes is on the account"
     );
+}
+
+/// The one text on the settings page reaches every session, whatever harness
+/// runs it: it is written into the root as the file that harness reads as its
+/// global instructions, verbatim, with no heading over it and nothing saying
+/// where it came from.
+///
+/// The other state — nobody having typed a text, and no such file in any root
+/// at all — is what the four allowlist tests above assert, each of them asking
+/// its own harness's file of a fixture nobody has configured.
+///
+/// The Repo's own `CLAUDE.md` in the Worktree is the Repo's, untouched and read
+/// as it always was, and the account's own global file is neither read nor
+/// written: this one is Verkstead's from end to end.
+#[tokio::test]
+async fn the_settings_text_is_the_global_instructions_file_in_every_root() {
+    let mut fixture = grilling().await;
+    fixture.configure(THE_INSTRUCTIONS_CONFIGURED);
+
+    // The Repo's own instructions, which are none of this setting's business.
+    let repos_own = fixture.worktree().join("CLAUDE.md");
+    std::fs::write(&repos_own, THE_REPOS_OWN).unwrap();
+
+    let quoted = |path: &Path| path.display().to_string().replace('\'', "''");
+
+    for harness in ["claude", "codex", "grok", "opencode"] {
+        let given = match harness {
+            "codex" => {
+                fixture.under_codex(true).await;
+                fixture.codex_root_inside().join("AGENTS.md")
+            }
+            "grok" => {
+                fixture.under_grok(true).await;
+                fixture.grok_root_inside().join("AGENTS.md")
+            }
+            "opencode" => {
+                fixture.under_opencode(true).await;
+                fixture.opencode_inside()[0].join("AGENTS.md")
+            }
+            _ => fixture.root_inside().join("CLAUDE.md"),
+        };
+
+        // And the session rewrites it, which is a root's file to rewrite: it is
+        // Verkstead's own, nothing of it is the account's, and nothing of it
+        // goes anywhere as the session ends.
+        let classified = fixture.probe_running(&format!(
+            "{}{}{}\
+             [System.IO.File]::WriteAllText('{given}', 'the session wrote this')\r\n",
+            classifying(&[file("instructions", &given)]),
+            reading("text", &quoted(&given)),
+            reading("repos", &quoted(&repos_own)),
+            given = quoted(&given),
+        ));
+
+        assert_eq!(
+            said(&classified, "instructions"),
+            "write",
+            "a {harness} session finds its own global instructions file in its root, \
+             and the probe said: {classified:?}"
+        );
+        assert_eq!(
+            said(&classified, "text"),
+            THE_INSTRUCTIONS_READ,
+            "the text verbatim — every line of it, in the order they were typed — \
+             with no heading over it and nothing saying where it came from"
+        );
+        assert_eq!(
+            said(&classified, "repos"),
+            THE_REPOS_OWN.trim_end(),
+            "and the Repo's own instructions are beside it, read as they always were"
+        );
+
+        assert_eq!(
+            std::fs::read_to_string(&given).unwrap(),
+            "the session wrote this",
+            "and what the session wrote stayed in the root, which the next session \
+             builds again"
+        );
+    }
+
+    assert_eq!(
+        std::fs::read_to_string(&repos_own).unwrap(),
+        THE_REPOS_OWN,
+        "and nothing of the Worktree's own file was written"
+    );
+
+    for account in [
+        fixture.claude_dir().join("CLAUDE.md"),
+        fixture.codex_dir().join("AGENTS.md"),
+        fixture.grok_dir().join("AGENTS.md"),
+        fixture
+            .opencode_home()
+            .join(".config")
+            .join("opencode")
+            .join("AGENTS.md"),
+    ] {
+        assert_eq!(
+            std::fs::read_to_string(&account).unwrap(),
+            "# the human's own\n",
+            "nor of the account's own {}, which no session was given and none wrote back",
+            account.display()
+        );
+    }
 }
 
 /// With the Profile's memory switched off, an OpenCode session's data directory

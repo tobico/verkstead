@@ -10,7 +10,7 @@
 //! session's, so none of it is in the root, and whatever a harness adds next is
 //! absent from it too without anybody having to notice.
 //!
-//! **One shape for every harness**, in three parts. Which files and directories
+//! **One shape for every harness**, in four parts. Which files and directories
 //! each part is, is the harness's own — see [`Harness`]:
 //!
 //! - **The login, linked**, where the account has one.
@@ -20,6 +20,11 @@
 //!   transcript is written into the root — see [`Root::remembering`].
 //! - **A configuration file Verkstead writes**, carrying only what the
 //!   account's own says about reaching a model — see [`Root::written`].
+//! - **The settings page's instructions text, written as the file that
+//!   harness reads as its global instructions** — see [`Root::instructed`].
+//!   The account's own such file is left out with the rest of how the human
+//!   works, and this is what stands in its place. A text nobody typed is no
+//!   file.
 //!
 //! **The root is Verkstead's own directory**, under the Conversation's profile
 //! in the Data Directory, emptied and made again as each session starts — see
@@ -56,6 +61,14 @@ const PROJECTS: &str = "projects";
 
 /// The settings file Claude reads for the user, inside `~/.claude`.
 const SETTINGS: &str = "settings.json";
+
+/// The file Claude reads as its global instructions, inside `~/.claude`.
+const CLAUDE_INSTRUCTIONS: &str = "CLAUDE.md";
+
+/// The file the other three read as their global instructions: Codex's and
+/// Grok Build's inside the account's own directory, and OpenCode's inside its
+/// config directory.
+const AGENTS: &str = "AGENTS.md";
 
 /// Of the account's own settings, the keys a root's settings carry over.
 ///
@@ -516,6 +529,51 @@ impl Root {
                 )
             }
         }
+    }
+
+    /// The global instructions file a root is given: where it goes in a root
+    /// built in the Conversation's own directory at `built`, and what it
+    /// holds. `None` where there is no text to give.
+    ///
+    /// **The settings page's one text, verbatim.** No heading over it and no
+    /// line saying where it came from: what the human typed is what the
+    /// harness reads. It stands where the account's own global instructions
+    /// file would have been, which a root carries none of — see this module's
+    /// allowlist.
+    ///
+    /// Each harness names its own, and each is inside a directory the root
+    /// already builds: `.claude/CLAUDE.md` for Claude, `.codex/AGENTS.md` for
+    /// Codex, `.grok/AGENTS.md` for Grok Build, and the config directory's
+    /// `AGENTS.md` for OpenCode.
+    ///
+    /// **Written rather than joined**, exactly as the configuration file
+    /// beside it is: it is Verkstead's own file, it is never the account's,
+    /// and nothing of it is written back. Read off the settings at the moment
+    /// the root is built, so a text saved on the settings page reaches the
+    /// next session and a running one keeps what it started with.
+    ///
+    /// **A text of nothing is no file at all**, so a root then holds what it
+    /// held before there was such a setting. Which text is nothing is the
+    /// settings file's own answer — see [`crate::settings::Config`], where a
+    /// text of only whitespace has already become none.
+    ///
+    /// The Repo's own `CLAUDE.md` or `AGENTS.md` is in the Worktree, is the
+    /// Repo's, and is untouched by this: each harness reads both, this one
+    /// above it.
+    pub(crate) fn instructed(&self, built: &Path, text: &str) -> Option<(PathBuf, Vec<u8>)> {
+        if text.is_empty() {
+            return None;
+        }
+
+        let root = built.join(self.landing());
+
+        let path = match self.harness {
+            Harness::Claude { .. } => root.join(CLAUDE_INSTRUCTIONS),
+            Harness::Codex | Harness::Grok => root.join(AGENTS),
+            Harness::OpenCode => root.join(OPENCODE_CONFIG).join(AGENTS),
+        };
+
+        Some((path, text.as_bytes().to_vec()))
     }
 
     /// Whether a session on `platform` is given a copy of the login rather
@@ -2057,6 +2115,43 @@ mod tests {
                 },
             })
         );
+    }
+
+    /// Each harness's own global instructions file, inside a directory its root
+    /// already builds, holding the settings text and nothing else — and no file
+    /// anywhere for a text nobody typed.
+    #[test]
+    fn every_root_is_given_the_settings_text_as_the_file_its_harness_reads() {
+        let account = Path::new("/home/you/.claude");
+        let text = "Prefer the smallest change.\n\n- And say why.\n";
+
+        let claude = Root::claude(
+            Platform::Linux,
+            account,
+            Path::new("/home/you/src/verkstead/.git"),
+            Path::new("/state/worktrees/verkstead-x"),
+        );
+
+        let built = Path::new("/built");
+
+        for (root, file) in [
+            (claude, "/built/.claude/CLAUDE.md"),
+            (Root::codex(account), "/built/.codex/AGENTS.md"),
+            (Root::grok(account), "/built/.grok/AGENTS.md"),
+            (Root::opencode(account), "/built/.config/opencode/AGENTS.md"),
+        ] {
+            assert_eq!(
+                root.instructed(built, text),
+                Some((PathBuf::from(file), text.as_bytes().to_vec())),
+                "the text verbatim, with no heading over it and nothing saying \
+                 where it came from"
+            );
+            assert_eq!(
+                root.remembering(false).instructed(built, ""),
+                None,
+                "and nothing at all in a root for a setting nobody typed"
+            );
+        }
     }
 
     /// An account with no config, or one that does not read, is given a file

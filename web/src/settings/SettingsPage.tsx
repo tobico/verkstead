@@ -9,10 +9,11 @@
 //! folded together they are sections of one pane, read down in the order a
 //! fresh install needs them: everything git is told first, because without the
 //! token and the author nothing a session does with a Repo can be pushed, then
-//! the languages a session gets build support for, then what becomes of a
-//! Conversation once it is archived, then whether this machine can be reached
-//! from a phone, then the Agent Profiles and the Repos a Conversation is
-//! settled against, and last the extra directories a sandbox is given.
+//! the languages a session gets build support for, then the one text every
+//! session is given, then what becomes of a Conversation once it is archived,
+//! then whether this machine can be reached from a phone, then the Agent
+//! Profiles and the Repos a Conversation is settled against, and last the extra
+//! directories a sandbox is given.
 //!
 //! The conversations pane rides along because it is the app's navigation rather
 //! than the workbench's furniture: configuring a machine is something done
@@ -54,6 +55,7 @@ import { PaneHead } from "../workbench/PaneHead";
 import { pathOf } from "../workbench/openings";
 import { CleanupCard, CleanupPane } from "./Cleanup";
 import { GitCard, GitPane } from "./Git";
+import { InstructionsCard, InstructionsPane } from "./Instructions";
 import { LanguagesCard, LanguagesPane } from "./Languages";
 import { RemoteCard, RemotePane } from "./Remote";
 import { SandboxBindsCard, SandboxBindsPane } from "./SandboxBinds";
@@ -222,6 +224,17 @@ function Settings(props: {
           open={props.opening === "languages"}
           press={() => props.select("languages")}
         />
+        {/* And under it, the other thing a session is handed before it has done
+            anything: the one text every session is given, whatever agent its
+            Profile runs. It reads beside the languages for the same reason they
+            read beside the git section — both are about what a session starts
+            with rather than about what any Conversation is settled against —
+            and above the Cleanup, because it is a setting somebody comes back
+            to rather than one they read once. */}
+        <InstructionsCard
+          open={props.opening === "instructions"}
+          press={() => props.select("instructions")}
+        />
         {/* And what becomes of a Conversation once the human has archived it:
             the trim that takes its bulk, and the delete that takes the whole of
             it. Under the two above because it is the setting nobody has to read
@@ -305,6 +318,9 @@ function Details(props: {
       </Match>
       <Match when={props.opening === "languages"}>
         <LanguagesPane back={props.back} />
+      </Match>
+      <Match when={props.opening === "instructions"}>
+        <InstructionsPane back={props.back} />
       </Match>
       <Match when={props.opening === "sandbox-binds"}>
         <SandboxBindsPane back={props.back} />

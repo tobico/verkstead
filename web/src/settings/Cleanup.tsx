@@ -70,7 +70,7 @@ import type {
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { PaneHead } from "../workbench/PaneHead";
-import { heldCleanup, heldPaths } from "./held";
+import { heldCleanup, heldInstructions, heldPaths } from "./held";
 import styles from "./Cleanup.module.css";
 
 /// The settings as they stand, read once for the two panes that draw them — the
@@ -240,6 +240,9 @@ export function CleanupPane(props: {
         share_on_done: told()?.share_on_done ?? false,
         // And the paths as they stand — see [`heldPaths`].
         ...heldPaths(told()),
+        // And the text every session is given, likewise — see
+        // [`heldInstructions`].
+        ...heldInstructions(told()),
         // And the ignore rules left exactly where they are. Alone among the
         // settings they travel as an action rather than a value: this form has
         // nothing to say about them, and one that spoke for them could have its

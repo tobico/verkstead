@@ -57,6 +57,7 @@ import repoList from "../src/repos/RepoList.module.css";
 import card from "../src/CardButton.module.css";
 import { GitCard, GitPane } from "../src/settings/Git";
 import styles from "../src/settings/Git.module.css";
+import instructions from "../src/settings/Instructions.module.css";
 import languages from "../src/settings/Languages.module.css";
 import binds from "../src/settings/SandboxBinds.module.css";
 import {
@@ -444,6 +445,9 @@ describe("saving", () => {
         conflict_resolution: TOLD.conflict_resolution,
         share_on_done: TOLD.share_on_done,
         ...PATHS,
+        // And the text every session is given, likewise: what is sent is what the
+        // file holds afterwards, so a save that left it out would clear it.
+        instructions: TOLD.instructions,
       }),
     );
   });
@@ -675,6 +679,7 @@ describe("replacing and clearing the token", () => {
         share_on_done: TOLD.share_on_done,
         paths: TOLD.paths,
         ignored_comments: TOLD.ignored_comments,
+        instructions: TOLD.instructions,
       },
       verified: null,
       refused: [],
@@ -700,6 +705,9 @@ describe("replacing and clearing the token", () => {
         conflict_resolution: TOLD.conflict_resolution,
         share_on_done: TOLD.share_on_done,
         ...PATHS,
+        // And the text every session is given, likewise: what is sent is what the
+        // file holds afterwards, so a save that left it out would clear it.
+        instructions: TOLD.instructions,
       }),
     );
 
@@ -1091,6 +1099,9 @@ describe("sharing on Done", () => {
         cleanup: CLEANUP,
         conflict_resolution: TOLD.conflict_resolution,
         ...PATHS,
+        // And the text every session is given, likewise: what is sent is what the
+        // file holds afterwards, so a save that left it out would clear it.
+        instructions: TOLD.instructions,
       }),
     );
 
@@ -1208,6 +1219,9 @@ describe("how a conflict is resolved", () => {
         },
         cleanup: CLEANUP,
         ...PATHS,
+        // And the text every session is given, likewise: what is sent is what the
+        // file holds afterwards, so a save that left it out would clear it.
+        instructions: TOLD.instructions,
       }),
     );
 
@@ -1472,7 +1486,36 @@ describe("the path a details pane stands at", () => {
     await waitFor(() => expect(history.get()).toBe("/"));
   });
 
-  /// And the third: the extra paths a sandbox is given beyond the worktree a
+  /// And the one text every session is given, which opens the same way again.
+  it("opens the instructions at /settings/instructions, replacing", async () => {
+    const { container, history } = thePage();
+
+    const face = await drawn<HTMLElement>(
+      container,
+      `.${instructions.instructionsCard}`,
+    );
+    fireEvent.click(face);
+
+    await waitFor(() => expect(history.get()).toBe("/settings/instructions"));
+
+    history.back();
+    await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  it("draws the box in the details pane, and reads its card as open", async () => {
+    const { container } = thePage("/settings/instructions");
+
+    await waitFor(() => screen.getByLabelText("Instructions"));
+
+    const face = await drawn<HTMLElement>(
+      container,
+      `.${instructions.instructionsCard}`,
+    );
+    expect(face.getAttribute("aria-pressed")).toBe("true");
+    expect(face.classList).toContain(card.open);
+  });
+
+  /// And the next: the extra paths a sandbox is given beyond the worktree a
   /// session works in.
   it("opens the binds at /settings/sandbox-binds, replacing", async () => {
     const { container, history } = thePage();
@@ -1710,6 +1753,7 @@ describe("where a settings details pane stands", () => {
   it("puts an id behind a segment of its own, and a word beside it", () => {
     expect(pathTo("git")).toBe("/settings/git");
     expect(pathTo("languages")).toBe("/settings/languages");
+    expect(pathTo("instructions")).toBe("/settings/instructions");
     expect(pathTo("sandbox-binds")).toBe("/settings/sandbox-binds");
     expect(pathTo(opensProfile(7))).toBe("/settings/profiles/7");
     expect(pathTo(opensProfile("new"))).toBe("/settings/profiles/new");
@@ -1720,6 +1764,7 @@ describe("where a settings details pane stands", () => {
     for (const opening of [
       "git",
       "languages",
+      "instructions",
       "sandbox-binds",
       "repos",
       opensProfile(7),

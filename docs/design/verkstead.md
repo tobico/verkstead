@@ -203,6 +203,13 @@ flowchart LR
   Verkstead writes carrying only how the account reaches its model. And every
   profile gains a **memory** switch, on by default: off, the store is the
   root's own and empty, and the session's transcript is read out of the root.
+  *Refined 2026-09-18, building built-roots/03-instructions-text*: a fourth part
+  beside those three, on every harness — the settings page's **Instructions**
+  text, written into the root as the file that harness reads for its global
+  instructions (`.claude/CLAUDE.md`, `.codex/AGENTS.md`, `.grok/AGENTS.md`, or
+  `AGENTS.md` in OpenCode's config directory), verbatim and alone. Written
+  rather than joined, so it is Verkstead's own file and nothing of it is
+  written back, and a text nobody has typed is no file at all.
 - **Pairings.** What runs a conversation's sessions is a profile *and* one of
   that profile's models, picked together. Each conversation fixes **two** of
   them before grilling starts: one for grilling, one for implementation work
@@ -456,7 +463,10 @@ flowchart LR
     built `~/.codex`, `~/.grok` or OpenCode config and data directory for the
     other three, with the memory store bound in only where the profile's memory
     switch is on (*refined 2026-09-18, building
-    built-roots/02-three-roots-and-memory*)
+    built-roots/02-three-roots-and-memory*); and in each of those roots the
+    settings page's **Instructions** text, written as the file that harness
+    reads for its global instructions, where one has been typed (*refined
+    2026-09-18, building built-roots/03-instructions-text*)
   - **ro:** `/nix` and system paths
   - **tmpfs:** `/tmp`; everything else in HOME absent
   - `~` inside is the home of whoever runs the server, at the same path — the
@@ -593,7 +603,14 @@ flowchart LR
   puts a session *inside* a skill is the prompt: installing one is not invoking
   one, and a sandbox has no global `CLAUDE.md` to say what the session is for,
   so the prompt names the skill by path above the Brief and the skill carries
-  the ask instruction in its own text.
+  the ask instruction in its own text. *Refined 2026-09-18, building
+  built-roots/03-instructions-text*: a root may hold a global instructions file
+  now — the settings page's **Instructions** text, written in as the file its
+  harness reads — so the reason is narrower than "there is no such file". That
+  file is the human's own words to every session of every conversation and
+  never a place for Verkstead to say which skill this one is running, and the
+  host's own is not bound in at all, so the prompt is still where a session is
+  sent into a skill.
 - **Verkstead itself reaches GitHub through host `gh`** (CI status, PR commit
   lists and comments), authenticating as the same configured token the sessions
   get — `GH_TOKEN` in the environment of each call, read from `secrets.yaml` at
@@ -1015,8 +1032,12 @@ Timeline events:
   one **Sandbox binds** subsection and a paragraph about what each entry widens
   — that subsection is the section now, at `/settings/sandbox-binds`, its one
   line says what the section configures, and what it counts and adds is a
-  *path*; the old slug is no such page rather than a redirect). The Sandbox
-  binds card sits directly below the Repos (*revised 2026-09-06, onboarding
+  *path*; the old slug is no such page rather than a redirect), and
+  **Instructions**, whose card says whether a text is configured and what it
+  reaches and whose pane holds the box that rewrites it, at
+  `/settings/instructions` directly below Language support (*added 2026-09-18,
+  building built-roots/03-instructions-text*). The Sandbox binds card sits
+  directly below the Repos (*revised 2026-09-06, onboarding
   stage 01*: it sat directly above them, because a watched path was
   what a Repo was registered from and a machine with none had nothing to put on
   that list — with the boundary gone the Repos are what a machine is set up by

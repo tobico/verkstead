@@ -45,6 +45,18 @@ use verkstead_server::store;
 /// session inside is told to put its Question Sets to.
 const LISTENING: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8422);
 
+/// What the settings page's Instructions card was given, as `config.yaml` holds
+/// it — and what every root's global instructions file holds, byte for byte.
+const THE_INSTRUCTIONS: &str = "Say what you changed.\n\n- And why.\n";
+
+/// And the Repo's own instructions, in the Worktree, which are the Repo's.
+const THE_REPOS_OWN: &str = "# what this repository says about itself\n";
+
+/// And the same text as the settings page saves it: one `config.yaml` key, in
+/// the block scalar that keeps a paragraph's blank line and a list's indent.
+const THE_INSTRUCTIONS_CONFIGURED: &str =
+    "instructions: |\n  Say what you changed.\n\n  - And why.\n";
+
 /// What the fixture's Codex account keeps in its `config.toml`: a provider of
 /// its own, which a session needs to reach the model, and the human's own MCP
 /// servers and features, which a session is not given.
@@ -3256,7 +3268,10 @@ async fn the_skills_inside_are_the_bundled_ones_and_only_those() {
     );
     assert_eq!(
         reported["claude-md"], "absent",
-        "there is no global CLAUDE.md in here to say how to reach the human"
+        "and no global CLAUDE.md is in here to say how to reach the human — this \
+         fixture has no instructions text configured, and the one a root holds \
+         where there is one is the human's own words rather than anywhere \
+         Verkstead says how to ask"
     );
     assert_eq!(
         reported["ask-instruction"], "inside",
@@ -3339,6 +3354,106 @@ async fn a_claude_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
     assert_eq!(
         reported["credentials"], "write",
         "while the login is there, and a session can refresh it"
+    );
+}
+
+/// The one text on the settings page reaches every session, whatever harness
+/// runs it: it is written into the root as the file that harness reads as its
+/// global instructions, verbatim, with no heading over it and nothing saying
+/// where it came from. And where nobody has typed one, no such file is in any
+/// root at all.
+///
+/// The Repo's own `CLAUDE.md` in the Worktree is the Repo's, untouched and read
+/// as it always was. This one stands above it, the way the human's own global
+/// file used to.
+#[tokio::test]
+async fn the_settings_text_is_the_global_instructions_file_in_every_root() {
+    let fixture = grilling().await;
+
+    // The Repo's own instructions, which are none of this setting's business.
+    let repos_own = fixture.worktree().join("CLAUDE.md");
+    std::fs::write(&repos_own, THE_REPOS_OWN).unwrap();
+
+    let codex = fixture.codex_profile().await;
+    let grok = fixture.grok_profile().await;
+    let opencode = fixture.opencode_profile().await;
+
+    let roots = [
+        (&fixture.profile, ".claude/CLAUDE.md"),
+        (&codex, ".codex/AGENTS.md"),
+        (&grok, ".grok/AGENTS.md"),
+        (&opencode, ".config/opencode/AGENTS.md"),
+    ];
+
+    // Nobody has been to the settings page, so no root holds a file for it and
+    // each is exactly what it was before there was such a setting.
+    for (profile, file) in roots {
+        let sandbox = fixture.sandbox_under(profile, LISTENING, &BuildCache::none(), vec![]);
+        let reported = probe(&sandbox, &format!(r#"file "$HOME/{file}" instructions"#));
+
+        assert_eq!(
+            reported["instructions"], "absent",
+            "nothing is written into a root for a setting nobody typed, and {file} is there"
+        );
+        assert!(!fixture.windows_profile().join(file).exists());
+    }
+
+    fixture.configure(THE_INSTRUCTIONS_CONFIGURED);
+
+    for (profile, file) in roots {
+        let sandbox = fixture.sandbox_under(profile, LISTENING, &BuildCache::none(), vec![]);
+
+        // And the session rewrites it, which is a root's file to rewrite: it is
+        // Verkstead's own, nothing of it is the account's, and nothing of it
+        // goes anywhere as the session ends.
+        let (reported, closing) = probe_closing(
+            &sandbox,
+            &format!(
+                r#"
+                file "$HOME/{file}" instructions
+                say text "$(tr '\n' '~' < "$HOME/{file}")"
+                say repos "$(cat {repo})"
+                printf 'the session wrote this\n' > "$HOME/{file}"
+                "#,
+                repo = quoted(&fixture.worktree().join("CLAUDE.md")),
+            ),
+        );
+        closing.close();
+
+        assert_eq!(
+            reported["instructions"], "write",
+            "a session under every harness finds {file} in its own root"
+        );
+        assert_eq!(
+            reported["text"],
+            THE_INSTRUCTIONS.replace('\n', "~"),
+            "the text verbatim — the blank line between the paragraphs and the \
+             indent of the list as they were typed — with no heading over it and \
+             nothing saying where it came from"
+        );
+        assert_eq!(
+            reported["repos"],
+            THE_REPOS_OWN.trim_end(),
+            "and the Repo's own instructions beside it, read as they always were"
+        );
+
+        assert_eq!(
+            std::fs::read_to_string(fixture.windows_profile().join(file)).unwrap(),
+            "the session wrote this\n",
+            "and what the session wrote stayed in the root, which the next session \
+             builds again"
+        );
+    }
+
+    assert_eq!(
+        std::fs::read_to_string(&repos_own).unwrap(),
+        THE_REPOS_OWN,
+        "and nothing of the Worktree's own file was written"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_dir().join("CLAUDE.md")).unwrap(),
+        "# the human's own\n",
+        "nor of the account's, which no session was given and none wrote back"
     );
 }
 

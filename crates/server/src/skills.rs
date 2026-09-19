@@ -21,15 +21,17 @@
 //! `.claude` of Verkstead's own with none of the account's skills in it — see
 //! the sandbox's `root` — so there is nothing of the account's to hide.
 //!
-//! Installing a skill is not invoking one, and the sandbox has no global
-//! `CLAUDE.md` to say what a session is for — the host's is not bound in, and
-//! the Profile's `~/.claude` is the human's rather than Verkstead's to write.
-//! What sends a session into the grilling skill is therefore [`grilling`]: the
-//! prompt it is started on names the skill by the path it is mounted at, above
-//! the Brief itself. That is also why the skill carries the ask instruction in
-//! its own text — the twelve lines it was forked from say to interview the
-//! human and never say how, because on a workstation the global `CLAUDE.md`
-//! said it instead.
+//! Installing a skill is not invoking one, and nothing in a sandbox says what a
+//! session is for. A root may hold a global instructions file — the settings
+//! page's one text, written in as the file its harness reads — but that is the
+//! human's own words to every session of every Conversation, never a place for
+//! Verkstead to say which skill this one is running; and the host's own such
+//! file is not bound in at all. What sends a session into the grilling skill is
+//! therefore [`grilling`]: the prompt it is started on names the skill by the
+//! path it is mounted at, above the Brief itself. That is also why the skill
+//! carries the ask instruction in its own text — the twelve lines it was forked
+//! from say to interview the human and never say how, because on a workstation
+//! the global `CLAUDE.md` said it instead.
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -1253,7 +1255,8 @@ mod tests {
 
     /// The whole reason the fork exists: the twelve lines it came from say to
     /// interview the human and never say how, because on a workstation the
-    /// global `CLAUDE.md` said it — and inside a sandbox there is no such file.
+    /// global `CLAUDE.md` said it — and the one a root may hold inside is the
+    /// human's own text rather than anywhere Verkstead says how to ask.
     #[test]
     fn the_grilling_skill_says_how_to_reach_the_human() {
         let grilling = skill("grilling/SKILL.md");

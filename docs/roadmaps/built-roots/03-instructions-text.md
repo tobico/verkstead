@@ -52,3 +52,24 @@ takes its place.
   building the fallback; if one has appeared, it is a file like the others.
 - Assumes the settings page still saves `config.yaml` sections through one API
   and that a section with no key still reads as nothing configured.
+
+## What the re-grounding found
+
+Checked against the code and the harnesses' own documentation as the stage
+started, 18 September 2026.
+
+- **Grok Build has a global instructions file now**, which is what the second
+  re-verify item above was written to catch. Its documentation says it reads
+  global rules in its own directory, taking an `AGENTS.md` there before it
+  reads anything in the repository — and that directory is the Grok Built Root.
+  So it is a file like the other three, and **the prompt section is not built
+  at all**: no harness is left with no file, and a fallback nothing exercises
+  is a branch nobody can see break.
+- The other three files are where this brief has them, and each is inside a
+  directory a root already builds.
+- Both of the other re-verify assumptions hold: stages 01 and 02 have landed
+  with a root per harness, the settings page still saves `config.yaml` through
+  the one API, and a section with no key still reads as nothing configured.
+
+The backlog that came out of it is three tasks rather than four — the setting,
+the file in every root, the docs.

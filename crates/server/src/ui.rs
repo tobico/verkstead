@@ -4146,6 +4146,11 @@ async fn save_settings(
                 // And the rules, decided above: either what was already written down
                 // or the whole list the page sent, in the order it sent it.
                 rules,
+                // And the text every session is given, as it was typed: a value
+                // like the binds above it, so what the page sent is what the
+                // file holds afterwards and a box cleared is a key taken away.
+                // Nothing about it can be refused — it is somebody's prose.
+                edit.instructions,
             )
             // On what the file already holds, for the reason the secrets below are
             // written that way: `session_path` is the one key in this file the page
@@ -4342,6 +4347,11 @@ fn as_told(
         // its rows, and a rule left out of the read would be one the human
         // could not correct.
         ignored_comments: config.ignored_comments().iter().map(as_written).collect(),
+
+        // And the text every session is given, empty where nobody has typed
+        // one: the box on the page holds a string either way, and there is no
+        // third state between an unwritten key and a text of nothing.
+        instructions: config.instructions().to_owned(),
         github_token: secrets.github_token().map(|token| TokenSaved {
             last_four: last_four(token),
             at: settings

@@ -219,9 +219,14 @@ and nothing else of that home is. A Claude session is told not to update the
 install it runs, which is read-only inside and the human's own besides, so
 nothing a session does moves it. The account's own skills are not there to be
 found: a Built Root holds none, so there is nothing to hide and nothing to
-refuse. Each Companion Repo the Conversation was configured with is inside as
-well: its Worktree and the git directory behind it, both at that companion's
-own mode, so a read-only one is read-only through both. The **Build Cache** is
+refuse. Nor are the account's global instructions, and what a session reads in
+their place is the settings page's **Instructions** text, written into the root
+as the file that harness reads: `.claude/CLAUDE.md`, `.codex/AGENTS.md`,
+`.grok/AGENTS.md`, or the config directory's `AGENTS.md` for OpenCode — and no
+such file at all where nobody has typed a text. Each Companion Repo the
+Conversation was configured with is inside as well: its Worktree and the git
+directory behind it, both at that companion's own mode, so a read-only one is
+read-only through both. The **Build Cache** is
 inside as well, writable, with the `sccache` it compiles through read-only
 beside the executable — that one is a client, and what it reaches is the
 **Compile Server** in a Sandbox of Verkstead's own — the sccache half only on
@@ -294,6 +299,35 @@ is reported on the page as one the server cannot see, and does nothing until the
 installer widens the unit. The **Build Cache** is not one of these and is not
 configured here.
 _Avoid_: sandbox settings, mounts, extra paths
+
+**Instructions**:
+One text, set on the settings page, that every session is given whatever
+harness runs it — what a human would otherwise keep in their own global
+`CLAUDE.md`, said once here instead. A **Built Root** holds none of the
+account's own files, so the account's global instructions are not in one, and
+this is what stands where they would have been.
+**One text for the whole installation** rather than one per **Agent Profile**,
+kept in `config.yaml` beside the git author and the **Sandbox Configuration**'s
+binds — a thing Verkstead is *told* rather than one it finds. It saves as a
+value the way those do: what the page sends is what the file holds afterwards,
+so clearing the box takes the key away rather than leaving an empty one. Nothing
+in it can be refused, there being no grammar in a paragraph of prose to get
+wrong, and an absent key, an empty one and one nothing can parse are the same
+empty text.
+**Written into each root as the file that harness reads**, verbatim and alone:
+no heading over it and no line saying where it came from. Claude's
+`.claude/CLAUDE.md`, Codex's `.codex/AGENTS.md`, Grok Build's `.grok/AGENTS.md`,
+and the config directory's `AGENTS.md` for OpenCode. Verkstead's own file like
+the configuration file beside it: written rather than joined, never the
+account's, and nothing of it written back as a session ends.
+**Read at the moment a root is built**, like the rest of `config.yaml`: a text
+saved on the settings page reaches the next session, and a running one keeps
+what it started with. A text nobody typed is no file at all, so a root then
+holds exactly what it held before there was such a setting.
+**The Repo's own instructions are untouched.** A `CLAUDE.md` or an `AGENTS.md`
+in the Worktree is the repository's and is read as it always was, with this one
+above it the way the human's global file used to be.
+_Avoid_: global CLAUDE.md, system prompt, preamble, rules
 
 **Build Cache**:
 One directory of Verkstead's own that every Sandbox gets writable, so a Rust
@@ -1330,7 +1364,7 @@ running session, and on a Mac and on Windows the `homes/<id>` directory too,
 which holds every root of the Conversation and is what a launch there would
 delete. A Codex terminal beside a Claude session has a root of its own, and
 builds it.
-**One rule for every harness, in three parts**, each harness's own files filling
+**One rule for every harness, in four parts**, each harness's own files filling
 them:
 **The login, linked**, so a login or a token refresh from inside lands in the
 account: Claude's `.credentials.json`, and `auth.json` for the other three.
@@ -1355,12 +1389,21 @@ Grok Build's `config.toml` holds `model`, `model_providers`, `auth_provider`,
 directory, holds `provider`, read from `opencode.json` or `opencode.jsonc`.
 Nothing else of the account's configuration goes in: no hooks, plugins,
 permissions, rules or MCP servers. It is not written back.
+**The settings page's Instructions text, written as the file that harness
+reads** for its global instructions: `CLAUDE.md` in a Claude root,
+`AGENTS.md` in a Codex or a Grok Build one, and `AGENTS.md` in OpenCode's
+config directory. Verbatim and alone, with no heading over it and no line
+saying where it came from, and written rather than joined the way the
+configuration file beside it is — Verkstead's own, never the account's, and
+nothing of it written back. The account's own such file is left out with the
+rest of how the human works, and this stands in its place; a text nobody has
+typed is no file at all. See **Instructions**.
 Beside a Claude root, in the profile, `.claude.json` is a **copy** of the
 account's. The copy has the account's MCP servers taken out, and the Repo and
 the Worktree seeded as trusted. Codex's trust is said on its launch line
 instead. Everything else of an account is absent: plugins, commands, agents,
-skills, rules, a global instructions file, history, databases outside the
-store, and whatever a harness adds next.
+skills, rules, the account's own global instructions file, history, databases
+outside the store, and whatever a harness adds next.
 **What a session changed is carried back as it ends**, on all three platforms.
 A login the session replaced, rather than wrote through, is written back over
 the account's own; one still the same file as the account's is left alone; and

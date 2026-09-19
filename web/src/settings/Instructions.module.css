@@ -1,0 +1,78 @@
+/* The one text every session is given — see `Instructions.tsx`.
+
+   Two halves in two panes, like the sections around it: the card carries
+   whether there is a text and what it reaches, and the box that rewrites it
+   stands in the details pane beside it.
+
+   What a card *is* is `CardButton.module.css`'s: the surface, the fill it takes
+   while its pane is open, and what it does under the pointer. What the field is
+   is `styles/base.css`'s textarea and `.grow` in `App.module.css`, which is what
+   gives it the height of what has been typed into it. What is here is only what
+   stands around them. */
+
+.instructionsCard {
+  margin-bottom: 1.5rem;
+}
+
+.instructionsCard h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+/* How it stands, in a line: the same quiet the sections above it say what is
+   configured in. */
+.standing {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+/* And the details pane: the line saying what the text is for, the box, and the
+   press. */
+.instructions {
+  margin-top: 0.85rem;
+}
+
+/* Taller than one line before anything is typed. Every other field on this page
+   holds a word — a name, a size, a number of days — and starts at the one line
+   `.grow` gives it; this one holds paragraphs, and a box the height of an email
+   field would say it was expecting one. It grows from here rather than to here:
+   `.grow` is what keeps it as tall as what is in it once there is anything. */
+.field textarea {
+  min-height: 9rem;
+}
+
+/* The press under the box rather than beside it, which is where the durations
+   on the Cleanup pane put theirs: a field this wide has no room to its right,
+   and a press under prose is where a form ends anyway. */
+.saving {
+  margin-top: 0.75rem;
+}
+
+.saving button {
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.saving button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.failure {
+  margin: 0.75rem 0 0;
+  font-size: 0.9rem;
+}
+
+@media (hover: hover) {
+  .saving button:not(:disabled):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}

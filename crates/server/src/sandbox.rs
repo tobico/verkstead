@@ -3567,6 +3567,15 @@ pub struct Sandbox {
     /// because it says what to go and configure.
     git_author: GitAuthor,
 
+    /// And the one text every session is given, taken at the same moment and
+    /// for the same reason — the settings page's Instructions.
+    ///
+    /// Written into the root as the file that harness reads as its global
+    /// instructions, which a root otherwise carries none of — see
+    /// [`root::Root::instructed`]. Empty is the setting nobody typed, and no
+    /// file at all.
+    instructions: String,
+
     /// Where the session inside reaches Verkstead: this Conversation's own base
     /// URL, which is what `verkstead ask` puts its Sets to.
     server: String,
@@ -3822,6 +3831,7 @@ impl Sandbox {
             home,
             github_token: secrets.github_token().map(str::to_owned),
             git_author: config.git_author().clone(),
+            instructions: config.instructions().to_owned(),
             server: reachable.asking_from(homes.platform(), conversation.id),
             binds,
             shell: None,
@@ -4462,6 +4472,11 @@ impl Sandbox {
     /// joined, so it is never the account's file and nothing of it is written
     /// back.
     ///
+    /// **And the settings page's instructions text beside it**, as the file
+    /// that harness reads for global instructions — see
+    /// [`root::Root::instructed`]. Written on the same terms and for the same
+    /// reason, and not written at all where nobody has typed a text.
+    ///
     /// **Neither emptied nor written where `builds` is false**, which is a
     /// root something of the Conversation is still running in, on any
     /// platform: this launch is given it as that one has it, with only a
@@ -4477,6 +4492,12 @@ impl Sandbox {
 
             let (path, contents) = root.written(built);
             surface.made(Access::Written { path, contents });
+
+            // And the settings page's one text, as the file this harness reads
+            // for global instructions — where there is a text to give.
+            if let Some((path, contents)) = root.instructed(built, &self.instructions) {
+                surface.made(Access::Written { path, contents });
+            }
 
             // A root that shares no memory has directories of its own, empty,
             // for the session's memory and transcript to be written into.

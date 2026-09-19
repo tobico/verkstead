@@ -268,6 +268,17 @@ writes, carrying only how your account reaches its model, and for Claude
 your plugins, hooks, skills, rules, MCP servers, global instructions, history
 or other repositories' transcripts are there.
 
+**What takes your global instructions' place is the settings page.** Its
+**Instructions** section is one text for the whole installation — not one per
+Profile — and it is written into each Built Root as the file that harness
+reads: `.claude/CLAUDE.md`, `.codex/AGENTS.md`, `.grok/AGENTS.md`, or
+`AGENTS.md` in OpenCode's config directory. It goes in verbatim, with no
+heading over it and no line saying where it came from, and it is read as the
+root is built — so a change there reaches the next session and a session
+already running keeps what it started with. Leave the box empty and no such
+file is written at all. Your repository's own `CLAUDE.md` or `AGENTS.md` is in
+the Worktree and is read exactly as it always was, under this one.
+
 **The memory switch on a Profile says whether its store is shared.** It is on
 by default. Turn it off on the Profile form and a session starts with an empty
 store of its own inside the Built Root instead: fresh memory, none of your
@@ -380,6 +391,14 @@ by writing a new file and renaming it over the old one, which replaces the link
 rather than writing through it. So a login changed
 inside is written back over the account's own as the session ends, and the
 link is made fresh for the session after.
+
+**And here too, none of your global instructions are in the root** — nor your
+plugins, hooks, skills, rules or MCP servers — with the settings page's
+**Instructions** section standing in their place: one text for the whole
+installation, written into the root as the file that harness reads, the same
+four files the Linux section names. It is read as the root is built, so a
+change there reaches the next session and a running one keeps what it started
+with, and an empty box writes no file at all.
 
 **Nothing outlives the app.** Exit off the menu is a stop where it stands, as it
 is on Linux, and so is the process being killed outright: every session and the
@@ -627,6 +646,16 @@ repository's transcripts, and none of your plugins, hooks, skills, rules, global
 instructions or history. The root's configuration file is one Verkstead writes.
 Beside a Claude root, `.claude.json` is a copy of yours with your MCP servers
 taken out and this Repo marked as trusted.
+
+**Your global instructions' place is taken by the settings page's
+Instructions section**, as it is on the other two platforms: one text for the
+whole installation, written into the root as the file that harness reads —
+`.claude\CLAUDE.md`, `.codex\AGENTS.md`, `.grok\AGENTS.md`, or `AGENTS.md` in
+OpenCode's config directory — verbatim and with nothing added to it. It is read
+as the root is built, so a change reaches the next session and a running one
+keeps what it started with, and an empty box writes no file. Your repository's
+own `CLAUDE.md` or `AGENTS.md` is in the Worktree and is read under it, exactly
+as it always was.
 
 **A hard link wants one volume**, which is the one thing about this that can
 refuse a session outright. Your account's files and the Data Directory have to
