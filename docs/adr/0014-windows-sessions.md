@@ -29,6 +29,13 @@ directory the session account can already walk through — the drive root among
 them — takes no step, because writing one there walked the whole volume on an
 elevated machine. See the last paragraph of that same section.
 
+Amended (2026-09-17): **the account is built rather than joined.** *The fresh
+profile* below joins the Agent Profile's account into the profile whole; the
+first independent Windows install showed what that carries in and what it lets
+out. A session now gets a root of Verkstead's own under the profile, seeded by
+an allowlist, and Linux gains a profile directory of the same shape. See
+*Amended: the account is built rather than joined*.
+
 The order is the terminal first. A Windows session runs **unsandboxed** from
 the moment the terminal works until the container lands, and the workbench says
 so on every one — above **Start work** on the composer, beside the terminal on
@@ -508,6 +515,65 @@ grant, nothing is written. Taking a boundary down writes nothing on a directory
 holding no entry of the account's, for the same reason. A step through the
 human's own profile, which gives nobody else anything, is written as it always
 was.
+
+## Amended: the account is built rather than joined
+
+Amended (2026-09-17). *The fresh profile*, above, joins every directory of the
+account in by a junction and every file by a hard link, and argues the rule
+over the account rather than over one backend. The rule stays; what is joined
+does not.
+
+**What joining the whole account carried in.** The first Windows install run by
+somebody other than the author put four reports in, and the account was behind
+the worst of them. The junction over `~/.claude` brought the human's
+`settings.json` with it, and with that their enabled plugins and a hook on
+eight events that failed on every tool call from inside the boundary; a session
+registered a plugin marketplace into the human's real `known_marketplaces.json`
+with an install path under `homes\1`, which is wiped at the next start; an
+in-session login and an in-session prompt rewrote the human's real
+`.credentials.json` and `settings.json`, because the junction makes them one
+file; and every transcript of every repository was in plain sight. The same
+was true on Linux through the read-write bind, and had gone unnoticed because
+the author's own account had already answered the one prompt that stops a
+fresh one.
+
+**So the root is built.** Under the profile, `homes\<id>\.claude` is a
+directory of Verkstead's own, made as the profile is, and what goes into it is
+an allowlist decided in [ADR-0011](0011-agent-backends.md)'s amendment of the
+same name: the credentials file by a **hard link**, so a login inside writes
+through — and where the agent replaces it, the write-back below carries it;
+the memory store by a **junction**, when the Profile's switch says so — for
+Claude, the Repo's and the Worktree's entries under `projects/` and no other
+repository's; a
+`settings.json` and an instructions file **written**; and `.claude.json`
+**copied** rather than linked, pre-seeded, and written back. Nothing else of
+the account. The other three harnesses get roots by the same rule and their own
+allowlists.
+
+**What it gives the boundary.** The read-write entry on the account directory
+— 1,289 files on the reporter's machine, and the tree a first boundary spent
+its minutes walking — becomes an entry on the built root and one on each joined
+memory entry. The other repositories' transcripts, which were most of that walk,
+are no longer in it. **The credentials file takes an entry of its own.** It is
+reached today through the entry on the account directory, which goes, and a hard
+link shares the file's own list rather than taking its new parent's — so
+without one the session cannot read its login. The entry is on the account's
+own file, so it is written down and taken back with the rest of the
+Conversation's entries.
+
+**Linux gains a profile directory.** A Linux session has run in a tmpfs over
+the server's home with the account bound in, and nothing under the Data
+Directory of its own; a root has to exist somewhere to be bound, so Linux
+makes `homes/<id>` as the other two platforms do and binds the built `.claude`
+over the tmpfs home's.
+
+**The write-back stays**, as *The fresh profile* decided it: nothing a session
+wrote to its account is lost, and a re-login from inside a run reaches the
+account. The pre-seeded trust entries reach it too, and the human accepted
+that. **And it now runs on every platform.** It was built for hard links, so
+Linux and a Mac have had nothing to write back; a copied `.claude.json` follows
+nothing anywhere, so their renderings hand back the credentials file and the
+copy as this one does.
 
 ## What stays as it was
 

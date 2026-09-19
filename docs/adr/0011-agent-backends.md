@@ -3,6 +3,13 @@
 Amends [ADR-0001](0001-blocking-cli-for-agent-integration.md): the blocking
 CLI is no longer every backend's channel.
 
+Amended (2026-09-17): **the account is built rather than joined.** A session
+is given a root of Verkstead's own seeded from the account by an allowlist, not
+the account's directory whole; the cover over `~/.claude/skills` goes with it,
+and the bypass that keeps a Claude run unattended is written into the root as
+well as passed on the line. See the three *Amended* paragraphs below, and the
+[built-roots roadmap](../roadmaps/built-roots/ROADMAP.md).
+
 Verkstead runs its sessions on one coding agent, and the `AgentType`
 discriminator has sat in the Profile with one value in it since the store was
 written — "so a second backend slots in beside `claude` rather than having to
@@ -258,6 +265,12 @@ programs ship as well as the ones the account added, and the home is the whole
 of what a Profile of either type names, so such a home is left as the account
 keeps it.
 
+Amended (2026-09-17): **the cover goes, because there is nothing under it.** A
+session's `~/.claude` is now built rather than joined — see the next section's
+amendment — and a built root holds no skills of the account's to hide. The
+hiding this paragraph argued for is kept by omission instead: what is not in
+the allowlist is not in the root.
+
 ## A Profile is one home directory, except Claude's pair
 
 Each new backend keeps its whole account under one relocatable home — Codex
@@ -268,6 +281,34 @@ pointed into it); Claude keeps its existing directory-plus-config-file pair,
 already stored and already working. The Profile form takes a per-type shape,
 and offers a backend only once its stage has landed — a type that cannot
 launch would be a lie in a picker.
+
+Amended (2026-09-17): **what a Profile stores is unchanged; what a session is
+given of it is built.** The first Windows install to run a real session showed
+what joining the account whole costs: the human's plugins and hooks ran in
+every session and failed on every tool call, a session wrote a path inside the
+sandbox's ephemeral storage into the human's plugin registry, an in-session
+login and an in-session prompt rewrote the human's real files, and every
+repository's transcripts were readable — and this repository's own Linux
+sessions were doing the same, unnoticed, through the read-write bind. So a
+session runs in a **built root** under the Conversation's profile, seeded by an
+allowlist that is the same rule for every harness: the **credentials**, linked
+so a login from inside lands in the account; the **memory store** — Claude's
+entries under `projects/` for the Repo and its Worktree and no other
+repository's, Codex's and Grok's `sessions/`, OpenCode's data directory — shared
+when the Profile's memory switch says so, on by default; a **configuration
+file Verkstead writes**, carrying only what names a model provider; and an
+**instructions file** from the settings page, in place of the human's own
+global one. Nothing else of the account is there. Claude's `.claude.json` is
+copied rather than linked, pre-seeded with the Repo's trust, and written back
+at session end as ADR-0014 decided, because a re-login from inside a run has
+to reach the account. ADR-0014 built that write-back for Windows's hard links
+alone; a copy follows nothing on any platform, so it now runs on Linux and a
+Mac too.
+
+Rejected: launch flags — `--setting-sources`, `--settings` — which close the
+inheritance and leave the write-through open; `--safe-mode`, which takes the
+Repo's own `CLAUDE.md`, the skills and MCP with it; and building Claude's root
+alone, which the human turned down for consistency.
 
 ## Unattended is the product's promise
 
@@ -281,6 +322,18 @@ rule, carrying `--dangerously-skip-permissions`, rather than the Profile's
 own settings being what keeps a run unattended. What stops a session doing
 harm is the Sandbox, which is unchanged; a backend stopping to ask approval
 mid-run stalls a run nobody is watching.
+
+Amended (2026-09-17): **the flag alone is not enough on a fresh account.**
+Claude Code asks once, interactively, before it honours
+`--dangerously-skip-permissions`, and records the answer in the account's
+`settings.json`; a fresh account has never answered, and a session on a
+pseudoconsole with nobody at it parked there for good. Every Linux session
+here had an account that answered once by hand, which is why it was never
+seen. So the answer is written into the built root's `settings.json` by
+Verkstead — `skipDangerousModePermissionPrompt` — beside the flag on the line,
+the way Codex's Worktree trust is already said on its line. `--print` was
+suggested and is not the fix: the Screen, the Hold, quiet detection and the
+Rescue all stand on the terminal.
 
 Amended: **OpenCode's bypass is `--auto` on the launch line**, rather than the
 permission configuration this paragraph first named. So every one of the four
