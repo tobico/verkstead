@@ -51,6 +51,13 @@
   border-radius: 0.4rem;
 }
 
+/* What a token has to be able to do, between the line saying what it is for and
+   the box it is pasted into — see `../settings/scopes.tsx`, which is where the
+   words are. */
+.scopes {
+  margin: 0.5rem 0 0.85rem;
+}
+
 /* Where a prefilled value was found, under the box holding it. Quiet, because
    it is not an instruction: it is there so that a value nobody typed can be
    checked before it is confirmed. */

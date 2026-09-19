@@ -40,6 +40,14 @@
 //! and a scroll-back, and telling one token from another is the whole of what
 //! the human needs from it here.
 //!
+//! Above it is the one thing this pane explains: what a token has to be able to
+//! do. The words are [`TokenScopes`](./scopes.tsx)'s, drawn here and on the
+//! wizard's git step, and they stand whether or not a token has ever been saved
+//! — where the lines under them are about the token that *was* saved and only
+//! appear after a save. It is here rather than in `CONTEXT.md` because the
+//! moment it is useful is the moment somebody is on GitHub's own form, and the
+//! failure it prevents is a session's push, which comes back naming no scope.
+//!
 //! One button saves both files, because the server writes both in one request:
 //! the author fields are values and the token is an action, so correcting an
 //! email address leaves the credentials alone. Clearing is its own press for the
@@ -69,8 +77,9 @@
 //! the pane about what Verkstead does on somebody else's GitHub. Each box is a
 //! regular expression matched anywhere in the text, a rule's boxes must all
 //! match, and an empty one constrains nothing — see **Ignore rule** in
-//! `CONTEXT.md`, which is where that is written down now: this pane carries no
-//! explanation beyond a field's own label.
+//! `CONTEXT.md`, which is where that is written down now: nothing on this pane
+//! explains a control it stands under, the scopes above being about the value
+//! rather than about the field.
 //!
 //! The rules travel as an action rather than a value for a reason of their own
 //! — a save is *refused* over a pattern that will not compile — so the rows are
@@ -115,6 +124,7 @@ import { Empty, ErrorLine } from "../notices";
 import { utcStamp } from "../set/when";
 import { PaneHead } from "../workbench/PaneHead";
 import { heldConfig } from "./held";
+import { TokenScopes } from "./scopes";
 import styles from "./Git.module.css";
 
 /// What the section is called, wherever it names itself: the card's heading and
@@ -539,6 +549,13 @@ export function GitPane(props: {
           <form class={styles.form} onSubmit={submit}>
             <section>
               <h3>GitHub token</h3>
+
+              {/* What a token has to be able to do, above everything about the
+                  one that is saved: this is the list to tick against before
+                  pasting one, and it stands whether or not anything has ever
+                  been saved here. */}
+              <TokenScopes class={styles.tokenScopes} />
+
               <Show when={configured()}>{(saved) => standing(saved())}</Show>
 
               {/* What GitHub said about the last token saved from here: the

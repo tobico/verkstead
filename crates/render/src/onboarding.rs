@@ -296,17 +296,18 @@ pub enum DependencyState {
 
 /// Where a program was seen that a session still cannot run.
 ///
-/// The half of *absent* that is worth a sentence. A name is missing in three
+/// The half of *absent* that is worth a sentence. A name is missing in four
 /// ways that are not the same thing to do anything about, and a row saying only
 /// *absent* would send somebody to install what they have already got: a
 /// program on the server's own `PATH` and not on a session's is a shell profile
-/// and a restart rather than an install.
+/// and a restart rather than an install, and a `claude` that is the desktop app
+/// is Claude Code already on the machine with no CLI on the end of its name.
 ///
 /// Flat on the wire — `{"seen": "Beyond", "at": "…"}` — the way
 /// [`DependencyState`] is, so the viewer narrows on a field rather than
 /// unwrapping a variant name. The wording is the viewer's own, like the install
 /// commands beside it: what is here is what the machine is, and what to say
-/// about it is the same three sentences on every Verkstead.
+/// about it is the same four sentences on every Verkstead.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "seen")]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
@@ -333,6 +334,20 @@ pub enum Seen {
     /// an uninstall leaves behind.
     Dangling {
         /// The link that leads nowhere.
+        at: String,
+    },
+
+    /// Where a session looks, and the file there is Claude Code's **desktop
+    /// app** rather than the CLI: a program that really is there and really
+    /// would run, and that a session handed it exits from without printing
+    /// anything.
+    ///
+    /// The desktop app includes Claude Code and has no CLI on the end of that
+    /// name, so what is wanted is the CLI installed beside it — which is the
+    /// row's own instruction, unchanged. What is here is the file, and the
+    /// sentence saying which of the two it is, is the viewer's like the rest.
+    Desktop {
+        /// The desktop app, where the name resolved.
         at: String,
     },
 }

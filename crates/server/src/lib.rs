@@ -1211,8 +1211,17 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
 
     // And nothing to escalate with: a server started this way was started from a
     // shell or a unit file, where there is nobody at the machine to put a
-    // password dialog in front of — see [`remote::Elevate`].
-    run_on_keyed(listener, config, key, None).await
+    // password dialog in front of — see [`remote::Elevate`]. Which is the same
+    // machine that has no tray to press **Open** in, so the startup line below
+    // is where this install hands the login link over.
+    run_on_keyed(
+        listener,
+        config,
+        key,
+        None,
+        key::HandsOverTheLink::TheStartupLine,
+    )
+    .await
 }
 
 /// The same again, with the Workbench Key already in hand — and with whatever
@@ -1229,11 +1238,18 @@ pub async fn run_on(listener: std::net::TcpListener, config: Config) -> Result<(
 /// has not got, and the desktop app can ask the platform for one where a daemon
 /// cannot. `None` is every other way in, and is what the pane behaved as before
 /// there was an app to hand one over — see [`remote::Elevate`].
+///
+/// And `hands_over` is what that same caller says about the login link: holding
+/// the key before there is a server to ask one of is the same thing as handing
+/// the link out itself, so the startup line names the address alone and the
+/// secret stays out of the file **View Logs** opens — see
+/// [`key::HandsOverTheLink`].
 pub async fn run_on_keyed(
     listener: std::net::TcpListener,
     config: Config,
     key: key::WorkbenchKey,
     escalation: Option<Arc<dyn remote::Elevate>>,
+    hands_over: key::HandsOverTheLink,
 ) -> Result<()> {
     // Resolved at startup: a bind that names nothing, and a HOME the unit never
     // said, are misconfigurations to report now rather than sessions that fail
@@ -1383,19 +1399,24 @@ pub async fn run_on_keyed(
     #[cfg(windows)]
     pipe::hold_the_grant(pipe.regranting());
 
-    // The one line an operator reads as Verkstead comes up, and so the daemon's
-    // whole way of handing the login link over: the address with the key on it,
-    // which is what a browser has to be pointed at to be let in at all
-    // (ADR-0015). A machine started from a unit file has no tray to press Open
-    // in, and this is what somebody reading the journal can paste.
+    // The one line an operator reads as Verkstead comes up — and, on the
+    // install where it is the handing over, the login link itself: the address
+    // with the key on it, which is what a browser has to be pointed at to be
+    // let in at all (ADR-0015). A machine started from a unit file has no tray
+    // to press Open in, and this is what somebody reading the journal can
+    // paste.
     //
-    // The secret is in the log, therefore, and that is the point of it. The
-    // journal is read by whoever the machine lets read it, which is where every
-    // other credential this server was started with is too — and re-issuing the
-    // key is what takes a link back off somebody who has read one.
+    // The secret is in the log *there*, therefore, and that is the point of it.
+    // The journal is read by whoever the machine lets read it, which is where
+    // every other credential this server was started with is too — and
+    // re-issuing the key is what takes a link back off somebody who has read
+    // one. That reasoning is the daemon's rather than every caller's: a caller
+    // that hands the link over itself says the address alone here, because its
+    // log is a file on a desk that a menu item opens — see
+    // [`key::HandsOverTheLink`].
     tracing::info!(
         listen = %config.listen,
-        workbench = %key::login_link(config.listen, &key),
+        workbench = %hands_over.startup_line(config.listen, &key),
         data_dir = %data_dir.display(),
         update_check = config.releases().is_some(),
         home = %homes.servers().display(),

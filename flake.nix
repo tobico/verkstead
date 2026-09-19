@@ -30,12 +30,17 @@
         # what `nix run github:tobico/verkstead` should get. The build from this
         # tree is one attribute away, under its own name.
         #
-        # Until the first Release there is nothing to download: the manifest
-        # ships with `systems` empty, and a package whose `src` cannot be named
-        # is one `nix flake check` refuses to evaluate — so `verkstead` *is* the
-        # source build for exactly as long as that is true. `release.yml`
-        # writing a real manifest is what switches it over, which means nothing
-        # here has to be remembered and undone.
+        # The manifest names the last Release, one entry per system it built
+        # for, and `release.yml`'s last job is what writes it — so what this
+        # resolves to moves with the Releases and nothing here is edited by
+        # hand.
+        #
+        # **A system the manifest has no entry for falls back to the source
+        # build**, which is what the condition is for: a package whose `src`
+        # cannot be named is one `nix flake check` refuses to evaluate, so an
+        # entry that is not there has to be something rather than an error. It
+        # covered every system before the first Release, when `systems` shipped
+        # empty, and it covers a platform a later Release did not build for.
         verkstead =
           if (nixpkgs.lib.importJSON ./nix/release.json).systems ? ${pkgs.stdenv.hostPlatform.system} then
             pkgs.callPackage ./nix/verkstead.nix { }

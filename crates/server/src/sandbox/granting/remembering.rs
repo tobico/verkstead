@@ -215,6 +215,14 @@ pub(crate) fn left_behind(data_dir: &Path) -> Vec<Remembered> {
             continue;
         }
 
+        // And the record that stands for the installation itself, which is in
+        // this directory on purpose and is no Conversation's: skipped by the
+        // name it was given for that — see [`STANDING`] — rather than left to
+        // reach the arm below and draw a stranger's warning at every start.
+        if name == Some(STANDING) {
+            continue;
+        }
+
         // A name that is not a Conversation's id is not a record this wrote:
         // every one of them is named by [`record`] and by nothing else.
         let Some(conversation) = name.and_then(|name| name.parse::<i64>().ok()) else {
@@ -265,11 +273,15 @@ fn record(data_dir: &Path, conversation: i64) -> PathBuf {
 /// What the machine's own record is called, beside the Conversations' in the
 /// same directory.
 ///
-/// **A name no Conversation can have**, which is what keeps it out of the
-/// sweep: a candidate there is a file whose name reads as an id — see
-/// [`left_behind`], and the test that says so — and this one does not. Which
-/// is the whole of how a record that must never be swept sits next to the ones
-/// that must.
+/// **A name no Conversation can have**, which is how a record that must never
+/// be swept sits next to the ones that must: nothing reading this directory can
+/// take it for one of theirs.
+///
+/// **And skipped by that name**, the way the half-written record beside it is —
+/// see [`left_behind`], and the test that says so. A file there whose name is
+/// not an id is a stranger and draws a warning, and this one is in the
+/// directory because Verkstead put it there: a sweep that let it reach that arm
+/// would warn about it at every start for the life of the installation.
 const STANDING: &str = "standing";
 
 /// Where that is.
@@ -734,6 +746,117 @@ mod tests {
                 .map(|remembered| remembered.conversation)
                 .collect::<Vec<_>>(),
             vec![7],
+        );
+    }
+
+    /// Somewhere for the log to go while the sweep runs, so a test can read
+    /// what it said rather than only what it handed back.
+    ///
+    /// The same shape [`super::super::writing`]'s tests use, and here for the
+    /// same reason: the formatted lines are the log somebody reads.
+    #[derive(Clone, Default)]
+    struct Said(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl io::Write for Said {
+        fn write(&mut self, wrote: &[u8]) -> io::Result<usize> {
+            self.0
+                .lock()
+                .expect("the log's own buffer")
+                .extend_from_slice(wrote);
+
+            Ok(wrote.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Said {
+        type Writer = Self;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    /// Every line the log wrote while `work` ran, down to `debug`.
+    ///
+    /// Thread-local, which is what makes it safe beside a suite running in
+    /// parallel: `with_default` is this thread's subscriber and no other test's
+    /// events reach it.
+    fn said(work: impl FnOnce()) -> Vec<String> {
+        let said = Said::default();
+
+        let log = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_ansi(false)
+            .with_writer(said.clone())
+            .finish();
+
+        tracing::subscriber::with_default(log, work);
+
+        let wrote = said.0.lock().expect("the log's own buffer");
+
+        String::from_utf8_lossy(&wrote)
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// The sweep says nothing whatever about the installation's own record, and
+    /// goes on saying something about a file that really is a stranger.
+    ///
+    /// **Which is the half the test above does not ask.** Passing a record over
+    /// and warning about it are the same list of candidates, so a sweep that
+    /// yields nothing for `standing` may still be writing a line about it — and
+    /// it was: every start on a machine that had ever written one warned that
+    /// something which is not a container's record was in the containers
+    /// directory, naming the file Verkstead itself had put there.
+    #[test]
+    fn the_sweep_says_nothing_about_the_installations_own_record() {
+        let held = tempfile::tempdir().unwrap();
+
+        standing_wrote(
+            held.path(),
+            "vk-0123456789ab",
+            "S-1-5-21-1234567890-1234567890-1234567890-1001",
+            &[Entry {
+                path: PathBuf::from(r"C:\Users"),
+                wanted: Wanted::Stepped,
+            }],
+        )
+        .unwrap();
+
+        wrote(held.path(), &remembered(7)).unwrap();
+
+        let log = said(|| {
+            left_behind(held.path());
+        });
+
+        assert!(
+            log.is_empty(),
+            "a sweep of what Verkstead wrote is a sweep with nothing to report: {log:?}",
+        );
+
+        std::fs::write(
+            directory(held.path()).join("not-a-conversation"),
+            "somebody else's\n",
+        )
+        .unwrap();
+
+        let log = said(|| {
+            left_behind(held.path());
+        });
+
+        assert!(
+            log.iter().any(|line| line.contains("not-a-conversation")),
+            "and a file there that nothing of Verkstead's wrote still draws its \
+             warning, named: {log:?}",
+        );
+        assert!(
+            !log.iter().any(|line| line.contains(STANDING)),
+            "while the record beside it is still passed over in silence: {log:?}",
         );
     }
 }

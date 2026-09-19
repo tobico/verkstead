@@ -20,6 +20,15 @@
 //! Data Directory does with the same misfortune, and deliberately — a Verkstead
 //! with nowhere to keep its database has nothing to serve, while one with
 //! nowhere to keep a log file has only lost the log.
+//!
+//! **And a file this writer starts opens with a byte-order mark**, which is the
+//! one thing here that is about the reader rather than the writing. Verkstead's
+//! own messages have em-dashes in them, and the viewers Windows opens a `.log`
+//! in read a file with no mark in the machine's code page — so a log written
+//! without one is read as mojibake by the very person being asked to report
+//! what it says. The mark belongs to a file being *started*, so it goes in at
+//! the head of a fresh file and at the head of each roll, and a run appending
+//! to a file that already has content adds none.
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
@@ -48,6 +57,14 @@ const FILE: &str = "verkstead.log";
 /// for, and the whole point of rolling over is that this directory has a size
 /// nobody has to think about.
 const PREVIOUS: &str = "verkstead.log.1";
+
+/// What a file this writer starts opens with: the UTF-8 byte-order mark.
+///
+/// Three bytes that say what the encoding is to a reader that would otherwise
+/// guess. Notepad and the rest of what Windows opens a `.log` in guess the
+/// machine's code page, and an em-dash read as one is the mojibake the
+/// reporter's log was full of.
+const MARK: &[u8] = b"\xEF\xBB\xBF";
 
 /// How large the live file may get before it rolls over.
 ///
@@ -152,8 +169,9 @@ impl Bounded {
         std::fs::create_dir_all(dir)?;
 
         let live = dir.join(FILE);
-        let file = OpenOptions::new().create(true).append(true).open(&live)?;
-        let written = file.metadata()?.len();
+        let mut file = OpenOptions::new().create(true).append(true).open(&live)?;
+        let already = file.metadata()?.len();
+        let written = marked(&mut file, already)?;
 
         Ok(Bounded {
             live,
@@ -176,10 +194,32 @@ impl Bounded {
             .create(true)
             .append(true)
             .open(&self.live)?;
-        self.written = 0;
+        self.written = marked(&mut self.file, 0)?;
 
         Ok(())
     }
+
+    /// Whether the live file holds anything but its mark, which is what says a
+    /// roll would put something behind rather than shuffle an empty file along.
+    fn holds_events(&self) -> bool {
+        self.written > MARK.len() as u64
+    }
+}
+
+/// Put [`MARK`] at the head of a file that is being started, and say how much
+/// is in it afterwards.
+///
+/// A file with something in it already is a run picking up where the one before
+/// it left off, and the mark is where *that* run put it — so this is about a
+/// file being started rather than about every write.
+fn marked(file: &mut File, written: u64) -> io::Result<u64> {
+    if written > 0 {
+        return Ok(written);
+    }
+
+    file.write_all(MARK)?;
+
+    Ok(MARK.len() as u64)
 }
 
 impl Write for Bounded {
@@ -187,7 +227,7 @@ impl Write for Bounded {
     /// event at a time — which is what makes rolling over here safe: the file
     /// is cut between events rather than through the middle of one.
     fn write(&mut self, event: &[u8]) -> io::Result<usize> {
-        if self.written > 0 && self.written + event.len() as u64 > ROLL_AT {
+        if self.holds_events() && self.written + event.len() as u64 > ROLL_AT {
             self.roll()?;
         }
 
@@ -300,6 +340,10 @@ mod tests {
     /// A run picks up where the one before it left off rather than throwing it
     /// away — and picks up its *size* with it, so a file that was full when the
     /// app was stopped rolls over rather than growing past the bound.
+    ///
+    /// And it adds no second mark: the mark belongs to the file the first run
+    /// started, and one in the middle of a file is three bytes of rubbish in
+    /// the log rather than an encoding anybody reads.
     #[test]
     fn a_second_run_appends_to_what_the_first_one_wrote() {
         let dir = tempfile::tempdir().unwrap();
@@ -312,9 +356,67 @@ mod tests {
         second.write_all(b"the second run\n").unwrap();
         drop(second);
 
-        let written = std::fs::read_to_string(dir.path().join(FILE)).unwrap();
+        let written = std::fs::read(dir.path().join(FILE)).unwrap();
 
-        assert_eq!(written, "the first run\nthe second run\n");
+        assert_eq!(written, [MARK, b"the first run\nthe second run\n"].concat());
+    }
+
+    /// A fresh file opens with the mark, so that the viewer Windows opens a
+    /// `.log` in reads Verkstead's em-dashes as em-dashes rather than guessing
+    /// the machine's code page.
+    #[test]
+    fn a_fresh_file_opens_with_the_mark() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let mut log = Bounded::in_dir(dir.path()).unwrap();
+        log.write_all("a line — with an em-dash in it\n".as_bytes())
+            .unwrap();
+        drop(log);
+
+        let written = std::fs::read(dir.path().join(FILE)).unwrap();
+
+        assert!(
+            written.starts_with(MARK),
+            "the log should open with the byte-order mark, and it opened with \
+             {:?}",
+            &written[..MARK.len().min(written.len())],
+        );
+    }
+
+    /// And so does the file a roll starts, which is the one the app goes on
+    /// writing into and the one **View Logs** opens for the rest of the run.
+    #[test]
+    fn the_file_a_roll_starts_opens_with_the_mark_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut log = Bounded::in_dir(dir.path()).unwrap();
+
+        let event = event(64 * 1024);
+        let events = (ROLL_AT / event.len() as u64) + 1;
+        for _ in 0..events {
+            log.write_all(&event).unwrap();
+        }
+        drop(log);
+
+        let live = std::fs::read(dir.path().join(FILE)).unwrap();
+        let previous = std::fs::read(dir.path().join(PREVIOUS)).unwrap();
+
+        assert!(
+            live.starts_with(MARK),
+            "the file the roll started should open with the mark",
+        );
+        assert!(
+            previous.starts_with(MARK),
+            "and so should the one behind it, which is the file the run \
+             started with",
+        );
+        assert_eq!(
+            previous
+                .windows(MARK.len())
+                .filter(|three| *three == MARK)
+                .count(),
+            1,
+            "and there is one mark in it rather than one per event",
+        );
     }
 
     /// The Log Directory is made by the binary that opens a file in it, which is

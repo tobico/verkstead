@@ -840,11 +840,22 @@ function Where(props: { of: Found }): JSX.Element {
 /// And where a row that is *not* there saw the name: a program the human has
 /// that no session can open.
 ///
-/// Three sentences for the three ways that happens, because they are three
+/// Four sentences for the four ways that happens, because they are four
 /// different things to do about it — a directory to put on the `PATH` Verkstead
-/// is started with, an install to move somewhere a session can reach, and a
-/// link left behind by an install that has gone. A row with none of them saw
-/// the name nowhere at all, and what it says is the instruction under it.
+/// is started with, an install to move somewhere a session can reach, a link
+/// left behind by an install that has gone, and the Claude Code desktop app
+/// standing where the CLI would. A row with none of them saw the name nowhere
+/// at all, and what it says is the instruction under it.
+///
+/// The desktop app is the one of the four that is really there and really runs,
+/// so its sentence says which of the two programs the file is and leaves the
+/// install to the row's own instruction directly beneath it. **Naming a command
+/// here would name the wrong one**: the only platform this row appears on is
+/// Windows, where the row leads with Anthropic's own installer and keeps npm as
+/// the alternative under it, so a sentence with `npm install` in it would put
+/// the row's second choice above the row's first. The server's half of the same
+/// answer does name a command — see `sessions::desktop_app` — because a Notice
+/// has no row under it to read one off.
 function Seen(props: { at: SeenSomewhere }): JSX.Element {
   return (
     <Note class={styles.seen}>
@@ -865,6 +876,12 @@ function Seen(props: { at: SeenSomewhere }): JSX.Element {
 
         <Show when={props.at.seen === "Dangling"}>
           <code>{props.at.at}</code> is a link with nothing at the end of it.
+        </Show>
+
+        <Show when={props.at.seen === "Desktop"}>
+          <code>{props.at.at}</code> is the Claude Code desktop app rather than
+          the command-line tool. The desktop app includes Claude Code, and the
+          CLI is installed separately — below is how.
         </Show>
       </span>
     </Note>

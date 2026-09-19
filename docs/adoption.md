@@ -197,7 +197,15 @@ where no session can reach it — so what the app opens is the login link, the
 address with the key on the end of it. **Open** composes it afresh at every
 press, which is what to reach for when a browser has forgotten the cookie:
 there is no link to keep anywhere, and nothing to type. Started with
-`--no-open`, the same link is on the startup line in **View Logs**.
+`--no-open`, **Open** is the whole of it — the app's own startup line names the
+address and no key, because **View Logs** opens a file on your desk and a
+workbench key written into it would be a login for anybody reading over your
+shoulder. The journal a `verkstead serve` writes is the other case, and still
+carries the link: a host with no tray has nowhere else to be handed one. **And
+so does an app that finds no tray to raise** — over SSH, in a container, or
+where the desktop will not give it an icon: there is no **Open** to press
+there, so the link goes in the log rather than leaving you with a workbench and
+no way into it.
 
 **Answering from your phone is the workbench's own settings**, under **Remote
 access**: it reads what this machine's Tailscale is doing, a checkbox puts the
@@ -342,7 +350,8 @@ there leaves the box ticked and the plist where it was.
 **The browser it opens is logged in**, as it is on Linux: what the app opens is
 the login link rather than the bare address, and **Open** composes it afresh at
 every press, which is what a browser that has forgotten the cookie wants.
-Started with `--no-open`, the same link is on the startup line in **View Logs**.
+Started with `--no-open`, **Open** is the whole of it: the app's own startup
+line names the address and no key, **View Logs** opening a file on your desk.
 
 **Answering from your phone is the settings page's Remote access section**, as
 it is on Linux, and Tailscale itself is the Mac's own. What differs is the
@@ -466,6 +475,17 @@ menu, and the uninstall entry in **Installed apps** beside everything else you
 installed. A newer msi replaces the copy that is there rather than standing
 beside it.
 
+**One thing about that install lands in the wrong list, and it is known.** On a
+fresh machine the uninstall entry was registered under the machine's own
+`HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall` rather than under
+your `HKCU`, so **Installed apps** offers it to everybody who signs in to this
+machine instead of only to you. Nothing else moved with it: the files, the Start
+menu entry and the `PATH` entry are all in your profile, and the install still
+asked nobody for anything. It is **parked rather than fixed** — finding what
+makes Windows Installer register it there wants a Windows machine to work on,
+and what it costs is an entry in the wrong list rather than an install that
+touched the machine. Uninstalling from **Installed apps** works either way.
+
 **And the install directory goes on your `PATH`**, which is the half of this
 download that is not the icon at all: `verkstead ask`, `verkstead guide` and
 the rest work in a terminal opened *after* the install. One that was already
@@ -532,8 +552,9 @@ than this describes.
 **The browser it opens is logged in**, as on the other two: what the app opens
 is the login link rather than the bare address, and **Open** composes it afresh
 at every press, which is what a browser that has forgotten the cookie wants.
-Started from a terminal with `--no-open`, the same link is on the startup line
-printed there and in **View Logs**.
+Started from a terminal with `--no-open`, **Open** is the whole of it: the
+app's own startup line names the address and no key, **View Logs** opening a
+file under your own `%LOCALAPPDATA%` that anybody at the screen can read.
 
 **Answering from your phone is the settings page's Remote access section**, as
 it is on the other two, and Tailscale itself is the machine's own. What differs
@@ -739,7 +760,13 @@ and every model this build knows for that agent — and there is a form under th
 for an account elsewhere. **Who the work is committed as** asks for the git
 author, prefilled from `git config --global`, with the GitHub token optional and
 prefilled from `GH_TOKEN`, `GITHUB_TOKEN` or the host `gh`'s own login, each
-field labelled with where its value came from. The last Next takes the mode
+field labelled with where its value came from. Above the token field is what one
+has to be able to do — `repo` and `workflow` on a classic token, and `gist` as
+well to publish a share; Contents, Pull requests, Issues and Workflows to write
+and Actions to read on a fine-grained one — because the push that needs them is
+made by a session inside the sandbox, where a refusal for a missing scope names
+none of them. The settings page says the same above its own token field. The
+last Next takes the mode
 off and lands you on the compose page. There is no skip and no going back
 through it: the verdict is reached once, at startup, so a machine that already
 has all three opens the workbench and never sees the wizard. What it does not do

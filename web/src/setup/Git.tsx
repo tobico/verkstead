@@ -56,6 +56,7 @@ import type {
 import { useReading } from "../freshness";
 import { ErrorLine, Note } from "../notices";
 import { heldConfig } from "../settings/held";
+import { TokenScopes } from "../settings/scopes";
 import { utcStamp } from "../set/when";
 import { COMPOSE } from "./steps";
 import styles from "./Git.module.css";
@@ -313,6 +314,12 @@ export function Git(): JSX.Element {
             Every session is handed it, and Verkstead reads pull requests and
             reviews with it. Leave it empty if GitHub is not in use here.
           </Note>
+
+          {/* And what it has to be able to do, in the words the settings page
+              says them in: this is the moment somebody is on GitHub's own
+              form, and a box ticked there is cheaper than a session that could
+              not push. */}
+          <TokenScopes class={styles.scopes} />
 
           {/* A token already configured is never sent back to a page — see the
               settings pane, where the same rule is why the field there is

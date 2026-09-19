@@ -822,6 +822,46 @@ describe("where each program was found", () => {
     expect(dangling.textContent).toContain("nothing at the end of it");
   });
 
+  /// And a `claude` that is the desktop app: a program the human really has
+  /// that a session is not launched as, so the row says which of the two it is
+  /// and goes on drawing the install under it.
+  it("says when the name is the desktop app rather than the CLI", () => {
+    const { container } = mount(
+      stating(
+        WINDOWS,
+        "Claude",
+        elsewhere({
+          seen: "Desktop",
+          at: "C:\\Users\\you\\AppData\\Local\\AnthropicClaude\\app-1.2.3\\claude.exe",
+        }),
+      ),
+    );
+    const claude = row(container, "Claude");
+    const note = claude.querySelector('[data-seen="Desktop"]')!;
+
+    expect(claude.dataset.state).toBe("Absent");
+    expect(note.textContent).toContain("AnthropicClaude");
+    expect(note.textContent).toContain(
+      "desktop app rather than the command-line tool",
+    );
+    expect(note.textContent).toContain("installed separately");
+
+    // And it names no command of its own, because the row's own instruction is
+    // directly under it — which on the one tab this row can appear on leads
+    // with Anthropic's installer and keeps npm as the alternative beneath it.
+    // A command in the sentence would put the row's second choice above its
+    // first.
+    expect(note.textContent).not.toContain("npm install");
+    expect(note.textContent).not.toContain("install.ps1");
+
+    expect(GUIDES.Windows.rows.Claude.command).toBe(
+      "irm https://claude.ai/install.ps1 | iex",
+    );
+    expect(GUIDES.Windows.rows.Claude.alternative?.command).toBe(
+      "npm install -g @anthropic-ai/claude-code",
+    );
+  });
+
   /// And a name on no `PATH` at all was seen nowhere: nothing is said under it
   /// but what to install.
   it("says nothing under a name that was seen nowhere", () => {

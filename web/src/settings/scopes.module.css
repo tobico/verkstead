@@ -1,0 +1,30 @@
+/* What a token has to be able to do — see `scopes.tsx`.
+
+   Quiet, the way the lines about where a prefill came from are: it is a list to
+   check against rather than something that has gone wrong, and it stands under
+   the heading at every visit whether or not a token has ever been saved. The
+   spacing around the block is the parent's, through the class it hands down. */
+
+.scopes {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+.why {
+  margin: 0 0 0.35rem;
+}
+
+.scopes ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.scopes li + li {
+  margin-top: 0.2rem;
+}
+
+.scopes code {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: var(--ink);
+}

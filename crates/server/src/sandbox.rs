@@ -1202,13 +1202,15 @@ pub(crate) const GH: &str = "gh";
 /// Where `program` really is for a session: the file a session would run, or —
 /// where there is none — where the name was seen instead.
 ///
-/// **The whole answer, because *absent* is three different things.** A name
+/// **The whole answer, because *absent* is four different things.** A name
 /// nothing on the machine has is somebody's install to do; a name on the
 /// server's own `PATH` in a directory a session's is not composed with is a
 /// shell profile and a restart; a link into somewhere no sandbox binds is an
-/// install to move. The wizard says which of the three a row is — see
-/// [`crate::onboarding`], which is the caller that wants more than *found* —
-/// and [`opened`] beside this is the same walk asked what a grant is made of.
+/// install to move; and a `claude` that is the desktop app is Claude Code
+/// already on the machine with no CLI on the end of its name. The wizard says
+/// which of the four a row is — see [`crate::onboarding`], which is the caller
+/// that wants more than *found* — and [`opened`] beside this is the same walk
+/// asked what a grant is made of.
 ///
 /// **A name that is a link is followed, and where it lands has to be somewhere
 /// a session can reach** — see [`reachable`], the same question a `PATH` entry
@@ -1245,6 +1247,10 @@ pub(crate) const GH: &str = "gh";
 /// there. A session's `PATH` is the server's own besides, so there is no entry
 /// for a name to be seen beyond.
 ///
+/// **And it is the platform the desktop app is on**, which is the one shape a
+/// name resolving to a real file is still not a harness — see [`desktop_app`],
+/// which is that whole question and is `stat`s and path reading.
+///
 /// Blocks: a handful of `stat` calls, and a `readlink` per hop.
 pub(crate) fn standing(
     platform: Platform,
@@ -1256,6 +1262,7 @@ pub(crate) fn standing(
 ) -> Standing {
     if platform == Platform::Windows {
         return match on_the_path(platform, program, path, pathext) {
+            Some(at) if desktop_app(platform, program, &at) => Standing::Desktop { at },
             Some(at) => Standing::Found {
                 landed: at.clone(),
                 at,
@@ -1321,7 +1328,7 @@ pub(crate) fn standing(
     passed.unwrap_or_else(|| beyond(program, path, servers))
 }
 
-/// Where `program` stands for a session, which is one of four things and not
+/// Where `program` stands for a session, which is one of five things and not
 /// simply there or not — see [`standing`], the one thing that says which.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Standing {
@@ -1361,10 +1368,80 @@ pub(crate) enum Standing {
     /// leaves behind.
     Dangling { at: PathBuf },
 
+    /// The name is where a session looks and the file there is Claude Code's
+    /// **desktop app** rather than its CLI — see [`desktop_app`], which is the
+    /// two shapes that say so.
+    ///
+    /// A file that really is there and really would run, which is what makes
+    /// this worth a variant of its own: a session handed it printed nothing and
+    /// exited, and nothing anywhere said why. The desktop app includes Claude
+    /// Code and has no CLI on the end of that name, so what to do about it is
+    /// to install the CLI beside it.
+    Desktop { at: PathBuf },
+
     /// On no `PATH` at all: there is nothing to say about it but that it is not
     /// there.
     Nowhere,
 }
+
+/// Whether the file `at`, resolved for `program`, is Claude Code's **desktop
+/// app** rather than the command-line tool a session is launched as.
+///
+/// **Decided by shape, and nothing is run to find out.** An Electron binary
+/// asked for `--version` may open a window on somebody's screen, and
+/// [ADR 0016](../../../docs/adr/0016-onboarding.md) kept the wizard to reads —
+/// so this is `stat`s and path reading, and every arm of it is a unit test on a
+/// machine that is not Windows.
+///
+/// Two shapes, and the platform is a value rather than a `cfg`:
+///
+/// - an ancestor directory named [`ANTHROPIC_CLAUDE`], which is where the app a
+///   person downloads installs itself under `%LOCALAPPDATA%` — the versioned
+///   `app-x.y.z` it really runs out of is under the same directory;
+/// - a sibling [`SQUIRREL_UPDATE`], which is Squirrel's updater standing beside
+///   the app it updates.
+///
+/// **Two, and both of them seen.** A third was written and taken out again: a
+/// parent directory called `WindowsApps`, where an app-execution alias stands
+/// and where an MSIX package would put one. No machine here has ever had that
+/// alias, and the cost of guessing wrong is not a row's wrong sentence — this
+/// answer refuses a session outright, with nothing on the Profile to overrule
+/// it, so a `claude.exe` alias standing in the directory every Windows user
+/// already has on their `PATH` would stop the product on that machine and tell
+/// the human to install what they have. A shape goes in here when somebody has
+/// seen it.
+fn desktop_app(platform: Platform, program: &str, at: &Path) -> bool {
+    if platform != Platform::Windows || program != crate::sessions::binary(store::AgentType::Claude)
+    {
+        return false;
+    }
+
+    let Some(directory) = at.parent() else {
+        return false;
+    };
+
+    // The ancestors rather than the parent: what the downloaded app resolves to
+    // sits a versioned directory below the one it installed into.
+    at.ancestors()
+        .skip(1)
+        .filter_map(Path::file_name)
+        .any(|name| called(name, ANTHROPIC_CLAUDE))
+        || directory.join(SQUIRREL_UPDATE).is_file()
+}
+
+/// Whether a path component is `against`, the way Windows reads one: without
+/// regard to case.
+fn called(component: &OsStr, against: &str) -> bool {
+    component
+        .as_encoded_bytes()
+        .eq_ignore_ascii_case(against.as_bytes())
+}
+
+/// Where the Claude Code desktop app installs itself under `%LOCALAPPDATA%`.
+const ANTHROPIC_CLAUDE: &str = "AnthropicClaude";
+
+/// Squirrel's updater, which stands beside the app it updates.
+const SQUIRREL_UPDATE: &str = "Update.exe";
 
 /// Where `program` was seen on the `PATH` the server itself was started with,
 /// in a directory a session's own does not hold.
@@ -6138,6 +6215,138 @@ mod tests {
             "and the description carries none of it, the rule being the \
              boundary's own there",
         );
+    }
+
+    /// A `claude` that is the Claude Code desktop app is said to be that rather
+    /// than found: it is a program that really runs, and a session handed it
+    /// prints nothing and exits.
+    ///
+    /// The two shapes, each on its own — the app a person downloads under
+    /// `%LOCALAPPDATA%`, and Squirrel's updater standing beside it. Both are
+    /// `stat`s and path reading, so both are a test on a machine that is not
+    /// Windows: what decides it is [`Platform`] as a value.
+    ///
+    /// **And the directory every Windows `PATH` already has is not one of
+    /// them**, which is the other half of this: `WindowsApps` is where an
+    /// app-execution alias stands, nobody here has seen Claude's there, and
+    /// this answer refuses a session rather than drawing a sentence. A shape
+    /// nobody has seen is a shape that stops the product on a machine it
+    /// guessed wrong about.
+    ///
+    /// The extension is spelled the way `%PATHEXT%` spells it, as the resolving
+    /// test above spells it: a Windows filesystem has no case where the one the
+    /// suite is running on does.
+    #[test]
+    fn a_claude_that_is_the_desktop_app_is_said_to_be_the_desktop_app() {
+        let machine = tempfile::tempdir().unwrap();
+        let local = machine.path().join("AppData/Local");
+
+        // The downloaded app, which runs out of a versioned directory under the
+        // one it installed into.
+        let app = local.join("AnthropicClaude/app-1.2.3");
+
+        // An install of the same shape somewhere else, known by the updater
+        // standing beside what it updates.
+        let squirrel = machine.path().join("Vendor");
+
+        // And the directory app-execution aliases stand in, which is on every
+        // Windows `PATH` and says nothing about what is standing there.
+        let alias = local.join("Microsoft/WindowsApps");
+
+        for directory in [&app, &squirrel, &alias] {
+            std::fs::create_dir_all(directory).unwrap();
+            std::fs::write(directory.join("claude.EXE"), "an Electron app\n").unwrap();
+        }
+
+        std::fs::write(squirrel.join("Update.exe"), "Squirrel\n").unwrap();
+
+        let said = |directory: &Path, program| {
+            standing(
+                Platform::Windows,
+                program,
+                Some(directory.as_os_str()),
+                None,
+                Some(OsStr::new(".COM;.EXE;.BAT;.CMD")),
+                None,
+            )
+        };
+
+        for (directory, why) in [
+            (
+                &app,
+                "the directory the app a person downloads installs into",
+            ),
+            (&squirrel, "the updater standing beside the app it updates"),
+        ] {
+            assert_eq!(
+                said(directory, "claude"),
+                Standing::Desktop {
+                    at: directory.join("claude.EXE"),
+                },
+                "{why} says what this file is, and no process was run to find \
+                 out",
+            );
+        }
+
+        assert_eq!(
+            said(&alias, "claude"),
+            Standing::Found {
+                at: alias.join("claude.EXE"),
+                landed: alias.join("claude.EXE"),
+                through: Vec::new(),
+            },
+            "while a `claude` standing where the aliases do is taken at its \
+             word: refusing it would stop every session on a machine whose \
+             CLI happens to be reached that way",
+        );
+
+        // A `git.EXE` is somebody's git rather than an Electron app: the only
+        // name this is ever asked about is Claude's own.
+        std::fs::write(squirrel.join("git.EXE"), "git\n").unwrap();
+
+        assert_eq!(
+            said(&squirrel, GIT),
+            Standing::Found {
+                at: squirrel.join("git.EXE"),
+                landed: squirrel.join("git.EXE"),
+                through: Vec::new(),
+            },
+            "and a name that is not Claude's is never the Claude Code desktop \
+             app, wherever it stands",
+        );
+    }
+
+    /// While a `claude` installed any of the ordinary ways is found as it always
+    /// was: the npm shim under `%APPDATA%`, and the native installer's own under
+    /// the profile.
+    #[test]
+    fn a_claude_that_is_the_cli_is_found_the_way_it_always_was() {
+        let home = tempfile::tempdir().unwrap();
+
+        for directory in ["AppData/Roaming/npm", ".local/bin"] {
+            let directory = home.path().join(directory);
+
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::write(directory.join("claude.EXE"), "the CLI\n").unwrap();
+
+            assert_eq!(
+                standing(
+                    Platform::Windows,
+                    "claude",
+                    Some(directory.as_os_str()),
+                    None,
+                    Some(OsStr::new(".COM;.EXE;.BAT;.CMD")),
+                    None,
+                ),
+                Standing::Found {
+                    at: directory.join("claude.EXE"),
+                    landed: directory.join("claude.EXE"),
+                    through: Vec::new(),
+                },
+                "a harness in a directory of neither shape is the \
+                 command-line tool, and the row ticks",
+            );
+        }
     }
 
     /// A name a session cannot run is not simply absent: where it *was* seen is

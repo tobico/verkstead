@@ -84,7 +84,7 @@ use std::sync::mpsc::sync_channel;
 use anyhow::{Context, Result};
 use tray_icon::TrayIcon;
 use verkstead_server::Config;
-use verkstead_server::key::{WorkbenchKey, login_link};
+use verkstead_server::key::{HandsOverTheLink, WorkbenchKey, login_link, workbench_address};
 
 /// What Verkstead is called wherever a platform asks for an identifier rather
 /// than a name (ADR-0012).
@@ -182,11 +182,26 @@ impl Desktop {
             .build()
             .context("starting the async runtime")?;
 
+        // And handed over with it: holding the key already is the same fact as
+        // handing the link out here rather than leaving it to a log line. The
+        // browser below is opened on it and the tray's **Open** opens another
+        // whenever it is pressed, so the server's startup line names the
+        // address alone — the log file **View Logs** opens is a file on
+        // somebody's desk, and a workbench key in it is a login anybody reading
+        // over a shoulder has (ADR-0015).
+        //
+        // **Said here because the line is written before the tray is raised**,
+        // and a tray that cannot be raised is not known about until it is
+        // tried. Where that happens the app says the link itself, below, rather
+        // than leaving a machine with nothing to log in with: this is what the
+        // install *intends*, and the fallback is what it does where the
+        // intention turns out not to hold.
         let serving = runtime.spawn(verkstead_server::run_on_keyed(
             listener,
             self.server,
             key.clone(),
             escalation(screen::there_is_one()),
+            HandsOverTheLink::TheCaller,
         ));
 
         // After the socket is bound and before the server is up, which is the
@@ -195,13 +210,22 @@ impl Desktop {
         // waits in the socket's own queue rather than being refused.
         if !self.no_open {
             // Not being able to open a browser is not a reason to stop serving:
-            // the same link is in the server's own startup line, a browser
-            // pointed at it by hand reaches the same viewer, and so does every
-            // other device on the tailnet.
-            let viewer = login_link(listen, &key);
+            // the tray's **Open** hands the same link over at every press, a
+            // browser pointed at it by hand reaches the same viewer, and so
+            // does every other device on the tailnet.
+            //
+            // **And what is said about it is the address rather than the
+            // link.** The link is the whole of logging in, so a line carrying
+            // one is the secret in the log — which is the thing this install
+            // keeps out of the file **View Logs** opens, and a warning is as
+            // much that file as the startup line is (ADR-0015). What a reader
+            // of it needs is which Verkstead would not open and why, and the
+            // address is that — the error's own account of what it was opening
+            // included, which is why the opener is told what to name.
+            let workbench = workbench_address(listen);
 
-            if let Err(error) = opener::url(&viewer) {
-                tracing::warn!(%viewer, "{error:#}");
+            if let Err(error) = opener::url_reported_as(&login_link(listen, &key), &workbench) {
+                tracing::warn!(%workbench, "{error:#}");
             }
         }
 
@@ -209,6 +233,23 @@ impl Desktop {
             // No tray to be in, so this is `verkstead serve` with a browser
             // opened: the main thread waits on the server, and the process is
             // stopped the way that one is.
+            //
+            // **And with the link, because there is no longer anybody to hand
+            // it over.** The startup line names the address alone on the
+            // reasoning that this install hands the link out itself — and the
+            // whole of that handing out is the browser above and the tray's
+            // **Open**. A run that reached here has no tray, and one that
+            // reached here with `--no-open` or a browser that would not start
+            // has had neither: leaving the link off *here* would be the
+            // redacting-everywhere that ADR-0015 rejected, and would leave a
+            // machine serving a workbench nobody can get into. So this is the
+            // daemon's way, taken by the app exactly where the app has become
+            // the daemon.
+            tracing::info!(
+                workbench = %login_link(listen, &key),
+                "there is no tray to press Open in, so this is the way in",
+            );
+
             return runtime
                 .block_on(serving)
                 .context("the thread the server was running on ended")?;
@@ -317,12 +358,16 @@ fn raise(
             // press months after the browser forgot the cookie has to be as good
             // as the first one.
             let viewer = login_link(listen, &key);
+            let workbench = workbench_address(listen);
 
             // Said and carried on, for the reason the open at startup is: the
             // viewer is reachable from every browser on the tailnet, and a
             // desktop that would not open one is no reason to stop serving them.
-            if let Err(error) = opener::url(&viewer) {
-                tracing::warn!(%viewer, "{error:#}");
+            // Said as the address rather than as the link, for the reason the
+            // open at startup is too — a press that failed is a line in the
+            // very file this install keeps the key out of.
+            if let Err(error) = opener::url_reported_as(&viewer, &workbench) {
+                tracing::warn!(%workbench, "{error:#}");
             }
         }
         tray::Chosen::ViewLogs => match &logging {

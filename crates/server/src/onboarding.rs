@@ -524,11 +524,13 @@ impl Machine {
     /// one thing the human cannot read off a tick.
     ///
     /// **And a row that is not says where it was seen**, where it was seen at
-    /// all — on a `PATH` entry the composing dropped, or at the end of a link a
-    /// session could not follow. Each of those is somebody's `PATH` to fix
-    /// rather than a program to install, and a row that said only *absent*
-    /// would send them to install what they have. See [`sandbox::standing`],
-    /// which is where all four answers are decided.
+    /// all — on a `PATH` entry the composing dropped, at the end of a link a
+    /// session could not follow, or standing where the Claude Code desktop app
+    /// installs. The first two are somebody's `PATH` to fix rather than a
+    /// program to install and the third is Claude Code with no CLI on the end
+    /// of its name, and a row that said only *absent* would send them to
+    /// install what they have. See [`sandbox::standing`], which is where all
+    /// five answers are decided.
     fn installed(&self, program: &str) -> DependencyState {
         match self.reaches(program) {
             sandbox::Standing::Found { at, landed, .. } => DependencyState::Present {
@@ -545,6 +547,9 @@ impl Machine {
                 target: shown_path(&target),
             }),
             sandbox::Standing::Dangling { at } => absent(Seen::Dangling {
+                at: shown_path(&at),
+            }),
+            sandbox::Standing::Desktop { at } => absent(Seen::Desktop {
                 at: shown_path(&at),
             }),
             sandbox::Standing::Nowhere => DependencyState::Absent {
@@ -1302,7 +1307,8 @@ fn no_account(why: String) -> DependencyState {
 }
 
 /// A row that is not there because the name was seen somewhere a session
-/// cannot use it — which is a `PATH` to fix rather than a program to install.
+/// cannot use it, or standing as a program that is not the harness — which is
+/// a `PATH` to fix or an install to finish rather than one to start.
 fn absent(seen: Seen) -> DependencyState {
     DependencyState::Absent {
         trouble: None,
@@ -1744,6 +1750,47 @@ echo {token}
             },
             "and neither is a link with nothing at the end of it, which is what \
              an uninstall leaves behind rather than a harness never installed",
+        );
+    }
+
+    /// And a `claude` that is the Claude Code desktop app reads absent with the
+    /// file named: a program the human really has, that is not the one a
+    /// session is launched as.
+    ///
+    /// What the row then draws under it is the install it already draws — the
+    /// CLI is installed separately, which is the whole of what there is to say
+    /// about it. See [`sandbox::desktop_app`], which is the three shapes, and
+    /// the tests beside it, which are each of them.
+    #[test]
+    fn a_claude_that_is_the_desktop_app_is_absent_with_the_file_named() {
+        let profile = tempfile::tempdir().unwrap();
+        let app = profile
+            .path()
+            .join("AppData/Local/AnthropicClaude/app-1.2.3");
+
+        std::fs::create_dir_all(&app).unwrap();
+        program(&app.join("claude.EXE"), "an Electron app\n");
+
+        let machine = Machine::stated(
+            Platform::Windows,
+            app.as_os_str().to_owned(),
+            app.as_os_str().to_owned(),
+            Some(OsString::from(".COM;.EXE;.BAT;.CMD")),
+            None,
+            &home(Platform::Windows, profile.path()),
+        );
+
+        assert_eq!(
+            state(&machine, Dependency::Claude),
+            DependencyState::Absent {
+                trouble: None,
+                seen: Some(Seen::Desktop {
+                    at: app.join("claude.EXE").to_string_lossy().into_owned(),
+                }),
+            },
+            "the desktop app includes Claude Code and has no CLI on the end of \
+             that name, so the row says which of the two this file is rather \
+             than ticking",
         );
     }
 

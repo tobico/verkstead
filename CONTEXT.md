@@ -387,7 +387,12 @@ as the Build Cache makes its own where it uses it, and what it holds is the log
 and the log before it: `verkstead.log`, rolled over to `verkstead.log.1` at a
 few megabytes and kept no further back than that, so a machine that has been
 running Verkstead for months is not handed a log nobody can open. **View Logs**
-on the tray menu is what opens it. The server itself keeps logging to stdout
+on the tray menu is what opens it. **A file started here opens with a
+byte-order mark** — a fresh one and each roll both, and a run appending to one
+that already has content adds none: Verkstead's own messages have em-dashes in
+them, and the viewers Windows opens a `.log` in read a file with no mark in the
+machine's code page, which is mojibake to the very person being asked to report
+what it says. The server itself keeps logging to stdout
 wherever it was started from — where the events go is the starting binary's
 call — and `RUST_LOG` filters the file exactly as it filters that stdout.
 **A machine that names nowhere to put one is not refused**: it gets no file, the
@@ -445,6 +450,21 @@ reads nothing of this server.
 startup line carries `workbench=`, and on the desktop app the browser opened at
 startup and the tray's **Open** both go to the link, built afresh at each press
 so a browser that forgot the cookie is let in again.
+**And the line carries the key only on the install that hands it over that
+way.** The daemon's does: a machine started from a unit file has no tray to
+press, and what somebody reading the journal pastes is the whole link. The
+desktop app's does not, naming the address alone: it has handed the link over
+already, and its log is the file the tray's **View Logs** opens on somebody's
+desk — a key written there is a login for anybody reading over their shoulder.
+**Unless there turned out to be no tray**, which is a machine over SSH, in a
+container, or one whose desktop would not give Verkstead an icon: the app's
+handing over is the browser and **Open**, so a run with neither says the link
+itself rather than serving a workbench nobody can get into. And a browser that
+would not open is reported by the address, at startup and at a press alike — a
+line about a failure is that file on that desk, and is nobody's only way in.
+A session cannot read the file whatever is in it, the log living in the human's
+own local application data and a session running as a local account of
+Verkstead's own.
 **Reset key**, at the foot of **Remote Access**, re-issues it: everything
 holding the old one meets a 401 on its next request, and the browser that
 pressed stays in — a reset made from the phone is a reset made from the only
@@ -525,10 +545,21 @@ the name resolved to and the file that path lands on, where it is a link: a
 distribution's `claude` too old to connect and the human's own under
 `~/.local/bin` are the same tick and two different programs. One that is not
 there says where the name was seen, where it was seen at all — on an entry of
-the server's own `PATH` that a session's is not composed with, or at the end of
-a link a session could not follow — because each of those is a `PATH` to fix
-rather than a program to install. A name on no list at all is absent with
-nothing said. And where a session looks is the composed list itself, drawn
+the server's own `PATH` that a session's is not composed with, at the end of a
+link a session could not follow, or standing as the Claude Code **desktop app**
+rather than the CLI — because the first two are a `PATH` to fix rather than a
+program to install, and the third is Claude Code already on the machine with no
+CLI on the end of that name. The desktop app is recognised by shape and nothing
+is run to find out: a `claude` under `%LOCALAPPDATA%\AnthropicClaude`, or beside
+Squirrel's `Update.exe`. Two shapes and both of them seen — a shape guessed at
+would refuse a session on a machine it was wrong about, with nothing on the
+Profile to overrule it. Its row says
+which of the two programs the file is and leaves the install to the row's own
+instruction beneath it, and a session whose Profile resolves to one is refused
+rather than started, with the same line in the log and in its Capture — that
+line naming an install, having no row under it to read one off. A name on no list at
+all is absent with nothing said. And where a session looks is the composed list
+itself, drawn
 above the rows on every platform, a session's `PATH` being the server's own
 rather than anything the wizard could write down.
 

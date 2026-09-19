@@ -1433,6 +1433,21 @@ async fn the_prompt_a_session_is_started_on_is_a_file_it_reads_the_brief_out_of(
         named.display(),
     );
 
+    // And spelled the one way Windows spells a path. The line is built from a
+    // profile path of this machine's own with two names put on the end of it,
+    // and a composer meant for the POSIX paths a Linux sandbox is given would
+    // put a forward slash after each — one path with both characters in it,
+    // which is what the human reads in their own log and what the session is
+    // told in prose. Only a Windows machine can see the difference: a `join`
+    // composes with the host's separator, so the suite on Linux writes the same
+    // characters whichever tool it uses.
+    assert!(
+        !named.to_string_lossy().contains('/'),
+        "the path the session is given should read as one path rather than as \
+         two halves: {}",
+        named.display(),
+    );
+
     let written = fixture.handoffs().join("prompt.md");
 
     the_same_file(&named, &written);

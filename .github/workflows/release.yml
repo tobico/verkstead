@@ -1,3 +1,7 @@
+# A run begins by reading the tag against the workspace manifest, and everything
+# that builds sits behind that: a tag the binaries would disagree with fails
+# before a runner compiles anything.
+#
 # What a `v*` tag ships: one bare binary per platform the project ships, and
 # beside them the desktop app as the file each desktop is installed from — the
 # Linux one as an AppImage, the macOS one as a dmg, the Windows one as an msi
@@ -40,12 +44,66 @@ permissions:
   contents: read
 
 jobs:
+  # The gate. `v0.1.1` shipped a binary reporting `0.1.0`, because the manifest
+  # takes its version from nowhere and the Release takes its own from the tag:
+  # a fresh install offered to update itself to the version it already was, and
+  # nothing in this workflow had a word to say about it. This job is that word,
+  # and it is the run's first because a mismatch is cheaper to hear about than
+  # four runners' worth of build.
+  #
+  # Everything else sits behind it through `viewer`, which every other job
+  # already needs: one edge in front of that one is one edge in front of all of
+  # them.
+  version:
+    name: Version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      # Asked of the ref, which is the opposite of what `publish` and `manifest`
+      # ask — and the same reasoning, put to a different question. Theirs is
+      # *is this a release*, which a rehearsal started against a tag must not be
+      # allowed to answer yes to. This one's is *does this ref carry a version*,
+      # and only a tag does: a run started by hand against a branch has nothing
+      # to compare and is stopped by nothing, while one started against a tag is
+      # checked, that being what a rehearsal is for.
+      #
+      # `cargo pkgid` is asked of `verkstead-cli` because the disagreement this
+      # catches is the human-visible one: `verkstead --version` is that crate's
+      # binary talking, and every crate here takes the workspace's version
+      # anyway. The runner's own cargo reads it — nothing is compiled here, so
+      # there is no toolchain to pin to the flake's.
+      #
+      # The hyphen rule is the one `releasing.md` states and the Windows
+      # Installer version already forces from the other end: a hyphen is
+      # semver's own spelling of a pre-release, so `v0.1.0-rc.1` and
+      # `v0.1.0-rc.2` are both a manifest reading `0.1.0`. The comparison is
+      # made against the tag up to its hyphen.
+      #
+      # What it says when they differ names both numbers. A line saying only
+      # that they disagree would send somebody off to look up the two the run
+      # already had in front of it.
+      - name: The tag and the manifest agree
+        if: github.ref_type == 'tag'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          tagged="${TAG#v}"
+          tagged="${tagged%%-*}"
+          manifest=$(cargo pkgid -p verkstead-cli | sed 's/.*@//')
+          if [ "$tagged" != "$manifest" ]; then
+            echo "::error::The tag $TAG is version $tagged, and Cargo.toml says $manifest. Bump the workspace version, land it on main, and tag that commit."
+            exit 1
+          fi
+          echo "$TAG and Cargo.toml agree on $manifest."
+
   # The viewer, built once. `rust-embed` reads `web/dist` at compile time, so
   # every build leg needs it on disk before cargo runs — but what vite writes
   # does not vary by platform, so building it in each leg would cost four times
   # over and let the four legs disagree about what they embedded.
   viewer:
     name: Viewer
+    needs: version
     runs-on: ubuntu-24.04
     defaults:
       run:

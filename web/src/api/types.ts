@@ -3470,17 +3470,18 @@ export type Screen = { repaint: string, columns: number, rows: number, };
 /**
  * Where a program was seen that a session still cannot run.
  *
- * The half of *absent* that is worth a sentence. A name is missing in three
+ * The half of *absent* that is worth a sentence. A name is missing in four
  * ways that are not the same thing to do anything about, and a row saying only
  * *absent* would send somebody to install what they have already got: a
  * program on the server's own `PATH` and not on a session's is a shell profile
- * and a restart rather than an install.
+ * and a restart rather than an install, and a `claude` that is the desktop app
+ * is Claude Code already on the machine with no CLI on the end of its name.
  *
  * Flat on the wire — `{"seen": "Beyond", "at": "…"}` — the way
  * [`DependencyState`] is, so the viewer narrows on a field rather than
  * unwrapping a variant name. The wording is the viewer's own, like the install
  * commands beside it: what is here is what the machine is, and what to say
- * about it is the same three sentences on every Verkstead.
+ * about it is the same four sentences on every Verkstead.
  */
 export type Seen = { "seen": "Beyond", 
 /**
@@ -3497,6 +3498,10 @@ at: string,
 target: string, } | { "seen": "Dangling", 
 /**
  * The link that leads nowhere.
+ */
+at: string, } | { "seen": "Desktop", 
+/**
+ * The desktop app, where the name resolved.
  */
 at: string, };
 
