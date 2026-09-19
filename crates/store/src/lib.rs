@@ -48,6 +48,7 @@ mod profiles;
 mod pull_requests;
 mod push;
 mod repos;
+mod session_endings;
 mod session_names;
 mod session_pairings;
 mod shares;
@@ -119,6 +120,7 @@ pub use repos::{
     ConflictResolution, Repo, Unregistering, load_repo, recorded_repos, register_repo,
     registered_repo, registered_repo_at, registered_repos, unregister_repo,
 };
+pub use session_endings::{Ended, end_session, session_ending};
 pub use session_names::session_id;
 pub use session_pairings::RanUnder;
 pub use shares::{Share, record_share, record_share_comment, share, share_commented};
@@ -722,6 +724,10 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // ran it — which hangs off the same Event again: one session is one Event,
     // and one Event is one launch.
     session_pairings::apply_schema(pool).await?;
+
+    // And how each of them ended — what it exited with and how long it lived —
+    // which hangs off the same Event once more, one session ending once.
+    session_endings::apply_schema(pool).await?;
 
     // And the record those sessions kept of themselves, which hangs off the
     // same Event again — one session is one Event, and one Event is one

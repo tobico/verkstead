@@ -1111,7 +1111,14 @@ The session's own record of its conversation — the agent's prose, its tool
 use, its reasoning, and what was put to it — kept word for word as the agent's
 backend wrote it, and rendered readable in the details pane. What summaries and a
 stop Notice's evidence draw from, falling back to the Capture when a session
-left none.
+left none — and, where the session itself printed nothing, to **how the session
+ended**: the code it exited with and how long it lived, which is all there is to
+say about one. Whether it printed anything is the relay's own reading rather
+than an empty Capture, a Capture being a record Verkstead also writes a line of
+its own into: on the platform whose boundary is written, a session that never
+said a word still leaves one that is not empty. Kept for a session that stopped
+without being asked to and for no other, a session Verkstead ended itself being
+one whose exit says nothing about anything.
 
 **Which record it is read from is the backend's to say.** A backend that takes
 a session id at launch — Claude Code and Grok Build both do — is told the name
@@ -1153,6 +1160,14 @@ The terminal bytes of a session, kept byte for byte, escapes and all — how it
 looked rather than what it said. What says a printing session has gone **Idle**,
 what the Screen replays, and the record of last resort for a session that left no
 Transcript.
+**And it may hold a line of Verkstead's own about the session**, which is the
+one thing in it no terminal printed. A Capture is opened before the sandbox is
+built, so that what a launch does before there is anything to print into it has
+somewhere to be said: on Windows the boundary being written, over how many
+access-control entries and how long it took — a first one took 112 s with
+nothing anywhere saying so — and, wherever a launch fails, why, which used to
+reach the log and nowhere else. The one record the human already opens is where
+both belong.
 _Avoid_: transcript (that is the readable record), raw output, tape
 
 **Screen**:
@@ -2210,6 +2225,27 @@ again; what happens next is the human's, typing into the Screen, steering or
 pressing **Stop**. Nothing goes on the Timeline for a rescue itself: it is
 Verkstead prodding an agent rather than anything the work has got to, and the
 line is in the session's own Capture. See ADR-0018.
+
+**What the human sees of it is a condition** rather than an Event — *idle 4 min,
+spoken to once* — drawn beside the lifecycle word on the card and in the row's
+label, the way *Waiting on checks* is. Its two halves are the rescue's own
+reading of the session, read as the page is drawn and stored nowhere: how long
+it has been **Idle**, against the same grace the rescue arms on, and how many
+times it has been spoken to. So it goes the moment the session says anything, an
+answer is put in front of the human, or the run ends — and a session sitting on
+a Set never wears it, that being a human with something in front of them rather
+than a Conversation nobody can move. Without it a parked agent and one hard at
+work read alike, which is ten minutes somebody spent watching a session that was
+never going to say a word.
+
+**It comes up when the Rescue has spoken rather than when the clock passes.**
+The idle clock counts from the session's last byte and nothing resets it when a
+Set is answered, so a condition drawn on the span alone would open with *idle 12
+min* the moment the human picked, the twelve minutes being their own
+deliberation — which is why the rescue holds off until it has seen the session
+at work since it was last stirred. The count is the register's proof that the
+hold-off is over, and the line the rescue typed echoes, so the span from then on
+is the silence since Verkstead spoke.
 _Avoid_: Nudge (that is the viewer's signal), retry, reminder, ping, poke
 
 **Stalled**:

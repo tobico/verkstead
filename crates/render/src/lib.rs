@@ -47,7 +47,7 @@ pub use conversations::{
     ConversationSteered, ConversationStopped, ConversationUnarchived, ConversationView,
     GrillingStarted, HandoffEvent, Lifecycle, ManualTaskEvent, Merging, MovedEvent, NewAdoption,
     NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption, NoticeEvent, OpenPullRequest,
-    OpenPullRequestRepo, PinnedEvent, ProposalView, PullRequestCheck, PullRequestComment,
+    OpenPullRequestRepo, Parked, PinnedEvent, ProposalView, PullRequestCheck, PullRequestComment,
     PullRequestCommit, PullRequestDetails, PullRequestEvent, PullRequestSummary, QuestionSetEvent,
     RepoChoice, RepoSwitched, ResolveConflictsEvent, Resolved, Resumed, RoadmapPane, Screen,
     SetRow, ShareView, ShowArchived, ShowingArchived, Shown, Size, StageDocument, StageEntry,

@@ -630,9 +630,21 @@ impl Grilling {
     /// The last one on the Timeline: a Conversation collects notices over a long
     /// run — a stage adopted, a roadmap finished — and what a stop writes is the
     /// newest thing Verkstead had to say.
+    ///
+    /// An escalation is passed over, being the one Notice that is not a stop:
+    /// the Rescue tells the human about a session it could not talk round and
+    /// leaves it running — see [`escalated`], which is how those are asked for.
+    /// A test waiting on a stop while a session beside it goes quiet would
+    /// otherwise be handed the wrong one.
     async fn stopped(&self) -> NoticeEvent {
-        self.until(|view| said(view).last().map(|notice| (*notice).clone()))
-            .await
+        self.until(|view| {
+            said(view)
+                .into_iter()
+                .filter(|notice| !escalation(notice))
+                .next_back()
+                .map(|notice| (*notice).clone())
+        })
+        .await
     }
 
     /// Who stopped it, which is the half of a stop the Timeline does not draw.
@@ -6240,6 +6252,97 @@ async fn a_sandbox_that_will_not_start_says_why_on_the_capture() {
         lines > 0 && !latest.is_empty(),
         "so the Timeline says what happened rather than `0 lines` and nothing: \
          {lines} lines, latest {latest:?}"
+    );
+}
+
+/// And a launch that never got as far as a process says why in the same place.
+///
+/// The Capture is opened before the sandbox is built rather than after the
+/// process is spawned, which is what gives a failed launch somewhere to say
+/// anything at all: until it moved, a session with no sandbox to run in left
+/// the Timeline empty and the reason in a log at a level nobody has turned on —
+/// the same complaint the boundary lines beside this exist for.
+///
+/// Provoked through the account the *next* session would run under: a file
+/// where its directory goes is a memory store that cannot be made in it, which
+/// is one of the handful of things that refuse a sandbox before it is built.
+/// The grilling's own account, worktree and handoff are all left alone, so what
+/// fails is the building of the second session's sandbox and nothing else —
+/// a launch that stops before there is a terminal, a boundary or a process.
+///
+/// **And the Linux half of the boundary lines is here too**: a session on this
+/// platform hides behind a wrapper with no access-control entries in it, so its
+/// Capture says nothing about a boundary. The one that does is asked on the
+/// machine that writes them — see `tests/sandbox_windows.rs`.
+#[tokio::test]
+async fn a_launch_that_could_not_build_a_sandbox_says_so_on_the_capture() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf 'the grilling is running\n'
+            while [ ! -f /tmp/verkstead/go ]; do sleep 0.1; done
+            printf '# What we settled\n\nAn in-process counter.\n' > /tmp/verkstead/handoff.md
+            : > /tmp/verkstead/done
+            printf 'the handoff is written\n'
+            sleep 300
+            ;;
+        *)
+            printf 'this session never gets to run\n'
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    // The grilling holds off writing its handoff until the test says so, for
+    // the reason the test above holds one: what makes the *next* launch fail
+    // has to be in place before that launch, and the handoff is what starts it.
+    let grilled = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    // A file where the implementation Profile's account is. Whatever the
+    // grilling is running under is untouched: what this refuses is the launch
+    // that follows it.
+    let account = fixture._elsewhere.path().join("implementation/.claude");
+    std::fs::remove_dir_all(&account).unwrap();
+    std::fs::write(&account, "not a directory\n").unwrap();
+
+    std::fs::write(handoff_directory(&fixture).join("go"), "").unwrap();
+
+    let refused = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id != grilled && !output.running)
+                .map(|output| (output.id, output.lines, output.latest.clone()))
+        })
+        .await;
+
+    let (event, lines, latest) = refused;
+    let said = fixture.capture(event).await;
+
+    assert!(
+        said.contains("could not build a sandbox"),
+        "a launch that failed before there was a process leaves an Event with the \
+         reason in its Capture: {said:?}"
+    );
+    assert!(
+        lines > 0 && !latest.is_empty(),
+        "and the Timeline row reads that rather than `0 lines` and nothing: \
+         {lines} lines, latest {latest:?}"
+    );
+
+    let grilling = fixture.capture(grilled).await;
+
+    assert!(
+        !grilling.contains("boundary"),
+        "and a session on this platform, whose sandbox is a wrapper with no \
+         access-control entries in it, is told nothing about a boundary: {grilling:?}"
     );
 }
 
@@ -15286,6 +15389,82 @@ async fn a_session_that_exits_badly_halts_the_run_with_a_notice() {
     );
 }
 
+/// And a session that said nothing at all says how it ended instead: the exit
+/// code and the tenths of a second it lived.
+///
+/// The shape a desktop-app launcher has. It starts, prints nothing and exits
+/// immediately — everything wrong with it is in the exit code and the lifetime,
+/// and *It said nothing at all* is true of it and points nowhere. The reporter
+/// who met one spent an hour finding out what this sentence says in a line.
+///
+/// Its reason is unchanged, which is the other half of the promise: the words
+/// the log used for the ending open the Notice exactly as they did. And the
+/// grilling session beside it is the third thing asked about — Verkstead ended
+/// that one itself once its handoff had landed, which is not a session that
+/// went wrong, so nothing was written down about how it exited and a stop over
+/// one would say what it always said.
+#[tokio::test]
+async fn a_session_that_printed_nothing_says_how_it_ended_in_its_notice() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            : > /tmp/verkstead/done
+            printf 'the handoff is written\n'
+            sleep 300
+            ;;
+        *)
+            exit 1
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    let grilled = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("the session exited with status 1"),
+        "the reason the Notice opens with is the one it always was: {:?}",
+        stopped.html,
+    );
+    assert!(
+        !stopped.html.contains("It said nothing at all."),
+        "and the evidence block is no longer the sentence that pointed nowhere: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("It exited with code 1 after 0."),
+        "it is the exit code and a lifetime in tenths of a second: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("s, having printed nothing."),
+        "and that there was nothing else to show: {:?}",
+        stopped.html,
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    assert!(
+        verkstead_store::session_ending(&pool, fixture.id, grilled)
+            .await
+            .unwrap()
+            .is_none(),
+        "and the grilling session Verkstead ended itself once its handoff had \
+         landed has no ending on the record: that is not a session that went \
+         wrong, and how it exited says nothing about anything",
+    );
+}
+
 /// And where the session kept a log, the evidence is what it said rather than
 /// what its terminal was drawing.
 ///
@@ -17255,6 +17434,13 @@ fn waiting_on_checks(view: &ConversationView) -> Vec<&NoticeEvent> {
 /// the settling loop writes.
 fn narrowing(notice: &NoticeEvent) -> bool {
     notice.html.contains("Waiting on checks")
+}
+
+/// And whether a Notice is the Rescue's escalation rather than a stop — the one
+/// Notice a session goes on running past. Told by what it opens with, the way
+/// [`narrowing`] is.
+fn escalation(notice: &NoticeEvent) -> bool {
+    notice.html.contains("has gone idle without finishing")
 }
 
 /// The whole of stage auto-continue: a settled wrap-up on a roadmap Conversation
@@ -24925,6 +25111,141 @@ async fn a_grilling_that_goes_idle_without_its_artifact_is_told_and_then_put_to_
     assert_eq!(view.blocked_on, Some(escalated.id));
 }
 
+/// And while it sits there, the card and the sidebar row say so: how long it has
+/// been idle, and how many times it has been spoken to.
+///
+/// A condition rather than an Event — nothing is written down, and the lifecycle
+/// word is untouched — drawn beside that word the way *Waiting on checks* is.
+/// Which is the whole of what a parked session was missing: a card saying
+/// *Running* about an agent with its turn over reads exactly like a card saying
+/// *Running* about one hard at work, and somebody watched one for ten minutes
+/// before concluding nothing was being captured.
+#[tokio::test]
+async fn a_session_that_sits_there_without_asking_says_so_on_the_card_and_the_row() {
+    let fixture = grilling(&a_grilling_that_never_writes_the_backlog()).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+
+    // A session with a Set of its own open is not sitting there, however long it
+    // has been quiet: it is waiting on the human, for as long as they take. So
+    // nothing is drawn beside the state while the pick is in front of them —
+    // the disc that says *waiting on you* is the whole of what it has to say.
+    pause(BRISKLY.proposing * 2).await;
+
+    assert!(
+        fixture.view().await.parked.is_none(),
+        "a session waiting on a pick is waiting rather than parked",
+    );
+    assert!(
+        fixture.row().await.parked.is_none(),
+        "and the row says as much as the card does about that",
+    );
+
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    // And not the moment they answer, either. The session has been quiet the
+    // whole time the Set was in front of them — far past the grace by now —
+    // and nothing resets the idle clock when an answer goes in, because an
+    // answer comes back through the CLI's long poll rather than being typed.
+    // So a condition drawn on the span alone would come up here saying *idle*
+    // over the human's own deliberation, which is the reading this is for.
+    // The rescue holds off for exactly that long, up to [`BRISKLY.waking`], and
+    // nothing is drawn until it has actually spoken.
+    let answered = fixture
+        .until(|view| (!view.waiting).then_some(view.parked))
+        .await;
+
+    assert!(
+        answered.is_none(),
+        "a session handed its answer a moment ago is not one sitting there, \
+         however long it was quiet while the human was deciding: {answered:?}",
+    );
+
+    // Told once, and the count says so — which is the first moment there is a
+    // condition at all.
+    let told_once = fixture
+        .until(|view| view.parked.filter(|parked| parked.spoken_to == 1))
+        .await;
+
+    assert_eq!(
+        told_once.spoken_to, 1,
+        "the card says it has been spoken to, which is what says Verkstead has \
+         noticed: {told_once:?}",
+    );
+
+    let row = fixture
+        .row_until(|row| row.parked.filter(|parked| parked.spoken_to == 1))
+        .await;
+
+    assert_eq!(
+        row.spoken_to, told_once.spoken_to,
+        "and the row it is found by carries the same condition as the card it \
+         opens, off the same register rather than a reading of its own: \
+         {row:?}",
+    );
+
+    // And the count rises with the second line rather than staying where it
+    // was: what the human is reading is how far this has got, and *spoken to
+    // twice* is the last of it before they are told.
+    let told_twice = fixture
+        .until(|view| view.parked.filter(|parked| parked.spoken_to == 2))
+        .await;
+
+    assert_eq!(
+        told_twice.spoken_to, 2,
+        "twice, and the condition says so rather than staying at one: \
+         {told_twice:?}",
+    );
+
+    // And it goes the moment the human is told, which is an answer put in front
+    // of them — see [`escalated`]. The disc that says *waiting on you* is the
+    // whole of what the row has to say from there: a session Verkstead has
+    // given up talking round is the human's to look at rather than a condition
+    // for them to watch tick over, and the session is left running for them to
+    // walk into.
+    escalated(&fixture).await;
+
+    let told = fixture
+        .until(|view| view.waiting.then_some(view.parked))
+        .await;
+
+    assert!(
+        told.is_none(),
+        "a session the human has been told about is one they are looking at \
+         rather than one sitting there: {told:?}",
+    );
+    assert!(
+        fixture.row().await.parked.is_none(),
+        "and the row says as much as the card does about that",
+    );
+    assert!(
+        fixture.view().await.working,
+        "the session is left running, a rescue having never been a stop",
+    );
+
+    // And it goes with the run besides. Nothing is stored for it, so a session
+    // that is no longer there has no condition rather than a stale one — and
+    // the press is the human's, a rescue leaving the ending to them.
+    fixture.force_stop().await;
+
+    let ended = fixture
+        .row_until(|row| (!row.working).then(|| row.clone()))
+        .await;
+
+    assert!(
+        ended.parked.is_none(),
+        "a session that is not there is not sitting there either: {ended:?}",
+    );
+    assert!(
+        fixture.view().await.parked.is_none(),
+        "and the card says as much as the row does about that",
+    );
+}
+
 /// And a backlog step that goes quiet without the commit that finishes it is
 /// told and put to the human the same way.
 ///
@@ -24978,7 +25299,7 @@ async fn escalated(fixture: &Grilling) -> NoticeEvent {
         let found = said(&view)
             .into_iter()
             .rev()
-            .find(|notice| notice.html.contains("has gone idle without finishing"))
+            .find(|notice| escalation(notice))
             .cloned();
 
         if let Some(notice) = found {

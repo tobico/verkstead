@@ -123,6 +123,7 @@ const CLOSED = {
   ready_to_continue: false,
   waiting: false,
   waiting_on_checks: false,
+  parked: null,
 } as const satisfies Partial<ConversationView>;
 
 /// And the same on a sidebar row, which carries the marks rather than the
@@ -134,6 +135,7 @@ const CLOSED_ROW = {
   idle: false,
   waiting: false,
   waiting_on_checks: false,
+  parked: null,
 } as const satisfies Partial<ConversationEntry>;
 
 /// The Conversation as the page is drawing it: the server's answer, with
@@ -268,6 +270,7 @@ export function rowFor(view: ConversationView): ConversationEntry {
     idle: false,
     waiting: false,
     waiting_on_checks: false,
+    parked: null,
     unseen: false,
   };
 }

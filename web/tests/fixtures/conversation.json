@@ -79,6 +79,7 @@
     }
   },
   "naming": false,
+  "parked": null,
   "pinned": [],
   "ready_to_continue": false,
   "ready_to_grill": true,

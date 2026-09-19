@@ -3691,6 +3691,44 @@ struct Boundary<'a> {
     standing: Vec<PathBuf>,
 }
 
+/// What a session's Capture is told as its boundary starts being written, and
+/// how many entries there are to write.
+///
+/// **In the Capture rather than only in the log**, which is where the human
+/// already is: the Timeline's row for a session that has started and printed
+/// nothing reads the same whether it is writing a boundary or sitting idle, and
+/// the one place both are visible from a phone is the session's own record. See
+/// [`Sandbox::command_saying`], which says it, and CONTEXT.md's **Capture**,
+/// which is where a line of Verkstead's own among a session's terminal bytes is
+/// allowed for.
+///
+/// Worded for somebody who has pressed a button and is waiting: what is
+/// happening, how much of it there is, and that the agent comes after it.
+fn writing_a_boundary(entries: usize) -> String {
+    format!(
+        "Verkstead is writing this session's boundary: {entries} access-control entries on \
+         this machine's own directories. The agent starts once they are written."
+    )
+}
+
+/// And what it is told when they are on: how long the whole of it took.
+///
+/// **The whole of it**, which is the profile emptied and the junctions made as
+/// well as the entries themselves — the human waited through all of it, and a
+/// number that covered only the writing would be one they could not reconcile
+/// with what they sat through. Which stretch of it took the time is the log's
+/// business — see [`granting::writing::stretch`].
+///
+/// Seconds to a decimal place, the way every other span a person reads here is
+/// said: a boundary is tenths of a second on a machine doing what it should and
+/// minutes on one that is not, and both read plainly this way.
+fn wrote_the_boundary(took: std::time::Duration) -> String {
+    format!(
+        "Verkstead wrote this session's boundary in {:.1} s.",
+        took.as_secs_f64()
+    )
+}
+
 impl Sandbox {
     /// The sandbox a session for `conversation` runs in, under the account
     /// `profile` names.
@@ -3907,6 +3945,37 @@ impl Sandbox {
     /// and there is no unsandboxed session to fall back to. The two platforms
     /// with a wrapper never refuse here.
     pub fn command<S: AsRef<OsStr>>(&self, argv: &[S]) -> std::io::Result<(Rendering, Closing)> {
+        self.command_saying(argv, &|_| {})
+    }
+
+    /// The same, with somewhere to put what this launch says about itself while
+    /// it is happening.
+    ///
+    /// **Which on one platform is the reason a session takes so long to
+    /// start.** A boundary is access-control entries written on real
+    /// directories, and a first one took 112 s with a Conversation showing a
+    /// session starting and nothing whatever to say why — the log said it, and
+    /// nobody opens a log from a phone. So a line goes out as the writing
+    /// starts and another as it ends, and what the caller does with them is put
+    /// them where the human is already looking: the session's own Capture — see
+    /// [`writing_a_boundary`] and [`wrote_the_boundary`], which is where the
+    /// words are.
+    ///
+    /// **Said as they happen rather than handed back at the end**, which is the
+    /// whole point: a line that arrives once the 112 s is over says nothing
+    /// anybody needed during it. So this blocks and `saying` is called from
+    /// inside it, and a caller that wants the first line readable while the
+    /// second is still coming runs this where blocking costs nothing and reads
+    /// them off as they arrive — see [`crate::sessions::Sessions::start`].
+    ///
+    /// Nothing is said at all on the two platforms whose sandbox is a wrapper:
+    /// there are no entries to write, so there is nothing happening that a
+    /// session start does not already account for.
+    pub fn command_saying<S: AsRef<OsStr>>(
+        &self,
+        argv: &[S],
+        saying: &dyn Fn(&str),
+    ) -> std::io::Result<(Rendering, Closing)> {
         // The root, which the next launch into it shares for as long as
         // something is running in it rather than build again from under it,
         // and the HOME it is in, which is emptied only while nothing of the
@@ -3917,7 +3986,7 @@ impl Sandbox {
             self.home
                 .sharing
                 .launched(self.conversation, self.root.named(), |launch| {
-                    self.launched(argv, launch)
+                    self.launched(argv, launch, saying)
                 })?;
 
         Ok((rendering, closing.sharing(share)))
@@ -3930,6 +3999,7 @@ impl Sandbox {
         &self,
         argv: &[S],
         launch: sharing::Launch,
+        saying: &dyn Fn(&str),
     ) -> std::io::Result<(Rendering, Closing)> {
         let surface = self.surface(argv, &launch);
 
@@ -3950,14 +4020,41 @@ impl Sandbox {
                 "this session's description asks to run as this installation's own local \
                  account with this many access-control entries on real directories"
             );
+
+            // And the same thing where the human is looking rather than in a
+            // log: from here to the end of this is the stretch a session spends
+            // starting with nothing on its Timeline to say why, and the line
+            // has to be out before a word of the boundary is written for it to
+            // be readable while it is being written — see
+            // [`Sandbox::command_saying`].
+            saying(&writing_a_boundary(boundary.entries.len()));
         }
 
         // The process first, because it is what makes the description true on
         // the filesystem: the profile is emptied, the account junctioned in and
         // the temporary directory made here, and an entry cannot be written on
         // a path nothing has put there yet.
+        //
+        // Timed where a boundary follows it: emptying a profile and making the
+        // junctions is the first stretch of a slow Windows start, and it is
+        // outside every clock the writing keeps — see
+        // [`granting::writing::stretch`], which is what says so in the log.
+        //
+        // And the same instant is where the Capture's own reckoning starts,
+        // because what it reports is what the human waited through rather than
+        // what one half of the work cost — see [`wrote_the_boundary`].
+        let began = std::time::Instant::now();
+
         #[allow(unused_mut)]
         let (mut rendering, mut closing) = rendered(self.platform, &surface);
+
+        #[cfg(windows)]
+        if boundary.is_some() {
+            granting::writing::stretch(
+                "profile emptied and junctions made for its entries to go on",
+                began,
+            );
+        }
 
         // And a Claude session's login, where the root it is in cannot be
         // trusted to have written it to the account by itself — see
@@ -3978,7 +4075,7 @@ impl Sandbox {
         }
 
         #[cfg(windows)]
-        if let Some(boundary) = boundary {
+        if let Some(boundary) = &boundary {
             // What the machine says about the paths this description refuses,
             // read before a word of it is written: a refusal cuts the
             // inheritance on the path it refuses, so this is the last moment at
@@ -3994,7 +4091,14 @@ impl Sandbox {
             // an access-control list in the meantime is something this reading
             // would then be answering about rather than about the machine as
             // the session found it.
+            //
+            // And timed, like each of the four below it: every one of them is
+            // work a boundary does before an entry is written, and a slow start
+            // that went into one of them said nothing about which — see
+            // [`granting::writing::stretch`].
+            let began = std::time::Instant::now();
             let cut = granting::writing::inheriting(&boundary.entries);
+            granting::writing::stretch("paths read for which of them were inheriting", began);
 
             // The identity, resolved rather than made: there is one account for
             // the whole installation — see [`account`] — so what a session start
@@ -4002,35 +4106,43 @@ impl Sandbox {
             // back the SID every entry below is written for. A machine with no
             // such account, or nothing holding its password, refuses the session
             // in words that name the verb to run.
+            let began = std::time::Instant::now();
             let account = self.session_account()?;
+            granting::writing::stretch("session account resolved on the machine", began);
 
+            let began = std::time::Instant::now();
             let entries = entries::Entries::of_conversation(
                 boundary.data_dir,
                 boundary.conversation,
                 account.name(),
                 account.sid().text(),
             )?;
+            granting::writing::stretch("Conversation's record of its entries opened", began);
 
             // Remembered before it is written, and remembered by the
             // Conversation's entries rather than by the session: an entry is
             // this Conversation's and comes off when its work stops — see
             // [`entries::Entries::wrote`], which is also where the order is.
+            let began = std::time::Instant::now();
             entries.wrote(
                 granting::written_down(&boundary.entries, &boundary.standing),
                 cut.clone(),
             )?;
+            granting::writing::stretch("entries written down before they were written", began);
 
             // And the other half of the same list, in the machine's own record
             // rather than this Conversation's: nothing sweeps a standing entry,
             // so removing the account is the one thing that ever takes one off
             // and this is what it reads — see
             // [`granting::remembering::standing_wrote`].
+            let began = std::time::Instant::now();
             granting::remembering::standing_wrote(
                 boundary.data_dir,
                 account.name(),
                 account.sid().text(),
                 &granting::standing_among(&boundary.entries, &boundary.standing),
             )?;
+            granting::writing::stretch("machine's record of the standing entries written", began);
 
             granting::writing::write(&boundary.entries, account.sid().text(), &cut)?;
 
@@ -4044,6 +4156,16 @@ impl Sandbox {
             rendering.launched_by(self.verkstead.inside());
 
             closing = closing.behind(entries);
+        }
+
+        // And the other end of the line said above: how long the human waited,
+        // said once the last entry is on. Outside the arm that writes them so
+        // that the two are one pair — a description with a boundary in it says
+        // both or neither, and a boundary that refused says neither, the
+        // refusal itself being what the caller puts in front of the human
+        // instead.
+        if boundary.is_some() {
+            saying(&wrote_the_boundary(began.elapsed()));
         }
 
         Ok((rendering, closing))

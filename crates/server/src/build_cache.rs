@@ -824,6 +824,12 @@ fn compile_server(
     // than wrote in place — see [`crate::sandbox::Closing`] — and the one file
     // this joins in is the sccache it is running, read-only. A compile server
     // outlives every session anyway, so there is no ending here to hang one on.
+    //
+    // Timed where a boundary follows it, for the reason a session's rendering
+    // is — see [`crate::sandbox::Sandbox::command`].
+    #[cfg(windows)]
+    let rendering_began = std::time::Instant::now();
+
     #[allow(unused_mut)]
     let (mut rendering, _) = sandbox::rendered(Platform::HERE, &surface);
 
@@ -839,6 +845,11 @@ fn compile_server(
     // with each session starting a server of its own.
     #[cfg(windows)]
     {
+        sandbox::granting::writing::stretch(
+            "profile emptied and junctions made for its entries to go on",
+            rendering_began,
+        );
+
         let entries = sandbox::granting::entries(&surface, sandbox::servers_home());
 
         // Read before a word of it is written, for the reason a session's is:
@@ -847,9 +858,17 @@ fn compile_server(
         // Server refuses nothing — it has no agent account to cover — so what
         // this comes back with is empty, and it is asked all the same rather
         // than assumed.
+        //
+        // And timed, like each of the four below it: see
+        // [`sandbox::granting::writing::stretch`], which is where a slow
+        // boundary says which stretch of itself took the time.
+        let began = std::time::Instant::now();
         let cut = sandbox::granting::writing::inheriting(&entries);
+        sandbox::granting::writing::stretch("paths read for which of them were inheriting", began);
 
+        let began = std::time::Instant::now();
         let account = the_session_account(session_account)?;
+        sandbox::granting::writing::stretch("session account resolved on the machine", began);
 
         // Under a record of its own rather than a Conversation's: this boundary
         // belongs to the process rather than to a piece of work, and it is held
@@ -857,27 +876,36 @@ fn compile_server(
         // one boundary per name, so a compile server started again for a size
         // the human changed finds the entries it already has rather than
         // writing them afresh.
+        let began = std::time::Instant::now();
         let held = sandbox::entries::Entries::of_the_compile_server(
             data_dir,
             account.name(),
             account.sid().text(),
         )?;
+        sandbox::granting::writing::stretch("compile server's record of its entries opened", began);
 
         let standing = sandbox::granting::standing_of(&surface, sandbox::servers_home());
 
+        let began = std::time::Instant::now();
         held.wrote(
             sandbox::granting::written_down(&entries, &standing),
             cut.clone(),
         )?;
+        sandbox::granting::writing::stretch("entries written down before they were written", began);
 
         // And the machine's own half — see this call in `sandbox::command`,
         // which is the same two records written for the same reason.
+        let began = std::time::Instant::now();
         sandbox::granting::remembering::standing_wrote(
             data_dir,
             account.name(),
             account.sid().text(),
             &sandbox::granting::standing_among(&entries, &standing),
         )?;
+        sandbox::granting::writing::stretch(
+            "machine's record of the standing entries written",
+            began,
+        );
 
         sandbox::granting::writing::write(&entries, account.sid().text(), &cut)?;
 
