@@ -1175,10 +1175,11 @@ describe("the models a profile lists", () => {
 
 
 describe("browsing for the account's paths", () => {
-  /// The labels the fields are found by, which are the ones the form has always
-  /// had — each of them saying where the path it names is mounted.
-  const DIRECTORY = "Claude directory, mounted at ~/.claude";
-  const CONFIG = "Config file, mounted at ~/.claude.json";
+  /// The labels the fields are found by, which are the ones the form has — each
+  /// of them saying what a session is given of the path it names.
+  const DIRECTORY =
+    "Claude directory, which a session's ~/.claude is built from";
+  const CONFIG = "Config file, copied to a session's ~/.claude.json";
 
   /// The server's home, and an account kept under it: a `.claude` beside a
   /// `.claude.json`, which is what these fields exist to point at.

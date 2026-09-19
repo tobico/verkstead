@@ -3614,8 +3614,9 @@ async fn a_session_is_named_before_it_starts_and_writes_its_log_under_that_name(
 
         printf 'named=%s\n' "$name"
 
-        mkdir -p "$HOME/.claude/projects/stub"
-        printf '' > "$HOME/.claude/projects/stub/$name.jsonl"
+        project=$(pwd | tr -c 'a-zA-Z0-9\n' -)
+        mkdir -p "$HOME/.claude/projects/$project"
+        printf '' > "$HOME/.claude/projects/$project/$name.jsonl"
         "#,
     )
     .await;
@@ -3637,17 +3638,20 @@ async fn a_session_is_named_before_it_starts_and_writes_its_log_under_that_name(
         "the session should have been run under the name Verkstead recorded for it: {said:?}"
     );
 
-    let log = fixture
-        ._elsewhere
-        .path()
-        .join("grilling/.claude/projects/stub")
-        .join(format!("{name}.jsonl"));
+    // One level under the account's `projects/`, which is where the log is
+    // looked for: under the entry named for the Worktree the session ran in,
+    // which is the one entry of `projects/` the stub could write through.
+    let projects = fixture._elsewhere.path().join("grilling/.claude/projects");
+    let log = std::fs::read_dir(&projects)
+        .unwrap()
+        .map(|entry| entry.unwrap().path().join(format!("{name}.jsonl")))
+        .find(|log| log.is_file());
 
     assert!(
-        log.is_file(),
+        log.is_some(),
         "a log named for the session should land under the grilling Profile's own \
-         directory, at {}",
-        log.display()
+         directory, one level under {}",
+        projects.display()
     );
 }
 
@@ -3670,7 +3674,7 @@ async fn a_sessions_own_log_is_followed_line_by_line_while_it_runs() {
             shift
         done
 
-        log=$HOME/.claude/projects/verkstead/$name.jsonl
+        log=$HOME/.claude/projects/$(pwd | tr -c 'a-zA-Z0-9\n' -)/$name.jsonl
         mkdir -p "$(dirname "$log")"
 
         printf '{"type":"user","text":"Rate limiting"}\n' > "$log"
@@ -3820,7 +3824,7 @@ async fn a_running_sessions_log_is_read_back_as_a_conversation() {
             shift
         done
 
-        log=$HOME/.claude/projects/verkstead/$name.jsonl
+        log=$HOME/.claude/projects/$(pwd | tr -c 'a-zA-Z0-9\n' -)/$name.jsonl
         mkdir -p "$(dirname "$log")"
 
         printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading the **brief**."}]}}\n' > "$log"
@@ -4589,7 +4593,7 @@ async fn a_running_sessions_row_reads_the_last_thing_the_agent_said() {
             shift
         done
 
-        log=$HOME/.claude/projects/verkstead/$name.jsonl
+        log=$HOME/.claude/projects/$(pwd | tr -c 'a-zA-Z0-9\n' -)/$name.jsonl
         mkdir -p "$(dirname "$log")"
 
         printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading the brief."}]}}\n' > "$log"
@@ -4649,7 +4653,7 @@ async fn a_running_sessions_row_counts_the_turns_on_its_transcript() {
             shift
         done
 
-        log=$HOME/.claude/projects/verkstead/$name.jsonl
+        log=$HOME/.claude/projects/$(pwd | tr -c 'a-zA-Z0-9\n' -)/$name.jsonl
         mkdir -p "$(dirname "$log")"
 
         printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading the brief."}]}}\n' > "$log"
@@ -4916,7 +4920,7 @@ async fn a_finished_sessions_row_reads_its_closing_words() {
             shift
         done
 
-        log=$HOME/.claude/projects/verkstead/$name.jsonl
+        log=$HOME/.claude/projects/$(pwd | tr -c 'a-zA-Z0-9\n' -)/$name.jsonl
         mkdir -p "$(dirname "$log")"
 
         printf '\033[2m│ working │\033[0m\n'
@@ -14889,7 +14893,7 @@ async fn the_evidence_of_a_run_that_stopped_is_what_the_agent_said() {
             sleep 300
             ;;
         *)
-            log=$HOME/.claude/projects/verkstead/$name.jsonl
+            log=$HOME/.claude/projects/$(pwd | tr -c 'a-zA-Z0-9\n' -)/$name.jsonl
             mkdir -p "$(dirname "$log")"
 
             printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"The window type is not where the brief says it is, so I have stopped."}]}}\n' > "$log"

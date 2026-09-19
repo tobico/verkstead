@@ -1940,8 +1940,8 @@ impl Sessions {
         // the platform that joins the account into a session's profile by hard
         // link, a file the session replaced rather than wrote in place. Held by
         // the relay from here, which is the thing that knows when the session is
-        // over. See [`crate::sandbox::Closing`], which is nothing at all on
-        // either Unix.
+        // over. See [`crate::sandbox::Closing`], which on either Unix is at most
+        // a Claude session's login.
         //
         // **And this is where a boundary that cannot be made refuses a
         // session** — a Windows machine with no session account to run as, or a
@@ -2134,7 +2134,7 @@ impl Sessions {
                     // hears that the session is over, because the next thing
                     // that happens after that word is the next session being
                     // launched into the same profile. Off the runtime, being a
-                    // file copy at worst; nothing at all on either Unix.
+                    // file copy at worst.
                     if let Err(error) =
                         tokio::task::spawn_blocking(move || afterwards.close()).await
                     {

@@ -27,12 +27,12 @@ The vocabulary in bold is the project's, defined once in
 
 | Before | Now |
 | --- | --- |
-| `sandbox` / `work-sandbox` — bwrap around the whole of `~/src` | A **Sandbox** per **Conversation**: its **Worktree**, its Repo's git directory, its handoff directory, the **Agent Profile**'s claude pair, and nothing else of the machine |
+| `sandbox` / `work-sandbox` — bwrap around the whole of `~/src` | A **Sandbox** per **Conversation**: its **Worktree**, its Repo's git directory, its handoff directory, a **Built Root** made out of the **Agent Profile**'s claude account — its login, this Repo's memory and transcripts, and a `settings.json` of Verkstead's own — and nothing else of the machine |
 | `agent`, `grilling`, `next-stage`, `next-tasks` — one wrapper per thing you might start | One **Conversation**, which runs through Draft → Grilling → Direction → Implementing → Wrapping → Done |
 | `roadrunner` — a terminal per run, driving `.tasks/` and `docs/roadmaps/` | The orchestrator, driving the same two files off the Repo, with the run visible on a **Timeline** instead of scrolling past |
 | roadrunner's interruptions | A **Halt** and its stop **Notice** — pushed to your phone, read where the work is, and answered by one **Resume** |
 | askance — one queue of Question Sets for the machine | **Question Sets** on the Timeline of the Conversation they were asked from |
-| The skills installed under `~/.claude/skills` | **Skills** shipped inside the binary and read-only inside at a path no backend owns, with the account's own not reachable at all, so a session's behaviour is the product's |
+| The skills installed under `~/.claude/skills` | **Skills** shipped inside the binary and read-only inside at a path no backend owns, with the account's own not in a session's `~/.claude` at all, so a session's behaviour is the product's |
 | A gate at every commit | No commit gates. Review consolidates in the wrap-up, per pull request |
 
 What stays: **askance is a separate, maintained product**, and the
@@ -89,10 +89,21 @@ Three of those are worth understanding before the first Conversation:
   instead: a token in `secrets.yaml` and a `git_author` in `config.yaml`, both
   in the data directory, reaching each session as `GH_TOKEN` and git's own
   `GIT_CONFIG_*`. It is bound in **read-only**, which is the whole of what
-  naming one buys — so an **Agent Profile**'s account kept under it that a
-  session has to *write*, which is every Claude account, goes in `paths` as
-  well. That is the one composition worth saying outright, and it is why the
-  example above names `/home/you/.claude` beside the repositories.
+  naming one buys — so an **Agent Profile**'s account kept under it that has to
+  be *written*, which is every Claude account, goes in `paths` as well. That is
+  the one composition worth saying outright, and it is why the example above
+  names `/home/you/.claude` beside the repositories. A Claude session is not
+  given that directory whole: it gets a **Built Root** of Verkstead's own.
+  Still, the account is written three ways. A login or token refresh writes
+  through to `.credentials.json`. Memory and transcripts are written under two
+  entries in `projects/`, which the server makes there first when they are
+  missing. And what a session changed in its copy of `.claude.json` is merged
+  back into `/home/you/.claude.json` as it ends. That merge writes a new file
+  beside the old one and renames it into place, so it needs the directory the
+  file is in to be writable. In this example that directory is the read-only
+  home, so the merge is logged and skipped; the session itself runs as normal.
+  To have it carried back as well, keep the account somewhere of its own,
+  named whole in `paths`, rather than in a home bound read-only.
 - **`sandboxBinds`** is the **Sandbox Configuration** — every entry is a hole
   in the boundary, which is why one that is not there refuses startup rather
   than being skipped. Each is one absolute path, and every session gets every
@@ -237,6 +248,16 @@ or hardened one may not. Without them the file says so — "Cannot mount AppImag
 please check your FUSE setup" — and `--appimage-extract-and-run` is the way past
 it for a machine you cannot change.
 
+**A Claude session's `~/.claude` is a Built Root, not your account.** It is made
+fresh under `homes/<id>` in the Data Directory as each session starts, and bound
+over `~/.claude` in the empty HOME bubblewrap makes. Only three things of your
+account are bound into it, read-write: the login file, and this Repo's and this
+Worktree's entries under `projects/`, so a login and the Repo's memory and
+transcripts land in your account. Its `settings.json` is one Verkstead writes,
+and `~/.claude.json` is a copy of yours, merged back as the session ends. None
+of your plugins, hooks, skills, global `CLAUDE.md`, history or other
+repositories' transcripts are there.
+
 ### The desktop app, on a Mac
 
 `Verkstead-universal.dmg` holds `Verkstead.app`: the same server and the same
@@ -307,9 +328,10 @@ Linux rendered over Apple's sandbox instead of bubblewrap: the Conversation's
 Worktree, the Repo's git directory and the handoff directory writable, each
 Companion Repo at the mode it was set to, the Sandbox Configuration's entries,
 the Build Cache with the machine's one `sccache` behind it, a HOME of the
-session's own with the Agent Profile's account inside it, the Skills and the
-`verkstead` a session asks with read-only, the system read-only, `/tmp`, the
-network whole and unfiltered, and nothing else of the machine.
+session's own with a Built Root made out of the Agent Profile's account inside
+it, the Skills and the `verkstead` a session asks with read-only, the system
+read-only, `/tmp`, the network whole and unfiltered, and nothing else of the
+machine.
 
 **`/tmp` is the one place a Mac session reaches more than a Linux one**, and
 the one thing on that list that is not the same on both. On Linux it is a
@@ -330,10 +352,15 @@ one, and is refused every byte of it. What it can still read is the metadata: a
 path it may not open answers `stat` and then refuses to open, because that is
 what a Mac looks like from inside a policy and a rule per path to pretend
 otherwise would buy nothing. And what a mount makes out of nothing is made for
-real instead: the session's HOME, the account linked into it, and the directory
+real instead: the session's HOME, the Built Root in it, and the directory
 holding the Skills and the `verkstead` binary are all really there under the
 Data Directory, and what keeps one Conversation out of another's is the policy
-rather than the absence.
+rather than the absence. The Built Root reaches the account through symbolic
+links: to the login file, and to this Repo's two entries under `projects/`.
+Claude saves its login by writing a new file and renaming it over the old one,
+which replaces the link rather than writing through it. So a login changed
+inside is written back over the account's own as the session ends, and the
+link is made fresh for the session after.
 
 **Nothing outlives the app.** Exit off the menu is a stop where it stands, as it
 is on Linux, and so is the process being killed outright: every session and the
@@ -506,10 +533,10 @@ above made. A session runs on a pseudoconsole Verkstead opens for it, as that
 account rather than as you: the Conversation's Worktree, the Repo's git
 directory and the handoff directory writable, each Companion Repo at the mode
 it was set to, the Sandbox Configuration's entries, the Build Cache with the
-shared `CARGO_HOME` inside it, a profile of the Conversation's own with the
-Agent Profile's account joined into it, the Skills and the `verkstead` a
-session asks with read-only, Windows and Program Files read-only, a temporary
-directory of the session's own, the network — and nothing else of the machine.
+shared `CARGO_HOME` inside it, a profile of the Conversation's own with a Built
+Root made out of the Agent Profile's account inside it, the Skills and the
+`verkstead` a session asks with read-only, Windows and Program Files
+read-only, a temporary directory of the session's own, the network — and nothing else of the machine.
 Not your Documents and not the rest of your profile.
 
 **The boundary refuses rather than hides**, as a Mac's does and unlike Linux's:
@@ -536,10 +563,12 @@ reads back the refusal.
 written on your own directories.** An account reaches what it has been granted
 and nothing else, so there is nothing to mount and no policy to hand a process:
 each real path the description names gets an access-control entry for that
-account — a grant on the Worktree at the reach the description says, a grant on
-the Agent Profile's account, an entry in front of the account's own skills that
-refuses them, and a step through each directory on the way to any of those, so
-that a path can be resolved without its parent becoming something to list. Two
+account — a grant on the Worktree at the reach the description says; for a
+Claude account, a grant on the Built Root, one on each of the two `projects/`
+entries joined into it, and one on the login file itself, but none on the
+account directory as a whole; and a step through each directory on the way to
+any of those, so that a path can be resolved without its parent becoming
+something to list. Two
 things about those entries are worth knowing, because they are on directories of
 yours rather than on anything of Verkstead's:
 
@@ -564,19 +593,35 @@ to fall back to, and the log says which of the three it was.
 Conversation's sessions starts. `USERPROFILE` and `HOME` point at it, and
 `APPDATA`, `LOCALAPPDATA`, `TEMP` and `TMP` point inside it — so what npm
 caches, what a tool writes down and what either of them throws away lands there
-rather than in your own profile. The Agent Profile's account is joined into it,
-every directory by a directory junction and every file by a hard link, so the
-account an agent reads is the real one and a session starts logged in.
+rather than in your own profile.
+
+**A Claude account is not joined into it whole.** The profile gets a Built Root
+at `.claude`, and only three things of the account are joined into that. The
+login file is joined by a hard link, so a session starts logged in. This Repo's
+entry and this Worktree's entry under `projects/` are joined by directory
+junctions, so memory and transcripts land in the account. There is no other
+repository's transcripts, and none of your plugins, hooks, skills, global
+`CLAUDE.md` or history. The root's `settings.json` is one Verkstead writes.
+Beside the root, `.claude.json` is a copy of yours with your MCP servers taken
+out and this Repo marked as trusted. The account of any other agent type is still
+joined into the profile whole, every directory by a junction and every file by
+a hard link.
 
 **A hard link wants one volume**, which is the one thing about this that can
-refuse a session outright. Your account's directory and the Data Directory have
-to be on the same drive; where they are not, the session does not start and the
-log says which two paths those are and which of them to move. And a hard link
-stops being one file the moment something saves over it by writing a temporary
-file and renaming it into place, which is exactly how an agent saves its
-config — so a linked file the session replaced is written back over the
-account's own as the session ends, and the link is made fresh for the session
-after. Nothing a session wrote to its account is lost.
+refuse a session outright. Your account's files and the Data Directory have to
+be on the same drive; where they are not, the session does not start and the
+log says which two paths those are and which of them to move.
+
+**What a session changed in its account is carried back as it ends.** A hard
+link stops being one file the moment something saves over it by writing a
+temporary file and renaming it into place, which is how Claude saves its login.
+So a linked file the session replaced is written back over the account's own,
+and the link is made fresh for the session after; one still the same file is
+left alone. The copied `.claude.json` is merged rather than copied back: only
+what the session changed reaches your file as it is by then, so what another
+session or your own `claude` wrote in the meantime is kept, and your MCP servers
+are never touched. A session that changed nothing leaves the file exactly as it
+was.
 
 **A Conversation Terminal opens on Windows PowerShell**, in the Worktree, on
 the same pseudoconsole a session runs on. Not `pwsh`, even where you have

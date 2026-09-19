@@ -57,12 +57,6 @@ pub(crate) fn command(surface: &Surface) -> Rendering {
             } => {
                 bwrap.arg(flag(*reach)).arg(host).arg(inside);
             }
-            // Which is a bind too on this platform: an empty directory of
-            // Verkstead's own, read-only over whatever a session would
-            // otherwise have found there.
-            Access::Nothing { inside, empty } => {
-                bwrap.arg("--ro-bind").arg(empty).arg(inside);
-            }
             // `/proc` and `/dev` are made rather than bound: they are the
             // sandbox's own, which is what makes the unshared pid namespace
             // mean anything.
@@ -77,6 +71,36 @@ pub(crate) fn command(surface: &Surface) -> Rendering {
             }
             Access::Empty(path) => {
                 bwrap.arg("--dir").arg(path);
+            }
+            // Made on the host rather than in the namespace, and so an arm
+            // with no flag: a root has to be a real
+            // directory before anything can be bound out of it, and what
+            // reaches it is the bind said after this.
+            //
+            // **Failures are logged rather than raised**, for the reason the
+            // Mac's own making is: a rendering cannot refuse, and a root that
+            // could not be made is a bind that fails saying which path.
+            Access::Built(path) => {
+                if let Err(error) = super::emptied(path) {
+                    tracing::error!(
+                        error = ?error,
+                        built = %path.display(),
+                        "a directory a session's root is built in could not be made, so the \
+                         session will not find what was to be built there"
+                    );
+                }
+            }
+            // And a file written into that directory, on the host for the same
+            // reason and logged for the same reason.
+            Access::Written { path, contents } => {
+                if let Err(error) = std::fs::write(path, contents) {
+                    tracing::error!(
+                        error = ?error,
+                        written = %path.display(),
+                        "a file a session's root is given could not be written, so the session \
+                         will not find it"
+                    );
+                }
             }
         }
     }

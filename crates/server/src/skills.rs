@@ -17,10 +17,9 @@
 //!
 //! An account's own skills are hidden rather than merged with: Verkstead's fork
 //! is what a Conversation is grilled by, and a Profile is an account to run as
-//! rather than a second opinion about how to work. The mount used to do that
-//! hiding by landing on the account's own path; a mount at a path no backend
-//! owns covers nothing, so what a sandbox puts over [`CLAUDE_INSIDE_HOME`]
-//! instead is [`Skills::nothing`].
+//! rather than a second opinion about how to work. A Claude session is given a
+//! `.claude` of Verkstead's own with none of the account's skills in it — see
+//! the sandbox's `root` — so there is nothing of the account's to hide.
 //!
 //! Installing a skill is not invoking one, and the sandbox has no global
 //! `CLAUDE.md` to say what a session is for — the host's is not bound in, and
@@ -73,11 +72,6 @@ pub(crate) const INSIDE: &str = "/verkstead/skills";
 /// — the last name of [`INSIDE`], and the one the skills are written into
 /// under the Data Directory.
 const DIRECTORY: &str = "skills";
-
-/// And where a Claude session would otherwise find skills of its own, under
-/// whatever HOME a sandbox has: the account's, kept in the Profile's directory,
-/// which [`Skills::nothing`] is bound over instead.
-pub(crate) const CLAUDE_INSIDE_HOME: &str = ".claude/skills";
 
 /// The grilling skill, as a session is told to find it.
 ///
@@ -144,10 +138,6 @@ const FOLLOWING_UP: &str = "following-up/SKILL.md";
 #[derive(Debug, Clone)]
 pub struct Skills {
     path: PathBuf,
-
-    /// And an empty directory beside them, which is what covers the account's
-    /// own — see [`Skills::nothing`].
-    nothing: PathBuf,
 
     /// And where a session reads them, which is `path` itself wherever nothing
     /// can be mounted anywhere else — see [`Skills::inside`].
@@ -236,16 +226,7 @@ impl Skills {
 
         tracing::debug!(path = %path.display(), files = installed, "the bundled skills are installed");
 
-        let nothing = data_dir.join("nothing");
-
-        std::fs::create_dir_all(&nothing)
-            .with_context(|| format!("making {}", nothing.display()))?;
-
-        Ok(Skills {
-            path,
-            nothing,
-            inside,
-        })
+        Ok(Skills { path, inside })
     }
 
     /// Where they landed, which is what a sandbox reaches for.
@@ -272,19 +253,6 @@ impl Skills {
         crate::sandbox::under(&self.inside, skill)
             .display()
             .to_string()
-    }
-
-    /// And an empty directory of Verkstead's own, which a sandbox binds
-    /// read-only over [`CLAUDE_INSIDE_HOME`].
-    ///
-    /// What the mount used to do by standing on the account's own path: an
-    /// account's skills are hidden rather than merged with, and the case that
-    /// guards is an older fork of the ones Verkstead ships sitting in the
-    /// Profile's directory. Kept empty rather than made fresh per sandbox
-    /// because nothing is ever written into it — the bind is read-only, so a
-    /// session cannot fill it in and then read from it.
-    pub fn nothing(&self) -> &Path {
-        &self.nothing
     }
 }
 
@@ -1101,7 +1069,6 @@ mod tests {
     fn mounted() -> Skills {
         Skills {
             path: PathBuf::from(INSIDE),
-            nothing: PathBuf::new(),
             inside: PathBuf::from(INSIDE),
         }
     }
@@ -4108,24 +4075,6 @@ mod tests {
             std::fs::read_to_string(skills.path().join("grilling/SKILL.md")).unwrap(),
             skill("grilling/SKILL.md"),
             "what is installed is what the binary carries"
-        );
-    }
-
-    /// And the empty directory beside them, which is what covers the account's
-    /// own skills now that the mount doing that has moved to a path of
-    /// Verkstead's own.
-    #[test]
-    fn an_empty_directory_is_installed_for_the_accounts_own_to_be_hidden_behind() {
-        let state = tempfile::tempdir().unwrap();
-
-        let skills =
-            Skills::installed(Platform::HERE, state.path()).expect("this binary carries skills");
-
-        assert_eq!(skills.nothing(), state.path().join("nothing"));
-        assert_eq!(
-            std::fs::read_dir(skills.nothing()).unwrap().count(),
-            0,
-            "what is bound over an account's skills has to hold nothing of its own"
         );
     }
 

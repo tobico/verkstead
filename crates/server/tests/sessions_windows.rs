@@ -967,9 +967,9 @@ fn the_machines_account() -> Logon {
     }
 }
 
-/// The Agent Profile's account on the host: Claude's pair, with a file of its
-/// own in the directory half so that a session can be asked whether the account
-/// it is running under is the one the Profile named.
+/// The Agent Profile's account on the host: Claude's pair, with a login in
+/// the directory half so that a session can be asked whether the account it is
+/// running under is the one the Profile named.
 ///
 /// One account for all three roles rather than one apiece. What a session's
 /// profile joins in is the account of the Profile it was launched under, and
@@ -979,13 +979,16 @@ fn account(elsewhere: &Path) -> PathBuf {
     let account = elsewhere.join("claude");
 
     std::fs::create_dir_all(account.join(".claude")).unwrap();
-    std::fs::write(account.join(".claude").join("marker.txt"), THE_ACCOUNTS).unwrap();
+    std::fs::write(
+        account.join(".claude").join(".credentials.json"),
+        THE_ACCOUNTS,
+    )
+    .unwrap();
     std::fs::write(account.join(".claude.json"), "{}\n").unwrap();
 
-    // And the skills that account has of its own, which are the one thing
-    // inside it a session is meant to find nothing at — see the description's
-    // `Access::Nothing`, and the test below that attempts to read this file
-    // from inside a session's container.
+    // And the skills that account has of its own, which a session's root does
+    // not hold — see the test below that attempts to read this file from
+    // inside a session.
     std::fs::create_dir_all(account.join(".claude").join("skills")).unwrap();
     std::fs::write(
         account.join(".claude").join("skills").join("theirs.md"),
@@ -1629,8 +1632,8 @@ async fn force_stop_ends_a_session_where_it_stands() {
 /// names a Windows program reads for the account's own directories all point
 /// inside one directory under the Data Directory; the two halves they name are
 /// really there; what a session throws away lands in it; and the account the
-/// Profile named is really there, joined in by the junction and the hard link
-/// the open rendering makes.
+/// Profile named is really there: its login hard-linked into the `.claude`
+/// root built for Claude, and a copy of the file half of the pair beside it.
 ///
 /// **All five are the value Verkstead composed**, which is one of the things
 /// that got simpler when the boundary stopped being an AppContainer: a session
@@ -1653,7 +1656,7 @@ async fn a_session_runs_in_a_profile_of_the_conversations_own() {
 
         [System.IO.File]::WriteAllText((Under $env:TEMP 'thrown-away.txt'), 'gone with it')
 
-        Note 'marker' ([System.IO.File]::ReadAllText((Under $env:USERPROFILE '.claude\marker.txt')))
+        Note 'marker' ([System.IO.File]::ReadAllText((Under $env:USERPROFILE '.claude\.credentials.json')))
         Note 'config' ([System.IO.File]::ReadAllText((Under $env:USERPROFILE '.claude.json')))
 
         Say 'read the account'
@@ -1718,20 +1721,39 @@ async fn a_session_runs_in_a_profile_of_the_conversations_own() {
     assert_eq!(
         fixture.written("marker").await,
         THE_ACCOUNTS,
-        "and the account inside is the one the Profile named, joined in by the \
-         junction the rendering makes",
+        "and the login inside is the one the Profile named, hard-linked into \
+         the root the rendering builds",
     );
+    let config: serde_json::Value = serde_json::from_str(&fixture.written("config").await)
+        .expect("the copy of the file half reads as JSON");
+
     assert_eq!(
-        fixture.written("config").await,
-        "{}\n",
-        "and so is the file half of it, joined in by a hard link",
+        config
+            .as_object()
+            .map(|keys| keys.keys().map(String::as_str).collect::<Vec<_>>()),
+        Some(vec!["projects"]),
+        "and the file half of it is a copy of the account's own, which is empty, \
+         with nothing added but the trust seeded into it: {config}",
+    );
+    assert!(
+        config["projects"]
+            .as_object()
+            .is_some_and(|entries| !entries.is_empty()
+                && entries
+                    .values()
+                    .all(|entry| entry["hasTrustDialogAccepted"] == true)),
+        "the Repo and the Worktree trusted in it: {config}",
     );
 
     // Read from the host rather than from inside, which is the other half of
     // the same claim: the account's own directory is where the Profile said,
     // and the profile is somewhere else entirely.
     assert!(
-        fixture.account.join(".claude").join("marker.txt").is_file(),
+        fixture
+            .account
+            .join(".claude")
+            .join(".credentials.json")
+            .is_file(),
         "the account itself is untouched",
     );
 }
@@ -1748,7 +1770,7 @@ async fn a_session_runs_in_a_profile_of_the_conversations_own() {
 /// The four the description names, and the two it does not. The second pair is
 /// the whole point of there being a boundary at all: the human's own Documents,
 /// which nothing in a description ever mentions, and the account's own skills,
-/// which a description mentions in order to say a session finds nothing there.
+/// which a session's root does not hold and no description grants.
 /// Both are refused rather than missing, and this tells the two apart — see
 /// [`PREAMBLE`]'s `Reading`, which is why the answers are exception names.
 #[tokio::test]
@@ -1757,7 +1779,7 @@ async fn a_session_reaches_what_the_description_names_and_is_refused_what_it_doe
         r#"
         Note 'worktree' (Reading (Under (Here) 'README.md'))
         Note 'git' (Reading (Under '{git}' 'HEAD'))
-        Note 'account' (Reading (Under $env:USERPROFILE '.claude\marker.txt'))
+        Note 'account' (Reading (Under $env:USERPROFILE '.claude\.credentials.json'))
         Note 'skills' (Reading (Under '{skills}' 'grilling\SKILL.md'))
 
         Note 'documents' (Reading (Under '{documents}' 'private.txt'))
@@ -1772,7 +1794,10 @@ async fn a_session_reaches_what_the_description_names_and_is_refused_what_it_doe
     for (name, what) in [
         ("worktree", "the Conversation's own checkout"),
         ("git", "the Repo's git directory behind it"),
-        ("account", "the Profile's account, through the junction"),
+        (
+            "account",
+            "the Profile's login, through the hard link in the root",
+        ),
         ("skills", "the skills it is grilled by"),
     ] {
         let said = fixture.written(name).await;
@@ -1791,8 +1816,7 @@ async fn a_session_reaches_what_the_description_names_and_is_refused_what_it_doe
         ),
         (
             "their-skills",
-            "the account's own skills, which the description names as nothing \
-             at all",
+            "the account's own skills, which no description grants",
         ),
     ] {
         assert_eq!(

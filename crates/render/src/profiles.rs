@@ -55,8 +55,8 @@ pub enum AgentType {
 #[serde(tag = "agent_type")]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum ProfileAccount {
-    /// Claude Code's pair: what is bind-mounted over `~/.claude` and
-    /// `~/.claude.json` inside the sandbox.
+    /// Claude Code's pair: the directory a session's `~/.claude` is built from,
+    /// and the file its `~/.claude.json` is copied from.
     Claude {
         claude_dir: String,
         config_file: String,

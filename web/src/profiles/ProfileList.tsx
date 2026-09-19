@@ -147,11 +147,13 @@ export const PROFILE_REFUSAL: Record<ProfileSaved, string> = {
   DirNotAbsolute:
     "Give the claude directory's absolute path, starting with a slash.",
   DirMissing: "There is nothing at the claude directory's path.",
-  NotADirectory: "That is not a directory — `~/.claude` is mounted from one.",
+  NotADirectory:
+    "That is not a directory — a session's `~/.claude` is built from one.",
   ConfigNotAbsolute:
     "Give the config file's absolute path, starting with a slash.",
   ConfigMissing: "There is nothing at the config file's path.",
-  NotAFile: "That is not a file — `~/.claude.json` is mounted from one.",
+  NotAFile:
+    "That is not a file — a session's `~/.claude.json` is copied from one.",
   HomeNotAbsolute: "Give the home's absolute path, starting with a slash.",
   HomeMissing: "There is nothing at the home's path.",
   HomeNotADirectory:
@@ -209,7 +211,8 @@ const ACCOUNT_FIELDS: Record<AgentType, AccountField[]> = {
       key: "claude_dir",
       label: (
         <>
-          Claude directory, mounted at <code>~/.claude</code>
+          Claude directory, which a session's <code>~/.claude</code> is built
+          from
         </>
       ),
       placeholder: "/home/you/accounts/work/.claude",
@@ -218,7 +221,7 @@ const ACCOUNT_FIELDS: Record<AgentType, AccountField[]> = {
       key: "config_file",
       label: (
         <>
-          Config file, mounted at <code>~/.claude.json</code>
+          Config file, copied to a session's <code>~/.claude.json</code>
         </>
       ),
       placeholder: "/home/you/accounts/work/.claude.json",

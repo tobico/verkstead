@@ -575,12 +575,11 @@ async fn the_harness_under_the_servers_home_is_what_a_linux_session_runs() {
     assert_eq!(
         reported["the-accounts-own"], "absent",
         "and what a session is grilled by is still the product's: a grant said \
-         ahead of the refusal is one the refusal stands over",
+         for the `PATH` puts none of the account's own skills inside",
     );
     assert_eq!(
-        reported["account-skills"], "read",
-        "the directory covering them being no more a session's to fill in than \
-         the skills are",
+        reported["account-skills"], "absent",
+        "the root a session is given having no skills directory at all",
     );
 }
 

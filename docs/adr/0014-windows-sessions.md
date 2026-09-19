@@ -561,19 +561,41 @@ without one the session cannot read its login. The entry is on the account's
 own file, so it is written down and taken back with the rest of the
 Conversation's entries.
 
-**Linux gains a profile directory.** A Linux session has run in a tmpfs over
-the server's home with the account bound in, and nothing under the Data
-Directory of its own; a root has to exist somewhere to be bound, so Linux
-makes `homes/<id>` as the other two platforms do and binds the built `.claude`
-over the tmpfs home's.
+**Linux gains a profile directory.** A Linux session has run in an empty
+directory bubblewrap makes over the server's HOME, with the account bound in,
+and nothing under the Data Directory of its own. A root has to exist somewhere
+to be bound, so Linux makes `homes/<id>` as the other two platforms do, and
+binds the built `.claude` and the `.claude.json` copy into that empty HOME.
 
 **The write-back stays**, as *The fresh profile* decided it: nothing a session
 wrote to its account is lost, and a re-login from inside a run reaches the
-account. The pre-seeded trust entries reach it too, and the human accepted
-that. **And it now runs on every platform.** It was built for hard links, so
+account. **And it now runs on every platform.** It was built for hard links, so
 Linux and a Mac have had nothing to write back; a copied `.claude.json` follows
 nothing anywhere, so their renderings hand back the credentials file and the
 copy as this one does.
+
+**As built, three things are narrower than the paragraphs above.** They are
+decided in [ADR-0011](0011-agent-backends.md)'s amendment and hold on this
+platform as on the other two:
+
+- **The written `settings.json` is an allowlist**: the bypass key, and the
+  account's own `apiKeyHelper` and `env` where it has them, because those are
+  how an API-key login reaches the model. No `hooks`, plugins or permissions.
+- **The `.claude.json` copy has `mcpServers` taken out**, at the top level and
+  under each `projects` entry, because those are the human's own MCP servers.
+- **The `.claude.json` write-back is a merge by key, not a whole-file copy.**
+  The identity check still decides the credentials file: a link the session
+  replaced is written back and made again, and one still the same file is left
+  alone. But a copy is never the same file as the account's, and sessions end
+  in any order, so writing it back whole would undo what another session or the
+  human's own `claude` wrote meanwhile, and would delete the MCP servers the
+  copy never had. So only the top-level keys and `projects` entries the session
+  changed are written into the account's file as it is at session end, a key
+  the session removed is removed, and `mcpServers` is never written or removed.
+  The seeded trust reaches the account only in an entry the session itself
+  changed, and a session that changed nothing leaves the file byte for byte as
+  it was. The human approved this narrowing of *The fresh profile*'s
+  write-back.
 
 ## What stays as it was
 
