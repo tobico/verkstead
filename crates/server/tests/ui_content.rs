@@ -1990,6 +1990,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
                         config_file: std::path::PathBuf::from(format!("{home}/.claude.json")),
                     },
                     models: models.iter().map(|model| (*model).to_owned()).collect(),
+                    memory: true,
                 },
             )
             .await

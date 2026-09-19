@@ -582,6 +582,7 @@ async fn a_share_says_nothing_about_the_machine_it_was_taken_on() {
                 config_file: PathBuf::from("/srv/accounts/fable/.claude.json"),
             },
             models: vec!["claude-fable-5".to_owned()],
+            memory: true,
         },
     )
     .await

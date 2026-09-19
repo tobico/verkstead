@@ -204,8 +204,8 @@ _Avoid_: state directory, work dir, scratch space, cache
 **Sandbox**:
 What a session runs inside: its Conversation's Worktree, the Repo's git
 directory and the Conversation's handoff directory writable, the Agent
-Profile's account as a **Built Root** at `~/.claude` and a copy of its
-`~/.claude.json` — never the account whole — the system, the Skills,
+Profile's account as a **Built Root** — never the account whole, and for Claude
+a copy of its `~/.claude.json` beside it — the system, the Skills,
 the Conversation's **Attachments** and the Verkstead executable read-only in a
 directory of Verkstead's own, and nothing else of the machine at all — not
 even the checkout the Worktree was made from. The directories a session's own
@@ -1256,14 +1256,13 @@ A coding-agent account Verkstead can run a session under: an agent type, the
 account itself, the models that account can run, and a name where there is
 anything for one to tell apart. **The account's shape is its type's**, rather
 than one shape every Profile is assumed to have — Claude Code's is the directory
-and config file pair at `~/.claude` / `~/.claude.json`, which a session is
-given as a **Built Root** and a copy rather than whole, and every backend after it keeps its whole account under one
-relocatable home — Codex's at `~/.codex`, Grok Build's at `~/.grok`, and
-OpenCode's at neither, opencode keeping no dot-directory of its own: its home is
-the directory its XDG config and data directories sit inside, and both are bound
-at those defaults in a HOME that is fresh enough for them to resolve there.
-Whichever it is, a session is given something out of that one account and no
-other, which is what keeps accounts separate. A type is offered
+and config file pair at `~/.claude` / `~/.claude.json`, and every backend after
+it keeps its whole account under one relocatable home — Codex's at `~/.codex`,
+Grok Build's at `~/.grok`, and OpenCode's at neither, opencode keeping no
+dot-directory of its own: its home is the directory its XDG config and data
+directories sit inside. Whichever it is, a session is given a **Built Root**
+made out of that one account and no other, never the account whole, which is
+what keeps accounts separate. A type is offered
 to the human only once it can launch the real thing: one that cannot would be a
 lie in a picker, so the form offers Claude, Codex, Grok Build and OpenCode, and
 a Profile of a type whose stage has not landed is one saved over the API until
@@ -1272,6 +1271,18 @@ models are a list and the list is the Profile's own, because different Profiles
 reach different accounts and each can launch different things; none of them is a
 default, so which one a session runs is always picked — as a Pairing, alongside
 the Profile itself.
+**Every Profile has a memory switch**, whatever its type: whether the account's
+memory store is shared into a session's Built Root, or the session starts with
+an empty store of its own. It is a fact about the Profile, stored beside its
+account, and **on by default** — on for every Profile saved before the switch
+existed too, because sharing is what the human had been getting, and the switch
+is a way to stop rather than a way to start. **On**, memory a session writes and
+the transcript it leaves are the account's, and the next session reads them.
+**Off**, the store is the root's own and empty as each session starts: fresh
+memory, none of the human's transcripts in reach, and the session's own
+transcript written into the root, where Verkstead reads it from. The login and
+the written configuration are the same either way. On the Profile form it is one
+checkbox, drawn for every agent type; the cards and the pickers do not show it.
 **A Profile need not be named.** The harness's mark and the model already say
 the whole of what most accounts are — the one Claude Code login on this machine,
 running Fable 5 — and a box that had to be filled in before a save would be a
@@ -1306,34 +1317,64 @@ _Avoid_: account, identity, persona, agent config, default profile (**Default**
 is what an unnamed one is *called*, not one anything falls back to)
 
 **Built Root**:
-The `~/.claude` a Claude session runs in. It is a directory of Verkstead's own
-at `homes/<id>/.claude` under the Data Directory, emptied and made again as
-each of the Conversation's sessions starts. On Linux, a session or terminal that
-starts while another of the Conversation's is still running shares the root
-as it is instead, because emptying it would unmount what is joined into the
-running one. It holds an allowlist out of the
-**Agent Profile**'s account, and nothing else. **The credentials file**, linked,
-so a login or a token refresh from inside lands in the account. **Two entries
-under `projects/`**, joined read-write and made in the account first where
-missing: the Repo's main checkout's, which holds Claude's memory of the Repo,
-and the Worktree's, where the session's transcript is written — no other
-repository's. **A `settings.json` Verkstead writes**, holding the key that
-skips the bypass-permissions consent, and the account's own `apiKeyHelper` and
-`env` where the account has them, because those are how an API-key login
-reaches the model. Nothing else of the account's settings goes in: no hooks,
-plugins or permissions.
-Beside the root, in the profile, `.claude.json` is a **copy** of the account's.
-The copy has the account's MCP servers taken out, and the Repo and the Worktree
-seeded as trusted. Everything else under the account's `~/.claude` is absent:
-plugins, commands, agents, skills, the global `CLAUDE.md`, history, and whatever
-Claude adds next.
+What a session is given of its **Agent Profile**'s account, whatever the
+harness: the `~/.claude` a Claude session runs in, the `~/.codex` a Codex one
+does, the `~/.grok` a Grok Build one does, and the config and data directories
+under `~/.config/opencode` and `~/.local/share/opencode` an OpenCode one does.
+Each is a directory of Verkstead's own at `homes/<id>` under the Data
+Directory, emptied and made again as each of the Conversation's sessions starts
+— except while something of the Conversation is still running in what would be
+emptied, which the next session or terminal is given as it stands instead. That
+is the root on Linux, where emptying it would unmount what is joined into the
+running session, and on a Mac and on Windows the `homes/<id>` directory too,
+which holds every root of the Conversation and is what a launch there would
+delete. A Codex terminal beside a Claude session has a root of its own, and
+builds it.
+**One rule for every harness, in three parts**, each harness's own files filling
+them:
+**The login, linked**, so a login or a token refresh from inside lands in the
+account: Claude's `.credentials.json`, and `auth.json` for the other three.
+An account with no login gets none.
+**The memory store, joined read-write only where the Profile's memory switch
+is on**, and made in the account first where missing. Claude's is two entries
+under `projects/` — the Repo's main checkout's, which holds Claude's memory of
+the Repo, and the Worktree's, where the session's transcript is written — and
+no other repository's. Codex's is `sessions/`, where its rollouts go, and
+`memories/`. Grok Build's is `sessions/` and `memory/`. OpenCode's is its
+whole data directory, because the database in it runs in write-ahead-log mode
+and one joined a file at a time will not open; its login is in there too.
+With the switch off each of those is the root's own and empty, and for
+OpenCode `auth.json` alone is linked into a data directory of the root's own.
+**A configuration file Verkstead writes**, carrying only what the account's
+own says about reaching a model. Claude's `settings.json` holds the key that
+skips the bypass-permissions consent, and the account's `apiKeyHelper` and
+`env`. Codex's `config.toml` holds `model_provider` and `model_providers`.
+Grok Build's `config.toml` holds `model`, `model_providers`, `auth_provider`,
+`auth`, `grok_com_config`, and where models are listed and reached out of
+`endpoints`. OpenCode's `opencode.json`, the only file in its config
+directory, holds `provider`, read from `opencode.json` or `opencode.jsonc`.
+Nothing else of the account's configuration goes in: no hooks, plugins,
+permissions, rules or MCP servers. It is not written back.
+Beside a Claude root, in the profile, `.claude.json` is a **copy** of the
+account's. The copy has the account's MCP servers taken out, and the Repo and
+the Worktree seeded as trusted. Codex's trust is said on its launch line
+instead. Everything else of an account is absent: plugins, commands, agents,
+skills, rules, a global instructions file, history, databases outside the
+store, and whatever a harness adds next.
 **What a session changed is carried back as it ends**, on all three platforms.
-A credentials file the session replaced, rather than wrote through, is written
-back over the account's own; one still the same file as the account's is left
-alone. The `.claude.json` copy is merged rather than written back whole: only
-the keys and `projects` entries the session changed reach the account's file as
-it is by then, the account's MCP servers are never touched, and a session that
-changed nothing leaves the file exactly as it was.
+A login the session replaced, rather than wrote through, is written back over
+the account's own; one still the same file as the account's is left alone; and
+a login made where the account had none is handed to it. A Grok Build login on
+Linux is the one copied rather than linked, because grok saves it only by
+renaming a file over it and a bind refuses that; it is merged back by login
+scope, the way the `.claude.json` copy is. The `.claude.json` copy is merged rather than
+written back whole: only the keys and `projects` entries the session changed
+reach the account's file as it is by then, the account's MCP servers are never
+touched, and a session that changed nothing leaves the file exactly as it was.
+**A session's transcript is read where it really is on the host**: in the
+account's store when memory is shared, and in the root under `homes/<id>` when
+it is not. On Linux the root's joined store is a bind inside the session's
+namespace, so on the host the account's directory is the only place that log is.
 What a Profile stores, and how the setup wizard finds an account, do not change:
 a Built Root is what a session is *given*.
 _Avoid_: account home, joined account, claude home, mounted account

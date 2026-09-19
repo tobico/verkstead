@@ -77,6 +77,10 @@ sqlx.workspace = true
 # now, which is where it was when only the tests made directories.
 tempfile.workspace = true
 time.workspace = true
+# Reading the provider keys out of a Codex account's `config.toml`, and writing
+# the one a session's root is given — see `sandbox/root.rs`. The release already
+# in the lockfile, which a build dependency brought in.
+toml = "0.8"
 # `process` and `io-util` are the session half: a grilling session is a child
 # process whose output is read as it arrives, and neither the spawning nor the
 # reading can block the runtime the server is answering requests on.

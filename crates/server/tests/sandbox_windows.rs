@@ -136,6 +136,9 @@ const THEIR_SKILL: &str = "# what the account would have been grilled by\n";
 const CREDENTIALS: &str = ".credentials.json";
 const THE_LOGIN: &str = "{\"the\": \"login\"}";
 
+/// And where Codex keeps one inside `~/.codex`, and Grok Build inside `~/.grok`.
+const AUTH: &str = "auth.json";
+
 /// Another repository's `projects/` entry in the account, which is no session's
 /// business.
 const ANOTHER_REPOSITORY: &str = "C--somewhere-else";
@@ -554,6 +557,166 @@ impl Grilling {
         entries
     }
 
+    /// Run this fixture's sessions under a Codex account instead, holding what
+    /// a Codex account that has been used holds: a login, a configuration
+    /// naming a provider beside the human's MCP servers, a rollout and a memory,
+    /// and the human's own rules and instructions — really there, so that a
+    /// probe finding them refused or absent has found the boundary.
+    async fn under_codex(&mut self, memory: bool) {
+        let codex = self.codex_dir();
+
+        for dir in ["sessions", "memories", "rules"] {
+            std::fs::create_dir_all(codex.join(dir)).unwrap();
+            std::fs::write(codex.join(dir).join(MARKER), SAID).unwrap();
+        }
+
+        std::fs::write(codex.join(AUTH), THE_LOGIN).unwrap();
+        std::fs::write(codex.join("AGENTS.md"), "# the human's own\n").unwrap();
+        std::fs::write(
+            codex.join("config.toml"),
+            "model_provider = \"proxy\"\n\n[model_providers.proxy]\n\
+             base_url = \"https://proxy.example/v1\"\n\n\
+             [mcp_servers.the-humans]\ncommand = \"npx\"\n",
+        )
+        .unwrap();
+
+        self.profile = store::create_profile(
+            &self.pool,
+            &store::ProfileFacts {
+                name: Some("codex".to_owned()),
+                account: store::Account::Codex { home: codex },
+                models: vec!["gpt-5-codex".to_owned()],
+                memory,
+            },
+        )
+        .await
+        .unwrap()
+        .expect("the Profile saves");
+    }
+
+    /// The Codex account's own `~/.codex` on the host — see
+    /// [`Grilling::under_codex`].
+    fn codex_dir(&self) -> PathBuf {
+        self._watched.path().join("codex-account/.codex")
+    }
+
+    /// And the root a Codex session is given in its place, inside the profile.
+    fn codex_root_inside(&self) -> PathBuf {
+        self.profile_dir().join(".codex")
+    }
+
+    /// Run this fixture's sessions under an OpenCode account instead, holding
+    /// what an opencode 1.18.30 account that has been used holds: a login and a
+    /// store in its data directory, and in its config directory an
+    /// `opencode.jsonc` naming a provider beside the human's MCP servers, and
+    /// the human's own skills — really there, so that a probe finding them
+    /// refused or absent has found the boundary.
+    async fn under_opencode(&mut self, memory: bool) {
+        let home = self.opencode_home();
+        let config = home.join(".config").join("opencode");
+        let data = home.join(".local").join("share").join("opencode");
+
+        std::fs::create_dir_all(config.join("skills")).unwrap();
+        std::fs::write(config.join("skills").join(MARKER), SAID).unwrap();
+        std::fs::write(
+            config.join("opencode.jsonc"),
+            "{\n  // The human's own proxy.\n  \"provider\": { \"proxy\": {} },\n  \
+             \"mcp\": { \"the-humans\": {} },\n}\n",
+        )
+        .unwrap();
+
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(data.join(AUTH), THE_LOGIN).unwrap();
+        std::fs::write(data.join("opencode.db"), SAID).unwrap();
+
+        self.profile = store::create_profile(
+            &self.pool,
+            &store::ProfileFacts {
+                name: Some("opencode".to_owned()),
+                account: store::Account::OpenCode { home },
+                models: vec!["opencode/big-pickle".to_owned()],
+                memory,
+            },
+        )
+        .await
+        .unwrap()
+        .expect("the Profile saves");
+    }
+
+    /// The home the OpenCode account is kept in on the host — see
+    /// [`Grilling::under_opencode`].
+    fn opencode_home(&self) -> PathBuf {
+        self._watched.path().join("opencode-account")
+    }
+
+    /// And the account's data directory in it.
+    fn opencode_data(&self) -> PathBuf {
+        self.opencode_home()
+            .join(".local")
+            .join("share")
+            .join("opencode")
+    }
+
+    /// And the two directories an OpenCode session is given in their place,
+    /// inside the profile: the config directory and the data directory.
+    fn opencode_inside(&self) -> [PathBuf; 2] {
+        [
+            self.profile_dir().join(".config").join("opencode"),
+            self.profile_dir()
+                .join(".local")
+                .join("share")
+                .join("opencode"),
+        ]
+    }
+
+    /// Run this fixture's sessions under a Grok Build account instead, holding
+    /// what a Grok Build 1.0.13 account that has been used holds: a login, a
+    /// configuration reaching a model beside the human's MCP servers, a session
+    /// store and a memory, and the human's own skills — really there, so that a
+    /// probe finding them refused or absent has found the boundary.
+    async fn under_grok(&mut self, memory: bool) {
+        let grok = self.grok_dir();
+
+        for dir in ["sessions", "memory", "skills"] {
+            std::fs::create_dir_all(grok.join(dir)).unwrap();
+            std::fs::write(grok.join(dir).join(MARKER), SAID).unwrap();
+        }
+
+        std::fs::write(grok.join(AUTH), THE_LOGIN).unwrap();
+        std::fs::write(grok.join("pager.toml"), "# the human's own\n").unwrap();
+        std::fs::write(
+            grok.join("config.toml"),
+            "[model.the-proxy]\nbase_url = \"https://proxy.example/v1\"\n\n\
+             [mcp_servers.the-humans]\ncommand = \"npx\"\n",
+        )
+        .unwrap();
+
+        self.profile = store::create_profile(
+            &self.pool,
+            &store::ProfileFacts {
+                name: Some("grok".to_owned()),
+                account: store::Account::Grok { home: grok },
+                models: vec!["grok-4.6".to_owned()],
+                memory,
+            },
+        )
+        .await
+        .unwrap()
+        .expect("the Profile saves");
+    }
+
+    /// The Grok Build account's own `~/.grok` on the host — see
+    /// [`Grilling::under_grok`].
+    fn grok_dir(&self) -> PathBuf {
+        self._watched.path().join("grok-account/.grok")
+    }
+
+    /// And the root a Grok Build session is given in its place, inside the
+    /// profile.
+    fn grok_root_inside(&self) -> PathBuf {
+        self.profile_dir().join(".grok")
+    }
+
     /// The directories of the human's and the machine's own that this
     /// fixture's description grants — which is what a boundary's ending has to
     /// leave as it found them.
@@ -746,6 +909,7 @@ async fn grilling() -> Grilling {
                 config_file,
             },
             models: vec!["claude-opus-5".to_owned()],
+            memory: true,
         },
     )
     .await
@@ -1414,6 +1578,522 @@ async fn a_login_read_through_the_link_and_saved_by_rename_is_the_accounts_after
             .expect("the account has its login"),
         "{\"refreshed\": true}",
         "which is written back over the account's own login as the session ends"
+    );
+}
+
+/// With the Profile's memory switched off, a session's root holds a `projects/`
+/// of its own and nothing in it, and no entry is granted on the account's own
+/// `projects/` entries — so they are refused like the rest of the account, even
+/// where an earlier session with memory on made them.
+///
+/// What the session writes there is the root's, under the Conversation's own
+/// profile on the host, which is where its transcript is looked for.
+#[tokio::test]
+async fn a_root_without_memory_has_an_empty_projects_of_its_own() {
+    let mut fixture = grilling().await;
+
+    // Made in the account by a sandbox with memory on, as a Profile switched
+    // off after sessions ran under it has them.
+    let entries = fixture.joined_entries();
+
+    fixture.profile.memory = false;
+
+    let projects = fixture.root_inside().join("projects");
+    let transcript = projects
+        .join(entries[0].file_name().unwrap())
+        .join("the-session.jsonl");
+    let quoted = |path: &Path| path.display().to_string().replace('\'', "''");
+
+    let mut asked = vec![
+        directory("projects-in-the-root", &projects),
+        file("credentials", fixture.root_inside().join(CREDENTIALS)),
+    ];
+
+    for (name, entry) in ["an-entry", "the-other-entry"].into_iter().zip(&entries) {
+        asked.push(directory(name, entry));
+    }
+
+    let classified = fixture.probe_running(&format!(
+        "{}\
+         Report 'listed' ([System.IO.Directory]::GetFileSystemEntries('{projects}').Length)\r\n\
+         [void][System.IO.Directory]::CreateDirectory('{entry}')\r\n\
+         [System.IO.File]::WriteAllText('{transcript}', '{{\"turn\": 1}}')\r\n",
+        classifying(&asked),
+        projects = quoted(&projects),
+        entry = quoted(transcript.parent().unwrap()),
+        transcript = quoted(&transcript),
+    ));
+
+    assert_eq!(
+        said(&classified, "projects-in-the-root"),
+        "write",
+        "the root's own `projects/` is there and writable, and the probe said: {classified:?}"
+    );
+    assert_eq!(
+        said(&classified, "listed"),
+        "0",
+        "and it starts empty, and the probe said: {classified:?}"
+    );
+    assert_eq!(
+        said(&classified, "credentials"),
+        "write",
+        "while the login is joined either way, and the probe said: {classified:?}"
+    );
+
+    for name in ["an-entry", "the-other-entry"]
+        .into_iter()
+        .take(entries.len())
+    {
+        assert_eq!(
+            said(&classified, name),
+            "refused",
+            "no entry is granted on the account's own `projects/` entries, and the \
+             probe said: {classified:?}"
+        );
+    }
+
+    assert_eq!(
+        std::fs::read_to_string(&transcript).unwrap(),
+        "{\"turn\": 1}",
+        "the transcript is in the root on the host, one level under `projects/` \
+         where it is looked for"
+    );
+    assert!(
+        !entries[0].join("the-session.jsonl").exists(),
+        "and not in the account"
+    );
+}
+
+/// A Codex session's `.codex` is a root of Verkstead's own: the login hard-linked
+/// in with an entry of its own, `sessions/` and `memories/` junctioned in, and a
+/// `config.toml` Verkstead wrote carrying the account's provider and none of its
+/// MCP servers. The human's rules and instructions are not in it, and nothing
+/// grants the account's own directory — so reached by its real path, it is
+/// refused.
+#[tokio::test]
+async fn a_codex_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
+    let mut fixture = grilling().await;
+    fixture.under_codex(true).await;
+
+    let root = fixture.codex_root_inside();
+    let account = fixture.codex_dir();
+    let config = root.join("config.toml");
+    let rollout = root.join("sessions").join("rollout-the-session.jsonl");
+    let quoted = |path: &Path| path.display().to_string().replace('\'', "''");
+
+    let asked = [
+        directory("root", &root),
+        file("login", root.join(AUTH)),
+        directory("sessions", root.join("sessions")),
+        directory("memories", root.join("memories")),
+        directory("rules", root.join("rules")),
+        file("agents-md", root.join("AGENTS.md")),
+        directory("the-accounts-own", &account),
+        directory("the-accounts-rules", account.join("rules")),
+    ];
+
+    let classified = fixture.probe_running(&format!(
+        "{}{}\
+         [System.IO.File]::WriteAllText('{rollout}', '{{}}')\r\n",
+        classifying(&asked),
+        reading("config", &quoted(&config)),
+        rollout = quoted(&rollout),
+    ));
+
+    for (name, word) in [
+        ("root", "write"),
+        ("login", "write"),
+        ("sessions", "write"),
+        ("memories", "write"),
+        ("rules", "absent"),
+        ("agents-md", "absent"),
+        ("the-accounts-own", "refused"),
+        ("the-accounts-rules", "refused"),
+    ] {
+        assert_eq!(
+            said(&classified, name),
+            word,
+            "{name} should be {word}, and the probe said: {classified:?}"
+        );
+    }
+
+    let config = said(&classified, "config");
+    assert!(
+        config.contains("model_provider = \"proxy\"")
+            && config.contains("[model_providers.proxy]")
+            && !config.contains("mcp_servers"),
+        "the written configuration carries the provider and nothing else: {config}"
+    );
+    assert!(
+        account
+            .join("sessions")
+            .join("rollout-the-session.jsonl")
+            .is_file(),
+        "and a rollout a session writes is on the account"
+    );
+}
+
+/// With the Profile's memory switched off, a Codex root's `sessions/` and
+/// `memories/` are its own and empty, and nothing is granted on the account's —
+/// so they are refused like the rest of the account. The rollout a session
+/// writes is in the root on the host, where it is looked for.
+#[tokio::test]
+async fn a_codex_root_without_memory_has_a_store_of_its_own() {
+    let mut fixture = grilling().await;
+    fixture.under_codex(false).await;
+
+    let root = fixture.codex_root_inside();
+    let account = fixture.codex_dir();
+    let sessions = root.join("sessions");
+    let rollout = sessions.join("rollout-the-session.jsonl");
+    let quoted = |path: &Path| path.display().to_string().replace('\'', "''");
+
+    let asked = [
+        directory("sessions", &sessions),
+        directory("memories", root.join("memories")),
+        file("login", root.join(AUTH)),
+        directory("the-accounts-sessions", account.join("sessions")),
+    ];
+
+    let classified = fixture.probe_running(&format!(
+        "{}\
+         Report 'listed' ([System.IO.Directory]::GetFileSystemEntries('{sessions}').Length)\r\n\
+         [System.IO.File]::WriteAllText('{rollout}', '{{}}')\r\n",
+        classifying(&asked),
+        sessions = quoted(&sessions),
+        rollout = quoted(&rollout),
+    ));
+
+    for (name, word) in [
+        ("sessions", "write"),
+        ("memories", "write"),
+        ("login", "write"),
+        ("the-accounts-sessions", "refused"),
+        ("listed", "0"),
+    ] {
+        assert_eq!(
+            said(&classified, name),
+            word,
+            "{name} should be {word}, and the probe said: {classified:?}"
+        );
+    }
+
+    assert!(rollout.is_file(), "the rollout is in the root on the host");
+    assert!(
+        !account
+            .join("sessions")
+            .join("rollout-the-session.jsonl")
+            .exists(),
+        "and not in the account"
+    );
+}
+
+/// A Codex login written inside, in place as codex writes it, is the account's
+/// login through the hard link and its entry.
+#[tokio::test]
+async fn a_codex_login_written_inside_is_the_accounts() {
+    let mut fixture = grilling().await;
+    fixture.under_codex(true).await;
+
+    let login = fixture.codex_root_inside().join(AUTH);
+    let quoted = login.display().to_string().replace('\'', "''");
+
+    let classified = fixture.probe_running(&format!(
+        "{CLASSIFYING}\r\n\
+         Report 'read' ([System.IO.File]::ReadAllText('{quoted}'))\r\n\
+         [System.IO.File]::WriteAllText('{quoted}', '{{\"refreshed\": true}}')\r\n\
+         Report 'written' 'yes'\r\n"
+    ));
+
+    assert_eq!(said(&classified, "read"), THE_LOGIN);
+    assert_eq!(said(&classified, "written"), "yes");
+    assert_eq!(
+        std::fs::read_to_string(fixture.codex_dir().join(AUTH)).unwrap(),
+        "{\"refreshed\": true}",
+        "the login written inside is the account's"
+    );
+}
+
+/// A Grok Build session's `.grok` is a root of Verkstead's own: the login
+/// hard-linked in with an entry of its own, `sessions/` and `memory/`
+/// junctioned in, and a `config.toml` Verkstead wrote carrying what reaches the
+/// model and none of the human's MCP servers. The human's skills and interface
+/// settings are not in it, and nothing grants the account's own directory — so
+/// reached by its real path, it is refused.
+#[tokio::test]
+async fn a_grok_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
+    let mut fixture = grilling().await;
+    fixture.under_grok(true).await;
+
+    let root = fixture.grok_root_inside();
+    let account = fixture.grok_dir();
+    let config = root.join("config.toml");
+    let log = root.join("sessions").join("updates.jsonl");
+    let quoted = |path: &Path| path.display().to_string().replace('\'', "''");
+
+    let asked = [
+        directory("root", &root),
+        file("login", root.join(AUTH)),
+        directory("sessions", root.join("sessions")),
+        directory("memory", root.join("memory")),
+        directory("skills", root.join("skills")),
+        file("pager", root.join("pager.toml")),
+        directory("the-accounts-own", &account),
+        directory("the-accounts-skills", account.join("skills")),
+    ];
+
+    let classified = fixture.probe_running(&format!(
+        "{}{}\
+         [System.IO.File]::WriteAllText('{log}', '{{}}')\r\n",
+        classifying(&asked),
+        reading("config", &quoted(&config)),
+        log = quoted(&log),
+    ));
+
+    for (name, word) in [
+        ("root", "write"),
+        ("login", "write"),
+        ("sessions", "write"),
+        ("memory", "write"),
+        ("skills", "absent"),
+        ("pager", "absent"),
+        ("the-accounts-own", "refused"),
+        ("the-accounts-skills", "refused"),
+    ] {
+        assert_eq!(
+            said(&classified, name),
+            word,
+            "{name} should be {word}, and the probe said: {classified:?}"
+        );
+    }
+
+    let config = said(&classified, "config");
+    assert!(
+        config.contains("[model.the-proxy]") && !config.contains("mcp_servers"),
+        "the written configuration carries the model and nothing else: {config}"
+    );
+    assert!(
+        account.join("sessions").join("updates.jsonl").is_file(),
+        "and a log a session writes is on the account"
+    );
+}
+
+/// With the Profile's memory switched off, a Grok Build root's `sessions/` and
+/// `memory/` are its own and empty, and nothing is granted on the account's —
+/// so they are refused like the rest of the account. The log a session writes
+/// is in the root on the host, where it is looked for.
+#[tokio::test]
+async fn a_grok_root_without_memory_has_a_store_of_its_own() {
+    let mut fixture = grilling().await;
+    fixture.under_grok(false).await;
+
+    let root = fixture.grok_root_inside();
+    let account = fixture.grok_dir();
+    let sessions = root.join("sessions");
+    let log = sessions.join("updates.jsonl");
+    let quoted = |path: &Path| path.display().to_string().replace('\'', "''");
+
+    let asked = [
+        directory("sessions", &sessions),
+        directory("memory", root.join("memory")),
+        file("login", root.join(AUTH)),
+        directory("the-accounts-sessions", account.join("sessions")),
+    ];
+
+    let classified = fixture.probe_running(&format!(
+        "{}\
+         Report 'listed' ([System.IO.Directory]::GetFileSystemEntries('{sessions}').Length)\r\n\
+         [System.IO.File]::WriteAllText('{log}', '{{}}')\r\n",
+        classifying(&asked),
+        sessions = quoted(&sessions),
+        log = quoted(&log),
+    ));
+
+    for (name, word) in [
+        ("sessions", "write"),
+        ("memory", "write"),
+        ("login", "write"),
+        ("the-accounts-sessions", "refused"),
+        ("listed", "0"),
+    ] {
+        assert_eq!(
+            said(&classified, name),
+            word,
+            "{name} should be {word}, and the probe said: {classified:?}"
+        );
+    }
+
+    assert!(log.is_file(), "the log is in the root on the host");
+    assert!(
+        !account.join("sessions").join("updates.jsonl").exists(),
+        "and not in the account"
+    );
+}
+
+/// A Grok Build login saved inside the way grok 1.0.13 saves one — a temporary
+/// file renamed over it — is the account's once the session has ended. A
+/// `MEMORY.md` saved the same way is inside a junctioned directory, so it is the
+/// account's as it is saved.
+#[tokio::test]
+async fn a_grok_login_saved_by_rename_is_the_accounts_afterwards() {
+    let mut fixture = grilling().await;
+    fixture.under_grok(true).await;
+
+    let login = fixture.grok_root_inside().join(AUTH);
+    let memory = fixture.grok_root_inside().join("memory").join("MEMORY.md");
+    let quoted = |path: &Path| path.display().to_string().replace('\'', "''");
+
+    let classified = fixture.probe_running(&format!(
+        "{CLASSIFYING}\r\n\
+         Report 'read' ([System.IO.File]::ReadAllText('{login}'))\r\n\
+         [System.IO.File]::WriteAllText('{login}.tmp', '{{\"refreshed\": true}}')\r\n\
+         [System.IO.File]::Delete('{login}')\r\n\
+         [System.IO.File]::Move('{login}.tmp', '{login}')\r\n\
+         [System.IO.File]::WriteAllText('{memory}.tmp', 'remembered inside')\r\n\
+         [System.IO.File]::Move('{memory}.tmp', '{memory}')\r\n\
+         Report 'renamed' 'yes'\r\n",
+        login = quoted(&login),
+        memory = quoted(&memory),
+    ));
+
+    assert_eq!(said(&classified, "read"), THE_LOGIN);
+    assert_eq!(said(&classified, "renamed"), "yes");
+    assert_eq!(
+        std::fs::read_to_string(fixture.grok_dir().join("memory").join("MEMORY.md")).unwrap(),
+        "remembered inside",
+        "the memory saved inside is the account's"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.grok_dir().join(AUTH)).unwrap(),
+        "{\"refreshed\": true}",
+        "and so is the login, written back as the session ended"
+    );
+}
+
+/// An OpenCode session's config directory is Verkstead's own, holding only an
+/// `opencode.json` carrying the account's provider. With memory on its data
+/// directory is the account's, junctioned in whole, so a store a session writes
+/// is on the account. The human's skills are not in the config directory, and
+/// the account's own, reached by its real path, is refused.
+#[tokio::test]
+async fn an_opencode_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
+    let mut fixture = grilling().await;
+    fixture.under_opencode(true).await;
+
+    let [config, data] = fixture.opencode_inside();
+    let account = fixture.opencode_home().join(".config").join("opencode");
+    let store = data.join("opencode.db");
+    let quoted = |path: &Path| path.display().to_string().replace('\'', "''");
+
+    let asked = [
+        directory("config", &config),
+        file("login", data.join(AUTH)),
+        file("store", &store),
+        directory("skills", config.join("skills")),
+        directory("the-accounts-skills", account.join("skills")),
+    ];
+
+    let classified = fixture.probe_running(&format!(
+        "{}{}\
+         Report 'listed' ([System.IO.Directory]::GetFileSystemEntries('{config}').Length)\r\n\
+         [System.IO.File]::WriteAllText('{store}', 'written inside')\r\n",
+        classifying(&asked),
+        reading("written", &quoted(&config.join("opencode.json"))),
+        config = quoted(&config),
+        store = quoted(&store),
+    ));
+
+    for (name, word) in [
+        ("config", "write"),
+        ("login", "write"),
+        ("store", "write"),
+        ("skills", "absent"),
+        ("the-accounts-skills", "refused"),
+        ("listed", "1"),
+    ] {
+        assert_eq!(
+            said(&classified, name),
+            word,
+            "{name} should be {word}, and the probe said: {classified:?}"
+        );
+    }
+
+    assert_eq!(
+        read_as_json(&classified, "written"),
+        serde_json::json!({ "provider": { "proxy": {} } }),
+        "the written configuration carries the provider and nothing else"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.opencode_data().join("opencode.db")).unwrap(),
+        "written inside",
+        "and a store a session writes is on the account"
+    );
+}
+
+/// With the Profile's memory switched off, an OpenCode session's data directory
+/// is the root's own, holding the account's login alone, hard-linked. The store
+/// a session writes is in the root on the host, and the account's is refused
+/// and untouched. A login the session saves by rename is the account's once the
+/// session has ended.
+#[tokio::test]
+async fn an_opencode_root_without_memory_has_a_data_directory_of_its_own() {
+    let mut fixture = grilling().await;
+    fixture.under_opencode(false).await;
+
+    let [_, data] = fixture.opencode_inside();
+    let login = data.join(AUTH);
+    let store = data.join("opencode.db");
+    let quoted = |path: &Path| path.display().to_string().replace('\'', "''");
+
+    let asked = [
+        file("login", &login),
+        file(
+            "the-accounts-store",
+            fixture.opencode_data().join("opencode.db"),
+        ),
+    ];
+
+    let classified = fixture.probe_running(&format!(
+        "{}\
+         Report 'listed' ([System.IO.Directory]::GetFileSystemEntries('{data}').Length)\r\n\
+         [System.IO.File]::WriteAllText('{store}', 'the session''s own')\r\n\
+         [System.IO.File]::WriteAllText('{login}.tmp', '{{\"refreshed\": true}}')\r\n\
+         [System.IO.File]::Delete('{login}')\r\n\
+         [System.IO.File]::Move('{login}.tmp', '{login}')\r\n\
+         Report 'renamed' 'yes'\r\n",
+        classifying(&asked),
+        data = quoted(&data),
+        store = quoted(&store),
+        login = quoted(&login),
+    ));
+
+    for (name, word) in [
+        ("login", "write"),
+        ("the-accounts-store", "refused"),
+        ("listed", "1"),
+        ("renamed", "yes"),
+    ] {
+        assert_eq!(
+            said(&classified, name),
+            word,
+            "{name} should be {word}, and the probe said: {classified:?}"
+        );
+    }
+
+    assert_eq!(
+        std::fs::read_to_string(&store).unwrap(),
+        "the session's own",
+        "the store is in the root on the host, where it is looked for"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.opencode_data().join("opencode.db")).unwrap(),
+        SAID,
+        "and the account's is untouched"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.opencode_data().join(AUTH)).unwrap(),
+        "{\"refreshed\": true}",
+        "while the login saved inside is the account's, written back as the session ended"
     );
 }
 

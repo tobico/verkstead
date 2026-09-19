@@ -295,6 +295,7 @@ async fn a_profile(pool: &SqlitePool, dir: &Path) -> i64 {
                 config_file: account.join("claude.json"),
             },
             models: vec!["sonnet".to_owned()],
+            memory: true,
         },
     )
     .await

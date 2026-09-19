@@ -194,6 +194,7 @@ describe("taking an account on", () => {
       name: null,
       account: PART_WAY.accounts[0]!.account,
       models: models("Claude"),
+      memory: true,
     });
   });
 

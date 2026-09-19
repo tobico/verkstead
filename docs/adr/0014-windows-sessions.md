@@ -36,6 +36,12 @@ out. A session now gets a root of Verkstead's own under the profile, seeded by
 an allowlist, and Linux gains a profile directory of the same shape. See
 *Amended: the account is built rather than joined*.
 
+Amended (2026-09-18): **fresh, except while something of the Conversation is
+still running in it.** *The fresh profile* below makes one as each session
+starts, which took a running session's root away when a terminal opened beside
+it. A launch into a profile or a root something is running in is given it as it
+stands. See *Amended: fresh, except under something still running*.
+
 The order is the terminal first. A Windows session runs **unsandboxed** from
 the moment the terminal works until the container lands, and the workbench says
 so on every one — above **Start work** on the composer, beside the terminal on
@@ -548,24 +554,34 @@ repository's; a
 `settings.json` and an instructions file **written**; and `.claude.json`
 **copied** rather than linked, pre-seeded, and written back. Nothing else of
 the account. The other three harnesses get roots by the same rule and their own
-allowlists.
+allowlists: `homes\<id>\.codex` and `homes\<id>\.grok`, each with `auth.json`
+by a hard link and, when the switch is on, `sessions\` and `memory\` (Codex:
+`memories\`) by junctions;
+and for OpenCode a built config directory, with its data directory joined whole
+by a junction when the switch is on, or built with `auth.json` alone hard-linked
+into it when the switch is off.
 
 **What it gives the boundary.** The read-write entry on the account directory
 — 1,289 files on the reporter's machine, and the tree a first boundary spent
-its minutes walking — becomes an entry on the built root and one on each joined
-memory entry. The other repositories' transcripts, which were most of that walk,
+its minutes walking — becomes an entry on each built directory and one on each
+directory joined into it, whatever the harness. With the memory switch off,
+nothing is joined and the entries are on the built directories alone. The other repositories' transcripts, which were most of that walk,
 are no longer in it. **The credentials file takes an entry of its own.** It is
 reached today through the entry on the account directory, which goes, and a hard
 link shares the file's own list rather than taking its new parent's — so
 without one the session cannot read its login. The entry is on the account's
 own file, so it is written down and taken back with the rest of the
-Conversation's entries.
+Conversation's entries. That holds for every harness's login linked on its own;
+an OpenCode login inside a data directory joined whole is reached through the
+entry on that directory. The login is also the one thing a root joins by hard
+link, so it is what the check for another volume names.
 
 **Linux gains a profile directory.** A Linux session has run in an empty
 directory bubblewrap makes over the server's HOME, with the account bound in,
 and nothing under the Data Directory of its own. A root has to exist somewhere
 to be bound, so Linux makes `homes/<id>` as the other two platforms do, and
-binds the built `.claude` and the `.claude.json` copy into that empty HOME.
+binds the built root — `.claude` with the `.claude.json` copy, `.codex`,
+`.grok`, or OpenCode's directories — into that empty HOME.
 
 **The write-back stays**, as *The fresh profile* decided it: nothing a session
 wrote to its account is lost, and a re-login from inside a run reaches the
@@ -596,6 +612,45 @@ platform as on the other two:
   changed, and a session that changed nothing leaves the file byte for byte as
   it was. The human approved this narrowing of *The fresh profile*'s
   write-back.
+
+## Amended: fresh, except under something still running
+
+(2026-09-18) *The fresh profile* makes a session's profile fresh as each
+session starts, and that is the whole of what it said. A Conversation can have
+two things running in one profile at once — a grilling session and the
+Conversation Terminal beside it, which is a shell inside the same Sandbox — and
+the second to start was emptying what the first was running out of.
+
+On Linux the harm was a kernel one, and is fixed by stage 01 of the built-roots
+roadmap: what is joined into a root is bound onto mount points inside it, and
+unlinking those unmounts them inside the running session, which loses its
+transcript, its memory and its login at once. **On a Mac and on Windows the
+harm is plainer.** The profile *is* the directory every root of the
+Conversation sits in, nothing is mounted anywhere, and emptying it is a delete
+— of a running session's built root, and with the memory switch off (see
+[ADR-0011](0011-agent-backends.md)) of the only copy there is of its transcript
+and its memory, an OpenCode database included, held open as it goes.
+
+**So a profile and a root are made fresh only while nothing of the
+Conversation is running in them.** The server keeps one register of what is
+running in which root; it now answers two questions rather than one — whether
+anything is running in *this* root, which says whether the root is built, and
+whether anything is running in *any* root of the Conversation, which says
+whether the profile holding them may be emptied. A launch that may not empty is
+given the directory as it stands: nothing emptied, nothing rewritten, and the
+same baseline to merge its copy against. Only a directory of its own root that
+is missing is made, so that what it joins has somewhere to land.
+
+Linux is unchanged by this half: HOME there is made inside the mount namespace
+and nothing of the host's is under it, so every launch says the same thing
+about it.
+
+**What it costs.** The register is held while a launch is rendered, so on this
+platform the logon and the access-control entries are written under it and a
+second Conversation starting at the same moment waits for them. Sessions start
+one at a time on a machine with one human at it, and the alternative — a
+profile deleted from under a running session — is the one this decision is
+about.
 
 ## What stays as it was
 

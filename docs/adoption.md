@@ -27,7 +27,7 @@ The vocabulary in bold is the project's, defined once in
 
 | Before | Now |
 | --- | --- |
-| `sandbox` / `work-sandbox` — bwrap around the whole of `~/src` | A **Sandbox** per **Conversation**: its **Worktree**, its Repo's git directory, its handoff directory, a **Built Root** made out of the **Agent Profile**'s claude account — its login, this Repo's memory and transcripts, and a `settings.json` of Verkstead's own — and nothing else of the machine |
+| `sandbox` / `work-sandbox` — bwrap around the whole of `~/src` | A **Sandbox** per **Conversation**: its **Worktree**, its Repo's git directory, its handoff directory, a **Built Root** made out of the **Agent Profile**'s account — its login, its memory and transcripts where the Profile shares them, and a configuration file of Verkstead's own — and nothing else of the machine |
 | `agent`, `grilling`, `next-stage`, `next-tasks` — one wrapper per thing you might start | One **Conversation**, which runs through Draft → Grilling → Direction → Implementing → Wrapping → Done |
 | `roadrunner` — a terminal per run, driving `.tasks/` and `docs/roadmaps/` | The orchestrator, driving the same two files off the Repo, with the run visible on a **Timeline** instead of scrolling past |
 | roadrunner's interruptions | A **Halt** and its stop **Notice** — pushed to your phone, read where the work is, and answered by one **Resume** |
@@ -90,14 +90,18 @@ Three of those are worth understanding before the first Conversation:
   in the data directory, reaching each session as `GH_TOKEN` and git's own
   `GIT_CONFIG_*`. It is bound in **read-only**, which is the whole of what
   naming one buys — so an **Agent Profile**'s account kept under it that has to
-  be *written*, which is every Claude account, goes in `paths` as well. That is
-  the one composition worth saying outright, and it is why the example above
-  names `/home/you/.claude` beside the repositories. A Claude session is not
-  given that directory whole: it gets a **Built Root** of Verkstead's own.
-  Still, the account is written three ways. A login or token refresh writes
-  through to `.credentials.json`. Memory and transcripts are written under two
-  entries in `projects/`, which the server makes there first when they are
-  missing. And what a session changed in its copy of `.claude.json` is merged
+  be *written*, which is every account of every agent type, goes in `paths` as
+  well. That is the one composition worth saying outright, and it is why the
+  example above names `/home/you/.claude` beside the repositories; a Codex
+  account would be `/home/you/.codex`, a Grok Build one `/home/you/.grok`, and
+  an OpenCode one both `/home/you/.config/opencode` and
+  `/home/you/.local/share/opencode`. A session is not given that directory
+  whole: it gets a **Built Root** of Verkstead's own. Still, the account is
+  written. A login or token refresh writes through to the login file. With the
+  Profile's memory switch on, which is the default, memory and transcripts are
+  written into the account's store — for Claude under two entries in
+  `projects/`, which the server makes there first when they are missing. And
+  for Claude, what a session changed in its copy of `.claude.json` is merged
   back into `/home/you/.claude.json` as it ends. That merge writes a new file
   beside the old one and renames it into place, so it needs the directory the
   file is in to be writable. In this example that directory is the read-only
@@ -248,15 +252,28 @@ or hardened one may not. Without them the file says so — "Cannot mount AppImag
 please check your FUSE setup" — and `--appimage-extract-and-run` is the way past
 it for a machine you cannot change.
 
-**A Claude session's `~/.claude` is a Built Root, not your account.** It is made
-fresh under `homes/<id>` in the Data Directory as each session starts, and bound
-over `~/.claude` in the empty HOME bubblewrap makes. Only three things of your
-account are bound into it, read-write: the login file, and this Repo's and this
-Worktree's entries under `projects/`, so a login and the Repo's memory and
-transcripts land in your account. Its `settings.json` is one Verkstead writes,
-and `~/.claude.json` is a copy of yours, merged back as the session ends. None
-of your plugins, hooks, skills, global `CLAUDE.md`, history or other
-repositories' transcripts are there.
+**A session's account is a Built Root, not your account.** It is made fresh
+under `homes/<id>` in the Data Directory as each session starts, and bound at
+`~/.claude`, `~/.codex` or `~/.grok`, or at OpenCode's two directories, in the
+empty HOME bubblewrap makes. Only an allowlist of your account is bound into
+it, read-write: the login file, so a login lands in your account, and the
+memory store, so memory and transcripts do too — for Claude this Repo's and
+this Worktree's entries under `projects/`, for Codex `sessions/` and
+`memories/`, for Grok Build `sessions/` and `memory/`, and for OpenCode the
+whole data directory. The one exception is a Grok Build login, which is copied
+in and merged back as the session ends, because grok saves it by renaming a
+file over it and a bind refuses that. The configuration file is one Verkstead
+writes, carrying only how your account reaches its model, and for Claude
+`~/.claude.json` is a copy of yours, merged back as the session ends. None of
+your plugins, hooks, skills, rules, MCP servers, global instructions, history
+or other repositories' transcripts are there.
+
+**The memory switch on a Profile says whether its store is shared.** It is on
+by default. Turn it off on the Profile form and a session starts with an empty
+store of its own inside the Built Root instead: fresh memory, none of your
+transcripts, and nothing it remembers written into your account. Its own
+transcript is still found and still reaches the Timeline. The same holds on a
+Mac and on Windows.
 
 ### The desktop app, on a Mac
 
@@ -356,9 +373,11 @@ real instead: the session's HOME, the Built Root in it, and the directory
 holding the Skills and the `verkstead` binary are all really there under the
 Data Directory, and what keeps one Conversation out of another's is the policy
 rather than the absence. The Built Root reaches the account through symbolic
-links: to the login file, and to this Repo's two entries under `projects/`.
-Claude saves its login by writing a new file and renaming it over the old one,
-which replaces the link rather than writing through it. So a login changed
+links: to the login file, and, with the memory switch on, to the memory store —
+this Repo's two entries under `projects/` for Claude, and the directories the
+Linux section names for the other three. Claude and Grok Build save their login
+by writing a new file and renaming it over the old one, which replaces the link
+rather than writing through it. So a login changed
 inside is written back over the account's own as the session ends, and the
 link is made fresh for the session after.
 
@@ -563,10 +582,10 @@ reads back the refusal.
 written on your own directories.** An account reaches what it has been granted
 and nothing else, so there is nothing to mount and no policy to hand a process:
 each real path the description names gets an access-control entry for that
-account — a grant on the Worktree at the reach the description says; for a
-Claude account, a grant on the Built Root, one on each of the two `projects/`
-entries joined into it, and one on the login file itself, but none on the
-account directory as a whole; and a step through each directory on the way to
+account — a grant on the Worktree at the reach the description says; for the
+account, a grant on the Built Root, one on each directory of the memory store
+joined into it, and one on the login file itself, but none on the account
+directory as a whole; and a step through each directory on the way to
 any of those, so that a path can be resolved without its parent becoming
 something to list. Two
 things about those entries are worth knowing, because they are on directories of
@@ -590,22 +609,24 @@ to fall back to, and the log says which of the three it was.
 
 **The profile a session runs in is the Conversation's own**, under
 `%APPDATA%\Verkstead\homes`, emptied and made again as each of that
-Conversation's sessions starts. `USERPROFILE` and `HOME` point at it, and
+Conversation's sessions starts — except while another session or terminal of it
+is still running in there, which is given the profile as it stands rather than
+having it deleted out from under it. `USERPROFILE` and `HOME` point at it, and
 `APPDATA`, `LOCALAPPDATA`, `TEMP` and `TMP` point inside it — so what npm
 caches, what a tool writes down and what either of them throws away lands there
 rather than in your own profile.
 
-**A Claude account is not joined into it whole.** The profile gets a Built Root
-at `.claude`, and only three things of the account are joined into that. The
-login file is joined by a hard link, so a session starts logged in. This Repo's
-entry and this Worktree's entry under `projects/` are joined by directory
-junctions, so memory and transcripts land in the account. There is no other
-repository's transcripts, and none of your plugins, hooks, skills, global
-`CLAUDE.md` or history. The root's `settings.json` is one Verkstead writes.
-Beside the root, `.claude.json` is a copy of yours with your MCP servers taken
-out and this Repo marked as trusted. The account of any other agent type is still
-joined into the profile whole, every directory by a junction and every file by
-a hard link.
+**No account is joined into it whole.** The profile gets a Built Root — at
+`.claude`, `.codex` or `.grok`, or OpenCode's two directories — and only an
+allowlist of the account is joined into that. The login file is joined by a hard
+link, so a session starts logged in. With the memory switch on, the memory store
+is joined by directory junctions, so memory and transcripts land in the account:
+for Claude this Repo's entry and this Worktree's entry under `projects/`, and
+for the others the directories the Linux section names. There is no other
+repository's transcripts, and none of your plugins, hooks, skills, rules, global
+instructions or history. The root's configuration file is one Verkstead writes.
+Beside a Claude root, `.claude.json` is a copy of yours with your MCP servers
+taken out and this Repo marked as trusted.
 
 **A hard link wants one volume**, which is the one thing about this that can
 refuse a session outright. Your account's files and the Data Directory have to
@@ -614,7 +635,8 @@ log says which two paths those are and which of them to move.
 
 **What a session changed in its account is carried back as it ends.** A hard
 link stops being one file the moment something saves over it by writing a
-temporary file and renaming it into place, which is how Claude saves its login.
+temporary file and renaming it into place, which is how Claude and Grok Build
+save a login.
 So a linked file the session replaced is written back over the account's own,
 and the link is made fresh for the session after; one still the same file is
 left alone. The copied `.claude.json` is merged rather than copied back: only

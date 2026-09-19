@@ -392,6 +392,7 @@ fn standing(granting: bool) -> Grilling {
                     config_file,
                 },
                 models: vec!["claude-opus-5".to_owned()],
+                memory: true,
             },
         )
         .await

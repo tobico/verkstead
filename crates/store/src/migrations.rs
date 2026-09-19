@@ -17,13 +17,14 @@
 //! session ran under, so each table is rebuilt beside itself with the rows
 //! copied across.
 //!
-//! Seven of them are a column arriving rather than rows moving between tables —
+//! Eight of them are a column arriving rather than rows moving between tables —
 //! the Review role's Profile, the branch name somebody settled on, whether a
 //! branch is still waiting to be named, whether a session is idling on a stored
 //! ask, the branch a Conversation's base was resolved through, whether a commit
-//! is a merge, and which Answer an attached file was put on — which is the same
-//! kind of one-time rewrite: the rows already there are given the value that
-//! says what was true of them before the column existed.
+//! is a merge, which Answer an attached file was put on, and whether a Profile
+//! shares its account's memory — which is the same kind of one-time rewrite:
+//! the rows already there are given the value that says what was true of them
+//! before the column existed.
 //!
 //! Each is written to be safe against a database that has already had it, and
 //! what says whether there is anything to do is the presence of what it
@@ -53,7 +54,8 @@ pub(crate) async fn apply(pool: &SqlitePool) -> Result<()> {
     commits_that_never_said_they_were_merges(pool).await?;
     attached_files_that_named_no_answer(pool).await?;
     profiles_that_had_to_be_named(pool).await?;
-    sessions_that_had_to_name_a_profile(pool).await
+    sessions_that_had_to_name_a_profile(pool).await?;
+    profiles_that_had_no_memory_switch(pool).await
 }
 
 /// Let a Profile go unnamed: rebuild `profiles` with a nullable name, and put
@@ -269,6 +271,43 @@ async fn sessions_that_had_to_name_a_profile(pool: &SqlitePool) -> Result<()> {
     tx.commit()
         .await
         .context("letting a session's record name no Agent Profile")
+}
+
+/// Give every Agent Profile saved before there was a memory switch the switch,
+/// on.
+///
+/// On because the shared store is what every one of those Profiles has been
+/// getting: a session under it was given the account's memory, and the switch
+/// arrives as a way to stop that rather than as a way to start it. So the
+/// column's own default is the whole of the rewrite, and there is no `UPDATE`
+/// under it — see [`super::profiles::Profile::memory`].
+///
+/// Added in place rather than rebuilt: a column with a constant default is
+/// something SQLite can add to a STRICT table without copying a row, and nothing
+/// about the table's rules changes with it. It runs after the rebuild above,
+/// whose shape predates the switch, so a database old enough to need both gets
+/// both in that order.
+///
+/// Safe to run twice: what says whether there is anything to do is the column
+/// being absent, and after the first run it is there.
+async fn profiles_that_had_no_memory_switch(pool: &SqlitePool) -> Result<()> {
+    let there: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM pragma_table_info('profiles') WHERE name = ?")
+            .bind("memory")
+            .fetch_optional(pool)
+            .await
+            .context("looking for whether a Profile has a memory switch")?;
+
+    if there.is_some() {
+        return Ok(());
+    }
+
+    sqlx::query("ALTER TABLE profiles ADD COLUMN memory INTEGER NOT NULL DEFAULT 1")
+        .execute(pool)
+        .await
+        .context("giving the Profiles saved before this a memory switch that is on")?;
+
+    Ok(())
 }
 
 /// Give every commit recorded before a merge was told apart from an ordinary

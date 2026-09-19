@@ -126,6 +126,11 @@ pub struct ProfileEntry {
     /// `null` while the account is where it was left, which is the ordinary
     /// case.
     pub broken: Option<Broken>,
+
+    /// Whether a session under this Profile shares the account's memory store,
+    /// or starts with an empty one of its own. On unless the human switched it
+    /// off.
+    pub memory: bool,
 }
 
 /// A Profile as the human has just written it, for saving or for rewriting.
@@ -149,6 +154,18 @@ pub struct ProfileEdit {
     /// whitespace are the server's to drop, and a list that comes to nothing is
     /// refused.
     pub models: Vec<String>,
+
+    /// Whether a session under this Profile shares the account's memory store:
+    /// `true` for the store the human's own sessions keep, `false` for an empty
+    /// one of the session's own. Left out, it is on — the default the form
+    /// draws, and what every Profile had before there was a switch.
+    #[serde(default = "memory_on")]
+    pub memory: bool,
+}
+
+/// What [`ProfileEdit::memory`] is when a request leaves it out.
+fn memory_on() -> bool {
+    true
 }
 
 /// What became of saving a Profile.

@@ -104,6 +104,7 @@ import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import { CardButton } from "../CardButton";
+import { Check } from "../Check";
 import { HarnessMark } from "../HarnessMark";
 import { IconButton } from "../IconButton";
 import { PaneSticky } from "../Panes";
@@ -288,6 +289,9 @@ export const BLANK_PROFILE: ProfileEdit = {
   name: null,
   account: BLANK_ACCOUNT.Claude,
   models: [],
+  // On, which is what every account has always been given: the switch is a
+  // way to stop sharing memory rather than a way to start.
+  memory: true,
 };
 
 /// The types the picker offers, in the order it offers them.
@@ -517,6 +521,7 @@ export function ProfilePane(props: {
           name: profile.name,
           account: { ...profile.account },
           models: [...profile.models],
+          memory: profile.memory,
         };
   };
 
@@ -952,6 +957,19 @@ export function ProfileForm(props: {
           </>
         )}
       </For>
+
+      {/* The memory switch, for every agent type alike: whether a session is
+          given the account's memory and transcripts, or starts with an empty
+          store of its own. Drawn under the account because it is about what
+          of the account a session is given. */}
+      <Check
+        label="Share this account's memory with its sessions"
+        on={form().memory}
+        flip={(memory) => {
+          setEdited({ ...form(), memory });
+          setRefused(null);
+        }}
+      />
 
       <div class={styles.buttons}>
         <button type="submit" disabled={save.isPending}>

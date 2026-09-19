@@ -10,6 +10,11 @@ and the bypass that keeps a Claude run unattended is written into the root as
 well as passed on the line. See the three *Amended* paragraphs below, and the
 [built-roots roadmap](../roadmaps/built-roots/ROADMAP.md).
 
+Amended (2026-09-18): **Codex, Grok Build and OpenCode are built by the same
+rule, and every Profile has a memory switch.** Transcript discovery reads the
+store where it really is on the host: the account's with memory on, the root's
+with it off. See *As built for Codex, Grok Build and OpenCode*.
+
 Verkstead runs its sessions on one coding agent, and the `AgentType`
 discriminator has sat in the Profile with one value in it since the store was
 written — "so a second backend slots in beside `claude` rather than having to
@@ -277,7 +282,8 @@ Each new backend keeps its whole account under one relocatable home — Codex
 under `~/.codex`, Grok Build under `~/.grok`, OpenCode under its XDG config
 and data directories. A new-type Profile therefore stores **one home
 directory**, bound where that backend expects it (OpenCode's XDG paths
-pointed into it); Claude keeps its existing directory-plus-config-file pair,
+pointed into it) — the amendment below gives a session a root built out of it
+instead; Claude keeps its existing directory-plus-config-file pair,
 already stored and already working. The Profile form takes a per-type shape,
 and offers a backend only once its stage has landed — a type that cannot
 launch would be a lie in a picker.
@@ -339,6 +345,84 @@ inheritance and leave the write-through open; `--safe-mode`, which takes the
 Repo's own `CLAUDE.md`, the skills and MCP with it; and building Claude's root
 alone, which the human turned down for consistency.
 
+**As built for Codex, Grok Build and OpenCode** (2026-09-18), each allowlist
+was read off a real install. Six things are recorded beside the paragraph
+above, the last of them settled in review:
+
+- **The memory switch is on every Profile, Claude's included**: a `memory`
+  column beside the account, added in place by a migration, on by default and
+  on for every Profile that already existed. Off, nothing of the account's
+  store is made or joined, and each of its directories is the root's own and
+  empty — for Claude, an empty `projects/`. The login and the written
+  configuration are the same either way.
+- **Codex's store is `sessions/` and `memories/`, and none of its databases.**
+  The human chose `memories/`, which holds `MEMORY.md` and
+  `memory_summary.md`, beside the rollouts. `archived_sessions/` is not in it,
+  and nor is any SQLite database at the top of `~/.codex` — `state_5.sqlite`,
+  `memories_1.sqlite`, `thread_history_1.sqlite`, `logs_2.sqlite`,
+  `goals_1.sqlite`, `queue_1.sqlite` in codex 0.154. A database linked a file at a
+  time loses its write-ahead-log siblings and will not open, so each is the
+  session's own and starts empty. A fresh state database beside a shared `sessions/` does no
+  paid work: codex fills it from the rollouts as it starts, and the `memories`
+  feature, which would summarise them with a model, is off unless `[features]`
+  turns it on, which the written file never carries. `codex login` writes
+  `auth.json` in place, so a link stays the account's file. The written
+  `config.toml` carries `model_provider` and `model_providers`.
+- **Grok Build's store is two directories, not the files the roadmap named.**
+  Read off grok 1.0.13: `memory/` holds a global `MEMORY.md` and a directory per
+  repository, each with a `MEMORY.md` and an `index.sqlite`; `sessions/` holds
+  the session logs and a `session_search.sqlite`. Both databases run in
+  write-ahead-log mode, so `index.sqlite` is never linked on its own: `sessions/`
+  and `memory/` are joined whole, each database with its siblings. The human
+  agreed. Grok has no one key that names a provider, so its written
+  `config.toml` carries what its configuration reference gives to reaching a
+  model and signing in to one: `model`, `model_providers`, `auth_provider`,
+  `auth`, `grok_com_config`, and `endpoints.models_base_url` and
+  `endpoints.models_list_url`. **And its login is a copy on Linux.** grok saves
+  `auth.json` only by renaming a file over it, and a bind refuses the rename
+  (`grok logout` inside fails with *Resource busy*), so on Linux the login is
+  copied in, owner-only, and merged back by login scope at session end with the
+  merge `.claude.json` uses. The human chose this. On a Mac and on Windows the
+  rename replaces the link, and the ordinary write-back hands it back. Because a
+  Linux session's HOME is the server's own, a root bound at `~/.grok` would hide
+  `~/.grok/bin`, where xAI's installer puts `grok`, so read-only `PATH`
+  directories under a root's name are bound again after it.
+- **OpenCode's data directory is joined whole with memory on**, as decided: it
+  holds `opencode.db` with its `-wal` and `-shm` siblings, checked on opencode
+  1.18.30, and the login, `mcp-auth.json` and logs travel with it. With memory
+  off it is the root's own, `auth.json` alone is linked in, and the database
+  starts empty; `opencode auth logout` rewrites `auth.json` in place, so the
+  link stays the account's file. The config directory is built either way and
+  holds only an `opencode.json` carrying `provider`, read from `opencode.json`
+  and then `opencode.jsonc`, comments allowed, the later file's keys winning.
+- **Discovery reads where the store really is on the host, not the built root.**
+  The roadmap said every transcript reader would look in the session's root.
+  That holds only with memory off, where the root under `homes/<id>` is the one
+  place the log is. With memory on, a Linux join is a bind inside the session's
+  namespace, so the root on the host holds an empty directory and the log is in
+  the account. So Claude's glob of `projects/`, Codex's rollout match, Grok's
+  named session and OpenCode's database each look in the account's store when
+  memory is on, and in the root on the host when it is off.
+- **Nothing of a Conversation is emptied while something of it is running**,
+  on every platform rather than on Linux alone. Stage 01 shared a Linux root
+  something was running in, because emptying it would unmount what is joined
+  into the running session. On a Mac and on Windows the `homes/<id>` directory
+  *is* the HOME, holding every root of the Conversation, and a terminal
+  opening there emptied it — which with memory off deletes the only copy of a
+  running session's transcript and memory, and an OpenCode database it is
+  writing. So the register that says what is running in which root says as well
+  whether anything is running in the HOME, and a launch into one that is
+  keeps it: nothing emptied, nothing rewritten, and any directory of its own
+  root that is missing made so that what it joins has somewhere to land.
+
+A login made inside where the account had none is handed to the account at
+session end on all three platforms, for every harness. And the Windows grant
+follows each allowlist rather than Claude's: an entry on each built directory,
+one on each directory joined into it, and one on a linked login, and none on an
+account directory as a whole — an OpenCode data directory joined whole being a
+joined directory, granted as one. The check for files on another volume names
+the login, which is the only thing a root joins by hard link.
+
 ## Unattended is the product's promise
 
 Verkstead passes each backend's approval-bypass flags itself:
@@ -387,7 +471,9 @@ named in the Capture.
   Claude does, so its log is named. Codex and OpenCode take none, so theirs
   is *found*: the log that appears in the account's session store for the
   session's worktree after launch, matched on working directory and start
-  time. ADR-0006's rules are unchanged — lines stored verbatim, parsed at
+  time. (Amended 2026-09-18: in the account's store where the Profile shares
+  its memory, and in the built root on the host where it does not — see *As
+  built for Codex, Grok Build and OpenCode*.) ADR-0006's rules are unchanged — lines stored verbatim, parsed at
   render time, the Capture the complete record wherever no log is found.
 
   **Amended: OpenCode's store is a database, not a file of lines**, read off

@@ -169,6 +169,11 @@ fn policy(surface: &Surface) -> String {
             // is for.
             Access::Empty(path) => policy.push_str(&reaching(path, Reach::ReadWrite)),
 
+            // And one left as it is because something of the Conversation is
+            // still running in it — see [`super::sharing`] — which says the
+            // same thing about reaching it.
+            Access::Kept(path) => policy.push_str(&reaching(path, Reach::ReadWrite)),
+
             // And one built on the host, which grants nothing by being said:
             // what reaches it is what the description says after it.
             Access::Built(_) | Access::Written { .. } => {}
@@ -223,6 +228,7 @@ fn realise(surface: &Surface) {
     for access in surface.reaches() {
         let made = match access {
             Access::Empty(path) | Access::Built(path) => super::emptied(path),
+            Access::Kept(path) => std::fs::create_dir_all(path),
             Access::Written { path, contents } => std::fs::write(path, contents),
             Access::Elsewhere { host, inside, .. } => linked(host, inside),
             _ => Ok(()),

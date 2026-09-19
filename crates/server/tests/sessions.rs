@@ -1757,6 +1757,24 @@ async fn grilling(stub: &str) -> Grilling {
     grilling_spilling(tempfile::tempdir().unwrap(), stub, PULL_REQUEST).await
 }
 
+/// And the same on a Claude account whose memory is switched off, so that a
+/// session's root has a `projects/` of its own and its log is written there.
+async fn grilling_forgetting(stub: &str) -> Grilling {
+    grilling_however_started(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        NOTHING_ATTACHED,
+        Pickers::GrillingForgetting,
+        Origin::None,
+        Seeded::Nothing,
+        None,
+    )
+    .await
+}
+
 /// The same, grilled under an account of the second agent type — one home
 /// rather than Claude's pair.
 ///
@@ -1772,6 +1790,24 @@ async fn grilling_on_codex(stub: &str) -> Grilling {
         &[],
         NOTHING_ATTACHED,
         Pickers::GrillingOnCodex,
+        Origin::None,
+        Seeded::Nothing,
+        None,
+    )
+    .await
+}
+
+/// And the grilling role on a Codex Profile whose memory is switched off, so a
+/// session's `sessions/` is its root's own and its rollout is written there.
+async fn grilling_on_codex_forgetting(stub: &str) -> Grilling {
+    grilling_however_started(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        NOTHING_ATTACHED,
+        Pickers::GrillingOnCodexForgetting,
         Origin::None,
         Seeded::Nothing,
         None,
@@ -1874,6 +1910,24 @@ async fn grilling_on_grok(stub: &str) -> Grilling {
     .await
 }
 
+/// And the third backend again, with that Profile's memory switched off, so a
+/// session's `sessions/` is its root's own and its log is written there.
+async fn grilling_on_grok_forgetting(stub: &str) -> Grilling {
+    grilling_however_started(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        NOTHING_ATTACHED,
+        Pickers::EverythingOnGrokForgetting,
+        Origin::None,
+        Seeded::Nothing,
+        None,
+    )
+    .await
+}
+
 /// And the same again on the fourth, whose account is one home as well — two
 /// directories inside it rather than the directory itself, which is what
 /// [`Bench::everything_on_opencode`] makes.
@@ -1911,6 +1965,27 @@ async fn grilling_spilling_on_opencode(spill: tempfile::TempDir, stub: &str) -> 
         &[],
         NOTHING_ATTACHED,
         Pickers::EverythingOnOpenCode,
+        Origin::None,
+        Seeded::Nothing,
+        None,
+    )
+    .await
+}
+
+/// And the same with that Profile's memory switched off, so a session's data
+/// directory is its root's own and its store is written there.
+async fn grilling_spilling_on_opencode_forgetting(
+    spill: tempfile::TempDir,
+    stub: &str,
+) -> Grilling {
+    grilling_however_started(
+        spill,
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        NOTHING_ATTACHED,
+        Pickers::EverythingOnOpenCodeForgetting,
         Origin::None,
         Seeded::Nothing,
         None,
@@ -2166,6 +2241,22 @@ enum Pickers {
 
     /// And on the fourth — see [`Bench::everything_on_opencode`].
     EverythingOnOpenCode,
+
+    /// Every role under a Pairing of its own, and the grilling Profile's memory
+    /// switched off — see [`Bench::forgetting`].
+    GrillingForgetting,
+
+    /// The grilling role on a Codex Profile, as [`Pickers::GrillingOnCodex`],
+    /// with that Profile's memory switched off.
+    GrillingOnCodexForgetting,
+
+    /// Every role on a Grok Build Profile, as [`Pickers::EverythingOnGrok`],
+    /// with that Profile's memory switched off.
+    EverythingOnGrokForgetting,
+
+    /// Every role on an OpenCode Profile, as [`Pickers::EverythingOnOpenCode`],
+    /// with that Profile's memory switched off.
+    EverythingOnOpenCodeForgetting,
 }
 
 /// The same with a read-write companion beside it, for the tests about a
@@ -2355,6 +2446,19 @@ async fn grilling_however_started(
         Pickers::EverythingOnCodex => bench.everything_on_codex(id).await,
         Pickers::EverythingOnGrok => bench.everything_on_grok(id).await,
         Pickers::EverythingOnOpenCode => bench.everything_on_opencode(id).await,
+        Pickers::GrillingForgetting => bench.forgetting("grilling").await,
+        Pickers::GrillingOnCodexForgetting => {
+            bench.grilling_on_codex(id).await;
+            bench.forgetting("codex").await;
+        }
+        Pickers::EverythingOnGrokForgetting => {
+            bench.everything_on_grok(id).await;
+            bench.forgetting("grok").await;
+        }
+        Pickers::EverythingOnOpenCodeForgetting => {
+            bench.everything_on_opencode(id).await;
+            bench.forgetting("opencode").await;
+        }
     }
 
     // While it is still drafting, which is the only time a companion can be
@@ -2491,6 +2595,31 @@ impl Bench {
             .await;
             assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
         }
+    }
+
+    /// And switch the memory off on the Profile called `name`, which is the one
+    /// thing the form changes about it: the same account and models, saved again
+    /// with the switch unticked.
+    async fn forgetting(&self, name: &str) {
+        let profiles: Vec<verkstead_render::ProfileEntry> =
+            get(&self.app, "/api/ui/profiles").await;
+        let forgetting = profiles
+            .into_iter()
+            .find(|profile| profile.name.as_deref() == Some(name))
+            .expect("the Profile is saved before its memory is switched off");
+
+        let saved: ProfileSaved = post(
+            &self.app,
+            &format!("/api/ui/profiles/{}", forgetting.id),
+            &serde_json::json!({
+                "name": forgetting.name,
+                "account": forgetting.account,
+                "models": forgetting.models,
+                "memory": false,
+            }),
+        )
+        .await;
+        assert_eq!(saved, ProfileSaved::Saved);
     }
 
     /// And pick the grilling role under an account of the second agent type,
@@ -3723,6 +3852,78 @@ async fn a_sessions_own_log_is_followed_line_by_line_while_it_runs() {
     assert_eq!(fixture.close().await, ConversationClosed::Closed);
 }
 
+/// With the Profile's memory switched off, the session's log is written into
+/// its root's own `projects/` rather than the account's — and it is followed
+/// from there onto the Timeline all the same.
+///
+/// The root is on the host under the Conversation's own directory in the Data
+/// Directory, which is where the log is looked for; the account's `projects/`
+/// holds nothing of this session's.
+#[tokio::test]
+async fn a_sessions_log_is_followed_out_of_its_root_where_memory_is_off() {
+    let fixture = grilling_forgetting(
+        r#"
+        name=
+        while [ $# -gt 0 ]; do
+            if [ "$1" = --session-id ]; then name=$2; fi
+            shift
+        done
+
+        log=$HOME/.claude/projects/$(pwd | tr -c 'a-zA-Z0-9\n' -)/$name.jsonl
+        mkdir -p "$(dirname "$log")"
+
+        printf '{"type":"user","text":"Rate limiting"}\n' > "$log"
+        printf 'Reading the brief.\n'
+
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+    let transcript = fixture.transcript_of(event, 1).await;
+
+    assert_eq!(
+        transcript,
+        vec![r#"{"type":"user","text":"Rate limiting"}"#.to_owned()],
+        "the log in the root is followed onto the Transcript"
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+    let name = verkstead_store::session_id(&pool, event)
+        .await
+        .unwrap()
+        .expect("Verkstead should have written down what it named the session");
+
+    let written = |projects: PathBuf| {
+        std::fs::read_dir(projects)
+            .map(|entries| {
+                entries
+                    .map(|entry| entry.unwrap().path().join(format!("{name}.jsonl")))
+                    .any(|log| log.is_file())
+            })
+            .unwrap_or(false)
+    };
+
+    assert!(
+        written(
+            fixture
+                .state
+                .path()
+                .join("homes")
+                .join(fixture.id.to_string())
+                .join(".claude/projects")
+        ),
+        "the log is in the root on the host"
+    );
+    assert!(
+        !written(fixture._elsewhere.path().join("grilling/.claude/projects")),
+        "and not in the account"
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+}
+
 /// A session already running is untouched when the Agent Profile it was
 /// launched under is removed.
 ///
@@ -3936,8 +4137,10 @@ async fn a_session_on_a_second_backend_runs_from_its_home_with_the_capture_as_it
 /// **The account is configured from the line rather than from its directory.**
 /// The credential store is file-backed because there is no keyring inside the
 /// sandbox, and the Worktree is trusted so that no version of codex stops at a
-/// trust prompt in front of nobody — and the Profile's own home is left exactly
-/// as the account keeps it, which is what the last of these reads.
+/// trust prompt in front of nobody — and what a session finds at `~/.codex` is a
+/// root holding a configuration Verkstead wrote beside the account's memory
+/// store, with nothing about trust written into it, which is what the last of
+/// these reads.
 #[tokio::test]
 async fn a_codex_session_is_launched_with_the_line_codex_takes() {
     let fixture = grilling_on_codex(
@@ -3998,8 +4201,10 @@ async fn a_codex_session_is_launched_with_the_line_codex_takes() {
         "codex takes no session id, so it is told none: {said:?}"
     );
     assert!(
-        said.contains("account=\n"),
-        "and Verkstead writes nothing into the Profile's own directory: {said:?}"
+        said.contains("account=config.toml memories sessions \n"),
+        "and its `.codex` is a root holding the configuration Verkstead wrote and \
+         the account's memory store, with no login where the account has none: \
+         {said:?}"
     );
 }
 
@@ -4073,6 +4278,73 @@ async fn a_codex_session_follows_the_rollout_that_names_its_own_worktree() {
         "the rollout naming this session's own Worktree is the one followed, and its \
          lines should be kept exactly as codex wrote them — a line caught half-written \
          waiting for the rest of itself"
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+}
+
+/// With the Profile's memory switched off, a Codex session's rollout is written
+/// into its root's own `sessions/` rather than the account's — and it is found
+/// and followed from there onto the Timeline all the same.
+///
+/// The root is on the host under the Conversation's own directory in the Data
+/// Directory, which is where the rollout is looked for; the account's
+/// `sessions/` holds nothing of this session's.
+#[tokio::test]
+async fn a_codex_sessions_rollout_is_followed_out_of_its_root_where_memory_is_off() {
+    let fixture = grilling_on_codex_forgetting(
+        r#"
+        day=$HOME/.codex/sessions/$(date +%Y/%m/%d)
+        mkdir -p "$day"
+
+        log=$day/rollout-2026-09-17T17-47-02-cccc.jsonl
+        printf '{"type":"session_meta","payload":{"cwd":"%s"}}\n' "$(pwd)" > "$log"
+        printf 'where=%s\n' "$(pwd)"
+
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+    let transcript = fixture.transcript_of(event, 1).await;
+
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+    let worktree = said
+        .lines()
+        .find_map(|line| line.strip_prefix("where="))
+        .expect("the session says where it ran");
+
+    assert_eq!(
+        transcript,
+        vec![format!(
+            r#"{{"type":"session_meta","payload":{{"cwd":"{worktree}"}}}}"#
+        )],
+        "the rollout in the root is followed onto the Transcript"
+    );
+
+    let rollouts = |sessions: PathBuf| {
+        std::fs::read_dir(sessions)
+            .map(|years| years.count())
+            .unwrap_or(0)
+    };
+
+    assert_eq!(
+        rollouts(
+            fixture
+                .state
+                .path()
+                .join("homes")
+                .join(fixture.id.to_string())
+                .join(".codex/sessions")
+        ),
+        1,
+        "the rollout is in the root on the host"
+    );
+    assert_eq!(
+        rollouts(fixture._elsewhere.path().join("codex/.codex/sessions")),
+        0,
+        "and not in the account"
     );
 
     assert_eq!(fixture.close().await, ConversationClosed::Closed);
@@ -4269,6 +4541,84 @@ async fn a_grok_session_follows_the_log_it_was_named_for() {
     assert_eq!(fixture.close().await, ConversationClosed::Closed);
 }
 
+/// With the Profile's memory switched off, a Grok session's log is written into
+/// its root's own `sessions/` rather than the account's — and it is found under
+/// the name Verkstead gave it and followed from there onto the Timeline all the
+/// same.
+///
+/// The root is on the host under the Conversation's own directory in the Data
+/// Directory, which is where the log is looked for; the account's `sessions/`
+/// holds nothing of this session's.
+#[tokio::test]
+async fn a_grok_sessions_log_is_followed_out_of_its_root_where_memory_is_off() {
+    let fixture = grilling_on_grok_forgetting(
+        r#"
+        name=
+        while [ $# -gt 0 ]; do
+            if [ "$1" = --session-id ]; then name=$2; fi
+            shift
+        done
+
+        mine=$HOME/.grok/sessions/$(pwd | sed 's|/|%2F|g')/$name
+        mkdir -p "$mine"
+        printf '{"method":"session/update","params":{"sessionId":"%s","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Rate limiting"}}}}\n' "$name" \
+            > "$mine/updates.jsonl"
+        printf 'named=%s\n' "$name"
+
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+    let transcript = fixture.transcript_of(event, 1).await;
+
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+    let name = said
+        .lines()
+        .find_map(|line| line.strip_prefix("named="))
+        .expect("the session says what it was named");
+
+    assert_eq!(
+        transcript,
+        [format!(
+            r#"{{"method":"session/update","params":{{"sessionId":"{name}","update":{{"sessionUpdate":"user_message_chunk","content":{{"type":"text","text":"Rate limiting"}}}}}}}}"#
+        )],
+        "the log in the root is followed onto the Transcript"
+    );
+
+    let logs = |sessions: PathBuf| {
+        std::fs::read_dir(sessions)
+            .map(|groups| {
+                groups
+                    .flatten()
+                    .filter(|group| group.path().join(name).join("updates.jsonl").is_file())
+                    .count()
+            })
+            .unwrap_or(0)
+    };
+
+    assert_eq!(
+        logs(
+            fixture
+                .state
+                .path()
+                .join("homes")
+                .join(fixture.id.to_string())
+                .join(".grok/sessions")
+        ),
+        1,
+        "the log is in the root on the host"
+    );
+    assert_eq!(
+        logs(fixture._elsewhere.path().join("grok/.grok/sessions")),
+        0,
+        "and not in the account"
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+}
+
 /// An OpenCode session's record is found rather than named, and it is not a
 /// file: opencode takes no session id, and it keeps its sessions in one database
 /// under its account. So what says a session in there is this one is the
@@ -4413,6 +4763,74 @@ async fn an_opencode_session_follows_the_records_of_the_session_it_opened_in_its
         "and the row counts the reading the pane draws: the text put to the \
          session is the one turn of it, and the session's own row is opencode's \
          bookkeeping",
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+}
+
+/// With the Profile's memory switched off, an OpenCode session's data directory
+/// is its root's own, so its store is written there rather than in the account
+/// — and its records are found in that store and followed onto the Timeline all
+/// the same.
+///
+/// The root is on the host under the Conversation's own directory in the Data
+/// Directory, which is where the store is looked for. A store in the account
+/// holding a session of this very Worktree is not followed.
+#[tokio::test]
+async fn an_opencode_sessions_records_are_followed_out_of_its_root_where_memory_is_off() {
+    let spill = tempfile::tempdir().unwrap();
+    let ran_in = spill.path().join("ran-in");
+
+    let fixture = grilling_spilling_on_opencode_forgetting(
+        spill,
+        &format!(
+            r#"
+            printf '%s' "$(pwd)" > {ran_in}
+            printf 'Reading the brief.\n'
+            sleep 300
+            "#,
+            ran_in = ran_in.display(),
+        ),
+    )
+    .await;
+
+    let worktree = until_written(&ran_in).await;
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+
+    // The account's own store, with a session of this Worktree in it that is
+    // not this one: it is the human's memory, which this session does not have.
+    let account = opencode_store(&fixture.opencode_account()).await;
+    opencode_session(&account, "ses_the_humans", &worktree, 0).await;
+    opencode_record(
+        &account,
+        "ses_the_humans",
+        0,
+        "session.created.1",
+        r#"{"info":{"title":"The human's own."}}"#,
+    )
+    .await;
+
+    // And the root's, on the host, where this session wrote its own.
+    let root = fixture
+        .state
+        .path()
+        .join("homes")
+        .join(fixture.id.to_string());
+    let store = opencode_store(&root).await;
+    opencode_session(&store, "ses_mine", &worktree, 0).await;
+    opencode_record(
+        &store,
+        "ses_mine",
+        0,
+        "session.created.1",
+        r#"{"info":{"title":"Rate limiting"}}"#,
+    )
+    .await;
+
+    assert_eq!(
+        fixture.transcript_of(event, 1).await,
+        [r#"{"kind":"session.created.1","seq":0,"record":{"info":{"title":"Rate limiting"}}}"#],
+        "the store in the root is the one followed, and not the account's"
     );
 
     assert_eq!(fixture.close().await, ConversationClosed::Closed);

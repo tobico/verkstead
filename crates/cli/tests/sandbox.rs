@@ -149,6 +149,7 @@ impl Grilling {
                     name: Some("codex".to_owned()),
                     account: store::Account::Codex { home },
                     models: vec!["gpt-5-codex".to_owned()],
+                    memory: true,
                 },
             )
             .await
@@ -291,6 +292,7 @@ fn grilling() -> Grilling {
                     config_file,
                 },
                 models: vec!["claude-opus-5".to_owned()],
+                memory: true,
             },
         )
         .await

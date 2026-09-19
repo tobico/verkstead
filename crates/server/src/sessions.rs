@@ -2006,7 +2006,8 @@ impl Sessions {
             store::start_capture(pool, conversation_id, session.as_deref(), Some(pairing)).await?;
 
         // The log the agent keeps of itself is followed inside the directory of
-        // the Profile it is running under — under the name Verkstead gave the
+        // the Profile it is running under, or the session's own root where that
+        // Profile shares no memory — under the name Verkstead gave the
         // session on a backend that takes one, and by the Worktree it opened in
         // and the moment it started on a backend that does not. A session with
         // no name has no log to look for — see [`crate::transcript`].
@@ -2017,6 +2018,7 @@ impl Sessions {
                 session,
                 conversation.worktree.as_deref(),
                 at_launch,
+                &agents.homes.for_conversation(conversation_id),
             )
         });
 
@@ -2742,6 +2744,7 @@ mod tests {
                 config_file: PathBuf::from("/srv/accounts/fable/.claude.json"),
             },
             models: vec!["claude-fable-5".to_owned(), "claude-opus-5".to_owned()],
+            memory: true,
         }
     }
 
@@ -2765,6 +2768,7 @@ mod tests {
                     home: PathBuf::from("/srv/accounts/work/.codex"),
                 },
                 models: vec!["gpt-5-codex".to_owned()],
+                memory: true,
             },
             model: Some("gpt-5-codex".to_owned()),
         }
@@ -2780,6 +2784,7 @@ mod tests {
                     home: PathBuf::from("/srv/accounts/work/.grok"),
                 },
                 models: vec!["grok-4.6".to_owned()],
+                memory: true,
             },
             model: Some("grok-4.6".to_owned()),
         }
@@ -2797,6 +2802,7 @@ mod tests {
                     home: PathBuf::from("/srv/accounts/zen/opencode"),
                 },
                 models: vec!["opencode/big-pickle".to_owned()],
+                memory: true,
             },
             model: Some("opencode/big-pickle".to_owned()),
         }

@@ -52,6 +52,10 @@
 //! every Profile saved before this keeps the name it has — and both uniqueness
 //! rules hold over the rebuilt table afterwards.
 //!
+//! And one column added holding its default: an Agent Profile says whether its
+//! sessions share the account's memory. Every Profile from before arrives on,
+//! because the shared store is what they have always been given.
+//!
 //! Both old shapes are written here by hand rather than by the code that used to
 //! write them: that code has gone, and what has to keep working is a database
 //! rather than a function.
@@ -63,12 +67,12 @@ use std::path::PathBuf;
 use sqlx::SqlitePool;
 use verkstead_store::{
     Account, Clash, Commit, Decision, Event, Finished, Lifecycle, Pairing, ProfileFacts,
-    PullRequest, RanUnder, WaitingOn, asked_to_stop, clear_stop, commit_repo, conversations,
-    create_profile, finish_wrap_up, fix_attempts, load_conversation, open_database, profiles,
-    pull_request, pull_request_repo, record_another_pull_request, record_commit,
-    record_fix_attempt, recorded_commits, register_repo, settle_wrap_up, start_capture,
-    start_conversation, start_grilling, start_unnamed_conversation, stop, stopped, timeline,
-    wrap_up_settled,
+    PullRequest, RanUnder, Saving, WaitingOn, asked_to_stop, clear_stop, commit_repo,
+    conversations, create_profile, finish_wrap_up, fix_attempts, load_conversation, load_profile,
+    open_database, profiles, pull_request, pull_request_repo, record_another_pull_request,
+    record_commit, record_fix_attempt, recorded_commits, register_repo, settle_wrap_up,
+    start_capture, start_conversation, start_grilling, start_unnamed_conversation, stop, stopped,
+    timeline, update_profile, wrap_up_settled,
 };
 
 /// A database with the old table in it, and a Conversation to hang stops off.
@@ -1880,6 +1884,10 @@ async fn the_profiles_of_before_keep_their_names_and_both_rules_hold() {
         );
         assert_eq!(saved[1].account, claude("work"));
         assert_eq!(saved[1].models, ["claude-opus-5"]);
+        assert!(
+            saved.iter().all(|profile| profile.memory),
+            "a Profile from before the switch shares its memory, as it always did"
+        );
 
         pool.close().await;
     }
@@ -1896,6 +1904,7 @@ async fn the_profiles_of_before_keep_their_names_and_both_rules_hold() {
                 name: Some("work".to_owned()),
                 account: claude("second"),
                 models: vec!["claude-opus-5".to_owned()],
+                memory: true,
             }
         )
         .await
@@ -1909,6 +1918,7 @@ async fn the_profiles_of_before_keep_their_names_and_both_rules_hold() {
         name: None,
         account,
         models: vec!["claude-opus-5".to_owned()],
+        memory: true,
     };
 
     assert_eq!(
@@ -1926,6 +1936,124 @@ async fn the_profiles_of_before_keep_their_names_and_both_rules_hold() {
             .unwrap(),
         Err(Clash::DefaultTaken),
     );
+}
+
+/// A database whose Profiles could go unnamed but had no memory switch, which
+/// is every Verkstead before a session could be started with memory of its own.
+///
+/// The table is written out as that Verkstead declared it, with one Profile
+/// that is named and one that is not.
+async fn profiles_without_a_memory_switch(dir: &Path) {
+    let pool = open_database(&dir.join("verkstead.db")).await.unwrap();
+
+    sqlx::query("DROP TABLE profiles")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    sqlx::query(
+        "CREATE TABLE profiles (
+             id          INTEGER PRIMARY KEY AUTOINCREMENT,
+             name        TEXT UNIQUE,
+             claude_dir  TEXT NOT NULL,
+             config_file TEXT NOT NULL,
+             model       TEXT NOT NULL,
+             agent_type  TEXT NOT NULL
+         ) STRICT",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    for (id, name) in [(1, Some("work")), (2, None)] {
+        let account = name.unwrap_or("default");
+
+        sqlx::query(
+            "INSERT INTO profiles (id, name, claude_dir, config_file, model, agent_type)
+             VALUES (?, ?, ?, ?, 'claude-opus-5', 'claude')",
+        )
+        .bind(id)
+        .bind(name)
+        .bind(format!("/watched/accounts/{account}/.claude"))
+        .bind(format!("/watched/accounts/{account}/.claude.json"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    pool.close().await;
+}
+
+/// Every Profile saved before the switch reads as memory on, opening twice adds
+/// the column once, and a switch turned off after the migration stays off.
+#[tokio::test]
+async fn the_profiles_of_before_the_memory_switch_share_their_memory() {
+    let dir = tempfile::tempdir().unwrap();
+    profiles_without_a_memory_switch(dir.path()).await;
+
+    for opening in [
+        "it opens, and the switch arrives on",
+        "it opens again, and the column is not added twice",
+    ] {
+        let pool = open_database(&dir.path().join("verkstead.db"))
+            .await
+            .unwrap();
+
+        let saved = profiles(&pool).await.unwrap();
+        assert_eq!(saved.len(), 2, "{opening}");
+        assert!(saved.iter().all(|profile| profile.memory), "{opening}");
+
+        pool.close().await;
+    }
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        update_profile(
+            &pool,
+            1,
+            &ProfileFacts {
+                name: Some("work".to_owned()),
+                account: claude("work"),
+                models: vec!["claude-opus-5".to_owned()],
+                memory: false,
+            }
+        )
+        .await
+        .unwrap(),
+        Saving::Saved,
+    );
+    pool.close().await;
+
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+    assert!(
+        !load_profile(&pool, 1).await.unwrap().unwrap().memory,
+        "a reopening does not switch it back on"
+    );
+}
+
+/// A database made fresh has the switch in its own table, rather than waiting
+/// on a migration to add it.
+#[tokio::test]
+async fn a_fresh_database_declares_the_memory_switch() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = open_database(&dir.path().join("verkstead.db"))
+        .await
+        .unwrap();
+
+    let declared: (String, i64, String) = sqlx::query_as(
+        "SELECT type, \"notnull\", dflt_value FROM pragma_table_info('profiles')
+         WHERE name = 'memory'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(declared, ("INTEGER".to_owned(), 1, "1".to_owned()));
 }
 
 /// A database whose every session record had to name a Profile, which is every
@@ -2068,6 +2196,7 @@ async fn the_sessions_of_before_keep_their_names_and_a_new_one_may_have_none() {
                 config_file: account.join("claude.json"),
             },
             models: vec!["claude-opus-5".to_owned()],
+            memory: true,
         },
     )
     .await

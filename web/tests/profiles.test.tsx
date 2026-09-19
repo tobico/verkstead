@@ -137,18 +137,31 @@ function sent(fetching: ReturnType<typeof serving>, path: string): unknown {
   return JSON.parse(String(written![1]?.body));
 }
 
+/// The model ticks, which are every checkbox in a row of the models list — the
+/// memory switch under the account is a checkbox too, and not one of them.
+function picks(): HTMLElement[] {
+  return [...screen.getAllByRole("checkbox")].filter((tick) =>
+    tick.closest("li"),
+  );
+}
+
+/// The memory switch, by the words beside it.
+function memorySwitch(): HTMLInputElement {
+  return screen.getByRole("checkbox", {
+    name: /Share this account's memory/,
+  }) as HTMLInputElement;
+}
+
 /// Every model the form has a tick for, in the order they are drawn.
 function offered(): string[] {
-  return [...screen.getAllByRole("checkbox")].map(
-    (tick) => tick.closest("li")!.textContent!,
-  );
+  return picks().map((tick) => tick.closest("li")!.textContent!);
 }
 
 /// And every one that is ticked, as the ids they would be saved as: the label
 /// reads the pretty name, so the id beside it is what the row is read back by —
 /// and for a model the list does not know, the two are the same string.
 function ticked(): string[] {
-  return [...screen.getAllByRole("checkbox")]
+  return picks()
     .filter((tick) => (tick as HTMLInputElement).checked)
     .map((tick) => {
       const row = tick.closest("li")!;
@@ -236,6 +249,7 @@ function fillIn(profile: ProfileEdit) {
 const NEW: ProfileEdit = {
   name: "personal",
   models: ["claude-sonnet-5"],
+  memory: true,
   account: {
     agent_type: "Claude",
     claude_dir: "/home/you/accounts/personal/.claude",
@@ -248,6 +262,7 @@ const NEW: ProfileEdit = {
 const NEW_CODEX: ProfileEdit = {
   name: "work",
   models: ["gpt-5-codex"],
+  memory: true,
   account: {
     agent_type: "Codex",
     home: "/home/you/accounts/work/.codex",
@@ -259,6 +274,7 @@ const NEW_CODEX: ProfileEdit = {
 const NEW_GROK: ProfileEdit = {
   name: "xai",
   models: ["grok-4.6"],
+  memory: true,
   account: {
     agent_type: "Grok",
     home: "/home/you/accounts/xai/.grok",
@@ -270,6 +286,7 @@ const NEW_GROK: ProfileEdit = {
 const NEW_OPENCODE: ProfileEdit = {
   name: "zen",
   models: ["opencode/big-pickle"],
+  memory: true,
   account: {
     agent_type: "OpenCode",
     home: "/home/you/accounts/zen/opencode",
@@ -311,6 +328,17 @@ describe("the cards", () => {
   /// model its account can launch — the list is the whole of what it says it can
   /// run, so a card could not draw one of them without picking — and a line of
   /// ids under every row is what a list is scrolled past rather than scanned.
+  /// The memory switch is the pane's: a card says which account it is, and
+  /// whether that account's memory is shared is read when it is opened.
+  it("keeps the memory switch off the card", async () => {
+    theProfiles();
+    const { container } = mountCards();
+
+    await waitFor(() => screen.getByText(reads(OPUS)));
+
+    expect(container.querySelector("input[type=checkbox]")).toBeNull();
+  });
+
   it("keeps the models off the card", async () => {
     theProfiles();
     mountCards();
@@ -651,6 +679,33 @@ describe("the pane a card opens", () => {
         name: FABLE.name,
         models: ["claude-opus-5"],
         account: FABLE.account,
+        memory: true,
+      }),
+    );
+  });
+
+  /// The switch reads as the profile was saved, and a rewrite sends it back
+  /// as it stands — here off, and ticked on again.
+  it("fills the memory switch in and sends it as it stands", async () => {
+    const forgetting: ProfileEntry = { ...FABLE, memory: false };
+    const fetching = serving(
+      whenever("/api/ui/profiles", json([forgetting, OPUS])),
+      json("Saved"),
+    );
+    mountPane(FABLE.id);
+
+    await waitFor(() => expect(memorySwitch().checked).toBe(false));
+
+    fireEvent.click(memorySwitch());
+    expect(memorySwitch().checked).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() =>
+      expect(sent(fetching, `/api/ui/profiles/${FABLE.id}`)).toEqual({
+        name: FABLE.name,
+        models: FABLE.models,
+        account: FABLE.account,
+        memory: true,
       }),
     );
   });
@@ -729,6 +784,39 @@ describe("the pane the plus opens", () => {
 
     await waitFor(() =>
       expect(sent(fetching, "/api/ui/profiles")).toEqual(NEW),
+    );
+  });
+
+  /// One checkbox under the account, for every agent type alike, and ticked
+  /// for a new profile: sharing the account's memory is what a session has
+  /// always been given.
+  it("draws the memory switch, ticked, whichever agent is picked", async () => {
+    theProfiles();
+    mountPane("new");
+
+    expect(memorySwitch().checked).toBe(true);
+
+    for (const agent of ["Codex", "Grok", "OpenCode", "Claude"] as const) {
+      pick("Agent", AGENT_NAME[agent]);
+
+      await waitFor(() => expect(memorySwitch().checked).toBe(true));
+    }
+  });
+
+  /// Unticked, the profile goes over with its memory off.
+  it("sends the memory switch off where it was unticked", async () => {
+    const fetching = theProfiles(json("Saved"));
+    mountPane("new");
+
+    fillIn(NEW);
+    fireEvent.click(memorySwitch());
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(sent(fetching, "/api/ui/profiles")).toEqual({
+        ...NEW,
+        memory: false,
+      }),
     );
   });
 
@@ -1107,6 +1195,7 @@ describe("the models a profile lists", () => {
         name: MIXED.name,
         models: MIXED.models,
         account: MIXED.account,
+        memory: true,
       }),
     );
   });
@@ -1353,6 +1442,7 @@ describe("browsing for the account's paths", () => {
       expect(sent(fetching, "/api/ui/profiles")).toEqual({
         name: "work",
         models: ["claude-sonnet-5"],
+        memory: true,
         account: {
           agent_type: "Claude",
           claude_dir: "/home/ada/accounts/work/.claude",

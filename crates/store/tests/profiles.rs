@@ -40,6 +40,7 @@ fn facts_for(name: &str, account: Account) -> ProfileFacts {
         name: Some(name.to_owned()),
         account,
         models: vec!["claude-opus-5".to_owned()],
+        memory: true,
     }
 }
 
@@ -88,6 +89,7 @@ fn unnamed(account: Account) -> ProfileFacts {
         name: None,
         account,
         models: vec!["claude-opus-5".to_owned()],
+        memory: true,
     }
 }
 
@@ -633,6 +635,73 @@ async fn everything_about_a_profile_is_the_humans_to_rewrite() {
     assert_eq!(read.name.as_deref(), Some("anthropic"));
     assert_eq!(read.models, ["claude-fable-5"]);
     assert_eq!(read.account, claude("anthropic"));
+}
+
+/// The memory switch is saved as it was set, created or rewritten, and read
+/// back the same from the list and from the one row.
+#[tokio::test]
+async fn a_profile_holds_its_memory_switch_either_way() {
+    let (_dir, pool) = fresh_pool().await;
+
+    let created = create_profile(&pool, &forgetting_as("forgetting"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!created.memory);
+    assert!(
+        !load_profile(&pool, created.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .memory
+    );
+
+    let remembering = saved(&pool, "remembering").await;
+    assert!(remembering.memory);
+
+    assert_eq!(
+        update_profile(&pool, remembering.id, &forgetting_as("remembering"))
+            .await
+            .unwrap(),
+        Saving::Saved
+    );
+
+    let listed: Vec<(Option<String>, bool)> = profiles(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|profile| (profile.name, profile.memory))
+        .collect();
+    assert_eq!(
+        listed,
+        [
+            (Some("forgetting".to_owned()), false),
+            (Some("remembering".to_owned()), false),
+        ]
+    );
+
+    assert_eq!(
+        update_profile(&pool, remembering.id, &facts("remembering"))
+            .await
+            .unwrap(),
+        Saving::Saved
+    );
+    assert!(
+        load_profile(&pool, remembering.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .memory,
+        "switched back on, it reads as on"
+    );
+}
+
+/// A Profile under `name` with its memory switched off.
+fn forgetting_as(name: &str) -> ProfileFacts {
+    ProfileFacts {
+        memory: false,
+        ..facts(name)
+    }
 }
 
 /// Rewriting a Profile under its own name is not a clash with itself.
@@ -1210,6 +1279,7 @@ async fn a_pairing_holds_the_model_it_was_chosen_with() {
         &pool,
         &ProfileFacts {
             models: vec!["claude-opus-5".to_owned(), "claude-fable-5".to_owned()],
+            memory: true,
             ..facts("work")
         },
     )

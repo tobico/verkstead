@@ -80,6 +80,20 @@ pub(crate) fn command(surface: &Surface) -> Rendering {
             // **Failures are logged rather than raised**, for the reason the
             // Mac's own making is: a rendering cannot refuse, and a root that
             // could not be made is a bind that fails saying which path.
+            // And one of those that something of the Conversation is still
+            // running in, which is made where it is missing and emptied never
+            // — see [`super::sharing`]. The ordinary case is a directory that
+            // is already there, holding what the running launch was given.
+            Access::Kept(path) => {
+                if let Err(error) = std::fs::create_dir_all(path) {
+                    tracing::error!(
+                        error = ?error,
+                        built = %path.display(),
+                        "a directory a session's root is shared in could not be made, so the \
+                         session will not find what was to be there"
+                    );
+                }
+            }
             Access::Built(path) => {
                 if let Err(error) = super::emptied(path) {
                     tracing::error!(
@@ -92,8 +106,14 @@ pub(crate) fn command(surface: &Surface) -> Rendering {
             }
             // And a file written into that directory, on the host for the same
             // reason and logged for the same reason.
+            //
+            // **Readable by its owner alone**, because what is written here is
+            // a login or a configuration that can hold an API key: a Grok Build
+            // login is a copy on this platform — see
+            // [`super::root::Root::login_copied`] — and grok keeps its own at
+            // that mode.
             Access::Written { path, contents } => {
-                if let Err(error) = std::fs::write(path, contents) {
+                if let Err(error) = owner_only(path, contents) {
                     tracing::error!(
                         error = ?error,
                         written = %path.display(),
@@ -113,6 +133,30 @@ pub(crate) fn command(surface: &Surface) -> Rendering {
     bwrap.args(surface.argv());
 
     bwrap
+}
+
+/// `contents` written to a new file at `path`, readable and writable by its
+/// owner and nobody else.
+#[cfg(unix)]
+fn owner_only(path: &std::path::Path, contents: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?
+        .write_all(contents)
+}
+
+/// And plainly where there are no Unix modes, which is a Windows build of the
+/// suite asking this rendering what it says — see the module list in
+/// [`super`].
+#[cfg(not(unix))]
+fn owner_only(path: &std::path::Path, contents: &[u8]) -> std::io::Result<()> {
+    std::fs::write(path, contents)
 }
 
 /// The flag that makes a bind what the description said it is.

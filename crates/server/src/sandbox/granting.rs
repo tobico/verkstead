@@ -190,8 +190,11 @@ pub(crate) fn entries(surface: &Surface, profile: Option<&Path>) -> Vec<Entry> {
             // The session's own profile and what it throws away, both of them
             // made by the rendering a moment before this — see
             // [`super::open::command`], which is what puts the directory there
-            // for the entry to go on.
-            Access::Empty(path) | Access::Temporary(path) => {
+            // for the entry to go on. And a profile or a root left as it is
+            // because something of the Conversation is still running in it,
+            // which is granted the same way for being the same directory —
+            // see [`super::sharing`].
+            Access::Empty(path) | Access::Temporary(path) | Access::Kept(path) => {
                 entries.push(granted(path, Reach::ReadWrite));
             }
 
