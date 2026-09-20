@@ -7,10 +7,18 @@ name: CI
 # Pull requests and pushes to `main`, which between them cover every commit
 # once. A branch with an open PR would run twice if pushes to it triggered as
 # well, and a branch without one has nothing to guard yet.
+#
+# And `release.yml`, which calls this workflow as its first job rather than
+# asking GitHub whether these checks happened to have passed already. A release
+# is started by hand at a moment nobody chose for its CI history, so the run
+# that ships is the run that tests: red here and the release stops having
+# written nothing. Calling it keeps one statement of what the checks are — a
+# second copy in `release.yml` would be a copy that drifts.
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 
 # Nothing here writes anything back; the default token would otherwise carry
 # write access to the repository's contents.

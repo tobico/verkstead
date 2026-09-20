@@ -1,101 +1,235 @@
-# A run begins by reading the tag against the workspace manifest, and everything
-# that builds sits behind that: a tag the binaries would disagree with fails
-# before a runner compiles anything.
+# A release is this workflow, run by hand against a version number, and
+# nothing a human does around it. It tests, bumps the workspace version and
+# lands that on `main`, builds the viewer and then every artifact from the
+# commit it just made, runs each of them, tags that commit, publishes the
+# Release, and records what it published in `nix/release.json`. There is no
+# step before it and no step after it: `docs/releasing.md` is a description of
+# this file rather than a procedure to follow.
 #
-# What a `v*` tag ships: one bare binary per platform the project ships, and
+# What a release ships: one bare binary per platform the project ships, and
 # beside them the desktop app as the file each desktop is installed from — the
 # Linux one as an AppImage, the macOS one as a dmg, the Windows one as an msi
-# — each with the viewer inside it, published as a GitHub Release under the tag
-# that triggered the run. Every leg builds its artifact and then runs it — the
-# Windows one by installing it first — so a target that will not build, or that
-# builds something that will not run, fails the run rather than reaching a
+# — each with the viewer inside it, published as a GitHub Release under the
+# tag this run created. Every leg builds its artifact and then runs it — the
+# Windows one by installing it first — so a target that will not build, or
+# that builds something that will not run, fails the run rather than reaching a
 # Release.
 #
 # A last job then records the bare binaries in `nix/release.json` and commits
 # it to `main`, which is the whole interface to the binary flake.
+#
+# The order is what makes a failed run cheap. Everything that could say no —
+# the checks, the version, the tag — says it before anything is written, and
+# the two writes that a run cannot take back are a tag and a Release, both of
+# which happen after all eight artifacts exist and have been run. What a
+# failure in between leaves behind is a `main` whose version number has moved
+# ahead of its last release, which is where it was going anyway: re-running
+# with the same version finds the bump already made and carries on.
 #
 # Pinned throughout, as `ci.yml` is: actions to released versions, runners to
 # images rather than `-latest`, and Rust to the patch version the flake's
 # nixpkgs carries.
 name: Release
 
-# A `v*` tag, which is a release; or a run started by hand, which is a rehearsal
-# of one. Nothing else: every other commit is `ci.yml`'s, and a branch has
-# nothing to ship.
+# By hand and by hand only. Nothing here is triggered by a push: a tag used to
+# start this workflow, and now this workflow makes the tag, so listening for
+# one would be listening for itself.
 #
-# The rehearsal is here because the only other way to find out whether a leg
-# works would be to publish. It builds every artifact and runs every assertion,
-# while the two jobs that write — the Release and the manifest commit — run for
-# a pushed tag and nothing else, so a run started by hand stops after the
-# building. Asked of the event rather than of the ref, because
-# `workflow_dispatch` takes a tag as readily as a branch: gated on the ref, a
-# rehearsal somebody started against `v0.1.0` would publish it. See the `if` on
-# each of them.
+# The version is typed without its `v`, the way `Cargo.toml` and the flake both
+# spell one, because that is the number a person has in mind. Everything that
+# wants the other spelling derives it — see `TAG` below.
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      version:
+        description: The version to release, without a leading v (0.1.2, or 0.1.0-rc.1)
+        required: true
+        type: string
 
 # Read at the top, so that the jobs which compile the dependency tree and run
 # other people's actions hold a token that can do nothing to the repository.
-# The two jobs that write — the Release, and the manifest commit — widen this
-# for themselves.
+# The three jobs that write — the version bump, the tag and Release, and the
+# manifest commit — widen this for themselves.
 permissions:
   contents: read
 
-jobs:
-  # The gate. `v0.1.1` shipped a binary reporting `0.1.0`, because the manifest
-  # takes its version from nowhere and the Release takes its own from the tag:
-  # a fresh install offered to update itself to the version it already was, and
-  # nothing in this workflow had a word to say about it. This job is that word,
-  # and it is the run's first because a mismatch is cheaper to hear about than
-  # four runners' worth of build.
-  #
-  # Everything else sits behind it through `viewer`, which every other job
-  # already needs: one edge in front of that one is one edge in front of all of
-  # them.
-  version:
-    name: Version
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7.0.1
+# The version and the tag, spelled once each. Every job that names one reads it
+# from here, so the tag the Release carries, the tag the manifest's urls point
+# into, and the tag on the commit are the same string by construction rather
+# than by three expressions agreeing.
+#
+# Also the one place the input is interpolated. Everything below reads these
+# through the environment and never `${{ inputs.version }}` inside a script: an
+# expression is substituted into the shell's source text before the shell sees
+# it, and a variable is not.
+env:
+  VERSION: ${{ inputs.version }}
+  TAG: v${{ inputs.version }}
 
-      # Asked of the ref, which is the opposite of what `publish` and `manifest`
-      # ask — and the same reasoning, put to a different question. Theirs is
-      # *is this a release*, which a rehearsal started against a tag must not be
-      # allowed to answer yes to. This one's is *does this ref carry a version*,
-      # and only a tag does: a run started by hand against a branch has nothing
-      # to compare and is stopped by nothing, while one started against a tag is
-      # checked, that being what a rehearsal is for.
-      #
-      # `cargo pkgid` is asked of `verkstead-cli` because the disagreement this
-      # catches is the human-visible one: `verkstead --version` is that crate's
-      # binary talking, and every crate here takes the workspace's version
-      # anyway. The runner's own cargo reads it — nothing is compiled here, so
-      # there is no toolchain to pin to the flake's.
-      #
-      # The hyphen rule is the one `releasing.md` states and the Windows
-      # Installer version already forces from the other end: a hyphen is
-      # semver's own spelling of a pre-release, so `v0.1.0-rc.1` and
-      # `v0.1.0-rc.2` are both a manifest reading `0.1.0`. The comparison is
-      # made against the tag up to its hyphen.
-      #
-      # What it says when they differ names both numbers. A line saying only
-      # that they disagree would send somebody off to look up the two the run
-      # already had in front of it.
-      - name: The tag and the manifest agree
-        if: github.ref_type == 'tag'
-        env:
-          TAG: ${{ github.ref_name }}
+jobs:
+  # The checks, before anything is written. `ci.yml` is called rather than
+  # copied, and rather than asked after the fact whether it happened to be
+  # green on whatever `main` had reached — a release is started at a moment
+  # nobody chose for its CI history, so the run that ships is the run that
+  # tests. It is the first job because it is the one that can say no for free:
+  # a red check here stops a release that has bumped nothing, tagged nothing
+  # and published nothing.
+  #
+  # What it tests is `main` as it stands, which is the tree that is about to
+  # ship give or take the version number `prepare` writes into it. Testing the
+  # bumped tree instead would mean committing the bump first, and a red check
+  # would then have left that commit on `main` — which is the one thing this
+  # ordering is for.
+  tests:
+    name: Tests
+    uses: ./.github/workflows/ci.yml
+
+  # The version, written down and landed. `v0.1.1` shipped a binary reporting
+  # `0.1.0`, because the tag said one number and `Cargo.toml` said another and
+  # nothing in this workflow had a word to say about it: a fresh install
+  # offered to update itself to the version it already was. The fix was a gate
+  # that compared the two and failed; this job is the fix the gate was standing
+  # in for, which is that the workflow sets the number rather than checking
+  # somebody else did.
+  #
+  # Everything that builds sits behind it through `viewer`, and takes the
+  # commit this job made as the tree it builds — see the `ref` on each
+  # checkout. What ships is therefore the commit `main` has, rather than a
+  # tree that resembles it.
+  prepare:
+    name: Prepare
+    needs: tests
+    runs-on: ubuntu-24.04
+    # The first of the three jobs that write: the bump is a commit on `main`,
+    # the exception to the review process that `docs/agents/git-workflow.md`
+    # records alongside the manifest's.
+    permissions:
+      contents: write
+    outputs:
+      # The commit every build leg checks out and `publish` tags. Named here
+      # rather than left to be `main`, because `main` is a moving branch and
+      # eight legs reading it separately could read two different commits.
+      sha: ${{ steps.bump.outputs.sha }}
+    steps:
+      # `main`, not the ref the run was started against. `workflow_dispatch`
+      # offers every branch and tag in the same list, and a release built from
+      # anything but `main` would publish a Release whose manifest commit lands
+      # on a `main` that does not contain the code.
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: main
+
+      # Typed by a human at the moment they press the button, which is the one
+      # input this workflow has and so the one thing about a run that can be a
+      # typo. Semver's own shape, and no leading `v`: the `v` belongs to the
+      # tag, this workflow adds it, and a version typed with one would reach
+      # `Cargo.toml` as `v0.1.2` and every url as `vv0.1.2`.
+      - name: The version is one a release can carry
         run: |
-          tagged="${TAG#v}"
-          tagged="${tagged%%-*}"
-          manifest=$(cargo pkgid -p verkstead-cli | sed 's/.*@//')
-          if [ "$tagged" != "$manifest" ]; then
-            echo "::error::The tag $TAG is version $tagged, and Cargo.toml says $manifest. Bump the workspace version, land it on main, and tag that commit."
+          if ! printf '%s' "$VERSION" |
+            grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$'; then
+            echo "::error::'$VERSION' is not a version. Give three numbers, optionally a hyphen and a pre-release, and no leading v: 0.1.2, or 0.1.0-rc.1."
             exit 1
           fi
-          echo "$TAG and Cargo.toml agree on $manifest."
+          echo "Releasing $TAG."
+
+      # A tag is the one thing in a release that cannot be done twice, and it
+      # is worth hearing about now rather than after eight legs have built.
+      # Asked of `origin` rather than of the checkout, which fetched no tags.
+      #
+      # A re-run of a release whose `publish` already tagged is caught here and
+      # told to pick a new number: the Release under that tag either exists, in
+      # which case there is nothing to re-run, or it does not, in which case
+      # the tag is wreckage to be deleted by hand before trying again.
+      - name: Nothing carries this tag yet
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null 2>&1; then
+            echo "::error::$TAG already exists. Release a new version, or delete the tag if the run that made it published nothing."
+            exit 1
+          fi
+          echo "$TAG is free."
+
+      # The workspace version, which every crate here takes, edited in the one
+      # place it is written. A hyphen is semver's own spelling of a
+      # pre-release, and a Cargo version has nowhere to put one that the
+      # Windows Installer version could also carry — three numbers and nothing
+      # after them — so `v0.1.0-rc.1` and `v0.1.0-rc.2` are both a manifest
+      # reading `0.1.0`. That is the same rule from both ends: the tag keeps
+      # the pre-release, the compiled binary does not.
+      #
+      # awk rather than sed because `version = ` appears in `[workspace.
+      # package]` and could appear in any table below it; the section is
+      # tracked so that only the workspace's own line is touched.
+      #
+      # `cargo update --workspace` then writes the same number into
+      # `Cargo.lock`, which carries a version per workspace crate and would
+      # otherwise fail every `--locked` build in the legs below. `--workspace`
+      # is what keeps it to those crates: no dependency moves in a release.
+      # The runner's own cargo does both — nothing is compiled here, so there
+      # is no toolchain to pin to the flake's.
+      - name: Bump the workspace version
+        run: |
+          crate="${VERSION%%-*}"
+          awk -v v="$crate" '
+            /^\[/ { section = $0 }
+            section == "[workspace.package]" && /^version = / {
+              print "version = \"" v "\""; next
+            }
+            { print }
+          ' Cargo.toml > Cargo.toml.bumped
+          mv Cargo.toml.bumped Cargo.toml
+          cargo update --workspace
+          git --no-pager diff -- Cargo.toml
+
+      # The edit read back through cargo rather than through the file, which is
+      # what makes this more than a repeat of the step above: an awk that
+      # matched the wrong line would have agreed with itself, and cargo is what
+      # the build legs will actually ask. `verkstead-cli` because the
+      # disagreement this catches is the human-visible one — `verkstead
+      # --version` is that crate's binary talking.
+      - name: Cargo reads the version this release carries
+        run: |
+          want="${VERSION%%-*}"
+          got=$(cargo pkgid -p verkstead-cli | sed 's/.*@//')
+          if [ "$want" != "$got" ]; then
+            echo "::error::The bump wanted $want, and cargo reads $got."
+            exit 1
+          fi
+          echo "Cargo.toml reads $got."
+
+      # Straight onto `main`, with no pull request — the first of this
+      # workflow's two exceptions to the review process, recorded in
+      # `docs/agents/git-workflow.md` beside the manifest's. Unlike the
+      # manifest, this commit touches files the checks read, which is why the
+      # checks ran first: what lands here is a version number on a tree that
+      # was green a job ago.
+      #
+      # The author is the bot, as the manifest's is. Nobody wrote this commit.
+      #
+      # Nothing re-triggers: a push made with the workflow's own `GITHUB_TOKEN`
+      # starts no workflow run, so this neither re-enters CI nor starts a
+      # second release.
+      #
+      # A version already landed is not an error. A run that failed in a build
+      # leg and is being run again finds `main` already reading its number,
+      # commits nothing, and hands the same commit down — which is what makes
+      # the retry the same release rather than a new one.
+      - name: Land the bump on main
+        id: bump
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email \
+            '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Cargo.toml Cargo.lock
+          if git diff --cached --quiet; then
+            echo "main already reads $VERSION; nothing to commit."
+          else
+            git commit -m "chore: version $VERSION"
+            git push origin HEAD:main
+          fi
+          sha=$(git rev-parse HEAD)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Everything below is built from $sha."
 
   # The viewer, built once. `rust-embed` reads `web/dist` at compile time, so
   # every build leg needs it on disk before cargo runs — but what vite writes
@@ -103,13 +237,20 @@ jobs:
   # over and let the four legs disagree about what they embedded.
   viewer:
     name: Viewer
-    needs: version
+    needs: prepare
     runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: web
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          # The commit `prepare` made, rather than whatever `main` has reached
+          # by the time this runs. Every leg names the same sha, so the eight
+          # artifacts a Release carries are eight builds of one tree — and it
+          # is the tree whose `Cargo.toml` carries this release's version,
+          # which is the whole reason `prepare` runs before anything compiles.
+          ref: ${{ needs.prepare.outputs.sha }}
 
       # pnpm, Node and the `--frozen-lockfile` install, shared with `ci.yml` —
       # see the action for what each pin is and why. So the viewer that ships is
@@ -134,7 +275,7 @@ jobs:
   # cross-compiled, and so every leg can run the binary it just built.
   build:
     name: ${{ matrix.asset }}
-    needs: viewer
+    needs: [prepare, viewer]
     runs-on: ${{ matrix.runner }}
     strategy:
       # A broken leg does not cancel its siblings. Which targets are broken is
@@ -178,6 +319,9 @@ jobs:
       BINARY: target/${{ matrix.target }}/release/verkstead${{ matrix.exe }}
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          # The bump commit, as every leg does — see the `viewer` job.
+          ref: ${{ needs.prepare.outputs.sha }}
 
       # Straight to where `#[folder]` points — see `crates/server/src/viewer.rs`.
       # `web/dist` is gitignored, so the checkout above left the directory empty
@@ -387,7 +531,7 @@ jobs:
   # x86_64 only, per ADR-0012: an arm64 Linux user has the bare CLI.
   desktop-linux:
     name: Verkstead-x86_64.AppImage
-    needs: viewer
+    needs: [prepare, viewer]
     runs-on: ubuntu-24.04
     # **The floor this artifact runs on is decided here, and nowhere else.** A
     # bundle carries every library it links but not the C runtime — a process
@@ -449,6 +593,9 @@ jobs:
             squashfs-tools fuse3 xvfb dbus-x11
 
       - uses: actions/checkout@v7.0.1
+        with:
+          # The bump commit, as every leg does — see the `viewer` job.
+          ref: ${{ needs.prepare.outputs.sha }}
 
       # As the CLI legs do and for the same reason: the viewer is embedded at
       # compile time out of `web/dist`, which the checkout leaves empty. The
@@ -687,7 +834,7 @@ jobs:
   # silicon image, which is the half more people download.
   desktop-macos:
     name: Verkstead-universal.dmg
-    needs: viewer
+    needs: [prepare, viewer]
     runs-on: macos-15
     env:
       # Where `tools/build-macos-dmg.sh` leaves it, said once; and where the
@@ -697,6 +844,9 @@ jobs:
       MOUNT: target/macos/mounted
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          # The bump commit, as every leg does — see the `viewer` job.
+          ref: ${{ needs.prepare.outputs.sha }}
 
       # As every other leg does, and for the same reason: the viewer is
       # embedded at compile time out of `web/dist`, which the checkout leaves
@@ -948,7 +1098,7 @@ jobs:
   # runs this one.
   desktop-windows:
     name: Verkstead-x86_64.msi
-    needs: viewer
+    needs: [prepare, viewer]
     runs-on: windows-2025
     # Every `run` below is a shell script, as in the `build` job above: said
     # once here rather than left to the PowerShell a Windows runner defaults
@@ -964,6 +1114,9 @@ jobs:
       MSI: target/windows/Verkstead-x86_64.msi
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          # The bump commit, as every leg does — see the `viewer` job.
+          ref: ${{ needs.prepare.outputs.sha }}
 
       # As every other leg does, and for the same reason: the viewer is
       # embedded at compile time out of `web/dist`, which the checkout leaves
@@ -1350,32 +1503,38 @@ jobs:
           path: ${{ env.MSI }}
           if-no-files-found: error
 
-  # The Release, once every leg has succeeded — the desktop ones as much as the
-  # matrix. `needs` is the whole of that rule: a matrix job has failed if any of
-  # its legs did, and a job whose `needs` failed does not run — so a tag that
-  # could not be built for one architecture publishes nothing, rather than a set
-  # that looks complete until somebody reaches for what is not in it.
+  # The tag and the Release, once every leg has succeeded — the desktop ones as
+  # much as the matrix. `needs` is the whole of that rule: a matrix job has
+  # failed if any of its legs did, and a job whose `needs` failed does not run
+  # — so a release that could not be built for one architecture publishes
+  # nothing, rather than a set that looks complete until somebody reaches for
+  # what is not in it.
+  #
+  # The tag is made here rather than in `prepare` for that same reason. It is
+  # the one write this workflow cannot take back — a tag is what
+  # `releases/latest`, the flake's urls and every link anybody saves are keyed
+  # by — so it is made at the last moment at which everything it names is known
+  # to exist, and after it there is only the Release it was made for.
   publish:
     name: Publish
-    needs: [build, desktop-linux, desktop-macos, desktop-windows]
-    # A pushed tag, or nothing at all. A run started by hand has built every
-    # artifact and run every assertion by the time it reaches here, and stops:
-    # there is nothing left to rehearse, and publishing is the one thing a
-    # rehearsal must not do.
-    #
-    # The event rather than the ref, because the two are not the same question:
-    # this workflow is pushed to by tags alone, so a `push` *is* a tag, while a
-    # `workflow_dispatch` can be started against a tag as easily as a branch —
-    # GitHub offers both in the same list — and a ref test would let that one
-    # through as a release.
-    if: github.event_name == 'push'
+    needs: [prepare, build, desktop-linux, desktop-macos, desktop-windows]
     runs-on: ubuntu-24.04
-    # The only job that writes. Creating a Release is a write to the
-    # repository's contents, and it is granted here rather than at the top of
-    # the file so that the build legs never hold a token that can publish.
+    # The second of the three jobs that write. Pushing a tag and creating a
+    # Release are both writes to the repository's contents, and it is granted
+    # here rather than at the top of the file so that the build legs never hold
+    # a token that can publish.
     permissions:
       contents: write
     steps:
+      # A checkout, which this job did without until it started tagging: the
+      # tag is made with git against the commit `prepare` landed, so the
+      # repository has to be here. The sha rather than `main`, for the reason
+      # every build leg takes the sha — `main` may have moved under a release
+      # that takes an hour to build, and the tag belongs on what was built.
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+
       # The five bare binaries, and neither the viewer artifact this run is
       # also holding nor the desktop ones: `pattern` is what leaves both
       # behind, and every desktop leg names its artifact `desktop-…` precisely
@@ -1455,25 +1614,57 @@ jobs:
           fi
           printf '%s\n' "$found"
 
+      # The tag, on the commit every artifact above was built from, and the
+      # last thing before the Release that names it. Annotated rather than
+      # lightweight — it is the one written record that this commit is this
+      # version, and an annotation is where that sentence goes; `git describe`
+      # reads annotated tags and skips the others besides.
+      #
+      # `prepare` established the tag was free before anything was built. This
+      # asks again, because the answer could have changed in the hour since,
+      # and because a re-run of a `publish` that tagged and then failed to
+      # upload should find its own tag and carry on rather than stop on it.
+      #
+      # Pushed with the workflow's own `GITHUB_TOKEN`, which starts no workflow
+      # run — nothing in this repository listens for a tag any more, and this
+      # is why it does not need to.
+      - name: Tag the commit this was built from
+        env:
+          SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email \
+            '41898282+github-actions[bot]@users.noreply.github.com'
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null 2>&1; then
+            echo "$TAG is already on origin."
+          else
+            git tag -a "$TAG" -m "Verkstead $TAG" "$SHA"
+            git push origin "$TAG"
+          fi
+          # The sha rather than the tag: in the branch above, the tag is on
+          # origin and not in this shallow checkout, and `log` would not find
+          # it. What is worth reading here is the commit either way.
+          git --no-pager log -1 --oneline "$SHA"
+
       # `gh` rather than a release action: it is on the runner already and it
       # takes the workflow's own token, so there is no third-party version to
-      # pin for what is one API call. It is given the repository by name
-      # because this job has no checkout to infer one from — it wants the
-      # artifacts, and none of the sources.
+      # pin for what is one API call. The repository is given by name all the
+      # same, so that the step says what it is publishing to rather than
+      # inferring it from the checkout above.
       #
       # A pre-release is semver's own rule, a hyphen after the version, as in
-      # `v0.1.0-rc.1`. A throwaway tag rehearsing this workflow is one of
-      # those: marking it keeps `releases/latest` on the newest real version,
-      # and keeps a rehearsal from reading as the project's first release.
+      # `v0.1.0-rc.1`. Marking it keeps `releases/latest` on the newest real
+      # version, which is the url the install command asks for — so a release
+      # that only rehearses the pipeline is a version with a hyphen in it, and
+      # that is the whole of the difference between the two.
       #
       # Notes are generated rather than written. There is nobody to write them
-      # at the moment a tag is pushed, and a release with an empty body is
+      # at the moment a release is coined, and a release with an empty body is
       # worse than one listing what landed since the last tag.
       - name: Publish the Release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
         run: |
           case "$TAG" in
             *-*) prerelease=(--prerelease) ;;
@@ -1490,7 +1681,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
         run: gh release view "$TAG" --json isPrerelease,assets
 
   # What the Release now holds of the bare binaries, written down where the
@@ -1511,23 +1701,16 @@ jobs:
   manifest:
     name: Manifest
     needs: publish
-    # A pushed tag, said here as well as on `publish` rather than left to be
-    # inferred. `needs` already skips this job in a run that published nothing;
-    # this is the job that commits to `main`, and what stops it doing that is
-    # worth reading here rather than a job away. See `publish` for why the
-    # question is about the event.
-    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
-    # The second and last job that writes: the manifest is a commit on `main`.
+    # The third and last job that writes: the manifest is a commit on `main`.
     permissions:
       contents: write
     env:
-      TAG: ${{ github.ref_name }}
       # Where the four assets this job hashes now live. Built once here because
       # both the step that hashes them and the manifest it writes need the same
       # urls, and a url the manifest only resembles is a url nobody checked.
       DOWNLOAD_BASE: >-
-        ${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}
+        ${{ github.server_url }}/${{ github.repository }}/releases/download/v${{ inputs.version }}
     steps:
       # `main`, not the tag: the commit goes on top of whatever `main` has
       # reached by now. What the tag's own tree held is beside the point — the
@@ -1617,14 +1800,14 @@ jobs:
       # records why: a manifest that needs a merge per release is a manifest
       # that goes stale the first time somebody is busy.
       #
-      # The author is the bot, not whoever pushed the tag. That address is
+      # The author is the bot, not whoever started the run. That address is
       # GitHub's own for `github-actions[bot]`, so the commit is attributed to
       # the app in the UI rather than to a person who never wrote it.
       #
       # Nothing re-triggers: a push made with the workflow's own `GITHUB_TOKEN`
       # does not start a workflow run, so this neither re-enters CI nor loops
-      # back into this workflow. Nothing here pushes a tag besides, which is the
-      # only push `release.yml` listens for.
+      # back into this workflow — which nothing could do in any case, this
+      # workflow being started by hand and by nothing else.
       #
       # A rejected push means `main` moved between the checkout and here, which
       # fails the run loudly; re-running the job checks out the new `main` and

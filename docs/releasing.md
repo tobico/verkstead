@@ -1,17 +1,79 @@
 # Releasing
 
-A release is a tag and nothing else.
-[`release.yml`](../.github/workflows/release.yml) fires on `v*`: it reads the
-tag against the workspace manifest and stops there if they disagree, builds the
-viewer once, then the bare CLI binary for each platform on a runner of that
-platform's own architecture, and beside them one desktop app per desktop
-platform — the Linux one as `Verkstead-x86_64.AppImage`, the macOS one as
-`Verkstead-universal.dmg`, the Windows one as `Verkstead-x86_64.msi`. Every leg
-runs what it built, all of it is published as a GitHub Release under the tag,
-and finally the workflow commits
-[`nix/release.json`](../nix/release.json) to `main` so the flake fetches what
-was just published. None of that is hand-driven, and nothing in it is
-hand-edited afterwards.
+A release is one run of
+[`release.yml`](../.github/workflows/release.yml), started by hand against a
+version number, and nothing a human does around it. There is no commit to land
+first and no tag to push: the workflow runs the checks, bumps the workspace
+version and lands that on `main`, builds every artifact from the commit it just
+made, runs each of them, tags that commit, publishes the Release, and records
+what it published where the flake reads it. This page describes that file
+rather than a procedure to follow.
+
+## Coining one
+
+In the Actions tab, **Release** → **Run workflow**, and type the version
+without its `v` — `0.1.2`, or `0.1.0-rc.1`. Or from a terminal:
+
+```console
+$ gh workflow run release.yml -f version=0.1.2
+```
+
+The number is the one input a run has, and so the one thing about it that can
+be a typo. The first job to touch it refuses anything that is not semver's own
+shape, refuses a leading `v` — the `v` belongs to the tag and the workflow adds
+it — and refuses a version whose tag already exists.
+
+What `main` is at the moment you press the button is what gets released, so
+that is the thing to have settled first: the run takes `main`'s head, and every
+artifact is built from it.
+
+## The order, and what a failure leaves
+
+Each of these waits on the one above it.
+
+1. **Tests.** The run calls `ci.yml` rather than asking GitHub whether those
+   checks happened to have passed on whatever `main` had reached. A release is
+   started at a moment nobody chose for its CI history, so the run that ships
+   is the run that tests. Red here and the release stops having written
+   nothing.
+2. **Prepare.** The workspace version in [`Cargo.toml`](../Cargo.toml) is set
+   to the release's — `Cargo.lock` with it, which carries a version per
+   workspace crate — and committed to `main` by `github-actions[bot]` as
+   `chore: version <version>`. Everything below is built from that commit by
+   sha rather than from `main`, so an hour-long release and a branch that moves
+   under it are not the same thing.
+3. **The viewer**, built once. `rust-embed` reads `web/dist` at compile time
+   and what vite writes does not vary by platform, so building it per leg would
+   cost eight times over and let the legs disagree about what they embedded.
+4. **Eight legs**, each building its artifact and then running it: five bare
+   CLI binaries, and beside them one desktop app per desktop platform — the
+   Linux one as `Verkstead-x86_64.AppImage`, the macOS one as
+   `Verkstead-universal.dmg`, the Windows one as `Verkstead-x86_64.msi`.
+5. **Publish.** The tag is made on the prepare commit, annotated, and pushed;
+   then the Release is created under it with all eight artifacts and generated
+   notes.
+6. **Manifest.** [`nix/release.json`](../nix/release.json) is written from the
+   published assets and committed to `main`, so the flake fetches what was just
+   published.
+
+**A run that fails leaves a `main` whose version has moved ahead of its last
+release, and nothing else.** That is where `main` was going anyway, and running
+the same version again finds the bump already made and carries on — the retry
+is the same release rather than a new one. Nothing that cannot be taken back
+happens until every artifact exists and has been run: the tag and the Release
+are the last two steps, in that order, and a leg that will not build reaches
+neither.
+
+Two things follow from that ordering and are worth saying out loud. **The tests
+run on the tree before the bump**, so what ships differs from what was tested
+by a version string and nothing else; testing the bumped tree would mean
+committing it first, and a red check would then have left that commit on
+`main`. And **the version bump is one of two commits this workflow pushes
+straight to `main`** with no pull request — see
+[the git workflow](agents/git-workflow.md#exception-the-release-commits) for
+why both are exceptions and what makes them safe.
+
+## What the legs are, and what holds them to their floors
 
 The CLI legs each run on a runner of their own architecture; the Linux desktop
 leg runs in an `ubuntu:22.04` container on top of one. That is the whole of what
@@ -96,41 +158,23 @@ them since the Windows port, held apart from the desktop artifacts by the
 artifact name each leg uploaded under rather than by the name of the file inside
 it.
 
-A tag with a hyphen in it — `v0.1.0-rc.1` — is semver's own spelling of a
+A version with a hyphen in it — `0.1.0-rc.1` — is semver's own spelling of a
 pre-release, and the workflow marks the Release as one. That is the difference
-between a tag that ships and one that only rehearses the pipeline: GitHub keeps
-a pre-release off `releases/latest`, which is the url an install command asks
-for.
+between a release that ships and one that only rehearses the pipeline: GitHub
+keeps a pre-release off `releases/latest`, which is the url an install command
+asks for. It is also the only difference, the run being the same run either
+way, so a rehearsal really does rehearse.
+
+The compiled binary drops the hyphen and everything after it, for the reason
+the msi does: `v0.1.0-rc.1` and `v0.1.0-rc.2` are both a `Cargo.toml` reading
+`0.1.0`, which is what `verkstead --version` prints. The tag is the only place
+the difference between two release candidates lives, and `prepare` is where
+that truncation happens.
 
 **The manifest on `main` names the last release**, which is what
 `packages.verkstead` downloads — see the note in [`flake.nix`](../flake.nix),
 which falls back to the source build on any system the manifest has no entry
 for.
-
-## Before you tag
-
-- **Bump the version in [`Cargo.toml`](../Cargo.toml) to the tag without its
-  `v`, and land that commit.** The manifest takes its version from the tag while
-  the binary reports the one it was compiled with, so a mismatch ships a binary
-  that disagrees with the flake about what it is — and, where the tag is the
-  higher of the two, an Update Notice naming an update that is already
-  installed. `v0.1.1` shipped exactly that, which is why the run's first job
-  compares the two and fails before anything is built, naming both numbers. A
-  tag is compared up to its hyphen, so `v0.1.0-rc.1` wants a manifest reading
-  `0.1.0` — the same rule the Windows Installer version forces from the other
-  end.
-- **The commit is already on `main`.** The manifest job checks out `main` rather
-  than the tag, so a tag on a branch publishes a Release whose manifest lands on
-  a `main` that does not contain the code.
-- **CI is green on that commit.** `release.yml` builds each binary and runs it,
-  but it runs no tests; those are `ci.yml`'s, and `ci.yml` does not run on tags.
-
-## Tagging
-
-```console
-$ git tag -a v0.1.0 -m 'Verkstead v0.1.0' <sha-on-main>
-$ git push origin v0.1.0
-```
 
 ## After the run
 
@@ -148,10 +192,11 @@ newcomer actually follows.
    ```
 
    A `404` means GitHub still has no release that is not a pre-release, which
-   means the tag carried a hyphen.
+   means the version carried a hyphen.
 
 2. **That binary, downloaded and run** somewhere `verkstead` is not already on
-   the `PATH`. Then `verkstead --version`, which prints the tag without its `v`.
+   the `PATH`. Then `verkstead --version`, which prints the version you typed,
+   up to its hyphen.
 
 3. **The AppImage, downloaded and run** on a Linux desktop — the same way, and
    made executable first because a Release asset carries no mode:
@@ -209,11 +254,13 @@ newcomer actually follows.
 
    What it prints is the manifest's version, and so the tag's.
 
-7. **The manifest on `main`** names the new version and carries all four nix
-   systems, committed by `github-actions[bot]` as
-   `chore: release manifest for <tag>`. That commit deliberately starts no CI
-   run — [the git workflow](agents/git-workflow.md#exception-the-release-manifest)
-   records why it is the one write to `main` that skips review.
+7. **The two commits on `main`**, both by `github-actions[bot]`: `chore:
+   version <version>` from before the build, and `chore: release manifest for
+   <tag>` from after it. The manifest names the new version and carries all
+   four nix systems. Neither commit starts a CI run —
+   [the git workflow](agents/git-workflow.md#exception-the-release-commits)
+   records why they are the two writes to `main` that skip review, and what
+   makes each safe.
 
 8. **The Update Notice**, on a server still running the previous version: the
    Repo list gains a banner naming the new one, and the README's `## Updating`

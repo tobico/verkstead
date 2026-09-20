@@ -66,9 +66,9 @@ request.
 **[Development](docs/development.md)** — the dev shell, building the viewer,
 and the loop for working on Verkstead itself.
 
-**[Releasing](docs/releasing.md)** — how a tag would become the published
-binaries, the AppImage, the dmg and the msi. Nothing has been released under
-this name yet.
+**[Releasing](docs/releasing.md)** — the one workflow that turns a version
+number into the published binaries, the AppImage, the dmg and the msi. Nothing
+has been released under this name yet.
 
 ## License
 

@@ -42,9 +42,9 @@ wrappers that launched it — see [The old tools](#the-old-tools).
 
 ## Getting it running
 
-Nothing has been released under this name yet, so what follows is what a `v*`
-tag produces rather than something to fetch today — [releasing.md](releasing.md)
-says what a tag builds and where it puts it.
+Nothing has been released under this name yet, so what follows is what a
+release produces rather than something to fetch today —
+[releasing.md](releasing.md) says what a release builds and where it puts it.
 
 There are four ways in, and they are four different things rather than four
 spellings of one. **The flake and the NixOS module run the headless daemon**, on

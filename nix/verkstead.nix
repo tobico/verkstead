@@ -2,8 +2,8 @@
 # `nix run github:tobico/verkstead` should get the tool, not a cold compile of the
 # Rust workspace and the pnpm viewer beside it. Which version to fetch, from
 # where, and what it must hash to all come out of `nix/release.json`, which
-# `release.yml` commits to `main` after every tag — so nothing in here is edited
-# per release.
+# `release.yml` commits to `main` at the end of every release — so nothing in
+# here is edited per release.
 #
 # The build from this tree is `verkstead-source`, one attribute away.
 {
