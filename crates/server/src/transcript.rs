@@ -15,7 +15,8 @@
 //! **How it is found is the backend's own** — see [`Search`]. Claude Code takes
 //! the name Verkstead gave the session before it started it (see
 //! [`crate::sessions`]) and writes a file called that, so its log is a lookup
-//! inside the Agent Profile's `projects` directory. Codex takes no session id at
+//! inside the Agent Profile's `projects` directory, or the session root's own
+//! where the Profile shares no memory. Codex takes no session id at
 //! all, so nothing known before it starts names its log: what identifies a
 //! rollout is what the session wrote in it about itself, which is the Worktree
 //! it opened in — so the session's log is the one naming this Worktree that
@@ -146,9 +147,10 @@ enum Search {
     /// see [`updates`].
     Updates { sessions: PathBuf, session: String },
 
-    /// OpenCode's: the database its account keeps its sessions in, the Worktree
-    /// this session is working in, and the moment it was launched. Codex's rule
-    /// against a store that is not a file of lines — see [`crate::records`].
+    /// OpenCode's: the database its account or its root keeps its sessions in,
+    /// the Worktree this session is working in, and the moment it was launched.
+    /// Codex's rule against a store that is not a file of lines — see
+    /// [`crate::records`].
     Records {
         database: PathBuf,
         worktree: PathBuf,
@@ -191,30 +193,44 @@ impl Tail {
     /// The last two are what the two backends that take no session id are found
     /// *by*, and are nothing to the two that name their own: a Codex or an
     /// OpenCode session with neither is a session with nothing to look for —
-    /// see [`Search`].
+    /// see [`Search`]. `home` is the Conversation's own, which is where a root
+    /// a session was built is on the host — see [`crate::sandbox::Home`].
     pub(crate) fn of(
         conversation: i64,
         profile: &store::Profile,
         session: &str,
         worktree: Option<&Path>,
         launched: SystemTime,
+        home: &crate::sandbox::Home,
     ) -> Tail {
         // One arm per agent type rather than one path every type is assumed to
         // keep: where a backend puts its record, and what it calls it, is that
         // backend's own business, and a backend arriving with a fourth answer
         // lands here.
         let search = match (&profile.account, worktree) {
-            // Where Claude Code keeps its logs, under the directory the account
-            // is.
+            // Where Claude Code keeps its logs: under the directory the account
+            // is where the Profile shares its memory, and under the session's
+            // own root on the host where it does not. A shared entry is a join,
+            // and on Linux a join is a bind inside the namespace only, so on the
+            // host the log is in the account; an unshared `projects/` is the
+            // root's own directory, so the log is there and nowhere else.
             (store::Account::Claude { claude_dir, .. }, _) => Search::Named {
-                projects: claude_dir.join("projects"),
+                projects: match profile.memory {
+                    true => claude_dir.join("projects"),
+                    false => home.claude_projects(),
+                },
                 session: session.to_owned(),
             },
 
-            // And where codex keeps its rollouts, under the one directory its
-            // account is.
-            (store::Account::Codex { home }, Some(worktree)) => Search::Rollout {
-                sessions: home.join(ROLLOUTS),
+            // And where codex keeps its rollouts: under the one directory its
+            // account is where the Profile shares its memory, and under the
+            // session's own root on the host where it does not — for Claude's
+            // reason above, `sessions/` being joined whole rather than by entry.
+            (store::Account::Codex { home: account }, Some(worktree)) => Search::Rollout {
+                sessions: match profile.memory {
+                    true => account.join(ROLLOUTS),
+                    false => home.codex_sessions(),
+                },
                 worktree: worktree.to_owned(),
                 launched: to_the_second(launched),
             },
@@ -226,24 +242,34 @@ impl Tail {
             // given up on rather than guessed at.
             (store::Account::Codex { .. }, None) => Search::Nowhere,
 
-            // And where grok keeps its sessions, under the one directory its
-            // account is. Grok Build names its session at launch, so the log is
+            // And where grok keeps its sessions: under the one directory its
+            // account is where the Profile shares its memory, and under the
+            // session's own root on the host where it does not, for Codex's
+            // reason. Grok Build names its session at launch, so the log is
             // named rather than found — the Worktree and the moment are
             // nothing to it.
-            (store::Account::Grok { home }, _) => Search::Updates {
-                sessions: home.join(SESSIONS),
+            (store::Account::Grok { home: account }, _) => Search::Updates {
+                sessions: match profile.memory {
+                    true => account.join(SESSIONS),
+                    false => home.grok_sessions(),
+                },
                 session: session.to_owned(),
             },
 
             // And where opencode keeps its sessions, which is one database
-            // under the data half of the two directories its account is. The
-            // name of the file is the one the sandbox pinned rather than the
-            // one opencode would have chosen for itself — see
-            // [`crate::sandbox`].
-            (store::Account::OpenCode { home }, Some(worktree)) => Search::Records {
-                database: home
-                    .join(crate::sandbox::OPENCODE_DATA_INSIDE_HOME)
-                    .join(crate::sandbox::OPENCODE_DB_FILE),
+            // under the data half of the two directories its account is where
+            // the Profile shares its memory, and in the session's own root on
+            // the host where it does not — the data directory being joined
+            // whole, for Codex's reason. The name of the file is the one the
+            // sandbox pinned rather than the one opencode would have chosen for
+            // itself — see [`crate::sandbox`].
+            (store::Account::OpenCode { home: account }, Some(worktree)) => Search::Records {
+                database: match profile.memory {
+                    true => account
+                        .join(crate::sandbox::OPENCODE_DATA_INSIDE_HOME)
+                        .join(crate::sandbox::OPENCODE_DB_FILE),
+                    false => home.opencode_database(),
+                },
                 worktree: worktree.to_owned(),
                 launched,
             },

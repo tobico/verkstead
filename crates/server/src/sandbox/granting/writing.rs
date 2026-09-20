@@ -83,6 +83,17 @@
 //! other way round: every grant comes off before a refusal is put back, so
 //! what [`uncopied`] tells a copy from is the human's own list above it rather
 //! than one still carrying this session's grant.
+//!
+//! **And what the whole of it cost is in the log, adding up.** A first Windows
+//! boundary took 112 s and the log said only that it had been slow: the entries
+//! under the threshold wrote no line at all, so there was nothing to add up;
+//! the total counted the entries the description named rather than the ones the
+//! loop walked; and its span reached over work no line beside it described. So
+//! every entry written or taken off now has its duration at `debug` and the
+//! slow ones an `info` line besides — see [`slowly`]; the total beside them
+//! spans that loop and counts those lines — see [`took`]; and each stretch of a
+//! boundary that is not an entry gets a line of its own — see [`stretch`], and
+//! [`super::super::Sandbox::command`], which is where most of them are.
 
 use std::ffi::OsStr;
 use std::io;
@@ -293,12 +304,24 @@ pub(crate) fn write(entries: &[Entry], sid: &str, cut: &[PathBuf]) -> io::Result
     let _one = one_at_a_time();
 
     let (mut through, mut refused) = (0usize, 0usize);
-    let began = std::time::Instant::now();
 
     // Read under the lock, so that what a list was found saying is still what
     // it says when the rest of this is written.
+    //
+    // **And timed on its own**, because it is a list read for every step this
+    // description asks for and nothing below it describes that. Inside the
+    // total it would be the one stretch of a slow boundary no line beside the
+    // number could account for — see [`stretch`].
+    let reading = std::time::Instant::now();
     let worth = super::worth_writing(entries, sid.bytes(), found);
+    stretch("lists read for which of its entries already stand", reading);
+
     let left_alone = entries.len() - worth.len();
+
+    // Started here rather than above, so that what it spans is the loop the
+    // per-entry lines describe and nothing else — see [`took`].
+    let began = std::time::Instant::now();
+    let mut walked = 0usize;
 
     for entry in refusals_first(&worth) {
         if !entry.path.exists() {
@@ -336,6 +359,13 @@ pub(crate) fn write(entries: &[Entry], sid: &str, cut: &[PathBuf]) -> io::Result
                     }
                 }
 
+                // Timed like every other entry before this arm leaves: a step
+                // is a list written, and a walk of the tree beneath it is
+                // exactly what it costs — see [`super::written_down`], where
+                // that walk was measured.
+                walked += 1;
+                slowly(&entry.path, entry.wanted, one);
+
                 continue;
             }
         };
@@ -352,6 +382,7 @@ pub(crate) fn write(entries: &[Entry], sid: &str, cut: &[PathBuf]) -> io::Result
             ))
         })?;
 
+        walked += 1;
         slowly(&entry.path, entry.wanted, one);
     }
 
@@ -364,7 +395,7 @@ pub(crate) fn write(entries: &[Entry], sid: &str, cut: &[PathBuf]) -> io::Result
          through them",
     );
 
-    took(began, entries.len(), "written");
+    took(began, walked, "written");
 
     Ok(())
 }
@@ -379,16 +410,31 @@ pub(crate) fn write(entries: &[Entry], sid: &str, cut: &[PathBuf]) -> io::Result
 /// no line at all.
 const DAWDLING: Duration = Duration::from_millis(250);
 
-/// One entry that took longer than [`DAWDLING`], said with the path — which is
-/// the whole of what somebody reading a slow start needs, the cost being the
-/// size of the tree under that one directory.
+/// One entry, said with the path and how long it took — which is the whole of
+/// what somebody reading a slow start needs, the cost being the size of the
+/// tree under that one directory.
 ///
-/// **At `info`, and deliberately.** The thing this exists to make visible was
-/// invisible precisely because nothing said it at the level anybody reads, and
-/// an entry over the threshold is rare enough to be worth a line: on a machine
-/// where the boundary is doing what it should, there are none at all.
+/// **Every entry at `debug`, and that is what makes the log add up.** A total
+/// beside lines for the slow entries only is a number nothing can be checked
+/// against: sixty entries each under [`DAWDLING`] cannot make 112 s, and with
+/// no line for the quick ones there is no telling whether the difference is
+/// sixty near-misses or a stretch of work nobody has thought about. Written for
+/// every entry, these sum to what [`took`] reports and the remainder is real.
+///
+/// **And the slow ones at `info` as well, deliberately.** The thing this exists
+/// to make visible was invisible precisely because nothing said it at the level
+/// anybody reads, and an entry over the threshold is rare enough to be worth a
+/// line: on a machine where the boundary is doing what it should, there are
+/// none at all.
 fn slowly(path: &Path, wanted: Wanted, began: std::time::Instant) {
     let took = began.elapsed();
+
+    tracing::debug!(
+        path = %path.display(),
+        ?took,
+        ?wanted,
+        "an access-control entry, written and timed so that the entries sum to the boundary",
+    );
 
     if took < DAWDLING {
         return;
@@ -402,9 +448,58 @@ fn slowly(path: &Path, wanted: Wanted, began: std::time::Instant) {
     );
 }
 
-/// And the whole of a boundary, where it was slow enough to be worth a line.
+/// One named stretch of a boundary that is not an entry — said with what it is
+/// and how long it took.
+///
+/// **Because a boundary is more than the entries it writes**, and everything
+/// else it does used to be time the log swallowed. The profile is emptied and
+/// the junctions made, the paths are read for which were inheriting, the
+/// account is resolved, two records are written, and the lists are read for
+/// which entries already stand — none of it inside [`took`]'s span and none of
+/// it beside it either, so a boundary that spent its 112 s in any of them said
+/// only that it had been slow. One of these on each is what lets somebody
+/// reading a slow start say *where* rather than only *that*.
+///
+/// **At `debug` always and at `info` when it dawdles**, which is [`slowly`]'s
+/// arrangement for [`slowly`]'s reason: the debug line is what makes the
+/// arithmetic possible and the `info` line is what somebody who is not reading
+/// on purpose still sees.
+pub(crate) fn stretch(what: &str, began: std::time::Instant) {
+    let took = began.elapsed();
+
+    tracing::debug!(?took, "a boundary's {what}");
+
+    if took < DAWDLING {
+        return;
+    }
+
+    tracing::info!(
+        ?took,
+        "a boundary's {what} took a while, which is a slow boundary saying where the time went",
+    );
+}
+
+/// And the whole of a boundary's entries.
+///
+/// **`entries` is the count of the lines beside this** rather than the count
+/// the description asked for: the loop walks the entries worth writing, which
+/// is fewer than the description names wherever the account can already step
+/// through a directory — see [`super::worth_writing`]. Reported as the whole
+/// description's number, the total disagreed with the lines under it before
+/// anybody had begun adding them up.
+///
+/// **And the span is the loop's**, so that what it covers is exactly what those
+/// lines describe. What a boundary does either side of the loop is named by
+/// [`stretch`] instead.
 fn took(began: std::time::Instant, entries: usize, what: &str) {
     let took = began.elapsed();
+
+    tracing::debug!(
+        ?took,
+        entries,
+        "a boundary's access-control entries were {what}, and the lines beside this are the \
+         entries it counts",
+    );
 
     if took < DAWDLING {
         return;
@@ -442,6 +537,7 @@ pub(crate) fn strip(entries: &[Entry], cut: &[PathBuf], sid: &str) {
 
     let _one = one_at_a_time();
     let began = std::time::Instant::now();
+    let mut walked = 0usize;
 
     for entry in grants_first(entries) {
         if !entry.path.exists() {
@@ -491,10 +587,11 @@ pub(crate) fn strip(entries: &[Entry], cut: &[PathBuf], sid: &str) {
             }
         }
 
+        walked += 1;
         slowly(&entry.path, entry.wanted, one);
     }
 
-    took(began, entries.len(), "taken off");
+    took(began, walked, "taken off");
 }
 
 /// `entries` with every refusal in front of every grant, each half in the order
@@ -1413,6 +1510,187 @@ mod tests {
             .expect("a description naming paths that are not there");
     }
 
+    /// Somewhere for the log to go while something runs, so that a test can
+    /// read what a boundary said of itself.
+    ///
+    /// **The formatted lines rather than the events**, which is the whole of
+    /// what is wanted here: what these tests ask is whether a line was written
+    /// at all and what count it named, and that is a question about the log
+    /// somebody reads.
+    #[derive(Clone, Default)]
+    struct Said(std::sync::Arc<Mutex<Vec<u8>>>);
+
+    impl io::Write for Said {
+        fn write(&mut self, wrote: &[u8]) -> io::Result<usize> {
+            self.0
+                .lock()
+                .expect("the log's own buffer")
+                .extend_from_slice(wrote);
+
+            Ok(wrote.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Said {
+        type Writer = Self;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    /// Every line the log wrote while `work` ran, down to `debug`.
+    ///
+    /// Thread-local, which is what makes it safe beside a suite running in
+    /// parallel: `with_default` is this thread's subscriber and no other
+    /// test's events reach it.
+    fn said(work: impl FnOnce()) -> Vec<String> {
+        let said = Said::default();
+
+        let log = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_ansi(false)
+            .with_writer(said.clone())
+            .finish();
+
+        tracing::subscriber::with_default(log, work);
+
+        let wrote = said.0.lock().expect("the log's own buffer");
+
+        String::from_utf8_lossy(&wrote)
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// The log of a boundary adds up: every entry the loop walked has a line of
+    /// its own, and the total beside them counts those lines.
+    ///
+    /// **Which is what a first Windows boundary had not got.** It took 112 s
+    /// and said only that it had been slow — the entries under [`DAWDLING`]
+    /// wrote nothing, so there was no sum to take, and the total named the
+    /// whole description's count while the loop had walked the shorter list of
+    /// what was worth writing. What runs here is the arithmetic rather than the
+    /// duration: Wine does not write an access-control list faithfully, so what
+    /// a boundary costs on the reporter's machine is theirs to measure and what
+    /// this asks is whether the lines are there to measure it with.
+    #[test]
+    fn every_entry_a_boundary_walks_has_a_line_and_the_total_counts_them() {
+        let held = tempfile::tempdir().expect("a directory to lay a description out in");
+
+        let account = held.path().join("account");
+        let skills = account.join("skills");
+        let worktree = held.path().join("worktree");
+
+        std::fs::create_dir_all(&skills).unwrap();
+        std::fs::create_dir_all(&worktree).unwrap();
+
+        let entries = vec![
+            Entry {
+                path: account,
+                wanted: Wanted::Stepped,
+            },
+            Entry {
+                path: skills,
+                wanted: Wanted::Refused,
+            },
+            Entry {
+                path: worktree,
+                wanted: Wanted::Granted(Reach::ReadWrite),
+            },
+            // Walked past rather than written, and so counted by neither the
+            // lines nor the total — see [`write`].
+            Entry {
+                path: held.path().join("a-path-nothing-has-put-there"),
+                wanted: Wanted::Granted(Reach::ReadOnly),
+            },
+        ];
+
+        let cut = inheriting(&entries);
+
+        let log = said(|| {
+            write(&entries, NOBODY, &cut).expect("a description of three real directories");
+            strip(&entries, &cut, NOBODY);
+        });
+
+        let lines = |saying: &str| log.iter().filter(|line| line.contains(saying)).count();
+
+        // The two halves are counted as the log is read rather than by what
+        // this test expects of the machine: how many entries are worth writing
+        // is a fact about the lists this machine's temporary directory came
+        // with — see [`super::worth_writing`] — and what is asked here is that
+        // the number a total names is the number of lines under it, whatever
+        // that machine answered.
+        let (mut walked, mut totals) = (0usize, 0usize);
+
+        for line in &log {
+            if line.contains("an access-control entry, written and timed") {
+                walked += 1;
+
+                assert!(
+                    !line.contains("a-path-nothing-has-put-there"),
+                    "a path nothing has put there is walked past rather than written, \
+                     so it should have no line at all. The log said:\n{}",
+                    log.join("\n"),
+                );
+
+                continue;
+            }
+
+            // The `debug` total rather than the `info` one a slow boundary
+            // writes beside it, so that a machine slow enough for both does
+            // not count its entries twice.
+            let Some((_, counted)) = line
+                .contains("and the lines beside this are the entries it counts")
+                .then(|| line.split_once("entries="))
+                .flatten()
+            else {
+                continue;
+            };
+
+            assert_eq!(
+                counted
+                    .split_whitespace()
+                    .next()
+                    .and_then(|counted| counted.parse().ok()),
+                Some(walked),
+                "a boundary's total should count the entries the lines beside it \
+                 describe. The log said:\n{}",
+                log.join("\n"),
+            );
+
+            totals += 1;
+            walked = 0;
+        }
+
+        assert_eq!(
+            totals,
+            2,
+            "the entries going on and the entries coming off are each a total. \
+             The log said:\n{}",
+            log.join("\n"),
+        );
+
+        assert!(
+            lines("an access-control entry, written and timed") >= 2,
+            "and a description of three real directories should have written \
+             something. The log said:\n{}",
+            log.join("\n"),
+        );
+
+        assert_eq!(
+            lines("lists read for which of its entries already stand"),
+            1,
+            "and the read that decides which entries already stand is named on its \
+             own, being inside no total and beside no line. The log said:\n{}",
+            log.join("\n"),
+        );
+    }
+
     /// A refused directory is left holding exactly the entries it held, which
     /// is what a refusal owes a directory of the human's own.
     ///
@@ -1615,12 +1893,13 @@ mod tests {
     /// the two look the same to anything coarser and only one of them is a
     /// boundary.
     ///
-    /// **The entries come off a [`Surface`] rather than being written by
+    /// **The grant comes off a [`Surface`] rather than being written by
     /// hand**, which is not tidiness: what makes the granted path resolve at
     /// all is the step on every directory on the way to it, and a list naming
     /// only the two paths this test cares about would be refused at the first
     /// ancestor. See [`super::entries`], which is what a session start asks and
-    /// what puts the steps in.
+    /// what puts the steps in. The refusal is added by hand, no description
+    /// saying one any more — see [`Wanted::Refused`].
     #[test]
     fn a_granted_path_is_read_as_the_account_and_a_refused_one_is_not() {
         let account = the_session_account();
@@ -1640,11 +1919,13 @@ mod tests {
         }
 
         let mut surface = Surface::starting_in(granted.clone());
-        surface
-            .own(&granted, Reach::ReadWrite)
-            .nothing(&refused, &refused);
+        surface.own(&granted, Reach::ReadWrite);
 
-        let entries = super::super::entries(&surface, None);
+        let mut entries = super::super::entries(&surface, None);
+        entries.push(Entry {
+            path: refused.clone(),
+            wanted: Wanted::Refused,
+        });
         let cut = inheriting(&entries);
 
         write(&entries, account.sid().text(), &cut).expect("the entries this description comes to");

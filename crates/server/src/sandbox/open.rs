@@ -35,18 +35,9 @@
 //! Windows arms of [`super::own_directory`], [`crate::skills::Skills::inside`],
 //! [`crate::handoffs::inside`] and [`super::Executable`] are for, and what
 //! [`super::Surface::elsewhere`] does with a bind of a path onto itself. What
-//! is left to join in is the Profile's account and the Conversation's handoff
+//! is left to join in is the Profile's account — for Claude, what goes into
+//! the root built for it, see [`super::root`] — and the Conversation's handoff
 //! directory.
-//!
-//! **And one thing it deliberately does not make.**
-//! [`super::Access::Nothing`] is the account's own skills hidden, which the
-//! other two platforms answer with an empty directory over them and a refusal
-//! of the path. There is nothing made here, and the answer that looks nearest
-//! would be worse than none: that path is *inside* the account, which by now is
-//! a junction, so a directory made at it would be a directory made in the
-//! human's own account. So nothing is put there and the path is refused
-//! instead, which on this platform is an entry rather than a mount — see
-//! [`super::granting::writing::refuse`].
 //!
 //! **Finding the program is this rendering's own work.** The two Unix
 //! renderings hand a vector to a wrapper and the wrapper's own `execvp` finds
@@ -205,7 +196,17 @@ fn realise(surface: &Surface) -> Vec<(PathBuf, PathBuf)> {
             // The profile itself, and then whatever goes inside it: the order
             // is the description's, and emptying comes first in it — see
             // [`Surface`].
-            Access::Empty(path) => super::emptied(path),
+            Access::Empty(path) | Access::Built(path) => super::emptied(path),
+
+            // Except where something of the Conversation is still running in
+            // one of them, which is made where it is missing and emptied never
+            // — see [`super::sharing`]. Emptying it here would delete what
+            // that launch is running out of.
+            Access::Kept(path) => std::fs::create_dir_all(path),
+
+            // And a file of Verkstead's own written into one of those, which
+            // is reached through the directory it is in.
+            Access::Written { path, contents } => std::fs::write(path, contents),
 
             // Somewhere to write a temporary file, which on this platform is a
             // directory inside that profile rather than one the machine shares
@@ -225,12 +226,6 @@ fn realise(surface: &Surface) -> Vec<(PathBuf, PathBuf)> {
 
                 joined(host, inside)
             }
-
-            // And the one thing left unmade on purpose — see this module's own
-            // documentation, which says why the nearest answer would be worse
-            // than none. What refuses the path is an entry written after this,
-            // on the real directory the junction leads to.
-            Access::Nothing { .. } => Ok(()),
 
             // And what needs nothing made for it: a path of the host's is
             // already where the description says it is, and the process table
@@ -665,6 +660,46 @@ mod tests {
             said, WHOLE,
             "an argument holding a space and a quote should arrive as the one \
              argument it was"
+        );
+    }
+
+    /// A profile said [`Access::Empty`] is emptied as the description is made
+    /// true, and one said [`Access::Kept`] is left exactly as it is — which is
+    /// what a launch into a Conversation something is already running in says
+    /// about the HOME they are both in, on the platform whose HOME is a real
+    /// directory. Made where it is not there, so a launch that shares a root
+    /// still has every directory of it to join out of.
+    #[test]
+    fn a_kept_profile_is_made_where_it_is_missing_and_emptied_never() {
+        let dir = tempfile::tempdir().unwrap();
+        let (emptied, kept) = (dir.path().join("emptied"), dir.path().join("kept"));
+
+        for profile in [&emptied, &kept] {
+            std::fs::create_dir_all(profile).unwrap();
+            std::fs::write(profile.join("written-by-the-session"), "kept\n").unwrap();
+        }
+
+        let missing = dir.path().join("kept/the-roots-own");
+        let mut surface = described(dir.path(), &["the-agent"]);
+
+        surface
+            .made(Access::Empty(emptied.clone()))
+            .made(Access::Kept(kept.clone()))
+            .made(Access::Kept(missing.clone()));
+
+        command(&surface);
+
+        assert!(
+            !emptied.join("written-by-the-session").exists(),
+            "what the last launch left in a profile it empties is gone"
+        );
+        assert!(
+            kept.join("written-by-the-session").is_file(),
+            "while what a running launch has in one that is kept is left alone"
+        );
+        assert!(
+            missing.is_dir(),
+            "and a directory that is not there is made"
         );
     }
 

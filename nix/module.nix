@@ -183,9 +183,13 @@ in
         The `home` option below is bound in too, and read-only — so an agent
         account kept under it that a session has to *write*, which is every
         Claude account, is named here as well. That is the one composition worth
-        saying outright: naming it as the home does not make it writable, and
-        the account is the thing a session writes its own logs and settings
-        into.
+        saying outright: naming it as the home does not make it writable. A
+        Claude session is given a root of Verkstead's own rather than the
+        account whole, but its login, its memory and its transcripts are still
+        written into the account's `.claude`. And what it changed in its copy of
+        `.claude.json` is merged back by a rename beside that file, which a
+        read-only home refuses: that merge is logged and skipped, and the
+        session runs as normal.
       '';
     };
 

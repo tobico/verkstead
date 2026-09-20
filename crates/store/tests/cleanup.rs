@@ -20,6 +20,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use sqlx::SqlitePool;
 use verkstead_schema::{QuestionSet, Response};
@@ -28,14 +29,14 @@ use verkstead_store::{
     ProfileFacts, PullRequest, Rollup, Settlements, Standing, Summary, Trimming, WaitingOn,
     add_companion, append_capture, append_transcript, archive_conversation, ask, attach, capture,
     close_conversation, create_profile, deletable, delete_conversation, deleted_tables,
-    load_conversation, load_response, lock_set, nothing_else, open_database, pick_direction,
-    place_conversations, reclaim, record_addressed_comments, record_backlog, record_check_rollup,
-    record_commit, record_conflict_fix_attempt, record_delivery, record_fix_attempt,
-    record_merging, record_pull_request, record_share, record_share_comment, record_standing,
-    register_repo, save_brief, session_id, set_grilling_pairing, settle_wrap_up, skip_review,
-    stamp_unseen, start_capture, start_conversation, start_grilling, start_implementing, stop,
-    submit_response, timeline, transcript, trim_conversation, trimmable, trimmed,
-    unarchive_conversation,
+    end_session, load_conversation, load_response, lock_set, nothing_else, open_database,
+    pick_direction, place_conversations, reclaim, record_addressed_comments, record_backlog,
+    record_check_rollup, record_commit, record_conflict_fix_attempt, record_delivery,
+    record_fix_attempt, record_merging, record_pull_request, record_share, record_share_comment,
+    record_standing, register_repo, save_brief, session_id, set_grilling_pairing, settle_wrap_up,
+    skip_review, stamp_unseen, start_capture, start_conversation, start_grilling,
+    start_implementing, stop, submit_response, timeline, transcript, trim_conversation, trimmable,
+    trimmed, unarchive_conversation,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -152,7 +153,7 @@ async fn worked(pool: &SqlitePool, branch: &str) -> Worked {
 
 /// One session's worth of bulk: the Capture, the log it kept of itself, and the
 /// name Verkstead ran it under — with the summary the Timeline card is drawn
-/// from beside them.
+/// from beside them, and how the session ended.
 async fn printed(pool: &SqlitePool, id: i64, session: &str, said: &str) -> i64 {
     let profile = create_profile(
         pool,
@@ -162,6 +163,7 @@ async fn printed(pool: &SqlitePool, id: i64, session: &str, said: &str) -> i64 {
                 home: PathBuf::from("/watched/accounts/work/.codex"),
             },
             models: vec!["gpt-5".to_owned()],
+            memory: true,
         },
     )
     .await
@@ -197,6 +199,10 @@ async fn printed(pool: &SqlitePool, id: i64, session: &str, said: &str) -> i64 {
     )
     .await
     .unwrap();
+
+    end_session(pool, event, Some(1), Duration::from_millis(400), true)
+        .await
+        .unwrap();
 
     event
 }
@@ -531,6 +537,7 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
                 home: PathBuf::from("/watched/accounts/work/.codex"),
             },
             models: vec!["gpt-5".to_owned()],
+            memory: true,
         },
     )
     .await

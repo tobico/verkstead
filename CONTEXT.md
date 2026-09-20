@@ -204,7 +204,8 @@ _Avoid_: state directory, work dir, scratch space, cache
 **Sandbox**:
 What a session runs inside: its Conversation's Worktree, the Repo's git
 directory and the Conversation's handoff directory writable, the Agent
-Profile's pair at `~/.claude` and `~/.claude.json`, the system, the Skills,
+Profile's account as a **Built Root** — never the account whole, and for Claude
+a copy of its `~/.claude.json` beside it — the system, the Skills,
 the Conversation's **Attachments** and the Verkstead executable read-only in a
 directory of Verkstead's own, and nothing else of the machine at all — not
 even the checkout the Worktree was made from. The directories a session's own
@@ -216,12 +217,16 @@ link on the `PATH` into a versions directory no `PATH` names. A link leading
 anywhere else, or leading nowhere, is a name a session is not given at all,
 and nothing else of that home is. A Claude session is told not to update the
 install it runs, which is read-only inside and the human's own besides, so
-nothing a session does moves it. Nothing at all stands where the
-account's own skills would be found: they are hidden rather than merged with,
-and where the mechanism has no mount to hide one with it refuses the path
-instead. Each Companion Repo the Conversation was configured with is inside as
-well: its Worktree and the git directory behind it, both at that companion's
-own mode, so a read-only one is read-only through both. The **Build Cache** is
+nothing a session does moves it. The account's own skills are not there to be
+found: a Built Root holds none, so there is nothing to hide and nothing to
+refuse. Nor are the account's global instructions, and what a session reads in
+their place is the settings page's **Instructions** text, written into the root
+as the file that harness reads: `.claude/CLAUDE.md`, `.codex/AGENTS.md`,
+`.grok/AGENTS.md`, or the config directory's `AGENTS.md` for OpenCode — and no
+such file at all where nobody has typed a text. Each Companion Repo the
+Conversation was configured with is inside as well: its Worktree and the git
+directory behind it, both at that companion's own mode, so a read-only one is
+read-only through both. The **Build Cache** is
 inside as well, writable, with the `sccache` it compiles through read-only
 beside the executable — that one is a client, and what it reaches is the
 **Compile Server** in a Sandbox of Verkstead's own — the sccache half only on
@@ -265,12 +270,14 @@ rather than Linux's, with one thing neither other platform has: the entries are
 written on the human's own directories, so they are per Conversation, they come
 off with the Worktree when it closes, and a server that stopped between the two
 sweeps them at its next startup off a record it wrote under the Data Directory.
-The path a mount would have hidden is refused instead on both of the other two —
-the seatbelt's `require-not`, and on Windows an entry in front of the account's
-own skills — and where a session's profile and the account inside it cannot be
-made out of a mount they are really made: on a Mac under the Data Directory, and
-on Windows as a profile of the Conversation's own with every directory of the
-account joined in by a junction and every file by a hard link.
+A session's profile and the Built Root inside it are really made on all three,
+under `homes/<id>` in the Data Directory. On Linux the root and the
+`.claude.json` copy are bound into the empty HOME bubblewrap makes; on a Mac
+and on Windows the profile is the session's HOME itself. What is joined into
+the root is joined by each platform's own means: a bind on Linux, a symbolic
+link on a Mac, and on Windows a junction for a directory and a hard link for a
+file. On Windows the entries are written on the root and on each thing joined
+into it, and never on the account directory as a whole.
 _Avoid_: container, jail, isolation, environment
 
 **Sandbox Configuration**:
@@ -292,6 +299,35 @@ is reported on the page as one the server cannot see, and does nothing until the
 installer widens the unit. The **Build Cache** is not one of these and is not
 configured here.
 _Avoid_: sandbox settings, mounts, extra paths
+
+**Instructions**:
+One text, set on the settings page, that every session is given whatever
+harness runs it — what a human would otherwise keep in their own global
+`CLAUDE.md`, said once here instead. A **Built Root** holds none of the
+account's own files, so the account's global instructions are not in one, and
+this is what stands where they would have been.
+**One text for the whole installation** rather than one per **Agent Profile**,
+kept in `config.yaml` beside the git author and the **Sandbox Configuration**'s
+binds — a thing Verkstead is *told* rather than one it finds. It saves as a
+value the way those do: what the page sends is what the file holds afterwards,
+so clearing the box takes the key away rather than leaving an empty one. Nothing
+in it can be refused, there being no grammar in a paragraph of prose to get
+wrong, and an absent key, an empty one and one nothing can parse are the same
+empty text.
+**Written into each root as the file that harness reads**, verbatim and alone:
+no heading over it and no line saying where it came from. Claude's
+`.claude/CLAUDE.md`, Codex's `.codex/AGENTS.md`, Grok Build's `.grok/AGENTS.md`,
+and the config directory's `AGENTS.md` for OpenCode. Verkstead's own file like
+the configuration file beside it: written rather than joined, never the
+account's, and nothing of it written back as a session ends.
+**Read at the moment a root is built**, like the rest of `config.yaml`: a text
+saved on the settings page reaches the next session, and a running one keeps
+what it started with. A text nobody typed is no file at all, so a root then
+holds exactly what it held before there was such a setting.
+**The Repo's own instructions are untouched.** A `CLAUDE.md` or an `AGENTS.md`
+in the Worktree is the repository's and is read as it always was, with this one
+above it the way the human's global file used to be.
+_Avoid_: global CLAUDE.md, system prompt, preamble, rules
 
 **Build Cache**:
 One directory of Verkstead's own that every Sandbox gets writable, so a Rust
@@ -351,7 +387,12 @@ as the Build Cache makes its own where it uses it, and what it holds is the log
 and the log before it: `verkstead.log`, rolled over to `verkstead.log.1` at a
 few megabytes and kept no further back than that, so a machine that has been
 running Verkstead for months is not handed a log nobody can open. **View Logs**
-on the tray menu is what opens it. The server itself keeps logging to stdout
+on the tray menu is what opens it. **A file started here opens with a
+byte-order mark** — a fresh one and each roll both, and a run appending to one
+that already has content adds none: Verkstead's own messages have em-dashes in
+them, and the viewers Windows opens a `.log` in read a file with no mark in the
+machine's code page, which is mojibake to the very person being asked to report
+what it says. The server itself keeps logging to stdout
 wherever it was started from — where the events go is the starting binary's
 call — and `RUST_LOG` filters the file exactly as it filters that stdout.
 **A machine that names nowhere to put one is not refused**: it gets no file, the
@@ -409,6 +450,21 @@ reads nothing of this server.
 startup line carries `workbench=`, and on the desktop app the browser opened at
 startup and the tray's **Open** both go to the link, built afresh at each press
 so a browser that forgot the cookie is let in again.
+**And the line carries the key only on the install that hands it over that
+way.** The daemon's does: a machine started from a unit file has no tray to
+press, and what somebody reading the journal pastes is the whole link. The
+desktop app's does not, naming the address alone: it has handed the link over
+already, and its log is the file the tray's **View Logs** opens on somebody's
+desk — a key written there is a login for anybody reading over their shoulder.
+**Unless there turned out to be no tray**, which is a machine over SSH, in a
+container, or one whose desktop would not give Verkstead an icon: the app's
+handing over is the browser and **Open**, so a run with neither says the link
+itself rather than serving a workbench nobody can get into. And a browser that
+would not open is reported by the address, at startup and at a press alike — a
+line about a failure is that file on that desk, and is nobody's only way in.
+A session cannot read the file whatever is in it, the log living in the human's
+own local application data and a session running as a local account of
+Verkstead's own.
 **Reset key**, at the foot of **Remote Access**, re-issues it: everything
 holding the old one meets a 401 on its next request, and the browser that
 pressed stays in — a reset made from the phone is a reset made from the only
@@ -489,10 +545,21 @@ the name resolved to and the file that path lands on, where it is a link: a
 distribution's `claude` too old to connect and the human's own under
 `~/.local/bin` are the same tick and two different programs. One that is not
 there says where the name was seen, where it was seen at all — on an entry of
-the server's own `PATH` that a session's is not composed with, or at the end of
-a link a session could not follow — because each of those is a `PATH` to fix
-rather than a program to install. A name on no list at all is absent with
-nothing said. And where a session looks is the composed list itself, drawn
+the server's own `PATH` that a session's is not composed with, at the end of a
+link a session could not follow, or standing as the Claude Code **desktop app**
+rather than the CLI — because the first two are a `PATH` to fix rather than a
+program to install, and the third is Claude Code already on the machine with no
+CLI on the end of that name. The desktop app is recognised by shape and nothing
+is run to find out: a `claude` under `%LOCALAPPDATA%\AnthropicClaude`, or beside
+Squirrel's `Update.exe`. Two shapes and both of them seen — a shape guessed at
+would refuse a session on a machine it was wrong about, with nothing on the
+Profile to overrule it. Its row says
+which of the two programs the file is and leaves the install to the row's own
+instruction beneath it, and a session whose Profile resolves to one is refused
+rather than started, with the same line in the log and in its Capture — that
+line naming an install, having no row under it to read one off. A name on no list at
+all is absent with nothing said. And where a session looks is the composed list
+itself, drawn
 above the rows on every platform, a session's `PATH` being the server's own
 rather than anything the wizard could write down.
 
@@ -1075,7 +1142,14 @@ The session's own record of its conversation — the agent's prose, its tool
 use, its reasoning, and what was put to it — kept word for word as the agent's
 backend wrote it, and rendered readable in the details pane. What summaries and a
 stop Notice's evidence draw from, falling back to the Capture when a session
-left none.
+left none — and, where the session itself printed nothing, to **how the session
+ended**: the code it exited with and how long it lived, which is all there is to
+say about one. Whether it printed anything is the relay's own reading rather
+than an empty Capture, a Capture being a record Verkstead also writes a line of
+its own into: on the platform whose boundary is written, a session that never
+said a word still leaves one that is not empty. Kept for a session that stopped
+without being asked to and for no other, a session Verkstead ended itself being
+one whose exit says nothing about anything.
 
 **Which record it is read from is the backend's to say.** A backend that takes
 a session id at launch — Claude Code and Grok Build both do — is told the name
@@ -1117,6 +1191,14 @@ The terminal bytes of a session, kept byte for byte, escapes and all — how it
 looked rather than what it said. What says a printing session has gone **Idle**,
 what the Screen replays, and the record of last resort for a session that left no
 Transcript.
+**And it may hold a line of Verkstead's own about the session**, which is the
+one thing in it no terminal printed. A Capture is opened before the sandbox is
+built, so that what a launch does before there is anything to print into it has
+somewhere to be said: on Windows the boundary being written, over how many
+access-control entries and how long it took — a first one took 112 s with
+nothing anywhere saying so — and, wherever a launch fails, why, which used to
+reach the log and nowhere else. The one record the human already opens is where
+both belong.
 _Avoid_: transcript (that is the readable record), raw output, tape
 
 **Screen**:
@@ -1254,13 +1336,13 @@ A coding-agent account Verkstead can run a session under: an agent type, the
 account itself, the models that account can run, and a name where there is
 anything for one to tell apart. **The account's shape is its type's**, rather
 than one shape every Profile is assumed to have — Claude Code's is the directory
-and config file pair bind-mounted at `~/.claude` / `~/.claude.json` inside the
-sandbox, and every backend after it keeps its whole account under one
-relocatable home — Codex's at `~/.codex`, Grok Build's at `~/.grok`, and
-OpenCode's at neither, opencode keeping no dot-directory of its own: its home is
-the directory its XDG config and data directories sit inside, and both are bound
-at those defaults in a HOME that is fresh enough for them to resolve there.
-Whichever it is, mounting it is what keeps accounts separate. A type is offered
+and config file pair at `~/.claude` / `~/.claude.json`, and every backend after
+it keeps its whole account under one relocatable home — Codex's at `~/.codex`,
+Grok Build's at `~/.grok`, and OpenCode's at neither, opencode keeping no
+dot-directory of its own: its home is the directory its XDG config and data
+directories sit inside. Whichever it is, a session is given a **Built Root**
+made out of that one account and no other, never the account whole, which is
+what keeps accounts separate. A type is offered
 to the human only once it can launch the real thing: one that cannot would be a
 lie in a picker, so the form offers Claude, Codex, Grok Build and OpenCode, and
 a Profile of a type whose stage has not landed is one saved over the API until
@@ -1269,6 +1351,18 @@ models are a list and the list is the Profile's own, because different Profiles
 reach different accounts and each can launch different things; none of them is a
 default, so which one a session runs is always picked — as a Pairing, alongside
 the Profile itself.
+**Every Profile has a memory switch**, whatever its type: whether the account's
+memory store is shared into a session's Built Root, or the session starts with
+an empty store of its own. It is a fact about the Profile, stored beside its
+account, and **on by default** — on for every Profile saved before the switch
+existed too, because sharing is what the human had been getting, and the switch
+is a way to stop rather than a way to start. **On**, memory a session writes and
+the transcript it leaves are the account's, and the next session reads them.
+**Off**, the store is the root's own and empty as each session starts: fresh
+memory, none of the human's transcripts in reach, and the session's own
+transcript written into the root, where Verkstead reads it from. The login and
+the written configuration are the same either way. On the Profile form it is one
+checkbox, drawn for every agent type; the cards and the pickers do not show it.
 **A Profile need not be named.** The harness's mark and the model already say
 the whole of what most accounts are — the one Claude Code login on this machine,
 running Fable 5 — and a box that had to be filled in before a save would be a
@@ -1301,6 +1395,78 @@ carries on. What has already run goes on saying so, a session's record holding
 the Profile's name rather than a pointer to its row.
 _Avoid_: account, identity, persona, agent config, default profile (**Default**
 is what an unnamed one is *called*, not one anything falls back to)
+
+**Built Root**:
+What a session is given of its **Agent Profile**'s account, whatever the
+harness: the `~/.claude` a Claude session runs in, the `~/.codex` a Codex one
+does, the `~/.grok` a Grok Build one does, and the config and data directories
+under `~/.config/opencode` and `~/.local/share/opencode` an OpenCode one does.
+Each is a directory of Verkstead's own at `homes/<id>` under the Data
+Directory, emptied and made again as each of the Conversation's sessions starts
+— except while something of the Conversation is still running in what would be
+emptied, which the next session or terminal is given as it stands instead. That
+is the root on Linux, where emptying it would unmount what is joined into the
+running session, and on a Mac and on Windows the `homes/<id>` directory too,
+which holds every root of the Conversation and is what a launch there would
+delete. A Codex terminal beside a Claude session has a root of its own, and
+builds it.
+**One rule for every harness, in four parts**, each harness's own files filling
+them:
+**The login, linked**, so a login or a token refresh from inside lands in the
+account: Claude's `.credentials.json`, and `auth.json` for the other three.
+An account with no login gets none.
+**The memory store, joined read-write only where the Profile's memory switch
+is on**, and made in the account first where missing. Claude's is two entries
+under `projects/` — the Repo's main checkout's, which holds Claude's memory of
+the Repo, and the Worktree's, where the session's transcript is written — and
+no other repository's. Codex's is `sessions/`, where its rollouts go, and
+`memories/`. Grok Build's is `sessions/` and `memory/`. OpenCode's is its
+whole data directory, because the database in it runs in write-ahead-log mode
+and one joined a file at a time will not open; its login is in there too.
+With the switch off each of those is the root's own and empty, and for
+OpenCode `auth.json` alone is linked into a data directory of the root's own.
+**A configuration file Verkstead writes**, carrying only what the account's
+own says about reaching a model. Claude's `settings.json` holds the key that
+skips the bypass-permissions consent, and the account's `apiKeyHelper` and
+`env`. Codex's `config.toml` holds `model_provider` and `model_providers`.
+Grok Build's `config.toml` holds `model`, `model_providers`, `auth_provider`,
+`auth`, `grok_com_config`, and where models are listed and reached out of
+`endpoints`. OpenCode's `opencode.json`, the only file in its config
+directory, holds `provider`, read from `opencode.json` or `opencode.jsonc`.
+Nothing else of the account's configuration goes in: no hooks, plugins,
+permissions, rules or MCP servers. It is not written back.
+**The settings page's Instructions text, written as the file that harness
+reads** for its global instructions: `CLAUDE.md` in a Claude root,
+`AGENTS.md` in a Codex or a Grok Build one, and `AGENTS.md` in OpenCode's
+config directory. Verbatim and alone, with no heading over it and no line
+saying where it came from, and written rather than joined the way the
+configuration file beside it is — Verkstead's own, never the account's, and
+nothing of it written back. The account's own such file is left out with the
+rest of how the human works, and this stands in its place; a text nobody has
+typed is no file at all. See **Instructions**.
+Beside a Claude root, in the profile, `.claude.json` is a **copy** of the
+account's. The copy has the account's MCP servers taken out, and the Repo and
+the Worktree seeded as trusted. Codex's trust is said on its launch line
+instead. Everything else of an account is absent: plugins, commands, agents,
+skills, rules, the account's own global instructions file, history, databases
+outside the store, and whatever a harness adds next.
+**What a session changed is carried back as it ends**, on all three platforms.
+A login the session replaced, rather than wrote through, is written back over
+the account's own; one still the same file as the account's is left alone; and
+a login made where the account had none is handed to it. A Grok Build login on
+Linux is the one copied rather than linked, because grok saves it only by
+renaming a file over it and a bind refuses that; it is merged back by login
+scope, the way the `.claude.json` copy is. The `.claude.json` copy is merged rather than
+written back whole: only the keys and `projects` entries the session changed
+reach the account's file as it is by then, the account's MCP servers are never
+touched, and a session that changed nothing leaves the file exactly as it was.
+**A session's transcript is read where it really is on the host**: in the
+account's store when memory is shared, and in the root under `homes/<id>` when
+it is not. On Linux the root's joined store is a bind inside the session's
+namespace, so on the host the account's directory is the only place that log is.
+What a Profile stores, and how the setup wizard finds an account, do not change:
+a Built Root is what a session is *given*.
+_Avoid_: account home, joined account, claude home, mounted account
 
 **Pairing**:
 An Agent Profile and one of the models it lists, chosen together, and what a
@@ -2090,6 +2256,27 @@ again; what happens next is the human's, typing into the Screen, steering or
 pressing **Stop**. Nothing goes on the Timeline for a rescue itself: it is
 Verkstead prodding an agent rather than anything the work has got to, and the
 line is in the session's own Capture. See ADR-0018.
+
+**What the human sees of it is a condition** rather than an Event — *idle 4 min,
+spoken to once* — drawn beside the lifecycle word on the card and in the row's
+label, the way *Waiting on checks* is. Its two halves are the rescue's own
+reading of the session, read as the page is drawn and stored nowhere: how long
+it has been **Idle**, against the same grace the rescue arms on, and how many
+times it has been spoken to. So it goes the moment the session says anything, an
+answer is put in front of the human, or the run ends — and a session sitting on
+a Set never wears it, that being a human with something in front of them rather
+than a Conversation nobody can move. Without it a parked agent and one hard at
+work read alike, which is ten minutes somebody spent watching a session that was
+never going to say a word.
+
+**It comes up when the Rescue has spoken rather than when the clock passes.**
+The idle clock counts from the session's last byte and nothing resets it when a
+Set is answered, so a condition drawn on the span alone would open with *idle 12
+min* the moment the human picked, the twelve minutes being their own
+deliberation — which is why the rescue holds off until it has seen the session
+at work since it was last stirred. The count is the register's proof that the
+hold-off is over, and the line the rescue typed echoes, so the span from then on
+is the silence since Verkstead spoke.
 _Avoid_: Nudge (that is the viewer's signal), retry, reminder, ping, poke
 
 **Stalled**:

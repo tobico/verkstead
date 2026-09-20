@@ -57,6 +57,8 @@ import repoList from "../src/repos/RepoList.module.css";
 import card from "../src/CardButton.module.css";
 import { GitCard, GitPane } from "../src/settings/Git";
 import styles from "../src/settings/Git.module.css";
+import scopes from "../src/settings/scopes.module.css";
+import instructions from "../src/settings/Instructions.module.css";
 import languages from "../src/settings/Languages.module.css";
 import binds from "../src/settings/SandboxBinds.module.css";
 import {
@@ -173,6 +175,17 @@ function sent(fetching: ReturnType<typeof serving>): unknown {
 }
 
 const TOKEN = "ghp_fedcba9876543210";
+
+/// What the scopes block says a token has to be able to do, a line per flavour
+/// of token — the classic one first, as the block draws them.
+///
+/// Read off the block rather than through `getByText`, because each line is
+/// part words and part `code`: what is being asked is what the whole line says.
+function wanted(container: HTMLElement): string[] {
+  return [...container.querySelectorAll(`.${scopes.scopes} li`)].map(
+    (line) => line.textContent ?? "",
+  );
+}
 
 describe("the card", () => {
   it("says of a saved token its last four characters and when it was written", async () => {
@@ -349,7 +362,9 @@ describe("the form", () => {
   /// what a gist is published as and what a pattern matches are all written
   /// down elsewhere, and a page that said them again was a page nobody read.
   /// A computed line is not one of these — what the machine is doing stays
-  /// wherever it was, which is what the warnings above prove.
+  /// wherever it was, which is what the warnings above prove. Neither are the
+  /// scopes below: they say what the *value* has to be able to do, which is
+  /// nowhere else and is what the next test is about.
   it("carries no note explaining a control", async () => {
     theSettings(TOLD);
     const { container } = mountPane();
@@ -357,6 +372,38 @@ describe("the form", () => {
     await waitFor(() => screen.getByLabelText("Name"));
 
     expect(container.querySelectorAll(`.${notices.note}`)).toHaveLength(0);
+  });
+
+  /// What a token has to be able to do, in both flavours GitHub issues one in.
+  /// A push a scope is missing for is made inside a session, so the refusal
+  /// that comes back names no scope — this is the only place the boxes to tick
+  /// are named.
+  it("names the scopes a token needs, in both flavours", async () => {
+    theSettings(TOLD);
+    const { container } = mountPane();
+
+    await waitFor(() => screen.getByText(/Tick these on GitHub/));
+
+    const [classic, fine] = wanted(container);
+    expect(classic).toContain("repo");
+    expect(classic).toContain("workflow");
+    expect(classic).toContain("gist");
+
+    expect(fine).toContain("Contents");
+    expect(fine).toContain("Pull requests");
+    expect(fine).toContain("Issues");
+    expect(fine).toContain("Workflows");
+    expect(fine).toContain("Actions");
+  });
+
+  /// And they stand before there is anything to say them about: this is what to
+  /// tick *before* pasting one, where the lines about the account and the scope
+  /// GitHub withheld are about a token that has been saved.
+  it("names them with no token configured", async () => {
+    theSettings(UNSET);
+    mountPane();
+
+    await waitFor(() => screen.getByText(/Tick these on GitHub/));
   });
 
   /// The way out of a details pane is the way back its head draws, hidden by the
@@ -444,6 +491,9 @@ describe("saving", () => {
         conflict_resolution: TOLD.conflict_resolution,
         share_on_done: TOLD.share_on_done,
         ...PATHS,
+        // And the text every session is given, likewise: what is sent is what the
+        // file holds afterwards, so a save that left it out would clear it.
+        instructions: TOLD.instructions,
       }),
     );
   });
@@ -675,6 +725,7 @@ describe("replacing and clearing the token", () => {
         share_on_done: TOLD.share_on_done,
         paths: TOLD.paths,
         ignored_comments: TOLD.ignored_comments,
+        instructions: TOLD.instructions,
       },
       verified: null,
       refused: [],
@@ -700,6 +751,9 @@ describe("replacing and clearing the token", () => {
         conflict_resolution: TOLD.conflict_resolution,
         share_on_done: TOLD.share_on_done,
         ...PATHS,
+        // And the text every session is given, likewise: what is sent is what the
+        // file holds afterwards, so a save that left it out would clear it.
+        instructions: TOLD.instructions,
       }),
     );
 
@@ -1091,6 +1145,9 @@ describe("sharing on Done", () => {
         cleanup: CLEANUP,
         conflict_resolution: TOLD.conflict_resolution,
         ...PATHS,
+        // And the text every session is given, likewise: what is sent is what the
+        // file holds afterwards, so a save that left it out would clear it.
+        instructions: TOLD.instructions,
       }),
     );
 
@@ -1208,6 +1265,9 @@ describe("how a conflict is resolved", () => {
         },
         cleanup: CLEANUP,
         ...PATHS,
+        // And the text every session is given, likewise: what is sent is what the
+        // file holds afterwards, so a save that left it out would clear it.
+        instructions: TOLD.instructions,
       }),
     );
 
@@ -1472,7 +1532,36 @@ describe("the path a details pane stands at", () => {
     await waitFor(() => expect(history.get()).toBe("/"));
   });
 
-  /// And the third: the extra paths a sandbox is given beyond the worktree a
+  /// And the one text every session is given, which opens the same way again.
+  it("opens the instructions at /settings/instructions, replacing", async () => {
+    const { container, history } = thePage();
+
+    const face = await drawn<HTMLElement>(
+      container,
+      `.${instructions.instructionsCard}`,
+    );
+    fireEvent.click(face);
+
+    await waitFor(() => expect(history.get()).toBe("/settings/instructions"));
+
+    history.back();
+    await waitFor(() => expect(history.get()).toBe("/"));
+  });
+
+  it("draws the box in the details pane, and reads its card as open", async () => {
+    const { container } = thePage("/settings/instructions");
+
+    await waitFor(() => screen.getByLabelText("Instructions"));
+
+    const face = await drawn<HTMLElement>(
+      container,
+      `.${instructions.instructionsCard}`,
+    );
+    expect(face.getAttribute("aria-pressed")).toBe("true");
+    expect(face.classList).toContain(card.open);
+  });
+
+  /// And the next: the extra paths a sandbox is given beyond the worktree a
   /// session works in.
   it("opens the binds at /settings/sandbox-binds, replacing", async () => {
     const { container, history } = thePage();
@@ -1710,6 +1799,7 @@ describe("where a settings details pane stands", () => {
   it("puts an id behind a segment of its own, and a word beside it", () => {
     expect(pathTo("git")).toBe("/settings/git");
     expect(pathTo("languages")).toBe("/settings/languages");
+    expect(pathTo("instructions")).toBe("/settings/instructions");
     expect(pathTo("sandbox-binds")).toBe("/settings/sandbox-binds");
     expect(pathTo(opensProfile(7))).toBe("/settings/profiles/7");
     expect(pathTo(opensProfile("new"))).toBe("/settings/profiles/new");
@@ -1720,6 +1810,7 @@ describe("where a settings details pane stands", () => {
     for (const opening of [
       "git",
       "languages",
+      "instructions",
       "sandbox-binds",
       "repos",
       opensProfile(7),

@@ -147,6 +147,7 @@ async fn profile(pool: &SqlitePool, name: &str, models: &[&str]) -> i64 {
                 config_file: PathBuf::from(format!("/state/profiles/{name}.json")),
             },
             models: models.iter().map(|model| (*model).to_owned()).collect(),
+            memory: true,
         },
     )
     .await

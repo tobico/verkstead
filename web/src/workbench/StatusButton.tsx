@@ -47,7 +47,7 @@ import { faChevronDown } from "@fortawesome/free-solid-svg-icons";
 import { Icon } from "../Icon";
 import type { ConversationView } from "../api/types";
 import { Actions } from "./Actions";
-import { WAITING_ON_CHECKS } from "./conditions";
+import { WAITING_ON_CHECKS, parked } from "./conditions";
 import { pressed } from "./eager";
 import { ENDED, STATE } from "./states";
 import styles from "./StatusButton.module.css";
@@ -114,11 +114,22 @@ export function status(conversation: ConversationView): Status {
     return { word: WAITING_ON_CHECKS, state, attention: false };
   }
 
-  // A session in the worktree. A session that has gone quiet says nothing
-  // extra — no idle word and no ring: it is still what the run is doing, and a
-  // second word for it would be the button reporting on the agent's typing.
+  // A session in the worktree. A session between two lines of its own output
+  // says nothing extra — no idle word and no ring: it is still what the run is
+  // doing, and a second word for it would be the button reporting on the
+  // agent's typing.
+  //
+  // One the Rescue is watching sit there is the other thing, and it takes the
+  // word: the session has been idle long past the grace with nothing open and
+  // nothing to show for itself, which is a run nobody can move and reads as
+  // *Running* only because nothing was ever drawn for it. The words are
+  // [`parked`], which the sidebar row says the same condition in.
   if (conversation.working) {
-    return { word: "Running", state, attention: false };
+    return {
+      word: conversation.parked ? parked(conversation.parked) : "Running",
+      state,
+      attention: false,
+    };
   }
 
   // And nothing running, with something of Verkstead's own still holding it:

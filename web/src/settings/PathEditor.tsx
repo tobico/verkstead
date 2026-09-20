@@ -46,7 +46,7 @@ import type {
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty } from "../notices";
-import { heldCleanup, heldPaths } from "./held";
+import { heldCleanup, heldInstructions, heldPaths } from "./held";
 import styles from "./PathEditor.module.css";
 
 /// The settings as they stand, read once for every pane that draws them — the
@@ -132,6 +132,9 @@ export function useWritingPaths() {
         cleanup: heldCleanup(standing),
         conflict_resolution: standing?.conflict_resolution ?? "Merge",
         share_on_done: standing?.share_on_done ?? false,
+        // And the text every session is given, likewise — see
+        // [`heldInstructions`].
+        ...heldInstructions(standing),
         ...lists,
         // And the ignore rules left exactly where they are. Alone among the
         // settings they travel as an action rather than a value: this form has

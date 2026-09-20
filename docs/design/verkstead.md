@@ -183,13 +183,33 @@ flowchart LR
   other backends can slot in later. The model
   list is the profile's own rather than one list shared by all of them, and it
   has no default entry: the profile says what is available and the pick is made
-  where a session is set up. Account separation works as in the
-  current scripts: the profile's pair is bind-mounted at `~/.claude` /
-  `~/.claude.json` inside the sandbox. *Which backends, settled 2026-08-29 in
+  where a session is set up. Account separation: a session is given
+  something out of the profile's own account and no other. *Refined
+  2026-09-17, building built-roots/01-claude-root*: the pair is no longer
+  bind-mounted whole. A session's `~/.claude` is a **built root** under
+  `homes/<id>` in the data directory, holding the account's credentials file
+  (linked), the Repo's and the Worktree's `projects/` entries (joined) and a
+  `settings.json` Verkstead writes; `~/.claude.json` is a copy, merged back at
+  session end. See [ADR-0011](../adr/0011-agent-backends.md). *Which backends, settled 2026-08-29 in
   [ADR-0011](../adr/0011-agent-backends.md)*: Codex, Grok Build and OpenCode
   spend the other three slots, each at full parity. A new-type profile stores
   **one** home directory rather than claude's pair — the whole account lives
   under it — and the form offers a type only once its stage has landed.
+  *Refined 2026-09-18, building built-roots/02-three-roots-and-memory*: a Codex,
+  Grok Build or OpenCode session is not given that home whole either. It gets a
+  built root by the same rule as Claude's — the login linked, the memory store
+  (`sessions/` and `memories/` for Codex, `sessions/` and `memory/` for Grok
+  Build, OpenCode's whole data directory) joined, and a configuration file
+  Verkstead writes carrying only how the account reaches its model. And every
+  profile gains a **memory** switch, on by default: off, the store is the
+  root's own and empty, and the session's transcript is read out of the root.
+  *Refined 2026-09-18, building built-roots/03-instructions-text*: a fourth part
+  beside those three, on every harness — the settings page's **Instructions**
+  text, written into the root as the file that harness reads for its global
+  instructions (`.claude/CLAUDE.md`, `.codex/AGENTS.md`, `.grok/AGENTS.md`, or
+  `AGENTS.md` in OpenCode's config directory), verbatim and alone. Written
+  rather than joined, so it is Verkstead's own file and nothing of it is
+  written back, and a text nobody has typed is no file at all.
 - **Pairings.** What runs a conversation's sessions is a profile *and* one of
   that profile's models, picked together. Each conversation fixes **two** of
   them before grilling starts: one for grilling, one for implementation work
@@ -435,7 +455,18 @@ flowchart LR
 
 - **bwrap, minimum surface**, evolved from `tobico-scripts/bin/sandbox`:
   - **rw:** the conversation's worktree; the repo's common `.git` directory;
-    the profile's claude pair at `~/.claude` and `~/.claude.json`
+    a built root at `~/.claude` and a copy of the profile's `.claude.json` at
+    `~/.claude.json`, both under `homes/<id>` in the data directory, with the
+    account's credentials file and the Repo's and Worktree's `projects/`
+    entries bound into the root — never the account's `~/.claude` whole
+    (*refined 2026-09-17, building built-roots/01-claude-root*); likewise a
+    built `~/.codex`, `~/.grok` or OpenCode config and data directory for the
+    other three, with the memory store bound in only where the profile's memory
+    switch is on (*refined 2026-09-18, building
+    built-roots/02-three-roots-and-memory*); and in each of those roots the
+    settings page's **Instructions** text, written as the file that harness
+    reads for its global instructions, where one has been typed (*refined
+    2026-09-18, building built-roots/03-instructions-text*)
   - **ro:** `/nix` and system paths
   - **tmpfs:** `/tmp`; everything else in HOME absent
   - `~` inside is the home of whoever runs the server, at the same path — the
@@ -565,13 +596,21 @@ flowchart LR
   whatever an earlier binary left — and every sandbox binds that directory
   read-only over `~/.claude/skills`, hiding any the account itself keeps.
   *Where, refined 2026-08-29 in [ADR-0011](../adr/0011-agent-backends.md)*:
-  the mount moves to `/verkstead/skills`, a path no backend owns, and an empty
-  directory is bound over `~/.claude/skills` in its place so the hiding is
-  kept. What
+  the mount moves to `/verkstead/skills`, a path no backend owns. *Refined
+  2026-09-17, building built-roots/01-claude-root*: nothing is bound over
+  `~/.claude/skills` any more. A session's `~/.claude` is a built root that
+  holds none of the account's skills, so there is nothing there to hide. What
   puts a session *inside* a skill is the prompt: installing one is not invoking
   one, and a sandbox has no global `CLAUDE.md` to say what the session is for,
   so the prompt names the skill by path above the Brief and the skill carries
-  the ask instruction in its own text.
+  the ask instruction in its own text. *Refined 2026-09-18, building
+  built-roots/03-instructions-text*: a root may hold a global instructions file
+  now — the settings page's **Instructions** text, written in as the file its
+  harness reads — so the reason is narrower than "there is no such file". That
+  file is the human's own words to every session of every conversation and
+  never a place for Verkstead to say which skill this one is running, and the
+  host's own is not bound in at all, so the prompt is still where a session is
+  sent into a skill.
 - **Verkstead itself reaches GitHub through host `gh`** (CI status, PR commit
   lists and comments), authenticating as the same configured token the sessions
   get — `GH_TOKEN` in the environment of each call, read from `secrets.yaml` at
@@ -962,7 +1001,17 @@ Timeline events:
   `CONTEXT.md` rather than beside the choice). The token field is write-only:
   what is shown of a saved one is its last four characters and when it was
   written, with replace and clear as presses of their own, and the account
-  GitHub verified it as after a save. With either setting missing the page says
+  GitHub verified it as after a save.
+  *Refined 2026-09-18, building built-roots/05-first-run-hygiene*: above the
+  field is what a token has to be able to do — `repo` and `workflow` on a
+  classic one and `gist` as well for a share, Contents, Pull requests, Issues
+  and Workflows to write and Actions to read on a fine-grained one. It stands
+  whether or not a token has been saved, which is what tells it from the lines
+  under it about the one that was; it is the same words on the wizard's git
+  step, drawn from one module; and it is on the page rather than in `CONTEXT.md`
+  because the push that needs those scopes is a session's, made inside the
+  sandbox, so a refusal for a missing one comes back naming no scope at all.
+  With either setting missing the page says
   so and says what it costs: sessions that cannot reach GitHub, commits that
   fail asking who the author is.
   Under the Git section are the Agent Profiles and the Repos, which had pages of
@@ -993,8 +1042,12 @@ Timeline events:
   one **Sandbox binds** subsection and a paragraph about what each entry widens
   — that subsection is the section now, at `/settings/sandbox-binds`, its one
   line says what the section configures, and what it counts and adds is a
-  *path*; the old slug is no such page rather than a redirect). The Sandbox
-  binds card sits directly below the Repos (*revised 2026-09-06, onboarding
+  *path*; the old slug is no such page rather than a redirect), and
+  **Instructions**, whose card says whether a text is configured and what it
+  reaches and whose pane holds the box that rewrites it, at
+  `/settings/instructions` directly below Language support (*added 2026-09-18,
+  building built-roots/03-instructions-text*). The Sandbox binds card sits
+  directly below the Repos (*revised 2026-09-06, onboarding
   stage 01*: it sat directly above them, because a watched path was
   what a Repo was registered from and a machine with none had nothing to put on
   that list — with the boundary gone the Repos are what a machine is set up by
@@ -1006,7 +1059,7 @@ Timeline events:
   both went with the grammar that made them). That card's count of entries the
   server cannot see is what the warning on it is drawn from: a bind that has
   quietly stopped resolving is what nobody goes looking for. What is on a card is
-  what a list is scanned for and the rest is in the pane — a Profile's mounted
+  what a list is scanned for and the rest is in the pane — a Profile's account
   paths, the models it lists, its agent type as a field and Remove; Language
   support's checkbox per language and the size of the Rust cache's compiled
   half. **A Profile's card is one line: the harness's mark, the harness's name,

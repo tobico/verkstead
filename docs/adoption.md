@@ -27,12 +27,12 @@ The vocabulary in bold is the project's, defined once in
 
 | Before | Now |
 | --- | --- |
-| `sandbox` / `work-sandbox` — bwrap around the whole of `~/src` | A **Sandbox** per **Conversation**: its **Worktree**, its Repo's git directory, its handoff directory, the **Agent Profile**'s claude pair, and nothing else of the machine |
+| `sandbox` / `work-sandbox` — bwrap around the whole of `~/src` | A **Sandbox** per **Conversation**: its **Worktree**, its Repo's git directory, its handoff directory, a **Built Root** made out of the **Agent Profile**'s account — its login, its memory and transcripts where the Profile shares them, and a configuration file of Verkstead's own — and nothing else of the machine |
 | `agent`, `grilling`, `next-stage`, `next-tasks` — one wrapper per thing you might start | One **Conversation**, which runs through Draft → Grilling → Direction → Implementing → Wrapping → Done |
 | `roadrunner` — a terminal per run, driving `.tasks/` and `docs/roadmaps/` | The orchestrator, driving the same two files off the Repo, with the run visible on a **Timeline** instead of scrolling past |
 | roadrunner's interruptions | A **Halt** and its stop **Notice** — pushed to your phone, read where the work is, and answered by one **Resume** |
 | askance — one queue of Question Sets for the machine | **Question Sets** on the Timeline of the Conversation they were asked from |
-| The skills installed under `~/.claude/skills` | **Skills** shipped inside the binary and read-only inside at a path no backend owns, with the account's own not reachable at all, so a session's behaviour is the product's |
+| The skills installed under `~/.claude/skills` | **Skills** shipped inside the binary and read-only inside at a path no backend owns, with the account's own not in a session's `~/.claude` at all, so a session's behaviour is the product's |
 | A gate at every commit | No commit gates. Review consolidates in the wrap-up, per pull request |
 
 What stays: **askance is a separate, maintained product**, and the
@@ -89,10 +89,25 @@ Three of those are worth understanding before the first Conversation:
   instead: a token in `secrets.yaml` and a `git_author` in `config.yaml`, both
   in the data directory, reaching each session as `GH_TOKEN` and git's own
   `GIT_CONFIG_*`. It is bound in **read-only**, which is the whole of what
-  naming one buys — so an **Agent Profile**'s account kept under it that a
-  session has to *write*, which is every Claude account, goes in `paths` as
+  naming one buys — so an **Agent Profile**'s account kept under it that has to
+  be *written*, which is every account of every agent type, goes in `paths` as
   well. That is the one composition worth saying outright, and it is why the
-  example above names `/home/you/.claude` beside the repositories.
+  example above names `/home/you/.claude` beside the repositories; a Codex
+  account would be `/home/you/.codex`, a Grok Build one `/home/you/.grok`, and
+  an OpenCode one both `/home/you/.config/opencode` and
+  `/home/you/.local/share/opencode`. A session is not given that directory
+  whole: it gets a **Built Root** of Verkstead's own. Still, the account is
+  written. A login or token refresh writes through to the login file. With the
+  Profile's memory switch on, which is the default, memory and transcripts are
+  written into the account's store — for Claude under two entries in
+  `projects/`, which the server makes there first when they are missing. And
+  for Claude, what a session changed in its copy of `.claude.json` is merged
+  back into `/home/you/.claude.json` as it ends. That merge writes a new file
+  beside the old one and renames it into place, so it needs the directory the
+  file is in to be writable. In this example that directory is the read-only
+  home, so the merge is logged and skipped; the session itself runs as normal.
+  To have it carried back as well, keep the account somewhere of its own,
+  named whole in `paths`, rather than in a home bound read-only.
 - **`sandboxBinds`** is the **Sandbox Configuration** — every entry is a hole
   in the boundary, which is why one that is not there refuses startup rather
   than being skipped. Each is one absolute path, and every session gets every
@@ -182,7 +197,15 @@ where no session can reach it — so what the app opens is the login link, the
 address with the key on the end of it. **Open** composes it afresh at every
 press, which is what to reach for when a browser has forgotten the cookie:
 there is no link to keep anywhere, and nothing to type. Started with
-`--no-open`, the same link is on the startup line in **View Logs**.
+`--no-open`, **Open** is the whole of it — the app's own startup line names the
+address and no key, because **View Logs** opens a file on your desk and a
+workbench key written into it would be a login for anybody reading over your
+shoulder. The journal a `verkstead serve` writes is the other case, and still
+carries the link: a host with no tray has nowhere else to be handed one. **And
+so does an app that finds no tray to raise** — over SSH, in a container, or
+where the desktop will not give it an icon: there is no **Open** to press
+there, so the link goes in the log rather than leaving you with a workbench and
+no way into it.
 
 **Answering from your phone is the workbench's own settings**, under **Remote
 access**: it reads what this machine's Tailscale is doing, a checkbox puts the
@@ -236,6 +259,40 @@ will not, saying `GLIBC_2.35 not found` and nothing friendlier.
 or hardened one may not. Without them the file says so — "Cannot mount AppImage,
 please check your FUSE setup" — and `--appimage-extract-and-run` is the way past
 it for a machine you cannot change.
+
+**A session's account is a Built Root, not your account.** It is made fresh
+under `homes/<id>` in the Data Directory as each session starts, and bound at
+`~/.claude`, `~/.codex` or `~/.grok`, or at OpenCode's two directories, in the
+empty HOME bubblewrap makes. Only an allowlist of your account is bound into
+it, read-write: the login file, so a login lands in your account, and the
+memory store, so memory and transcripts do too — for Claude this Repo's and
+this Worktree's entries under `projects/`, for Codex `sessions/` and
+`memories/`, for Grok Build `sessions/` and `memory/`, and for OpenCode the
+whole data directory. The one exception is a Grok Build login, which is copied
+in and merged back as the session ends, because grok saves it by renaming a
+file over it and a bind refuses that. The configuration file is one Verkstead
+writes, carrying only how your account reaches its model, and for Claude
+`~/.claude.json` is a copy of yours, merged back as the session ends. None of
+your plugins, hooks, skills, rules, MCP servers, global instructions, history
+or other repositories' transcripts are there.
+
+**What takes your global instructions' place is the settings page.** Its
+**Instructions** section is one text for the whole installation — not one per
+Profile — and it is written into each Built Root as the file that harness
+reads: `.claude/CLAUDE.md`, `.codex/AGENTS.md`, `.grok/AGENTS.md`, or
+`AGENTS.md` in OpenCode's config directory. It goes in verbatim, with no
+heading over it and no line saying where it came from, and it is read as the
+root is built — so a change there reaches the next session and a session
+already running keeps what it started with. Leave the box empty and no such
+file is written at all. Your repository's own `CLAUDE.md` or `AGENTS.md` is in
+the Worktree and is read exactly as it always was, under this one.
+
+**The memory switch on a Profile says whether its store is shared.** It is on
+by default. Turn it off on the Profile form and a session starts with an empty
+store of its own inside the Built Root instead: fresh memory, none of your
+transcripts, and nothing it remembers written into your account. Its own
+transcript is still found and still reaches the Timeline. The same holds on a
+Mac and on Windows.
 
 ### The desktop app, on a Mac
 
@@ -293,7 +350,8 @@ there leaves the box ticked and the plist where it was.
 **The browser it opens is logged in**, as it is on Linux: what the app opens is
 the login link rather than the bare address, and **Open** composes it afresh at
 every press, which is what a browser that has forgotten the cookie wants.
-Started with `--no-open`, the same link is on the startup line in **View Logs**.
+Started with `--no-open`, **Open** is the whole of it: the app's own startup
+line names the address and no key, **View Logs** opening a file on your desk.
 
 **Answering from your phone is the settings page's Remote access section**, as
 it is on Linux, and Tailscale itself is the Mac's own. What differs is the
@@ -307,9 +365,10 @@ Linux rendered over Apple's sandbox instead of bubblewrap: the Conversation's
 Worktree, the Repo's git directory and the handoff directory writable, each
 Companion Repo at the mode it was set to, the Sandbox Configuration's entries,
 the Build Cache with the machine's one `sccache` behind it, a HOME of the
-session's own with the Agent Profile's account inside it, the Skills and the
-`verkstead` a session asks with read-only, the system read-only, `/tmp`, the
-network whole and unfiltered, and nothing else of the machine.
+session's own with a Built Root made out of the Agent Profile's account inside
+it, the Skills and the `verkstead` a session asks with read-only, the system
+read-only, `/tmp`, the network whole and unfiltered, and nothing else of the
+machine.
 
 **`/tmp` is the one place a Mac session reaches more than a Linux one**, and
 the one thing on that list that is not the same on both. On Linux it is a
@@ -330,10 +389,25 @@ one, and is refused every byte of it. What it can still read is the metadata: a
 path it may not open answers `stat` and then refuses to open, because that is
 what a Mac looks like from inside a policy and a rule per path to pretend
 otherwise would buy nothing. And what a mount makes out of nothing is made for
-real instead: the session's HOME, the account linked into it, and the directory
+real instead: the session's HOME, the Built Root in it, and the directory
 holding the Skills and the `verkstead` binary are all really there under the
 Data Directory, and what keeps one Conversation out of another's is the policy
-rather than the absence.
+rather than the absence. The Built Root reaches the account through symbolic
+links: to the login file, and, with the memory switch on, to the memory store —
+this Repo's two entries under `projects/` for Claude, and the directories the
+Linux section names for the other three. Claude and Grok Build save their login
+by writing a new file and renaming it over the old one, which replaces the link
+rather than writing through it. So a login changed
+inside is written back over the account's own as the session ends, and the
+link is made fresh for the session after.
+
+**And here too, none of your global instructions are in the root** — nor your
+plugins, hooks, skills, rules or MCP servers — with the settings page's
+**Instructions** section standing in their place: one text for the whole
+installation, written into the root as the file that harness reads, the same
+four files the Linux section names. It is read as the root is built, so a
+change there reaches the next session and a running one keeps what it started
+with, and an empty box writes no file at all.
 
 **Nothing outlives the app.** Exit off the menu is a stop where it stands, as it
 is on Linux, and so is the process being killed outright: every session and the
@@ -401,6 +475,17 @@ menu, and the uninstall entry in **Installed apps** beside everything else you
 installed. A newer msi replaces the copy that is there rather than standing
 beside it.
 
+**One thing about that install lands in the wrong list, and it is known.** On a
+fresh machine the uninstall entry was registered under the machine's own
+`HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall` rather than under
+your `HKCU`, so **Installed apps** offers it to everybody who signs in to this
+machine instead of only to you. Nothing else moved with it: the files, the Start
+menu entry and the `PATH` entry are all in your profile, and the install still
+asked nobody for anything. It is **parked rather than fixed** — finding what
+makes Windows Installer register it there wants a Windows machine to work on,
+and what it costs is an entry in the wrong list rather than an install that
+touched the machine. Uninstalling from **Installed apps** works either way.
+
 **And the install directory goes on your `PATH`**, which is the half of this
 download that is not the icon at all: `verkstead ask`, `verkstead guide` and
 the rest work in a terminal opened *after* the install. One that was already
@@ -467,8 +552,9 @@ than this describes.
 **The browser it opens is logged in**, as on the other two: what the app opens
 is the login link rather than the bare address, and **Open** composes it afresh
 at every press, which is what a browser that has forgotten the cookie wants.
-Started from a terminal with `--no-open`, the same link is on the startup line
-printed there and in **View Logs**.
+Started from a terminal with `--no-open`, **Open** is the whole of it: the
+app's own startup line names the address and no key, **View Logs** opening a
+file under your own `%LOCALAPPDATA%` that anybody at the screen can read.
 
 **Answering from your phone is the settings page's Remote access section**, as
 it is on the other two, and Tailscale itself is the machine's own. What differs
@@ -506,10 +592,10 @@ above made. A session runs on a pseudoconsole Verkstead opens for it, as that
 account rather than as you: the Conversation's Worktree, the Repo's git
 directory and the handoff directory writable, each Companion Repo at the mode
 it was set to, the Sandbox Configuration's entries, the Build Cache with the
-shared `CARGO_HOME` inside it, a profile of the Conversation's own with the
-Agent Profile's account joined into it, the Skills and the `verkstead` a
-session asks with read-only, Windows and Program Files read-only, a temporary
-directory of the session's own, the network — and nothing else of the machine.
+shared `CARGO_HOME` inside it, a profile of the Conversation's own with a Built
+Root made out of the Agent Profile's account inside it, the Skills and the
+`verkstead` a session asks with read-only, Windows and Program Files
+read-only, a temporary directory of the session's own, the network — and nothing else of the machine.
 Not your Documents and not the rest of your profile.
 
 **The boundary refuses rather than hides**, as a Mac's does and unlike Linux's:
@@ -536,10 +622,12 @@ reads back the refusal.
 written on your own directories.** An account reaches what it has been granted
 and nothing else, so there is nothing to mount and no policy to hand a process:
 each real path the description names gets an access-control entry for that
-account — a grant on the Worktree at the reach the description says, a grant on
-the Agent Profile's account, an entry in front of the account's own skills that
-refuses them, and a step through each directory on the way to any of those, so
-that a path can be resolved without its parent becoming something to list. Two
+account — a grant on the Worktree at the reach the description says; for the
+account, a grant on the Built Root, one on each directory of the memory store
+joined into it, and one on the login file itself, but none on the account
+directory as a whole; and a step through each directory on the way to
+any of those, so that a path can be resolved without its parent becoming
+something to list. Two
 things about those entries are worth knowing, because they are on directories of
 yours rather than on anything of Verkstead's:
 
@@ -561,22 +649,51 @@ to fall back to, and the log says which of the three it was.
 
 **The profile a session runs in is the Conversation's own**, under
 `%APPDATA%\Verkstead\homes`, emptied and made again as each of that
-Conversation's sessions starts. `USERPROFILE` and `HOME` point at it, and
+Conversation's sessions starts — except while another session or terminal of it
+is still running in there, which is given the profile as it stands rather than
+having it deleted out from under it. `USERPROFILE` and `HOME` point at it, and
 `APPDATA`, `LOCALAPPDATA`, `TEMP` and `TMP` point inside it — so what npm
 caches, what a tool writes down and what either of them throws away lands there
-rather than in your own profile. The Agent Profile's account is joined into it,
-every directory by a directory junction and every file by a hard link, so the
-account an agent reads is the real one and a session starts logged in.
+rather than in your own profile.
+
+**No account is joined into it whole.** The profile gets a Built Root — at
+`.claude`, `.codex` or `.grok`, or OpenCode's two directories — and only an
+allowlist of the account is joined into that. The login file is joined by a hard
+link, so a session starts logged in. With the memory switch on, the memory store
+is joined by directory junctions, so memory and transcripts land in the account:
+for Claude this Repo's entry and this Worktree's entry under `projects/`, and
+for the others the directories the Linux section names. There is no other
+repository's transcripts, and none of your plugins, hooks, skills, rules, global
+instructions or history. The root's configuration file is one Verkstead writes.
+Beside a Claude root, `.claude.json` is a copy of yours with your MCP servers
+taken out and this Repo marked as trusted.
+
+**Your global instructions' place is taken by the settings page's
+Instructions section**, as it is on the other two platforms: one text for the
+whole installation, written into the root as the file that harness reads —
+`.claude\CLAUDE.md`, `.codex\AGENTS.md`, `.grok\AGENTS.md`, or `AGENTS.md` in
+OpenCode's config directory — verbatim and with nothing added to it. It is read
+as the root is built, so a change reaches the next session and a running one
+keeps what it started with, and an empty box writes no file. Your repository's
+own `CLAUDE.md` or `AGENTS.md` is in the Worktree and is read under it, exactly
+as it always was.
 
 **A hard link wants one volume**, which is the one thing about this that can
-refuse a session outright. Your account's directory and the Data Directory have
-to be on the same drive; where they are not, the session does not start and the
-log says which two paths those are and which of them to move. And a hard link
-stops being one file the moment something saves over it by writing a temporary
-file and renaming it into place, which is exactly how an agent saves its
-config — so a linked file the session replaced is written back over the
-account's own as the session ends, and the link is made fresh for the session
-after. Nothing a session wrote to its account is lost.
+refuse a session outright. Your account's files and the Data Directory have to
+be on the same drive; where they are not, the session does not start and the
+log says which two paths those are and which of them to move.
+
+**What a session changed in its account is carried back as it ends.** A hard
+link stops being one file the moment something saves over it by writing a
+temporary file and renaming it into place, which is how Claude and Grok Build
+save a login.
+So a linked file the session replaced is written back over the account's own,
+and the link is made fresh for the session after; one still the same file is
+left alone. The copied `.claude.json` is merged rather than copied back: only
+what the session changed reaches your file as it is by then, so what another
+session or your own `claude` wrote in the meantime is kept, and your MCP servers
+are never touched. A session that changed nothing leaves the file exactly as it
+was.
 
 **A Conversation Terminal opens on Windows PowerShell**, in the Worktree, on
 the same pseudoconsole a session runs on. Not `pwsh`, even where you have
@@ -643,7 +760,13 @@ and every model this build knows for that agent — and there is a form under th
 for an account elsewhere. **Who the work is committed as** asks for the git
 author, prefilled from `git config --global`, with the GitHub token optional and
 prefilled from `GH_TOKEN`, `GITHUB_TOKEN` or the host `gh`'s own login, each
-field labelled with where its value came from. The last Next takes the mode
+field labelled with where its value came from. Above the token field is what one
+has to be able to do — `repo` and `workflow` on a classic token, and `gist` as
+well to publish a share; Contents, Pull requests, Issues and Workflows to write
+and Actions to read on a fine-grained one — because the push that needs them is
+made by a session inside the sandbox, where a refusal for a missing scope names
+none of them. The settings page says the same above its own token field. The
+last Next takes the mode
 off and lands you on the compose page. There is no skip and no going back
 through it: the verdict is reached once, at startup, so a machine that already
 has all three opens the workbench and never sees the wizard. What it does not do

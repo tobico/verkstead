@@ -37,13 +37,13 @@ use verkstead_render::{
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, Creation, Cursor, GrillingStarted, IgnoreRule,
     IgnoredCommentsEdit, InstallPress, Lifecycle, Locked, Merging, MissedOut, NewAdoption,
-    NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption, ProfileChoice, ProfileEdit,
-    ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
-    RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress,
-    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
-    SharedCommit, SharedConversation, ShowArchived, ShowingArchived, Standing, SteerOpened,
-    SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalOpened, TimelineEvent,
-    TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption, Parked, ProfileChoice,
+    ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice,
+    RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit,
+    ServePress, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
+    SharePublished, SharedCommit, SharedConversation, ShowArchived, ShowingArchived, Standing,
+    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalOpened,
+    TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -975,6 +975,14 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
     // fact about the few rows in it.
     let idling = state.sessions.idle();
 
+    // And which of *those* the rescue is watching sit there: idle long past the
+    // grace rather than for the moment between two lines of output, and spoken
+    // to about it at least once, which is what says the rescue's own hold-off
+    // is over rather than that an idle clock has passed a number. A third read of the one
+    // register, for the same reason the second is one — see
+    // [`crate::sessions::Sessions::all_parked`].
+    let sitting = state.sessions.all_parked();
+
     let rows: Vec<ConversationEntry> = conversations
         .into_iter()
         .map(|conversation| {
@@ -999,6 +1007,20 @@ async fn conversations(State(state): State<AppState>) -> HttpResponse {
                 // say. A fix session working a red check draws as plain
                 // Wrapping — waiting is what a wrap-up with nobody in it does.
                 waiting_on_checks: conversation.narrowed_to_checks && !working,
+                // And the rescue's own reading of the session, paired with
+                // `working` for the reason `idle` above is: the two reads are a
+                // moment apart, and a row saying a session that has gone is
+                // sitting there would be the pair contradicting itself.
+                //
+                // And not where something is waiting on the human, which is the
+                // middle third of the rescue's own condition read from the
+                // store instead of the register — a session sitting on a Set is
+                // waiting for an answer rather than parked, and the disc
+                // already says so.
+                parked: (working && !conversation.waiting)
+                    .then(|| sitting.get(&conversation.id))
+                    .flatten()
+                    .map(parked),
                 // And whether Verkstead has told the human something about it
                 // they have not looked at yet, which is the store's alone: it is
                 // written down rather than read off anything here, being a fact
@@ -1168,6 +1190,12 @@ pub(crate) async fn conversation_view(
     // so the answer cannot differ between the Events it is drawn against.
     let idling = state.sessions.idling(id);
 
+    // And the same register once more for the long silence behind that one: the
+    // rescue's reading of a session sitting there without asking, which is what
+    // the card draws its condition from — see
+    // [`crate::sessions::Sessions::parked`].
+    let sitting = state.sessions.parked(id);
+
     let timeline = match store::timeline(&state.pool, id).await {
         Ok(timeline) => timeline,
         Err(error) => {
@@ -1180,13 +1208,21 @@ pub(crate) async fn conversation_view(
     // The read above closes the window at a session's end; this one closes the
     // window at its start, which is the same mistake from the other side.
     //
-    // A session's Event is opened by [`store::start_capture`] a moment before
-    // the register learns of the session writing into it — see
-    // [`crate::sessions::Sessions::start`], where the two are a few lines
-    // apart. A Timeline read in between carries an Event the read above cannot
-    // name, and drawing it as stopped is the `0 lines` and nothing this whole
-    // ordering exists to prevent: a page saying a session never said anything,
-    // about one that has only just started saying it.
+    // A session's Event is opened by [`store::start_capture`] before the
+    // register learns of the session writing into it — see
+    // [`crate::sessions::Sessions::start`], where the two are a whole launch
+    // apart, and on the platform whose boundary is written, minutes of one. A
+    // Timeline read in between carries an Event the read above cannot name, and
+    // drawing it as stopped is the `0 lines` and nothing this whole ordering
+    // exists to prevent: a page saying a session never said anything, about one
+    // that has only just started saying it.
+    //
+    // Which is why the launch itself names the Event as soon as it has one —
+    // see [`crate::sessions::Launching::printing_into`], which is what makes
+    // [`crate::sessions::Sessions::writing`] answer through that whole stretch
+    // rather than only through the moment either side of it. What is left for
+    // the two reads below to close is the gap at a session's end and the gap
+    // between the launch note going and the register having it.
     //
     // Either read naming it is enough, because both windows are wrong the same
     // way round — a live session drawn as a finished one — and the cost of
@@ -1737,6 +1773,11 @@ pub(crate) async fn conversation_view(
         // with it, so the label is drawn only where nothing is running — the
         // same reading `working` below is.
         waiting_on_checks: narrowed_to_checks && writing.is_none() && writing_now.is_none(),
+        // And the other condition, which is the one a running session can be in:
+        // idle past the grace with the rescue watching it, said in the same
+        // numbers the sidebar row carries — and not while anything is waiting on
+        // the human, for the reason the row above gives.
+        parked: sitting.filter(|_| !waiting).as_ref().map(parked),
         resets,
         archived,
         trimmed,
@@ -3946,6 +3987,20 @@ fn row_state(id: i64, state: store::RowState) -> Lifecycle {
     }
 }
 
+/// The register's reading of a session sitting there without asking, as the
+/// viewer receives it — see [`crate::sessions::Parked`].
+///
+/// Whole seconds, because the words it comes out in count minutes: a condition
+/// that said *idle 4 min* one second and *idle 4 min* the next off a number that
+/// had moved is a redraw nobody can see. What those words are is the viewer's
+/// and said once there — see `conditions.ts`.
+fn parked(sitting: &crate::sessions::Parked) -> Parked {
+    Parked {
+        idle_seconds: sitting.idle_for.as_secs(),
+        spoken_to: sitting.spoken_to,
+    }
+}
+
 /// The store's lifecycle state as the viewer receives it. One word either side,
 /// and this is where the two vocabularies are held to each other.
 fn lifecycle(state: store::Lifecycle) -> Lifecycle {
@@ -4146,6 +4201,11 @@ async fn save_settings(
                 // And the rules, decided above: either what was already written down
                 // or the whole list the page sent, in the order it sent it.
                 rules,
+                // And the text every session is given, as it was typed: a value
+                // like the binds above it, so what the page sent is what the
+                // file holds afterwards and a box cleared is a key taken away.
+                // Nothing about it can be refused — it is somebody's prose.
+                edit.instructions,
             )
             // On what the file already holds, for the reason the secrets below are
             // written that way: `session_path` is the one key in this file the page
@@ -4342,6 +4402,11 @@ fn as_told(
         // its rows, and a rule left out of the read would be one the human
         // could not correct.
         ignored_comments: config.ignored_comments().iter().map(as_written).collect(),
+
+        // And the text every session is given, empty where nobody has typed
+        // one: the box on the page holds a string either way, and there is no
+        // third state between an unwritten key and a text of nothing.
+        instructions: config.instructions().to_owned(),
         github_token: secrets.github_token().map(|token| TokenSaved {
             last_four: last_four(token),
             at: settings

@@ -235,6 +235,10 @@ pub fn shared(
             working: false,
             driven: false,
 
+            // And the rescue's reading of a session, which there is none of
+            // here either: the condition is a running session's.
+            parked: None,
+
             // And the marks that point at a stop. The Notice a stop is read
             // through does not board, so a badge pointing at one would point at
             // nothing — and *blocked on you* said to somebody who cannot act is

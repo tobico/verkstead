@@ -1218,6 +1218,19 @@ waiting: boolean,
  */
 waiting_on_checks: boolean, 
 /**
+ * The session on this row having gone quiet without asking — see
+ * [`Parked`] — or `null` where it has not.
+ *
+ * A second condition beside the one above and the same kind of thing: a
+ * fact read off a running session at the moment the list is drawn, said in
+ * numbers here and in words by the viewer.
+ *
+ * Always `null` where nothing is working, which keeps it a pair with
+ * `idle` for the reason `idle` is a pair with `working`: only a running
+ * session can be sitting there.
+ */
+parked: Parked | null, 
+/**
  * Whether Verkstead has told the human something about this Conversation
  * that they have not looked at yet.
  *
@@ -1571,6 +1584,15 @@ waiting: boolean,
  * derived from and the only place it can hold.
  */
 waiting_on_checks: boolean, 
+/**
+ * The session running on this Conversation having gone quiet without
+ * asking — see [`Parked`] — or `null` where none is or none has.
+ *
+ * The same condition the sidebar row carries, read off the same register
+ * in the same breath, so the card and the row it opens cannot come to
+ * disagree about the one session.
+ */
+parked: Parked | null, 
 /**
  * What the stop shows about the account that ran out coming back, and
  * `null` on every stop that is not a usage window's — which is nearly all
@@ -2396,6 +2418,49 @@ export type PairingView = { profile: ProfileEntry,
 model: string | null, };
 
 /**
+ * A running session that has gone quiet without asking: how long it has been
+ * sitting there, and how many times the Rescue has spoken to it.
+ *
+ * The rescue's own reading of a session, which nothing else here has. The mark
+ * beside `idle` is the backend's short judgement of a session mid-turn; this is
+ * the long one the rescue arms on — idle past the runner's grace, with nothing
+ * open on the Conversation, nothing to show for itself, and **the Rescue
+ * having already spoken to it at least once**. A session wearing it is one
+ * nobody can move and nothing was saying anything about, which is what a first
+ * Windows run left somebody watching for ten minutes.
+ *
+ * The count is what says the rescue's own hold-off is over rather than a
+ * number beside the span: an idle clock alone counts the human's wait on a Set
+ * as the session's silence, so a condition drawn off one would open with *idle
+ * 12 min* the moment they answered. See the server's `Running::parked`.
+ *
+ * A condition rather than a state, for the reason *Waiting on checks* is one:
+ * the lifecycle is untouched, nothing is written down, and both halves are read
+ * off the register at the moment the page is drawn — the idle clock the session
+ * already carries, and the count the rescue keeps beside it.
+ *
+ * Numbers rather than words, because the words are the viewer's and are said
+ * once there: the same condition is drawn on the card the human opens and on
+ * the row they find it by.
+ */
+export type Parked = { 
+/**
+ * How long it has been idle, in whole seconds and by its backend's own
+ * judgement of idle — see the server's `Idle`.
+ */
+idle_seconds: number, 
+/**
+ * And how many times the Rescue has typed its line into it: once or twice,
+ * which is as many times as a session is ever spoken to before it is
+ * stopped where it stands.
+ *
+ * Never none. A session nothing has said anything to yet wears no
+ * condition at all, so the count is what the condition is drawn on rather
+ * than a number it carries.
+ */
+spoken_to: number, };
+
+/**
  * Whether the server can see what an entry names, at the moment it was asked.
  *
  * Reported rather than refused: a save lands whatever it was told, so an entry
@@ -2581,7 +2646,14 @@ account: ProfileAccount,
  * whitespace are the server's to drop, and a list that comes to nothing is
  * refused.
  */
-models: Array<string>, };
+models: Array<string>, 
+/**
+ * Whether a session under this Profile shares the account's memory store:
+ * `true` for the store the human's own sessions keep, `false` for an empty
+ * one of the session's own. Left out, it is on — the default the form
+ * draws, and what every Profile had before there was a switch.
+ */
+memory: boolean, };
 
 /**
  * One row of the Profile list.
@@ -2616,7 +2688,13 @@ models: Array<string>,
  * `null` while the account is where it was left, which is the ordinary
  * case.
  */
-broken: Broken | null, };
+broken: Broken | null, 
+/**
+ * Whether a session under this Profile shares the account's memory store,
+ * or starts with an empty one of its own. On unless the human switched it
+ * off.
+ */
+memory: boolean, };
 
 /**
  * What became of saving a Profile.
@@ -3392,17 +3470,18 @@ export type Screen = { repaint: string, columns: number, rows: number, };
 /**
  * Where a program was seen that a session still cannot run.
  *
- * The half of *absent* that is worth a sentence. A name is missing in three
+ * The half of *absent* that is worth a sentence. A name is missing in four
  * ways that are not the same thing to do anything about, and a row saying only
  * *absent* would send somebody to install what they have already got: a
  * program on the server's own `PATH` and not on a session's is a shell profile
- * and a restart rather than an install.
+ * and a restart rather than an install, and a `claude` that is the desktop app
+ * is Claude Code already on the machine with no CLI on the end of its name.
  *
  * Flat on the wire — `{"seen": "Beyond", "at": "…"}` — the way
  * [`DependencyState`] is, so the viewer narrows on a field rather than
  * unwrapping a variant name. The wording is the viewer's own, like the install
  * commands beside it: what is here is what the machine is, and what to say
- * about it is the same three sentences on every Verkstead.
+ * about it is the same four sentences on every Verkstead.
  */
 export type Seen = { "seen": "Beyond", 
 /**
@@ -3419,6 +3498,10 @@ at: string,
 target: string, } | { "seen": "Dangling", 
 /**
  * The link that leads nowhere.
+ */
+at: string, } | { "seen": "Desktop", 
+/**
+ * The desktop app, where the name resolved.
  */
 at: string, };
 
@@ -3662,7 +3745,18 @@ sandbox_binds: Array<string>,
  * not about the rules says nothing about them, and the ones on disk are
  * left exactly where they are.
  */
-ignored_comments: IgnoredCommentsEdit, };
+ignored_comments: IgnoredCommentsEdit, 
+/**
+ * And the text every session is given, as a value again — the plainest one
+ * here. What is sent is what `config.yaml` holds afterwards, so a box
+ * cleared on the page is the key taken out of the file.
+ *
+ * Nothing about it can be turned down. It is a paragraph of somebody's
+ * prose for an agent to read: there is no grammar to get wrong, nothing to
+ * compile and nobody to ask about it, so a save carrying it cannot fail
+ * the way one carrying a rule can.
+ */
+instructions: string, };
 
 /**
  * What became of a save.
@@ -3749,7 +3843,21 @@ paths: PathsView,
  * included: this is what the editor draws back into its rows, and a rule
  * quietly left out of the read would be one the human could not correct.
  */
-ignored_comments: Array<IgnoreRule>, };
+ignored_comments: Array<IgnoreRule>, 
+/**
+ * And the one text every session is given, whatever harness runs it —
+ * empty on a Verkstead nobody has typed one into, which is a session told
+ * nothing beyond what its Repo carries.
+ *
+ * A string rather than an optional, and empty for nothing, the way the
+ * author's two halves are: the box on the page holds a string either way,
+ * and clearing it is how the text is taken off.
+ *
+ * Verbatim, line breaks and leading spaces and all. What a harness is
+ * handed is these words, so what comes back here has to be the ones that
+ * were typed rather than a tidied copy of them.
+ */
+instructions: string, };
 
 /**
  * What became of sharing a Conversation to the pull requests its work is on.

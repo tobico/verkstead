@@ -27,6 +27,7 @@ const profile = (
       ? { agent_type, claude_dir: "/srv/dir", config_file: "/srv/file" }
       : { agent_type, home: "/srv/home" },
   models: [],
+  memory: true,
   broken: null,
 });
 

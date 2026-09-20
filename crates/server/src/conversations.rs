@@ -1522,8 +1522,9 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
     // happened.
     //
     // What it is started on is the Brief under the line that sends it into the
-    // bundled grilling skill: a sandbox has no global `CLAUDE.md` to say what a
-    // session is for, so the prompt is where it is said — see [`crate::skills`].
+    // bundled grilling skill: nothing in a sandbox says what a session is for —
+    // a global instructions file there holds the human's own text and never
+    // Verkstead's — so the prompt is where it is said — see [`crate::skills`].
     if let Some(pairing) = conversation.grilling_pairing.pairing().cloned()
         && let Some(prompt) = state
             .sessions

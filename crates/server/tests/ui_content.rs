@@ -1990,6 +1990,7 @@ async fn the_viewers_own_tests_are_fed_from_here() {
                         config_file: std::path::PathBuf::from(format!("{home}/.claude.json")),
                     },
                     models: models.iter().map(|model| (*model).to_owned()).collect(),
+                    memory: true,
                 },
             )
             .await
@@ -3110,6 +3111,12 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             "ignored_comments": {
                 "Set": { "rules": [{ "author": "coderabbitai", "body": "billing" }] }
             },
+
+            // And a text for every session, for the reason the size above is
+            // typed. Two paragraphs rather than a line, because what the pane
+            // has to draw is prose with its line breaks in it, and a fixture
+            // holding one line would prove nothing about the box that holds it.
+            "instructions": "Prefer the smallest change that does the job.\n\nSay what you could not finish rather than finishing something else.\n",
         }),
     )
     .await;

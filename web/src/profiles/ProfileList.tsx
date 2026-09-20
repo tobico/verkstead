@@ -104,6 +104,7 @@ import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
 
 import { CardButton } from "../CardButton";
+import { Check } from "../Check";
 import { HarnessMark } from "../HarnessMark";
 import { IconButton } from "../IconButton";
 import { PaneSticky } from "../Panes";
@@ -147,11 +148,13 @@ export const PROFILE_REFUSAL: Record<ProfileSaved, string> = {
   DirNotAbsolute:
     "Give the claude directory's absolute path, starting with a slash.",
   DirMissing: "There is nothing at the claude directory's path.",
-  NotADirectory: "That is not a directory — `~/.claude` is mounted from one.",
+  NotADirectory:
+    "That is not a directory — a session's `~/.claude` is built from one.",
   ConfigNotAbsolute:
     "Give the config file's absolute path, starting with a slash.",
   ConfigMissing: "There is nothing at the config file's path.",
-  NotAFile: "That is not a file — `~/.claude.json` is mounted from one.",
+  NotAFile:
+    "That is not a file — a session's `~/.claude.json` is copied from one.",
   HomeNotAbsolute: "Give the home's absolute path, starting with a slash.",
   HomeMissing: "There is nothing at the home's path.",
   HomeNotADirectory:
@@ -209,7 +212,8 @@ const ACCOUNT_FIELDS: Record<AgentType, AccountField[]> = {
       key: "claude_dir",
       label: (
         <>
-          Claude directory, mounted at <code>~/.claude</code>
+          Claude directory, which a session's <code>~/.claude</code> is built
+          from
         </>
       ),
       placeholder: "/home/you/accounts/work/.claude",
@@ -218,7 +222,7 @@ const ACCOUNT_FIELDS: Record<AgentType, AccountField[]> = {
       key: "config_file",
       label: (
         <>
-          Config file, mounted at <code>~/.claude.json</code>
+          Config file, copied to a session's <code>~/.claude.json</code>
         </>
       ),
       placeholder: "/home/you/accounts/work/.claude.json",
@@ -285,6 +289,9 @@ export const BLANK_PROFILE: ProfileEdit = {
   name: null,
   account: BLANK_ACCOUNT.Claude,
   models: [],
+  // On, which is what every account has always been given: the switch is a
+  // way to stop sharing memory rather than a way to start.
+  memory: true,
 };
 
 /// The types the picker offers, in the order it offers them.
@@ -514,6 +521,7 @@ export function ProfilePane(props: {
           name: profile.name,
           account: { ...profile.account },
           models: [...profile.models],
+          memory: profile.memory,
         };
   };
 
@@ -949,6 +957,19 @@ export function ProfileForm(props: {
           </>
         )}
       </For>
+
+      {/* The memory switch, for every agent type alike: whether a session is
+          given the account's memory and transcripts, or starts with an empty
+          store of its own. Drawn under the account because it is about what
+          of the account a session is given. */}
+      <Check
+        label="Share this account's memory with its sessions"
+        on={form().memory}
+        flip={(memory) => {
+          setEdited({ ...form(), memory });
+          setRefused(null);
+        }}
+      />
 
       <div class={styles.buttons}>
         <button type="submit" disabled={save.isPending}>

@@ -3,6 +3,18 @@
 Amends [ADR-0001](0001-blocking-cli-for-agent-integration.md): the blocking
 CLI is no longer every backend's channel.
 
+Amended (2026-09-17): **the account is built rather than joined.** A session
+is given a root of Verkstead's own seeded from the account by an allowlist, not
+the account's directory whole; the cover over `~/.claude/skills` goes with it,
+and the bypass that keeps a Claude run unattended is written into the root as
+well as passed on the line. See the three *Amended* paragraphs below, and the
+[built-roots roadmap](../roadmaps/built-roots/ROADMAP.md).
+
+Amended (2026-09-18): **Codex, Grok Build and OpenCode are built by the same
+rule, and every Profile has a memory switch.** Transcript discovery reads the
+store where it really is on the host: the account's with memory on, the root's
+with it off. See *As built for Codex, Grok Build and OpenCode*.
+
 Verkstead runs its sessions on one coding agent, and the `AgentType`
 discriminator has sat in the Profile with one value in it since the store was
 written — "so a second backend slots in beside `claude` rather than having to
@@ -258,16 +270,158 @@ programs ship as well as the ones the account added, and the home is the whole
 of what a Profile of either type names, so such a home is left as the account
 keeps it.
 
+Amended (2026-09-17): **the cover goes, because there is nothing under it.** A
+session's `~/.claude` is now built rather than joined — see the next section's
+amendment — and a built root holds no skills of the account's to hide. The
+hiding this paragraph argued for is kept by omission instead: what is not in
+the allowlist is not in the root.
+
 ## A Profile is one home directory, except Claude's pair
 
 Each new backend keeps its whole account under one relocatable home — Codex
 under `~/.codex`, Grok Build under `~/.grok`, OpenCode under its XDG config
 and data directories. A new-type Profile therefore stores **one home
 directory**, bound where that backend expects it (OpenCode's XDG paths
-pointed into it); Claude keeps its existing directory-plus-config-file pair,
+pointed into it) — the amendment below gives a session a root built out of it
+instead; Claude keeps its existing directory-plus-config-file pair,
 already stored and already working. The Profile form takes a per-type shape,
 and offers a backend only once its stage has landed — a type that cannot
 launch would be a lie in a picker.
+
+Amended (2026-09-17): **what a Profile stores is unchanged; what a session is
+given of it is built.** The first Windows install to run a real session showed
+what joining the account whole costs: the human's plugins and hooks ran in
+every session and failed on every tool call, a session wrote a path inside the
+sandbox's ephemeral storage into the human's plugin registry, an in-session
+login and an in-session prompt rewrote the human's real files, and every
+repository's transcripts were readable — and this repository's own Linux
+sessions were doing the same, unnoticed, through the read-write bind. So a
+session runs in a **built root** under the Conversation's profile, seeded by an
+allowlist that is the same rule for every harness: the **credentials**, linked
+so a login from inside lands in the account; the **memory store** — Claude's
+entries under `projects/` for the Repo and its Worktree and no other
+repository's, Codex's and Grok's `sessions/`, OpenCode's data directory — shared
+when the Profile's memory switch says so, on by default; a **configuration
+file Verkstead writes**, carrying only what names a model provider; and an
+**instructions file** from the settings page, in place of the human's own
+global one. Nothing else of the account is there. Claude's `.claude.json` is
+copied rather than linked, pre-seeded with the Repo's trust, and written back
+at session end as ADR-0014 decided, because a re-login from inside a run has
+to reach the account. ADR-0014 built that write-back for Windows's hard links
+alone; a copy follows nothing on any platform, so it now runs on Linux and a
+Mac too.
+
+**As built for Claude**, the allowlist and the write-back came out narrower than
+the paragraph above in three places:
+
+- **The written `settings.json` carries two keys of the account's:
+  `apiKeyHelper` and `env`**, where the account's own file has them, beside
+  `skipDangerousModePermissionPrompt`. Those two are how an API-key login
+  reaches the model. Nothing else is carried — no `hooks`, `enabledPlugins`,
+  `permissions` or `statusLine` — because an allowlist stays closed when Claude
+  adds a key, and a denylist would not. An account with no `settings.json`, or
+  one that does not parse, still gets the bypass key. The file is not written
+  back.
+- **The `.claude.json` copy has `mcpServers` taken out**, at the top level and
+  under each `projects` entry. Those are the human's own MCP servers, the same
+  leak as plugins.
+- **The write-back of `.claude.json` is a merge by key, not a copy of the
+  whole file.** A copy never shares an identity with the account's file, so
+  the identity check alone would write it back after every session. Sessions
+  run in parallel, so the last to end would undo what another session, or the
+  human's own `claude`, wrote in the meantime; and a whole-file write-back of a
+  copy without `mcpServers` would delete the human's servers. So the copy as
+  given is kept as a baseline. At session end, only the top-level keys and the
+  single `projects` entries whose value changed from that baseline are written
+  into the account's file as it is by then, and a key the session removed is
+  removed. `mcpServers` is never written or removed, at either level. The trust
+  seeded into the copy reaches the account only in an entry the session itself
+  changed. A session that changed nothing leaves the account's file byte for
+  byte as it was. This narrows ADR-0014's whole-file write-back, and the human
+  approved it.
+
+Rejected: launch flags — `--setting-sources`, `--settings` — which close the
+inheritance and leave the write-through open; `--safe-mode`, which takes the
+Repo's own `CLAUDE.md`, the skills and MCP with it; and building Claude's root
+alone, which the human turned down for consistency.
+
+**As built for Codex, Grok Build and OpenCode** (2026-09-18), each allowlist
+was read off a real install. Six things are recorded beside the paragraph
+above, the last of them settled in review:
+
+- **The memory switch is on every Profile, Claude's included**: a `memory`
+  column beside the account, added in place by a migration, on by default and
+  on for every Profile that already existed. Off, nothing of the account's
+  store is made or joined, and each of its directories is the root's own and
+  empty — for Claude, an empty `projects/`. The login and the written
+  configuration are the same either way.
+- **Codex's store is `sessions/` and `memories/`, and none of its databases.**
+  The human chose `memories/`, which holds `MEMORY.md` and
+  `memory_summary.md`, beside the rollouts. `archived_sessions/` is not in it,
+  and nor is any SQLite database at the top of `~/.codex` — `state_5.sqlite`,
+  `memories_1.sqlite`, `thread_history_1.sqlite`, `logs_2.sqlite`,
+  `goals_1.sqlite`, `queue_1.sqlite` in codex 0.154. A database linked a file at a
+  time loses its write-ahead-log siblings and will not open, so each is the
+  session's own and starts empty. A fresh state database beside a shared `sessions/` does no
+  paid work: codex fills it from the rollouts as it starts, and the `memories`
+  feature, which would summarise them with a model, is off unless `[features]`
+  turns it on, which the written file never carries. `codex login` writes
+  `auth.json` in place, so a link stays the account's file. The written
+  `config.toml` carries `model_provider` and `model_providers`.
+- **Grok Build's store is two directories, not the files the roadmap named.**
+  Read off grok 1.0.13: `memory/` holds a global `MEMORY.md` and a directory per
+  repository, each with a `MEMORY.md` and an `index.sqlite`; `sessions/` holds
+  the session logs and a `session_search.sqlite`. Both databases run in
+  write-ahead-log mode, so `index.sqlite` is never linked on its own: `sessions/`
+  and `memory/` are joined whole, each database with its siblings. The human
+  agreed. Grok has no one key that names a provider, so its written
+  `config.toml` carries what its configuration reference gives to reaching a
+  model and signing in to one: `model`, `model_providers`, `auth_provider`,
+  `auth`, `grok_com_config`, and `endpoints.models_base_url` and
+  `endpoints.models_list_url`. **And its login is a copy on Linux.** grok saves
+  `auth.json` only by renaming a file over it, and a bind refuses the rename
+  (`grok logout` inside fails with *Resource busy*), so on Linux the login is
+  copied in, owner-only, and merged back by login scope at session end with the
+  merge `.claude.json` uses. The human chose this. On a Mac and on Windows the
+  rename replaces the link, and the ordinary write-back hands it back. Because a
+  Linux session's HOME is the server's own, a root bound at `~/.grok` would hide
+  `~/.grok/bin`, where xAI's installer puts `grok`, so read-only `PATH`
+  directories under a root's name are bound again after it.
+- **OpenCode's data directory is joined whole with memory on**, as decided: it
+  holds `opencode.db` with its `-wal` and `-shm` siblings, checked on opencode
+  1.18.30, and the login, `mcp-auth.json` and logs travel with it. With memory
+  off it is the root's own, `auth.json` alone is linked in, and the database
+  starts empty; `opencode auth logout` rewrites `auth.json` in place, so the
+  link stays the account's file. The config directory is built either way and
+  holds only an `opencode.json` carrying `provider`, read from `opencode.json`
+  and then `opencode.jsonc`, comments allowed, the later file's keys winning.
+- **Discovery reads where the store really is on the host, not the built root.**
+  The roadmap said every transcript reader would look in the session's root.
+  That holds only with memory off, where the root under `homes/<id>` is the one
+  place the log is. With memory on, a Linux join is a bind inside the session's
+  namespace, so the root on the host holds an empty directory and the log is in
+  the account. So Claude's glob of `projects/`, Codex's rollout match, Grok's
+  named session and OpenCode's database each look in the account's store when
+  memory is on, and in the root on the host when it is off.
+- **Nothing of a Conversation is emptied while something of it is running**,
+  on every platform rather than on Linux alone. Stage 01 shared a Linux root
+  something was running in, because emptying it would unmount what is joined
+  into the running session. On a Mac and on Windows the `homes/<id>` directory
+  *is* the HOME, holding every root of the Conversation, and a terminal
+  opening there emptied it — which with memory off deletes the only copy of a
+  running session's transcript and memory, and an OpenCode database it is
+  writing. So the register that says what is running in which root says as well
+  whether anything is running in the HOME, and a launch into one that is
+  keeps it: nothing emptied, nothing rewritten, and any directory of its own
+  root that is missing made so that what it joins has somewhere to land.
+
+A login made inside where the account had none is handed to the account at
+session end on all three platforms, for every harness. And the Windows grant
+follows each allowlist rather than Claude's: an entry on each built directory,
+one on each directory joined into it, and one on a linked login, and none on an
+account directory as a whole — an OpenCode data directory joined whole being a
+joined directory, granted as one. The check for files on another volume names
+the login, which is the only thing a root joins by hard link.
 
 ## Unattended is the product's promise
 
@@ -281,6 +435,22 @@ rule, carrying `--dangerously-skip-permissions`, rather than the Profile's
 own settings being what keeps a run unattended. What stops a session doing
 harm is the Sandbox, which is unchanged; a backend stopping to ask approval
 mid-run stalls a run nobody is watching.
+
+Amended (2026-09-17): **the flag alone is not enough on a fresh account.**
+Claude Code asks once, interactively, before it honours
+`--dangerously-skip-permissions`, and records the answer in the account's
+`settings.json`; a fresh account has never answered, and a session on a
+pseudoconsole with nobody at it parked there for good. Every Linux session
+here had an account that answered once by hand, which is why it was never
+seen. So the answer is written into the built root's `settings.json` by
+Verkstead — `skipDangerousModePermissionPrompt` — beside the flag on the line,
+the way Codex's Worktree trust is already said on its line. `--print` was
+suggested and is not the fix: the Screen, the Hold, quiet detection and the
+Rescue all stand on the terminal. **`bypassPermissionsModeAccepted` is not
+seeded** into the `.claude.json` copy, though the roadmap first named it:
+Claude Code 2.1.268 moves that key out of `.claude.json` and into
+`settings.json` as it starts, and the settings key already answers the same
+consent.
 
 Amended: **OpenCode's bypass is `--auto` on the launch line**, rather than the
 permission configuration this paragraph first named. So every one of the four
@@ -301,7 +471,9 @@ named in the Capture.
   Claude does, so its log is named. Codex and OpenCode take none, so theirs
   is *found*: the log that appears in the account's session store for the
   session's worktree after launch, matched on working directory and start
-  time. ADR-0006's rules are unchanged — lines stored verbatim, parsed at
+  time. (Amended 2026-09-18: in the account's store where the Profile shares
+  its memory, and in the built root on the host where it does not — see *As
+  built for Codex, Grok Build and OpenCode*.) ADR-0006's rules are unchanged — lines stored verbatim, parsed at
   render time, the Capture the complete record wherever no log is found.
 
   **Amended: OpenCode's store is a database, not a file of lines**, read off

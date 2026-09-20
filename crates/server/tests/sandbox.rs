@@ -25,7 +25,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -44,6 +44,81 @@ use verkstead_server::store;
 /// Where the server this Conversation belongs to is listening — which is what a
 /// session inside is told to put its Question Sets to.
 const LISTENING: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8422);
+
+/// What the settings page's Instructions card was given, as `config.yaml` holds
+/// it — and what every root's global instructions file holds, byte for byte.
+const THE_INSTRUCTIONS: &str = "Say what you changed.\n\n- And why.\n";
+
+/// And the Repo's own instructions, in the Worktree, which are the Repo's.
+const THE_REPOS_OWN: &str = "# what this repository says about itself\n";
+
+/// And the same text as the settings page saves it: one `config.yaml` key, in
+/// the block scalar that keeps a paragraph's blank line and a list's indent.
+const THE_INSTRUCTIONS_CONFIGURED: &str =
+    "instructions: |\n  Say what you changed.\n\n  - And why.\n";
+
+/// What the fixture's Codex account keeps in its `config.toml`: a provider of
+/// its own, which a session needs to reach the model, and the human's own MCP
+/// servers and features, which a session is not given.
+const CODEX_ACCOUNT_CONFIG: &str = r#"model_provider = "proxy"
+notify = ["notify-send"]
+
+[model_providers.proxy]
+name = "The proxy"
+base_url = "https://proxy.example/v1"
+
+[mcp_servers.the-humans]
+command = "npx"
+
+[features]
+memories = true
+"#;
+
+/// What the fixture's Grok Build account keeps in its `config.toml`: a model
+/// behind a proxy of its own and how it signs in, which a session needs, and
+/// the human's own MCP servers, memory setting and interface, which a session
+/// is not given.
+const GROK_ACCOUNT_CONFIG: &str = r#"[model.the-proxy]
+model = "gpt-5"
+base_url = "https://proxy.example/v1"
+
+[auth]
+auth_provider_command = "/usr/local/bin/sign-in"
+
+[mcp_servers.the-humans]
+command = "npx"
+
+[memory]
+enabled = true
+
+[ui]
+screen_mode = "minimal"
+"#;
+
+/// And the login it keeps: one scope, as grok 1.0.13 writes `auth.json`, whose
+/// top-level keys are the scopes a login is for.
+const GROK_LOGIN: &str = "{\"https://auth.x.ai::the-humans\": {\"key\": \"the login\"}}\n";
+
+/// What the fixture's OpenCode account keeps in its `opencode.jsonc`, comments
+/// and all: a provider of its own, which a session needs, and the human's own
+/// MCP servers, plugins and instructions, which a session is not given.
+const OPENCODE_ACCOUNT_CONFIG: &str = r#"{
+  // The human's own proxy.
+  "provider": {
+    "proxy": {
+      "npm": "@ai-sdk/openai-compatible",
+      "options": { "baseURL": "https://proxy.example/v1" },
+    },
+  },
+  /* How the human works. */
+  "mcp": { "the-humans": { "type": "local", "command": ["npx"] } },
+  "plugin": ["the-humans-plugin"],
+  "instructions": ["RULES.md"],
+}
+"#;
+
+/// And the login it keeps.
+const OPENCODE_LOGIN: &str = "{\"opencode\": {\"type\": \"api\", \"key\": \"the login\"}}\n";
 
 /// What stands in for the server's own image: an executable that says which
 /// build it is.
@@ -282,10 +357,25 @@ fi
         cache: &BuildCache,
         extra: Vec<Bind>,
     ) -> Sandbox {
+        self.sandbox_in(&self.homes(), profile, listening, cache, extra)
+    }
+
+    /// And one built off a `homes` the caller holds, which is how two
+    /// sandboxes come to share a register of what is running in which root —
+    /// the server has one `Homes` and starts every session and terminal off
+    /// it, where a fixture asking twice would get two.
+    fn sandbox_in(
+        &self,
+        homes: &Homes,
+        profile: &store::Profile,
+        listening: SocketAddr,
+        cache: &BuildCache,
+        extra: Vec<Bind>,
+    ) -> Sandbox {
         Sandbox::for_conversation(
             &self.conversation,
             profile,
-            &self.homes(),
+            homes,
             &Reachable::at(listening),
             &self.skills,
             &self.verkstead,
@@ -364,6 +454,21 @@ fi
         self.elsewhere.path().join("account/.claude.json")
     }
 
+    /// And the directory the Codex Profile names.
+    fn codex_dir(&self) -> PathBuf {
+        self.elsewhere.path().join("codex-account/.codex")
+    }
+
+    /// And the directory the Grok Build Profile names.
+    fn grok_dir(&self) -> PathBuf {
+        self.elsewhere.path().join("grok-account/.grok")
+    }
+
+    /// And the home the OpenCode Profile names.
+    fn opencode_home(&self) -> PathBuf {
+        self.elsewhere.path().join("opencode-account/opencode")
+    }
+
     /// Write `secrets.yaml` as the settings page would, so that the sandboxes
     /// built after this carry the token.
     fn configure_github_token(&self, yaml: &str) {
@@ -379,13 +484,37 @@ fi
     /// A Profile of the second agent type, whose whole account is one home.
     ///
     /// Saved into the same store the fixture's own was, with a home beside the
-    /// repository holding something of the account's — so that "the home is
-    /// bound" is a claim about a directory with contents rather than about an
-    /// empty one.
+    /// repository holding what a Codex account that has been used holds: a
+    /// login, a configuration naming a provider of its own beside the human's
+    /// MCP servers, a rollout and a memory, and the human's own rules, skills,
+    /// instructions, history, archive and databases — so that what a session's
+    /// root leaves out is a claim about files that are there.
     async fn codex_profile(&self) -> store::Profile {
-        let home = self.elsewhere.path().join("codex-account/.codex");
-        std::fs::create_dir_all(&home).unwrap();
-        std::fs::write(home.join("config.toml"), "# the account's own\n").unwrap();
+        let home = self.codex_dir();
+
+        for dir in [
+            "sessions/2026/09/01",
+            "memories",
+            "rules",
+            "skills/the-accounts-own",
+            "archived_sessions",
+        ] {
+            std::fs::create_dir_all(home.join(dir)).unwrap();
+        }
+
+        for (file, contents) in [
+            ("auth.json", "{\"the\": \"login\"}\n"),
+            ("config.toml", CODEX_ACCOUNT_CONFIG),
+            ("sessions/2026/09/01/rollout-the-humans.jsonl", "{}\n"),
+            ("memories/MEMORY.md", "remembered\n"),
+            ("rules/default.rules", "# the human's\n"),
+            ("skills/the-accounts-own/SKILL.md", "# the human's\n"),
+            ("AGENTS.md", "# the human's\n"),
+            ("history.jsonl", "{}\n"),
+            ("state_5.sqlite", "not really a database\n"),
+        ] {
+            std::fs::write(home.join(file), contents).unwrap();
+        }
 
         store::create_profile(
             &self.pool,
@@ -393,6 +522,7 @@ fi
                 name: Some("codex".to_owned()),
                 account: store::Account::Codex { home },
                 models: vec!["gpt-5-codex".to_owned()],
+                memory: true,
             },
         )
         .await
@@ -402,18 +532,47 @@ fi
 
     /// And one of the third, whose account is one home as the second's is.
     ///
-    /// With skills of its own inside it, because grok discovers them there and
-    /// the home is the whole of what the Profile names: nothing is bound over
-    /// anything inside such a home (ADR-0011), and what would be hidden if
-    /// something were is the skills grok itself ships.
+    /// Holding what a Grok Build 1.0.13 account that has been used holds: a
+    /// login, a configuration reaching a model of its own beside the human's MCP
+    /// servers, a session's log and the search database beside it, the global
+    /// memory and a repository's with its index, and the human's own skills,
+    /// plugins, interface settings and logs — so that what a session's root
+    /// leaves out is a claim about files that are there.
     async fn grok_profile(&self) -> store::Profile {
-        let home = self.elsewhere.path().join("grok-account/.grok");
-        std::fs::create_dir_all(home.join("skills/the-accounts-own")).unwrap();
-        std::fs::write(
-            home.join("skills/the-accounts-own/SKILL.md"),
-            "# what grok found there\n",
-        )
-        .unwrap();
+        let home = self.grok_dir();
+
+        for dir in [
+            "sessions/%2Fsrc%2Fthe-humans/019-the-humans",
+            "memory/the-humans-0123abcd",
+            "skills/the-accounts-own",
+            "plugins",
+            "logs",
+        ] {
+            std::fs::create_dir_all(home.join(dir)).unwrap();
+        }
+
+        for (file, contents) in [
+            ("auth.json", GROK_LOGIN),
+            ("config.toml", GROK_ACCOUNT_CONFIG),
+            (
+                "sessions/%2Fsrc%2Fthe-humans/019-the-humans/updates.jsonl",
+                "{}\n",
+            ),
+            ("sessions/session_search.sqlite", "not really a database\n"),
+            ("memory/MEMORY.md", "remembered\n"),
+            (
+                "memory/the-humans-0123abcd/index.sqlite",
+                "not really a database\n",
+            ),
+            (
+                "skills/the-accounts-own/SKILL.md",
+                "# what grok found there\n",
+            ),
+            ("pager.toml", "# the human's\n"),
+            ("logs/unified.jsonl", "{}\n"),
+        ] {
+            std::fs::write(home.join(file), contents).unwrap();
+        }
 
         store::create_profile(
             &self.pool,
@@ -421,6 +580,7 @@ fi
                 name: Some("grok".to_owned()),
                 account: store::Account::Grok { home },
                 models: vec!["grok-4.6".to_owned()],
+                memory: true,
             },
         )
         .await
@@ -433,12 +593,11 @@ fi
     ///
     /// Made the way a human makes one — a `HOME=<it> opencode` run leaves
     /// exactly these — with something inside each so the test can say which
-    /// landed where. The skills among them, because an OpenCode Profile binds
-    /// nothing over anything either: its own are inside the config directory
-    /// the Profile names, and its two global paths are under HOME, where a
-    /// fresh sandbox has nothing at all.
+    /// landed where. The config directory holds the human's own skills,
+    /// plugins and an `opencode.jsonc` with comments; the data directory holds
+    /// the login and a database with its write-ahead-log siblings.
     async fn opencode_profile(&self) -> store::Profile {
-        let home = self.elsewhere.path().join("opencode-account/opencode");
+        let home = self.opencode_home();
         let config = home.join(".config/opencode");
         let data = home.join(".local/share/opencode");
 
@@ -448,9 +607,20 @@ fi
             "# what opencode found there\n",
         )
         .unwrap();
+        std::fs::create_dir_all(config.join("node_modules")).unwrap();
+        std::fs::write(config.join("package.json"), "{}\n").unwrap();
+        std::fs::write(config.join("opencode.jsonc"), OPENCODE_ACCOUNT_CONFIG).unwrap();
 
         std::fs::create_dir_all(&data).unwrap();
-        std::fs::write(data.join("auth.json"), "{}\n").unwrap();
+        for (file, contents) in [
+            ("auth.json", OPENCODE_LOGIN),
+            ("opencode.db", "the human's sessions\n"),
+            ("opencode.db-wal", "\n"),
+            ("opencode.db-shm", "\n"),
+            ("mcp-auth.json", "{}\n"),
+        ] {
+            std::fs::write(data.join(file), contents).unwrap();
+        }
 
         store::create_profile(
             &self.pool,
@@ -458,6 +628,7 @@ fi
                 name: Some("opencode".to_owned()),
                 account: store::Account::OpenCode { home },
                 models: vec!["opencode/big-pickle".to_owned()],
+                memory: true,
             },
         )
         .await
@@ -573,6 +744,24 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
     )
     .unwrap();
 
+    // And the rest of what a human's account holds that a session is not given:
+    // a login, which it is, beside plugins, a global CLAUDE.md, a history and
+    // another repository's transcripts, which it is not.
+    std::fs::write(
+        claude_dir.join(".credentials.json"),
+        "{\"the\": \"login\"}\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(claude_dir.join("plugins/the-accounts-own")).unwrap();
+    std::fs::write(claude_dir.join("CLAUDE.md"), "# the human's own\n").unwrap();
+    std::fs::write(claude_dir.join("history.jsonl"), "{}\n").unwrap();
+    std::fs::create_dir_all(claude_dir.join("projects/-home-you-src-something-else")).unwrap();
+    std::fs::write(
+        claude_dir.join("projects/-home-you-src-something-else/another.jsonl"),
+        "{}\n",
+    )
+    .unwrap();
+
     let profile = store::create_profile(
         &pool,
         &store::ProfileFacts {
@@ -582,6 +771,7 @@ async fn grilling_alongside(companions: &[(&str, store::CompanionMode)]) -> Gril
                 config_file,
             },
             models: vec!["claude-opus-5".to_owned()],
+            memory: true,
         },
     )
     .await
@@ -815,13 +1005,19 @@ file() {
 
 /// Run `script` inside `sandbox` and read back what it reported.
 fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
+    probe_closing(sandbox, script).0
+}
+
+/// The same, keeping what the session's ending is left to see to — which is
+/// what the tests about a login written inside have to close themselves.
+fn probe_closing(sandbox: &Sandbox, script: &str) -> (BTreeMap<String, String>, Closing) {
     let whole = format!("{PROBE}\n{script}\n");
 
-    let rendered = sandbox
+    let (rendering, closing) = sandbox
         .command(&[SH, "-c", &whole])
         .expect("a rendering on a platform with no identity to make");
 
-    let output = Command::try_from(&rendered.0)
+    let output = Command::try_from(&rendering)
         .expect("a rendering with no container")
         .stdin(Stdio::null())
         .output()
@@ -833,11 +1029,13 @@ fn probe(sandbox: &Sandbox, script: &str) -> BTreeMap<String, String> {
         "the probe failed inside the sandbox: {stderr}"
     );
 
-    String::from_utf8_lossy(&output.stdout)
+    let reported = String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter_map(|line| line.split_once('='))
         .map(|(key, value)| (key.to_owned(), value.to_owned()))
-        .collect()
+        .collect();
+
+    (reported, closing)
 }
 
 /// And what the process a sandbox renders to is actually handed, read off the
@@ -1318,8 +1516,9 @@ async fn the_open_rendering_hands_a_session_the_environment_it_was_described_wit
 /// there and by a symbolic link on the machine running this, and it is the
 /// `windows-2025` job that reads the first of those back.
 ///
-/// Claude's pair, which is the one shape of account that is a directory *and* a
-/// file — so this is the junction and the hard link in one test.
+/// Claude's, which is a root of Verkstead's own with the login hard-linked into
+/// it and this Repo's and this Worktree's `projects/` entries junctioned in —
+/// and beside it the file half of the pair, hard-linked as it always was.
 #[tokio::test]
 async fn a_windows_session_finds_the_profiles_account_inside_a_profile_of_its_own() {
     let fixture = grilling().await;
@@ -1327,47 +1526,205 @@ async fn a_windows_session_finds_the_profiles_account_inside_a_profile_of_its_ow
     made(&fixture.sandbox_on(Platform::Windows));
 
     let profile = fixture.windows_profile();
+    let root = profile.join(".claude");
 
-    assert_eq!(
-        std::fs::read_to_string(profile.join(".claude/settings.json")).unwrap(),
-        "{}\n",
-        "what the account holds should be readable at the name Claude looks for \
-         it under"
+    assert!(
+        !std::fs::symlink_metadata(&root).unwrap().is_symlink(),
+        "the root is a directory of Verkstead's own, not a junction to the account"
     );
 
-    // And the other direction, which is the half that says this is the account
-    // rather than a copy of it: a session logging in writes a file, and the
-    // human's own account is where it has to land.
-    std::fs::write(profile.join(".claude/written-inside.json"), "inside\n").unwrap();
+    let mut held: Vec<String> = std::fs::read_dir(&root)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    held.sort();
 
     assert_eq!(
-        std::fs::read_to_string(fixture.claude_dir().join("written-inside.json")).unwrap(),
-        "inside\n",
-        "a file a session writes into its account should be on the account"
+        held,
+        [".credentials.json", "projects", "settings.json"],
+        "the login, the projects directory and the settings Verkstead wrote are \
+         the whole of the root: none of the account's plugins, skills, \
+         `CLAUDE.md` or history"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("settings.json")).unwrap(),
+        "{\n  \"skipDangerousModePermissionPrompt\": true\n}\n",
+        "and the settings are Verkstead's, holding the bypass key and nothing of \
+         an account whose own settings carry nothing over"
     );
 
-    // The file half, written the way a program writes one in place — which is
-    // the case a hard link answers whole. The other case, a file replaced by a
-    // rename, is answered as the session ends — see
-    // [`a_file_a_session_replaced_is_written_back_to_the_account_as_the_session_ends`].
+    let mut entries: Vec<String> = std::fs::read_dir(root.join("projects"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    entries.sort();
+
+    let mut expected = vec![entry_named(&fixture.repo), entry_named(fixture.worktree())];
+    expected.sort();
+
+    assert_eq!(
+        entries, expected,
+        "and under it this Repo's entry and this Worktree's, and no other \
+         repository's"
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(root.join(".credentials.json")).unwrap(),
+        "{\"the\": \"login\"}\n",
+        "the login is readable at the name Claude looks for it under"
+    );
+    assert_eq!(
+        std::fs::metadata(root.join(".credentials.json"))
+            .unwrap()
+            .ino(),
+        std::fs::metadata(fixture.claude_dir().join(".credentials.json"))
+            .unwrap()
+            .ino(),
+        "and it is the account's own file, which is what a hard link is"
+    );
+
+    // And the other direction, which is the half that says the entries are the
+    // account rather than a copy of it: what a session writes as memory and
+    // transcript has to land in the human's own account.
+    let transcript = root
+        .join("projects")
+        .join(entry_named(fixture.worktree()))
+        .join("the-session.jsonl");
+    std::fs::write(&transcript, "{}\n").unwrap();
+
+    assert!(
+        fixture
+            .claude_dir()
+            .join("projects")
+            .join(entry_named(fixture.worktree()))
+            .join("the-session.jsonl")
+            .is_file(),
+        "a transcript a session writes should be on the account"
+    );
+
+    // The file half is a copy rather than a link: written into, it is the
+    // session's own until the session ends — see
+    // [`a_windows_sessions_config_is_a_copy_merged_into_the_account_as_the_session_ends`].
+    assert_ne!(
+        std::fs::metadata(profile.join(".claude.json"))
+            .unwrap()
+            .ino(),
+        std::fs::metadata(fixture.claude_config()).unwrap().ino(),
+        "the account's config file is copied into the profile, not linked"
+    );
+
     std::fs::write(profile.join(".claude.json"), "{\"logged-in\": true}\n").unwrap();
 
     assert_eq!(
         std::fs::read_to_string(fixture.claude_config()).unwrap(),
-        "{\"logged-in\": true}\n",
-        "the account's config file and the one inside the profile should be one \
-         file, which is what a hard link is"
+        "{}\n",
+        "so what is written inside is not on the account while the session runs"
     );
 }
 
-/// And the same rule over an account that is one directory, which is what the
-/// three agent types after Claude keep one as.
-///
-/// Asked because the rule is written over the account rather than over Claude's
-/// pair: a Codex or opencode session started into a profile with nothing joined
-/// into it would be logged out, with nothing saying why.
+/// An OpenCode session on Windows is given a root of Verkstead's own too: a
+/// config directory holding only the `opencode.json` Verkstead wrote, carrying
+/// the account's provider, and with memory on the account's data directory
+/// junctioned in whole. None of the human's skills, plugins or MCP servers.
 #[tokio::test]
-async fn an_account_that_is_one_directory_is_joined_into_the_profile_too() {
+async fn a_windows_opencode_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
+    let fixture = grilling().await;
+    let opencode = fixture.opencode_profile().await;
+
+    made(
+        &fixture
+            .sandbox_on_under(&opencode, Platform::Windows)
+            .expect("a grilling Conversation has a worktree to build a sandbox around"),
+    );
+
+    let config = fixture.windows_profile().join(".config/opencode");
+    let data = fixture.windows_profile().join(".local/share/opencode");
+
+    assert!(
+        !std::fs::symlink_metadata(&config).unwrap().is_symlink(),
+        "the config directory is Verkstead's own, not a junction to the account"
+    );
+    assert_eq!(listed(&config), ["opencode.json"]);
+    assert_opencode_config_carries_the_provider_alone(
+        &std::fs::read_to_string(config.join("opencode.json")).unwrap(),
+    );
+
+    assert!(
+        std::fs::symlink_metadata(&data).unwrap().is_symlink(),
+        "the data directory is the account's, joined whole"
+    );
+
+    std::fs::write(data.join("opencode.db"), "written inside\n").unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(
+            fixture
+                .opencode_home()
+                .join(".local/share/opencode/opencode.db")
+        )
+        .unwrap(),
+        "written inside\n",
+        "and a store a session writes is on the account"
+    );
+}
+
+/// With memory off, a Windows OpenCode root's data directory is its own and
+/// holds the account's login alone, hard-linked. A login the session replaces
+/// by rename is the account's once the session ends.
+#[tokio::test]
+async fn a_windows_opencode_root_without_memory_links_the_login_alone_and_hands_it_back() {
+    let fixture = grilling().await;
+    let forgetting = store::Profile {
+        memory: false,
+        ..fixture.opencode_profile().await
+    };
+    let credentials = fixture
+        .opencode_home()
+        .join(".local/share/opencode/auth.json");
+
+    let afterwards = made(
+        &fixture
+            .sandbox_on_under(&forgetting, Platform::Windows)
+            .expect("a grilling Conversation has a worktree to build a sandbox around"),
+    );
+
+    let data = fixture.windows_profile().join(".local/share/opencode");
+
+    assert!(
+        !std::fs::symlink_metadata(&data).unwrap().is_symlink(),
+        "the data directory is the root's own"
+    );
+    assert_eq!(listed(&data), ["auth.json"]);
+    assert_eq!(
+        std::fs::metadata(data.join("auth.json")).unwrap().ino(),
+        std::fs::metadata(&credentials).unwrap().ino(),
+        "the login is the account's own file, which is what a hard link is"
+    );
+
+    replaced(&data.join("auth.json"), "{\"refreshed\": \"inside\"}\n");
+
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        OPENCODE_LOGIN,
+        "the replaced login is not the account's while the session runs"
+    );
+
+    afterwards.close();
+
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{\"refreshed\": \"inside\"}\n",
+        "and is once it ends"
+    );
+}
+
+/// A Codex session on Windows is given a root of Verkstead's own too: the login
+/// hard-linked into it, `sessions/` and `memories/` junctioned in, and a
+/// `config.toml` Verkstead wrote carrying the account's provider and none of
+/// its MCP servers. None of the human's rules, skills, instructions, history
+/// or databases.
+#[tokio::test]
+async fn a_windows_codex_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
     let fixture = grilling().await;
     let codex = fixture.codex_profile().await;
 
@@ -1377,24 +1734,194 @@ async fn an_account_that_is_one_directory_is_joined_into_the_profile_too() {
             .expect("a grilling Conversation has a worktree to build a sandbox around"),
     );
 
-    let inside = fixture.windows_profile().join(".codex");
+    let root = fixture.windows_profile().join(".codex");
 
-    assert_eq!(
-        std::fs::read_to_string(inside.join("config.toml")).unwrap(),
-        "# the account's own\n",
-        "what the Profile named should be what a session finds under the name \
-         codex keeps an account at"
+    assert!(
+        !std::fs::symlink_metadata(&root).unwrap().is_symlink(),
+        "the root is a directory of Verkstead's own, not a junction to the account"
     );
+    assert_eq!(
+        listed(&root),
+        ["auth.json", "config.toml", "memories", "sessions"],
+        "the login, the written configuration and the memory store are the whole \
+         of the root"
+    );
+    assert_eq!(
+        std::fs::metadata(root.join("auth.json")).unwrap().ino(),
+        std::fs::metadata(fixture.codex_dir().join("auth.json"))
+            .unwrap()
+            .ino(),
+        "the login is the account's own file, which is what a hard link is"
+    );
+    assert_codex_config_carries_the_provider_alone(&root.join("config.toml"));
 
-    std::fs::write(inside.join("auth.json"), "{}\n").unwrap();
+    std::fs::write(root.join("sessions/rollout-the-session.jsonl"), "{}\n").unwrap();
+    std::fs::write(root.join("memories/MEMORY.md"), "remembered inside\n").unwrap();
 
     assert!(
         fixture
-            .elsewhere
-            .path()
-            .join("codex-account/.codex/auth.json")
-            .exists(),
-        "and a file written inside should be on the account"
+            .codex_dir()
+            .join("sessions/rollout-the-session.jsonl")
+            .is_file(),
+        "a rollout a session writes is on the account"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.codex_dir().join("memories/MEMORY.md")).unwrap(),
+        "remembered inside\n",
+        "and so is a memory"
+    );
+}
+
+/// With memory off, a Windows Codex root's `sessions/` and `memories/` are its
+/// own and empty, and nothing of the account's is joined for them.
+#[tokio::test]
+async fn a_windows_codex_root_without_memory_has_a_store_of_its_own() {
+    let fixture = grilling().await;
+    let forgetting = store::Profile {
+        memory: false,
+        ..fixture.codex_profile().await
+    };
+
+    made(
+        &fixture
+            .sandbox_on_under(&forgetting, Platform::Windows)
+            .expect("a grilling Conversation has a worktree to build a sandbox around"),
+    );
+
+    let root = fixture.windows_profile().join(".codex");
+
+    assert_eq!(
+        listed(&root),
+        ["auth.json", "config.toml", "memories", "sessions"]
+    );
+
+    for store in ["sessions", "memories"] {
+        assert!(
+            !std::fs::symlink_metadata(root.join(store))
+                .unwrap()
+                .is_symlink(),
+            "the root's {store} is its own directory"
+        );
+        assert!(listed(&root.join(store)).is_empty(), "and it starts empty");
+    }
+}
+
+/// A Codex account with no login has none to link into a Windows root, so the
+/// login a session makes is handed back as it ends.
+#[tokio::test]
+async fn a_codex_login_a_windows_session_made_in_an_account_with_none_is_the_accounts_afterwards() {
+    let fixture = grilling().await;
+    let codex = fixture.codex_profile().await;
+    let credentials = fixture.codex_dir().join("auth.json");
+    std::fs::remove_file(&credentials).unwrap();
+
+    let afterwards = made(
+        &fixture
+            .sandbox_on_under(&codex, Platform::Windows)
+            .expect("a grilling Conversation has a worktree to build a sandbox around"),
+    );
+    let inside = fixture.windows_profile().join(".codex/auth.json");
+
+    assert!(!inside.exists(), "there is no login to give the root");
+    std::fs::write(&inside, "{\"logged\": \"in\"}\n").unwrap();
+
+    afterwards.close();
+
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{\"logged\": \"in\"}\n",
+        "the login the session made is the account's"
+    );
+}
+
+/// A Grok Build session on Windows is given a root of Verkstead's own too: the
+/// login hard-linked into it, `sessions/` and `memory/` junctioned in, and a
+/// `config.toml` Verkstead wrote carrying what reaches the model and none of
+/// the human's MCP servers. None of the human's skills, plugins, interface
+/// settings or logs.
+#[tokio::test]
+async fn a_windows_grok_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
+    let fixture = grilling().await;
+    let grok = fixture.grok_profile().await;
+
+    made(
+        &fixture
+            .sandbox_on_under(&grok, Platform::Windows)
+            .expect("a grilling Conversation has a worktree to build a sandbox around"),
+    );
+
+    let root = fixture.windows_profile().join(".grok");
+
+    assert!(
+        !std::fs::symlink_metadata(&root).unwrap().is_symlink(),
+        "the root is a directory of Verkstead's own, not a junction to the account"
+    );
+    assert_eq!(
+        listed(&root),
+        ["auth.json", "config.toml", "memory", "sessions"],
+        "the login, the written configuration and the memory store are the whole \
+         of the root"
+    );
+    assert_eq!(
+        std::fs::metadata(root.join("auth.json")).unwrap().ino(),
+        std::fs::metadata(fixture.grok_dir().join("auth.json"))
+            .unwrap()
+            .ino(),
+        "the login is the account's own file, which is what a hard link is"
+    );
+    assert_grok_config_carries_the_model_alone(&root.join("config.toml"));
+
+    std::fs::create_dir_all(root.join("sessions/%2Fwork/019-the-session")).unwrap();
+    std::fs::write(
+        root.join("sessions/%2Fwork/019-the-session/updates.jsonl"),
+        "{}\n",
+    )
+    .unwrap();
+
+    assert!(
+        fixture
+            .grok_dir()
+            .join("sessions/%2Fwork/019-the-session/updates.jsonl")
+            .is_file(),
+        "a log a session writes is on the account"
+    );
+}
+
+/// A login grok 1.0.13 saves inside a Windows root replaces the hard link, and
+/// is the account's once the session ends. A `MEMORY.md` replaced the same way
+/// is in a junctioned directory, so it is the account's as it is written.
+#[tokio::test]
+async fn a_grok_login_a_windows_session_replaced_is_the_accounts_once_the_session_ends() {
+    let fixture = grilling().await;
+    let grok = fixture.grok_profile().await;
+
+    let afterwards = made(
+        &fixture
+            .sandbox_on_under(&grok, Platform::Windows)
+            .expect("a grilling Conversation has a worktree to build a sandbox around"),
+    );
+    let root = fixture.windows_profile().join(".grok");
+
+    replaced(&root.join("auth.json"), "{\"refreshed\": \"inside\"}\n");
+    replaced(&root.join("memory/MEMORY.md"), "remembered inside\n");
+
+    assert_eq!(
+        std::fs::read_to_string(fixture.grok_dir().join("memory/MEMORY.md")).unwrap(),
+        "remembered inside\n",
+        "the memory is the account's straight away"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.grok_dir().join("auth.json")).unwrap(),
+        GROK_LOGIN,
+        "while the replaced login is not, until the session ends"
+    );
+
+    afterwards.close();
+
+    assert_eq!(
+        std::fs::read_to_string(fixture.grok_dir().join("auth.json")).unwrap(),
+        "{\"refreshed\": \"inside\"}\n",
+        "and then it is"
     );
 }
 
@@ -1434,19 +1961,34 @@ async fn each_session_gets_the_profile_fresh_and_the_account_untouched() {
 
     let profile = fixture.windows_profile();
     std::fs::write(profile.join("what-the-last-session-left"), "state\n").unwrap();
+    std::fs::write(profile.join(".claude/left-in-the-root"), "state\n").unwrap();
 
     made(&fixture.sandbox_on(Platform::Windows));
 
     assert!(
-        !profile.join("what-the-last-session-left").exists(),
-        "a session should start in a profile holding nothing of the session \
-         before it"
+        !profile.join("what-the-last-session-left").exists()
+            && !profile.join(".claude/left-in-the-root").exists(),
+        "a session should start in a profile and a root holding nothing of the \
+         session before it"
     );
 
     assert_eq!(
-        std::fs::read_to_string(fixture.claude_dir().join("settings.json")).unwrap(),
-        "{}\n",
-        "and the account should be joined in again, whole"
+        std::fs::read_to_string(profile.join(".claude/.credentials.json")).unwrap(),
+        "{\"the\": \"login\"}\n",
+        "and the login should be joined in again"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_dir().join(".credentials.json")).unwrap(),
+        "{\"the\": \"login\"}\n",
+        "with the account's own file untouched by the emptying"
+    );
+    assert!(
+        fixture
+            .claude_dir()
+            .join("projects")
+            .join(entry_named(fixture.worktree()))
+            .is_dir(),
+        "and so is each `projects/` entry a junction led to"
     );
     assert_eq!(
         std::fs::read_to_string(fixture.claude_config()).unwrap(),
@@ -1464,66 +2006,159 @@ async fn each_session_gets_the_profile_fresh_and_the_account_untouched() {
     );
 }
 
-/// A file the session replaced rather than wrote in place is on the account
-/// once the session has ended, and the session after it finds one file again.
-///
-/// **The case a hard link cannot answer by itself.** An agent that saves its
-/// config by writing a temporary file and renaming it over the top leaves the
-/// session writing to a file of its own, with the account's copy seeing none of
-/// it — so the ending the rendering handed back is asked, and what the session
-/// wrote goes back over the account (ADR-0014).
+/// A Windows session's `.claude.json` is a copy: its Repo and Worktree trusted,
+/// the account's MCP servers taken out, and what the session changed merged
+/// into the account's own file as it ends — whether it wrote the copy in place
+/// or replaced it by rename, as Claude saves one.
 ///
 /// Asked of the description on whichever machine is running this, as everything
-/// else about that rendering is: a file is joined into the profile by a hard
-/// link on either kind of machine, and what a rename over one costs is the same
-/// fact about the filesystem either way.
+/// else about that rendering is.
 #[tokio::test]
-async fn a_file_a_session_replaced_is_written_back_to_the_account_as_the_session_ends() {
+async fn a_windows_sessions_config_is_a_copy_merged_into_the_account_as_the_session_ends() {
     let fixture = grilling().await;
+    std::fs::write(
+        fixture.claude_config(),
+        "{\"numStartups\": 1, \"theme\": \"dark\", \"mcpServers\": {\"the-humans\": {}}}\n",
+    )
+    .unwrap();
 
     let afterwards = made(&fixture.sandbox_on(Platform::Windows));
     let inside = fixture.windows_profile().join(".claude.json");
 
+    let copy: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&inside).unwrap()).unwrap();
+
+    assert_eq!(copy["mcpServers"], serde_json::Value::Null);
+    assert_eq!(copy["numStartups"], 1);
+    assert_eq!(
+        copy["projects"]
+            .as_object()
+            .unwrap()
+            .values()
+            .filter(|entry| entry["hasTrustDialogAccepted"] == true)
+            .count(),
+        2,
+        "the Repo and the Worktree are trusted in the copy: {copy}"
+    );
+    assert_eq!(
+        afterwards.copied().collect::<Vec<_>>(),
+        [inside.as_path()],
+        "and the copy is what the session's ending merges back"
+    );
+    assert!(
+        !afterwards.linked().any(|linked| linked == inside),
+        "rather than a link it writes back whole"
+    );
+
     let written = fixture.windows_profile().join(".claude.json.tmp");
-    std::fs::write(&written, "{\"logged-in\": true}\n").unwrap();
+    std::fs::write(
+        &written,
+        "{\"numStartups\": 2, \"theme\": \"dark\", \"projects\": {}}\n",
+    )
+    .unwrap();
+    std::fs::rename(&written, &inside).unwrap();
+
+    std::fs::write(
+        fixture.claude_config(),
+        "{\"numStartups\": 1, \"theme\": \"light\", \"mcpServers\": {\"the-humans\": {}}}\n",
+    )
+    .unwrap();
+
+    afterwards.close();
+
+    let merged: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(fixture.claude_config()).unwrap()).unwrap();
+
+    assert_eq!(
+        merged["numStartups"], 2,
+        "what the session changed is merged in"
+    );
+    assert_eq!(
+        merged["theme"], "light",
+        "what the account changed meanwhile is kept"
+    );
+    assert_eq!(
+        merged["mcpServers"],
+        serde_json::json!({"the-humans": {}}),
+        "and the human's MCP servers survive a copy that never had them"
+    );
+}
+
+/// A login a Windows session saves by rename is the account's once the session
+/// has ended, as Claude saves one: a temporary file renamed over the hard link
+/// in the root.
+#[tokio::test]
+async fn a_login_a_windows_session_saved_by_rename_is_written_back_to_the_account() {
+    let fixture = grilling().await;
+    let credentials = fixture.claude_dir().join(".credentials.json");
+
+    let afterwards = made(&fixture.sandbox_on(Platform::Windows));
+    let inside = fixture.windows_profile().join(".claude/.credentials.json");
+
+    let written = inside.with_extension("json.tmp");
+    std::fs::write(&written, "{\"refreshed\": true}\n").unwrap();
     std::fs::rename(&written, &inside).unwrap();
 
     assert_eq!(
-        std::fs::read_to_string(fixture.claude_config()).unwrap(),
-        "{}\n",
-        "which is the whole of the problem: the two names have stopped being one \
-         file, and the account has seen none of what the session wrote"
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{\"the\": \"login\"}\n",
+        "the rename took the root's name off the account's file"
     );
 
     afterwards.close();
 
     assert_eq!(
-        std::fs::read_to_string(fixture.claude_config()).unwrap(),
-        "{\"logged-in\": true}\n",
-        "so as the session ends what it wrote is written back over the account's own"
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{\"refreshed\": true}\n",
+        "so as the session ends the refreshed login is written back over it"
+    );
+    assert_eq!(
+        std::fs::metadata(&inside).unwrap().ino(),
+        std::fs::metadata(&credentials).unwrap().ino(),
+        "and the root's name is one with the account's file again"
+    );
+}
+
+/// An account with no login has none to link into a Windows root, so the
+/// login a session makes is handed back as the session ends and is the
+/// account's from then on.
+#[tokio::test]
+async fn a_login_a_windows_session_made_in_an_account_with_none_is_the_accounts_afterwards() {
+    let fixture = grilling().await;
+    let credentials = fixture.claude_dir().join(".credentials.json");
+    std::fs::remove_file(&credentials).unwrap();
+
+    let afterwards = made(&fixture.sandbox_on(Platform::Windows));
+    let inside = fixture.windows_profile().join(".claude/.credentials.json");
+
+    assert!(!inside.exists(), "there is no login to give the root");
+    assert!(
+        afterwards.linked().any(|linked| linked == inside),
+        "and the name a login would be made at is what the session's ending is \
+         asked about"
     );
 
-    // And the session after it finds one file rather than two: the link is made
-    // fresh, so a change written in place inside is on the account without
-    // anything being copied anywhere.
-    made(&fixture.sandbox_on(Platform::Windows));
+    std::fs::write(&inside, "{\"logged\": \"in\"}\n").unwrap();
 
-    std::fs::write(&inside, "{\"logged-in\": true, \"in\": \"place\"}\n").unwrap();
+    afterwards.close();
 
     assert_eq!(
-        std::fs::read_to_string(fixture.claude_config()).unwrap(),
-        "{\"logged-in\": true, \"in\": \"place\"}\n",
-        "the session after a write-back is writing the account itself again"
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{\"logged\": \"in\"}\n",
+        "the login the session made is the account's"
     );
 }
 
 /// And what each rendering leaves to be seen to, which is nothing at all on the
-/// platform whose links follow their own target.
+/// platform whose links follow their own target — for an account with a login
+/// to bind, which is the fixture's. See
+/// [`a_login_made_inside_an_account_with_none_is_the_accounts_once_the_session_ends`]
+/// for the one that has none.
 ///
 /// A Conversation Terminal holds one of these as a session does — it is a shell
-/// in the same profile under the same account — and on Linux what either of
-/// them holds is empty. The Mac's is asked of the rendering itself, in the
-/// server's own tests, because a Mac sandbox is not one this machine can build.
+/// in the same profile under the same account. The Mac's is asked of the
+/// rendering itself, in the server's own tests, because a Mac sandbox is not
+/// one this machine can build.
 #[tokio::test]
 async fn a_rendering_whose_links_follow_their_target_leaves_nothing_to_close() {
     let fixture = grilling().await;
@@ -1541,9 +2176,13 @@ async fn a_rendering_whose_links_follow_their_target_leaves_nothing_to_close() {
         .collect();
 
     assert!(
-        linked.contains(&fixture.windows_profile().join(".claude.json")),
+        linked.contains(&fixture.windows_profile().join(".claude/.credentials.json")),
         "and the platform that joins a file in by hard link leaves the file it \
-         joined in: {linked:?}"
+         joined in, the login in the root: {linked:?}"
+    );
+    assert!(
+        !linked.contains(&fixture.windows_profile().join(".claude.json")),
+        "but not `.claude.json`, which is a copy rather than a link: {linked:?}"
     );
 
     // And nothing else anywhere. A name outside the profile is a rendering
@@ -1583,6 +2222,7 @@ async fn an_account_on_another_volume_is_a_session_that_is_not_started() {
                 config_file: PathBuf::from(r"Z:\accounts\work\.claude.json"),
             },
             models: vec!["claude-opus-5".to_owned()],
+            memory: true,
         },
     )
     .await
@@ -1710,15 +2350,16 @@ async fn the_profiles_pair_is_the_whole_of_what_home_holds() {
     );
 }
 
-/// And for a backend whose whole account is one home, that home is the whole of
-/// what HOME holds — bound where that backend looks for it, and nothing of
-/// Claude's beside it.
+/// A Codex session's `.codex` is a root of Verkstead's own, holding the
+/// account's login, its `sessions/` and `memories/`, and a `config.toml`
+/// Verkstead wrote — and nothing else of the account's at all. And it is the
+/// whole of what HOME holds: a `~/.claude` inside a Codex session would be an
+/// account nothing is running as.
 ///
-/// Two accounts of different shapes cannot both be right about `~`, so what is
-/// mounted is the account's own type's and only that: a `~/.claude` inside a
-/// Codex session would be an account nothing is running as.
+/// The human's rules, skills, `AGENTS.md`, history, archive and databases are
+/// how *they* work, so none of it is there.
 #[tokio::test]
-async fn a_home_account_is_bound_where_its_backend_looks_for_it() {
+async fn a_codex_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
     let fixture = grilling().await;
     let profile = fixture.codex_profile().await;
     let sandbox = fixture.sandbox_under(&profile, LISTENING, &BuildCache::none(), vec![]);
@@ -1726,39 +2367,316 @@ async fn a_home_account_is_bound_where_its_backend_looks_for_it() {
     let reported = probe(
         &sandbox,
         r#"
-            dir "$HOME/.codex" codex-home
-            file "$HOME/.codex/config.toml" codex-config
-            dir "$HOME/.claude" claude-dir
-            file "$HOME/.claude.json" claude-config
             say home "$(ls -A "$HOME" | sort | tr '\n' ' ')"
+            say root "$(ls -A "$HOME/.codex" | sort | tr '\n' ' ')"
+            file "$HOME/.codex/auth.json" login
+            file "$HOME/.codex/sessions/2026/09/01/rollout-the-humans.jsonl" rollout
+            file "$HOME/.codex/memories/MEMORY.md" memory
+            dir "$HOME/.codex/rules" rules
+            dir "$HOME/.codex/skills" skills
+            file "$HOME/.codex/AGENTS.md" agents-md
+            file "$HOME/.codex/history.jsonl" history
+            dir "$HOME/.codex/archived_sessions" archived
+            file "$HOME/.codex/state_5.sqlite" state
+            dir "$HOME/.claude" claude-dir
+            printf '{}\n' > "$HOME/.codex/sessions/rollout-the-session.jsonl"
+            printf 'remembered inside\n' > "$HOME/.codex/memories/MEMORY.md"
+        "#,
+    );
+
+    assert_eq!(reported["home"], ".codex ");
+    assert_eq!(
+        reported["root"], "auth.json config.toml memories sessions ",
+        "the login, the written configuration and the memory store are the whole \
+         of the root"
+    );
+
+    for write in ["login", "rollout", "memory"] {
+        assert_eq!(
+            reported[write], "write",
+            "the account's {write} is there, and a session can write it"
+        );
+    }
+
+    for absent in [
+        "rules",
+        "skills",
+        "agents-md",
+        "history",
+        "archived",
+        "state",
+        "claude-dir",
+    ] {
+        assert_eq!(
+            reported[absent], "absent",
+            "the account's {absent} is none of a session's business"
+        );
+    }
+
+    assert!(
+        fixture
+            .codex_dir()
+            .join("sessions/rollout-the-session.jsonl")
+            .is_file(),
+        "a rollout a session writes is on the account, where it is looked for"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.codex_dir().join("memories/MEMORY.md")).unwrap(),
+        "remembered inside\n",
+        "and so is a memory"
+    );
+
+    assert_codex_config_carries_the_provider_alone(
+        &fixture.windows_profile().join(".codex/config.toml"),
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.codex_dir().join("config.toml")).unwrap(),
+        CODEX_ACCOUNT_CONFIG,
+        "and the account's own file is as it was"
+    );
+}
+
+/// An account with no `config.toml` of its own, and a memory store it has
+/// never written, still launches: the root is given an empty configuration,
+/// and the two directories are made in the account for the joins.
+#[tokio::test]
+async fn a_codex_account_with_no_config_and_no_store_still_launches() {
+    let fixture = grilling().await;
+    let profile = fixture.codex_profile().await;
+
+    for gone in ["sessions", "memories"] {
+        std::fs::remove_dir_all(fixture.codex_dir().join(gone)).unwrap();
+    }
+    std::fs::remove_file(fixture.codex_dir().join("config.toml")).unwrap();
+
+    let reported = probe(
+        &fixture.sandbox_under(&profile, LISTENING, &BuildCache::none(), vec![]),
+        r#"
+            say config "$(cat "$HOME/.codex/config.toml")"
+            dir "$HOME/.codex/sessions" sessions
+            dir "$HOME/.codex/memories" memories
+        "#,
+    );
+
+    assert_eq!(reported["config"], "", "an empty configuration");
+    assert_eq!(reported["sessions"], "write");
+    assert_eq!(reported["memories"], "write");
+    assert!(
+        fixture.codex_dir().join("sessions").is_dir()
+            && fixture.codex_dir().join("memories").is_dir(),
+        "made in the account, where what is written in them belongs"
+    );
+    assert!(
+        !fixture.codex_dir().join("config.toml").exists(),
+        "and the account is not given a configuration file for it"
+    );
+}
+
+/// With the Profile's memory switched off, a Codex session's `sessions/` and
+/// `memories/` are the root's own and start empty: nothing of the account's is
+/// joined, and what the session writes stays out of the account.
+///
+/// The rollout it writes is in the root on the host, under the Conversation's
+/// own directory — which is where it is looked for.
+#[tokio::test]
+async fn a_codex_root_without_memory_has_a_store_of_its_own() {
+    let fixture = grilling().await;
+    let forgetting = store::Profile {
+        memory: false,
+        ..fixture.codex_profile().await
+    };
+
+    let reported = probe(
+        &fixture.sandbox_under(&forgetting, LISTENING, &BuildCache::none(), vec![]),
+        r#"
+            say root "$(ls -A "$HOME/.codex" | sort | tr '\n' ' ')"
+            say sessions "$(ls -A "$HOME/.codex/sessions" | tr '\n' ' ')"
+            say memories "$(ls -A "$HOME/.codex/memories" | tr '\n' ' ')"
+            file "$HOME/.codex/auth.json" login
+            mkdir -p "$HOME/.codex/sessions/2026/09/17"
+            printf '{}\n' > "$HOME/.codex/sessions/2026/09/17/rollout-the-session.jsonl"
+            printf 'fresh\n' > "$HOME/.codex/memories/MEMORY.md"
         "#,
     );
 
     assert_eq!(
-        reported["codex-home"], "write",
-        "a session writes its own logs and settings under the home it runs as"
+        reported["root"], "auth.json config.toml memories sessions ",
+        "the same root as with memory on"
+    );
+    assert_eq!(reported["sessions"], "", "but its `sessions/` starts empty");
+    assert_eq!(reported["memories"], "", "and so do its `memories/`");
+    assert_eq!(
+        reported["login"], "write",
+        "while the login is joined either way"
+    );
+
+    assert!(
+        fixture
+            .windows_profile()
+            .join(".codex/sessions/2026/09/17/rollout-the-session.jsonl")
+            .is_file(),
+        "the rollout is in the root on the host"
+    );
+    assert!(
+        !fixture.codex_dir().join("sessions/2026/09/17").exists(),
+        "and not in the account"
     );
     assert_eq!(
-        reported["codex-config"], "write",
-        "and what the account already kept there is there to be read"
-    );
-    assert_eq!(reported["claude-dir"], "absent");
-    assert_eq!(reported["claude-config"], "absent");
-    assert_eq!(
-        reported["home"], ".codex ",
-        "everything else in HOME is simply not there, this account's own included"
+        std::fs::read_to_string(fixture.codex_dir().join("memories/MEMORY.md")).unwrap(),
+        "remembered\n",
+        "whose memory is untouched"
     );
 }
 
-/// And a Grok Build account is bound where grok looks for it, with everything
-/// the account keeps inside still there.
-///
-/// The skills among them: grok discovers them inside the home the Profile
-/// names, so nothing is bound over anything in there (ADR-0011) — covering that
-/// directory would hide the skills grok itself ships as well as the ones the
-/// account added.
+/// A Codex login written inside is the account's as it is written: codex 0.154
+/// writes `auth.json` in place, through the bind, so there is nothing to write
+/// back as the session ends.
 #[tokio::test]
-async fn a_grok_account_is_bound_over_the_directory_grok_keeps_one_in() {
+async fn a_codex_login_written_inside_is_the_accounts_as_it_is_written() {
+    let fixture = grilling().await;
+    let profile = fixture.codex_profile().await;
+
+    let (_, afterwards) = probe_closing(
+        &fixture.sandbox_under(&profile, LISTENING, &BuildCache::none(), vec![]),
+        r#"printf '{"refreshed": "in place"}\n' > "$HOME/.codex/auth.json""#,
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(fixture.codex_dir().join("auth.json")).unwrap(),
+        "{\"refreshed\": \"in place\"}\n"
+    );
+    assert_eq!(afterwards.linked().count(), 0);
+}
+
+/// A Codex account with no login has no file to bind, so a session that logs in
+/// writes one into its own root — and that file is the account's once the
+/// session has ended.
+#[tokio::test]
+async fn a_codex_login_made_inside_an_account_with_none_is_the_accounts_once_the_session_ends() {
+    let fixture = grilling().await;
+    let profile = fixture.codex_profile().await;
+    let credentials = fixture.codex_dir().join("auth.json");
+    std::fs::remove_file(&credentials).unwrap();
+
+    let (reported, afterwards) = probe_closing(
+        &fixture.sandbox_under(&profile, LISTENING, &BuildCache::none(), vec![]),
+        r#"
+            file "$HOME/.codex/auth.json" before
+            printf '{"logged": "in"}\n' > "$HOME/.codex/auth.json"
+        "#,
+    );
+
+    assert_eq!(reported["before"], "absent", "there is no login to give it");
+    assert!(!credentials.exists());
+
+    afterwards.close();
+
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{\"logged\": \"in\"}\n",
+        "and the account's from then on"
+    );
+}
+
+/// A Conversation Terminal opened while a Codex session runs shares its root
+/// rather than emptying it, as a Claude one does. And a root of the other
+/// harness beside it in the same Conversation — a Claude session with a
+/// terminal under a Codex account — is its own: building one leaves the other
+/// as it is.
+#[tokio::test]
+async fn a_codex_root_something_is_running_in_is_shared_and_a_claude_root_beside_it_kept() {
+    let fixture = grilling().await;
+    let codex = fixture.codex_profile().await;
+    let home = fixture.windows_profile();
+
+    let claude_session = made(&fixture.sandbox(vec![]));
+    std::fs::write(home.join(".claude/written-by-claude"), "kept\n").unwrap();
+
+    let codex_sandbox = fixture.sandbox_under(&codex, LISTENING, &BuildCache::none(), vec![]);
+    let codex_session = made(&codex_sandbox);
+
+    assert!(
+        home.join(".claude/written-by-claude").is_file(),
+        "a Codex root built beside a running Claude session leaves its root as it is"
+    );
+
+    std::fs::write(home.join(".codex/written-by-codex"), "kept\n").unwrap();
+    let terminal = made(&codex_sandbox);
+
+    assert!(
+        home.join(".codex/written-by-codex").is_file(),
+        "a terminal opened beside a running Codex session shares its root"
+    );
+
+    drop(codex_session);
+    drop(terminal);
+    made(&codex_sandbox);
+
+    assert!(
+        !home.join(".codex/written-by-codex").exists(),
+        "and once nothing is running in it, the next launch is given it fresh"
+    );
+    drop(claude_session);
+}
+
+/// A launch that shares a root builds nothing in it, but it does make a
+/// directory of that root which is not there — which is what a Profile whose
+/// memory switch was turned off while a session ran leaves behind. An OpenCode
+/// root sharing its memory is the config directory alone, and one sharing none
+/// wants a data directory of its own beside it: without one made, the terminal
+/// would be a bind out of a directory that is not there, and nothing would
+/// start.
+#[tokio::test]
+async fn a_shared_root_is_given_the_directory_a_switched_off_memory_adds_to_it() {
+    let fixture = grilling().await;
+    let remembering = fixture.opencode_profile().await;
+    let forgetting = store::Profile {
+        memory: false,
+        ..remembering.clone()
+    };
+
+    let home = fixture.windows_profile();
+    let homes = fixture.homes();
+    let session =
+        made(&fixture.sandbox_in(&homes, &remembering, LISTENING, &BuildCache::none(), vec![]));
+
+    std::fs::write(home.join(".config/opencode/written-by-opencode"), "kept\n").unwrap();
+    assert!(
+        !home.join(".local/share/opencode").exists(),
+        "a root sharing its memory has the account's data directory and none of its own"
+    );
+
+    let terminal =
+        made(&fixture.sandbox_in(&homes, &forgetting, LISTENING, &BuildCache::none(), vec![]));
+
+    assert!(
+        home.join(".local/share/opencode").is_dir(),
+        "and a terminal that shares that root is given a data directory of its own to bind"
+    );
+    assert!(
+        home.join(".config/opencode/written-by-opencode").is_file(),
+        "while the rest of the root is left as the running session has it"
+    );
+
+    drop(session);
+    drop(terminal);
+}
+
+/// A Grok Build session's `.grok` is a root of Verkstead's own, holding the
+/// account's login, its `sessions/` and `memory/`, and a `config.toml`
+/// Verkstead wrote — and nothing else of the account's at all. And it is the
+/// whole of what HOME holds.
+///
+/// The human's skills, plugins, interface settings and logs are how *they*
+/// work, so none of it is there.
+///
+/// **The login is a copy on Linux** rather than a bind, because grok saves one
+/// by a rename a bind refuses — so the file inside is the account's as it was
+/// when the session started, readable by its owner alone.
+#[tokio::test]
+async fn a_grok_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
+    use std::os::unix::fs::PermissionsExt;
+
     let fixture = grilling().await;
     let profile = fixture.grok_profile().await;
     let sandbox = fixture.sandbox_under(&profile, LISTENING, &BuildCache::none(), vec![]);
@@ -1766,43 +2684,272 @@ async fn a_grok_account_is_bound_over_the_directory_grok_keeps_one_in() {
     let reported = probe(
         &sandbox,
         r#"
-            dir "$HOME/.grok" grok-home
-            file "$HOME/.grok/skills/the-accounts-own/SKILL.md" the-accounts-own
-            dir "$HOME/.claude" claude-dir
             say home "$(ls -A "$HOME" | sort | tr '\n' ' ')"
+            say root "$(ls -A "$HOME/.grok" | sort | tr '\n' ' ')"
+            say login "$(cat "$HOME/.grok/auth.json")"
+            file "$HOME/.grok/sessions/%2Fsrc%2Fthe-humans/019-the-humans/updates.jsonl" log
+            file "$HOME/.grok/sessions/session_search.sqlite" search
+            file "$HOME/.grok/memory/MEMORY.md" memory
+            file "$HOME/.grok/memory/the-humans-0123abcd/index.sqlite" index
+            dir "$HOME/.grok/skills" skills
+            dir "$HOME/.grok/plugins" plugins
+            file "$HOME/.grok/pager.toml" pager
+            dir "$HOME/.grok/logs" logs
+            dir "$HOME/.claude" claude-dir
             say agent "${VERKSTEAD_AGENT-unset}"
+            mkdir -p "$HOME/.grok/sessions/%2Fwork/019-the-session"
+            printf '{}\n' > "$HOME/.grok/sessions/%2Fwork/019-the-session/updates.jsonl"
+            printf 'remembered inside\n' > "$HOME/.grok/memory/MEMORY.md.saving"
+            mv "$HOME/.grok/memory/MEMORY.md.saving" "$HOME/.grok/memory/MEMORY.md"
+        "#,
+    );
+
+    assert_eq!(reported["home"], ".grok ");
+    assert_eq!(
+        reported["root"], "auth.json config.toml memory sessions ",
+        "the login, the written configuration and the memory store are the whole \
+         of the root"
+    );
+    assert_eq!(
+        reported["login"],
+        GROK_LOGIN.trim_end(),
+        "the account's login is there to be read"
+    );
+
+    for write in ["log", "search", "memory", "index"] {
+        assert_eq!(
+            reported[write], "write",
+            "the account's {write} is there, and a session can write it"
+        );
+    }
+
+    for absent in ["skills", "plugins", "pager", "logs", "claude-dir"] {
+        assert_eq!(
+            reported[absent], "absent",
+            "the account's {absent} is none of a session's business"
+        );
+    }
+
+    assert_eq!(reported["agent"], "grok");
+
+    assert!(
+        fixture
+            .grok_dir()
+            .join("sessions/%2Fwork/019-the-session/updates.jsonl")
+            .is_file(),
+        "a log a session writes is on the account, where it is looked for"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.grok_dir().join("memory/MEMORY.md")).unwrap(),
+        "remembered inside\n",
+        "and so is a memory, replaced by a rename the way grok saves one"
+    );
+
+    let root = fixture.windows_profile().join(".grok");
+    assert_grok_config_carries_the_model_alone(&root.join("config.toml"));
+    assert_eq!(
+        std::fs::metadata(root.join("auth.json"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600,
+        "the copy of the login is its owner's alone"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.grok_dir().join("config.toml")).unwrap(),
+        GROK_ACCOUNT_CONFIG,
+        "and the account's own configuration is as it was"
+    );
+}
+
+/// An account with no `config.toml` of its own, and a memory store it has
+/// never written, still launches: the root is given an empty configuration,
+/// and the two directories are made in the account for the joins.
+#[tokio::test]
+async fn a_grok_account_with_no_config_and_no_store_still_launches() {
+    let fixture = grilling().await;
+    let profile = fixture.grok_profile().await;
+
+    for gone in ["sessions", "memory"] {
+        std::fs::remove_dir_all(fixture.grok_dir().join(gone)).unwrap();
+    }
+    std::fs::remove_file(fixture.grok_dir().join("config.toml")).unwrap();
+
+    let reported = probe(
+        &fixture.sandbox_under(&profile, LISTENING, &BuildCache::none(), vec![]),
+        r#"
+            say config "$(cat "$HOME/.grok/config.toml")"
+            dir "$HOME/.grok/sessions" sessions
+            dir "$HOME/.grok/memory" memory
+        "#,
+    );
+
+    assert_eq!(reported["config"], "", "an empty configuration");
+    assert_eq!(reported["sessions"], "write");
+    assert_eq!(reported["memory"], "write");
+    assert!(
+        fixture.grok_dir().join("sessions").is_dir() && fixture.grok_dir().join("memory").is_dir(),
+        "made in the account, where what is written in them belongs"
+    );
+    assert!(
+        !fixture.grok_dir().join("config.toml").exists(),
+        "and the account is not given a configuration file for it"
+    );
+}
+
+/// With the Profile's memory switched off, a Grok Build session's `sessions/`
+/// and `memory/` are the root's own and start empty: nothing of the account's
+/// is joined, and what the session writes stays out of the account.
+///
+/// The log it writes is in the root on the host, under the Conversation's own
+/// directory — which is where it is looked for.
+#[tokio::test]
+async fn a_grok_root_without_memory_has_a_store_of_its_own() {
+    let fixture = grilling().await;
+    let forgetting = store::Profile {
+        memory: false,
+        ..fixture.grok_profile().await
+    };
+
+    let reported = probe(
+        &fixture.sandbox_under(&forgetting, LISTENING, &BuildCache::none(), vec![]),
+        r#"
+            say root "$(ls -A "$HOME/.grok" | sort | tr '\n' ' ')"
+            say sessions "$(ls -A "$HOME/.grok/sessions" | tr '\n' ' ')"
+            say memory "$(ls -A "$HOME/.grok/memory" | tr '\n' ' ')"
+            file "$HOME/.grok/auth.json" login
+            mkdir -p "$HOME/.grok/sessions/%2Fwork/019-the-session"
+            printf '{}\n' > "$HOME/.grok/sessions/%2Fwork/019-the-session/updates.jsonl"
+            printf 'fresh\n' > "$HOME/.grok/memory/MEMORY.md"
         "#,
     );
 
     assert_eq!(
-        reported["grok-home"], "write",
-        "a session writes its own sessions and settings under the home it runs as"
+        reported["root"], "auth.json config.toml memory sessions ",
+        "the same root as with memory on"
+    );
+    assert_eq!(reported["sessions"], "", "but its `sessions/` starts empty");
+    assert_eq!(reported["memory"], "", "and so does its `memory/`");
+    assert_eq!(
+        reported["login"], "write",
+        "while the login is given either way"
+    );
+
+    assert!(
+        fixture
+            .windows_profile()
+            .join(".grok/sessions/%2Fwork/019-the-session/updates.jsonl")
+            .is_file(),
+        "the log is in the root on the host"
+    );
+    assert!(
+        !fixture.grok_dir().join("sessions/%2Fwork").exists(),
+        "and not in the account"
     );
     assert_eq!(
-        reported["the-accounts-own"], "write",
-        "and what the account keeps inside it is left where grok looks for it"
+        std::fs::read_to_string(fixture.grok_dir().join("memory/MEMORY.md")).unwrap(),
+        "remembered\n",
+        "whose memory is untouched"
     );
-    assert_eq!(reported["claude-dir"], "absent");
-    assert_eq!(reported["home"], ".grok ");
-    assert_eq!(reported["agent"], "grok");
 }
 
-/// And an OpenCode account lands as the two directories opencode reads, at the
-/// XDG defaults inside a fresh HOME — so nothing has to be said in the
-/// environment about where they are.
-///
-/// The two of them and no more: the cache and the state directories are the
-/// sandbox's own, made fresh and thrown away with it, because neither is part
-/// of the account. The skills the account keeps are inside its config
-/// directory, and nothing is bound over them (ADR-0011) — the two paths
-/// opencode reads globally are under HOME rather than under the account, and a
-/// fresh HOME has neither.
-///
-/// And the store's name is pinned in the environment, so a session writes the
-/// one file Verkstead named rather than whichever one the release channel the
-/// binary came from would have chosen.
+/// A login grok saves inside a Linux session — by renaming a file over its
+/// copy, which a bind would have refused — is merged into the account as the
+/// session ends: the scope it saved goes back, and a scope the human's own
+/// `grok` saved meanwhile stays.
 #[tokio::test]
-async fn an_opencode_account_lands_at_the_xdg_paths_opencode_reads() {
+async fn a_grok_login_saved_inside_by_rename_is_merged_into_the_account_as_the_session_ends() {
+    let fixture = grilling().await;
+    let profile = fixture.grok_profile().await;
+    let credentials = fixture.grok_dir().join("auth.json");
+
+    let (_, afterwards) = probe_closing(
+        &fixture.sandbox_under(&profile, LISTENING, &BuildCache::none(), vec![]),
+        r#"
+            printf '{"https://auth.x.ai::the-humans": {"key": "refreshed inside"}}\n' \
+                > "$HOME/.grok/auth.json.saving"
+            mv "$HOME/.grok/auth.json.saving" "$HOME/.grok/auth.json"
+        "#,
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        GROK_LOGIN,
+        "the account's login is as it was while the session runs"
+    );
+
+    // The human's own `grok` signs in to a second scope in the meantime.
+    std::fs::write(
+        &credentials,
+        "{\"https://auth.x.ai::the-humans\": {\"key\": \"the login\"}, \
+         \"https://id.example::work\": {\"key\": \"the human's\"}}\n",
+    )
+    .unwrap();
+
+    afterwards.close();
+
+    let merged: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&credentials).unwrap()).unwrap();
+
+    assert_eq!(
+        merged,
+        serde_json::json!({
+            "https://auth.x.ai::the-humans": { "key": "refreshed inside" },
+            "https://id.example::work": { "key": "the human's" },
+        }),
+        "the session's refresh reaches the account beside the human's own login"
+    );
+}
+
+/// A Grok Build account with no login has none to copy, so a session that logs
+/// in writes one into its own root — and that file is the account's once the
+/// session has ended.
+#[tokio::test]
+async fn a_grok_login_made_inside_an_account_with_none_is_the_accounts_once_the_session_ends() {
+    let fixture = grilling().await;
+    let profile = fixture.grok_profile().await;
+    let credentials = fixture.grok_dir().join("auth.json");
+    std::fs::remove_file(&credentials).unwrap();
+
+    let (reported, afterwards) = probe_closing(
+        &fixture.sandbox_under(&profile, LISTENING, &BuildCache::none(), vec![]),
+        r#"
+            file "$HOME/.grok/auth.json" before
+            printf '{"logged": "in"}\n' > "$HOME/.grok/auth.json"
+        "#,
+    );
+
+    assert_eq!(reported["before"], "absent", "there is no login to give it");
+    assert!(!credentials.exists());
+
+    afterwards.close();
+
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{\"logged\": \"in\"}\n",
+        "and the account's from then on"
+    );
+}
+
+/// An OpenCode session is given the two directories opencode reads, at the XDG
+/// defaults inside a fresh HOME — so nothing has to be said in the environment
+/// about where they are — built from an allowlist.
+///
+/// **The config directory is Verkstead's own**, holding only an `opencode.json`
+/// that carries the account's provider, read out of its `opencode.jsonc`,
+/// comments and all. None of the human's skills, plugins, MCP servers or
+/// instructions.
+///
+/// **The data directory is the account's, joined whole** with memory on: the
+/// login and the database beside its write-ahead-log siblings, so what a
+/// session writes there is on the account.
+///
+/// The cache and the state directories are the sandbox's own, made fresh and
+/// thrown away with it. And the store's name is pinned in the environment, so
+/// a session writes the one file Verkstead named.
+#[tokio::test]
+async fn an_opencode_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
     let fixture = grilling().await;
     let profile = fixture.opencode_profile().await;
     let sandbox = fixture.sandbox_under(&profile, LISTENING, &BuildCache::none(), vec![]);
@@ -1810,34 +2957,37 @@ async fn an_opencode_account_lands_at_the_xdg_paths_opencode_reads() {
     let reported = probe(
         &sandbox,
         r#"
-            dir "$HOME/.config/opencode" config
-            dir "$HOME/.local/share/opencode" data
-            file "$HOME/.local/share/opencode/auth.json" auth
-            file "$HOME/.config/opencode/skills/the-accounts-own/SKILL.md" the-accounts-own
+            say config "$(ls -A "$HOME/.config/opencode" | sort | tr '\n' ' ')"
+            say data "$(ls -A "$HOME/.local/share/opencode" | sort | tr '\n' ' ')"
+            say login "$(cat "$HOME/.local/share/opencode/auth.json")"
+            file "$HOME/.local/share/opencode/opencode.db" db-file
             dir "$HOME/.claude" claude-dir
             say home "$(ls -A "$HOME" | sort | tr '\n' ' ')"
             say cache "$(ls -A "$HOME/.cache" 2>/dev/null | tr '\n' ' ')"
             say db "${OPENCODE_DB-unset}"
             say agent "${VERKSTEAD_AGENT-unset}"
+            printf 'written inside\n' > "$HOME/.local/share/opencode/opencode.db"
         "#,
     );
 
     assert_eq!(
-        reported["config"], "write",
-        "a session writes the configuration of the account it runs as"
+        reported["config"], "opencode.json ",
+        "the written configuration is the whole of the config directory"
+    );
+    assert_opencode_config_carries_the_provider_alone(
+        &std::fs::read_to_string(
+            fixture
+                .windows_profile()
+                .join(".config/opencode/opencode.json"),
+        )
+        .unwrap(),
     );
     assert_eq!(
-        reported["data"], "write",
-        "and its store and its own session records beside them"
+        reported["data"], "auth.json mcp-auth.json opencode.db opencode.db-shm opencode.db-wal ",
+        "the account's data directory, whole"
     );
-    assert_eq!(
-        reported["auth"], "write",
-        "the account itself being the file in the second of the two"
-    );
-    assert_eq!(
-        reported["the-accounts-own"], "write",
-        "and the skills it keeps are left where opencode looks for them"
-    );
+    assert_eq!(reported["login"], OPENCODE_LOGIN.trim_end());
+    assert_eq!(reported["db-file"], "write");
     assert_eq!(reported["claude-dir"], "absent");
     assert_eq!(
         reported["home"], ".config .local ",
@@ -1853,6 +3003,118 @@ async fn an_opencode_account_lands_at_the_xdg_paths_opencode_reads() {
         "the store is named by Verkstead rather than by the release channel"
     );
     assert_eq!(reported["agent"], "opencode");
+
+    let data = fixture.opencode_home().join(".local/share/opencode");
+    assert_eq!(
+        std::fs::read_to_string(data.join("opencode.db")).unwrap(),
+        "written inside\n",
+        "a store a session writes is the account's, where it is looked for"
+    );
+    assert_eq!(
+        std::fs::read_to_string(
+            fixture
+                .opencode_home()
+                .join(".config/opencode/opencode.jsonc")
+        )
+        .unwrap(),
+        OPENCODE_ACCOUNT_CONFIG,
+        "and the account's own configuration is as it was"
+    );
+}
+
+/// With the Profile's memory switched off, an OpenCode session's data directory
+/// is the root's own: only the account's login is linked into it, and the
+/// database starts empty. What the session writes stays out of the account, and
+/// is in the root on the host, under the Conversation's own directory — which
+/// is where it is looked for. A login written inside is the account's as it is
+/// written, opencode writing `auth.json` in place.
+#[tokio::test]
+async fn an_opencode_root_without_memory_has_a_data_directory_of_its_own() {
+    let fixture = grilling().await;
+    let forgetting = store::Profile {
+        memory: false,
+        ..fixture.opencode_profile().await
+    };
+
+    let reported = probe(
+        &fixture.sandbox_under(&forgetting, LISTENING, &BuildCache::none(), vec![]),
+        r#"
+            say config "$(ls -A "$HOME/.config/opencode" | sort | tr '\n' ' ')"
+            say data "$(ls -A "$HOME/.local/share/opencode" | sort | tr '\n' ' ')"
+            file "$HOME/.local/share/opencode/auth.json" login
+            printf 'the session'"'"'s own\n' > "$HOME/.local/share/opencode/opencode.db"
+            printf '{"refreshed": "in place"}\n' > "$HOME/.local/share/opencode/auth.json"
+        "#,
+    );
+
+    assert_eq!(
+        reported["config"], "opencode.json ",
+        "the same config directory as with memory on"
+    );
+    assert_eq!(
+        reported["data"], "auth.json ",
+        "and of the account's data directory, the login alone"
+    );
+    assert_eq!(reported["login"], "write");
+
+    assert_eq!(
+        std::fs::read_to_string(
+            fixture
+                .windows_profile()
+                .join(".local/share/opencode/opencode.db")
+        )
+        .unwrap(),
+        "the session's own\n",
+        "the store is in the root on the host"
+    );
+
+    let data = fixture.opencode_home().join(".local/share/opencode");
+    assert_eq!(
+        std::fs::read_to_string(data.join("opencode.db")).unwrap(),
+        "the human's sessions\n",
+        "and the account's is untouched"
+    );
+    assert_eq!(
+        std::fs::read_to_string(data.join("auth.json")).unwrap(),
+        "{\"refreshed\": \"in place\"}\n",
+        "while the login written inside is the account's"
+    );
+}
+
+/// An OpenCode account with no login and memory off has no file to bind, so a
+/// session that logs in writes one into its own root — and that file is the
+/// account's once the session has ended.
+#[tokio::test]
+async fn an_opencode_login_made_inside_an_account_with_none_is_the_accounts_once_the_session_ends()
+{
+    let fixture = grilling().await;
+    let forgetting = store::Profile {
+        memory: false,
+        ..fixture.opencode_profile().await
+    };
+    let credentials = fixture
+        .opencode_home()
+        .join(".local/share/opencode/auth.json");
+    std::fs::remove_file(&credentials).unwrap();
+
+    let (reported, afterwards) = probe_closing(
+        &fixture.sandbox_under(&forgetting, LISTENING, &BuildCache::none(), vec![]),
+        r#"
+            file "$HOME/.local/share/opencode/auth.json" before
+            printf '{"logged": "in"}\n' > "$HOME/.local/share/opencode/auth.json"
+        "#,
+    );
+
+    assert_eq!(reported["before"], "absent", "there is no login to give it");
+    assert!(!credentials.exists());
+
+    afterwards.close();
+
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{\"logged\": \"in\"}\n",
+        "and the account's from then on"
+    );
 }
 
 /// And an OpenCode session's shell tool holds a command for a day rather than
@@ -2006,7 +3268,10 @@ async fn the_skills_inside_are_the_bundled_ones_and_only_those() {
     );
     assert_eq!(
         reported["claude-md"], "absent",
-        "there is no global CLAUDE.md in here to say how to reach the human"
+        "and no global CLAUDE.md is in here to say how to reach the human — this \
+         fixture has no instructions text configured, and the one a root holds \
+         where there is one is the human's own words rather than anywhere \
+         Verkstead says how to ask"
     );
     assert_eq!(
         reported["ask-instruction"], "inside",
@@ -2029,41 +3294,826 @@ fn installed_on_the_host(skills: &Skills) -> String {
     names.iter().map(|name| format!("{name} ")).collect()
 }
 
-/// The mount that hid the account's own skills has moved to a path of
-/// Verkstead's own, so an empty directory stands where it did.
+/// A Claude session's `.claude` is a root of Verkstead's own, holding the
+/// account's login and this Repo's and this Worktree's `projects/` entries —
+/// and nothing else of the account's at all.
 ///
 /// A Profile is an account to run as rather than a second opinion about how to
-/// work, and the case that guards is an older fork of the skills Verkstead ships
-/// sitting in the account's directory. The rest of the pair is the account's as
-/// it always was: what is covered is the one directory.
+/// work: the human's plugins, hooks, global `CLAUDE.md` and history are how
+/// *they* work, and another repository's transcripts are no session's business.
+/// So none of it is covered over or refused. It is simply never put there.
 #[tokio::test]
-async fn the_accounts_own_skills_are_covered_by_nothing_at_all() {
+async fn a_claude_session_is_given_a_root_of_the_allowlist_and_nothing_else() {
     let fixture = grilling().await;
     let sandbox = fixture.sandbox(vec![]);
 
     let reported = probe(
         &sandbox,
         r#"
+        say root "$(ls -A "$HOME/.claude" | sort | tr '\n' ' ')"
+        say projects "$(ls -A "$HOME/.claude/projects" | sort | tr '\n' ' ')"
+        dir "$HOME/.claude/plugins" plugins
+        file "$HOME/.claude/CLAUDE.md" claude-md
+        file "$HOME/.claude/history.jsonl" history
+        dir "$HOME/.claude/projects/-home-you-src-something-else" another-repository
+        dir "$HOME/.claude/skills" skills
         file "$HOME/.claude/skills/the-accounts-own/SKILL.md" the-accounts-own
-        dir "$HOME/.claude/skills" skills-dir
-        say inside "$(ls -A "$HOME/.claude/skills" | tr '\n' ' ')"
-        file "$HOME/.claude/settings.json" settings
+        file "$HOME/.claude/.credentials.json" credentials
         "#,
     );
 
     assert_eq!(
-        reported["the-accounts-own"], "absent",
-        "what a session is grilled by is the product's, not whatever the account keeps"
+        reported["root"], ".credentials.json projects settings.json ",
+        "the login, the projects directory and the settings Verkstead wrote are \
+         the whole of the root"
+    );
+
+    let mut entries = [entry_named(&fixture.repo), entry_named(fixture.worktree())];
+    entries.sort();
+
+    assert_eq!(
+        reported["projects"],
+        format!("{} {} ", entries[0], entries[1]),
+        "and under it, this Repo's entry and this Worktree's"
+    );
+
+    for absent in [
+        "plugins",
+        "claude-md",
+        "history",
+        "another-repository",
+        "skills",
+        "the-accounts-own",
+    ] {
+        assert_eq!(
+            reported[absent], "absent",
+            "the account's {absent} is none of a session's business"
+        );
+    }
+
+    assert_eq!(
+        reported["credentials"], "write",
+        "while the login is there, and a session can refresh it"
+    );
+}
+
+/// The one text on the settings page reaches every session, whatever harness
+/// runs it: it is written into the root as the file that harness reads as its
+/// global instructions, verbatim, with no heading over it and nothing saying
+/// where it came from. And where nobody has typed one, no such file is in any
+/// root at all.
+///
+/// The Repo's own `CLAUDE.md` in the Worktree is the Repo's, untouched and read
+/// as it always was. This one stands above it, the way the human's own global
+/// file used to.
+#[tokio::test]
+async fn the_settings_text_is_the_global_instructions_file_in_every_root() {
+    let fixture = grilling().await;
+
+    // The Repo's own instructions, which are none of this setting's business.
+    let repos_own = fixture.worktree().join("CLAUDE.md");
+    std::fs::write(&repos_own, THE_REPOS_OWN).unwrap();
+
+    let codex = fixture.codex_profile().await;
+    let grok = fixture.grok_profile().await;
+    let opencode = fixture.opencode_profile().await;
+
+    let roots = [
+        (&fixture.profile, ".claude/CLAUDE.md"),
+        (&codex, ".codex/AGENTS.md"),
+        (&grok, ".grok/AGENTS.md"),
+        (&opencode, ".config/opencode/AGENTS.md"),
+    ];
+
+    // Nobody has been to the settings page, so no root holds a file for it and
+    // each is exactly what it was before there was such a setting.
+    for (profile, file) in roots {
+        let sandbox = fixture.sandbox_under(profile, LISTENING, &BuildCache::none(), vec![]);
+        let reported = probe(&sandbox, &format!(r#"file "$HOME/{file}" instructions"#));
+
+        assert_eq!(
+            reported["instructions"], "absent",
+            "nothing is written into a root for a setting nobody typed, and {file} is there"
+        );
+        assert!(!fixture.windows_profile().join(file).exists());
+    }
+
+    fixture.configure(THE_INSTRUCTIONS_CONFIGURED);
+
+    for (profile, file) in roots {
+        let sandbox = fixture.sandbox_under(profile, LISTENING, &BuildCache::none(), vec![]);
+
+        // And the session rewrites it, which is a root's file to rewrite: it is
+        // Verkstead's own, nothing of it is the account's, and nothing of it
+        // goes anywhere as the session ends.
+        let (reported, closing) = probe_closing(
+            &sandbox,
+            &format!(
+                r#"
+                file "$HOME/{file}" instructions
+                say text "$(tr '\n' '~' < "$HOME/{file}")"
+                say repos "$(cat {repo})"
+                printf 'the session wrote this\n' > "$HOME/{file}"
+                "#,
+                repo = quoted(&fixture.worktree().join("CLAUDE.md")),
+            ),
+        );
+        closing.close();
+
+        assert_eq!(
+            reported["instructions"], "write",
+            "a session under every harness finds {file} in its own root"
+        );
+        assert_eq!(
+            reported["text"],
+            THE_INSTRUCTIONS.replace('\n', "~"),
+            "the text verbatim — the blank line between the paragraphs and the \
+             indent of the list as they were typed — with no heading over it and \
+             nothing saying where it came from"
+        );
+        assert_eq!(
+            reported["repos"],
+            THE_REPOS_OWN.trim_end(),
+            "and the Repo's own instructions beside it, read as they always were"
+        );
+
+        assert_eq!(
+            std::fs::read_to_string(fixture.windows_profile().join(file)).unwrap(),
+            "the session wrote this\n",
+            "and what the session wrote stayed in the root, which the next session \
+             builds again"
+        );
+    }
+
+    assert_eq!(
+        std::fs::read_to_string(&repos_own).unwrap(),
+        THE_REPOS_OWN,
+        "and nothing of the Worktree's own file was written"
     );
     assert_eq!(
-        reported["skills-dir"], "read",
-        "and the directory covering it is no more a session's to fill in than the skills are"
+        std::fs::read_to_string(fixture.claude_dir().join("CLAUDE.md")).unwrap(),
+        "# the human's own\n",
+        "nor of the account's, which no session was given and none wrote back"
     );
-    assert_eq!(reported["inside"], "", "there is nothing in it to read");
+}
+
+/// A Claude session's root holds a `settings.json` of Verkstead's own, and an
+/// account with none of its own still gets one — holding the key that stops a
+/// session parking for ever at the bypass-permissions consent, with nobody at
+/// its terminal to answer it.
+#[tokio::test]
+async fn a_fresh_account_is_given_settings_that_skip_the_bypass_consent() {
+    let fixture = grilling().await;
+    let settings = fixture.claude_dir().join("settings.json");
+    std::fs::remove_file(&settings).unwrap();
+
+    let (reported, closing) = probe_closing(
+        &fixture.sandbox(vec![]),
+        r#"
+        file "$HOME/.claude/settings.json" settings
+        say written "$(tr -d ' \n' < "$HOME/.claude/settings.json")"
+        "#,
+    );
+    closing.close();
+
+    assert_eq!(reported["settings"], "write");
     assert_eq!(
-        reported["settings"], "write",
-        "while the rest of the Profile's own directory is writable as before"
+        reported["written"], r#"{"skipDangerousModePermissionPrompt":true}"#,
+        "the bypass key, and nothing else where the account had nothing to carry"
     );
+    assert!(
+        !settings.exists(),
+        "and the account is not given a settings file for it"
+    );
+}
+
+/// Of the account's own settings, what an API-key login needs comes over and
+/// nothing else does: the human's hooks are how *they* work. And what was
+/// written into the root is Verkstead's, so the account's file is as it was
+/// once the session has ended — even where the session changed its own.
+#[tokio::test]
+async fn an_accounts_key_helper_and_environment_come_over_and_its_hooks_do_not() {
+    let fixture = grilling().await;
+    let settings = fixture.claude_dir().join("settings.json");
+    let own = concat!(
+        "{\n",
+        "  \"apiKeyHelper\": \"/usr/local/bin/print-key\",\n",
+        "  \"env\": {\"ANTHROPIC_BASE_URL\": \"https://proxy.example\"},\n",
+        "  \"hooks\": {\"Stop\": []}\n",
+        "}\n",
+    );
+    std::fs::write(&settings, own).unwrap();
+
+    let (reported, closing) = probe_closing(
+        &fixture.sandbox(vec![]),
+        r#"
+        say written "$(tr -d ' \n' < "$HOME/.claude/settings.json")"
+        printf '{"hooks": {"Stop": ["changed inside"]}}\n' > "$HOME/.claude/settings.json"
+        "#,
+    );
+    closing.close();
+
+    assert_eq!(
+        reported["written"],
+        concat!(
+            r#"{"apiKeyHelper":"/usr/local/bin/print-key","#,
+            r#""env":{"ANTHROPIC_BASE_URL":"https://proxy.example"},"#,
+            r#""skipDangerousModePermissionPrompt":true}"#,
+        ),
+        "the key helper and the environment beside the bypass key, and no hooks"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&settings).unwrap(),
+        own,
+        "and the account's own settings are byte for byte what they were"
+    );
+}
+
+/// What a session writes under the Repo's entry and the Worktree's lands in the
+/// account, which is what makes a memory outlive the session and a transcript
+/// something Verkstead can follow — and an entry the account did not have yet
+/// is made there first.
+///
+/// The transcript is found by walking one level of the account's `projects/`
+/// for `<session-id>.jsonl`, so the file being at that path in the account is
+/// the file being found.
+#[tokio::test]
+async fn memory_and_a_transcript_written_inside_land_in_the_account() {
+    let fixture = grilling().await;
+
+    let projects = fixture.claude_dir().join("projects");
+    let (repo, worktree) = (
+        projects.join(entry_named(&fixture.repo)),
+        projects.join(entry_named(fixture.worktree())),
+    );
+
+    assert!(
+        !repo.exists() && !worktree.exists(),
+        "nobody has run Claude in this Repo yet, so the account has neither entry"
+    );
+
+    let sandbox = fixture.sandbox(vec![]);
+
+    assert!(
+        repo.is_dir() && worktree.is_dir(),
+        "so both are made in the account before a session is given them"
+    );
+
+    probe(
+        &sandbox,
+        &format!(
+            r#"
+            mkdir -p "$HOME/.claude/projects/{repo}/memory"
+            printf 'remembered\n' > "$HOME/.claude/projects/{repo}/memory/MEMORY.md"
+            printf '{{"turn": 1}}\n' > "$HOME/.claude/projects/{worktree}/the-session.jsonl"
+            "#,
+            repo = entry_named(&fixture.repo),
+            worktree = entry_named(fixture.worktree()),
+        ),
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(repo.join("memory/MEMORY.md")).unwrap(),
+        "remembered\n",
+        "the Repo's memory is the account's"
+    );
+    assert_eq!(
+        std::fs::read_to_string(worktree.join("the-session.jsonl")).unwrap(),
+        "{\"turn\": 1}\n",
+        "and so is the session's transcript, one level under `projects/` where it \
+         is looked for"
+    );
+}
+
+/// With the Profile's memory switched off, a Claude session's root holds a
+/// `projects/` of its own and nothing in it: none of the account's entries is
+/// joined, and none is made in the account for a join that is not there.
+///
+/// What the session writes there is the root's, on the host, under the
+/// Conversation's own directory — which is where its transcript is looked for.
+#[tokio::test]
+async fn a_root_without_memory_has_an_empty_projects_of_its_own() {
+    let fixture = grilling().await;
+    let forgetting = store::Profile {
+        memory: false,
+        ..fixture.profile.clone()
+    };
+
+    let account = fixture.claude_dir().join("projects");
+    let (repo, worktree) = (
+        account.join(entry_named(&fixture.repo)),
+        account.join(entry_named(fixture.worktree())),
+    );
+
+    let sandbox = fixture.sandbox_under(&forgetting, LISTENING, &BuildCache::none(), vec![]);
+
+    assert!(
+        !repo.exists() && !worktree.exists(),
+        "nothing is made in the account's `projects/` for a root that joins none of it"
+    );
+
+    let reported = probe(
+        &sandbox,
+        &format!(
+            r#"
+            say root "$(ls -A "$HOME/.claude" | sort | tr '\n' ' ')"
+            say projects "$(ls -A "$HOME/.claude/projects" | tr '\n' ' ')"
+            dir "$HOME/.claude/projects/-home-you-src-something-else" another-repository
+            file "$HOME/.claude/.credentials.json" credentials
+            mkdir -p "$HOME/.claude/projects/{worktree}"
+            printf '{{"turn": 1}}\n' > "$HOME/.claude/projects/{worktree}/the-session.jsonl"
+            "#,
+            worktree = entry_named(fixture.worktree()),
+        ),
+    );
+
+    assert_eq!(
+        reported["root"], ".credentials.json projects settings.json ",
+        "the same root as with memory on"
+    );
+    assert_eq!(reported["projects"], "", "but its `projects/` starts empty");
+    assert_eq!(
+        reported["another-repository"], "absent",
+        "and none of the account's transcripts are in it"
+    );
+    assert_eq!(
+        reported["credentials"], "write",
+        "while the login is joined either way"
+    );
+
+    let home = fixture
+        .state
+        .path()
+        .join("homes")
+        .join(fixture.conversation.id.to_string());
+
+    assert_eq!(
+        std::fs::read_to_string(
+            home.join(".claude/projects")
+                .join(entry_named(fixture.worktree()))
+                .join("the-session.jsonl")
+        )
+        .unwrap(),
+        "{\"turn\": 1}\n",
+        "the transcript is in the root on the host, one level under `projects/` \
+         where it is looked for"
+    );
+    assert!(!worktree.exists(), "and not in the account");
+}
+
+/// A login refreshed inside is the account's login, as it is written.
+///
+/// Linux binds the file over its name in the root, and Claude saves it by
+/// writing a temporary file and renaming it — a rename a bind refuses, which is
+/// when Claude writes the file where it is instead. Both halves are asked here:
+/// the rename is refused, and the write in place lands.
+#[tokio::test]
+async fn a_login_refreshed_inside_is_the_accounts_as_it_is_written() {
+    let fixture = grilling().await;
+    let sandbox = fixture.sandbox(vec![]);
+
+    let (reported, afterwards) = probe_closing(
+        &sandbox,
+        r#"
+        printf '{"refreshed": "renamed"}\n' > "$HOME/.claude/.credentials.json.tmp"
+        if mv -f "$HOME/.claude/.credentials.json.tmp" "$HOME/.claude/.credentials.json" 2>/dev/null; then
+            say renamed yes
+        else
+            say renamed refused
+        fi
+        printf '{"refreshed": "in place"}\n' > "$HOME/.claude/.credentials.json"
+        "#,
+    );
+
+    assert_eq!(
+        reported["renamed"], "refused",
+        "a rename onto a bound file is refused, which is what sends Claude to \
+         writing in place"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_dir().join(".credentials.json")).unwrap(),
+        "{\"refreshed\": \"in place\"}\n",
+        "and what it writes in place is the account's login"
+    );
+    assert_eq!(
+        afterwards.linked().count(),
+        0,
+        "so there is nothing to write back as the session ends"
+    );
+}
+
+/// An account with no login has no file to bind, so a session that logs in
+/// writes one into its own root — and that file is the account's once the
+/// session has ended.
+#[tokio::test]
+async fn a_login_made_inside_an_account_with_none_is_the_accounts_once_the_session_ends() {
+    let fixture = grilling().await;
+    let credentials = fixture.claude_dir().join(".credentials.json");
+    std::fs::remove_file(&credentials).unwrap();
+
+    let sandbox = fixture.sandbox(vec![]);
+
+    let (reported, afterwards) = probe_closing(
+        &sandbox,
+        r#"
+        file "$HOME/.claude/.credentials.json" before
+        printf '{"logged": "in"}\n' > "$HOME/.claude/.credentials.json.tmp"
+        mv -f "$HOME/.claude/.credentials.json.tmp" "$HOME/.claude/.credentials.json"
+        "#,
+    );
+
+    assert_eq!(reported["before"], "absent", "there is no login to give it");
+    assert!(
+        !credentials.exists(),
+        "and what it wrote is in its root until the session has ended"
+    );
+
+    afterwards.close();
+
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{\"logged\": \"in\"}\n",
+        "and the account's from then on"
+    );
+}
+
+/// The `.claude.json` a Claude session reads is a copy of the account's, with
+/// the Repo and the Worktree trusted in it — so the session is past the trust
+/// dialog with nobody at its terminal — and with none of the human's own MCP
+/// servers in it, at the top level or under an entry.
+#[tokio::test]
+async fn a_claude_sessions_config_trusts_the_repo_and_the_worktree_and_holds_no_mcp_servers() {
+    let fixture = grilling().await;
+    std::fs::write(
+        fixture.claude_config(),
+        concat!(
+            r#"{"numStartups": 7, "mcpServers": {"the-humans": {}}, "projects": "#,
+            r#"{"/home/you/src/something-else": {"mcpServers": {"its-own": {}}, "allowedTools": []}}}"#,
+            "\n",
+        ),
+    )
+    .unwrap();
+
+    let reported = probe(
+        &fixture.sandbox(vec![]),
+        r#"say config "$(tr -d '\n' < "$HOME/.claude.json")""#,
+    );
+    let config: serde_json::Value = serde_json::from_str(&reported["config"]).unwrap();
+
+    for trusted in [fixture.repo.as_path(), fixture.worktree()] {
+        assert_eq!(
+            config["projects"][trusted.to_string_lossy().as_ref()]["hasTrustDialogAccepted"],
+            true,
+            "{} reads as trusted inside: {config}",
+            trusted.display()
+        );
+    }
+
+    assert_eq!(
+        config["numStartups"], 7,
+        "the rest of the account's is there"
+    );
+    assert_eq!(
+        config["mcpServers"],
+        serde_json::Value::Null,
+        "and not the human's MCP servers"
+    );
+    assert_eq!(
+        config["projects"]["/home/you/src/something-else"],
+        serde_json::json!({"allowedTools": []}),
+        "nor an entry's own"
+    );
+}
+
+/// What a Claude session changes in its `.claude.json` reaches the account as
+/// the session ends, merged into the account's file as it is by then: a key the
+/// account changed meanwhile is kept, and the human's MCP servers survive a copy
+/// that never had them.
+///
+/// Written the way Claude writes it: a rename, which a bind over a file refuses,
+/// and then in place.
+#[tokio::test]
+async fn what_a_session_changed_in_its_config_is_merged_into_the_accounts_as_it_ends() {
+    let fixture = grilling().await;
+    std::fs::write(
+        fixture.claude_config(),
+        r#"{"numStartups": 1, "theme": "dark", "tipsHistory": {"a": 1}, "mcpServers": {"the-humans": {}}}"#,
+    )
+    .unwrap();
+
+    let (reported, afterwards) = probe_closing(
+        &fixture.sandbox(vec![]),
+        r#"
+        printf '{"numStartups": 2, "theme": "dark"}\n' > "$HOME/.claude.json.tmp"
+        if mv -f "$HOME/.claude.json.tmp" "$HOME/.claude.json" 2>/dev/null; then
+            say renamed yes
+        else
+            say renamed refused
+        fi
+        printf '{"numStartups": 2, "theme": "dark"}\n' > "$HOME/.claude.json"
+        "#,
+    );
+
+    assert_eq!(
+        reported["renamed"], "refused",
+        "a rename onto the bound copy is refused, which sends Claude to writing \
+         in place"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_config()).unwrap(),
+        r#"{"numStartups": 1, "theme": "dark", "tipsHistory": {"a": 1}, "mcpServers": {"the-humans": {}}}"#,
+        "and what it writes is its copy, not the account's file"
+    );
+
+    std::fs::write(
+        fixture.claude_config(),
+        r#"{"numStartups": 1, "theme": "light", "tipsHistory": {"a": 1}, "mcpServers": {"the-humans": {}}}"#,
+    )
+    .unwrap();
+
+    afterwards.close();
+
+    let merged: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(fixture.claude_config()).unwrap()).unwrap();
+
+    assert_eq!(
+        merged,
+        serde_json::json!({
+            "numStartups": 2,
+            "theme": "light",
+            "mcpServers": {"the-humans": {}},
+        }),
+        "the session's change and its removal of `tipsHistory` are merged in, the \
+         account's own change of theme is kept, the MCP servers survive, and the \
+         trust seeded into the copy stays there"
+    );
+}
+
+/// A session that changed nothing in its `.claude.json` leaves the account's
+/// byte for byte as it was, and a login still one with the account's is left
+/// alone.
+#[tokio::test]
+async fn a_session_that_changed_nothing_leaves_the_accounts_config_as_it_was() {
+    let fixture = grilling().await;
+    let own = "{\"numStartups\":1,   \"mcpServers\": {\"the-humans\": {}}}\n";
+    std::fs::write(fixture.claude_config(), own).unwrap();
+
+    let credentials = fixture.claude_dir().join(".credentials.json");
+    let modified = std::fs::metadata(&credentials).unwrap().modified().unwrap();
+
+    let (reported, afterwards) = probe_closing(
+        &fixture.sandbox(vec![]),
+        r#"file "$HOME/.claude.json" config"#,
+    );
+
+    assert_eq!(reported["config"], "write");
+
+    afterwards.close();
+
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_config()).unwrap(),
+        own,
+        "nothing differs, so nothing is written"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&credentials).unwrap(),
+        "{\"the\": \"login\"}\n"
+    );
+    assert_eq!(
+        std::fs::metadata(&credentials).unwrap().modified().unwrap(),
+        modified,
+        "and the login is not written at all"
+    );
+}
+
+/// The root is a directory under the Data Directory, the Conversation's own,
+/// and every session is given it fresh: what the last one left is gone, and
+/// the account behind it is untouched.
+///
+/// And nothing a session writes under HOME lands anywhere on the host but
+/// through a bind: a file beside `.claude` is in the namespace and gone with
+/// it, where one inside `.claude` is in the root.
+#[tokio::test]
+async fn the_root_is_built_under_the_data_directory_fresh_for_each_session() {
+    let fixture = grilling().await;
+    let sandbox = fixture.sandbox(vec![]);
+
+    let home = fixture
+        .state
+        .path()
+        .join("homes")
+        .join(fixture.conversation.id.to_string());
+
+    probe(
+        &sandbox,
+        r#"
+        printf 'left\n' > "$HOME/.claude/left-in-the-root"
+        printf 'left\n' > "$HOME/left-beside-it"
+        "#,
+    );
+
+    assert!(
+        home.join(".claude/projects").is_dir(),
+        "the root is built in the Conversation's own directory under the Data \
+         Directory"
+    );
+    assert!(
+        home.join(".claude/left-in-the-root").is_file(),
+        "and what a session writes in `.claude` is written there"
+    );
+    assert!(
+        !fixture.home_path().join("left-beside-it").exists()
+            && !home.join("left-beside-it").exists(),
+        "while what it writes beside `.claude` lands nowhere on the host"
+    );
+
+    made(&sandbox);
+
+    assert!(
+        !home.join(".claude/left-in-the-root").exists(),
+        "a session is given the root fresh, with nothing of the one before it"
+    );
+    assert!(
+        home.join(".claude").is_dir(),
+        "and made again, for the binds a session starts with to be made into"
+    );
+    assert_eq!(
+        std::fs::read_to_string(fixture.claude_dir().join(".credentials.json")).unwrap(),
+        "{\"the\": \"login\"}\n",
+        "and the account behind it is untouched by the emptying"
+    );
+    assert!(
+        fixture
+            .claude_dir()
+            .join("plugins/the-accounts-own")
+            .is_dir()
+    );
+}
+
+/// A launch into a Conversation that already has something running in its root
+/// — a Conversation Terminal opened beside a session — shares that root rather
+/// than empty it: emptying it would unmount what is joined into the running
+/// one. It is built afresh once everything running in it has ended.
+#[tokio::test]
+async fn a_root_something_is_running_in_is_shared_rather_than_built_again() {
+    let fixture = grilling().await;
+    let sandbox = fixture.sandbox(vec![]);
+
+    let home = fixture
+        .state
+        .path()
+        .join("homes")
+        .join(fixture.conversation.id.to_string());
+
+    let session = made(&sandbox);
+
+    std::fs::write(home.join(".claude/written-by-the-session"), "kept\n").unwrap();
+    std::fs::write(
+        home.join(".claude.json"),
+        "{\"written\": \"by the session\"}\n",
+    )
+    .unwrap();
+
+    let terminal = made(&sandbox);
+
+    assert!(
+        home.join(".claude/written-by-the-session").is_file(),
+        "a terminal opened beside a running session leaves its root as it is"
+    );
+    assert_eq!(
+        std::fs::read_to_string(home.join(".claude.json")).unwrap(),
+        "{\"written\": \"by the session\"}\n",
+        "and its copy of `.claude.json` too"
+    );
+    assert_eq!(
+        terminal.copied().collect::<Vec<_>>(),
+        [home.join(".claude.json")],
+        "which the terminal merges back as well"
+    );
+
+    drop(session);
+    let second = made(&sandbox);
+
+    assert!(
+        home.join(".claude/written-by-the-session").is_file(),
+        "the terminal is still running in it"
+    );
+
+    drop(terminal);
+    drop(second);
+    made(&sandbox);
+
+    assert!(
+        !home.join(".claude/written-by-the-session").exists(),
+        "and once nothing is, the next launch is given it fresh"
+    );
+}
+
+/// `path` replaced by a file of `contents`, the way grok 1.0.13 saves one:
+/// written beside it and renamed over the top.
+fn replaced(path: &Path, contents: &str) {
+    let beside = path.with_extension("saving");
+    std::fs::write(&beside, contents).unwrap();
+    std::fs::rename(&beside, path).unwrap();
+}
+
+/// That the `config.toml` a Grok Build root was written at `written` carries
+/// the fixture account's model and how it signs in, and none of its MCP
+/// servers, memory setting or interface.
+fn assert_grok_config_carries_the_model_alone(written: &Path) {
+    let written = std::fs::read_to_string(written).unwrap();
+
+    for carried in [
+        "[model.the-proxy]",
+        "base_url = \"https://proxy.example/v1\"",
+        "auth_provider_command = \"/usr/local/bin/sign-in\"",
+    ] {
+        assert!(
+            written.contains(carried),
+            "what reaches the model is carried over: {written}"
+        );
+    }
+
+    for left in ["mcp_servers", "memory", "enabled", "screen_mode"] {
+        assert!(
+            !written.contains(left),
+            "and nothing else of the account's is: {written}"
+        );
+    }
+}
+
+/// The names in a directory on the host, sorted.
+fn listed(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+
+    names
+}
+
+/// That the `opencode.json` an OpenCode root was written, as `written`, carries
+/// the fixture account's provider, and none of its MCP servers, plugins or
+/// instructions.
+fn assert_opencode_config_carries_the_provider_alone(written: &str) {
+    let written: serde_json::Value = serde_json::from_str(written).unwrap();
+
+    assert_eq!(
+        written,
+        serde_json::json!({
+            "provider": {
+                "proxy": {
+                    "npm": "@ai-sdk/openai-compatible",
+                    "options": { "baseURL": "https://proxy.example/v1" },
+                },
+            },
+        }),
+        "the account's provider is carried over, and nothing else of its configuration"
+    );
+}
+
+/// That the `config.toml` a Codex root was written at `written` carries the
+/// fixture account's provider, and none of its MCP servers, notifier or
+/// features.
+fn assert_codex_config_carries_the_provider_alone(written: &Path) {
+    let written = std::fs::read_to_string(written).unwrap();
+
+    for carried in [
+        "model_provider = \"proxy\"",
+        "[model_providers.proxy]",
+        "base_url = \"https://proxy.example/v1\"",
+    ] {
+        assert!(
+            written.contains(carried),
+            "the account's provider is carried over: {written}"
+        );
+    }
+
+    for left in ["mcp_servers", "notify", "features", "memories"] {
+        assert!(
+            !written.contains(left),
+            "and nothing else of the account's is: {written}"
+        );
+    }
+}
+
+/// The name Claude Code gives a path's `projects/` entry, for the paths these
+/// tests use — none of them long enough to be cut and hashed, which is the
+/// server's own unit tests' to ask.
+fn entry_named(path: &Path) -> String {
+    path.canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .chars()
+        .map(|kept| {
+            if kept.is_ascii_alphanumeric() {
+                kept
+            } else {
+                '-'
+            }
+        })
+        .collect()
 }
 
 /// `verkstead` inside is the executable serving the session, and it is what a

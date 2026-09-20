@@ -102,12 +102,13 @@ const EVENT_KEYED: &[&str] = &[
     "capture_turns",
     "capture_chunks",
     "captures",
-    // What the session's own backend kept of it, what Verkstead called it, and
-    // what it ran under.
+    // What the session's own backend kept of it, what Verkstead called it, what
+    // it ran under, and how it ended.
     "transcript_lines",
     "session_names",
     "session_pairings",
     "session_agents",
+    "session_endings",
     // And the summary a commit card is drawn from. The commit itself names the
     // Conversation as well and goes with the rest of those.
     "commit_summaries",

@@ -28,20 +28,11 @@
 //! keeps one account out of another's is the policy: the account this session
 //! runs under is reachable and every other path on the machine is not.
 //!
-//! And [`Access::Nothing`] is the one the two mechanisms answer in opposite
-//! directions. A mount hides the account's own skills by standing an empty
-//! directory on them; there is nothing to stand anywhere here, and a link
-//! written at that path would be written *into* the account itself — so it is
-//! the path being kept out of the rule that grants the account, in that rule's
-//! own words. See [`reaching`] and [`refusing`].
-//!
-//! **Not a `deny` written after it, which is what this used to be.** A mount
-//! table takes the last bind that landed and a policy does not read the same
-//! way: a probe inside a real sandbox found the account's own skills writable
-//! while the policy that made them so said, in order, that they were refused.
-//! So the exclusion is `require-not` inside the one rule, where no reading of
-//! the order can come out differently, and the outright `deny` stays beside it
-//! as the statement of intent rather than as the mechanism.
+//! **A policy does not read in order the way a mount table does.** A probe
+//! inside a real sandbox once found a path writable while a `deny` written
+//! after the `allow` it sat under said it was refused. So nothing here grants a
+//! path and then takes part of it back: what a session is not to reach is
+//! simply never granted.
 
 use std::path::{Path, PathBuf};
 
@@ -159,29 +150,16 @@ pub(crate) fn command(surface: &Surface) -> Rendering {
 fn policy(surface: &Surface) -> String {
     let mut policy = String::from(FLOOR);
 
-    // What the description says a session must not reach, resolved once and
-    // read by every rule below — see [`refusing`]. A rule that would grant
-    // something one of these sits under has to say so in the same breath rather
-    // than leave a later `deny` to take it back.
-    let refused: Vec<PathBuf> = surface
-        .reaches()
-        .iter()
-        .filter_map(|access| match access {
-            Access::Nothing { inside, .. } => Some(real(inside)),
-            _ => None,
-        })
-        .collect();
-
     for access in surface.reaches() {
         match access {
-            Access::Own { path, reach } => policy.push_str(&reaching(path, *reach, &refused)),
+            Access::Own { path, reach } => policy.push_str(&reaching(path, *reach)),
 
             // Somewhere to write a temporary file. The host's own on this
             // platform rather than a filesystem of the session's, which is
             // where a tmpfs and a policy part company: what a session writes
             // there is visible to whoever else is on the machine, and what they
             // left there is visible to it.
-            Access::Temporary(path) => policy.push_str(&reaching(path, Reach::ReadWrite, &refused)),
+            Access::Temporary(path) => policy.push_str(&reaching(path, Reach::ReadWrite)),
 
             Access::Devices => policy.push_str(DEVICES),
 
@@ -189,7 +167,16 @@ fn policy(surface: &Surface) -> String {
             // this is written — see [`realise`] — so what is left to say about
             // it is that a session may read and write it, which is what a HOME
             // is for.
-            Access::Empty(path) => policy.push_str(&reaching(path, Reach::ReadWrite, &refused)),
+            Access::Empty(path) => policy.push_str(&reaching(path, Reach::ReadWrite)),
+
+            // And one left as it is because something of the Conversation is
+            // still running in it — see [`super::sharing`] — which says the
+            // same thing about reaching it.
+            Access::Kept(path) => policy.push_str(&reaching(path, Reach::ReadWrite)),
+
+            // And one built on the host, which grants nothing by being said:
+            // what reaches it is what the description says after it.
+            Access::Built(_) | Access::Written { .. } => {}
 
             // And a path a session finds somewhere else, which by now is a link
             // to the path it really is. A policy is matched against what a name
@@ -210,27 +197,8 @@ fn policy(surface: &Surface) -> String {
                     ));
                 }
 
-                policy.push_str(&reaching(host, *reach, &refused));
+                policy.push_str(&reaching(host, *reach));
             }
-
-            // And what a mount would have covered, refused instead — said
-            // twice, and neither saying is the other's spelling.
-            //
-            // **The rule that grants the account excludes this path in the same
-            // breath**, which is [`reaching`]'s doing and is what actually
-            // holds: a `deny` written after an `allow` the path sits under does
-            // not take it back, and a probe inside a real sandbox is what said
-            // so — the account's own skills came back writable while a policy
-            // that read in order said they could not be.
-            //
-            // **And it is denied outright as well**, which costs nothing and is
-            // what says the intention rather than the arithmetic: a path
-            // reached by some route nobody thought of is still one a session
-            // must not have.
-            Access::Nothing { inside, .. } => policy.push_str(&format!(
-                "\n(deny file* (subpath {}))\n",
-                quoted(&real(inside))
-            )),
 
             // There is no `/proc` on a Mac, so the process table is not a path
             // and nothing here is about one — what a session can learn about
@@ -259,7 +227,9 @@ fn policy(surface: &Surface) -> String {
 fn realise(surface: &Surface) {
     for access in surface.reaches() {
         let made = match access {
-            Access::Empty(path) => super::emptied(path),
+            Access::Empty(path) | Access::Built(path) => super::emptied(path),
+            Access::Kept(path) => std::fs::create_dir_all(path),
+            Access::Written { path, contents } => std::fs::write(path, contents),
             Access::Elsewhere { host, inside, .. } => linked(host, inside),
             _ => Ok(()),
         };
@@ -297,22 +267,14 @@ fn linked(host: &Path, inside: &Path) -> std::io::Result<()> {
 }
 
 /// The rules that make one path reachable: readable and runnable, and writable
-/// where the description said so — less whatever of `refused` sits under it.
+/// where the description said so.
 ///
 /// Runnable with readable, rather than as a decision of its own. Every path in
 /// a description is either the system a session runs programs out of or a
 /// directory of the project's, and a checkout a session may read is one it may
 /// build and run — which is what a coding session is for.
-///
-/// **What is refused is excluded here rather than denied afterwards.** The
-/// account's own skills sit inside the account, so the rule that grants the
-/// account is the rule that would otherwise grant them — and a `deny` written
-/// after it does not take them back, which a probe inside a real sandbox is
-/// what settled: the skills came back writable while a policy that read in
-/// order said they could not be. `require-not` says it in the one rule instead,
-/// where no reading of the order can come out differently. See [`refusing`].
-fn reaching(path: &Path, reach: Reach, refused: &[PathBuf]) -> String {
-    let matched = refusing(&real(path), refused);
+fn reaching(path: &Path, reach: Reach) -> String {
+    let matched = format!("(subpath {})", quoted(&real(path)));
 
     let mut rules = format!("\n(allow file-read* file-map-executable process-exec* {matched})\n");
 
@@ -323,37 +285,13 @@ fn reaching(path: &Path, reach: Reach, refused: &[PathBuf]) -> String {
     rules
 }
 
-/// `path` as the filter a rule about it matches on: the subpath itself, and
-/// where anything in `refused` sits under it, that subpath with each of them
-/// taken out of it.
-///
-/// A path in `refused` that is `path` itself is left alone — a rule granting
-/// exactly what another one refuses is the description contradicting itself
-/// rather than something to render, and the outright `deny` is what answers it.
-fn refusing(path: &Path, refused: &[PathBuf]) -> String {
-    let subpath = format!("(subpath {})", quoted(path));
-
-    let under: String = refused
-        .iter()
-        .filter(|no| no.as_path() != path && no.starts_with(path))
-        .map(|no| format!(" (require-not (subpath {}))", quoted(no)))
-        .collect();
-
-    if under.is_empty() {
-        return subpath;
-    }
-
-    format!("(require-all {subpath}{under})")
-}
-
 /// What `path` really is: resolved whole where it is there, and resolved as far
 /// as it goes with the rest of the name on the end where it is not.
 ///
-/// The second is what a rule about a path that is not there wants, and there is
-/// one: `~/.claude` inside is a link to the Profile's account, and what refuses
-/// the account's own skills has to name them *under the account* whether that
-/// account happens to keep any or not. A name resolved no further than itself
-/// would be a rule about a path nothing will ever be checked against.
+/// The second is what a rule about a path that is not there wants: a name
+/// resolved no further than itself would be a rule about a path nothing will
+/// ever be checked against, where a name under a link has to be named under
+/// what the link leads to.
 fn real(path: &Path) -> PathBuf {
     if let Ok(resolved) = std::fs::canonicalize(path) {
         return resolved;
@@ -514,6 +452,85 @@ mod tests {
         );
     }
 
+    /// A Claude session's root, built the way the description says one: a
+    /// directory of Verkstead's own under HOME, with the login and a
+    /// `projects/` entry linked into it, a settings file written into it and
+    /// the account's rest nowhere — and a policy granting what is linked rather
+    /// than the account whole.
+    #[test]
+    fn a_root_is_really_built_with_only_what_is_joined_into_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let account = dir.path().join("account/.claude");
+        let entry = account.join("projects/-Users-you-src-verkstead");
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(&entry).unwrap();
+        std::fs::create_dir_all(account.join("plugins")).unwrap();
+        std::fs::write(account.join(".credentials.json"), "{}\n").unwrap();
+
+        // What the session before this one left in its root.
+        std::fs::create_dir_all(home.join(".claude/left-behind")).unwrap();
+
+        let root = home.join(".claude");
+
+        let mut surface = Surface::starting_in(dir.path().to_owned());
+        surface
+            .made(Access::Empty(home.clone()))
+            .made(Access::Built(root.clone()))
+            .made(Access::Written {
+                path: root.join("settings.json"),
+                contents: b"{}\n".to_vec(),
+            })
+            .elsewhere(&root, &root, Reach::ReadWrite)
+            .elsewhere(
+                account.join(".credentials.json"),
+                root.join(".credentials.json"),
+                Reach::ReadWrite,
+            )
+            .elsewhere(
+                &entry,
+                root.join("projects/-Users-you-src-verkstead"),
+                Reach::ReadWrite,
+            );
+
+        realise(&surface);
+
+        let mut held: Vec<String> = std::fs::read_dir(&root)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        held.sort();
+
+        assert_eq!(held, [".credentials.json", "projects", "settings.json"]);
+        assert_eq!(
+            std::fs::read_to_string(root.join("settings.json")).unwrap(),
+            "{}\n"
+        );
+        assert_eq!(
+            std::fs::read_link(root.join(".credentials.json")).unwrap(),
+            account.join(".credentials.json")
+        );
+        assert_eq!(
+            std::fs::read_link(root.join("projects/-Users-you-src-verkstead")).unwrap(),
+            entry
+        );
+
+        let policy = policy(&surface);
+
+        for granted in [account.join(".credentials.json"), entry.clone()] {
+            assert!(
+                policy.contains(&format!(
+                    "(allow file-write* (subpath {}))",
+                    quoted(&real(&granted))
+                )),
+                "what is joined into the root is the session's to write:\n{policy}",
+            );
+        }
+        assert!(
+            !policy.contains(&format!("(subpath {})", quoted(&real(&account)))),
+            "and the account itself is granted nowhere:\n{policy}",
+        );
+    }
+
     /// A link left by whichever session was here before is this session's to
     /// replace: one Conversation's handoff directory is reached at the path
     /// every other Conversation's is.
@@ -537,66 +554,6 @@ mod tests {
         assert!(
             theirs.is_dir(),
             "and what it pointed at is somebody else's directory, not this one's to remove",
-        );
-    }
-
-    /// And what a mount would have covered is refused instead — under the
-    /// account, which is where a session would really find it, and after the
-    /// rule that made the account reachable.
-    #[test]
-    fn the_accounts_own_skills_are_refused_where_they_really_are() {
-        let dir = tempfile::tempdir().unwrap();
-        let account = dir.path().join("account/.claude");
-        let home = dir.path().join("home");
-        std::fs::create_dir_all(account.join("skills/the-accounts-own")).unwrap();
-
-        let mut surface = Surface::starting_in(dir.path().to_owned());
-        surface
-            .made(Access::Empty(home.clone()))
-            .elsewhere(&account, home.join(".claude"), Reach::ReadWrite)
-            .nothing(home.join(".claude/skills"), dir.path().join("nothing"));
-
-        realise(&surface);
-
-        let policy = policy(&surface);
-        let skills = quoted(&real(&account.join("skills")));
-
-        assert!(
-            policy.contains(&format!("(deny file* (subpath {skills}))")),
-            "what a session is grilled by is the product's, not whatever the \
-             account keeps:\n{policy}",
-        );
-
-        // The one that actually holds it: the rule granting the account says in
-        // its own words that this path is not part of what it grants, so
-        // nothing about the order of the two decides it — see the module's own
-        // documentation for the probe that settled that it has to.
-        for granted in ["file-read*", "file-write*"] {
-            assert!(
-                policy.contains(&format!(
-                    "(allow {granted}{} (require-all (subpath {}) (require-not (subpath {skills})))",
-                    if granted == "file-read*" {
-                        " file-map-executable process-exec*"
-                    } else {
-                        ""
-                    },
-                    quoted(&real(&account)),
-                )),
-                "the account is granted with its own skills taken out of what \
-                 is granted, rather than added back and denied again:\n{policy}",
-            );
-        }
-
-        assert!(
-            !policy.contains(&format!(
-                "(allow file-write* (subpath {}))",
-                quoted(&real(&account))
-            )),
-            "and there is no rule anywhere granting the account whole:\n{policy}",
-        );
-        assert!(
-            account.join("skills/the-accounts-own").is_dir(),
-            "nothing of the account's own is written over to do it",
         );
     }
 

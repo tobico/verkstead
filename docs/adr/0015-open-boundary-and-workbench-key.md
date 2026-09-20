@@ -84,6 +84,30 @@ the daemon's way. Neither a `verkstead` subcommand nor a wizard step: the first
 would be a second place to print one line, and the second would put a step
 nothing gates in front of somebody who has not yet seen a Conversation.
 
+Amended: **the startup line carries the link on the install where that line
+*is* the handing over, and the address alone where it is not.** The desktop app
+was doing both — opening a browser on the link, and logging the same line the
+daemon logs, key and all, into the file the tray's **View Logs** opens. A
+journal read by whoever the machine lets read it is one thing; a file on
+somebody's desk that a menu item opens is another. So `verkstead serve` is
+unchanged, a headless host having nothing else and a key redacted there leaving
+a machine started from a unit file with no way in at all; the desktop app's
+line names the address alone, and the app is the one caller that arrives
+holding the key before there is a server to ask one of. Rejected with the
+subcommand above: redacting everywhere.
+
+**With the rule that the redaction follows the handing over rather than the
+binary.** The desktop app's handing over is the browser it opens and the tray's
+**Open**, and a run that finds no tray to raise — no screen at all, a toolkit
+that will not start, a tray that refuses the icon — has neither of those and no
+way to hand a link over. So an app that finds no tray says the link itself, in
+the log, the way the daemon does. Which is the rejection above read the way it
+was meant: what was turned down is a machine left with no way in, and the
+address alone on a machine with no tray *is* that machine. The same rule takes
+the link off the two lines the app writes when a browser will not open, at
+startup and at a press of **Open** — those are a file on a desk whatever
+happens, and neither of them is anybody's only way in.
+
 What stays open: the Share Viewer, which other people open from a gist link
 and which reads nothing of the API; `/api/v1/health`; and the
 Conversation-scoped session API, which is a session's own and scoped already.

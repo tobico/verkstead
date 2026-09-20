@@ -23,6 +23,7 @@ import type {
   SettingsSaved,
   SettingsView,
 } from "../src/api/types";
+import scopes from "../src/settings/scopes.module.css";
 import { Git } from "../src/setup/Git";
 import { SETUP_STEP } from "../src/setup/steps";
 import { SET_UP, theWorkbench } from "./bench";
@@ -118,6 +119,18 @@ function source(container: ParentNode, id: string): string | undefined {
   );
 }
 
+/// What the step says a token has to be able to do, a line per flavour of
+/// token — the classic one first, as the block draws them.
+///
+/// Read off the block rather than by its words, because each line is part words
+/// and part `code`: what is being asked is what the whole line says. The words
+/// are the settings page's, drawn here too — see `src/settings/scopes.tsx`.
+function wanted(container: ParentNode): string[] {
+  return [...container.querySelectorAll(`.${scopes.scopes} li`)].map(
+    (line) => line.textContent ?? "",
+  );
+}
+
 /// The press onwards, found by its own words the way the steps before it are.
 function onwards(container: ParentNode): HTMLButtonElement {
   return [...container.querySelectorAll("button")].find(
@@ -198,6 +211,27 @@ describe("what the fields open with", () => {
     expect(source(container, "setup-author-name")).toBeUndefined();
   });
 
+  /// And the token field says what a token has to be able to do, in both
+  /// flavours GitHub issues one in. The push that needs these scopes is a
+  /// session's, made inside the sandbox, so the refusal that comes back names
+  /// none of them — this is the moment the boxes can still be ticked.
+  it("names the scopes a token needs, in both flavours", async () => {
+    const { container } = mount(NOTHING);
+
+    await waitFor(() => expect(onwards(container)).toBeTruthy());
+
+    const [classic, fine] = wanted(container);
+    expect(classic).toContain("repo");
+    expect(classic).toContain("workflow");
+    expect(classic).toContain("gist");
+
+    expect(fine).toContain("Contents");
+    expect(fine).toContain("Pull requests");
+    expect(fine).toContain("Issues");
+    expect(fine).toContain("Workflows");
+    expect(fine).toContain("Actions");
+  });
+
   /// git refuses a commit with no author, so both halves are required — which
   /// is the one thing that holds this step's Next.
   it("refuses Next until both halves of the author are there", async () => {
@@ -268,6 +302,9 @@ describe("what Next saves", () => {
         "/var/cache/verkstead-node",
         "/var/cache/verkstead-cargo",
       ],
+      // And the text every session is given, likewise: what is sent is what the
+      // file holds afterwards, so a save that left it out would clear it.
+      instructions: TOLD.instructions,
     });
   });
 

@@ -124,6 +124,25 @@ impl Opener {
         Opener { bin, opened }
     }
 
+    /// And a machine with no browser on it at all, which is what a *failed*
+    /// open is: a `PATH` with none of the programs the opener knows on it.
+    ///
+    /// **An opener that ran and exited non-zero is not one**, which is worth
+    /// saying because it is the obvious way to write this and it does not work:
+    /// the app hands the url over detached and never waits for what it started,
+    /// so a browser that failed after it was launched is an open that succeeded.
+    /// What fails is the launch, and nothing to launch is how to make it.
+    #[cfg(unix)]
+    fn refusing(dir: &Path) -> Opener {
+        let bin = dir.join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+
+        Opener {
+            bin,
+            opened: dir.join("opened"),
+        }
+    }
+
     #[cfg(not(unix))]
     fn in_dir(dir: &Path) -> Opener {
         let bin = dir.join("bin");
@@ -850,6 +869,189 @@ fn the_log_file_holds_the_servers_own_startup_line() {
     );
 
     app.stop();
+}
+
+/// And that line names the address rather than the login link, because this
+/// install hands the link over itself: a browser opened as the app comes up, and
+/// the tray's **Open** at every press after it (ADR-0015).
+///
+/// The file is the point. **View Logs** is a menu item on somebody's desk, the
+/// log lives in their own local application data, and a workbench key written
+/// into it is a login for anybody reading over their shoulder — where the
+/// daemon's journal, which `serve.rs` asserts still carries the whole link, is
+/// the one place a headless machine has to hand one over at all.
+///
+/// **Asked of the line rather than of the file**, because there is one other
+/// line this app may write a link on and it is a line these runs always reach —
+/// see the test below, which is that one. What ADR-0015 settled is what the
+/// *startup* line says, so that is what this reads.
+#[test]
+fn the_startup_line_carries_no_workbench_key() {
+    let tmp = tempfile::tempdir().unwrap();
+    let opener = Opener::in_dir(tmp.path());
+    let home = tmp.path().join("home");
+    let data_dir = tmp.path().join("data");
+    let port = free_port();
+
+    let flags = flags(port, &data_dir);
+    let mut args = as_args(&flags);
+    args.push("--no-open");
+    let mut app = App::start(port, Some(&opener), &home, &args, &[]);
+
+    // The key this run is gated on, read back the way a second start would read
+    // it rather than scraped out of what was logged — a test that looked for
+    // the secret in the log by its shape would pass against a log that had one
+    // spelled some other way.
+    let secret = verkstead_server::key::WorkbenchKey::issued(&data_dir)
+        .expect("the app writes its key as it starts")
+        .secret();
+
+    let line = said(&home, "verkstead is listening");
+
+    assert!(
+        !line.contains(&secret) && !line.contains("?key="),
+        "the line the tray's app comes up on should hold no way into the \
+         workbench, got:\n{line}"
+    );
+    assert!(
+        line.contains(&format!("127.0.0.1:{port}")),
+        "and it should still say where Verkstead came up, got:\n{line}"
+    );
+
+    app.stop();
+}
+
+/// **And where there is no tray, the app says the link after all** — because at
+/// that point nothing else is going to.
+///
+/// The startup line leaves the key off on the reasoning that this install hands
+/// the link over itself, and the whole of that handing over is the browser at
+/// startup and the tray's **Open**. A run with no screen has no tray, and one
+/// with no screen and `--no-open` has had neither: the address alone would leave
+/// it serving a workbench nobody on the machine can get into, which is the
+/// redacting-everywhere ADR-0015 turned down. So the app falls back to the
+/// daemon's way exactly where it has become the daemon.
+///
+/// Every test in this file is such a run on a machine whose screen is named in
+/// the environment — there is no tray under a test there — so this is asked of
+/// the line that says so.
+///
+/// **Not on Windows**, where a screen is asked of the window station rather than
+/// read off the environment: a test on a logged-in runner is on `WinSta0` like
+/// any other process, raises a tray, and never reaches the line. Nothing about
+/// the fallback is Windows's own — it is the same branch of the same function —
+/// so what is lost by leaving it to the other platforms is the premise, not the
+/// coverage. See `crate::screen`.
+#[cfg(not(windows))]
+#[test]
+fn a_run_with_no_tray_says_the_link_itself() {
+    let tmp = tempfile::tempdir().unwrap();
+    let opener = Opener::in_dir(tmp.path());
+    let home = tmp.path().join("home");
+    let data_dir = tmp.path().join("data");
+    let port = free_port();
+
+    let flags = flags(port, &data_dir);
+    let mut args = as_args(&flags);
+    args.push("--no-open");
+    let mut app = App::start(port, Some(&opener), &home, &args, &[]);
+
+    let link = verkstead_server::key::WorkbenchKey::issued(&data_dir)
+        .expect("the app writes its key as it starts")
+        .link(&format!("http://127.0.0.1:{port}"));
+
+    let line = said(&home, "no tray to press Open in");
+
+    assert!(
+        line.contains(&link),
+        "a run nobody can press Open in should carry the whole login link, \
+         got:\n{line}"
+    );
+
+    app.stop();
+}
+
+/// The one line of the log carrying `marker`, waited for and returned.
+///
+/// The app writes from the runtime's threads and from its own, so a line a test
+/// is about may still be on its way when the server starts answering.
+fn said(home: &Path, marker: &str) -> String {
+    await_log(home, |logged| logged.contains(marker))
+        .lines()
+        .find(|line| line.contains(marker))
+        .expect("await_log only returns once the marker is there")
+        .to_owned()
+}
+
+/// **Nor when the browser would not open**, which is the other place the app has
+/// ever had the link in its hand.
+///
+/// A machine with no browser on it is not a machine to stop serving on — the
+/// tray's **Open** is still there, and so is every other device on the tailnet —
+/// so the app says so and carries on. What it says is the address, because a
+/// warning is as much the file **View Logs** opens as the startup line is: a
+/// line that named the link would put the key in the log by the one route the
+/// test above cannot take, `--no-open` being the arm where the link is never
+/// built at all.
+#[cfg(unix)]
+#[test]
+fn the_log_carries_no_workbench_key_where_the_browser_would_not_open() {
+    let tmp = tempfile::tempdir().unwrap();
+    let opener = Opener::refusing(tmp.path());
+    let home = tmp.path().join("home");
+    let data_dir = tmp.path().join("data");
+    let port = free_port();
+
+    let flags = flags(port, &data_dir);
+    let args = as_args(&flags);
+    let mut app = App::start(port, Some(&opener), &home, &args, &[]);
+
+    let secret = verkstead_server::key::WorkbenchKey::issued(&data_dir)
+        .expect("the app writes its key as it starts")
+        .secret();
+
+    let line = said(&home, "in a browser");
+
+    assert!(
+        !line.contains(&secret) && !line.contains("?key="),
+        "a browser that would not open should be reported without the login \
+         link, got:\n{line}"
+    );
+    assert!(
+        line.contains(&format!("workbench=http://127.0.0.1:{port}")),
+        "and with the address, which is what a reader of it needed, got:\n{line}"
+    );
+    assert!(
+        opener.asked_for().is_none(),
+        "nothing on this run's PATH could have opened one",
+    );
+
+    app.stop();
+}
+
+/// The log file once it says what a test is waiting for, or a panic with the
+/// whole of it where it never does.
+///
+/// The app writes the startup line from the runtime's thread and the browser's
+/// refusal from the main one, so the two land in whichever order the machine
+/// runs them in: a read taken the moment the server answers is a read that may
+/// be one line early.
+fn await_log(home: &Path, until: impl Fn(&str) -> bool) -> String {
+    let deadline = Instant::now() + PATIENCE;
+
+    loop {
+        let logged = std::fs::read_to_string(log_file(home)).unwrap_or_default();
+
+        if until(&logged) {
+            return logged;
+        }
+
+        assert!(
+            Instant::now() < deadline,
+            "the log never said what this test is about, and what it said was:\n{logged}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
 /// And what is written there is filtered the way `verkstead serve`'s stdout is:

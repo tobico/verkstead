@@ -630,9 +630,21 @@ impl Grilling {
     /// The last one on the Timeline: a Conversation collects notices over a long
     /// run — a stage adopted, a roadmap finished — and what a stop writes is the
     /// newest thing Verkstead had to say.
+    ///
+    /// An escalation is passed over, being the one Notice that is not a stop:
+    /// the Rescue tells the human about a session it could not talk round and
+    /// leaves it running — see [`escalated`], which is how those are asked for.
+    /// A test waiting on a stop while a session beside it goes quiet would
+    /// otherwise be handed the wrong one.
     async fn stopped(&self) -> NoticeEvent {
-        self.until(|view| said(view).last().map(|notice| (*notice).clone()))
-            .await
+        self.until(|view| {
+            said(view)
+                .into_iter()
+                .filter(|notice| !escalation(notice))
+                .next_back()
+                .map(|notice| (*notice).clone())
+        })
+        .await
     }
 
     /// Who stopped it, which is the half of a stop the Timeline does not draw.
@@ -1757,6 +1769,24 @@ async fn grilling(stub: &str) -> Grilling {
     grilling_spilling(tempfile::tempdir().unwrap(), stub, PULL_REQUEST).await
 }
 
+/// And the same on a Claude account whose memory is switched off, so that a
+/// session's root has a `projects/` of its own and its log is written there.
+async fn grilling_forgetting(stub: &str) -> Grilling {
+    grilling_however_started(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        NOTHING_ATTACHED,
+        Pickers::GrillingForgetting,
+        Origin::None,
+        Seeded::Nothing,
+        None,
+    )
+    .await
+}
+
 /// The same, grilled under an account of the second agent type — one home
 /// rather than Claude's pair.
 ///
@@ -1772,6 +1802,24 @@ async fn grilling_on_codex(stub: &str) -> Grilling {
         &[],
         NOTHING_ATTACHED,
         Pickers::GrillingOnCodex,
+        Origin::None,
+        Seeded::Nothing,
+        None,
+    )
+    .await
+}
+
+/// And the grilling role on a Codex Profile whose memory is switched off, so a
+/// session's `sessions/` is its root's own and its rollout is written there.
+async fn grilling_on_codex_forgetting(stub: &str) -> Grilling {
+    grilling_however_started(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        NOTHING_ATTACHED,
+        Pickers::GrillingOnCodexForgetting,
         Origin::None,
         Seeded::Nothing,
         None,
@@ -1874,6 +1922,24 @@ async fn grilling_on_grok(stub: &str) -> Grilling {
     .await
 }
 
+/// And the third backend again, with that Profile's memory switched off, so a
+/// session's `sessions/` is its root's own and its log is written there.
+async fn grilling_on_grok_forgetting(stub: &str) -> Grilling {
+    grilling_however_started(
+        tempfile::tempdir().unwrap(),
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        NOTHING_ATTACHED,
+        Pickers::EverythingOnGrokForgetting,
+        Origin::None,
+        Seeded::Nothing,
+        None,
+    )
+    .await
+}
+
 /// And the same again on the fourth, whose account is one home as well — two
 /// directories inside it rather than the directory itself, which is what
 /// [`Bench::everything_on_opencode`] makes.
@@ -1911,6 +1977,27 @@ async fn grilling_spilling_on_opencode(spill: tempfile::TempDir, stub: &str) -> 
         &[],
         NOTHING_ATTACHED,
         Pickers::EverythingOnOpenCode,
+        Origin::None,
+        Seeded::Nothing,
+        None,
+    )
+    .await
+}
+
+/// And the same with that Profile's memory switched off, so a session's data
+/// directory is its root's own and its store is written there.
+async fn grilling_spilling_on_opencode_forgetting(
+    spill: tempfile::TempDir,
+    stub: &str,
+) -> Grilling {
+    grilling_however_started(
+        spill,
+        stub,
+        PULL_REQUEST,
+        *BRISKLY,
+        &[],
+        NOTHING_ATTACHED,
+        Pickers::EverythingOnOpenCodeForgetting,
         Origin::None,
         Seeded::Nothing,
         None,
@@ -2166,6 +2253,22 @@ enum Pickers {
 
     /// And on the fourth — see [`Bench::everything_on_opencode`].
     EverythingOnOpenCode,
+
+    /// Every role under a Pairing of its own, and the grilling Profile's memory
+    /// switched off — see [`Bench::forgetting`].
+    GrillingForgetting,
+
+    /// The grilling role on a Codex Profile, as [`Pickers::GrillingOnCodex`],
+    /// with that Profile's memory switched off.
+    GrillingOnCodexForgetting,
+
+    /// Every role on a Grok Build Profile, as [`Pickers::EverythingOnGrok`],
+    /// with that Profile's memory switched off.
+    EverythingOnGrokForgetting,
+
+    /// Every role on an OpenCode Profile, as [`Pickers::EverythingOnOpenCode`],
+    /// with that Profile's memory switched off.
+    EverythingOnOpenCodeForgetting,
 }
 
 /// The same with a read-write companion beside it, for the tests about a
@@ -2355,6 +2458,19 @@ async fn grilling_however_started(
         Pickers::EverythingOnCodex => bench.everything_on_codex(id).await,
         Pickers::EverythingOnGrok => bench.everything_on_grok(id).await,
         Pickers::EverythingOnOpenCode => bench.everything_on_opencode(id).await,
+        Pickers::GrillingForgetting => bench.forgetting("grilling").await,
+        Pickers::GrillingOnCodexForgetting => {
+            bench.grilling_on_codex(id).await;
+            bench.forgetting("codex").await;
+        }
+        Pickers::EverythingOnGrokForgetting => {
+            bench.everything_on_grok(id).await;
+            bench.forgetting("grok").await;
+        }
+        Pickers::EverythingOnOpenCodeForgetting => {
+            bench.everything_on_opencode(id).await;
+            bench.forgetting("opencode").await;
+        }
     }
 
     // While it is still drafting, which is the only time a companion can be
@@ -2491,6 +2607,31 @@ impl Bench {
             .await;
             assert_eq!(chosen, verkstead_render::ProfileChosen::Chosen);
         }
+    }
+
+    /// And switch the memory off on the Profile called `name`, which is the one
+    /// thing the form changes about it: the same account and models, saved again
+    /// with the switch unticked.
+    async fn forgetting(&self, name: &str) {
+        let profiles: Vec<verkstead_render::ProfileEntry> =
+            get(&self.app, "/api/ui/profiles").await;
+        let forgetting = profiles
+            .into_iter()
+            .find(|profile| profile.name.as_deref() == Some(name))
+            .expect("the Profile is saved before its memory is switched off");
+
+        let saved: ProfileSaved = post(
+            &self.app,
+            &format!("/api/ui/profiles/{}", forgetting.id),
+            &serde_json::json!({
+                "name": forgetting.name,
+                "account": forgetting.account,
+                "models": forgetting.models,
+                "memory": false,
+            }),
+        )
+        .await;
+        assert_eq!(saved, ProfileSaved::Saved);
     }
 
     /// And pick the grilling role under an account of the second agent type,
@@ -3391,8 +3532,9 @@ async fn a_session_runs_the_grilling_profiles_agent_on_the_brief_in_the_worktree
     );
     assert!(
         said.contains("/verkstead/skills/grilling/SKILL.md"),
-        "the session is sent into the bundled grilling skill by the prompt, there being no \
-         global CLAUDE.md inside to say what it is for: {said:?}"
+        "the session is sent into the bundled grilling skill by the prompt, nothing inside \
+         saying what the session is for — a global instructions file there holds the \
+         human's own text and never Verkstead's: {said:?}"
     );
     assert!(
         said.contains(BRIEF),
@@ -3614,8 +3756,9 @@ async fn a_session_is_named_before_it_starts_and_writes_its_log_under_that_name(
 
         printf 'named=%s\n' "$name"
 
-        mkdir -p "$HOME/.claude/projects/stub"
-        printf '' > "$HOME/.claude/projects/stub/$name.jsonl"
+        project=$(pwd | tr -c 'a-zA-Z0-9\n' -)
+        mkdir -p "$HOME/.claude/projects/$project"
+        printf '' > "$HOME/.claude/projects/$project/$name.jsonl"
         "#,
     )
     .await;
@@ -3637,17 +3780,20 @@ async fn a_session_is_named_before_it_starts_and_writes_its_log_under_that_name(
         "the session should have been run under the name Verkstead recorded for it: {said:?}"
     );
 
-    let log = fixture
-        ._elsewhere
-        .path()
-        .join("grilling/.claude/projects/stub")
-        .join(format!("{name}.jsonl"));
+    // One level under the account's `projects/`, which is where the log is
+    // looked for: under the entry named for the Worktree the session ran in,
+    // which is the one entry of `projects/` the stub could write through.
+    let projects = fixture._elsewhere.path().join("grilling/.claude/projects");
+    let log = std::fs::read_dir(&projects)
+        .unwrap()
+        .map(|entry| entry.unwrap().path().join(format!("{name}.jsonl")))
+        .find(|log| log.is_file());
 
     assert!(
-        log.is_file(),
+        log.is_some(),
         "a log named for the session should land under the grilling Profile's own \
-         directory, at {}",
-        log.display()
+         directory, one level under {}",
+        projects.display()
     );
 }
 
@@ -3670,7 +3816,7 @@ async fn a_sessions_own_log_is_followed_line_by_line_while_it_runs() {
             shift
         done
 
-        log=$HOME/.claude/projects/verkstead/$name.jsonl
+        log=$HOME/.claude/projects/$(pwd | tr -c 'a-zA-Z0-9\n' -)/$name.jsonl
         mkdir -p "$(dirname "$log")"
 
         printf '{"type":"user","text":"Rate limiting"}\n' > "$log"
@@ -3714,6 +3860,78 @@ async fn a_sessions_own_log_is_followed_line_by_line_while_it_runs() {
     assert!(
         said.contains("Reading the brief.\n") && said.contains("Asking.\n"),
         "following the log should not cost the Capture anything: {said:?}"
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+}
+
+/// With the Profile's memory switched off, the session's log is written into
+/// its root's own `projects/` rather than the account's — and it is followed
+/// from there onto the Timeline all the same.
+///
+/// The root is on the host under the Conversation's own directory in the Data
+/// Directory, which is where the log is looked for; the account's `projects/`
+/// holds nothing of this session's.
+#[tokio::test]
+async fn a_sessions_log_is_followed_out_of_its_root_where_memory_is_off() {
+    let fixture = grilling_forgetting(
+        r#"
+        name=
+        while [ $# -gt 0 ]; do
+            if [ "$1" = --session-id ]; then name=$2; fi
+            shift
+        done
+
+        log=$HOME/.claude/projects/$(pwd | tr -c 'a-zA-Z0-9\n' -)/$name.jsonl
+        mkdir -p "$(dirname "$log")"
+
+        printf '{"type":"user","text":"Rate limiting"}\n' > "$log"
+        printf 'Reading the brief.\n'
+
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+    let transcript = fixture.transcript_of(event, 1).await;
+
+    assert_eq!(
+        transcript,
+        vec![r#"{"type":"user","text":"Rate limiting"}"#.to_owned()],
+        "the log in the root is followed onto the Transcript"
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+    let name = verkstead_store::session_id(&pool, event)
+        .await
+        .unwrap()
+        .expect("Verkstead should have written down what it named the session");
+
+    let written = |projects: PathBuf| {
+        std::fs::read_dir(projects)
+            .map(|entries| {
+                entries
+                    .map(|entry| entry.unwrap().path().join(format!("{name}.jsonl")))
+                    .any(|log| log.is_file())
+            })
+            .unwrap_or(false)
+    };
+
+    assert!(
+        written(
+            fixture
+                .state
+                .path()
+                .join("homes")
+                .join(fixture.id.to_string())
+                .join(".claude/projects")
+        ),
+        "the log is in the root on the host"
+    );
+    assert!(
+        !written(fixture._elsewhere.path().join("grilling/.claude/projects")),
+        "and not in the account"
     );
 
     assert_eq!(fixture.close().await, ConversationClosed::Closed);
@@ -3820,7 +4038,7 @@ async fn a_running_sessions_log_is_read_back_as_a_conversation() {
             shift
         done
 
-        log=$HOME/.claude/projects/verkstead/$name.jsonl
+        log=$HOME/.claude/projects/$(pwd | tr -c 'a-zA-Z0-9\n' -)/$name.jsonl
         mkdir -p "$(dirname "$log")"
 
         printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading the **brief**."}]}}\n' > "$log"
@@ -3932,8 +4150,10 @@ async fn a_session_on_a_second_backend_runs_from_its_home_with_the_capture_as_it
 /// **The account is configured from the line rather than from its directory.**
 /// The credential store is file-backed because there is no keyring inside the
 /// sandbox, and the Worktree is trusted so that no version of codex stops at a
-/// trust prompt in front of nobody — and the Profile's own home is left exactly
-/// as the account keeps it, which is what the last of these reads.
+/// trust prompt in front of nobody — and what a session finds at `~/.codex` is a
+/// root holding a configuration Verkstead wrote beside the account's memory
+/// store, with nothing about trust written into it, which is what the last of
+/// these reads.
 #[tokio::test]
 async fn a_codex_session_is_launched_with_the_line_codex_takes() {
     let fixture = grilling_on_codex(
@@ -3994,8 +4214,10 @@ async fn a_codex_session_is_launched_with_the_line_codex_takes() {
         "codex takes no session id, so it is told none: {said:?}"
     );
     assert!(
-        said.contains("account=\n"),
-        "and Verkstead writes nothing into the Profile's own directory: {said:?}"
+        said.contains("account=config.toml memories sessions \n"),
+        "and its `.codex` is a root holding the configuration Verkstead wrote and \
+         the account's memory store, with no login where the account has none: \
+         {said:?}"
     );
 }
 
@@ -4069,6 +4291,73 @@ async fn a_codex_session_follows_the_rollout_that_names_its_own_worktree() {
         "the rollout naming this session's own Worktree is the one followed, and its \
          lines should be kept exactly as codex wrote them — a line caught half-written \
          waiting for the rest of itself"
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+}
+
+/// With the Profile's memory switched off, a Codex session's rollout is written
+/// into its root's own `sessions/` rather than the account's — and it is found
+/// and followed from there onto the Timeline all the same.
+///
+/// The root is on the host under the Conversation's own directory in the Data
+/// Directory, which is where the rollout is looked for; the account's
+/// `sessions/` holds nothing of this session's.
+#[tokio::test]
+async fn a_codex_sessions_rollout_is_followed_out_of_its_root_where_memory_is_off() {
+    let fixture = grilling_on_codex_forgetting(
+        r#"
+        day=$HOME/.codex/sessions/$(date +%Y/%m/%d)
+        mkdir -p "$day"
+
+        log=$day/rollout-2026-09-17T17-47-02-cccc.jsonl
+        printf '{"type":"session_meta","payload":{"cwd":"%s"}}\n' "$(pwd)" > "$log"
+        printf 'where=%s\n' "$(pwd)"
+
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+    let transcript = fixture.transcript_of(event, 1).await;
+
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+    let worktree = said
+        .lines()
+        .find_map(|line| line.strip_prefix("where="))
+        .expect("the session says where it ran");
+
+    assert_eq!(
+        transcript,
+        vec![format!(
+            r#"{{"type":"session_meta","payload":{{"cwd":"{worktree}"}}}}"#
+        )],
+        "the rollout in the root is followed onto the Transcript"
+    );
+
+    let rollouts = |sessions: PathBuf| {
+        std::fs::read_dir(sessions)
+            .map(|years| years.count())
+            .unwrap_or(0)
+    };
+
+    assert_eq!(
+        rollouts(
+            fixture
+                .state
+                .path()
+                .join("homes")
+                .join(fixture.id.to_string())
+                .join(".codex/sessions")
+        ),
+        1,
+        "the rollout is in the root on the host"
+    );
+    assert_eq!(
+        rollouts(fixture._elsewhere.path().join("codex/.codex/sessions")),
+        0,
+        "and not in the account"
     );
 
     assert_eq!(fixture.close().await, ConversationClosed::Closed);
@@ -4265,6 +4554,84 @@ async fn a_grok_session_follows_the_log_it_was_named_for() {
     assert_eq!(fixture.close().await, ConversationClosed::Closed);
 }
 
+/// With the Profile's memory switched off, a Grok session's log is written into
+/// its root's own `sessions/` rather than the account's — and it is found under
+/// the name Verkstead gave it and followed from there onto the Timeline all the
+/// same.
+///
+/// The root is on the host under the Conversation's own directory in the Data
+/// Directory, which is where the log is looked for; the account's `sessions/`
+/// holds nothing of this session's.
+#[tokio::test]
+async fn a_grok_sessions_log_is_followed_out_of_its_root_where_memory_is_off() {
+    let fixture = grilling_on_grok_forgetting(
+        r#"
+        name=
+        while [ $# -gt 0 ]; do
+            if [ "$1" = --session-id ]; then name=$2; fi
+            shift
+        done
+
+        mine=$HOME/.grok/sessions/$(pwd | sed 's|/|%2F|g')/$name
+        mkdir -p "$mine"
+        printf '{"method":"session/update","params":{"sessionId":"%s","update":{"sessionUpdate":"user_message_chunk","content":{"type":"text","text":"Rate limiting"}}}}\n' "$name" \
+            > "$mine/updates.jsonl"
+        printf 'named=%s\n' "$name"
+
+        sleep 300
+        "#,
+    )
+    .await;
+
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+    let transcript = fixture.transcript_of(event, 1).await;
+
+    let said = fixture.capture(event).await.replace("\r\n", "\n");
+    let name = said
+        .lines()
+        .find_map(|line| line.strip_prefix("named="))
+        .expect("the session says what it was named");
+
+    assert_eq!(
+        transcript,
+        [format!(
+            r#"{{"method":"session/update","params":{{"sessionId":"{name}","update":{{"sessionUpdate":"user_message_chunk","content":{{"type":"text","text":"Rate limiting"}}}}}}}}"#
+        )],
+        "the log in the root is followed onto the Transcript"
+    );
+
+    let logs = |sessions: PathBuf| {
+        std::fs::read_dir(sessions)
+            .map(|groups| {
+                groups
+                    .flatten()
+                    .filter(|group| group.path().join(name).join("updates.jsonl").is_file())
+                    .count()
+            })
+            .unwrap_or(0)
+    };
+
+    assert_eq!(
+        logs(
+            fixture
+                .state
+                .path()
+                .join("homes")
+                .join(fixture.id.to_string())
+                .join(".grok/sessions")
+        ),
+        1,
+        "the log is in the root on the host"
+    );
+    assert_eq!(
+        logs(fixture._elsewhere.path().join("grok/.grok/sessions")),
+        0,
+        "and not in the account"
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+}
+
 /// An OpenCode session's record is found rather than named, and it is not a
 /// file: opencode takes no session id, and it keeps its sessions in one database
 /// under its account. So what says a session in there is this one is the
@@ -4409,6 +4776,74 @@ async fn an_opencode_session_follows_the_records_of_the_session_it_opened_in_its
         "and the row counts the reading the pane draws: the text put to the \
          session is the one turn of it, and the session's own row is opencode's \
          bookkeeping",
+    );
+
+    assert_eq!(fixture.close().await, ConversationClosed::Closed);
+}
+
+/// With the Profile's memory switched off, an OpenCode session's data directory
+/// is its root's own, so its store is written there rather than in the account
+/// — and its records are found in that store and followed onto the Timeline all
+/// the same.
+///
+/// The root is on the host under the Conversation's own directory in the Data
+/// Directory, which is where the store is looked for. A store in the account
+/// holding a session of this very Worktree is not followed.
+#[tokio::test]
+async fn an_opencode_sessions_records_are_followed_out_of_its_root_where_memory_is_off() {
+    let spill = tempfile::tempdir().unwrap();
+    let ran_in = spill.path().join("ran-in");
+
+    let fixture = grilling_spilling_on_opencode_forgetting(
+        spill,
+        &format!(
+            r#"
+            printf '%s' "$(pwd)" > {ran_in}
+            printf 'Reading the brief.\n'
+            sleep 300
+            "#,
+            ran_in = ran_in.display(),
+        ),
+    )
+    .await;
+
+    let worktree = until_written(&ran_in).await;
+    let event = fixture.until(|view| output(view).map(|o| o.id)).await;
+
+    // The account's own store, with a session of this Worktree in it that is
+    // not this one: it is the human's memory, which this session does not have.
+    let account = opencode_store(&fixture.opencode_account()).await;
+    opencode_session(&account, "ses_the_humans", &worktree, 0).await;
+    opencode_record(
+        &account,
+        "ses_the_humans",
+        0,
+        "session.created.1",
+        r#"{"info":{"title":"The human's own."}}"#,
+    )
+    .await;
+
+    // And the root's, on the host, where this session wrote its own.
+    let root = fixture
+        .state
+        .path()
+        .join("homes")
+        .join(fixture.id.to_string());
+    let store = opencode_store(&root).await;
+    opencode_session(&store, "ses_mine", &worktree, 0).await;
+    opencode_record(
+        &store,
+        "ses_mine",
+        0,
+        "session.created.1",
+        r#"{"info":{"title":"Rate limiting"}}"#,
+    )
+    .await;
+
+    assert_eq!(
+        fixture.transcript_of(event, 1).await,
+        [r#"{"kind":"session.created.1","seq":0,"record":{"info":{"title":"Rate limiting"}}}"#],
+        "the store in the root is the one followed, and not the account's"
     );
 
     assert_eq!(fixture.close().await, ConversationClosed::Closed);
@@ -4589,7 +5024,7 @@ async fn a_running_sessions_row_reads_the_last_thing_the_agent_said() {
             shift
         done
 
-        log=$HOME/.claude/projects/verkstead/$name.jsonl
+        log=$HOME/.claude/projects/$(pwd | tr -c 'a-zA-Z0-9\n' -)/$name.jsonl
         mkdir -p "$(dirname "$log")"
 
         printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading the brief."}]}}\n' > "$log"
@@ -4649,7 +5084,7 @@ async fn a_running_sessions_row_counts_the_turns_on_its_transcript() {
             shift
         done
 
-        log=$HOME/.claude/projects/verkstead/$name.jsonl
+        log=$HOME/.claude/projects/$(pwd | tr -c 'a-zA-Z0-9\n' -)/$name.jsonl
         mkdir -p "$(dirname "$log")"
 
         printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading the brief."}]}}\n' > "$log"
@@ -4916,7 +5351,7 @@ async fn a_finished_sessions_row_reads_its_closing_words() {
             shift
         done
 
-        log=$HOME/.claude/projects/verkstead/$name.jsonl
+        log=$HOME/.claude/projects/$(pwd | tr -c 'a-zA-Z0-9\n' -)/$name.jsonl
         mkdir -p "$(dirname "$log")"
 
         printf '\033[2m│ working │\033[0m\n'
@@ -5817,6 +6252,97 @@ async fn a_sandbox_that_will_not_start_says_why_on_the_capture() {
         lines > 0 && !latest.is_empty(),
         "so the Timeline says what happened rather than `0 lines` and nothing: \
          {lines} lines, latest {latest:?}"
+    );
+}
+
+/// And a launch that never got as far as a process says why in the same place.
+///
+/// The Capture is opened before the sandbox is built rather than after the
+/// process is spawned, which is what gives a failed launch somewhere to say
+/// anything at all: until it moved, a session with no sandbox to run in left
+/// the Timeline empty and the reason in a log at a level nobody has turned on —
+/// the same complaint the boundary lines beside this exist for.
+///
+/// Provoked through the account the *next* session would run under: a file
+/// where its directory goes is a memory store that cannot be made in it, which
+/// is one of the handful of things that refuse a sandbox before it is built.
+/// The grilling's own account, worktree and handoff are all left alone, so what
+/// fails is the building of the second session's sandbox and nothing else —
+/// a launch that stops before there is a terminal, a boundary or a process.
+///
+/// **And the Linux half of the boundary lines is here too**: a session on this
+/// platform hides behind a wrapper with no access-control entries in it, so its
+/// Capture says nothing about a boundary. The one that does is asked on the
+/// machine that writes them — see `tests/sandbox_windows.rs`.
+#[tokio::test]
+async fn a_launch_that_could_not_build_a_sandbox_says_so_on_the_capture() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf 'the grilling is running\n'
+            while [ ! -f /tmp/verkstead/go ]; do sleep 0.1; done
+            printf '# What we settled\n\nAn in-process counter.\n' > /tmp/verkstead/handoff.md
+            : > /tmp/verkstead/done
+            printf 'the handoff is written\n'
+            sleep 300
+            ;;
+        *)
+            printf 'this session never gets to run\n'
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    // The grilling holds off writing its handoff until the test says so, for
+    // the reason the test above holds one: what makes the *next* launch fail
+    // has to be in place before that launch, and the handoff is what starts it.
+    let grilled = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    // A file where the implementation Profile's account is. Whatever the
+    // grilling is running under is untouched: what this refuses is the launch
+    // that follows it.
+    let account = fixture._elsewhere.path().join("implementation/.claude");
+    std::fs::remove_dir_all(&account).unwrap();
+    std::fs::write(&account, "not a directory\n").unwrap();
+
+    std::fs::write(handoff_directory(&fixture).join("go"), "").unwrap();
+
+    let refused = fixture
+        .until(|view| {
+            outputs(view)
+                .into_iter()
+                .find(|output| output.id != grilled && !output.running)
+                .map(|output| (output.id, output.lines, output.latest.clone()))
+        })
+        .await;
+
+    let (event, lines, latest) = refused;
+    let said = fixture.capture(event).await;
+
+    assert!(
+        said.contains("could not build a sandbox"),
+        "a launch that failed before there was a process leaves an Event with the \
+         reason in its Capture: {said:?}"
+    );
+    assert!(
+        lines > 0 && !latest.is_empty(),
+        "and the Timeline row reads that rather than `0 lines` and nothing: \
+         {lines} lines, latest {latest:?}"
+    );
+
+    let grilling = fixture.capture(grilled).await;
+
+    assert!(
+        !grilling.contains("boundary"),
+        "and a session on this platform, whose sandbox is a wrapper with no \
+         access-control entries in it, is told nothing about a boundary: {grilling:?}"
     );
 }
 
@@ -14863,6 +15389,82 @@ async fn a_session_that_exits_badly_halts_the_run_with_a_notice() {
     );
 }
 
+/// And a session that said nothing at all says how it ended instead: the exit
+/// code and the tenths of a second it lived.
+///
+/// The shape a desktop-app launcher has. It starts, prints nothing and exits
+/// immediately — everything wrong with it is in the exit code and the lifetime,
+/// and *It said nothing at all* is true of it and points nowhere. The reporter
+/// who met one spent an hour finding out what this sentence says in a line.
+///
+/// Its reason is unchanged, which is the other half of the promise: the words
+/// the log used for the ending open the Notice exactly as they did. And the
+/// grilling session beside it is the third thing asked about — Verkstead ended
+/// that one itself once its handoff had landed, which is not a session that
+/// went wrong, so nothing was written down about how it exited and a stop over
+/// one would say what it always said.
+#[tokio::test]
+async fn a_session_that_printed_nothing_says_how_it_ended_in_its_notice() {
+    let fixture = grilling(
+        r#"
+        case "$1" in
+        claude-grilling-5)
+            printf '# What we settled\n\nA counter per key.\n' > /tmp/verkstead/handoff.md
+            : > /tmp/verkstead/done
+            printf 'the handoff is written\n'
+            sleep 300
+            ;;
+        *)
+            exit 1
+            ;;
+        esac
+        "#,
+    )
+    .await;
+
+    let grilled = fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+    assert_eq!(fixture.pick(set, "inline").await, Submitted::Accepted);
+
+    let stopped = fixture.stopped().await;
+
+    assert!(
+        stopped.html.contains("the session exited with status 1"),
+        "the reason the Notice opens with is the one it always was: {:?}",
+        stopped.html,
+    );
+    assert!(
+        !stopped.html.contains("It said nothing at all."),
+        "and the evidence block is no longer the sentence that pointed nowhere: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("It exited with code 1 after 0."),
+        "it is the exit code and a lifetime in tenths of a second: {:?}",
+        stopped.html,
+    );
+    assert!(
+        stopped.html.contains("s, having printed nothing."),
+        "and that there was nothing else to show: {:?}",
+        stopped.html,
+    );
+
+    let pool = open_database(&fixture.database).await.unwrap();
+
+    assert!(
+        verkstead_store::session_ending(&pool, fixture.id, grilled)
+            .await
+            .unwrap()
+            .is_none(),
+        "and the grilling session Verkstead ended itself once its handoff had \
+         landed has no ending on the record: that is not a session that went \
+         wrong, and how it exited says nothing about anything",
+    );
+}
+
 /// And where the session kept a log, the evidence is what it said rather than
 /// what its terminal was drawing.
 ///
@@ -14889,7 +15491,7 @@ async fn the_evidence_of_a_run_that_stopped_is_what_the_agent_said() {
             sleep 300
             ;;
         *)
-            log=$HOME/.claude/projects/verkstead/$name.jsonl
+            log=$HOME/.claude/projects/$(pwd | tr -c 'a-zA-Z0-9\n' -)/$name.jsonl
             mkdir -p "$(dirname "$log")"
 
             printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"The window type is not where the brief says it is, so I have stopped."}]}}\n' > "$log"
@@ -16832,6 +17434,13 @@ fn waiting_on_checks(view: &ConversationView) -> Vec<&NoticeEvent> {
 /// the settling loop writes.
 fn narrowing(notice: &NoticeEvent) -> bool {
     notice.html.contains("Waiting on checks")
+}
+
+/// And whether a Notice is the Rescue's escalation rather than a stop — the one
+/// Notice a session goes on running past. Told by what it opens with, the way
+/// [`narrowing`] is.
+fn escalation(notice: &NoticeEvent) -> bool {
+    notice.html.contains("has gone idle without finishing")
 }
 
 /// The whole of stage auto-continue: a settled wrap-up on a roadmap Conversation
@@ -24502,6 +25111,141 @@ async fn a_grilling_that_goes_idle_without_its_artifact_is_told_and_then_put_to_
     assert_eq!(view.blocked_on, Some(escalated.id));
 }
 
+/// And while it sits there, the card and the sidebar row say so: how long it has
+/// been idle, and how many times it has been spoken to.
+///
+/// A condition rather than an Event — nothing is written down, and the lifecycle
+/// word is untouched — drawn beside that word the way *Waiting on checks* is.
+/// Which is the whole of what a parked session was missing: a card saying
+/// *Running* about an agent with its turn over reads exactly like a card saying
+/// *Running* about one hard at work, and somebody watched one for ten minutes
+/// before concluding nothing was being captured.
+#[tokio::test]
+async fn a_session_that_sits_there_without_asking_says_so_on_the_card_and_the_row() {
+    let fixture = grilling(&a_grilling_that_never_writes_the_backlog()).await;
+
+    fixture
+        .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
+        .await;
+
+    let set = fixture.ask(PROPOSING).await;
+
+    // A session with a Set of its own open is not sitting there, however long it
+    // has been quiet: it is waiting on the human, for as long as they take. So
+    // nothing is drawn beside the state while the pick is in front of them —
+    // the disc that says *waiting on you* is the whole of what it has to say.
+    pause(BRISKLY.proposing * 2).await;
+
+    assert!(
+        fixture.view().await.parked.is_none(),
+        "a session waiting on a pick is waiting rather than parked",
+    );
+    assert!(
+        fixture.row().await.parked.is_none(),
+        "and the row says as much as the card does about that",
+    );
+
+    assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
+
+    // And not the moment they answer, either. The session has been quiet the
+    // whole time the Set was in front of them — far past the grace by now —
+    // and nothing resets the idle clock when an answer goes in, because an
+    // answer comes back through the CLI's long poll rather than being typed.
+    // So a condition drawn on the span alone would come up here saying *idle*
+    // over the human's own deliberation, which is the reading this is for.
+    // The rescue holds off for exactly that long, up to [`BRISKLY.waking`], and
+    // nothing is drawn until it has actually spoken.
+    let answered = fixture
+        .until(|view| (!view.waiting).then_some(view.parked))
+        .await;
+
+    assert!(
+        answered.is_none(),
+        "a session handed its answer a moment ago is not one sitting there, \
+         however long it was quiet while the human was deciding: {answered:?}",
+    );
+
+    // Told once, and the count says so — which is the first moment there is a
+    // condition at all.
+    let told_once = fixture
+        .until(|view| view.parked.filter(|parked| parked.spoken_to == 1))
+        .await;
+
+    assert_eq!(
+        told_once.spoken_to, 1,
+        "the card says it has been spoken to, which is what says Verkstead has \
+         noticed: {told_once:?}",
+    );
+
+    let row = fixture
+        .row_until(|row| row.parked.filter(|parked| parked.spoken_to == 1))
+        .await;
+
+    assert_eq!(
+        row.spoken_to, told_once.spoken_to,
+        "and the row it is found by carries the same condition as the card it \
+         opens, off the same register rather than a reading of its own: \
+         {row:?}",
+    );
+
+    // And the count rises with the second line rather than staying where it
+    // was: what the human is reading is how far this has got, and *spoken to
+    // twice* is the last of it before they are told.
+    let told_twice = fixture
+        .until(|view| view.parked.filter(|parked| parked.spoken_to == 2))
+        .await;
+
+    assert_eq!(
+        told_twice.spoken_to, 2,
+        "twice, and the condition says so rather than staying at one: \
+         {told_twice:?}",
+    );
+
+    // And it goes the moment the human is told, which is an answer put in front
+    // of them — see [`escalated`]. The disc that says *waiting on you* is the
+    // whole of what the row has to say from there: a session Verkstead has
+    // given up talking round is the human's to look at rather than a condition
+    // for them to watch tick over, and the session is left running for them to
+    // walk into.
+    escalated(&fixture).await;
+
+    let told = fixture
+        .until(|view| view.waiting.then_some(view.parked))
+        .await;
+
+    assert!(
+        told.is_none(),
+        "a session the human has been told about is one they are looking at \
+         rather than one sitting there: {told:?}",
+    );
+    assert!(
+        fixture.row().await.parked.is_none(),
+        "and the row says as much as the card does about that",
+    );
+    assert!(
+        fixture.view().await.working,
+        "the session is left running, a rescue having never been a stop",
+    );
+
+    // And it goes with the run besides. Nothing is stored for it, so a session
+    // that is no longer there has no condition rather than a stale one — and
+    // the press is the human's, a rescue leaving the ending to them.
+    fixture.force_stop().await;
+
+    let ended = fixture
+        .row_until(|row| (!row.working).then(|| row.clone()))
+        .await;
+
+    assert!(
+        ended.parked.is_none(),
+        "a session that is not there is not sitting there either: {ended:?}",
+    );
+    assert!(
+        fixture.view().await.parked.is_none(),
+        "and the card says as much as the row does about that",
+    );
+}
+
 /// And a backlog step that goes quiet without the commit that finishes it is
 /// told and put to the human the same way.
 ///
@@ -24555,7 +25299,7 @@ async fn escalated(fixture: &Grilling) -> NoticeEvent {
         let found = said(&view)
             .into_iter()
             .rev()
-            .find(|notice| notice.html.contains("has gone idle without finishing"))
+            .find(|notice| escalation(notice))
             .cloned();
 
         if let Some(notice) = found {

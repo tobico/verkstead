@@ -123,6 +123,7 @@ async fn entries(profiles: Vec<store::Profile>) -> Result<Vec<ProfileEntry>> {
                 name: profile.name,
                 account: account(&profile.account),
                 models: profile.models,
+                memory: profile.memory,
             })
             .collect()
     })
@@ -242,6 +243,7 @@ async fn checked(edit: &ProfileEdit) -> Result<Result<store::ProfileFacts, Profi
     }
 
     let account = edit.account.clone();
+    let memory = edit.memory;
 
     Ok(tokio::task::spawn_blocking(move || inspect(&account))
         .await?
@@ -249,6 +251,7 @@ async fn checked(edit: &ProfileEdit) -> Result<Result<store::ProfileFacts, Profi
             name,
             account,
             models,
+            memory,
         }))
 }
 

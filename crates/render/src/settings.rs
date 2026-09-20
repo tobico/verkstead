@@ -60,6 +60,14 @@
 //! nothing about them, and cannot have its own save turned down by a rule
 //! somebody hand-edited into the file weeks ago. What comes back names the row
 //! and the box, because that is what the page has to draw the error at.
+//!
+//! And the instructions are one text, both ways, and nothing else: the words
+//! every session is given whatever harness runs it, in place of the global
+//! `CLAUDE.md` a Built Root does not carry. A value like the binds — what is
+//! sent is what the file holds afterwards — and the one setting here that
+//! nothing could refuse, there being no grammar in a paragraph of prose to get
+//! wrong. It travels verbatim in both directions, because verbatim is what a
+//! harness is handed.
 
 use serde::{Deserialize, Serialize};
 
@@ -112,6 +120,19 @@ pub struct SettingsView {
     /// included: this is what the editor draws back into its rows, and a rule
     /// quietly left out of the read would be one the human could not correct.
     pub ignored_comments: Vec<IgnoreRule>,
+
+    /// And the one text every session is given, whatever harness runs it —
+    /// empty on a Verkstead nobody has typed one into, which is a session told
+    /// nothing beyond what its Repo carries.
+    ///
+    /// A string rather than an optional, and empty for nothing, the way the
+    /// author's two halves are: the box on the page holds a string either way,
+    /// and clearing it is how the text is taken off.
+    ///
+    /// Verbatim, line breaks and leading spaces and all. What a harness is
+    /// handed is these words, so what comes back here has to be the ones that
+    /// were typed rather than a tidied copy of them.
+    pub instructions: String,
 }
 
 /// How a merge conflict between a pull request and its base branch is resolved.
@@ -408,6 +429,16 @@ pub struct SettingsEdit {
     /// not about the rules says nothing about them, and the ones on disk are
     /// left exactly where they are.
     pub ignored_comments: IgnoredCommentsEdit,
+
+    /// And the text every session is given, as a value again — the plainest one
+    /// here. What is sent is what `config.yaml` holds afterwards, so a box
+    /// cleared on the page is the key taken out of the file.
+    ///
+    /// Nothing about it can be turned down. It is a paragraph of somebody's
+    /// prose for an agent to read: there is no grammar to get wrong, nothing to
+    /// compile and nobody to ask about it, so a save carrying it cannot fail
+    /// the way one carrying a rule can.
+    pub instructions: String,
 }
 
 /// The build cache as the human has just set it.
