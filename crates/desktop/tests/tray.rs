@@ -25,8 +25,13 @@
 //! gives it one with `dbus-run-session`, and so can anybody:
 //!
 //! ```text
-//! dbus-run-session -- cargo test -p verkstead-desktop --test tray -- --ignored
+//! dbus-run-session -- cargo test -p verkstead-desktop --test tray -- --ignored --test-threads=1
 //! ```
+//!
+//! **One at a time**, which is what that last flag is for: both tests here put a
+//! watcher on the bus under the one name the specification gives it, and one of
+//! them begins by asserting there is no watcher at all. Run beside each other
+//! they would be two tests arguing over a name rather than two tests.
 //!
 //! **No screen and no toolkit.** The GTK in this crate is the dialogs' and the
 //! loop's, and neither is on the way to an icon here — see
@@ -34,12 +39,13 @@
 //! `$DISPLAY` is not read by anything it touches.
 #![cfg(target_os = "linux")]
 
+use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use verkstead_desktop::tray;
-use zbus::blocking::connection;
+use verkstead_desktop::{panel, tray};
+use zbus::blocking::{Connection, connection};
 use zbus::interface;
 
 /// How long the icon is given to arrive.
@@ -107,20 +113,15 @@ impl Watcher {
     }
 }
 
-/// The app hands its icon to whoever is drawing the tray.
+/// Put the watcher on the bus, and hand back the list it fills in.
 ///
-/// The name the item takes carries this process's id — that is the form the
-/// specification asks for — so the assertion is not merely that *an* icon
-/// arrived but that this one did.
-#[test]
-#[ignore = "needs a session bus of its own; run it under dbus-run-session, as ci.yml does"]
-fn the_icon_reaches_a_watcher() {
+/// The connection comes back with it and has to be held: dropping it takes the
+/// watcher off the bus, and an app registering with a name nobody owns is the
+/// failure this whole file is about.
+fn watching() -> (Connection, Arc<Mutex<Vec<String>>>) {
     let registered = Arc::new(Mutex::new(Vec::new()));
 
-    // Held to the end of the test: dropping this takes the watcher off the bus,
-    // and an app registering with a name nobody owns is the failure this whole
-    // file is about.
-    let _watcher = connection::Builder::session()
+    let bus = connection::Builder::session()
         .expect(
             "this test speaks to a session bus and there is none here — run it under \
              `dbus-run-session`, as ci.yml does",
@@ -140,11 +141,15 @@ fn the_icon_reaches_a_watcher() {
              under a session bus of its own with `dbus-run-session`",
         );
 
-    // The icon, held for as long as there is a test to have one: dropping a
-    // `TrayIcon` takes it out of the tray, which here would be the app
-    // unregistering from the watcher mid-assertion.
-    let _icon = tray::show(Some(false), |_| {}).expect("the app could not raise its tray icon");
+    (bus, registered)
+}
 
+/// Wait for this process's own icon to be registered with the watcher.
+///
+/// The name an item takes carries the id of the process that published it —
+/// that is the form the specification asks for — so what is waited for here is
+/// not merely *an* icon but this one.
+fn wait_for_the_icon(registered: &Mutex<Vec<String>>) {
     let mine = format!("org.kde.StatusNotifierItem-{}-", std::process::id());
     let until = Instant::now() + PATIENCE;
 
@@ -155,12 +160,12 @@ fn the_icon_reaches_a_watcher() {
             .clone();
 
         if names.iter().any(|name| name.starts_with(&mine)) {
-            break;
+            return;
         }
 
         assert!(
             Instant::now() < until,
-            "the app raised its tray icon without registering it with the watcher on the bus: \
+            "the icon was raised without being registered with the watcher on the bus: \
              {names:?} arrived in {PATIENCE:?}, and none of them is this process's {mine}*"
         );
 
@@ -168,4 +173,66 @@ fn the_icon_reaches_a_watcher() {
         // notices, and long enough not to be a spin.
         sleep(Duration::from_millis(20));
     }
+}
+
+/// The app hands its icon to whoever is drawing the tray.
+#[test]
+#[ignore = "needs a session bus of its own; run it under dbus-run-session, as ci.yml does"]
+fn the_icon_reaches_a_watcher() {
+    let (_watcher, registered) = watching();
+
+    // Held for as long as there is a test to have one: dropping a `TrayIcon`
+    // takes it out of the tray, which here would be the app unregistering from
+    // the watcher mid-assertion.
+    let _icon = tray::show(Some(false), |_| {}).expect("the app could not raise its tray icon");
+
+    wait_for_the_icon(&registered);
+}
+
+/// A tray that starts after Verkstead does still gets the icon.
+///
+/// The case this is about is the ordinary one on a desktop that launches
+/// Verkstead at login: the app comes up first, offers its icon to a bus with no
+/// panel on it, and is refused. What it does then is wait, which is
+/// [`panel::when_one_arrives`] — and this is that wait, from nothing on the bus
+/// through to the icon registered.
+///
+/// What the app does when told is hop onto the loop's thread and offer the icon
+/// again; the hop is [`verkstead_desktop::toolkit::later`], which every menu
+/// pick already goes through, so what is asserted here is the telling and the
+/// offer either side of it.
+#[test]
+#[ignore = "needs a session bus of its own; run it under dbus-run-session, as ci.yml does"]
+fn a_tray_that_arrives_late_still_gets_the_icon() {
+    assert!(
+        !panel::is_there(),
+        "this test starts with a bus that has no tray on it, and this one has one — run it \
+         under a session bus of its own with `dbus-run-session`",
+    );
+
+    let (told, being_told) = channel();
+    panel::when_one_arrives(move || {
+        let _ = told.send(());
+    })
+    .expect("the app could not watch the bus for a tray");
+
+    // Nothing has arrived, so nothing should have been said. A watch that fires
+    // on its own is a watch that would have the app offering its icon into an
+    // empty bus and settling for the refusal.
+    assert!(
+        being_told.recv_timeout(Duration::from_millis(500)).is_err(),
+        "the app was told a tray had arrived while there was none on the bus",
+    );
+
+    let (_watcher, registered) = watching();
+
+    being_told
+        .recv_timeout(PATIENCE)
+        .expect("a tray arrived on the bus and the app was never told");
+
+    // Which is what the app does next, and where this test stands in for the
+    // loop the app hops onto to do it.
+    let _icon = tray::show(Some(false), |_| {}).expect("the app could not raise its tray icon");
+
+    wait_for_the_icon(&registered);
 }

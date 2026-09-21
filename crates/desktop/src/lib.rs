@@ -67,6 +67,12 @@ pub mod elevate;
 pub mod logs;
 /// Handing a URL or a file to whatever this desktop opens it with.
 pub mod opener;
+/// Whatever draws the tray on this desktop, and whether it is there yet.
+///
+/// Linux's alone: it is the one platform where the thing that draws the icon is
+/// a program that can be missing, or late.
+#[cfg(target_os = "linux")]
+pub mod panel;
 /// Whether this process has a screen to draw on.
 pub mod screen;
 /// Whether Verkstead comes up when the desktop session does.
@@ -229,30 +235,41 @@ impl Desktop {
             }
         }
 
-        let Some(tray) = raise(listen, &key, &logging, &startup) else {
-            // No tray to be in, so this is `verkstead serve` with a browser
-            // opened: the main thread waits on the server, and the process is
-            // stopped the way that one is.
-            //
-            // **And with the link, because there is no longer anybody to hand
-            // it over.** The startup line names the address alone on the
-            // reasoning that this install hands the link out itself — and the
-            // whole of that handing out is the browser above and the tray's
-            // **Open**. A run that reached here has no tray, and one that
-            // reached here with `--no-open` or a browser that would not start
-            // has had neither: leaving the link off *here* would be the
-            // redacting-everywhere that ADR-0015 rejected, and would leave a
-            // machine serving a workbench nobody can get into. So this is the
-            // daemon's way, taken by the app exactly where the app has become
-            // the daemon.
+        let raised = raise(listen, &key, &logging, &startup);
+
+        // **The link, wherever there is no icon to press Open in — which
+        // includes the run that is about to grow one.** The startup line names
+        // the address alone on the reasoning that this install hands the link
+        // out itself, and the whole of that handing out is the browser above and
+        // the tray's **Open**. A run that reached here has no tray yet, and one
+        // that reached here with `--no-open` or a browser that would not start
+        // has had neither: leaving the link off *here* would be the
+        // redacting-everywhere that ADR-0015 rejected, and would leave a machine
+        // serving a workbench nobody can get into. So this is the daemon's way,
+        // taken by the app exactly where the app is a daemon — for the whole run
+        // below, or for however much of it passes before a tray turns up.
+        if !matches!(raised, Raised::Now(_)) {
             tracing::info!(
                 workbench = %login_link(listen, &key),
                 "there is no tray to press Open in, so this is the way in",
             );
+        }
 
-            return runtime
-                .block_on(serving)
-                .context("the thread the server was running on ended")?;
+        let tray = match raised {
+            Raised::Now(icon) => Some(icon),
+            // The loop is held anyway, because the icon can still go up in it:
+            // what is waiting for a tray raises the icon from inside this loop
+            // and leaves it with [`tray::keep`], so there is nothing to hold
+            // here. See [`raise`].
+            Raised::WhenATrayArrives => None,
+            // No tray to be in and none coming, so this is `verkstead serve`
+            // with a browser opened: the main thread waits on the server, and
+            // the process is stopped the way that one is.
+            Raised::Nowhere => {
+                return runtime
+                    .block_on(serving)
+                    .context("the thread the server was running on ended")?;
+            }
         };
 
         // The server's own ending, brought to the thread the loop is about to
@@ -275,6 +292,10 @@ impl Desktop {
         // of rather than waited on — see this method's own docs for what Exit
         // leaves behind, which is nothing.
         drop(tray);
+        // And the other one, where the icon went up inside the loop that has
+        // just ended: the loop's thread is this thread, which is the thread
+        // holding it. See [`tray::keep`].
+        tray::let_go();
         runtime.shutdown_background();
 
         match ended {
@@ -305,19 +326,40 @@ fn escalation(screen: bool) -> Option<Arc<dyn verkstead_server::remote::Elevate>
     screen.then(|| Arc::new(elevate::Graphical::here()) as Arc<_>)
 }
 
-/// The icon in the tray, or `None` where there is nowhere to put one.
+/// Where the icon went, which is not always up and not always now.
+enum Raised {
+    /// It is in the tray, and this is it: dropping it takes it out again.
+    Now(TrayIcon),
+    /// Not yet, and not never. There is a screen and a toolkit here and nothing
+    /// drawing a tray on the bus — so the icon is offered again when something
+    /// arrives at the name a tray owns, and until then this app is the loop with
+    /// no icon in it. Linux's alone; see [`panel`].
+    WhenATrayArrives,
+    /// Nowhere, and nothing about this run will change that.
+    Nowhere,
+}
+
+/// Put the icon in the tray, or say why it is not there.
 ///
-/// **None of the ways there is nowhere is a reason to stop serving.** No screen
+/// **None of the ways it is not there is a reason to stop serving.** No screen
 /// at all — over SSH, in a container, under a test — is a Verkstead serving
 /// browsers elsewhere and nothing wrong with it; a screen that is named and
 /// cannot be opened, or a tray that will not take the icon, is a machine to say
 /// something about in the log. What is left in each case is the server and the
 /// viewer, which is the useful half of the app.
 ///
-/// A desktop with no tray host running is *not* one of them: the item registers
-/// on the bus whether or not anything is drawing it, so an icon nobody shows is
-/// one this cannot tell from an icon somebody does. macOS has no such question
-/// — the menu bar is the session's own and always there.
+/// **A Linux desktop with nothing drawing a tray is not one of them either, and
+/// it is not an answer that holds for the session.** What draws the icon there
+/// is a program — part of a panel, or a shell extension — and this app can be
+/// started before it: a session that launches Verkstead at login, which is what
+/// the Launch on Startup box arranges, is a race this app loses about as often
+/// as it wins. The icon is offered again when one turns up, which is
+/// [`Raised::WhenATrayArrives`]. macOS and Windows have no such question — a
+/// menu bar and a notification area are the session's own and are always there.
+///
+/// An icon that *was* taken and whose tray then went away is nobody's problem
+/// here: the item stays published, and the backend registers with the next tray
+/// to arrive on its own account.
 ///
 /// `listen` and `key` are where Open sends the browser: the same login link
 /// that was opened at startup, built again at each press rather than captured
@@ -331,15 +373,15 @@ fn raise(
     key: &WorkbenchKey,
     logging: &logs::Kept,
     startup: &startup::Startup,
-) -> Option<TrayIcon> {
+) -> Raised {
     if !screen::there_is_one() {
         tracing::info!("there is no screen here, so Verkstead is running as the server alone");
-        return None;
+        return Raised::Nowhere;
     }
 
     if let Err(error) = toolkit::start() {
         tracing::warn!("the desktop toolkit would not start, so there is no tray icon: {error:#}");
-        return None;
+        return Raised::Nowhere;
     }
 
     // Said where the refusal above is said, and for the reader who is owed the
@@ -354,14 +396,20 @@ fn raise(
 
     let key = key.clone();
     let logging = logging.clone();
+    // Two of them, because the icon can be offered twice: what the handler
+    // below does with the registration is the same work whichever offer was
+    // taken, and what the box is ticked to has to be read again at the second
+    // one — a tick is what the registration said as the menu was made, and a
+    // menu made later is a later reading.
+    let ticking = startup.clone();
     let startup = startup.clone();
 
-    // What the box is ticked to as the menu is made, which is what the
-    // registration says right now — or nothing to tick, on a machine with
-    // nowhere to keep one.
-    let ticked = startup.possible().then(|| startup.on());
-
-    let raised = tray::show(ticked, move |chosen| match chosen {
+    // **Behind an `Arc` rather than handed straight over**, for the same
+    // reason: where nothing is drawing a tray yet the icon is offered again
+    // from inside the loop, and what is offered with it is this same handler
+    // rather than a second one built out of second copies of everything it
+    // holds.
+    let chosen: Arc<dyn Fn(tray::Chosen) + Send + Sync> = Arc::new(move |chosen| match chosen {
         tray::Chosen::Open => {
             // The link rather than the bare address, and built here rather than
             // captured: what makes a browser the human's is the key on it, and a
@@ -415,16 +463,64 @@ fn raise(
         tray::Chosen::Exit => toolkit::stop(),
     });
 
+    // **Asked before the icon is offered, rather than read off a refusal.**
+    // There is nothing to put an icon in until something owns the name a tray
+    // owns, and the backend answers that with an error among its others — so
+    // the app asks the bus itself, and what comes back is the difference
+    // between a tray that is not there yet and a tray that would not have it.
+    // See [`panel`].
+    #[cfg(target_os = "linux")]
+    if !panel::is_there() {
+        // The same offer, made from inside the loop when there is somewhere for
+        // it to go. What it hands `panel` is the hop rather than the work: every
+        // pick the menu leads to is the loop thread's, and so is the menu — see
+        // [`toolkit::later`], and [`tray::keep`] for who holds an icon raised
+        // where there is no caller left to hold it.
+        let offering = move || {
+            let ticked = ticking.possible().then(|| ticking.on());
+
+            if let Some(icon) = said(tray::show(ticked, move |picked| chosen(picked))) {
+                tray::keep(icon);
+            }
+        };
+
+        return match panel::when_one_arrives(move || toolkit::later(offering)) {
+            Ok(()) => {
+                tracing::info!(
+                    "nothing is drawing a tray on this desktop yet, so the icon goes up when \
+                     something is"
+                );
+                Raised::WhenATrayArrives
+            }
+            // Which is the bus itself rather than the tray on it: no session bus
+            // to publish an icon on, and none coming.
+            Err(error) => {
+                tracing::warn!("putting the icon in the tray: {error:#}");
+                Raised::Nowhere
+            }
+        };
+    }
+
+    // What the box is ticked to as the menu is made, which is what the
+    // registration says right now — or nothing to tick, on a machine with
+    // nowhere to keep one.
+    let ticked = ticking.possible().then(|| ticking.on());
+
+    said(tray::show(ticked, move |picked| chosen(picked))).map_or(Raised::Nowhere, Raised::Now)
+}
+
+/// Say what came of offering the icon, and hand back whatever there is to hold.
+///
+/// **The line on the way through is as much the point as the icon.** The log is
+/// the only mark any of this leaves, and a reader who has been told what *would*
+/// have gone wrong is owed the line saying nothing did. It is also what the
+/// release workflow's macOS and Windows legs read to know that the app they have
+/// just built can raise a tray at all — a headless run reaches neither the
+/// toolkit nor the item, so this line is the whole of what tells the two apart.
+/// See `.github/workflows/release.yml`.
+fn said(raised: Result<TrayIcon>) -> Option<TrayIcon> {
     match raised {
         Ok(icon) => {
-            // Said on the way through, where each of the two refusals above is
-            // said: the log is the only mark any of this leaves, and a reader
-            // who has been told what *would* have gone wrong is owed the line
-            // saying nothing did. It is also what the release workflow's
-            // desktop leg reads to know that the bundle it has just built can
-            // raise a tray at all — a headless run reaches neither the toolkit
-            // nor the bus item, so this line is the whole of what tells the two
-            // apart. See `.github/workflows/release.yml`.
             tracing::info!("Verkstead is in the tray");
             Some(icon)
         }

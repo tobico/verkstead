@@ -717,9 +717,10 @@ jobs:
       # nothing of the bundle's left in it; what there is to assert is that the
       # app registers with a panel, which is
       # `crates/desktop/tests/tray.rs` on every pull request rather than this leg
-      # by hand at a release. The app's log here will carry a warning about a
-      # watcher it could not find, and that is this container having no panel in
-      # it rather than anything about the file being shipped.
+      # by hand at a release. The app's log here will carry a warning about
+      # there being no session bus to publish an icon on, and that is this
+      # container being a container rather than anything about the file being
+      # shipped.
       #
       # `--no-open` stays: a screen is not a browser, and there is still nothing
       # here to hand a URL to.

@@ -145,7 +145,9 @@ jobs:
       # The Linux tray, which the run above skipped and which nothing else in
       # this project asks about. The icon is published onto the session bus and
       # drawn by a panel, so the suite stands a watcher of its own on a bus of
-      # its own and waits for the app's icon to arrive at it — see
+      # its own and waits for the app's icon to arrive at it — and then does it
+      # again with the watcher arriving second, which is what a desktop that
+      # launches Verkstead at login looks like. See
       # `crates/desktop/tests/tray.rs`, which says why that is a test here and
       # not a line in the release workflow.
       #
@@ -154,10 +156,14 @@ jobs:
       # is a bus where this cannot run. A runner has no session bus at all, and
       # a suite that quietly passed for want of one would be no check.
       #
-      # **`--ignored`**, because the test is marked so for the reason above: it
-      # is skipped by the workspace run and asked for here by name.
+      # **`--ignored`**, because the tests are marked so for the reason above:
+      # they are skipped by the workspace run and asked for here by name.
+      # **`--test-threads=1`**, because they take turns at the one name a
+      # watcher has — see the file.
       - name: The tray reaches a panel
-        run: dbus-run-session -- cargo test -p verkstead-desktop --test tray -- --ignored
+        run: |
+          dbus-run-session -- cargo test -p verkstead-desktop --test tray -- \
+            --ignored --test-threads=1
 
   # What the same sandbox comes to on a Mac, asked of a Mac. What a session may
   # reach is one description said once, and `sandbox-exec` is the second

@@ -97,6 +97,16 @@ gtk = "0.18"
 # accelerators on its predefined items, this menu has neither, and carrying it
 # would put a system library into CI, the dev shell and the AppImage for nothing.
 tray-icon = { version = "0.25", default-features = false, features = ["ksni"] }
+# The same bus, spoken to directly for the one question the backend above does
+# not ask twice: whether anything is out there to draw a tray. `ksni` offers the
+# icon once and gives up where nobody answers, and a Verkstead started with the
+# session — which is what the Launch on Startup box arranges — is a Verkstead
+# racing the panel it needs. So this app watches the name a tray owns and raises
+# the icon when one arrives. See `panel`, and `tray` for what is published.
+#
+# Already in the build under `ksni`, which is written on it, so what naming it
+# here adds to the tree is nothing.
+zbus = "5"
 
 # And the macOS half: AppKit, reached through the `objc2` bindings `tray-icon`
 # already builds on this platform, so the two halves of the app speak to one set
@@ -173,14 +183,3 @@ winresource = { version = "0.1", default-features = false }
 # A directory of the test's own for a registration to be written into, and — in
 # the shim's suite — for a stand-in `verkstead.exe` to stand in.
 tempfile = "3"
-
-# The tray's own suite, which is Linux's: what the icon is published onto is the
-# session bus, and what draws it is a panel — so the thing a test has to put
-# there is the panel's half of the specification. See `tests/tray.rs`.
-[target.'cfg(target_os = "linux")'.dev-dependencies]
-# The bus, spoken to directly rather than through the tray. It is already in the
-# build — `ksni` is written on it — so what this adds to the tree is nothing; it
-# is named here because a test that owns `org.kde.StatusNotifierWatcher` and
-# answers the one call the specification makes to it is a bus program in its own
-# right, and a dependency a test uses is a dependency a test declares.
-zbus = "5"
