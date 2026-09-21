@@ -70,9 +70,16 @@ jobs:
       # beside it and is spoken onto the session bus in Rust instead — see
       # `crates/desktop/Cargo.toml`. The package index is the one the step above
       # just updated.
+      #
+      # And `dbus-x11` for `dbus-run-session`, which nothing builds or links
+      # against: the tray's suite wants a session bus with no panel on it, and a
+      # runner has no session at all. Asked for under that name rather than
+      # `dbus-run-session`'s own package, because it depends on it under a name
+      # that has moved between releases and this one has not. See the tray step
+      # at the end of this job.
       - name: Install the desktop app's toolkit
         run: |
-          sudo apt-get install -y pkg-config libgtk-3-dev
+          sudo apt-get install -y pkg-config libgtk-3-dev dbus-x11
 
       # For the dev-shell autodetection alone: it decides whether to wrap a
       # session's command in `nix develop` by evaluating a flake attribute, so
@@ -134,6 +141,23 @@ jobs:
             git diff
             exit 1
           fi
+
+      # The Linux tray, which the run above skipped and which nothing else in
+      # this project asks about. The icon is published onto the session bus and
+      # drawn by a panel, so the suite stands a watcher of its own on a bus of
+      # its own and waits for the app's icon to arrive at it — see
+      # `crates/desktop/tests/tray.rs`, which says why that is a test here and
+      # not a line in the release workflow.
+      #
+      # **A bus of its own**, which is what `dbus-run-session` is for: the name
+      # the suite takes is the one a panel holds, so a bus with a desktop on it
+      # is a bus where this cannot run. A runner has no session bus at all, and
+      # a suite that quietly passed for want of one would be no check.
+      #
+      # **`--ignored`**, because the test is marked so for the reason above: it
+      # is skipped by the workspace run and asked for here by name.
+      - name: The tray reaches a panel
+        run: dbus-run-session -- cargo test -p verkstead-desktop --test tray -- --ignored
 
   # What the same sandbox comes to on a Mac, asked of a Mac. What a session may
   # reach is one description said once, and `sandbox-exec` is the second

@@ -579,18 +579,19 @@ jobs:
       # it back with, which is what lets the assertions run the artifact itself
       # rather than something unpacked out of it.
       #
-      # And `xvfb` and `dbus-x11`, which nothing builds or bundles with: a
-      # runner has no screen and no session bus, and without both the app takes
-      # its no-screen path and the bundled toolkit is never loaded at all — see
-      # the assertion for what that would leave unchecked. `dbus-x11` is asked
-      # for rather than `dbus-run-session`'s own package, because it depends on
-      # it under a name that has moved between releases and this one has not.
+      # And `xvfb`, which nothing builds or bundles with: a runner has no screen,
+      # and without one the app takes its no-screen path and the bundled toolkit
+      # is never loaded at all — see the assertion for what that would leave
+      # unchecked. No session bus here, and none wanted: what a bus would get
+      # this leg is the tray, and the tray is no longer anything this bundle can
+      # be wrong about — see `crates/desktop/tests/tray.rs`, which is where it is
+      # asserted, on every pull request.
       - name: Install what a distribution image has not got
         run: |
           apt-get update
           apt-get install -y ca-certificates curl git build-essential \
             pkg-config libgtk-3-dev \
-            squashfs-tools fuse3 xvfb dbus-x11
+            squashfs-tools fuse3 xvfb
 
       - uses: actions/checkout@v7.0.1
         with:
@@ -698,26 +699,36 @@ jobs:
           esac
 
       # The two halves of what a human downloads this file for, asserted on one
-      # run of it: a tray icon, and the viewer behind it.
+      # run of it: the toolkit this bundle carries, and the viewer behind it.
       #
       # **A screen, deliberately.** A runner has none, and a Verkstead started
       # without one reads that as a session with nowhere to put an icon, serves
       # anyway, and never starts the toolkit — see `crates/desktop/src/screen.rs`.
-      # Which would leave every library the bundle carries for the tray's sake
-      # unopened by this leg, and nothing but a run with a screen would ever find
-      # out whether what was copied in was the right file. So Xvfb is started and
-      # `$DISPLAY` points at it, and the app is run under a session bus of its
-      # own, which is where the tray item registers itself — the bus half being
-      # the whole of the tray now rather than a library drawn over the toolkit.
+      # Which would leave the GTK this bundle carries unopened by this leg: the
+      # dialogs are drawn with it and the app's loop is its, and nothing but a
+      # run with a screen would ever find out whether what was copied in loads.
+      # So Xvfb is started and `$DISPLAY` points at it.
+      #
+      # **The tray is asserted elsewhere, and deliberately not here.** It used to
+      # be this step's other half, back when it was drawn over an appindicator
+      # that `tools/build-appimage.sh` copied in by hand — a file the bundle
+      # could be wrong about, and only a run like this one would say so. It is
+      # Rust on the session bus now and its artwork is compiled in, so there is
+      # nothing of the bundle's left in it; what there is to assert is that the
+      # app registers with a panel, which is
+      # `crates/desktop/tests/tray.rs` on every pull request rather than this leg
+      # by hand at a release. The app's log here will carry a warning about a
+      # watcher it could not find, and that is this container having no panel in
+      # it rather than anything about the file being shipped.
       #
       # `--no-open` stays: a screen is not a browser, and there is still nothing
       # here to hand a URL to.
       #
-      # **The log is where the answer is.** Nothing about the tray is visible
-      # from outside the process, so the app says so itself — one line on the way
-      # up, and a warning on each of the ways it can end without an icon — and
-      # `$XDG_STATE_HOME` is set so the file it says it in is somewhere this step
-      # knows. See `crates/desktop/src/lib.rs`.
+      # **The log is where the answer is.** A toolkit that started is not visible
+      # from outside the process, so the app says so itself — one line once GTK
+      # is up, and a warning where it would not start — and `$XDG_STATE_HOME` is
+      # set so the file it says it in is somewhere this step knows. See
+      # `crates/desktop/src/lib.rs`.
       #
       # `--retry-connrefused` rather than a sleep, as in the CLI legs: the app is
       # up when it answers.
@@ -727,7 +738,7 @@ jobs:
       # for somebody to dismiss it. Nobody is here, so a run that got that far
       # would hold the job until the runner's own six hours were up rather than
       # failing in front of whoever tagged.
-      - name: The tray comes up, and the viewer is inside the AppImage
+      - name: The toolkit comes up, and the viewer is inside the AppImage
         timeout-minutes: 5
         env:
           XDG_STATE_HOME: ${{ runner.temp }}/state
@@ -755,7 +766,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/desktop"
           printf '%s\n' "$key" > "$RUNNER_TEMP/desktop/workbench.key"
 
-          dbus-run-session -- ./"$APPIMAGE" --no-open --listen 127.0.0.1:8422 \
+          ./"$APPIMAGE" --no-open --listen 127.0.0.1:8422 \
             --data-dir "$RUNNER_TEMP/desktop" &
           app=$!
           document=$(curl --fail --silent --show-error \
@@ -763,12 +774,12 @@ jobs:
             --cookie "workbench_key=$key" \
             http://127.0.0.1:8422/)
 
-          # The icon is raised on the main thread while the server comes up on
-          # another, so the viewer answering is no promise that the tray has
+          # The toolkit is started on the main thread while the server comes up
+          # on another, so the viewer answering is no promise that GTK has
           # finished either way yet. Waited for here rather than read after the
           # kill, where whichever won the race would be the answer.
           for _ in $(seq 50); do
-            if grep -q "Verkstead is in the tray" "$log" 2> /dev/null; then
+            if grep -q "the desktop toolkit is up" "$log" 2> /dev/null; then
               break
             fi
             sleep 0.2
@@ -788,12 +799,14 @@ jobs:
               ;;
           esac
 
-          # And the tray, out of the app's own log. Read for the line rather than
-          # against the warnings, so that a log which was never written — no log
-          # directory, and the events on a standard error nobody kept — fails
-          # here rather than passing for want of anything to find in it.
-          if ! grep -q "Verkstead is in the tray" "$log" 2> /dev/null; then
-            echo "::error::The AppImage did not raise a tray icon."
+          # And the toolkit, out of the app's own log — which on Linux is the
+          # bundled GTK having been found, loaded and initialised. Read for the
+          # line rather than against the warnings, so that a log which was never
+          # written — no log directory, and the events on a standard error
+          # nobody kept — fails here rather than passing for want of anything to
+          # find in it.
+          if ! grep -q "the desktop toolkit is up" "$log" 2> /dev/null; then
+            echo "::error::The AppImage did not start the toolkit it carries."
             cat "$log" 2> /dev/null || echo "There is no log at $log."
             exit 1
           fi

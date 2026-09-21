@@ -342,6 +342,16 @@ fn raise(
         return None;
     }
 
+    // Said where the refusal above is said, and for the reader who is owed the
+    // line saying nothing went wrong. It is also the whole of what the release
+    // workflow's AppImage leg reads: on Linux a toolkit that started is the
+    // bundled GTK having been found, loaded and initialised, which is the one
+    // claim about the bundle that a run with a screen can make for itself. The
+    // tray is no claim of the bundle's any more — it is spoken onto the session
+    // bus in Rust, and `crates/desktop/tests/tray.rs` is where that is asserted.
+    // See `.github/workflows/release.yml` and `.github/workflows/ci.yml`.
+    tracing::info!("the desktop toolkit is up");
+
     let key = key.clone();
     let logging = logging.clone();
     let startup = startup.clone();

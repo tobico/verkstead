@@ -173,3 +173,14 @@ winresource = { version = "0.1", default-features = false }
 # A directory of the test's own for a registration to be written into, and — in
 # the shim's suite — for a stand-in `verkstead.exe` to stand in.
 tempfile = "3"
+
+# The tray's own suite, which is Linux's: what the icon is published onto is the
+# session bus, and what draws it is a panel — so the thing a test has to put
+# there is the panel's half of the specification. See `tests/tray.rs`.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+# The bus, spoken to directly rather than through the tray. It is already in the
+# build — `ksni` is written on it — so what this adds to the tree is nothing; it
+# is named here because a test that owns `org.kde.StatusNotifierWatcher` and
+# answers the one call the specification makes to it is a bus program in its own
+# right, and a dependency a test uses is a dependency a test declares.
+zbus = "5"

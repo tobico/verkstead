@@ -156,6 +156,13 @@
               # Nothing else here needs one: `crates/desktop` is the first thing
               # in this repository to link a system library at all.
               pkg-config
+              # `dbus-run-session`, which the tray's suite is run under: the
+              # icon is published onto the session bus, and what that suite puts
+              # on the bus is the panel's own name — so it wants a session of
+              # its own rather than the desktop's. Nothing links this and the
+              # AppImage carries none of it; a developer running
+              # `crates/desktop/tests/tray.rs` is the whole of what it is for.
+              dbus
             ]);
 
           # The desktop app's toolkit (ADR-0012). A build input rather than a
