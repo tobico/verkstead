@@ -780,6 +780,20 @@ was made alongside. The rest is a sentence on the screen of instructions:
 Apple's own dialog on that Mac's screen rather than a command Verkstead can
 run for you, while Codex is a binary to put in `~/.local/bin`, which every Mac
 session looks in.
+**And on either Mac, `git` counts only with Apple's command line tools.** Every
+Mac has a `/usr/bin/git`, and without the tools behind it that file is a stub
+whose whole behaviour is to open Apple's install dialog and exit — so a row
+that ticked on finding it ticked on every Mac ever made, and handed each
+session of the ones without the tools a `git` that fails. What the row asks is
+`xcode-select`, never the stub: running the stub is what opens the dialog, on a
+machine nobody is standing at, every ten seconds the wizard re-probes. A Mac
+without the tools reads as a Mac with no `git`, with what `xcode-select` said
+under the row, and both Mac tabs lead their `git` row with
+`xcode-select --install` — Apple silicon keeping `brew install git` beneath it,
+that being the `git` a developer's Mac usually runs. A `git` from Homebrew or
+from nix is nobody's stub and ticks on being there, the way one does on every
+other machine.
+
 Only what could not be installed here — a NixOS, a server with no way to raise
 a dialog, an installer that would not run, a Homebrew that could not be
 installed, an Intel Mac's `git` — reaches a screen of instructions afterwards,

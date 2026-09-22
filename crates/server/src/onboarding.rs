@@ -16,11 +16,11 @@
 //! gone is said. See [`Mode`].
 //!
 //! **Everything else is probed on every read.** The probes are a `PATH` walked,
-//! one `bwrap` run, a home looked in and a settings file read, and probing on
-//! read is what leaves nothing running while nobody is looking: the wizard
-//! re-reads while a step is unmet, so an install that lands is ticked within ten
-//! seconds of landing, an account that appears is offered as quickly, and a
-//! closed workbench asks the machine nothing at all.
+//! one `bwrap` run, one `xcode-select` asked, a home looked in and a settings
+//! file read, and probing on read is what leaves nothing running while nobody
+//! is looking: the wizard re-reads while a step is unmet, so an install that
+//! lands is ticked within ten seconds of landing, an account that appears is
+//! offered as quickly, and a closed workbench asks the machine nothing at all.
 //!
 //! **Present means a session would find it.** A session resolves its binaries
 //! on the `PATH` inside the Sandbox, so every probe here resolves on that same
@@ -169,6 +169,45 @@ const SHELL: &str = "/bin/sh";
 
 /// The program the Linux sandbox row is about.
 const BWRAP: &str = "bwrap";
+
+/// The program the Mac's `git` row asks whether Apple's command line tools are
+/// installed.
+///
+/// **Asked instead of the `git` it is about.** Every Mac has a `/usr/bin/git`,
+/// and without the tools behind it that file is a stub whose whole behaviour is
+/// to open Apple's install dialog and exit — so running it to find out is
+/// opening that dialog on a machine nobody is standing at, every ten seconds
+/// the wizard re-probes. This is the program that answers the same question and
+/// opens nothing. See [`Machine::command_line_tools`].
+const XCODE_SELECT: &str = "xcode-select";
+
+/// The one thing it is asked, which prints the tools' own directory.
+///
+/// Its own constant so that the claim can be asked of a real machine — see
+/// `what_the_git_row_asks_about_the_tools_is_a_question_this_machine_answers`,
+/// which is the test a stub `xcode-select` cannot be.
+const PRINTED: &str = "-p";
+
+/// The `git` Apple ships, which is the one a Mac has whether anybody installed
+/// anything or not.
+///
+/// **Read as three components rather than as the one path**, the way the
+/// sandbox module reads Claude Code's desktop app by the directory it stands
+/// in: what a path *is* is a question about its components, and a shape is a
+/// thing a stated machine can have — a fixture's `usr/bin/git` under a
+/// temporary directory is the same file this is about, and on the machine the
+/// shape sits at the root.
+const APPLES_GIT: &str = "usr/bin/git";
+
+/// What the `git` row says on a Mac with no `xcode-select` on the `PATH` to
+/// ask.
+///
+/// An unanswered question is not a yes: the file a session would run is Apple's
+/// stub either way, so what the row can say is that it could not find out
+/// rather than that the tools are missing.
+const NO_XCODE_SELECT: &str = "the git a session would run is the stub Apple ships under /usr/bin, and there is no \
+     xcode-select on this machine's PATH to ask whether the command line tools behind it are \
+     installed";
 
 /// What a machine calls itself when it will not say, and what a stated one is
 /// called until a test says otherwise — see [`Machine::called`].
@@ -546,7 +585,8 @@ impl Machine {
     /// Every row of the dependencies step, in the order it is drawn: the
     /// sandbox, `git`, the four harnesses, and `gh`.
     ///
-    /// Blocks: a `PATH` walk apiece, and one `bwrap` run.
+    /// Blocks: a `PATH` walk apiece, one `bwrap` run on Linux, and one
+    /// `xcode-select` on a Mac whose `git` is Apple's.
     ///
     /// Reachable from outside the crate because one row is a question about the
     /// machine that no router can be stood up to ask: the Windows sandbox row
@@ -557,7 +597,7 @@ impl Machine {
     pub fn rows(&self) -> Vec<DependencyView> {
         let mut rows = vec![row(Dependency::Sandbox, self.sandbox())];
 
-        rows.push(row(Dependency::Git, self.installed(sandbox::GIT)));
+        rows.push(row(Dependency::Git, self.git()));
 
         rows.extend(HARNESSES.iter().map(|(dependency, agent_type)| {
             row(*dependency, self.installed(sessions::binary(*agent_type)))
@@ -610,33 +650,12 @@ impl Machine {
     /// program to install and the third is Claude Code with no CLI on the end
     /// of its name, and a row that said only *absent* would send them to
     /// install what they have. See [`sandbox::standing`], which is where all
-    /// five answers are decided.
+    /// five answers are decided, and [`stood`], which is that answer read as a
+    /// row — kept apart from the walk so that the `git` row, which asks a
+    /// second question of what it walked to, can read the same standing rather
+    /// than walk for it twice.
     fn installed(&self, program: &str) -> DependencyState {
-        match self.reaches(program) {
-            sandbox::Standing::Found { at, landed, .. } => DependencyState::Present {
-                at: Some(shown_path(&at)),
-                // The link's target, and only where it is another file: a
-                // program that is no link has one path and would read as two.
-                target: (landed != at).then(|| shown_path(&landed)),
-            },
-            sandbox::Standing::Beyond { at } => absent(Seen::Beyond {
-                at: shown_path(&at),
-            }),
-            sandbox::Standing::Leading { at, target } => absent(Seen::Leading {
-                at: shown_path(&at),
-                target: shown_path(&target),
-            }),
-            sandbox::Standing::Dangling { at } => absent(Seen::Dangling {
-                at: shown_path(&at),
-            }),
-            sandbox::Standing::Desktop { at } => absent(Seen::Desktop {
-                at: shown_path(&at),
-            }),
-            sandbox::Standing::Nowhere => DependencyState::Absent {
-                trouble: None,
-                seen: None,
-            },
-        }
+        stood(self.reaches(program))
     }
 
     /// The `PATH` a session searches, which on the machine this server is
@@ -686,14 +705,15 @@ impl Machine {
     /// And `program` resolved on that same list and nothing more asked of it:
     /// no link followed, no reach checked, no second list read.
     ///
-    /// The shorter question, for the two rows that go and *run* something out
-    /// here rather than say whether a session could. The Linux sandbox row
-    /// starts a `bwrap` in this process, and the git step reads a `git config`
-    /// out of the machine's own — see [`Machine::sandbox`] and
-    /// [`Machine::configured`], which are both of them. What either needs is a
-    /// file this process can start, and following a link into an install a
-    /// *session* could not reach would be answering somebody else's question
-    /// with it.
+    /// The shorter question, for the three things that go and *run* something
+    /// out here rather than say whether a session could. The Linux sandbox row
+    /// starts a `bwrap` in this process, the Mac's `git` row asks an
+    /// `xcode-select` whether the command line tools are installed, and the git
+    /// step reads a `git config` out of the machine's own — see
+    /// [`Machine::sandbox`], [`Machine::command_line_tools`] and
+    /// [`Machine::configured`], which are the three. What each needs is a file
+    /// this process can start, and following a link into an install a *session*
+    /// could not reach would be answering somebody else's question with it.
     ///
     /// A session's `PATH` rather than the server's all the same, so that what a
     /// row reports having run is a program on the list the row is about — see
@@ -768,6 +788,81 @@ impl Machine {
                 target: None,
             },
             Err(why) => no_account(why),
+        }
+    }
+
+    /// And what the `git` row says, which on a Mac is a second question.
+    ///
+    /// **Every Mac has a `/usr/bin/git`, and without Apple's command line tools
+    /// it is a stub**: run, it opens the install dialog and exits non-zero. So a
+    /// row that ticked on the file being there ticked on every Mac ever made,
+    /// and handed each session of the ones without the tools a `git` that fails
+    /// — which is [ADR 0016](../../../docs/adr/0016-onboarding.md)'s *Macs*:
+    /// git on a Mac counts only with the command line tools.
+    ///
+    /// So where the file a session would run is Apple's — see [`APPLES_GIT`],
+    /// which is that file read by its shape — the row is present only where
+    /// `xcode-select` says the tools are there, and absent with what it printed
+    /// underneath where it does not, the way a `bwrap` that would not run leaves
+    /// its stderr under the sandbox row.
+    ///
+    /// **And the stub is never the thing run.** Running it is what opens the
+    /// dialog, on a machine nobody is standing at, every ten seconds the wizard
+    /// re-probes: `git` is resolved and [`XCODE_SELECT`] is what is asked.
+    ///
+    /// A `git` that resolved anywhere else is Homebrew's or nix's or somebody's
+    /// own, and is the walk alone the way it is on every other platform —
+    /// Linux and Windows being the walk alone whatever it resolved to.
+    fn git(&self) -> DependencyState {
+        let standing = self.reaches(sandbox::GIT);
+
+        // Apple's own file on a Mac, which is the one case there is a second
+        // question about.
+        let stub = self.platform == Platform::MacOs
+            && matches!(
+                &standing,
+                sandbox::Standing::Found { landed, .. } if landed.ends_with(APPLES_GIT),
+            );
+
+        if stub {
+            if let Err(trouble) = self.command_line_tools() {
+                return DependencyState::Absent {
+                    trouble,
+                    seen: None,
+                };
+            }
+        }
+
+        stood(standing)
+    }
+
+    /// Whether Apple's command line tools are on this Mac, and what
+    /// `xcode-select` said where they are not.
+    ///
+    /// `xcode-select -p` prints the tools' own directory and exits zero where
+    /// they are installed, and exits non-zero with a sentence of its own where
+    /// they are not — which is the sentence that goes under the row, kept as it
+    /// is for the same reason `bwrap`'s is: see [`trivially`].
+    ///
+    /// A Mac with no `xcode-select` to ask is [`NO_XCODE_SELECT`], which is the
+    /// row saying it could not find out rather than claiming an answer.
+    fn command_line_tools(&self) -> Result<(), Option<String>> {
+        let Some(xcode_select) = self.found(XCODE_SELECT) else {
+            return Err(Some(NO_XCODE_SELECT.to_owned()));
+        };
+
+        let run = Command::new(xcode_select)
+            .arg(PRINTED)
+            .unseen()
+            .stdin(Stdio::null())
+            .output();
+
+        match run {
+            Ok(run) if run.status.success() => Ok(()),
+            Ok(run) => Err(words(&run.stderr)),
+            // An `xcode-select` that was found and would not start at all,
+            // which is the same pair of arms [`trivially`] has.
+            Err(trouble) => Err(Some(trouble.to_string())),
         }
     }
 
@@ -1408,6 +1503,42 @@ fn no_account(why: String) -> DependencyState {
     }
 }
 
+/// Where a program stands, read as the row that says it — [`sandbox::Standing`]
+/// and [`DependencyState`] being the same five answers in the probe's words and
+/// in the wizard's.
+///
+/// A function of the standing and of nothing else, so that a row which has more
+/// to ask about what it walked to — the Mac's `git`, see [`Machine::git`] — can
+/// ask it and then read the same standing, rather than walking the `PATH`
+/// twice for one row.
+fn stood(standing: sandbox::Standing) -> DependencyState {
+    match standing {
+        sandbox::Standing::Found { at, landed, .. } => DependencyState::Present {
+            at: Some(shown_path(&at)),
+            // The link's target, and only where it is another file: a program
+            // that is no link has one path and would read as two.
+            target: (landed != at).then(|| shown_path(&landed)),
+        },
+        sandbox::Standing::Beyond { at } => absent(Seen::Beyond {
+            at: shown_path(&at),
+        }),
+        sandbox::Standing::Leading { at, target } => absent(Seen::Leading {
+            at: shown_path(&at),
+            target: shown_path(&target),
+        }),
+        sandbox::Standing::Dangling { at } => absent(Seen::Dangling {
+            at: shown_path(&at),
+        }),
+        sandbox::Standing::Desktop { at } => absent(Seen::Desktop {
+            at: shown_path(&at),
+        }),
+        sandbox::Standing::Nowhere => DependencyState::Absent {
+            trouble: None,
+            seen: None,
+        },
+    }
+}
+
 /// A row that is not there because the name was seen somewhere a session
 /// cannot use it, or standing as a program that is not the harness — which is
 /// a `PATH` to fix or an install to finish rather than one to start.
@@ -1496,6 +1627,61 @@ mod tests {
             },
         }
     }
+
+    /// A machine whose `PATH` is Apple's own `usr/bin` under `dir` and then
+    /// `dir` itself, and whose home is `dir`.
+    ///
+    /// Two entries rather than the one [`machine`] gives, because what the git
+    /// row asks about a Mac is *which* directory the name resolved in: Apple's
+    /// stub stands in a `usr/bin` — see [`APPLES_GIT`], which is that file read
+    /// as the shape it is, so that a stated machine can have one — and
+    /// everything else stands beside it.
+    #[cfg(unix)]
+    fn with_a_usr_bin(platform: Platform, dir: &Path) -> Machine {
+        let apples = dir.join(APPLES_GIT);
+        let path = std::env::join_paths([apples.parent().unwrap(), dir]).unwrap();
+
+        Machine::stated(
+            platform,
+            path.clone(),
+            path,
+            None,
+            None,
+            &home(platform, dir),
+        )
+    }
+
+    /// A `git` at `at` that nothing may run: it leaves `ran` behind and fails
+    /// loudly if anything does.
+    ///
+    /// Which is the whole of the claim on a Mac. Apple's `/usr/bin/git` without
+    /// the command line tools opens a dialog when it is run, so a probe that
+    /// ran what it resolved would open one every ten seconds on a machine
+    /// nobody is standing at — and a stub that merely answered would not notice.
+    #[cfg(unix)]
+    fn a_git_nothing_runs(at: &Path, ran: &Path) {
+        std::fs::create_dir_all(at.parent().expect("a git stands in a directory")).unwrap();
+
+        program(
+            at,
+            &format!(
+                "#!/bin/sh\n: > \"{}\"\necho \"the probe ran the git it resolved\" >&2\nexit 1\n",
+                ran.display(),
+            ),
+        );
+    }
+
+    /// What `xcode-select -p` says on a Mac with the command line tools, which
+    /// is their directory and a zero — with the argument vector asserted, the
+    /// way the `bwrap` stand-in asserts its own.
+    #[cfg(unix)]
+    const WITH_THE_TOOLS: &str =
+        "#!/bin/sh\ntest \"$*\" = '-p' && echo /Library/Developer/CommandLineTools\n";
+
+    /// And on a Mac without them, which is Apple's own sentence and a two.
+    #[cfg(unix)]
+    const WITHOUT_THE_TOOLS: &str = "#!/bin/sh\necho 'xcode-select: error: unable to get active \
+                                     developer directory' >&2\nexit 2\n";
 
     /// The four shapes an account comes in, made under `home` — the same paths
     /// a session's account is mounted from.
@@ -2368,6 +2554,183 @@ echo {token}
              has no such file — every Linux has /bin/sh and not every Linux has \
              anything else",
         );
+    }
+
+    /// A Mac's `git` row is the file a session would run *and* whether running
+    /// it would work: Apple's stub without the command line tools opens a
+    /// dialog and exits, so the row is absent with what `xcode-select` said
+    /// underneath.
+    #[cfg(unix)]
+    #[test]
+    fn a_mac_whose_git_is_apples_is_absent_without_the_command_line_tools() {
+        let dir = tempfile::tempdir().unwrap();
+        let ran = dir.path().join("ran");
+        a_git_nothing_runs(&dir.path().join(APPLES_GIT), &ran);
+        program(&dir.path().join(XCODE_SELECT), WITHOUT_THE_TOOLS);
+
+        assert_eq!(
+            state(
+                &with_a_usr_bin(Platform::MacOs, dir.path()),
+                Dependency::Git
+            ),
+            DependencyState::Absent {
+                trouble: Some(
+                    "xcode-select: error: unable to get active developer directory".to_owned(),
+                ),
+                seen: None,
+            },
+            "the machine's own words, which are the ones that say what to run",
+        );
+
+        assert!(
+            !ran.exists(),
+            "the probe ran the stub, which is the dialog it exists not to open",
+        );
+    }
+
+    /// And where they are installed the same file ticks, named the way every
+    /// present row is named: `xcode-select` answered for it, and the `git` it
+    /// answered about is still never run.
+    #[cfg(unix)]
+    #[test]
+    fn a_mac_whose_git_is_apples_ticks_where_the_command_line_tools_are() {
+        let dir = tempfile::tempdir().unwrap();
+        let ran = dir.path().join("ran");
+        a_git_nothing_runs(&dir.path().join(APPLES_GIT), &ran);
+        program(&dir.path().join(XCODE_SELECT), WITH_THE_TOOLS);
+
+        assert_eq!(
+            state(
+                &with_a_usr_bin(Platform::MacOs, dir.path()),
+                Dependency::Git
+            ),
+            DependencyState::Present {
+                at: Some(dir.path().join(APPLES_GIT).to_string_lossy().into_owned()),
+                target: None,
+            },
+            "the tools are there, so the git under /usr/bin is a git that runs",
+        );
+
+        assert!(!ran.exists(), "and it was not what was asked");
+    }
+
+    /// A `git` that resolved anywhere else is Homebrew's or nix's or somebody's
+    /// own, and is the walk alone: the `xcode-select` beside it would say the
+    /// tools are missing, and it is not asked, because the question is about
+    /// Apple's file rather than about the Mac.
+    #[cfg(unix)]
+    #[test]
+    fn a_mac_whose_git_is_not_apples_is_present_with_no_tools_asked_about() {
+        let dir = tempfile::tempdir().unwrap();
+        let ran = dir.path().join("ran");
+        a_git_nothing_runs(&dir.path().join(sandbox::GIT), &ran);
+        program(&dir.path().join(XCODE_SELECT), WITHOUT_THE_TOOLS);
+
+        assert_eq!(
+            state(
+                &with_a_usr_bin(Platform::MacOs, dir.path()),
+                Dependency::Git
+            ),
+            DependencyState::Present {
+                at: Some(dir.path().join(sandbox::GIT).to_string_lossy().into_owned()),
+                target: None,
+            },
+            "a git nobody's dialog stands behind is a git, and this one is there",
+        );
+
+        assert!(!ran.exists(), "nothing runs the git a row is about");
+    }
+
+    /// And a Mac with Apple's `git` and no `xcode-select` to ask about it says
+    /// it could not find out, which is not the same as saying the tools are
+    /// missing.
+    #[cfg(unix)]
+    #[test]
+    fn a_mac_with_no_xcode_select_says_it_could_not_ask() {
+        let dir = tempfile::tempdir().unwrap();
+        let ran = dir.path().join("ran");
+        a_git_nothing_runs(&dir.path().join(APPLES_GIT), &ran);
+
+        let DependencyState::Absent { trouble, seen } = state(
+            &with_a_usr_bin(Platform::MacOs, dir.path()),
+            Dependency::Git,
+        ) else {
+            panic!("a stub nothing vouched for is not a git a session can use");
+        };
+
+        assert_eq!(seen, None, "the name was where a session looks");
+        assert!(
+            trouble.is_some_and(|why| why.contains(XCODE_SELECT)),
+            "the row says which question went unasked",
+        );
+        assert!(!ran.exists(), "and the stub is still not run");
+    }
+
+    /// Linux is the walk alone whatever the name resolved to: a `usr/bin/git`
+    /// there is whatever the distribution installed, with no dialog behind it
+    /// to ask anybody about.
+    #[cfg(unix)]
+    #[test]
+    fn a_linux_git_under_usr_bin_is_present_with_no_tools_asked_about() {
+        let dir = tempfile::tempdir().unwrap();
+        let ran = dir.path().join("ran");
+        a_git_nothing_runs(&dir.path().join(APPLES_GIT), &ran);
+        program(&dir.path().join(XCODE_SELECT), WITHOUT_THE_TOOLS);
+
+        assert_eq!(
+            state(
+                &with_a_usr_bin(Platform::Linux, dir.path()),
+                Dependency::Git
+            ),
+            DependencyState::Present {
+                at: Some(dir.path().join(APPLES_GIT).to_string_lossy().into_owned()),
+                target: None,
+            },
+            "the command line tools are a Mac's, and this row is unchanged by them",
+        );
+
+        assert!(!ran.exists(), "and no row anywhere runs the git it found");
+    }
+
+    /// And what the tools are asked with is a question a real Mac answers.
+    ///
+    /// The one thing the stubs above cannot say. A stub agrees with whatever
+    /// argument vector it is written beside, so an argument no `xcode-select`
+    /// takes would pass every test here and fail on the machine — the row
+    /// coming back absent on a Mac whose tools are installed, which is the
+    /// wizard held on a dependency that is already there.
+    ///
+    /// Asked of the running machine rather than of a fixture, because the claim
+    /// is about machines: `xcode-select` is Apple's own and on every Mac, and
+    /// [`PRINTED`] either names the tools' directory or says why there is none.
+    #[test]
+    #[cfg_attr(
+        not(target_os = "macos"),
+        ignore = "the `xcode-select` this runs is a Mac's"
+    )]
+    fn what_the_git_row_asks_about_the_tools_is_a_question_this_machine_answers() {
+        let xcode_select = Machine::here()
+            .found(XCODE_SELECT)
+            .expect("every Mac has an xcode-select, on the /usr/bin a session's PATH holds");
+
+        let run = Command::new(&xcode_select)
+            .arg(PRINTED)
+            .output()
+            .expect("the file the walk found is one this process can start");
+
+        let said = String::from_utf8_lossy(&run.stdout).trim().to_owned();
+
+        if run.status.success() {
+            assert!(
+                Path::new(&said).is_dir(),
+                "a zero from `{XCODE_SELECT} {PRINTED}` names the tools' own directory: {said:?}",
+            );
+        } else {
+            assert!(
+                words(&run.stderr).is_some(),
+                "and a Mac without them says why, which is what goes under the row",
+            );
+        }
     }
 
     /// Each of the four shapes in the server's home is offered as the Profile

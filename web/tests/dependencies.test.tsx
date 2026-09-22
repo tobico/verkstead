@@ -952,9 +952,14 @@ describe("what each machine is told to run", () => {
     Arch: "sudo pacman -S bubblewrap",
   };
 
-  /// And git, which every OS with a package manager has one for.
+  /// And git, which every OS with a package manager has one for — and which
+  /// both Macs lead with Apple's own dialog instead. Every Mac has a
+  /// /usr/bin/git, and without the command line tools behind it that file is a
+  /// stub that opens this dialog rather than running, so the line that gets a
+  /// Mac a working git is the one that installs them.
   const GIT: Partial<Record<Distro, string>> = {
-    MacOs: "brew install git",
+    MacOs: "xcode-select --install",
+    MacOsIntel: "xcode-select --install",
     Windows: "winget install --id Git.Git",
     NixOs: "environment.systemPackages = [ pkgs.git ];",
     Ubuntu: "sudo apt install git",
@@ -979,6 +984,27 @@ describe("what each machine is told to run", () => {
     }
 
     expect(GUIDES.OtherLinux.rows.Git.note).toContain("git");
+  });
+
+  /// And Homebrew's git is kept under Apple's dialog on the tab that has a
+  /// brew, rather than instead of it: it is the git a developer's Mac usually
+  /// runs, and it is a line to paste as much as the one above it is — so it is
+  /// an instruction of its own with a copy button beside it.
+  ///
+  /// The Intel tab keeps nothing under its, there being no brew on that
+  /// machine to install one with.
+  it("keeps Homebrew's git under Apple's dialog on the Mac that has a brew", () => {
+    expect(GUIDES.MacOs.rows.Git.alternative?.command).toBe("brew install git");
+    expect(GUIDES.MacOs.rows.Git.alternative?.note).toBeTruthy();
+
+    expect(GUIDES.MacOsIntel.rows.Git.alternative).toBeUndefined();
+
+    // And both of them say what the git already on the machine is, which is
+    // the whole of why the dialog leads.
+    for (const mac of ["MacOs", "MacOsIntel"] as const) {
+      expect(GUIDES[mac].rows.Git.note).toContain("/usr/bin");
+      expect(GUIDES[mac].rows.Git.note).toContain("command line tools");
+    }
   });
 
   it("names an exact command for each harness the OS packages", () => {

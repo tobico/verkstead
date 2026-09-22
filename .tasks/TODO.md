@@ -23,4 +23,4 @@ itself and carries its own tests; every one is unit-tested on a stated
 - [x] 03: Claude is Anthropic's installer on every Mac — [details](03-claude-on-every-mac.md)
 - [x] 04: An Intel Mac is told apart, and gets its own tab — [details](04-intel-mac-tab.md)
 - [x] 05: gh on an Intel Mac comes from GitHub's release — [details](05-gh-from-the-release.md)
-- [ ] 06: git on a Mac counts only with the command line tools — [details](06-git-needs-the-tools.md)
+- [x] 06: git on a Mac counts only with the command line tools — [details](06-git-needs-the-tools.md)

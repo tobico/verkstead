@@ -26,7 +26,10 @@
 //! would rather have that. See [`Instruction`]'s `alternative`. The Mac leads
 //! with the same installer and keeps nothing under it: what used to be there
 //! was Homebrew's cask, which existed for the Dock's `PATH` alone — see
-//! [`CLAUDE_ON_A_MAC`].
+//! [`CLAUDE_ON_A_MAC`]. The Apple-silicon Mac's `git` row is the other one that
+//! keeps a second: Apple's own dialog leads it on both Mac tabs, because the
+//! `/usr/bin/git` every Mac has is a stub without the command line tools, and
+//! `brew install git` is under it on the tab that has a `brew`.
 //!
 //! **Nine tabs and not one**, because the detection is a guess. It comes off
 //! `/etc/os-release`'s `ID` and then `ID_LIKE` on a Linux, and off
@@ -319,11 +322,25 @@ export const GUIDES: Record<Distro, Guide> = {
           "Apple's own sandbox-exec is on every Mac, and it is what a session " +
           "runs inside here. There is nothing to install.",
       },
+      // Apple's own dialog first, and Homebrew's git under it. Every Mac has a
+      // /usr/bin/git and without the command line tools that file is a stub
+      // that opens this same dialog instead of running — so this is the line
+      // that makes the git the machine already has work, and it is the line
+      // both Mac tabs lead with. Homebrew's is kept under it because it is the
+      // git a developer's Mac usually runs, and a Mac reading this tab has a
+      // brew to install it with.
       Git: {
-        command: "brew install git",
+        command: "xcode-select --install",
         note:
-          "Xcode's command line tools carry a git as well — xcode-select " +
-          "--install — and either of the two is somewhere a session looks.",
+          "git comes with Apple's command line tools, and this opens Apple's " +
+          "own dialog to install them. The git in /usr/bin without them is a " +
+          "stub that opens the same dialog instead of running.",
+        alternative: {
+          command: "brew install git",
+          note:
+            "Homebrew's own, which is the git most Macs with brew run. It " +
+            "wants the command line tools above installed first.",
+        },
       },
       Claude: CLAUDE_ON_A_MAC,
       Codex: {
