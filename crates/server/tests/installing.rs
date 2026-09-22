@@ -110,6 +110,13 @@ fn served_mac(dir: &Path, pool: &SqlitePool, dialog: Option<Arc<Dialog>>) -> Rou
 }
 
 /// A server over a machine stated whichever way, raising through `dialog`.
+///
+/// **A Mac searches one directory more than the others**, and that is the
+/// platform rather than the suite: a Mac session's `PATH` is composed with the
+/// home's own `.local/bin` at its head — see ADR-0016's *Macs* — which is where
+/// Anthropic's installer puts `claude`. Everywhere else the stubs' directory is
+/// the whole of it, the two vendor rows on a Linux being
+/// `tests/vendor_installers.rs`'s.
 fn stood_up(
     dir: &Path,
     pool: &SqlitePool,
@@ -117,9 +124,14 @@ fn stood_up(
     os_release: Option<String>,
     dialog: Option<Arc<Dialog>>,
 ) -> Router {
+    let searches = match platform {
+        Platform::MacOs => std::env::join_paths([bin(dir), local_bin(dir)]).unwrap(),
+        Platform::Linux | Platform::Windows => OsString::from(bin(dir).as_os_str()),
+    };
+
     let machine = Machine::stated(
         platform,
-        OsString::from(bin(dir).as_os_str()),
+        searches,
         OsString::from(bin(dir).as_os_str()),
         None,
         os_release,
@@ -149,13 +161,23 @@ fn bin(dir: &Path) -> PathBuf {
     bin
 }
 
-/// And the home it was started under, which is nothing this suite puts anything
-/// in: what is asked about here is the `PATH`.
+/// And the home it was started under, which is where a vendor's own installer
+/// lands what it installs.
 fn home(dir: &Path) -> PathBuf {
     let home = dir.join("home");
     std::fs::create_dir_all(&home).unwrap();
 
     home
+}
+
+/// The directory under it Anthropic's installer really writes into, which is on
+/// the floor a Mac session's `PATH` is composed from — see ADR-0016's *Macs*,
+/// and `sandbox::composed`.
+///
+/// Named rather than made: what makes the row go present is the installer
+/// having made it and put a program in it.
+fn local_bin(dir: &Path) -> PathBuf {
+    home(dir).join(".local/bin")
 }
 
 /// A script at `path`, executable.
@@ -263,11 +285,7 @@ fn a_homebrew(dir: &Path) {
              shift\n\
              if [ \"$1\" = --cask ]; then shift; fi\n\
              for formula in \"$@\"; do\n\
-             case \"$formula\" in\n\
-             claude-code) name=claude;;\n\
-             *) name=$formula;;\n\
-             esac\n\
-             '{cp}' '{installed}' '{into}'/$name\n\
+             '{cp}' '{installed}' '{into}'/$formula\n\
              done\n",
             cp = found("cp").display(),
             installed = installed.display(),
@@ -285,7 +303,40 @@ fn found(program: &str) -> PathBuf {
 }
 
 /// A `curl` and a `bash` in that directory, where what the `curl` answers with
-/// is a script that fails.
+/// is Anthropic's installer doing what it does: a script that puts `claude` in
+/// the home's `.local/bin`.
+///
+/// **Stubbed the way `tests/vendor_installers.rs` stubs it**, and for that
+/// file's reason: the line a ticked Claude row runs is `curl -fsSL
+/// https://claude.ai/install.sh | bash`, and a suite that ran it would install
+/// a harness on whoever's box it happened to be on. A unit that runs as the
+/// user searches the machine's own `PATH`, so this is what the line finds
+/// instead — and the directory it writes into is the one the real installer
+/// uses, which a Mac session reaches because a Mac's floor carries it.
+///
+/// The two programs it needs are named in full: the `PATH` that unit is handed
+/// is this machine's, which holds the stubs and nothing else.
+fn an_installer(dir: &Path) {
+    program(&bin(dir).join("bash"), "#!/bin/sh\nexec /bin/sh \"$@\"\n");
+
+    let installed = dir.join("what-the-installer-lands");
+    program(&installed, "#!/bin/sh\nexit 0\n");
+
+    program(
+        &bin(dir).join("curl"),
+        &format!(
+            "#!/bin/sh\n\
+             into='{into}'\n\
+             printf '%s\n' \"'{mkdir}' -p '$into'\" \"'{cp}' '{installed}' '$into/claude'\"\n",
+            into = local_bin(dir).display(),
+            mkdir = found("mkdir").display(),
+            cp = found("cp").display(),
+            installed = installed.display(),
+        ),
+    );
+}
+
+/// And the same pair where what the `curl` answers with is a script that fails.
 ///
 /// **Stubs rather than the vendor's own, and that is the whole point of them.**
 /// What a ticked Claude row runs is `curl -fsSL https://claude.ai/install.sh |
@@ -671,18 +722,22 @@ fn started(dialog: &Dialog) -> String {
     path.to_owned()
 }
 
-/// Ticking git and Claude Code on a Mac with Homebrew runs a `brew` line
-/// apiece, as the user, and the rows go present under the prefix.
+/// Ticking git and Claude Code on a Mac with Homebrew runs a `brew` line for
+/// the one Homebrew carries and Anthropic's own installer for the other, both
+/// as the user, and both rows go present.
 ///
-/// **Nothing is raised at all.** Every install on a Mac is Homebrew's, Homebrew
+/// **Nothing is raised at all.** Every package on a Mac is Homebrew's, Homebrew
 /// refuses to run as root, and the prefix it installs into is already this
 /// user's — so there is nothing here for a password dialog to be in front of,
 /// and a run that put one there would be asking for a privilege to do something
-/// that wants none.
+/// that wants none. Anthropic's installer wants none either: it writes under
+/// this user's home, which is the whole of why it is out of the dialog on every
+/// platform but the one whose dialog keeps the same user.
 #[tokio::test]
-async fn a_mac_installs_what_was_ticked_with_homebrew_and_raises_nothing() {
+async fn a_mac_installs_its_packages_with_homebrew_and_claude_with_anthropics() {
     let (dir, pool) = ready().await;
     a_homebrew(dir.path());
+    an_installer(dir.path());
 
     let dialog = Dialog::answered(dir.path(), Answer::Typed);
     let app = served_mac(dir.path(), &pool, Some(dialog.clone()));
@@ -712,17 +767,16 @@ async fn a_mac_installs_what_was_ticked_with_homebrew_and_raises_nothing() {
             row(&landed, ticked).state,
             DependencyState::Present {
                 at: Some(
-                    bin(dir.path())
-                        .join(match ticked {
-                            Dependency::Git => "git",
-                            _ => "claude",
-                        })
-                        .to_string_lossy()
-                        .into_owned(),
+                    match ticked {
+                        Dependency::Git => bin(dir.path()).join("git"),
+                        _ => local_bin(dir.path()).join("claude"),
+                    }
+                    .to_string_lossy()
+                    .into_owned(),
                 ),
                 target: None,
             },
-            "{ticked:?} is there, under the prefix `brew` installed into",
+            "{ticked:?} is there, where what installed it puts it",
         );
     }
 

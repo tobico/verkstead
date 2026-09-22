@@ -142,9 +142,10 @@ const RESTART =
   "since — the one a new install landed in — is one no session has until " +
   "Verkstead is started again from a shell whose PATH names it.";
 
-/// And the word over the one install a whole tab stands on — the Mac's
-/// Homebrew, which is what every command under it is run with.
-const FIRST = "What every command below is run with:";
+/// And the word over the one install a tab's own commands stand on — the Mac's
+/// Homebrew, which is what the `brew` lines under it are run with. Not every
+/// line under it: the two vendors' own installers there want no Homebrew.
+const FIRST = "What the brew commands below are run with:";
 
 /// Which rows are a harness, so that the row wears the same mark the rest of the
 /// app draws that backend with.
@@ -640,9 +641,9 @@ function Hints(props: {
 
       <Note class={styles.restart}>{RESTART}</Note>
 
-      {/* What every command on this tab wants first, where they all want the
-          same thing: the Mac's Homebrew, drawn once above the rows rather than
-          under each of the five that are a `brew install`. */}
+      {/* What this tab's own commands want first, where they want the same
+          thing: the Mac's Homebrew, drawn once above the rows rather than
+          under each of the four that are a `brew install`. */}
       <Show when={guide().before}>
         {(first) => (
           <div class={styles.before} data-before>

@@ -23,7 +23,10 @@
 //! the row that does, on every tab but the Mac's: the vendor's own installer
 //! first, because a distribution's package can be too old to connect at all —
 //! Ubuntu's under WSL was — and the packaged one under it for the machine that
-//! would rather have that. See [`Instruction`]'s `alternative`.
+//! would rather have that. See [`Instruction`]'s `alternative`. The Mac leads
+//! with the same installer and keeps nothing under it: what used to be there
+//! was Homebrew's cask, which existed for the Dock's `PATH` alone — see
+//! [`CLAUDE_ON_A_MAC`].
 //!
 //! **Eight tabs and not one**, because the detection is a guess. It comes off
 //! `/etc/os-release`'s `ID` and then `ID_LIKE`, so a derivative names its parent
@@ -132,6 +135,30 @@ const CLAUDE_NATIVE: Instruction = {
     "Verkstead is started from, with Verkstead started again once it is.",
 };
 
+/// And the same installer on a Mac, which is the same line with a note of its
+/// own.
+///
+/// **A Mac says nothing about the shell's `PATH`, because it does not depend on
+/// one.** Every other tab's note has to: what a session searches is the `PATH`
+/// Verkstead was started with, so a directory that `PATH` never named is one no
+/// session reaches. A Mac session's `PATH` is composed with the home's own
+/// `.local/bin` at its head whichever way the app was started — see ADR-0016's
+/// *Macs* — so there is nothing here for the human to put anywhere and nothing
+/// to restart. It is the one row on any tab whose note is shorter than the
+/// others rather than longer.
+///
+/// It is not an [`orElse`] either: Homebrew's `claude-code` cask was the Mac's
+/// row for as long as `~/.local/bin` was somewhere the Dock's `PATH` could not
+/// see, and with the floor carrying it the cask is a second install of the same
+/// program that goes stale.
+const CLAUDE_ON_A_MAC: Instruction = {
+  command: "curl -fsSL https://claude.ai/install.sh | bash",
+  note:
+    "Anthropic's own installer, and the one that stays current. It puts " +
+    "claude in ~/.local/bin, which is on every Mac session's PATH whichever " +
+    "way Verkstead was started.",
+};
+
 /// The same installer on Windows, where it is the PowerShell one and the home
 /// directory is spelled differently.
 const CLAUDE_NATIVE_WINDOWS: Instruction = {
@@ -231,14 +258,18 @@ export const GUIDES: Record<Distro, Guide> = {
     // you where it can — the prefix made behind the password dialog and the
     // installer run as you — so this is what to paste on the Mac where that
     // could not be done: it asks for your password once, for the same prefix.
+    //
+    // What it is above is the rows that are a `brew install`, rather than all
+    // of them: Claude Code is Anthropic's own installer here as everywhere
+    // else, and Grok Build is xAI's.
     before: {
       command:
         '/bin/bash -c "$(curl -fsSL ' +
         'https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
       note:
-        "Every command below is Homebrew's, and a Mac without Homebrew has " +
-        "nothing to run them with. It installs into /opt/homebrew on Apple " +
-        "silicon and /usr/local on Intel, and a session looks in both.",
+        "The brew commands below are Homebrew's, and a Mac without Homebrew " +
+        "has nothing to run them with. It installs into /opt/homebrew on " +
+        "Apple silicon and /usr/local on Intel, and a session looks in both.",
     },
 
     rows: {
@@ -253,16 +284,7 @@ export const GUIDES: Record<Distro, Guide> = {
           "Xcode's command line tools carry a git as well — xcode-select " +
           "--install — and either of the two is somewhere a session looks.",
       },
-      Claude: {
-        command: "brew install --cask claude-code",
-        note:
-          "A cask rather than a formula, and the install a Mac session finds " +
-          "whichever way Verkstead was started. Anthropic's own installer — " +
-          "curl -fsSL https://claude.ai/install.sh | bash — puts claude in " +
-          "~/.local/bin instead, and an app started from the Dock has " +
-          "launchd's PATH rather than a shell's, so it never names that " +
-          "directory. Homebrew's prefix it always names.",
-      },
+      Claude: CLAUDE_ON_A_MAC,
       Codex: {
         command: "brew install --cask codex",
         note: "A cask rather than a formula.",

@@ -754,11 +754,17 @@ packages this distribution carries, the vendor installers run after it as you �
 Anthropic's for Claude Code and xAI's for Grok Build, landing in `~/.local/bin`
 and `~/.grok/bin`, which Verkstead then puts on every session's `PATH` for you —
 and a progress bar and a status line say how far it has got. **On a Mac it is
-Homebrew's instead**, and there is usually no dialog at all: every ticked row is
-a `brew install` of its own, run as you, Homebrew refusing to run as root. A Mac
-with no `brew` yet raises one thing and one only — the step that makes
-Homebrew's prefix and hands it to you, which is what Homebrew's installer would
-have asked for a password for — and Homebrew installs itself after it, as you.
+Homebrew's instead**, and there is usually no dialog at all: every ticked row
+Homebrew carries is a `brew install` of its own, run as you, Homebrew refusing
+to run as root. A Mac with no `brew` yet raises one thing and one only — the
+step that makes Homebrew's prefix and hands it to you, which is what Homebrew's
+installer would have asked for a password for — and Homebrew installs itself
+after it, as you. **Claude Code is the exception there**, and it is Anthropic's
+own installer on a Mac as it is everywhere else: Homebrew's `claude-code` cask
+was the row for as long as `~/.local/bin` was somewhere a Mac session could not
+look, and a Mac session's `PATH` now carries that directory whichever way
+Verkstead was started — so what a tick runs is the install that stays current,
+and a press with Claude alone ticked installs no Homebrew at all.
 Only what could not be installed here — a NixOS, a server with no way to raise
 a dialog, an installer that would not run, a Homebrew that could not be
 installed — reaches a screen of instructions afterwards, with this

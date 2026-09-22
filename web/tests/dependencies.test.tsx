@@ -33,6 +33,7 @@ import type {
 } from "../src/api/types";
 import { Dependencies } from "../src/setup/Dependencies";
 import { SetupPage } from "../src/setup/SetupPage";
+import type { Instruction } from "../src/setup/instructions";
 import { DISTROS, GUIDES, instructionFor } from "../src/setup/instructions";
 import { SETUP_SCREEN, SETUP_STEP } from "../src/setup/steps";
 import { json, serving, whenever } from "./serving";
@@ -600,10 +601,11 @@ describe("the hint screen", () => {
     expect(row(container, "Codex").textContent).toContain("npm install -g");
   });
 
-  /// Every command on the Mac's tab is a `brew install`, so a Mac that reached
-  /// this screen because Homebrew could not be installed needs the one line
-  /// that gets it — drawn once above the rows rather than under each of the
-  /// five that are one.
+  /// Most of the Mac tab's commands are a `brew install`, so a Mac that
+  /// reached this screen because Homebrew could not be installed needs the one
+  /// line that gets it — drawn once above the rows rather than under each of
+  /// the four that are one. It says the `brew` commands rather than all of
+  /// them: Claude Code and Grok Build are their vendors' own installers here.
   it("draws the Mac's Homebrew above the rows, and no other tab's", () => {
     const { container } = hinting(ONE_FAILED);
 
@@ -618,7 +620,8 @@ describe("the hint screen", () => {
     expect(before.textContent).toContain(
       "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh",
     );
-    expect(before.textContent).toContain("Every command below is Homebrew's");
+    expect(before.textContent).toContain("The brew commands below are Homebrew's");
+    expect(before.textContent).not.toContain("Every command below");
   });
 
   /// A PATH read at startup is a PATH that does not have the directory this
@@ -922,11 +925,8 @@ describe("what each machine is told to run", () => {
       }
     }
 
-    // The casks Homebrew keeps those two under, which a plain `brew install`
-    // would not find.
-    expect(GUIDES.MacOs.rows.Claude.command).toBe(
-      "brew install --cask claude-code",
-    );
+    // The cask Homebrew keeps Codex under, which a plain `brew install` would
+    // not find.
     expect(GUIDES.MacOs.rows.Codex.command).toBe("brew install --cask codex");
     expect(GUIDES.MacOs.rows.OpenCode.command).toBe("brew install opencode");
   });
@@ -959,10 +959,8 @@ describe("what each machine is told to run", () => {
   /// The whole of why this feature exists: a distribution's claude can be too
   /// old to connect — Ubuntu's under WSL was — so the install that stays
   /// current is what a row leads with, and the packaged one waits under it.
-  it("leads Claude Code with the native installer on every tab but the Mac's", () => {
+  it("leads Claude Code with the native installer on every tab", () => {
     for (const distro of DISTROS) {
-      if (distro === "MacOs") continue;
-
       const claude = GUIDES[distro].rows.Claude;
 
       expect(claude.command).toBe(
@@ -970,6 +968,10 @@ describe("what each machine is told to run", () => {
           ? "irm https://claude.ai/install.ps1 | iex"
           : "curl -fsSL https://claude.ai/install.sh | bash",
       );
+
+      // The Mac is the one tab with nothing under it and nothing to say about
+      // a PATH — see the test below, which is that row's own.
+      if (distro === "MacOs") continue;
 
       // And says the one thing the command cannot: which PATH has to name
       // where it landed, and that Verkstead reads that PATH once.
@@ -983,16 +985,51 @@ describe("what each machine is told to run", () => {
     }
   });
 
-  /// Homebrew's prefix is on the floor under every Mac session's PATH and
-  /// ~/.local/bin is on none of it, because an app started from the Dock has
-  /// launchd's PATH rather than a shell's.
-  it("leads the Mac with Homebrew, and says what the Dock does", () => {
+  /// And the Mac says nothing about a shell's PATH or a restart, because a Mac
+  /// session's PATH is composed with the home's own ~/.local/bin at its head
+  /// whichever way Verkstead was started — ADR-0016's *Macs*. Homebrew's
+  /// claude-code cask was that row for as long as the Dock's PATH could not
+  /// see that directory, and it is gone.
+  it("says nothing about a shell's PATH on the Mac's Claude row", () => {
     const claude = GUIDES.MacOs.rows.Claude;
 
-    expect(claude.command).toBe("brew install --cask claude-code");
+    expect(claude.command).toBe("curl -fsSL https://claude.ai/install.sh | bash");
     expect(claude.alternative).toBeUndefined();
-    expect(claude.note).toContain("Dock");
-    expect(claude.note).toContain("launchd");
+    expect(claude.note).toContain("~/.local/bin");
+    expect(claude.note).toContain("every Mac session's PATH");
+    expect(claude.note).not.toContain("PATH of the shell");
+    expect(claude.note).not.toContain("started again");
+  });
+
+  /// And the name Homebrew kept it under is nowhere on the Mac's tab at all:
+  /// a second install of the same program, and the one that goes stale. The
+  /// other tabs still say `@anthropic-ai/claude-code`, which is npm's package
+  /// and their row's alternative.
+  it("names Homebrew's claude-code cask on no tab", () => {
+    const said = (instruction: Instruction) => [
+      instruction.command,
+      instruction.note,
+      instruction.alternative?.command,
+      instruction.alternative?.note,
+    ];
+
+    for (const instruction of Object.values(GUIDES.MacOs.rows)) {
+      for (const line of said(instruction)) {
+        expect(line ?? "").not.toContain("claude-code");
+      }
+    }
+
+    for (const distro of DISTROS) {
+      for (const instruction of Object.values(GUIDES[distro].rows)) {
+        for (const line of said(instruction)) {
+          expect(line ?? "").not.toContain("--cask claude-code");
+        }
+      }
+
+      for (const line of said(GUIDES[distro].before ?? {})) {
+        expect(line ?? "").not.toContain("claude-code");
+      }
+    }
   });
 
   /// The Mac is the one tab whose every command wants the same thing first,

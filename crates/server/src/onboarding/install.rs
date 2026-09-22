@@ -40,14 +40,16 @@
 //! `PATH` with no shell profile edited and nothing restarted — see
 //! [`crate::sandbox::installed_into`].
 //!
-//! **A Mac is Homebrew's, and Homebrew refuses to run as root.** So there the
-//! order is the other way up: every ticked row is a `brew install` of its own,
-//! run as the user, and the one thing that is ever raised is the step that
-//! makes Homebrew's prefix on a Mac that has no `brew` yet. That is the whole of
-//! what Homebrew's own installer would have called `sudo` for, so the installer
-//! after it runs as the user too and asks for nothing — see [`homebrew`], and
-//! [`Chain`], which is what makes a prefix nobody could make fail every `brew`
-//! line behind it rather than each of them separately.
+//! **A Mac's packages are Homebrew's, and Homebrew refuses to run as root.** So
+//! there the order is the other way up: every ticked row Homebrew carries is a
+//! `brew install` of its own, run as the user, and the one thing that is ever
+//! raised is the step that makes Homebrew's prefix on a Mac that has no `brew`
+//! yet. That is the whole of what Homebrew's own installer would have called
+//! `sudo` for, so the installer after it runs as the user too and asks for
+//! nothing — see [`homebrew`], and [`Chain`], which is what makes a prefix
+//! nobody could make fail every `brew` line behind it rather than each of them
+//! separately. The two vendors' own installers are the same unit there as
+//! everywhere else, wanting no Homebrew and raising nothing.
 //!
 //! **And a Windows machine raises everything.** There the dialog is UAC and
 //! what is behind it is the same user with their administrator token, so
@@ -1081,13 +1083,16 @@ fn vendors_own(row: Dependency, vendor: Vendor, lands: PathBuf) -> Unit {
     }
 }
 
-/// And every ticked row on a Mac, which is Homebrew's.
+/// And every ticked row on a Mac, which is Homebrew's but for the two that are
+/// their vendors' own.
 ///
 /// **One unit per row, and each of them as the user**, Homebrew refusing to run
-/// as root at all. Nothing lands anywhere worth writing down: both prefixes are
-/// on the floor a Mac session's `PATH` is composed from — see
+/// as root at all. A `brew install` lands nowhere worth writing down: both
+/// prefixes are on the floor a Mac session's `PATH` is composed from — see
 /// `sandbox::APPLE_INSTALLS` — so the row goes present off the very next probe
-/// without `session_path` being touched.
+/// without `session_path` being touched. A vendor's installer writes what it
+/// landed in the way it does on a Linux: the home's `.local/bin` is on that
+/// floor too, and writing it is what the unit's `lands` has always meant.
 ///
 /// **And where there is no `brew` yet, two units in front of them.** The
 /// elevated one makes the prefix and hands it over, which is the whole of what
@@ -1115,9 +1120,9 @@ fn homebrew(machine: &Machine, ticked: &[Dependency]) -> Plan {
                 _ => units.push(brew.unit(*row)),
             },
 
-            // The one row here that is not Homebrew's, and it is the one row
-            // Homebrew has no cask for: xAI's own installer, under this user's
-            // home the way it is on a Linux — see [`GROK`].
+            // The two rows here that are not Homebrew's: their vendors' own
+            // installers, under this user's home the way they are on a Linux —
+            // see [`CLAUDE`] and [`GROK`].
             OnAMac::Vendor(vendor) => match machine.home() {
                 Some(home) => units.push(vendors_own(*row, vendor, home.join(vendor.lands))),
                 None => beyond.push((*row, no_home(*row))),
@@ -1246,8 +1251,10 @@ enum OnAMac {
     /// which is where the human who has to type one reads them.
     Brew(Brew),
 
-    /// Or the vendor's own installer, there being no Homebrew name that is
-    /// really xAI's grok — see [`GROK`].
+    /// Or the vendor's own installer: Claude Code, which Anthropic's own
+    /// installer keeps current where Homebrew's cask was only ever there for
+    /// the Dock's `PATH`, and Grok Build, there being no Homebrew name that is
+    /// really xAI's grok — see [`CLAUDE`] and [`GROK`].
     Vendor(Vendor),
 }
 
@@ -1269,21 +1276,19 @@ fn on_a_mac(dependency: Dependency) -> OnAMac {
             cask: false,
         }),
 
-        // The two that ship as applications rather than as formulae. Claude
-        // Code's cask is the install a Mac session finds whichever way
-        // Verkstead was started, which is why it is the row here and the
-        // native installer is not: an app started from the Dock has launchd's
-        // `PATH` rather than a shell's, and that one never names
-        // `~/.local/bin`.
-        Dependency::Claude => OnAMac::Brew(Brew {
-            name: "claude-code",
-            cask: true,
-        }),
+        // Which ships as an application rather than as a formula, so it is a
+        // cask rather than a plain `brew install`.
         Dependency::Codex => OnAMac::Brew(Brew {
             name: "codex",
             cask: true,
         }),
 
+        // And the two rows that are their vendors' own installers here, the
+        // way they are on a Linux. Claude Code's cask was the row for as long
+        // as `~/.local/bin` was somewhere a Mac session could not look; the
+        // Mac floor carries it now, so what a tick runs is the install that
+        // stays current — see [`CLAUDE`], and ADR-0016's *Macs*.
+        Dependency::Claude => OnAMac::Vendor(CLAUDE),
         Dependency::Grok => OnAMac::Vendor(GROK),
     }
 }
@@ -2044,8 +2049,9 @@ mod tests {
         );
     }
 
-    /// A Mac with Homebrew is one `brew` line per ticked row, every one of them
-    /// run as the user and nothing raised at all.
+    /// A Mac with Homebrew is one `brew` line per packaged row, every one of
+    /// them run as the user and nothing raised at all — with the two vendors'
+    /// own installers beside them, the way they are on a Linux.
     ///
     /// The sandbox row is neither a unit nor a sentence: `sandbox-exec` is on
     /// every Mac, so a press that named it has nothing to do about it.
@@ -2057,7 +2063,7 @@ mod tests {
     /// nothing on its `PATH` and asked about on every runner.
     #[cfg(unix)]
     #[test]
-    fn a_mac_with_homebrew_installs_every_ticked_row_with_it() {
+    fn a_mac_with_homebrew_installs_every_packaged_row_with_it() {
         let dir = tempfile::tempdir().unwrap();
         crate::stand_ins::program(&dir.path().join(BREW), "#!/bin/sh\nexit 0\n");
 
@@ -2082,16 +2088,61 @@ mod tests {
         assert_eq!(git.covers, [Dependency::Git]);
         assert_eq!(git.lands, None, "Homebrew's prefix is on the Apple floor");
 
-        // A cask rather than a formula, which is the install a Mac session
-        // finds whichever way Verkstead was started.
-        assert_eq!(claude.line, "brew install --cask claude-code");
+        // Anthropic's own installer rather than Homebrew's cask, which is the
+        // install that stays current — and what it lands is written down, the
+        // home's `.local/bin` being where it puts `claude` here as everywhere
+        // else.
+        assert_eq!(
+            claude.line,
+            "curl -fsSL https://claude.ai/install.sh | bash"
+        );
         assert_eq!(claude.how, How::AsTheUser);
+        assert_eq!(claude.doing, "Running Anthropic's installer");
+        assert_eq!(claude.lands, Some(PathBuf::from(HOME).join(".local/bin")));
+        assert_eq!(
+            claude.chain, None,
+            "Anthropic's installer wants no Homebrew"
+        );
 
-        // And the one row Homebrew has no name for is xAI's own installer,
-        // under this user's home the way it is everywhere else.
+        // And xAI's beside it, under this user's home the way it is everywhere
+        // else.
         assert_eq!(grok.line, "curl -fsSL https://x.ai/cli/install.sh | bash");
         assert_eq!(grok.lands, Some(PathBuf::from(HOME).join(".grok/bin")));
         assert_eq!(grok.chain, None, "xAI's installer wants no Homebrew");
+    }
+
+    /// And a Mac with no `brew` and Claude alone ticked installs no Homebrew:
+    /// the prefix and the installer are raised in front of a `brew` line, and
+    /// there is none.
+    ///
+    /// **Which is the press this task is for.** Claude Code was the Mac's one
+    /// cask that mattered, so ticking it by itself used to be a run that made
+    /// Homebrew's prefix behind the password dialog and installed Homebrew
+    /// before it could install anything — on an Intel Mac, the `chmod
+    /// /usr/local` that fails outright. Now it is one unit of one command, run
+    /// as the user and raising nothing.
+    #[test]
+    fn a_mac_with_claude_alone_ticked_installs_no_homebrew() {
+        let plan = plan(&machine(Distro::MacOs), &[Dependency::Claude]);
+
+        assert!(plan.beyond.is_empty(), "{plan:?}");
+
+        let [claude] = plan.units.as_slice() else {
+            panic!("the one row, and one unit for it: {plan:?}");
+        };
+
+        assert_eq!(
+            claude.line,
+            "curl -fsSL https://claude.ai/install.sh | bash"
+        );
+        assert_eq!(claude.how, How::AsTheUser);
+        assert_eq!(claude.covers, [Dependency::Claude]);
+        assert_eq!(
+            claude.lands,
+            Some(PathBuf::from(HOME).join(".local/bin")),
+            "which is what goes on `session_path`, so the row ticks off the next probe",
+        );
+        assert_eq!(claude.chain, None);
     }
 
     /// And a Mac without it makes Homebrew's prefix and installs Homebrew
