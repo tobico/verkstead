@@ -6,7 +6,7 @@
 //! does not says where the vendor's own installer is and nothing else. What is
 //! never written here is a command that would install a *different* program
 //! under the right name — see [`GROK_UNIX`], which is the whole of why Grok
-//! Build is a link on all eight tabs.
+//! Build is a link on all nine tabs.
 //!
 //! **Every instruction says where the binary has to land**, because installing
 //! one is only half of it: a session resolves its programs on the `PATH` the
@@ -28,13 +28,14 @@
 //! was Homebrew's cask, which existed for the Dock's `PATH` alone — see
 //! [`CLAUDE_ON_A_MAC`].
 //!
-//! **Eight tabs and not one**, because the detection is a guess. It comes off
-//! `/etc/os-release`'s `ID` and then `ID_LIKE`, so a derivative names its parent
-//! and something nobody has heard of names nothing: the detected tab opens and
-//! the other seven stay a press away, for the machine the file was wrong about.
+//! **Nine tabs and not one**, because the detection is a guess. It comes off
+//! `/etc/os-release`'s `ID` and then `ID_LIKE` on a Linux, and off
+//! `hw.optional.arm64` on a Mac, so a derivative names its parent and something
+//! nobody has heard of names nothing: the detected tab opens and the other
+//! eight stay a press away, for the machine the read was wrong about.
 //!
 //! Nothing here is on the wire. What the server says is what this machine *is*
-//! and what it is missing; what to do about it is the same eight answers on
+//! and what it is missing; what to do about it is the same nine answers on
 //! every Verkstead, so they are the viewer's own — see
 //! `crates/render/src/onboarding.rs`, which carries the rows and the distro and
 //! no prose at all.
@@ -91,17 +92,37 @@ export type Guide = {
   /// And what every command on this tab wants first, where they all want the
   /// same thing.
   ///
-  /// One tab has one: the Mac's, where every line is `brew install` and a Mac
-  /// without Homebrew has nothing to run them with. It is drawn above the rows
-  /// rather than repeated under each of them, because it is one install for the
-  /// whole tab — and it is here at all because a run that could not install
-  /// Homebrew is exactly how somebody reaches this screen on a Mac.
+  /// One tab has one: the Apple-silicon Mac's, where every `brew install` line
+  /// wants a Homebrew and a Mac without one has nothing to run them with. It is
+  /// drawn above the rows rather than repeated under each of them, because it
+  /// is one install for the whole tab — and it is here at all because a run
+  /// that could not install Homebrew is exactly how somebody reaches this
+  /// screen on a Mac.
   before?: Instruction;
+
+  /// Or what this tab is, where what it is, is not what the machine beside it
+  /// is.
+  ///
+  /// One tab has one of these too, and it is the other Mac's: two tabs saying
+  /// *macOS* with different commands under them is a difference somebody has to
+  /// be told about, and the difference is the whole of why the tab exists —
+  /// Homebrew has dropped Intel. Drawn where the tab above draws Homebrew's own
+  /// line, and a sentence rather than an instruction, because there is nothing
+  /// here to run.
+  about?: string;
 };
 
-/// The eight tabs, in the order they are drawn — the order
+/// The nine tabs, in the order they are drawn — the order
 /// `verkstead_render::Distro` is written in, which is the two platforms, the
-/// five distributions whose commands are written down, and everything else.
+/// five distributions whose commands are written down, everything else, and the
+/// second Mac at the end of it.
+///
+/// **A list a `Distro` can fall out of**, which nothing but a test can hold to
+/// the type: a union of strings is gone by the time this runs, so a tab left
+/// out here is a machine whose own commands are drawn nowhere and whose tab
+/// nobody can press. What holds it is [`GUIDES`], which the type checker does
+/// hold exhaustive — see `dependencies.test.tsx`, where the two are read
+/// against each other.
 export const DISTROS: readonly Distro[] = [
   "MacOs",
   "Windows",
@@ -111,6 +132,7 @@ export const DISTROS: readonly Distro[] = [
   "Debian",
   "Arch",
   "OtherLinux",
+  "MacOsIntel",
 ];
 
 /// Claude Code the way Anthropic installs it, which is what every Linux tab
@@ -195,6 +217,25 @@ const GROK_WINDOWS: Instruction = {
     "grok-cli on npm is somebody else's project rather than xAI's grok.",
 };
 
+/// OpenCode the way OpenCode installs it, which is what the one tab with no
+/// package manager on it has.
+///
+/// **It lands under the home and nowhere a Mac already looks.** Anthropic's
+/// installer writes into `~/.local/bin`, which is on the Mac floor; this one
+/// writes into `~/.opencode/bin`, which is on nobody's. So a tick is the way to
+/// run it — Verkstead puts what it installed on every session's `PATH` — and a
+/// run by hand is the sentence every other tab's note says: the directory has
+/// to be on the `PATH` Verkstead is started from.
+const OPENCODE_NATIVE: Instruction = {
+  command: "curl -fsSL https://opencode.ai/install | bash",
+  note:
+    "OpenCode's own installer. It puts opencode in ~/.opencode/bin, which is " +
+    "not a directory a Mac session looks in by itself: tick the row and " +
+    "Verkstead puts it on every session's PATH, or run this by hand and put " +
+    "that directory on the PATH of the shell Verkstead is started from, with " +
+    "Verkstead started again once it is.",
+};
+
 /// A harness from npm, installed for the whole machine rather than for a user.
 ///
 /// `-g` under the distribution's own node lands the binary in `/usr/local/bin`
@@ -244,7 +285,7 @@ function nixos(attribute: string, note?: string): Instruction {
   };
 }
 
-/// The eight tabs' own answers.
+/// The nine tabs' own answers.
 ///
 /// Written out one tab at a time rather than composed out of a package manager
 /// and a table of names: what the note under a row says is as much of the
@@ -430,6 +471,65 @@ export const GUIDES: Record<Distro, Guide> = {
         note:
           "Install your distribution's GitHub CLI package, which is gh or " +
           "github-cli.",
+      },
+    },
+  },
+
+  /// And the Mac Homebrew has dropped, which is the tab drawn last.
+  ///
+  /// **Nothing here is a `brew install`**, so there is no Homebrew line above
+  /// it: Homebrew's installer refuses an Intel Mac outright, and its formulae
+  /// there get no bottles. What is left is what a Mac with no package manager
+  /// can be told — Apple's own tools, the vendors' own installers, and a
+  /// binary to unpack into a directory every Mac session looks in.
+  MacOsIntel: {
+    title: "macOS (Intel)",
+
+    about:
+      "Homebrew no longer supports Intel Macs — its installer refuses one " +
+      "outright — so nothing on this tab is a brew install.",
+
+    rows: {
+      Sandbox: {
+        note:
+          "Apple's own sandbox-exec is on every Mac, and it is what a session " +
+          "runs inside here. There is nothing to install.",
+      },
+
+      // Apple's own dialog rather than a package: every Mac has a
+      // `/usr/bin/git`, and without the command line tools behind it that file
+      // is a stub that opens this same dialog when a session runs it.
+      Git: {
+        command: "xcode-select --install",
+        note:
+          "git comes with Apple's command line tools, and this opens Apple's " +
+          "own dialog to install them. The git in /usr/bin without them is a " +
+          "stub that opens the same dialog instead of running.",
+      },
+
+      Claude: CLAUDE_ON_A_MAC,
+
+      // Neither a script nor a package this machine can use: the npm the other
+      // Unix tabs install it from wants a node this Mac has no package manager
+      // to fetch, and the cask beside it is Homebrew's.
+      Codex: {
+        link: "https://github.com/openai/codex/releases",
+        note:
+          "Codex has no installer script, and the package the other tabs use " +
+          "wants an npm this Mac has no package manager to install. Put the " +
+          "binary in ~/.local/bin, which is on every Mac session's PATH " +
+          "whichever way Verkstead was started.",
+      },
+
+      Grok: GROK_UNIX,
+      OpenCode: OPENCODE_NATIVE,
+
+      Gh: {
+        link: "https://github.com/cli/cli/releases",
+        note:
+          "GitHub ships a zip for this Mac rather than a package it can " +
+          "install. Unpack gh into ~/.local/bin, which is on every Mac " +
+          "session's PATH whichever way Verkstead was started.",
       },
     },
   },

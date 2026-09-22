@@ -765,9 +765,21 @@ was the row for as long as `~/.local/bin` was somewhere a Mac session could not
 look, and a Mac session's `PATH` now carries that directory whichever way
 Verkstead was started — so what a tick runs is the install that stays current,
 and a press with Claude alone ticked installs no Homebrew at all.
+**And an Intel Mac is not Homebrew's at all.** Homebrew has dropped those
+machines — its installer refuses one outright, and its formulae there get no
+bottles — so that Mac has a tab of its own with no `brew` on it, and a press
+raises nothing whatever is ticked. What installs is the vendors' own:
+Anthropic's for Claude Code, xAI's for Grok Build and OpenCode's own, each
+landing under your home and each put on every session's `PATH` for you. The
+rest is a sentence on the screen of instructions: `git` is Apple's command
+line tools, and `xcode-select --install` opens Apple's own dialog on that
+Mac's screen rather than a command Verkstead can run for you, while Codex
+and `gh` are a binary to put in `~/.local/bin`, which every Mac session
+looks in.
 Only what could not be installed here — a NixOS, a server with no way to raise
 a dialog, an installer that would not run, a Homebrew that could not be
-installed — reaches a screen of instructions afterwards, with this
+installed, an Intel Mac's `git` — reaches a screen of instructions afterwards,
+with this
 distro's own command and where the binary has to land; that screen holds Next,
 counting the rows detected, and it re-probes while you are away, so an
 `apt install bubblewrap` finishing in another window ticks the row within ten

@@ -1898,14 +1898,19 @@ export type DirectoryListing = { "Listed": {
 path: string | null, entries: Array<DirectoryEntry>, } } | "NotAbsolute" | "Missing" | "NotADirectory" | { "Unreadable": { why: string, } };
 
 /**
- * And which of the wizard's eight tabs this machine is.
+ * And which of the wizard's nine tabs this machine is.
  *
  * The five Linux distributions whose commands are written down, everything
- * else that is a Linux, and the two platforms whose answer is the platform's
- * own. Read off `/etc/os-release` — `ID` first and then `ID_LIKE`, so that a
- * derivative gets its parent's commands rather than the generic list.
+ * else that is a Linux, and the platforms whose answer is the platform's own —
+ * which is two machines on a Mac. Read off `/etc/os-release` — `ID` first and
+ * then `ID_LIKE`, so that a derivative gets its parent's commands rather than
+ * the generic list.
+ *
+ * **The order is the order the tabs are drawn in**, and the second Mac is at
+ * the end of it: the eight above are the list the wizard has always drawn, and
+ * an Intel Mac is the machine that fell out of one of them.
  */
-export type Distro = "MacOs" | "Windows" | "NixOs" | "Ubuntu" | "Fedora" | "Debian" | "Arch" | "OtherLinux";
+export type Distro = "MacOs" | "Windows" | "NixOs" | "Ubuntu" | "Fedora" | "Debian" | "Arch" | "OtherLinux" | "MacOsIntel";
 
 /**
  * What one entry is, which decides what the field drawing it does with the row.
@@ -2530,10 +2535,11 @@ export type PinnedEvent = { "AgentOutput": AgentOutputEvent } | { "TaskList": Ta
 /**
  * The three platforms, as the viewer receives one.
  *
- * Its own type beside [`Distro`], which carries the same fact for two of its
- * eight values: the distro is which set of commands to draw, and this is which
+ * Its own type beside [`Distro`], which carries the same fact for three of its
+ * nine values: the distro is which set of commands to draw, and this is which
  * machine they are for — a sandbox row that ticks, one that is run, and one
- * that is nothing to install.
+ * that is nothing to install. Both Macs are this one platform, `sandbox-exec`
+ * being Apple's own on either.
  */
 export type Platform = "Linux" | "MacOs" | "Windows";
 

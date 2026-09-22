@@ -19,10 +19,10 @@
   line-height: 1.5;
 }
 
-/* The eight machines, as the pressed-or-not buttons in a group the workbench's
+/* The nine machines, as the pressed-or-not buttons in a group the workbench's
    terminals already use: they are all always there, `aria-pressed` is the one
    word that says which is showing, and the strip scrolls where a phone cannot
-   hold all eight. */
+   hold all nine. */
 .tabs {
   display: flex;
   gap: 0.25rem;
@@ -392,4 +392,13 @@
 /* Its own instruction sits straight under that word. */
 .before .instruction {
   margin-top: 0.4rem;
+}
+
+/* And what one tab says about itself, where two of them are the same operating
+   system: the Intel Mac's sentence, drawn where the other Mac's Homebrew line
+   is. A note rather than a box, that box being for something to run and this
+   being something to know. Two classes deep to take the gap off the note's own
+   margin, the way every other parent here tightens one. */
+.step .about {
+  margin-top: 0;
 }

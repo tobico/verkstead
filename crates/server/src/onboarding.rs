@@ -123,6 +123,25 @@ pub(crate) use install::Refusal;
 /// command for ships.
 const OS_RELEASE: &str = "/etc/os-release";
 
+/// And what a Mac says which Mac it is with: Apple's own `sysctl`, at the path
+/// every Mac keeps it.
+///
+/// **Named in full rather than resolved.** What a session searches is the
+/// machine's own `PATH`, which is somebody's to arrange; what this asks about
+/// is the hardware, and the program that answers for it is Apple's own and has
+/// been at this path since long before any Mac Verkstead runs on.
+const SYSCTL: &str = "/usr/sbin/sysctl";
+
+/// The one thing it is asked, which is whether this Mac's processor is Apple's.
+///
+/// **It answers for the Mac rather than for the process.** A universal binary
+/// translated by Rosetta is an x86_64 process on an Apple-silicon Mac, and
+/// `uname -m` in it says `x86_64` — while Homebrew's prefix on that machine is
+/// still `/opt/homebrew` and its formulae still have bottles. So the question
+/// is put to the hardware, and the architecture this server was built for is
+/// read nowhere.
+const ARM64: &str = "hw.optional.arm64";
+
 /// What the sandbox row runs on Linux: a mount namespace holding the machine
 /// read-only, running the one program every machine really has.
 ///
@@ -176,6 +195,36 @@ fn hostname() -> String {
         .map(|name| name.to_string_lossy().into_owned())
         .filter(|name| !name.trim().is_empty())
         .unwrap_or_else(|| NAMELESS.to_owned())
+}
+
+/// What this machine says about [`ARM64`], where it is a machine with an
+/// opinion — which is a Mac and nothing else.
+///
+/// Read at the edge with everything else about the machine — see
+/// [`Machine::here`] — and never again: which processor a Mac has is not a
+/// thing that changes under a running server.
+///
+/// **Nothing is run anywhere but a Mac.** The OID is Apple's, and a `sysctl`
+/// on a Linux is a different program answering different questions; the other
+/// two platforms say nothing here and are the two Macs' opposite in
+/// [`distro`], where saying nothing is what an Intel Mac says.
+fn sysctl(platform: Platform) -> Option<String> {
+    if platform != Platform::MacOs {
+        return None;
+    }
+
+    let run = Command::new(SYSCTL)
+        .arg("-n")
+        .arg(ARM64)
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+
+    // An Intel Mac has no such OID: `sysctl` exits non-zero and complains on
+    // standard error, which is the same answer as a zero and is read as one.
+    run.status
+        .success()
+        .then(|| String::from_utf8_lossy(&run.stdout).into_owned())
 }
 
 /// Which harness row is which agent's, so that the name each is probed under is
@@ -237,6 +286,15 @@ pub struct Machine {
     /// file, because which line answers is [`distro`]'s business rather than
     /// the reading's.
     os_release: Option<String>,
+
+    /// And what `sysctl` said [`ARM64`] was, on the platform that is asked —
+    /// what was printed rather than what it means, for the reason the file
+    /// above is held whole: which Mac that makes this is [`distro`]'s business.
+    ///
+    /// `None` is a machine that said nothing, which is an Intel Mac, either of
+    /// the other two platforms, and every stated machine a suite has not said
+    /// otherwise about.
+    arm64: Option<String>,
 
     /// And the home of whoever is running this server, which is where the
     /// accounts are looked for. Whichever variable the platform keeps it in —
@@ -313,6 +371,9 @@ impl Machine {
         // [`crate::sandbox::Executable::of_the_server`] logs about at startup
         // for the other thing it costs.
         .running(std::env::current_exe().ok())
+        // And which Mac this is, where it is one — the one read here that is a
+        // command rather than a file or a variable.
+        .arm64(sysctl(Platform::HERE))
     }
 
     /// A machine stated rather than read, which is what a test stands a server
@@ -369,6 +430,20 @@ impl Machine {
         Machine { verkstead, ..self }
     }
 
+    /// And the same, having heard `said` from `sysctl` about [`ARM64`], which
+    /// is what tells the two Macs apart — see [`distro`].
+    ///
+    /// Said here rather than passed to [`Machine::stated`] for the reason the
+    /// hostname and the Data Directory are: it is one fact about one platform,
+    /// and every suite that states a Linux or a Windows would be carrying a
+    /// `None` through it for nothing.
+    pub fn arm64(self, said: Option<String>) -> Machine {
+        Machine {
+            arm64: said,
+            ..self
+        }
+    }
+
     /// The two ways of making one, said once: a `PATH` a caller stated, or none
     /// at all for the machine that composes its own.
     #[allow(clippy::too_many_arguments)]
@@ -398,6 +473,7 @@ impl Machine {
             hostname,
             data_dir: None,
             verkstead: None,
+            arm64: None,
         }
     }
 
@@ -444,10 +520,14 @@ impl Machine {
         self.verkstead.as_deref()
     }
 
-    /// And which of the wizard's eight tabs it is, which is also which package
+    /// And which of the wizard's nine tabs it is, which is also which package
     /// manager an install run raises — see [`install`].
     fn distro(&self) -> Distro {
-        distro(self.platform, self.os_release.as_deref())
+        distro(
+            self.platform,
+            self.os_release.as_deref(),
+            self.arm64.as_deref(),
+        )
     }
 
     /// Everything a reading of this machine asks it, made in one hop off the
@@ -1155,18 +1235,40 @@ fn present(state: &DependencyState) -> bool {
     matches!(state, DependencyState::Present { .. })
 }
 
-/// Which of the wizard's eight tabs this machine is.
+/// Which of the wizard's nine tabs this machine is.
 ///
 /// `ID` first, and `ID_LIKE` after it, which is what makes a derivative get its
 /// parent's commands: Linux Mint says `ID=linuxmint` and `ID_LIKE="ubuntu
 /// debian"`, and the first of those two is the one whose `apt` line is right.
 /// A machine naming none of them is *other Linux*, which the wizard answers
 /// with the generic list rather than with a command that would be wrong.
-fn distro(platform: Platform, os_release: Option<&str>) -> Distro {
+///
+/// A Mac is two of the nine, and which of them is [`mac`]'s answer.
+fn distro(platform: Platform, os_release: Option<&str>, arm64: Option<&str>) -> Distro {
     match platform {
-        Platform::MacOs => Distro::MacOs,
+        Platform::MacOs => mac(arm64),
         Platform::Windows => Distro::Windows,
         Platform::Linux => linux(os_release.unwrap_or_default()),
+    }
+}
+
+/// And which of the two Macs, out of what [`ARM64`] said.
+///
+/// **A one is Apple silicon and everything else is Intel.** The OID is absent
+/// on an Intel Mac, where `sysctl` exits non-zero and there is nothing to read
+/// at all, so an answer that is not a one is a machine to keep Homebrew away
+/// from: the prefix step there is a `chmod /usr/local` no Mac since Catalina
+/// allows, and the installer behind it refuses the machine anyway.
+///
+/// Which is what a read that could not be made comes to as well. A Mac whose
+/// `sysctl` would not run reads Intel and draws the tab that installs no
+/// Homebrew — the wrong tab on such a machine, and the one whose commands still
+/// work; the other is a press away, as every tab is, the detection having
+/// always been a guess the human can overrule.
+fn mac(arm64: Option<&str>) -> Distro {
+    match arm64.map(str::trim) {
+        Some("1") => Distro::MacOs,
+        _ => Distro::MacOsIntel,
     }
 }
 
@@ -1544,7 +1646,7 @@ echo {token}
             let os_release = format!("NAME=\"Something\"\nID={id}\nVERSION_ID=\"1\"\n");
 
             assert_eq!(
-                distro(Platform::Linux, Some(&os_release)),
+                distro(Platform::Linux, Some(&os_release), None),
                 expected,
                 "{id} is its own tab",
             );
@@ -1566,7 +1668,7 @@ echo {token}
             ("ID=pop\nID_LIKE=ubuntu debian\n", Distro::Ubuntu),
         ] {
             assert_eq!(
-                distro(Platform::Linux, Some(os_release)),
+                distro(Platform::Linux, Some(os_release), None),
                 expected,
                 "{os_release:?} is a derivative of a distribution with a command",
             );
@@ -1578,7 +1680,7 @@ echo {token}
     #[test]
     fn the_id_is_read_before_what_it_is_like() {
         assert_eq!(
-            distro(Platform::Linux, Some("ID=ubuntu\nID_LIKE=debian\n")),
+            distro(Platform::Linux, Some("ID=ubuntu\nID_LIKE=debian\n"), None),
             Distro::Ubuntu,
             "Ubuntu's own tab rather than Debian's, which is what it says it is like",
         );
@@ -1596,25 +1698,105 @@ echo {token}
             Some("NAME=\"Something\"\n"),
         ] {
             assert_eq!(
-                distro(Platform::Linux, os_release),
+                distro(Platform::Linux, os_release, None),
                 Distro::OtherLinux,
                 "{os_release:?} names no distribution with a command written for it",
             );
         }
     }
 
-    /// And the two platforms that have no distribution to be read never read
-    /// one, whatever happens to be in a file of that name.
+    /// And the platforms that have no distribution to be read never read one,
+    /// whatever happens to be in a file of that name.
     #[test]
     fn the_platforms_that_are_not_a_linux_are_their_own_tab() {
-        for (platform, expected) in [
-            (Platform::MacOs, Distro::MacOs),
-            (Platform::Windows, Distro::Windows),
+        for (platform, arm64, expected) in [
+            (Platform::MacOs, Some("1"), Distro::MacOs),
+            (Platform::MacOs, None, Distro::MacOsIntel),
+            (Platform::Windows, None, Distro::Windows),
         ] {
             assert_eq!(
-                distro(platform, Some("ID=ubuntu\n")),
+                distro(platform, Some("ID=ubuntu\n"), arm64),
                 expected,
                 "{platform:?} is what it is whatever a file says",
+            );
+        }
+    }
+
+    /// And which Mac it is, is `hw.optional.arm64` and nothing else: a one is
+    /// Apple silicon, and a zero or a machine that would not answer is the
+    /// Intel Mac Homebrew has dropped.
+    #[test]
+    fn a_mac_is_apple_silicon_where_it_says_its_processor_is() {
+        for (said, expected) in [
+            (Some("1\n"), Distro::MacOs),
+            (Some("1"), Distro::MacOs),
+            (Some("0\n"), Distro::MacOsIntel),
+            (Some(""), Distro::MacOsIntel),
+            (None, Distro::MacOsIntel),
+        ] {
+            assert_eq!(
+                distro(Platform::MacOs, None, said),
+                expected,
+                "{said:?} is what `sysctl` printed about this Mac",
+            );
+        }
+    }
+
+    /// And a Mac under Rosetta is an Apple-silicon Mac, which is the whole of
+    /// why the question is put to `sysctl` rather than to this process.
+    ///
+    /// **Which this suite is the case of.** The process asking is whatever the
+    /// runner is — an x86_64 one on this CI, as a translated universal binary
+    /// is on an Apple-silicon Mac — and the answer is the machine's own either
+    /// way: the tab is Homebrew's, whose prefix on that Mac is `/opt/homebrew`
+    /// and whose formulae there have bottles.
+    #[test]
+    fn a_mac_under_rosetta_is_the_mac_it_is_running_on() {
+        assert_eq!(
+            distro(Platform::MacOs, None, Some("1\n")),
+            Distro::MacOs,
+            "the slice this process is says nothing about the Mac under it",
+        );
+    }
+
+    /// And on a Mac the read is really made: Apple's `sysctl` is where it is
+    /// said to be, and the one thing it is asked answers a yes or a no.
+    ///
+    /// **The claim a stated machine cannot make.** Everything above is what the
+    /// wizard does with an answer, which is asked on any runner; this is that
+    /// there is one to be had — the program at [`SYSCTL`], and an [`ARM64`]
+    /// that is a one on an Apple-silicon Mac and absent on an Intel one, which
+    /// is what [`mac`] reads.
+    #[test]
+    #[cfg_attr(
+        not(target_os = "macos"),
+        ignore = "the `sysctl` this reads is a Mac's"
+    )]
+    fn a_real_mac_says_which_processor_it_has() {
+        assert!(
+            Path::new(SYSCTL).is_file(),
+            "{SYSCTL} is Apple's own and on every Mac",
+        );
+
+        assert!(
+            matches!(
+                sysctl(Platform::MacOs).as_deref().map(str::trim),
+                None | Some("0") | Some("1"),
+            ),
+            "what this Mac says {ARM64} is: {:?}",
+            sysctl(Platform::MacOs),
+        );
+    }
+
+    /// And nothing is asked of a machine that is not a Mac: the OID is Apple's,
+    /// and the `sysctl` on a Linux answers other questions.
+    #[test]
+    fn only_a_mac_is_asked_what_processor_it_has() {
+        for platform in [Platform::Linux, Platform::Windows] {
+            assert_eq!(
+                sysctl(platform),
+                None,
+                "{platform:?} has nothing to say about hw.optional.arm64",
             );
         }
     }

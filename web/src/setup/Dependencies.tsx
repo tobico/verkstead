@@ -26,7 +26,7 @@
 //! hint screen where one did not.
 //!
 //! **The hint screen** is the step as it used to be, cut down to the rows that
-//! are still missing: the eight tabs of instructions, the list of directories a
+//! are still missing: the nine tabs of instructions, the list of directories a
 //! session looks in, and the note that the list was read once. Next is held
 //! until every one of those rows is detected, with the count beside it, and
 //! Back returns to the checkbox screen — which is how a row nobody wants after
@@ -135,16 +135,18 @@ const LOOKS = "Where a session looks for a program, in order:";
 /// Verkstead reads its `PATH` when it starts and composes every session's out of
 /// it, so a directory put on a shell's `PATH` after that is a directory no
 /// session has — which is the whole of what somebody whose fresh install has not
-/// ticked needs to know. Said once here rather than eight times over: it is a
+/// ticked needs to know. Said once here rather than nine times over: it is a
 /// fact about Verkstead rather than about any one machine.
 const RESTART =
   "Verkstead reads that PATH once, when it starts. A directory added to it " +
   "since — the one a new install landed in — is one no session has until " +
   "Verkstead is started again from a shell whose PATH names it.";
 
-/// And the word over the one install a tab's own commands stand on — the Mac's
-/// Homebrew, which is what the `brew` lines under it are run with. Not every
-/// line under it: the two vendors' own installers there want no Homebrew.
+/// And the word over the one install a tab's own commands stand on — the
+/// Apple-silicon Mac's Homebrew, which is what the `brew` lines under it are
+/// run with. Not every line under it: the two vendors' own installers there
+/// want no Homebrew, and the other Mac has no `brew` line at all — what that
+/// tab says about itself instead is its own `about`, see `instructions.ts`.
 const FIRST = "What the brew commands below are run with:";
 
 /// Which rows are a harness, so that the row wears the same mark the rest of the
@@ -640,6 +642,13 @@ function Hints(props: {
       </Show>
 
       <Note class={styles.restart}>{RESTART}</Note>
+
+      {/* And what one tab is, where two of them are the same operating system
+          with different commands under them: the Intel Mac's says so in a
+          sentence, drawn where the other Mac draws Homebrew's own line. */}
+      <Show when={guide().about}>
+        {(about) => <Note class={styles.about}>{about()}</Note>}
+      </Show>
 
       {/* What this tab's own commands want first, where they want the same
           thing: the Mac's Homebrew, drawn once above the rows rather than

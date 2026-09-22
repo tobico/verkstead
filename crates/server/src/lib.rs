@@ -721,7 +721,7 @@ fn nothing_bound() -> sandbox::SandboxConfig {
 /// The seam the onboarding suite is stood up over, and a parameter for the
 /// reason [`router_reading_tailscale`]'s Tailscale is one: what the wizard
 /// answers is a fact about the machine underneath it, and a wizard that has to
-/// say something about three platforms, eight distributions and a `bwrap` that
+/// say something about three platforms, nine distributions and a `bwrap` that
 /// will not run cannot be asked about any of them on the one machine the suite
 /// happens to be on. See [`onboarding::Machine::stated`].
 ///

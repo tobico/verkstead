@@ -42,6 +42,7 @@ use verkstead_server::github::Gh;
 use verkstead_server::onboarding::Machine;
 use verkstead_server::platform::{Environment, Platform};
 use verkstead_server::remote::{Elevate, Raised};
+use verkstead_server::settings::Settings;
 use verkstead_server::{open_database, router_onboarding_elevating};
 
 /// What this machine calls itself, which is the one thing in the status line
@@ -99,15 +100,28 @@ fn served_on(
         pool,
         Platform::Linux,
         Some(os_release.to_owned()),
+        None,
         dialog,
     )
 }
 
-/// And a stated Mac, which says nothing about itself: there is no
-/// `/etc/os-release` on one, and the platform is the whole of the answer.
+/// And a stated Apple-silicon Mac, which says nothing about itself but which
+/// processor it has: there is no `/etc/os-release` on a Mac, and what is left
+/// of the answer is `hw.optional.arm64` — see `onboarding::mac`.
 fn served_mac(dir: &Path, pool: &SqlitePool, dialog: Option<Arc<Dialog>>) -> Router {
-    stood_up(dir, pool, Platform::MacOs, None, dialog)
+    stood_up(dir, pool, Platform::MacOs, None, ARM64, dialog)
 }
+
+/// And the other Mac, which is the same platform saying nothing at all: the
+/// OID is absent on an Intel Mac, and a machine that will not answer for its
+/// processor is the Mac Homebrew has dropped.
+fn served_intel_mac(dir: &Path, pool: &SqlitePool, dialog: Option<Arc<Dialog>>) -> Router {
+    stood_up(dir, pool, Platform::MacOs, None, None, dialog)
+}
+
+/// What an Apple-silicon Mac answers with, which is the whole of what makes it
+/// Homebrew's.
+const ARM64: Option<&str> = Some("1");
 
 /// A server over a machine stated whichever way, raising through `dialog`.
 ///
@@ -122,10 +136,13 @@ fn stood_up(
     pool: &SqlitePool,
     platform: Platform,
     os_release: Option<String>,
+    arm64: Option<&str>,
     dialog: Option<Arc<Dialog>>,
 ) -> Router {
     let searches = match platform {
-        Platform::MacOs => std::env::join_paths([bin(dir), local_bin(dir)]).unwrap(),
+        Platform::MacOs => {
+            std::env::join_paths([bin(dir), local_bin(dir), opencode_bin(dir)]).unwrap()
+        }
         Platform::Linux | Platform::Windows => OsString::from(bin(dir).as_os_str()),
     };
 
@@ -141,7 +158,8 @@ fn stood_up(
             ..Environment::default()
         },
     )
-    .called(HOSTNAME.to_owned());
+    .called(HOSTNAME.to_owned())
+    .arm64(arm64.map(str::to_owned));
 
     router_onboarding_elevating(
         pool.clone(),
@@ -178,6 +196,16 @@ fn home(dir: &Path) -> PathBuf {
 /// having made it and put a program in it.
 fn local_bin(dir: &Path) -> PathBuf {
     home(dir).join(".local/bin")
+}
+
+/// And the one OpenCode's own installer writes into, which a Mac session
+/// reaches for the other reason: it is on no floor at all, and what puts it on
+/// a session's `PATH` is the `session_path` write the unit makes when it lands
+/// — see `tests/vendor_installers.rs`, where that write is followed through a
+/// machine composing its own `PATH`. Stated here, this machine's `PATH` being
+/// a word of the suite's that stands still.
+fn opencode_bin(dir: &Path) -> PathBuf {
+    home(dir).join(".opencode/bin")
 }
 
 /// A script at `path`, executable.
@@ -322,12 +350,22 @@ fn an_installer(dir: &Path) {
     let installed = dir.join("what-the-installer-lands");
     program(&installed, "#!/bin/sh\nexit 0\n");
 
+    // Whose installer it is, is the address it was asked for: the one stub
+    // answers for Anthropic and for OpenCode, each with the program and the
+    // directory that vendor's own script really leaves behind. Which is the
+    // one thing a unit says about itself that this suite can check — a `curl`
+    // that answered the same script whatever it was asked would prove nothing
+    // about which line a ticked row runs.
     program(
         &bin(dir).join("curl"),
         &format!(
             "#!/bin/sh\n\
-             into='{into}'\n\
-             printf '%s\n' \"'{mkdir}' -p '$into'\" \"'{cp}' '{installed}' '$into/claude'\"\n",
+             case \"$*\" in\n\
+             *opencode.ai*) into='{opencode}'; name=opencode ;;\n\
+             *) into='{into}'; name=claude ;;\n\
+             esac\n\
+             printf '%s\n' \"'{mkdir}' -p '$into'\" \"'{cp}' '{installed}' '$into/$name'\"\n",
+            opencode = opencode_bin(dir).display(),
             into = local_bin(dir).display(),
             mkdir = found("mkdir").display(),
             cp = found("cp").display(),
@@ -783,6 +821,102 @@ async fn a_mac_installs_its_packages_with_homebrew_and_claude_with_anthropics() 
     assert!(
         landed.steps.dependencies,
         "the step the wizard was held on is met by what the run installed",
+    );
+}
+
+/// And ticking Claude Code, OpenCode and `gh` on an Intel Mac runs the two
+/// vendors' own installers as the user, raises nothing at all, and sends the
+/// row it has no command for to the hint screen with what to do about it.
+///
+/// **Which is the press that failed on the release.** This machine used to be
+/// the other Mac: every ticked row was Homebrew's, so the run began by making
+/// Homebrew's prefix behind the password dialog — `chmod /usr/local`, which no
+/// Mac since Catalina allows — and a human watching it got
+/// `Operation not permitted` and a hint screen telling them to run the
+/// installer Homebrew refuses this machine with. There is no dialog here at
+/// all now, and what the two units install is under this user's own home.
+#[tokio::test]
+async fn an_intel_mac_installs_with_the_vendors_own_and_raises_nothing() {
+    let (dir, pool) = ready().await;
+    an_installer(dir.path());
+
+    let dialog = Dialog::answered(dir.path(), Answer::Typed);
+    let app = served_intel_mac(dir.path(), &pool, Some(dialog.clone()));
+
+    let ticked = [Dependency::Claude, Dependency::OpenCode, Dependency::Gh];
+
+    let pressed = install(&app, &ticked).await;
+    let run = pressed.run.expect("a press makes a run");
+
+    assert_eq!(
+        run.total, 3,
+        "every ticked row is a row of the run, the one nothing installs included: {run:?}",
+    );
+
+    let landed = over(&app).await;
+    let run = landed.run.clone().expect("the run it was started with");
+
+    assert_eq!(run.done, 3);
+    assert_eq!(run.status, "1 of 3 could not be installed");
+
+    assert!(
+        dialog.commands().is_empty(),
+        "an Intel Mac raises nothing: {:?}",
+        dialog.commands(),
+    );
+
+    // The two rows a vendor installs are present where that vendor's own
+    // installer puts them, both of them under this user's home.
+    for (installed, at) in [
+        (Dependency::Claude, local_bin(dir.path()).join("claude")),
+        (
+            Dependency::OpenCode,
+            opencode_bin(dir.path()).join("opencode"),
+        ),
+    ] {
+        assert_eq!(install_state(&landed, installed), &InstallState::Idle);
+        assert_eq!(
+            row(&landed, installed).state,
+            DependencyState::Present {
+                at: Some(at.to_string_lossy().into_owned()),
+                target: None,
+            },
+            "{installed:?} is there, where its vendor's installer puts it",
+        );
+    }
+
+    // And both directories are written down, so that the next start reads them
+    // back and the next session's `PATH` leads with them — which for
+    // `~/.opencode/bin` is the whole of how a session reaches it, it being on
+    // no floor.
+    assert_eq!(
+        Settings::in_data_dir(dir.path()).config().session_path(),
+        [
+            local_bin(dir.path()).to_string_lossy().into_owned(),
+            opencode_bin(dir.path()).to_string_lossy().into_owned(),
+        ],
+        "in the order the units ran",
+    );
+
+    // And the row nothing here installs is the hint screen's, in the words that
+    // say where to put it: task 05 gives this one an install of its own, and
+    // the sentence is what a machine that could not run it still gets.
+    assert!(
+        !present(&landed, Dependency::Gh),
+        "nothing was installed for it: {landed:?}",
+    );
+
+    let InstallState::Failed { why } = install_state(&landed, Dependency::Gh) else {
+        panic!("the row carries why nothing was run for it: {landed:?}");
+    };
+
+    assert!(
+        why.contains("~/.local/bin"),
+        "which says where the binary goes: {why}",
+    );
+    assert!(
+        !why.contains("brew") && !why.contains("Homebrew"),
+        "and says nothing about a Homebrew this Mac cannot have: {why}",
     );
 }
 
