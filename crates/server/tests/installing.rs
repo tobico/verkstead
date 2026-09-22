@@ -402,6 +402,124 @@ fn an_installer_that_fails(dir: &Path) {
 /// What that script says, which is the line the row it failed carries.
 const UNREACHABLE: &str = "The installer could not reach the network.";
 
+/// The version GitHub's releases answer with here, and the tag it is the tag
+/// of.
+///
+/// **A number of this suite's own, and nothing reads it off the box.** What is
+/// being asked about is that the version the line installs is the one the
+/// redirect named — see `onboarding::install`'s `GH_RELEASE` — so the stub
+/// below answers this tag and then refuses every download but this tag's, and a
+/// line that had a version written into it would be a run that failed here.
+const RELEASED: &str = "2.101.0";
+
+/// The programs Verkstead's own `gh` line reaches for, on the stated machine's
+/// `PATH`.
+///
+/// **The box's own rather than stubs, and put here rather than named in the
+/// line.** What a ticked `gh` row runs is Verkstead's line rather than a
+/// vendor's script, so it names its tools the way a Mac does — off the `PATH`
+/// it is handed — and a stated machine whose `PATH` is one directory of this
+/// suite's making has to hold them. They do what they do; the `curl` beside
+/// them is the stub, which is the whole of what is standing in for GitHub.
+fn the_tools_a_download_wants(dir: &Path) {
+    for tool in ["mktemp", "unzip", "mkdir", "cp", "chmod", "rm"] {
+        std::os::unix::fs::symlink(found(tool), bin(dir).join(tool))
+            .expect("the tools a download wants, on the machine's own `PATH`");
+    }
+}
+
+/// And a stub `curl` answering for GitHub's releases: the redirect with a tag,
+/// and that tag's `macOS_amd64` zip with a `gh` inside it.
+///
+/// **Stubbed for the reason every network here is**, and for one more: a suite
+/// that really asked GitHub would install whatever `gh` was released this
+/// morning, over a network a runner happens to have, and would be asking about
+/// GitHub rather than about the line. So the two calls the line makes are
+/// answered here — the redirect off [`RELEASED`], and the download off a zip
+/// this suite built, which is the release's own shape: a directory named for
+/// the version with the binary at `bin/gh` inside it.
+///
+/// **And the download is answered for one URL alone.** The version in it is the
+/// one the redirect just named, so a line that asked for any other — a version
+/// written into Verkstead, or a tag it never read — is a `curl` that fails and
+/// a row that stays absent.
+fn a_release(dir: &Path) {
+    program(&unpacked(dir).join("bin/gh"), "#!/bin/sh\nexit 0\n");
+
+    let zipped = dir.join("gh.zip");
+
+    let made = std::process::Command::new(found("zip"))
+        .arg("--quiet")
+        .arg("--recurse-paths")
+        .arg(&zipped)
+        .arg(unpacked(dir).file_name().expect("the release's directory"))
+        .current_dir(dir)
+        .status()
+        .expect("the suite's own `zip`");
+
+    assert!(
+        made.success(),
+        "the release this suite answers with: {made}"
+    );
+
+    program(
+        &bin(dir).join("curl"),
+        &format!(
+            "#!/bin/sh\n\
+             case \"$*\" in\n\
+             *releases/latest*)\n\
+             printf '%s' 'https://github.com/cli/cli/releases/tag/v{RELEASED}'\n\
+             exit 0\n\
+             ;;\n\
+             *'/download/v{RELEASED}/gh_{RELEASED}_macOS_amd64.zip') ;;\n\
+             *)\n\
+             printf '%s\n' 'curl was asked for a release GitHub never named' >&2\n\
+             exit 22\n\
+             ;;\n\
+             esac\n\
+             out=\n\
+             while [ $# -gt 0 ]; do\n\
+             if [ \"$1\" = -o ]; then out=$2; fi\n\
+             shift\n\
+             done\n\
+             '{cp}' '{zipped}' \"$out\"\n",
+            cp = found("cp").display(),
+            zipped = zipped.display(),
+        ),
+    );
+}
+
+/// What that zip holds, which is the shape GitHub's own release has: a
+/// directory named for the version, with the binary at `bin/gh` inside it.
+fn unpacked(dir: &Path) -> PathBuf {
+    let unpacked = dir.join(format!("gh_{RELEASED}_macOS_amd64/bin"));
+    std::fs::create_dir_all(&unpacked).unwrap();
+
+    unpacked
+        .parent()
+        .expect("the release's directory")
+        .to_owned()
+}
+
+/// And the same `curl` where the redirect answers and the download does not,
+/// which is the Mac that cannot reach GitHub.
+fn a_release_that_cannot_be_downloaded(dir: &Path) {
+    program(
+        &bin(dir).join("curl"),
+        &format!(
+            "#!/bin/sh\n\
+             case \"$*\" in\n\
+             *releases/latest*)\n\
+             printf '%s' 'https://github.com/cli/cli/releases/tag/v{RELEASED}'\n\
+             exit 0\n\
+             ;;\n\
+             esac\n\
+             printf '%s\n' '{UNREACHABLE}' >&2\n\
+             exit 7\n"
+        ),
+    );
+}
+
 /// The platform's password dialog, stubbed: what it was handed, what it does
 /// with it, and what it answers.
 #[derive(Debug)]
@@ -824,7 +942,7 @@ async fn a_mac_installs_its_packages_with_homebrew_and_claude_with_anthropics() 
     );
 }
 
-/// And ticking Claude Code, OpenCode and `gh` on an Intel Mac runs the two
+/// And ticking Claude Code, OpenCode and git on an Intel Mac runs the two
 /// vendors' own installers as the user, raises nothing at all, and sends the
 /// row it has no command for to the hint screen with what to do about it.
 ///
@@ -843,7 +961,7 @@ async fn an_intel_mac_installs_with_the_vendors_own_and_raises_nothing() {
     let dialog = Dialog::answered(dir.path(), Answer::Typed);
     let app = served_intel_mac(dir.path(), &pool, Some(dialog.clone()));
 
-    let ticked = [Dependency::Claude, Dependency::OpenCode, Dependency::Gh];
+    let ticked = [Dependency::Claude, Dependency::OpenCode, Dependency::Git];
 
     let pressed = install(&app, &ticked).await;
     let run = pressed.run.expect("a press makes a run");
@@ -899,24 +1017,134 @@ async fn an_intel_mac_installs_with_the_vendors_own_and_raises_nothing() {
     );
 
     // And the row nothing here installs is the hint screen's, in the words that
-    // say where to put it: task 05 gives this one an install of its own, and
-    // the sentence is what a machine that could not run it still gets.
+    // say what it wants: Apple's own dialog, which is on that Mac's screen
+    // rather than a command Verkstead can run for anybody.
     assert!(
-        !present(&landed, Dependency::Gh),
+        !present(&landed, Dependency::Git),
         "nothing was installed for it: {landed:?}",
     );
 
-    let InstallState::Failed { why } = install_state(&landed, Dependency::Gh) else {
+    let InstallState::Failed { why } = install_state(&landed, Dependency::Git) else {
         panic!("the row carries why nothing was run for it: {landed:?}");
     };
 
     assert!(
-        why.contains("~/.local/bin"),
-        "which says where the binary goes: {why}",
+        why.contains("xcode-select --install"),
+        "which says what installs it: {why}",
     );
     assert!(
         !why.contains("brew") && !why.contains("Homebrew"),
         "and says nothing about a Homebrew this Mac cannot have: {why}",
+    );
+}
+
+/// And ticking `gh` on that Mac unpacks GitHub's own release into the home's
+/// `.local/bin`, raises nothing, and writes the directory down.
+///
+/// **The row the other tab installs with Homebrew**, which this one has none
+/// of: `brew install gh` on an Intel Mac compiles from source under a Homebrew
+/// whose installer refuses the machine, so what a tick runs here is the zip
+/// every release carries. The version is the redirect's — the stub answers the
+/// download for that version's URL and no other — so a `gh` in `~/.local/bin`
+/// at the end of it is the version GitHub named a moment earlier.
+#[tokio::test]
+async fn an_intel_mac_unpacks_gh_out_of_githubs_release() {
+    let (dir, pool) = ready().await;
+    the_tools_a_download_wants(dir.path());
+    a_release(dir.path());
+
+    let dialog = Dialog::answered(dir.path(), Answer::Typed);
+    let app = served_intel_mac(dir.path(), &pool, Some(dialog.clone()));
+
+    install(&app, &[Dependency::Gh]).await;
+    let landed = over(&app).await;
+
+    assert!(
+        dialog.commands().is_empty(),
+        "a download under this user's own home asks nobody for a password: {:?}",
+        dialog.commands(),
+    );
+
+    assert_eq!(install_state(&landed, Dependency::Gh), &InstallState::Idle);
+    assert_eq!(
+        row(&landed, Dependency::Gh).state,
+        DependencyState::Present {
+            at: Some(
+                local_bin(dir.path())
+                    .join("gh")
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+            target: None,
+        },
+        "the row is present at the next probe, where the release was unpacked",
+    );
+
+    // And the directory is written down, which is what puts it on the next
+    // session's `PATH` — a Mac's floor carries it already, and `session_path`
+    // is what every unit that lands somewhere writes.
+    assert_eq!(
+        Settings::in_data_dir(dir.path()).config().session_path(),
+        [local_bin(dir.path()).to_string_lossy().into_owned()],
+    );
+
+    // And nothing of the unpacking is left behind: the zip was opened somewhere
+    // temporary and what was copied out of it is the binary alone.
+    assert_eq!(
+        std::fs::read_dir(local_bin(dir.path()))
+            .expect("the directory the release landed in")
+            .count(),
+        1,
+        "the binary and nothing beside it",
+    );
+}
+
+/// A download that could not be made fails the `gh` row in curl's own line and
+/// leaves nothing in `~/.local/bin`.
+///
+/// **Which is the Mac that cannot reach GitHub**, and the row it leaves is the
+/// hint screen's: the first line of what `curl` said goes under it, and the tab
+/// beneath that carries the releases link for the human who will fetch the zip
+/// by hand — see `web/src/setup/instructions.ts`.
+///
+/// **And the directory is untouched**, the zip having been opened somewhere
+/// temporary rather than over a directory a session searches: a half-downloaded
+/// `gh` on the `PATH` would be a row that went present over a program that
+/// cannot run.
+#[tokio::test]
+async fn a_gh_download_that_failed_leaves_nothing_behind() {
+    let (dir, pool) = ready().await;
+    the_tools_a_download_wants(dir.path());
+    a_release_that_cannot_be_downloaded(dir.path());
+
+    let dialog = Dialog::answered(dir.path(), Answer::Typed);
+    let app = served_intel_mac(dir.path(), &pool, Some(dialog.clone()));
+
+    install(&app, &[Dependency::Gh]).await;
+    let landed = over(&app).await;
+
+    assert_eq!(
+        install_state(&landed, Dependency::Gh),
+        &InstallState::Failed {
+            why: UNREACHABLE.to_owned(),
+        },
+        "the row carries the first line curl printed",
+    );
+    assert!(
+        !present(&landed, Dependency::Gh),
+        "and nothing was installed: {landed:?}",
+    );
+
+    assert!(
+        !local_bin(dir.path()).join("gh").exists(),
+        "nothing is left in ~/.local/bin",
+    );
+    assert!(
+        Settings::in_data_dir(dir.path())
+            .config()
+            .session_path()
+            .is_empty(),
+        "and a directory nothing landed in is not written down",
     );
 }
 

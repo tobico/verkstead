@@ -112,6 +112,11 @@ const NODE: &[&str] = &["nodejs", "npm"];
 /// What a skipped row reads.
 const CANCELLED: &str = "cancelled";
 
+/// The directory under the home a local install lands in, and the one a Mac
+/// session reaches whichever way Verkstead was started: it leads the Mac floor
+/// — see ADR-0016's *Macs*, and `sandbox`'s `composed`.
+const LOCAL_BIN: &str = ".local/bin";
+
 /// Anthropic's own installer, which is what a ticked Claude row runs.
 ///
 /// **The command the wizard already shows**, and the install that stays
@@ -123,7 +128,7 @@ const CANCELLED: &str = "cancelled";
 const CLAUDE: Vendor = Vendor {
     who: "Anthropic",
     line: "curl -fsSL https://claude.ai/install.sh | bash",
-    lands: ".local/bin",
+    lands: LOCAL_BIN,
 };
 
 /// And xAI's, which is what a ticked Grok Build row runs.
@@ -264,9 +269,37 @@ const CODEX_ON_INTEL: &str = "Codex has no installer script, and the package the
                               is on its releases page, and it goes in ~/.local/bin, which every \
                               Mac session looks in.";
 
-/// And what the `gh` row there says.
-const GH_ON_INTEL: &str = "The GitHub CLI ships a zip for this Mac rather than a package it can \
-                           install. Unpack gh into ~/.local/bin, which every Mac session looks in.";
+/// And GitHub's own release, which is what a ticked `gh` row runs on the Mac
+/// with no Homebrew to `brew install gh` with.
+///
+/// **A download rather than an installer**, GitHub publishing no script: every
+/// release carries a `gh_<version>_macOS_amd64.zip` with the binary at `bin/gh`
+/// inside it, and this is the four steps that turn one into a `gh` on a
+/// session's `PATH` — the version, the zip, the unpacking, and the copy into
+/// the home's own `.local/bin`.
+///
+/// **The version is this machine's to find, at the moment it installs.** It is
+/// the last path segment of wherever `releases/latest` redirects to — the tag,
+/// `v` and all, which the asset's name wants without it — so a Verkstead built
+/// months ago installs today's `gh`, where a version written down here would go
+/// stale with every release and be wrong for every human who pressed Next after
+/// it.
+///
+/// **Unpacked somewhere temporary and copied from there**, rather than
+/// extracted over a directory a session searches: a download that died halfway
+/// leaves a broken `gh` on the `PATH` if the zip is opened in place, and leaves
+/// nothing at all if it is opened in a directory that is thrown away either way.
+/// The exit status is the chain's own, kept across the cleanup, so the row
+/// carries what `curl` or `unzip` said rather than what `rm` did.
+const GH_RELEASE: &str = "unpacked=$(mktemp -d \"${TMPDIR:-/tmp}/verkstead-gh.XXXXXX\") && \
+     tag=$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+     https://github.com/cli/cli/releases/latest) && tag=${tag##*/} && \
+     curl -fsSL -o \"$unpacked/gh.zip\" \
+     \"https://github.com/cli/cli/releases/download/$tag/gh_${tag#v}_macOS_amd64.zip\" && \
+     unzip -q -j \"$unpacked/gh.zip\" '*/bin/gh' -d \"$unpacked\" && \
+     mkdir -p \"$HOME/.local/bin\" && cp \"$unpacked/gh\" \"$HOME/.local/bin/gh\" && \
+     chmod +x \"$HOME/.local/bin/gh\"; \
+     landed=$?; rm -rf \"$unpacked\"; exit $landed";
 
 /// And what a Mac with no Homebrew and nobody to hand a prefix to says on every
 /// ticked row Homebrew would have installed.
@@ -1362,12 +1395,16 @@ fn on_a_mac(dependency: Dependency) -> OnAMac {
 /// unit the other arms run as the user, each landing under the home and each
 /// written to `session_path` — `.opencode/bin` being on no floor at all.
 ///
-/// **And three rows go to the hint screen**, which is what a row with nothing
-/// to run has always done: `git` is Apple's command line tools and the dialog
-/// that installs them is on that machine's screen, Codex has neither a script
-/// nor a package a Mac without Homebrew can use, and `gh` is a release zip.
-/// Each carries the sentence that says so — see [`XCODE_TOOLS`],
-/// [`CODEX_ON_INTEL`] and [`GH_ON_INTEL`].
+/// **And `gh` is GitHub's own release**, which is the one row here that is
+/// neither a package nor a vendor's script: a zip per release, unpacked into
+/// the home's `.local/bin` as the user, at the version `releases/latest`
+/// redirects to when the human presses Next — see [`GH_RELEASE`].
+///
+/// **And two rows go to the hint screen**, which is what a row with nothing to
+/// run has always done: `git` is Apple's command line tools and the dialog that
+/// installs them is on that machine's screen, and Codex has neither a script
+/// nor a package a Mac without Homebrew can use. Each carries the sentence that
+/// says so — see [`XCODE_TOOLS`] and [`CODEX_ON_INTEL`].
 ///
 /// **The sandbox row is neither**, as it is on the other Mac: `sandbox-exec` is
 /// Apple's own and the probe ticks it.
@@ -1384,6 +1421,14 @@ fn intel(machine: &Machine, ticked: &[Dependency]) -> Plan {
                 None => beyond.push((*row, no_home(*row))),
             },
 
+            // Which lands under the home the same way a vendor's installer
+            // does, and is the hint screen's for the same reason where there
+            // is none to land under.
+            OnAnIntelMac::Release => match machine.home() {
+                Some(home) => units.push(ghs_release(home)),
+                None => beyond.push((*row, no_home(*row))),
+            },
+
             OnAnIntelMac::Beyond(why) => beyond.push((*row, why.to_owned())),
         }
     }
@@ -1396,7 +1441,7 @@ fn intel(machine: &Machine, ticked: &[Dependency]) -> Plan {
 }
 
 /// How one row is installed on an Intel Mac: the vendor's own installer,
-/// nothing at all, or nothing that can be done from here.
+/// GitHub's own release, nothing at all, or nothing that can be done from here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OnAnIntelMac {
     /// The sandbox row, and only it: `sandbox-exec` is Apple's own.
@@ -1405,12 +1450,16 @@ enum OnAnIntelMac {
     /// A vendor's own installer, run as the user under this user's home.
     Vendor(Vendor),
 
+    /// Or GitHub's release zip, unpacked under that home — the `gh` row, and
+    /// only it. See [`GH_RELEASE`].
+    Release,
+
     /// Or a row this machine has nothing to run for, with the sentence that
     /// goes under it on the hint screen.
     Beyond(&'static str),
 }
 
-/// Which of the three one row is.
+/// Which of the four one row is.
 fn on_an_intel_mac(dependency: Dependency) -> OnAnIntelMac {
     match dependency {
         Dependency::Sandbox => OnAnIntelMac::Nothing,
@@ -1418,10 +1467,31 @@ fn on_an_intel_mac(dependency: Dependency) -> OnAnIntelMac {
         Dependency::Claude => OnAnIntelMac::Vendor(CLAUDE),
         Dependency::Grok => OnAnIntelMac::Vendor(GROK),
         Dependency::OpenCode => OnAnIntelMac::Vendor(OPENCODE),
+        Dependency::Gh => OnAnIntelMac::Release,
 
         Dependency::Git => OnAnIntelMac::Beyond(XCODE_TOOLS),
         Dependency::Codex => OnAnIntelMac::Beyond(CODEX_ON_INTEL),
-        Dependency::Gh => OnAnIntelMac::Beyond(GH_ON_INTEL),
+    }
+}
+
+/// One unit unpacking GitHub's release of `gh` into `home`'s own `.local/bin`,
+/// as the user.
+///
+/// **The shape every as-the-user unit here has**, and for the reason they all
+/// do: nothing it writes is outside this user's home, so a password dialog in
+/// front of it would be asking for a privilege it has no use for. What it
+/// landed in is written to `session_path` like any other — `.local/bin` is on
+/// the Mac floor already, and writing it is what the unit's `lands` has always
+/// meant.
+fn ghs_release(home: &Path) -> Unit {
+    Unit {
+        line: GH_RELEASE.to_owned(),
+        covers: vec![Dependency::Gh],
+        doing: "Unpacking GitHub's release of gh".to_owned(),
+        how: How::AsTheUser,
+        lands: Some(home.join(LOCAL_BIN)),
+        chain: None,
+        regrants: None,
     }
 }
 
@@ -2417,12 +2487,11 @@ mod tests {
     /// An Intel Mac runs the vendors' own installers and raises nothing: no
     /// `brew` line, no prefix, and no dialog on anybody's screen.
     ///
-    /// **Which is the press that failed.** Ticking these three on this machine
+    /// **Which is the press that failed.** Ticking these four on this machine
     /// used to be a run that made Homebrew's prefix first — `chmod /usr/local`,
     /// which no Mac since Catalina allows — and then installed a Homebrew whose
-    /// installer refuses the machine anyway. Now Claude Code and OpenCode are
-    /// their vendors' own installs under this user's home, and `gh` says on the
-    /// hint screen where to put it.
+    /// installer refuses the machine anyway. Now every one of them lands under
+    /// this user's own home.
     #[test]
     fn an_intel_mac_installs_with_the_vendors_own_and_raises_nothing() {
         let plan = plan(
@@ -2436,8 +2505,8 @@ mod tests {
             ],
         );
 
-        let [claude, grok, opencode] = plan.units.as_slice() else {
-            panic!("one unit per row a vendor installs, and no other: {plan:?}");
+        let [claude, grok, opencode, gh] = plan.units.as_slice() else {
+            panic!("one unit per row that installs, and no other: {plan:?}");
         };
 
         assert_eq!(
@@ -2480,33 +2549,51 @@ mod tests {
             );
         }
 
+        // And GitHub's own release, which is the row that is neither a package
+        // nor a vendor's script: a zip a release carries, unpacked into the
+        // same directory Anthropic's installer writes into.
+        assert_eq!(gh.covers, [Dependency::Gh]);
+        assert_eq!(gh.doing, "Unpacking GitHub's release of gh");
+        assert_eq!(gh.lands, Some(PathBuf::from(HOME).join(LOCAL_BIN)));
+        assert!(
+            gh.line
+                .contains("https://github.com/cli/cli/releases/latest"),
+            "which is where the version is read from: {}",
+            gh.line,
+        );
+
+        // And it is read there rather than written down here: a pinned version
+        // goes stale with every gh release, and the human pressing Next wants
+        // today's. `amd64` is the only number in the line, and it is the
+        // architecture rather than a version.
+        assert!(
+            !gh.line
+                .replace("amd64", "")
+                .chars()
+                .any(|character| character.is_ascii_digit()),
+            "no gh version is written into the line: {}",
+            gh.line,
+        );
+
         // The sandbox row is neither a unit nor a sentence, `sandbox-exec`
         // being Apple's own on this Mac as on the other.
-        assert_eq!(beyond(&plan), [Dependency::Gh]);
-        assert!(
-            plan.beyond[0].1.contains("~/.local/bin"),
-            "the row says where to put what it could not install: {:?}",
-            plan.beyond[0].1,
-        );
+        assert_eq!(beyond(&plan), []);
     }
 
-    /// And the three rows an Intel Mac has nothing to run for go to the hint
+    /// And the two rows an Intel Mac has nothing to run for go to the hint
     /// screen with a sentence apiece, naming what each of them wants.
     #[test]
     fn an_intel_mac_sends_the_rows_it_cannot_install_to_the_hint_screen() {
         let plan = plan(
             &machine(Distro::MacOsIntel),
-            &[Dependency::Git, Dependency::Codex, Dependency::Gh],
+            &[Dependency::Git, Dependency::Codex],
         );
 
         assert!(
             plan.units.is_empty(),
-            "nothing to run for any of them: {plan:?}"
+            "nothing to run for either of them: {plan:?}"
         );
-        assert_eq!(
-            beyond(&plan),
-            [Dependency::Git, Dependency::Codex, Dependency::Gh],
-        );
+        assert_eq!(beyond(&plan), [Dependency::Git, Dependency::Codex]);
 
         let said = |row: Dependency| {
             plan.beyond
@@ -2527,7 +2614,7 @@ mod tests {
             said(Dependency::Codex),
         );
 
-        for row in [Dependency::Git, Dependency::Codex, Dependency::Gh] {
+        for row in [Dependency::Git, Dependency::Codex] {
             assert!(
                 !said(row).contains("brew") && !said(row).contains("Homebrew"),
                 "nothing on this machine is Homebrew's: {}",
@@ -2537,20 +2624,29 @@ mod tests {
     }
 
     /// And an Intel Mac whose environment names no home has nowhere for any of
-    /// the three installers to land, so every one of them is the hint screen's.
+    /// the four installs to land, so every one of them is the hint screen's —
+    /// GitHub's release with the rest, it being a copy into that same home.
     #[test]
     fn an_intel_mac_with_no_home_installs_nothing() {
         let plan = plan(
             &under(Distro::MacOsIntel, &PathBuf::new(), None),
-            &[Dependency::Claude, Dependency::OpenCode],
+            &[Dependency::Claude, Dependency::OpenCode, Dependency::Gh],
         );
 
         assert!(plan.units.is_empty(), "{plan:?}");
-        assert_eq!(beyond(&plan), [Dependency::Claude, Dependency::OpenCode]);
+        assert_eq!(
+            beyond(&plan),
+            [Dependency::Claude, Dependency::OpenCode, Dependency::Gh],
+        );
         assert!(
             plan.beyond[1].1.contains("OpenCode") && plan.beyond[1].1.contains("home"),
             "the row is named in its own words: {:?}",
             plan.beyond[1].1,
+        );
+        assert!(
+            plan.beyond[2].1.contains("GitHub CLI") && plan.beyond[2].1.contains("home"),
+            "and so is this one: {:?}",
+            plan.beyond[2].1,
         );
     }
 

@@ -770,12 +770,16 @@ machines — its installer refuses one outright, and its formulae there get no
 bottles — so that Mac has a tab of its own with no `brew` on it, and a press
 raises nothing whatever is ticked. What installs is the vendors' own:
 Anthropic's for Claude Code, xAI's for Grok Build and OpenCode's own, each
-landing under your home and each put on every session's `PATH` for you. The
-rest is a sentence on the screen of instructions: `git` is Apple's command
-line tools, and `xcode-select --install` opens Apple's own dialog on that
-Mac's screen rather than a command Verkstead can run for you, while Codex
-and `gh` are a binary to put in `~/.local/bin`, which every Mac session
-looks in.
+landing under your home and each put on every session's `PATH` for you. **And
+`gh` is GitHub's own release**, there being no Homebrew to `brew install gh`
+with and no installer script to run: the zip that release carries is unpacked
+into `~/.local/bin` as you, at whatever version `releases/latest` points at the
+moment you press Next — so it is today's `gh` rather than the one this build
+was made alongside. The rest is a sentence on the screen of instructions:
+`git` is Apple's command line tools, and `xcode-select --install` opens
+Apple's own dialog on that Mac's screen rather than a command Verkstead can
+run for you, while Codex is a binary to put in `~/.local/bin`, which every Mac
+session looks in.
 Only what could not be installed here — a NixOS, a server with no way to raise
 a dialog, an installer that would not run, a Homebrew that could not be
 installed, an Intel Mac's `git` — reaches a screen of instructions afterwards,
