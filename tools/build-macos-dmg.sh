@@ -181,6 +181,15 @@ VERSION="${VERSION##*@}"
 # `LSMinimumSystemVersion` is the Apple-silicon half's floor, which rustc builds
 # that target to and which is the higher of the two. One app gets one number,
 # and the honest one is the one both halves meet.
+#
+# `CFBundleIconFile` carries the `.icns` rather than leaving it off, which the
+# key usually allows: macOS appends the extension only to a value that has
+# none, and a value with dots in it reads as having one already. So this
+# bundle identifier — dotted, as every bundle identifier is — sent Launch
+# Services looking for a file called exactly `net.tobico.Verkstead`, which is
+# not what is in `Contents/Resources`, and Finder, the Dock and Get Info all
+# drew the generic app icon over a perfectly good icns. The name written here
+# is the name of the file copied above, whole.
 say "Writing the bundle…"
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -192,7 +201,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
 	<key>CFBundleExecutable</key>
 	<string>$LAUNCHER</string>
 	<key>CFBundleIconFile</key>
-	<string>$APP_ID</string>
+	<string>$APP_ID.icns</string>
 	<key>CFBundleIdentifier</key>
 	<string>$APP_ID</string>
 	<key>CFBundleInfoDictionaryVersion</key>

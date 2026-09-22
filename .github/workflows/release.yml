@@ -970,6 +970,55 @@ jobs:
           codesign --verify --strict \
             "$MOUNT/Verkstead.app/Contents/MacOS/verkstead"
 
+      # And that the icon a downloader drags into Applications resolves to a
+      # file macOS can read. The Finder icon is the one thing about this bundle
+      # that nothing running the app can tell you about — v0.1.2 shipped a
+      # sound icns under a `CFBundleIconFile` naming no file at all, passed
+      # every assertion beside this one, and drew the generic app icon on every
+      # Mac that downloaded it.
+      #
+      # Read off the mounted plist rather than out of
+      # `tools/build-macos-dmg.sh`: the point is a Mac reading back what was
+      # written, so the name is taken from the bundle and looked for in the
+      # bundle. Exactly, and against the directory listing rather than with
+      # `[ -f ]` alone — the volume is HFS+, which is case-insensitive, so a
+      # test that only opened the file would pass on a name macOS's own
+      # lookup would not.
+      #
+      # Then `iconutil` over the file, which is the other half of resolving:
+      # a name pointing at an icns the system cannot parse draws the same
+      # placeholder as a name pointing at nothing. Its output goes to the
+      # runner's temp because the image is mounted read-only, under a name
+      # ending in `.iconset`, which is the extension that conversion writes
+      # and the only one it accepts.
+      - name: The bundle's icon resolves
+        run: |
+          app="$MOUNT/Verkstead.app"
+          resources="$app/Contents/Resources"
+          iconset="$RUNNER_TEMP/Verkstead.iconset"
+
+          icon=$(plutil -extract CFBundleIconFile raw -o - \
+            "$app/Contents/Info.plist") || {
+            echo "::error::The bundle's Info.plist has no CFBundleIconFile."
+            exit 1
+          }
+          echo "CFBundleIconFile is $icon"
+
+          if ! ls "$resources" | grep -qxF "$icon"; then
+            echo "::error::CFBundleIconFile names $icon," \
+              "which is no file in Contents/Resources."
+            ls -l "$resources"
+            exit 1
+          fi
+
+          iconutil --convert iconset --output "$iconset" \
+            "$resources/$icon" || {
+            echo "::error::iconutil will not read $icon:" \
+              "macOS would draw the generic icon."
+            exit 1
+          }
+          ls -l "$iconset"
+
       # The two halves of what a human downloads this file for, asserted on one
       # run of it: an icon in the menu bar, and the viewer behind it.
       #
