@@ -52,10 +52,10 @@ bound read-only where that is under the home, so Claude's native install —
 `~/.local/bin/claude` linking into `~/.local/share/claude/versions/` — is
 found and launched; a target elsewhere, or a dangling link, is not found. Every
 Claude session runs with `DISABLE_AUTOUPDATER=1`, so no session writes into
-the human's install. Nothing is added the `PATH` did not name: a Mac app
-started from the Dock has launchd's `PATH` and never sees `~/.local/bin`, and
-the NixOS module's service user has no `~/.local/bin` of the human's — both
-are follow-ups rather than part of this. The row says where the name
+the human's install. Nothing is added the `PATH` did not name — on Linux: a
+Mac's floor carries the home's `.local/bin`, for the reason *Macs* below
+gives, and the NixOS module's service user has no `~/.local/bin` of the
+human's, which stays a follow-up. The row says where the name
 resolved and what it links to, and a name seen on the server's `PATH`
 somewhere a session cannot reach reads absent with a note saying so. The Linux
 sandbox row is a trivial `bwrap` run rather than a PATH lookup, because
@@ -74,7 +74,9 @@ a link to the vendor's install page where not, each saying where the binary
 must land. Claude's row leads with the native installer on every Linux tab and
 on Windows, saying `~/.local/bin` must be on the `PATH` of the shell Verkstead
 is started from and the server then restarted, the `PATH` being read once;
-macOS keeps Homebrew first, the Dock never handing an app the shell's `PATH`.
+on a Mac it leads with the same installer and needs no such note, `~/.local/bin`
+being on the Mac floor — see *Macs* below, which is also where the two Mac
+tabs come from.
 Every tab draws the real list a session looks on, sent on the wire, rather
 than prose about it. Any other Linux gets the generic list of what is needed.
 The step waits for **Continue** — it never advances under somebody's hands.
@@ -133,8 +135,9 @@ no reason to refuse the packages the archive still carries. `dnf` refreshes
 itself and `pacman`'s refresh is Arch's own `-Syu`, which is more than a press
 of Next asked for. The vendor installers run after it
 **as the user**, never elevated: Anthropic's for Claude Code, xAI's for Grok
-Build, and Homebrew's where a Mac has no `brew`, after one elevated step makes
-its prefix. Every Windows install goes through the runas arm. A run is a
+Build, and Homebrew's where an Apple-silicon Mac has no `brew`, after one
+elevated step makes its prefix — what a Mac installs is *Macs* below. Every
+Windows install goes through the runas arm. A run is a
 sequence of units, one command each; cancel finishes the unit under way and
 skips the rest.
 
@@ -165,6 +168,64 @@ the OS tabs, the PATH list and the restart note, its Next held with a counter
 beside it until every ticked row is detected, and Back to the checkboxes. The
 page polls every two seconds while a run is going. The install endpoint answers
 only while onboarding mode is on, and every button in the wizard reads Next.
+
+## Macs
+
+*Amended 2026-09-22.* Two things the Mac story above assumed stopped being
+true. A Mac app started from the Dock has launchd's `PATH` and never sees
+`~/.local/bin`, which is why the Mac tab led with Homebrew's `claude-code`
+cask and the planner installed it — and Homebrew has dropped Intel Macs: its
+installer refuses them outright and its formulae there get no bottles, so a
+`brew install gh` on one compiles from source, and the elevated step that made
+its prefix fails before that on `chmod /usr/local`, a directory every Catalina
+or later Mac already has and none will let be changed.
+
+**The Mac floor carries the home's `.local/bin`**, at its head, composed
+against the server's home rather than written as a string, and granted and
+link-followed the way any `PATH` entry under the home already is. This is the
+Mac half of *nothing is added the `PATH` did not name* reversed: on Linux the
+rule stands because the human's own `PATH` is the authority, and from the Dock
+there is no such `PATH` to consult — launchd's four directories are nobody's
+choice. Linux keeps the rule.
+
+**And a Mac's local installs lead its system directories whichever way the
+app was started.** Composed as it was, a session from the Dock had launchd's
+`/usr/bin` ahead of the floor's `/opt/homebrew/bin`, so Apple's older tools
+shadowed Homebrew's — the other way round from the same app started in a
+terminal. On a Mac the floor's install half — `~/.local/bin`, the two Homebrew
+prefixes and `/usr/local/bin` — is composed ahead of the server's own entries
+and the system half behind them, first occurrence still winning; a terminal
+whose `PATH` already led with Homebrew reads the same as before, and the Dock
+now reads the same as the terminal.
+
+**Claude is Anthropic's installer on every Mac.** The cask existed for the
+Dock's `PATH` alone; with `~/.local/bin` on the floor the installer that stays
+current works from either launch, and it is the one every other tab leads
+with. The cask is gone from the planner and the tab.
+
+**An Intel Mac is not Homebrew's.** `Machine` reads the architecture once —
+`hw.optional.arm64`, which answers for the Mac rather than for the slice the
+server happens to run as, so a server under Rosetta still reads as Apple
+silicon — and the wizard has two Mac tabs, `MacOs` and `MacOsIntel`, detected
+the way the Linux tabs are and both reachable. The Intel tab has no Homebrew
+line above it and says in one sentence why it differs. Its planner runs no
+`brew` and raises nothing: Claude, Grok and OpenCode run their vendors' own
+installers as the user, each landing under the home and written to
+`session_path`; `gh` is GitHub's release zip, the version taken from the
+`releases/latest` redirect at install time, unpacked into `~/.local/bin` as the
+user; `git` and Codex go to the hint screen — `xcode-select --install` opens
+Apple's own dialog, and Codex has neither a script nor a package a Mac without
+Homebrew can use, so its row links to its releases and says where the binary
+lands. Apple silicon keeps Homebrew for everything but Claude.
+
+**git on a Mac counts only with the command line tools.** Every Mac has
+`/usr/bin/git`, and without the tools it is a stub that opens Apple's install
+dialog — so the probe ticked git on a Mac where a session's `git` would fail.
+The Mac git row is present where the resolved `git` is not Apple's stub, or
+`xcode-select -p` says the tools are installed; a failure's words go under the
+row, and the probe never runs the stub itself. Both Mac tabs' git rows lead
+with `xcode-select --install`, Apple silicon keeping `brew install git` as the
+alternative.
 
 ## The zero state
 
@@ -223,7 +284,25 @@ page does. Either way the Repo is registered and becomes the draft's.
   the login shell's `PATH` by running the shell.** Rejected: the first hands a
   session a directory the human never put on their `PATH`, and the second
   spawns a shell whose rc files can hang or print. The server's own `PATH` is
-  the one the human started it with.
+  the one the human started it with. The first was reversed for Macs alone on
+  2026-09-22 — see *Macs* — because from the Dock there is no `PATH` the human
+  put anything on; the second stays rejected on both.
+- **Leaving launchd's order as it was**, the git probe covering the one case
+  that failed outright. Rejected on 2026-09-22: a session that finds a
+  different tool depending on how the app was started is the thing *present
+  means a session would find it* exists to rule out.
+- **Homebrew on an Intel Mac**, kept where one is already installed. Rejected
+  on 2026-09-22: the installer refuses Intel and the formulae get no bottles,
+  so the one route that works on every Intel Mac is the vendors' own.
+- **One macOS tab with both Macs' commands on every row.** Rejected: the
+  detected tab is the one the human reads, and a row saying two things is a
+  row somebody has to work out.
+- **gh's `.pkg` behind the password dialog**, landing in `/usr/local/bin`.
+  Rejected: the zip lands as the user with no dialog, in the directory the
+  floor already looks in.
+- **Codex from npm on an Intel Mac.** Rejected: it needs a `node` the machine
+  has no Homebrew to bring, and a hint row that links to the releases asks
+  for less.
 - **Probing on the sandbox PATH as it was.** Rejected: only nix and the
   Fedora and Arch distro packages land on it.
 - **A server timer that nudges the page.** Rejected: the probes are cheap
