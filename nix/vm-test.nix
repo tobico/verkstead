@@ -725,6 +725,7 @@ testers.runNixOSTest {
                         if entry["source"] == "Settings"
                     ],
                     "ignored_comments": "Keep",
+                    "instructions": stood["instructions"],
                 },
             )
         )
