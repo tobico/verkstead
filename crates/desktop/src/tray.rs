@@ -145,6 +145,35 @@ thread_local! {
     /// raised there. On Linux it is not, and [`crate::toolkit::later`] is what
     /// makes the second half of that true.
     static LAUNCH_ON_STARTUP: RefCell<Option<CheckMenuItem>> = const { RefCell::new(None) };
+
+    /// The icon itself, where it was raised after the loop had already started.
+    ///
+    /// A [`TrayIcon`] is the icon: dropping it takes the icon out of the tray,
+    /// so somebody has to hold it for as long as there is an app. The app holds
+    /// the one it raised on its way up — see [`crate::Desktop::run`] — and this
+    /// is for the other one: a Linux session whose panel arrived after
+    /// Verkstead did, where the icon goes up inside the loop and there is no
+    /// caller left standing to hand it to. Cleared by [`let_go`] where that
+    /// holding ends.
+    static RAISED_LATE: RefCell<Option<TrayIcon>> = const { RefCell::new(None) };
+}
+
+/// Hold `icon` on this thread for as long as the loop runs on it.
+///
+/// For an icon raised from inside the loop, which has nobody to give it to —
+/// see [`RAISED_LATE`]. Called on the loop's own thread, which is where an icon
+/// is raised at all.
+pub fn keep(icon: TrayIcon) {
+    RAISED_LATE.with(|kept| *kept.borrow_mut() = Some(icon));
+}
+
+/// Let go of the icon [`keep`] is holding, taking it out of the tray.
+///
+/// What [`crate::Desktop::run`] does with the icon it holds itself, done for
+/// the other one: the process is ending, and an icon is one of the two things
+/// this app leaves on a screen.
+pub fn let_go() {
+    RAISED_LATE.with(|kept| kept.borrow_mut().take());
 }
 
 /// What the Launch on Startup item is ticked to, or `None` where this thread
