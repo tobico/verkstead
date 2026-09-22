@@ -267,8 +267,8 @@ const LINUX_SYSTEM: &[&str] = &[
 ///
 /// `/run/current-system` is nix-darwin's, and it is the one entry here that is
 /// about a Mac somebody has been to some trouble over: that machine's tools are
-/// under it, [`APPLE_PATH`] looks there, and a Mac without nix-darwin skips it
-/// the way a machine without Homebrew skips `/opt/homebrew`.
+/// under it, [`APPLE_SYSTEM_PATH`] looks there, and a Mac without nix-darwin
+/// skips it the way a machine without Homebrew skips `/opt/homebrew`.
 const APPLE_SYSTEM: &[&str] = &[
     "/System/Library",
     "/System/Cryptexes",
@@ -926,15 +926,38 @@ pub(crate) fn entries(platform: Platform, path: &OsStr) -> Vec<PathBuf> {
 ///   the `/mnt/c/...` entries WSL appends off the end of it, and `/snap/bin`
 ///   and an `/opt/something/bin` with them.
 ///
-/// Then [`LINUX_PATH`] or [`APPLE_PATH`] under it, deduplicated against what is
-/// already there: a server started from a unit file with a `PATH` of two
-/// entries still reaches the machine's own toolchain. Nothing is added that the
-/// `PATH` did not name, the floor does not hold and `session_path` does not say
-/// — a server whose `PATH` has no `~/.local/bin` and which has installed
-/// nothing gives a session none. That last is ADR-0016's one amendment to the
-/// rule, and it is the settings module's *told, not found*: a directory
-/// Verkstead installed into is one the human ticked rather than one a guess
-/// turned up.
+/// Then [`LINUX_PATH`], or the Mac's two halves, under it and deduplicated
+/// against what is already there: a server started from a unit file with a
+/// `PATH` of two entries still reaches the machine's own toolchain. Nothing is
+/// added that the `PATH` did not name, the floor does not hold and
+/// `session_path` does not say — a Linux server whose `PATH` has no
+/// `~/.local/bin` and which has installed nothing gives a session none. That
+/// last is ADR-0016's one amendment to the rule, and it is the settings
+/// module's *told, not found*: a directory Verkstead installed into is one the
+/// human ticked rather than one a guess turned up.
+///
+/// **A Mac's floor is two halves, and the installs are the half that leads.**
+/// [`APPLE_INSTALLS`] — the home's own `.local/bin`, then the two Homebrew
+/// prefixes and `/usr/local/bin` — is composed *ahead* of the server's own
+/// entries, and [`APPLE_SYSTEM_PATH`] behind them, first occurrence still
+/// winning: a terminal whose `PATH` already led with Homebrew composes exactly
+/// as it did. An app started from the Dock has launchd's system directories and
+/// nothing else, and composed the other way round those shadowed the tools the
+/// machine was actually set up with — Apple's older `/usr/bin/git` ahead of
+/// Homebrew's, the same app reading one way from the Dock and another from a
+/// terminal. Linux keeps its one floor under everything, for the reason the
+/// rule above is the rule there: a Linux server is started from a session whose
+/// `PATH` the human's own profile wrote.
+///
+/// **And the home's `.local/bin` is composed rather than written**, which is
+/// why the leading half is a list and a path rather than one constant: it is
+/// [`LOCAL_INSTALL`] under whatever home the server runs under, and a server
+/// whose environment names none composes the floor without it. That is where
+/// Anthropic's installer puts `claude`, and from the Dock there is no `PATH` of
+/// the human's to have named it — see ADR-0016's *Macs*, where the rule is
+/// reversed for this platform alone. It is reached the way every entry under
+/// the home is: [`per_user`] grants it, and [`installs`] follows the link in it
+/// into the version it lands on.
 ///
 /// **Windows is `session` and then the server's own `PATH` as it stands**,
 /// which is what it has always been with the one list in front of it — see
@@ -948,22 +971,43 @@ pub(crate) fn composed(
     servers: &OsStr,
     home: Option<&Path>,
 ) -> OsString {
-    let floor = match platform {
-        Platform::Linux => LINUX_PATH,
-        Platform::MacOs => APPLE_PATH,
+    let (ahead, behind) = match platform {
+        Platform::Linux => ("", LINUX_PATH),
+        Platform::MacOs => (APPLE_INSTALLS, APPLE_SYSTEM_PATH),
         Platform::Windows => return windows_path(session, servers),
     };
 
-    let named = session
+    // The one entry of a floor that is a fact about the server rather than a
+    // string, and a Mac's alone — see [`LOCAL_INSTALL`].
+    let local = match platform {
+        Platform::MacOs => home.map(|home| home.join(LOCAL_INSTALL)),
+        Platform::Linux | Platform::Windows => None,
+    };
+
+    // The two rules read of a named entry, said once because the two lists
+    // that hold one are no longer beside each other — see the three above.
+    let could_look_in = |entry: &&OsStr| rooted(entry) && reachable(platform, entry, home);
+
+    let installed = session
         .iter()
         .map(|directory| directory.as_os_str())
-        .chain(apart(servers))
-        .filter(|entry| rooted(entry))
-        .filter(|entry| reachable(platform, entry, home));
+        .filter(could_look_in);
+
+    let leading = local
+        .as_deref()
+        .map(Path::as_os_str)
+        .into_iter()
+        .chain(apart(OsStr::new(ahead)));
+
+    let servers_own = apart(servers).filter(could_look_in);
 
     let mut kept: Vec<&OsStr> = Vec::new();
 
-    for entry in named.chain(apart(OsStr::new(floor))) {
+    for entry in installed
+        .chain(leading)
+        .chain(servers_own)
+        .chain(apart(OsStr::new(behind)))
+    {
         if !kept.iter().any(|held| same(held, entry)) {
             kept.push(entry);
         }
@@ -1902,7 +1946,7 @@ fn apart(path: &OsStr) -> impl Iterator<Item = &OsStr> {
 /// could not both be. A human who changes their `PATH` restarts the server,
 /// which is what the wizard's own instructions say.
 ///
-/// **There is no `WINDOWS_PATH` beside [`LINUX_PATH`] and [`APPLE_PATH`]**, and
+/// **There is no `WINDOWS_PATH` beside [`LINUX_PATH`] and the Mac's two**, and
 /// that is the decision rather than an omission. Those two are lists of where a
 /// packaged system puts its tools, and they are worth writing down because a
 /// session should reach the machine's own toolchain whatever the unit that
@@ -1963,25 +2007,45 @@ const PATH: &str = "PATH";
 /// the shapes ADR-0016 says a machine may have its harness in: a session that
 /// could not find one there would be a session refused for a program the human
 /// had installed. Ahead of `/usr/bin`, which is the ordering every Unix reads a
-/// local install by and the one [`APPLE_PATH`] already has.
+/// local install by and the one [`APPLE_INSTALLS`] already has.
 const LINUX_PATH: &str = "/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:\
                           /usr/local/bin:/usr/bin:/bin";
 
-/// And on a Mac, which has none of NixOS in it until somebody installs one.
+/// And the first half of a Mac's, which has none of NixOS in it until somebody
+/// installs one: the directories somebody's own installs land in, composed
+/// ahead of the server's own entries — see [`composed`], where that half is
+/// argued.
 ///
-/// Homebrew first — both the Apple-silicon prefix and the Intel one, which is
+/// Homebrew's two prefixes — the Apple-silicon one and the Intel one, which is
 /// under `/usr/local` — because a Mac used for development has its actual
 /// toolchain there and Apple's own `/usr/bin` holds older copies of half of it.
-/// Then the system, which is what is there on a Mac nobody has touched.
+/// `~/.local/bin` leads them and is not written here, being the server's home
+/// joined with [`LOCAL_INSTALL`] rather than a path any Mac has.
+const APPLE_INSTALLS: &str = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin";
+
+/// And the second: the system, which is what is there on a Mac nobody has
+/// touched, composed behind the server's own entries.
 ///
 /// Then nix's, last and present at all: a Mac running nix-darwin has tools
 /// under `/run/current-system/sw/bin` that exist nowhere else on it, and a Mac
 /// without one has an entry on its `PATH` that resolves to nothing, which costs
 /// a session nothing. So neither kind of machine is made to do without the
 /// other's — see [`APPLE_SYSTEM`], which lets the same directory be reached.
-const APPLE_PATH: &str = "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:\
-                          /usr/sbin:/sbin:/run/current-system/sw/bin:\
-                          /nix/var/nix/profiles/default/bin";
+const APPLE_SYSTEM_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin:\
+                                 /run/current-system/sw/bin:\
+                                 /nix/var/nix/profiles/default/bin";
+
+/// And where somebody's own installs go under their home, which is the one
+/// entry of the Mac floor that is composed rather than written.
+///
+/// Anthropic's installer puts `claude` here, as a link into a versions
+/// directory beside it; xAI's and OpenCode's put theirs under the home too, and
+/// an `npm --prefix ~/.local` puts anything else. A Mac app started from the
+/// Dock has launchd's `PATH` and no line of anybody's shell profile in it, so
+/// this is the one place a harness the human installed could be that no `PATH`
+/// would ever name — see [`composed`], and ADR-0016's *Macs*, which is where
+/// that is settled for this platform alone.
+const LOCAL_INSTALL: &str = ".local/bin";
 
 /// And what a session's `SHELL` is: the one path every platform this runs on is
 /// certain to have a shell at.
@@ -5453,13 +5517,110 @@ mod tests {
             "and `/opt` itself is not, so nothing else under it is: {entries:?}"
         );
 
-        for entry in apart(OsStr::new(APPLE_PATH)) {
+        for entry in apart(OsStr::new(APPLE_INSTALLS)).chain(apart(OsStr::new(APPLE_SYSTEM_PATH))) {
             assert!(
                 entries.contains(&entry),
-                "and the whole of the Apple floor is still under it, {entry:?} \
+                "and the whole of the Apple floor is still there, {entry:?} \
                  among the rest: {entries:?}"
             );
         }
+    }
+
+    /// And the order a Mac composes them in, which is ADR-0016's *Macs*: what
+    /// Verkstead installed, then the installs half of the floor with the home's
+    /// own `.local/bin` at its head, then the server's own entries, then the
+    /// system.
+    ///
+    /// Asked of launchd's `PATH`, which is the case it is about: an app started
+    /// from the Dock is handed those four directories and nothing else, and a
+    /// session composed the other way round found Apple's `/usr/bin/git` ahead
+    /// of Homebrew's and no `~/.local/bin` at all.
+    #[test]
+    fn a_mac_composes_the_local_installs_ahead_of_what_the_server_was_started_with() {
+        let home = Path::new("/Users/you");
+        let installed = [PathBuf::from("/Users/you/.verkstead/bin")];
+        let launchd = OsString::from("/usr/bin:/bin:/usr/sbin:/sbin");
+
+        let composed = composed(Platform::MacOs, &installed, &launchd, Some(home));
+        let entries: Vec<&OsStr> = apart(&composed).collect();
+
+        assert_eq!(
+            entries,
+            [
+                "/Users/you/.verkstead/bin",
+                "/Users/you/.local/bin",
+                "/opt/homebrew/bin",
+                "/opt/homebrew/sbin",
+                "/usr/local/bin",
+                "/usr/bin",
+                "/bin",
+                "/usr/sbin",
+                "/sbin",
+                "/run/current-system/sw/bin",
+                "/nix/var/nix/profiles/default/bin",
+            ]
+            .map(OsStr::new),
+            "`session_path` leads everything, the local installs are next — \
+             `~/.local/bin` at their head — and launchd's own directories are \
+             the system half, which they were already part of"
+        );
+    }
+
+    /// And a `PATH` that already led with Homebrew composes exactly as it did,
+    /// first occurrence winning over the half in front of it.
+    ///
+    /// Which is what says this costs a terminal nothing: the same app started
+    /// from a shell whose profile wrote a `PATH` reads as it always has, and it
+    /// is the Dock that has been brought up to meet it.
+    #[test]
+    fn a_mac_terminals_own_path_composes_as_it_always_did() {
+        let home = Path::new("/Users/you");
+        let terminals = OsString::from("/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin");
+
+        let composed = composed(Platform::MacOs, NOTHING_INSTALLED, &terminals, Some(home));
+        let entries: Vec<&OsStr> = apart(&composed).collect();
+
+        assert_eq!(
+            entries.first(),
+            Some(&OsStr::new("/Users/you/.local/bin")),
+            "the one entry that was never on it leads: {entries:?}"
+        );
+        assert_eq!(
+            entries
+                .iter()
+                .position(|entry| *entry == OsStr::new("/opt/homebrew/bin")),
+            Some(1),
+            "and Homebrew's prefix is where the human wrote it, the floor's own \
+             copy being the second occurrence of a directory already kept: \
+             {entries:?}"
+        );
+    }
+
+    /// And Linux composes as it always has: the floor under everything, with
+    /// nothing of it in front of the server's own entries.
+    ///
+    /// The half of the amendment that is *not* general — see ADR-0016's *Macs*.
+    /// A Linux server is started from a session whose `PATH` the human's own
+    /// profile wrote, so what it names is the authority and a directory it does
+    /// not name is one nothing adds.
+    #[test]
+    fn a_linux_session_still_stands_on_its_floor_rather_than_leading_with_it() {
+        let home = Path::new("/home/you");
+        let servers = OsString::from("/home/you/bin");
+
+        let composed = composed(Platform::Linux, NOTHING_INSTALLED, &servers, Some(home));
+        let entries: Vec<&OsStr> = apart(&composed).collect();
+
+        assert_eq!(
+            entries,
+            ["/home/you/bin"]
+                .iter()
+                .map(|entry| OsStr::new(*entry))
+                .chain(apart(OsStr::new(LINUX_PATH)))
+                .collect::<Vec<_>>(),
+            "the server's own entry and then the whole floor under it, and no \
+             `~/.local/bin` the `PATH` did not name"
+        );
     }
 
     /// What Verkstead installed leads a session's `PATH`: ahead of the server's
@@ -5611,21 +5772,59 @@ mod tests {
     /// And a `PATH` that named nothing at all is still the machine's own
     /// toolchain: the floor is what a session stands on however the unit that
     /// started the server was launched.
+    ///
+    /// The Mac's floor is the two halves with the home's own `.local/bin` at
+    /// the head of them, which is the one entry of it that is composed rather
+    /// than written — see [`LOCAL_INSTALL`].
     #[test]
     fn a_server_started_with_no_path_still_reaches_the_machines_own() {
-        for (platform, floor) in [(Platform::Linux, LINUX_PATH), (Platform::MacOs, APPLE_PATH)] {
+        let home = Path::new("/home/you");
+
+        let floors = [
+            (Platform::Linux, LINUX_PATH.to_owned()),
+            (
+                Platform::MacOs,
+                format!("/home/you/.local/bin:{APPLE_INSTALLS}:{APPLE_SYSTEM_PATH}"),
+            ),
+        ];
+
+        for (platform, floor) in floors {
             assert_eq!(
-                composed(
-                    platform,
-                    NOTHING_INSTALLED,
-                    OsStr::new(""),
-                    Some(Path::new("/home/you"))
-                ),
+                composed(platform, NOTHING_INSTALLED, OsStr::new(""), Some(home)),
                 OsString::from(floor),
                 "on {platform:?} an empty `PATH` composes to the floor and to \
                  nothing else"
             );
         }
+    }
+
+    /// And a Mac whose environment names no home composes that floor without
+    /// the one entry it is measured against, rather than refusing to compose
+    /// one at all.
+    ///
+    /// A server that cannot say where the home is is a server that could grant
+    /// nothing under one either — see [`per_user`], which is what would have
+    /// made the entry worth having.
+    #[test]
+    fn a_mac_with_no_home_composes_its_floor_without_the_local_install() {
+        let composed = composed(
+            Platform::MacOs,
+            NOTHING_INSTALLED,
+            OsStr::new("/usr/bin"),
+            None,
+        );
+
+        assert_eq!(
+            composed,
+            OsString::from(format!("{APPLE_INSTALLS}:{APPLE_SYSTEM_PATH}")),
+            "the two halves and nothing in front of them, `/usr/bin` being on \
+             the second of them already"
+        );
+        assert!(
+            !apart(&composed).any(|entry| ending(entry).ends_with(b".local/bin")),
+            "and no home's own directory, there being no home to join one \
+             onto: {composed:?}"
+        );
     }
 
     /// An entry written with a trailing separator and one written without are
@@ -5921,6 +6120,67 @@ mod tests {
             ],
             "the entry the `PATH` named and the install its program links into, \
              both read-only and neither of them without the other",
+        );
+    }
+
+    /// And on a Mac the `PATH` need not have named it: a server started from
+    /// the Dock composes the home's own `.local/bin` onto the floor, and what
+    /// is granted is that directory and the version its `claude` links into.
+    ///
+    /// The whole of ADR-0016's *Macs* in one case, and the one a bundle in
+    /// `/Applications` really is: launchd hands the app four system
+    /// directories, Anthropic's installer left a link under the home, and both
+    /// halves of the hole have to close on the floor's account alone for that
+    /// harness to start inside a session.
+    #[cfg(unix)]
+    #[test]
+    fn a_mac_grants_the_local_install_its_own_floor_named() {
+        let home = tempfile::tempdir().unwrap();
+        let (local, version) = (
+            home.path().join(".local/bin"),
+            home.path().join(".local/share/claude/versions/0.0.0"),
+        );
+
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::create_dir_all(&version).unwrap();
+        std::fs::write(version.join("claude"), "#!/bin/sh\n").unwrap();
+        std::os::unix::fs::symlink(version.join("claude"), local.join("claude")).unwrap();
+
+        // What an app started from the Dock is handed, and the whole of it.
+        let path = composed(
+            Platform::MacOs,
+            NOTHING_INSTALLED,
+            OsStr::new("/usr/bin:/bin:/usr/sbin:/sbin"),
+            Some(home.path()),
+        );
+
+        assert_eq!(
+            apart(&path).next(),
+            Some(local.as_os_str()),
+            "the floor puts it in front of everything launchd said: {path:?}",
+        );
+
+        let mut surface = Surface::starting_in(home.path().to_owned());
+
+        reaching(Platform::MacOs, &path, home.path(), &mut surface);
+
+        let granted: Vec<(&Path, Reach)> = surface
+            .reaches()
+            .iter()
+            .filter_map(|access| match access {
+                Access::Own { path, reach } => Some((path.as_path(), *reach)),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(
+            granted,
+            vec![
+                (local.as_path(), Reach::ReadOnly),
+                (version.as_path(), Reach::ReadOnly),
+            ],
+            "and a directory the floor named is granted exactly as one the \
+             human's own `PATH` named, the link in it followed the same way",
         );
     }
 
@@ -6580,26 +6840,63 @@ mod tests {
     ///
     /// Whole directories rather than the paths themselves: `/usr/bin` is on the
     /// `PATH` and `/usr` is what the system list holds.
+    ///
+    /// **With one carve-out, which is the floor's own entry under the home.**
+    /// `~/.local/bin` is in no system directory and is not meant to be: it is
+    /// reached through the per-user grant every `PATH` entry under the home is
+    /// reached through — see [`per_user`] — which is the other half of
+    /// [`reachable`] and is why this asks that question rather than the system
+    /// list alone.
     #[test]
     fn nothing_on_a_macs_path_is_a_directory_its_policy_refuses() {
-        for entry in APPLE_PATH.split(':') {
+        let home = Path::new("/Users/you");
+        let floor = composed(
+            Platform::MacOs,
+            NOTHING_INSTALLED,
+            OsStr::new(""),
+            Some(home),
+        );
+
+        for entry in apart(&floor) {
+            assert!(
+                reachable(Platform::MacOs, entry, Some(home)),
+                "{entry:?} is on a session's PATH and neither the system list \
+                 nor a grant under the home makes it reachable"
+            );
+        }
+
+        let local = OsStr::new("/Users/you/.local/bin");
+
+        assert!(
+            apart(&floor).any(|entry| entry == local),
+            "the home's own install directory is on that floor: {floor:?}"
+        );
+        assert!(
+            !APPLE_SYSTEM
+                .iter()
+                .any(|system| Path::new(local).starts_with(system)),
+            "and it is the one entry no system directory holds — the per-user \
+             grant is what a session reaches it through"
+        );
+
+        for entry in apart(OsStr::new(APPLE_INSTALLS)).chain(apart(OsStr::new(APPLE_SYSTEM_PATH))) {
             assert!(
                 APPLE_SYSTEM
                     .iter()
                     .any(|system| Path::new(entry).starts_with(system)),
-                "{entry} is on a session's PATH and nothing in the system list \
-                 makes it reachable"
+                "{entry:?} is written on a session's PATH and nothing in the \
+                 system list makes it reachable"
             );
         }
 
         assert!(
-            APPLE_PATH
+            APPLE_INSTALLS
                 .split(':')
                 .any(|entry| entry == "/opt/homebrew/bin"),
             "a Mac with Homebrew has its actual toolchain there"
         );
         assert!(
-            APPLE_PATH
+            APPLE_SYSTEM_PATH
                 .split(':')
                 .any(|entry| entry == "/run/current-system/sw/bin"),
             "and a Mac running nix-darwin is not made to do without nix's"

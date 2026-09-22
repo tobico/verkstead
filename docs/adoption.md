@@ -370,6 +370,17 @@ it, the Skills and the `verkstead` a session asks with read-only, the system
 read-only, `/tmp`, the network whole and unfiltered, and nothing else of the
 machine.
 
+**And `~/.local/bin` among what it reaches**, which is the one thing a Mac
+gives a session that your own `PATH` need not have named. That is where
+Anthropic's installer puts `claude`, and an app you started from the Dock has
+launchd's `PATH` — four system directories, and no line of your shell profile
+in it. So on a Mac that directory is on every session's `PATH` whether or not
+the server was started with it, read-only inside like every other install, and
+ahead of Apple's own `/usr/bin` along with Homebrew's two prefixes and
+`/usr/local/bin`: a session started from the Dock finds the same `git` as one
+started from a terminal. On Linux what your `PATH` names is still the whole of
+it.
+
 **`/tmp` is the one place a Mac session reaches more than a Linux one**, and
 the one thing on that list that is not the same on both. On Linux it is a
 filesystem of the session's own: it holds nothing of the machine's, and it goes

@@ -1700,6 +1700,66 @@ echo {token}
         );
     }
 
+    /// And the same install on a Mac started from the Dock, whose `PATH` names
+    /// none of it: the row is present all the same, because the Mac floor
+    /// carries the home's own `.local/bin` — see [`sandbox::composed`], and
+    /// ADR-0016's *Macs*, where that is settled for this platform alone.
+    ///
+    /// The case the whole slice is about. launchd hands an app four system
+    /// directories, so the `claude` Anthropic's installer left was a program
+    /// the human had installed, the wizard said was missing, and a session
+    /// could not have started either.
+    #[cfg(unix)]
+    #[test]
+    fn a_harness_under_the_home_is_present_on_a_mac_whose_path_never_named_it() {
+        let servers_home = tempfile::tempdir().unwrap();
+        let local = servers_home.path().join(".local/bin");
+        let version = servers_home
+            .path()
+            .join(".local/share/claude/versions/0.0.0");
+
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::create_dir_all(&version).unwrap();
+        program(&version.join("claude"), "#!/bin/sh\n");
+        std::os::unix::fs::symlink(version.join("claude"), local.join("claude")).unwrap();
+
+        // What an app started from the Dock is handed, and the whole of it.
+        let launchd = OsString::from("/usr/bin:/bin:/usr/sbin:/sbin");
+
+        let path = sandbox::composed(Platform::MacOs, &[], &launchd, Some(servers_home.path()));
+
+        let machine = Machine::stated(
+            Platform::MacOs,
+            path.clone(),
+            launchd,
+            None,
+            None,
+            &home(Platform::MacOs, servers_home.path()),
+        );
+
+        assert_eq!(
+            state(&machine, Dependency::Claude),
+            DependencyState::Present {
+                at: Some(local.join("claude").to_string_lossy().into_owned()),
+                target: Some(version.join("claude").to_string_lossy().into_owned()),
+            },
+            "the row says which file a session would run and which version it \
+             links into, on a `PATH` the server was started with none of",
+        );
+
+        let path = path.to_string_lossy();
+        let entries: Vec<&str> = path.split(':').collect();
+
+        assert!(
+            entries
+                .iter()
+                .take_while(|entry| **entry != "/usr/bin")
+                .any(|entry| Some(*entry) == local.to_str()),
+            "and it is ahead of the system directories launchd handed over, \
+             which is what makes it the one a session finds: {entries:?}",
+        );
+    }
+
     /// And a link into somewhere no session can reach, or one that leads
     /// nowhere at all, reads absent: what a row promises is a session that can
     /// start, rather than a file that happens to be on a list.

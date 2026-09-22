@@ -1086,7 +1086,7 @@ fn vendors_own(row: Dependency, vendor: Vendor, lands: PathBuf) -> Unit {
 /// **One unit per row, and each of them as the user**, Homebrew refusing to run
 /// as root at all. Nothing lands anywhere worth writing down: both prefixes are
 /// on the floor a Mac session's `PATH` is composed from — see
-/// `sandbox::APPLE_PATH` — so the row goes present off the very next probe
+/// `sandbox::APPLE_INSTALLS` — so the row goes present off the very next probe
 /// without `session_path` being touched.
 ///
 /// **And where there is no `brew` yet, two units in front of them.** The

@@ -19,7 +19,7 @@ itself and carries its own tests; every one is unit-tested on a stated
 ## Tasks
 
 - [x] 01: The bundle draws its icon — [details](01-bundle-icon.md)
-- [ ] 02: A Mac session sees `~/.local/bin` — [details](02-mac-floor.md)
+- [x] 02: A Mac session sees `~/.local/bin` — [details](02-mac-floor.md)
 - [ ] 03: Claude is Anthropic's installer on every Mac — [details](03-claude-on-every-mac.md)
 - [ ] 04: An Intel Mac is told apart, and gets its own tab — [details](04-intel-mac-tab.md)
 - [ ] 05: gh on an Intel Mac comes from GitHub's release — [details](05-gh-from-the-release.md)
