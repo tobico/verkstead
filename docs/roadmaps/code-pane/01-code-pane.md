@@ -59,7 +59,10 @@ pane is gone.
   browser's own way.
 - **Monaco is a chunk the page loads when Code first opens**, with its workers
   beside it under the hashed assets path, and it follows the workbench's theme.
-  Its settings are stage 03's; here it is VS Code's defaults.
+  Its settings are stage 03's; here it is VS Code's defaults. It rides into the
+  binary with the rest of the viewer, so measure the release's size before and
+  after and say what it came to — ADR-0019 names that cost and this is where it
+  becomes a number.
 - **The maximise toggle is remembered per device**, beside the pane widths in
   `localStorage`, off on the first open, and does nothing below the breakpoint
   where the details pane already has the window.

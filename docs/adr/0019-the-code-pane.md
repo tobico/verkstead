@@ -163,6 +163,18 @@ download the rest of the workbench never makes. VS Code's defaults, following
 the workbench's light and dark themes; word wrap, font size and minimap are the
 three settings exposed, on the pane's menu, per device.
 
+**And a second cost, which is the binary's.** The viewer is embedded in the one
+binary ([ADR-0004](0004-single-binary-distribution.md)), which already counts
+the embedded viewer among the named costs of that decision — so Monaco is not
+only a download the page makes once, it is weight in every release everybody
+downloads and every update everybody takes, and the bundled TypeScript worker
+carries the TypeScript compiler and is the largest file of it by some way. It
+is kept whole regardless: the Brief asked for VS Code's feel, and an editor
+trimmed of the languages somebody happens to open is a worse pane in exactly
+the moment it is wanted. What the trim would be, should a release ever have to
+go on a diet, is the TypeScript worker rather than the languages — colouring is
+most of the pane's value and almost none of its weight.
+
 An image opens as a preview in its tab; any other binary, and any file over a
 few megabytes, opens as a line saying why rather than in the editor.
 
