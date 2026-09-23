@@ -119,6 +119,32 @@
 //! closed by accident comes back to what was already there, still running and
 //! showing what it last showed.
 //!
+//! **And what is open outlives the pane.** The details pane draws one thing at
+//! a time and takes down whatever it is not showing, so opening an Event and
+//! coming back is a fresh mount of this file — which would be an empty pane
+//! over tabs somebody had opened and text they had typed and not saved. So
+//! none of that is held here: it is held above the frame's switch, per
+//! Conversation, and handed in (see [`./keeping`], and `Workbench.tsx` where it
+//! is kept). The device's storage that carries the same thing through a
+//! *reload* is stage 02 of the roadmap; what stands here survives the swap, and
+//! a page left with text nobody has saved warns on the way out, the browser's
+//! own way.
+//!
+//! The terminals are the exception, and the register is why: a shell is the
+//! server's, so the list is read on every opening and the tabs are settled
+//! against it. One whose shell has ended since is dropped rather than drawn,
+//! and one the register has that this page has not is taken up — which is how a
+//! shell opened on another device arrives.
+//!
+//! **And a maximise toggle at the end of the header**, which gives the editor
+//! the window: the sidebar and the Timeline go, and this pane takes what they
+//! were standing in. Off when Code first opens and remembered per device beside
+//! the pane widths, and drawn only where those panes are up — below that
+//! breakpoint the window is walked one pane at a time and this one already has
+//! it (ADR 0019, *One pane, replacing the Terminal*). What it hides belongs to
+//! the frame, so the hiding is done there: this pane draws the press and is
+//! handed the state — see `Workbench.tsx`.
+//!
 //! **And a tab is closed by the × at its end** — a file's as much as a shell's,
 //! the file's taking its reading and its buffer with it, so that opening it
 //! again is a fresh reading of the disk the way expanding a folder is. ADR 0013 kept Close on a context
@@ -165,6 +191,8 @@
 //! means to take the work on presses **Stop** first.
 
 import {
+  faCompress,
+  faExpand,
   faFile,
   faPlus,
   faTerminal,
@@ -208,6 +236,13 @@ import { Empty, ErrorLine } from "../notices";
 import { Attached } from "./Attached";
 import { Editor } from "./Editor";
 import { load } from "./editing";
+import {
+  dirty as unsavedIn,
+  disk as onDisk,
+  type Bar,
+  type Kept,
+  type Tab,
+} from "./keeping";
 import { PaneHead } from "./PaneHead";
 import { Tree } from "./Tree";
 import styles from "./Code.module.css";
@@ -343,14 +378,6 @@ export const WRITE_REFUSAL: Record<
 export const MOVED =
   "This file changed on disk while you were editing it, so nothing was saved.";
 
-/// One tab of the group: a terminal by the number the server issued it, or a
-/// file by its path.
-///
-/// Two shapes rather than one with a kind beside it, because the two are named
-/// by different things and nothing here ever has to ask a tab what it is
-/// without then using the answer.
-export type Tab = { terminal: number } | { file: string };
-
 /// What a tab is known by, which is the one string that can stand for either.
 ///
 /// Which tab is showing, and which the human turned to, are both this rather
@@ -372,6 +399,30 @@ export function named(path: string): string {
 export function Code(props: {
   conversation: ConversationView;
   back: () => void;
+
+  /// Everything this Conversation has open, which is held above this pane
+  /// rather than in it — see [`./keeping`].
+  ///
+  /// The frame draws one details pane at a time and takes down whatever it is
+  /// not showing, so a pane swapped for an Event and back is a fresh mount: what
+  /// was in this pane's own signals would be gone, tabs and unsaved text
+  /// together. Handed in instead, and the swap does not reach it.
+  ///
+  /// One Conversation's, which is the one being drawn: the pane is mounted
+  /// afresh when the Conversation changes, so this is the same keeping for as
+  /// long as it stands.
+  held: Kept;
+
+  /// The maximise toggle's state and the way to change it, where the window is
+  /// wide enough to have something to hide.
+  ///
+  /// Absent below that breakpoint, which is what takes the toggle out of the
+  /// header: the details pane already has the window there, and a press that
+  /// hid nothing would be a control about a layout that is not standing (ADR
+  /// 0019, *One pane, replacing the Terminal*). What it hides is the frame's,
+  /// so what it is remembered in is the frame's too — the toggle is here
+  /// because the pane it gives the window to is.
+  maximise?: { on: boolean; set: (on: boolean) => void };
 }): JSX.Element {
   /// Which of this Conversation's terminals are live.
   ///
@@ -418,68 +469,37 @@ export function Code(props: {
   // the one fetch either way — see [`./editing`].
   void load().catch(() => {});
 
-  /// Every tab there is, in the order they were opened: what was live when the
-  /// pane loaded, and what has been opened since — files and terminals alike,
-  /// in the one order, because they are the one bar.
+  /// Everything the pane holds, which is the keeping it was handed: the tabs,
+  /// what each file was read as, the buffers the human is typing into, the
+  /// sentences over the tabs standing on a shell that never started, the names
+  /// the shells have given themselves, which tab was turned to, what each
+  /// save came to, which saves are in flight, and when each shell this pane
+  /// opened was asked for.
   ///
-  /// The server issues its numbers in order and never reuses one, so the list it
-  /// answers with is already in that order and everything opened here goes on
-  /// the end. A tab standing on a shell that never started is one of these too,
-  /// under a key of its own — see [`stand`].
-  const [tabs, setTabs] = createSignal<Tab[]>([]);
-
-  /// What each open file came back as: the text and its version, the picture,
-  /// or the line saying why there is nothing to draw. Nothing at all while the
-  /// read is in flight, which is the moment between the press and the answer.
-  const [readings, setReadings] = createSignal<Record<string, FileReading>>({});
-
-  /// And the buffer behind each: the text as it stands in the editor, which
-  /// starts as what was read and is what the human types into.
-  ///
-  /// Held apart from the reading rather than written back over it, because the
-  /// two are different things: the reading is what the disk said at the version
-  /// it said it at, and this is what would be written over it. Which is what
-  /// makes [`dirty`] a comparison rather than a flag, and a save a write of
-  /// this over that version.
-  const [buffers, setBuffers] = createSignal<Record<string, string>>({});
-
-  /// And what each tab that is standing rather than running says: the shell
-  /// ended at once, or the refusal the server answered the open with.
-  ///
-  /// A tab is in here or it is not, and that is the whole of the difference
-  /// between the two kinds: one with an entry keeps its grid and takes no
-  /// typing, and one without is a shell somebody is working in.
-  const [over, setOver] = createSignal<Record<number, string>>({});
-
-  /// What each tab's shell has called itself, where it has called itself
-  /// anything: the title it last set, which is what the tab is labelled by.
-  ///
-  /// Kept here rather than in the window that heard it, because a name is a
-  /// thing about the tab bar and the window drawing the grid may be hidden. A
-  /// tab that has gone may leave an entry behind it, which names nothing: the
-  /// server never reuses a number, so nothing can ever come back under it.
-  const [titles, setTitles] = createSignal<Record<number, string>>({});
-
-  /// Which tab the human turned to, where they have turned to one — by its key,
-  /// that being the one word that names either kind.
-  const [chosen, setChosen] = createSignal<string | undefined>();
-
-  /// And what each open file's save last came to, where it came to anything to
-  /// draw: the bar over a refused stale write, or the line saying a save was
-  /// refused outright.
-  ///
-  /// Nothing for a file nobody has saved, and nothing again the moment one
-  /// lands: what is here is about the *last* press rather than about the file,
-  /// so a save that worked takes its own bar down.
-  const [bars, setBars] = createSignal<Record<string, Bar>>({});
-
-  /// Which files a save is in flight for, so that a second Ctrl+S while the
-  /// first is still being answered is not a second write of the same text.
-  ///
-  /// A plain set rather than a signal: nothing is drawn about it — a save is a
-  /// write of a few kilobytes to a local disk — and what it guards is the
-  /// request rather than the page.
-  const saving = new Set<string>();
+  /// Taken apart once rather than reached through the prop at every use: the
+  /// pane is mounted afresh when the Conversation changes, so what is here is
+  /// the one keeping for the whole of its life. Everything below reads and
+  /// writes these exactly as it did when they were the pane's own — which is
+  /// the point of handing them over whole.
+  const {
+    tabs,
+    setTabs,
+    readings,
+    setReadings,
+    buffers,
+    setBuffers,
+    over,
+    setOver,
+    titles,
+    setTitles,
+    chosen,
+    setChosen,
+    bars,
+    setBars,
+    saving,
+    askedAt,
+    refuse,
+  } = props.held;
 
   /// And which one they are being asked about, where a close was refused for a
   /// shell somebody is working in.
@@ -504,20 +524,13 @@ export function Code(props: {
   /// looked.
   const [read, setRead] = createSignal(false);
 
-  /// When this pane asked for each terminal it opened, which is what
-  /// [`AT_ONCE`] is measured from. Nothing for the ones that were already live:
-  /// this pane never asked for those, so a shell of theirs that ends is one that
-  /// ran.
-  const askedAt = new Map<number, number>();
-
   /// Whether an open is in flight, so that a second press while the first is
   /// still being answered does not open two shells.
+  ///
+  /// The pane's own rather than the keeping's, as the two cards below are: it
+  /// guards a request this mount made, and a pane taken down while one was in
+  /// flight has no press left to guard.
   let opening = false;
-
-  /// The key the next tab standing on a refusal gets. Below every number the
-  /// server issues, counting the other way, because a refused open was never
-  /// given one — there is no shell for it to name.
-  let refusals = 0;
 
   /// The one showing: the tab turned to, or the first while nobody has turned
   /// to one — and the first again once the one turned to is gone, which is what
@@ -582,8 +595,7 @@ export function Code(props: {
   const stand = (why: string): void => {
     replace();
 
-    refusals -= 1;
-    const tab = refusals;
+    const tab = refuse();
 
     setTabs((was) => [...was, { terminal: tab }]);
     setOver((was) => ({ ...was, [tab]: why }));
@@ -735,37 +747,15 @@ export function Code(props: {
     unbar(path);
   };
 
-  /// What the disk said about one open file, where what it said was text.
+  /// What the disk said about one open file, and whether there is text in it
+  /// that the disk has not got.
   ///
-  /// The reading rather than the buffer: this is what was read and the version
-  /// it was read at, which is what a save is a write over — and what the human's
-  /// text is compared against to know whether there is anything to save at all.
-  const disk = (
-    path: string,
-  ): Extract<FileReading, { Text: unknown }>["Text"] | undefined => {
-    const read = readings()[path];
-
-    return read !== undefined && typeof read !== "string" && "Text" in read
-      ? read.Text
-      : undefined;
-  };
-
-  /// Whether a file has text in it that is not on the disk.
-  ///
-  /// The buffer against the reading, which is the whole of what dirty means
-  /// here: the reading is what the disk said at the version it said it at, and
-  /// the buffer is what would be written over it. So a file typed into and
-  /// typed back is clean again, which is what VS Code's own dot says too.
-  ///
-  /// A file with no buffer yet is not dirty: the read is in flight, or what
-  /// came back was not text at all, and neither is a tab with something in it
-  /// to lose.
-  const dirty = (path: string): boolean => {
-    const read = disk(path);
-    const held = buffers()[path];
-
-    return read !== undefined && held !== undefined && held !== read.text;
-  };
+  /// Both asked of the keeping rather than worked out here, because the warning
+  /// on the way out of the page asks the second of them too — of every
+  /// Conversation at once, from above this pane — and one comparison written in
+  /// two places would be two ideas of what unsaved means.
+  const disk = (path: string) => onDisk(props.held, path);
+  const dirty = (path: string): boolean => unsavedIn(props.held, path);
 
   /// Read a file, and put what came back where the tab draws it from.
   ///
@@ -988,38 +978,80 @@ export function Code(props: {
   document.addEventListener("keydown", pressed);
   onCleanup(() => document.removeEventListener("keydown", pressed));
 
-  /// The tabs the pane loads with: one for each terminal the server is already
-  /// holding.
+  /// The tabs the pane opens with, settled against the register.
   ///
-  /// Once, for this Conversation. The list is a reading of the register at the
-  /// moment the pane opened, and everything that happens to it after that
-  /// happens here — a second seeding would put back a tab whose shell has since
-  /// ended.
+  /// The files are the keeping's and come back exactly as they were left: a
+  /// path, a reading and whatever was typed into it are this page's, and a pane
+  /// swapped for an Event and back finds them where they were. The terminals
+  /// are not — a shell is the server's, and the register is what says which of
+  /// them are still running — so every opening reads the list and meets what is
+  /// held against it.
+  ///
+  /// Which is two things. A tab whose shell has ended since is **dropped**
+  /// rather than drawn, there being nothing left to attach it to; and a shell
+  /// the register has that this page has no tab for is **added** at the end,
+  /// which is how a shell opened on another device arrives. A tab standing on a
+  /// shell that could not start is neither: what it holds is a sentence rather
+  /// than a socket, so it keeps its place until somebody asks for another
+  /// terminal.
+  ///
+  /// Once per opening, which is what the flag is: the list is a reading of the
+  /// register at the moment the pane opened, and everything that happens to it
+  /// after that happens here — a second settling would drop the tab of a shell
+  /// this pane had just opened.
   ///
   /// The numbers alone out of what the list says: the flag beside each is what
   /// was running when the pane loaded, and what a close acts on is the reading
   /// the server takes at the press.
-  let seeded: number | undefined;
+  let settled = false;
 
   createEffect(() => {
     const live = terminals.data?.live;
 
-    if (live === undefined || seeded === props.conversation.id) {
+    if (live === undefined || settled) {
       return;
     }
 
-    seeded = props.conversation.id;
-    setTabs((was) => [
-      ...live.map((terminal): Tab => ({ terminal: terminal.number })),
-      ...was,
-    ]);
+    settled = true;
+
+    const running = new Set(live.map((terminal) => terminal.number));
+
+    setTabs((was) => {
+      const kept = was.filter(
+        (one) =>
+          "file" in one ||
+          running.has(one.terminal) ||
+          over()[one.terminal] !== undefined,
+      );
+
+      const drawn = new Set(
+        kept.flatMap((one) => ("file" in one ? [] : [one.terminal])),
+      );
+
+      return [
+        ...kept,
+        ...live
+          .filter((terminal) => !drawn.has(terminal.number))
+          .map((terminal): Tab => ({ terminal: terminal.number })),
+      ];
+    });
+
     setRead(true);
   });
 
   return (
     <>
       <PaneSticky>
-        <PaneHead back={{ to: "Timeline", go: props.back }} title="Code">
+        <PaneHead
+          // Away while the pane has the window, which is the one frame with
+          // nothing beside it to go back *to*: the Timeline is not drawn, so
+          // "← Timeline" would be a press that did nothing. The way out of the
+          // mode is the toggle that made it.
+          back={
+            props.maximise?.on ? undefined : { to: "Timeline", go: props.back }
+          }
+          title="Code"
+        >
           {/* The tabs beside the title, where a pane's own controls go, and the
               way to another at the end of them. Buttons that say which they are
               rather than tabs: they are all always there, `aria-pressed` is the
@@ -1103,6 +1135,38 @@ export function Code(props: {
                 press={() => void open()}
               />
             </div>
+          </Show>
+
+          {/* And the way to give the editor the window, at the end of the
+              header: the sidebar and the Timeline go, and the details pane —
+              which is this one — takes what they were standing in (ADR 0019,
+              *One pane, replacing the Terminal*).
+
+              Drawn only where the frame has those panes up. Below that
+              breakpoint the window is walked one pane at a time and this one
+              already has it, so there is nothing for the press to hide and the
+              toggle is not there at all.
+
+              Its own button rather than the app's icon button, which is a way
+              *into* something and draws itself as open while you are in it:
+              this is a switch with two states, and what says which it is in is
+              `aria-pressed` on a press that changes it. */}
+          <Show when={props.maximise}>
+            {(maximise) => (
+              <button
+                type="button"
+                class={styles.maximise}
+                aria-label={
+                  maximise().on
+                    ? "Bring the other panes back"
+                    : "Give Code the window"
+                }
+                aria-pressed={maximise().on}
+                onClick={() => maximise().set(!maximise().on)}
+              >
+                <Icon of={maximise().on ? faCompress : faExpand} />
+              </button>
+            )}
           </Show>
         </PaneHead>
       </PaneSticky>
@@ -1504,12 +1568,3 @@ export function Moved(props: {
     </div>
   );
 }
-
-/// What a file's last save came to, where it came to anything the tab draws.
-///
-/// The file moved, which is a question to put to the human, or a sentence
-/// saying the save was refused outright. Two shapes rather than one with a kind
-/// beside it, for the reason [`Tab`] is two: they are drawn by different things
-/// and nothing here ever asks which one it is holding without then using the
-/// answer.
-export type Bar = "moved" | { why: string };

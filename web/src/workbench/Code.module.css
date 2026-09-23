@@ -336,3 +336,40 @@
   flex: none;
   gap: 0.5rem;
 }
+
+/* The maximise toggle, at the end of the pane's header: the press that hides
+   the sidebar and the Timeline so that the editor has the window, and the one
+   that brings them back.
+
+   Drawn as the × on a tab is rather than as the app's icon button, and for the
+   same reason the tabs are buttons rather than a tablist: what stands in this
+   header is a row of small marks sized to each other, and an icon button's own
+   padding is a header's. The pressed state is the fill the tab showing takes,
+   which is the one paint this bar has for *this is the state you are in*. */
+.maximise {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem 0.5rem;
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1;
+  color: var(--ink-soft);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 0.6rem;
+  cursor: pointer;
+}
+
+.maximise[aria-pressed="true"] {
+  color: var(--ink);
+  background: var(--code-wash);
+  border-color: var(--edge);
+}
+
+@media (hover: hover) {
+  .maximise:hover {
+    color: var(--ink);
+  }
+}

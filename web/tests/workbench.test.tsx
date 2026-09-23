@@ -12,7 +12,13 @@
 //! tests over there are what say so — and this side's job is to send what was
 //! typed and say in words what came back.
 
-import { fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@solidjs/testing-library";
 import type { Terminal as XTerm } from "@xterm/xterm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -19505,6 +19511,413 @@ describe("a file opened out of the code pane's tree", () => {
       await waitFor(() => expect(tabs(container)).toHaveLength(1));
       expect(card()).toBeNull();
     });
+  });
+
+  /// And what happens to all of it when the pane is swapped for another and
+  /// opened again — which is the ordinary way of working in this workbench,
+  /// the details pane being where every Event is read too.
+  ///
+  /// The pane goes when it is not the one showing: the frame draws one details
+  /// pane at a time and takes down the rest. So what Code holds is held above
+  /// it — see `src/workbench/keeping.ts` — and the swap does not reach it.
+  /// Which is only true of what belongs to this page. A shell belongs to the
+  /// server, so the tabs over the terminals are settled against the register on
+  /// every opening (ADR 0019, *Tabs and groups*).
+  describe("and the pane swapped away and back", () => {
+    /// Type into the editor, which is what makes a tab dirty.
+    async function types(container: ParentNode, text: string): Promise<void> {
+      fireEvent.input(editor(container)!, { target: { value: text } });
+      await waitFor(() => expect(editor(container)?.value).toBe(text));
+    }
+
+    /// Away to another of the conversation's details panes and back again,
+    /// which is the swap: the pane comes down on the way out and is mounted
+    /// afresh on the way in.
+    async function away(
+      container: ParentNode,
+      history: { set: (to: { value: string }) => void },
+    ): Promise<void> {
+      history.set({ value: `/conversations/${GRILLING.id}/backlog` });
+
+      await waitFor(() =>
+        expect(
+          container.querySelector(`.${shell.detailsPane} .${codePane.body}`),
+        ).toBeNull(),
+      );
+
+      history.set({ value: `/conversations/${GRILLING.id}/code` });
+      await drawn(container, `.${shell.detailsPane} .${codePane.body}`);
+    }
+
+    /// The dot on a tab holding text that is not on the disk.
+    function dots(container: ParentNode): Element[] {
+      return [
+        ...container.querySelectorAll(
+          `.${shell.detailsPane} .${codePane.tab} .${codePane.dot}`,
+        ),
+      ];
+    }
+
+    /// The whole of the first acceptance: the tabs, which one is showing, and
+    /// the text nobody has saved are all where they were left.
+    ///
+    /// And the file is not read again. What is drawn is the reading the tab
+    /// already had — which it has to be, the buffer being text typed over that
+    /// version: a fresh read would be a fresh version, and the dirty comparison
+    /// under the dot would be against text the human never saw.
+    it("finds the tabs, the one showing and the unsaved text", async () => {
+      const { container, history, fetching } = await expanded(
+        OWN_ROOT,
+        codeFolder as FolderListing,
+        whenever(fileOf(TEXT.path), json(codeFile)),
+      );
+
+      press(container, "Cargo.toml");
+      await waitFor(() => expect(editor(container)?.value).toBe(TEXT.text));
+
+      await types(container, "[workspace]\nmembers = []\n");
+      await waitFor(() => expect(dots(container)).toHaveLength(1));
+
+      await away(container, history);
+
+      // The tab bar as it was: the shell that was live, and the file after it.
+      await waitFor(() => expect(tabs(container)).toHaveLength(2));
+      expect(tabs(container).map((tab) => tab.textContent)).toEqual([
+        "Terminal 1",
+        "Cargo.toml",
+      ]);
+
+      // The one that was showing, still showing — and the text that was typed
+      // into it, still in it and still unsaved.
+      expect(
+        tabs(container).map((tab) => tab.getAttribute("aria-pressed")),
+      ).toEqual(["false", "true"]);
+      await waitFor(() =>
+        expect(editor(container)?.value).toBe("[workspace]\nmembers = []\n"),
+      );
+      expect(dots(container)).toHaveLength(1);
+
+      expect(askedFor(fetching, fileOf(TEXT.path))).toBe(1);
+    });
+
+    /// A file closed before the swap stays closed, which is the other half of
+    /// the same thing: what comes back is what was left rather than what was
+    /// ever opened.
+    it("leaves a file that was closed closed", async () => {
+      const { container, history } = await expanded(
+        OWN_ROOT,
+        codeFolder as FolderListing,
+        whenever(fileOf(TEXT.path), json(codeFile)),
+      );
+
+      press(container, "Cargo.toml");
+      await waitFor(() => expect(tabs(container)).toHaveLength(2));
+
+      fireEvent.click(crosses(container)[1]!);
+      await waitFor(() => expect(tabs(container)).toHaveLength(1));
+
+      await away(container, history);
+
+      await waitFor(() => expect(tabs(container)).toHaveLength(1));
+      expect(tabs(container)[0]!.textContent).toBe("Terminal 1");
+    });
+
+    /// And the terminals are settled against the register rather than kept: a
+    /// shell that ended while the pane was down has nothing left to attach to,
+    /// so its tab is dropped rather than drawn.
+    ///
+    /// Which is what makes the keeping safe to hold at all. The files are this
+    /// page's and come back untouched; the shells are the server's, and the
+    /// list is what says which of them are still running.
+    it("drops a terminal whose shell has ended since, and keeps the rest", async () => {
+      let live = [1, 2];
+
+      const { container, history } = await expanded(
+        OWN_ROOT,
+        codeFolder as FolderListing,
+        whenever(fileOf(TEXT.path), json(codeFile)),
+        // Answered afresh on every ask rather than fixed at mount, the whole
+        // question here being what the second opening is told.
+        whenever(TERMINALS_OF_IT, () => json(idle(live))()),
+      );
+
+      press(container, "Cargo.toml");
+      await waitFor(() => expect(tabs(container)).toHaveLength(3));
+
+      // The second shell exits while somebody is reading an Event.
+      live = [2];
+
+      await away(container, history);
+
+      await waitFor(() => expect(tabs(container)).toHaveLength(2));
+      expect(tabs(container).map((tab) => tab.textContent)).toEqual([
+        "Terminal 2",
+        "Cargo.toml",
+      ]);
+    });
+
+    /// And a shell opened somewhere else since — another device, another tab of
+    /// this browser — arrives at the end of the bar, the register being what
+    /// says which shells there are.
+    it("takes up a shell the register has and this page has not", async () => {
+      let live = [1];
+
+      const { container, history } = await expanded(
+        OWN_ROOT,
+        codeFolder as FolderListing,
+        whenever(fileOf(TEXT.path), json(codeFile)),
+        whenever(TERMINALS_OF_IT, () => json(idle(live))()),
+      );
+
+      press(container, "Cargo.toml");
+      await waitFor(() => expect(tabs(container)).toHaveLength(2));
+
+      live = [1, 4];
+
+      await away(container, history);
+
+      await waitFor(() => expect(tabs(container)).toHaveLength(3));
+      expect(tabs(container).map((tab) => tab.textContent)).toEqual([
+        "Terminal 1",
+        "Cargo.toml",
+        "Terminal 4",
+      ]);
+    });
+
+    /// And leaving the page with text nobody has saved warns, which is the
+    /// browser's own question rather than one of ours: nothing on a page can
+    /// hold up its own unloading, and saying there is something to lose is the
+    /// whole of what a listener may do about it.
+    ///
+    /// Asked from above the pane, so that it is still asked while Code is not
+    /// the pane showing — a buffer left dirty and an Event opened over it is
+    /// still text about to go.
+    it("warns before the page goes with unsaved text in it", async () => {
+      const { container, history } = await expanded(
+        OWN_ROOT,
+        codeFolder as FolderListing,
+        whenever(fileOf(TEXT.path), json(codeFile)),
+      );
+
+      // Nothing typed, nothing to warn about: a page with a file open as the
+      // disk has it is a page with nothing to lose.
+      expect(leaves()).toBe(false);
+
+      press(container, "Cargo.toml");
+      await waitFor(() => expect(editor(container)?.value).toBe(TEXT.text));
+      expect(leaves()).toBe(false);
+
+      await types(container, "[workspace]\nmembers = []\n");
+      await waitFor(() => expect(dots(container)).toHaveLength(1));
+
+      expect(leaves()).toBe(true);
+
+      // And from the Event beside it, the pane being down saying nothing about
+      // whether there is anything in it.
+      history.set({ value: `/conversations/${GRILLING.id}/backlog` });
+      await waitFor(() =>
+        expect(
+          container.querySelector(`.${shell.detailsPane} .${codePane.body}`),
+        ).toBeNull(),
+      );
+
+      expect(leaves()).toBe(true);
+    });
+
+    /// Leaving the page, as the browser asks about it: the event is cancelled
+    /// where there is something to lose, and goes through where there is not.
+    function leaves(): boolean {
+      return !window.dispatchEvent(
+        new Event("beforeunload", { cancelable: true }),
+      );
+    }
+  });
+});
+
+/// The maximise toggle in Code's header: the press that hides the sidebar and
+/// the Timeline so the editor has the window, and brings them back again.
+///
+/// An editor wants room, and the details pane is what the two panes beside it
+/// leave. What it is *not* is a second frame: the widths, the dividers and the
+/// ways between the panes all live in the one this workbench is drawn in, so
+/// maximising is that frame being handed fewer panes (ADR 0019, *One pane,
+/// replacing the Terminal*).
+///
+/// Remembered per device beside the pane widths, and for the same reason:
+/// how the frame stands in front of this human is theirs, and a phone that gave
+/// Code the window has said nothing about a laptop's columns.
+describe("the maximise toggle in the code pane", () => {
+  /// Where the toggle's state is kept, asked for by the name a browser would
+  /// find it under rather than through the module that writes it — the way the
+  /// widths beside it are asked for in `sizing.test.tsx`.
+  const MAXIMISED = "verkstead.pane-maximised";
+
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
+
+  /// The window this test is being read on, said the only way the frame asks:
+  /// which of its two breakpoints hold. Every listener spelling, for the reason
+  /// the setup's own stub has both — xterm is mounted in this pane and reaches
+  /// for whichever it finds.
+  function windowIs(width: "narrow" | "wide"): void {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: width === "wide" && query.startsWith("(min-width:"),
+      media: query,
+      onchange: null,
+      addListener() {},
+      removeListener() {},
+      addEventListener() {},
+      removeEventListener() {},
+      dispatchEvent: () => false,
+    }));
+  }
+
+  /// Code open on such a window, with its live shell attached.
+  ///
+  /// Waited for down to the socket rather than to the pane: the tab the
+  /// register's shell comes back as is what opens one, and a test that pressed
+  /// and ended before it had would leave an attach in flight behind it.
+  async function opened(width: Parameters<typeof windowIs>[0] = "wide") {
+    windowIs(width);
+    withTerminals([1]);
+
+    const mounted = mount(`/conversations/${GRILLING.id}/code`);
+    await drawn(
+      mounted.container,
+      `.${shell.detailsPane} .${attachedPane.screen}`,
+    );
+
+    return mounted;
+  }
+
+  function toggle(container: ParentNode): HTMLButtonElement | null {
+    return container.querySelector<HTMLButtonElement>(
+      `.${shell.detailsPane} .${codePane.maximise}`,
+    );
+  }
+
+  /// Which of the frame's panes are in the document at all. A level the frame
+  /// was handed nothing for is not drawn rather than drawn empty, which is what
+  /// maximising asks of it.
+  function panes(container: ParentNode): string[] {
+    return [
+      [shell.conversationsPane, "conversations"],
+      [shell.middlePane, "timeline"],
+      [shell.detailsPane, "details"],
+    ]
+      .filter(([name]) => container.querySelector(`.${name}`) !== null)
+      .map(([, said]) => said!);
+  }
+
+  /// Off when Code first opens, whatever the pane held last time.
+  it("stands off, with the three panes up", async () => {
+    const { container } = await opened();
+
+    expect(toggle(container)!.getAttribute("aria-pressed")).toBe("false");
+    expect(panes(container)).toEqual(["conversations", "timeline", "details"]);
+  });
+
+  /// And the press takes the two panes beside the editor away, the details pane
+  /// taking the window they were standing in.
+  it("takes the sidebar and the timeline away, and gives them back", async () => {
+    const { container } = await opened();
+
+    fireEvent.click(toggle(container)!);
+
+    await waitFor(() => expect(panes(container)).toEqual(["details"]));
+    expect(toggle(container)!.getAttribute("aria-pressed")).toBe("true");
+
+    // And the way out of the mode is the press that made it, there being
+    // nothing else on the screen to press.
+    fireEvent.click(toggle(container)!);
+
+    await waitFor(() =>
+      expect(panes(container)).toEqual([
+        "conversations",
+        "timeline",
+        "details",
+      ]),
+    );
+    expect(toggle(container)!.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  /// And what it was left at is this device's, so a reload comes back to it.
+  it("is remembered per device, and survives a reload", async () => {
+    const first = await opened();
+
+    fireEvent.click(toggle(first.container)!);
+    await waitFor(() => expect(panes(first.container)).toEqual(["details"]));
+
+    expect(localStorage.getItem(MAXIMISED)).toBe("on");
+
+    cleanup();
+
+    const again = await opened();
+
+    expect(toggle(again.container)!.getAttribute("aria-pressed")).toBe("true");
+    expect(panes(again.container)).toEqual(["details"]);
+
+    // And turning it off leaves nothing behind, the way the wrap setting does:
+    // off is what an untouched browser already answers.
+    fireEvent.click(toggle(again.container)!);
+    await waitFor(() => expect(localStorage.getItem(MAXIMISED)).toBeNull());
+  });
+
+  /// The mode is Code's own. Every other details pane is read beside the record
+  /// it belongs to, so opening one brings the panes back — and coming back to
+  /// Code finds the toggle where it was left.
+  it("gives the panes back to every other pane of the conversation", async () => {
+    const { container, history } = await opened();
+
+    fireEvent.click(toggle(container)!);
+    await waitFor(() => expect(panes(container)).toEqual(["details"]));
+
+    history.set({ value: `/conversations/${GRILLING.id}/backlog` });
+
+    await waitFor(() =>
+      expect(panes(container)).toEqual([
+        "conversations",
+        "timeline",
+        "details",
+      ]),
+    );
+
+    history.set({ value: `/conversations/${GRILLING.id}/code` });
+
+    await waitFor(() => expect(panes(container)).toEqual(["details"]));
+  });
+
+  /// And while the pane has the window there is nowhere beside it to go back
+  /// *to*: the Timeline is not drawn, so the way out of the level goes with it.
+  it("takes the way back out of the header with them", async () => {
+    const { container } = await opened();
+
+    await drawn(container, `.${shell.detailsPane} .${paneHead.back}`);
+
+    fireEvent.click(toggle(container)!);
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${shell.detailsPane} .${paneHead.back}`),
+      ).toBeNull(),
+    );
+  });
+
+  /// And on a window the details pane already has, the toggle is not drawn at
+  /// all: there is no pane beside this one for a press to hide, and a control
+  /// about a layout that is not standing is furniture.
+  it("is absent on a window that is walked one pane at a time", async () => {
+    const { container } = await opened("narrow");
+
+    expect(toggle(container)).toBeNull();
+
+    // And the pane is the one being read, which is what a narrow window is:
+    // there is nothing to maximise because there is nothing else up.
+    expect(panes(container)).toEqual([
+      "conversations",
+      "timeline",
+      "details",
+    ]);
   });
 });
 
