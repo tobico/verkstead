@@ -988,9 +988,13 @@ pub(crate) fn composed(
     };
 
     // The one entry of a floor that is a fact about the server rather than a
-    // string, and a Mac's alone — see [`LOCAL_INSTALL`].
+    // string, and a Mac's alone — see [`LOCAL_INSTALL`]. Composed with
+    // [`under`] rather than joined, for that function's own reason: this is an
+    // entry of a Mac's `PATH`, and [`Path::join`] writes the separator of
+    // whatever host is asking — a backslash on the Windows runner, which is
+    // one of the machines that asks what a Mac would compose.
     let local = match platform {
-        Platform::MacOs => home.map(|home| home.join(LOCAL_INSTALL)),
+        Platform::MacOs => home.map(|home| under(home, LOCAL_INSTALL)),
         Platform::Linux | Platform::Windows => None,
     };
 
