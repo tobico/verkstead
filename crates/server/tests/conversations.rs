@@ -1933,6 +1933,31 @@ async fn starting_is_refused_when_the_named_branch_is_already_there() {
     assert_eq!(view.branch, "rate-limiting", "and the name is still theirs");
 }
 
+/// And a name git will not give anybody, which is not the same question. It
+/// keeps a branch as a file under `refs/heads/`, so a name with refs beneath it
+/// is a name no branch can be cut at: a repository holding a stage's
+/// `roadmaps/mvp/01-packaging` is one where `roadmaps` cannot be a branch, ever.
+///
+/// Refused here rather than left to the `git worktree add` further down, whose
+/// complaint reaches the server log and leaves the human with nothing but *the
+/// worktree could not be made* — the failure stage branches were moved under a
+/// fixed component to stop happening, asked from the other side.
+#[tokio::test]
+async fn starting_is_refused_when_the_named_branch_is_a_path_git_will_not_give() {
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+
+    assert_eq!(rename(&app, id, "roadmaps").await, BranchRenamed::Renamed);
+    git(&repo, &["branch", "roadmaps/mvp/01-packaging"]);
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::BranchExists);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.worktree, None);
+    assert_eq!(worktrees(&repo).len(), 1, "only the repository itself");
+}
+
 /// But a name Verkstead invented is nobody's, so a repository that already has a
 /// branch by it is a reason to invent another rather than a reason to refuse:
 /// the human never saw that name and cannot have meant it.

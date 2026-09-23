@@ -1365,7 +1365,18 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
             // somebody typed, on a branch somebody's work is already on. That
             // one is theirs to think again about, and taking it over would be
             // Verkstead writing into work it did not start.
-            if worktrees::branch_exists(&repo, &branch) {
+            //
+            // [`worktrees::branch_taken`] rather than `branch_exists`, which is
+            // the reading [`crate::steering`] has always taken of the same
+            // question: git keeps a branch as a file under `refs/heads/`, so a
+            // name with refs beneath it is a name it will not give anybody —
+            // `roadmaps` is not free in a Repo holding `roadmaps/mvp/01-x`, and
+            // `show-ref --verify` on the name alone says it is. Asked the narrow
+            // way, the start goes on to a `git worktree add` git refuses, and
+            // all the human is told is that the worktree could not be made. See
+            // [`crate::stages::Stage::branch`], which is why every roadmap's
+            // stages now go under one such path.
+            if worktrees::branch_taken(&repo, &branch) {
                 return Err(GrillingStarted::BranchExists);
             }
 
