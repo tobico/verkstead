@@ -599,11 +599,20 @@ pub(crate) fn accepting(dir: &Path, args: &[&str], ok: &[i32]) -> Option<String>
 /// line: a folder wide enough for the question to be worth asking in one run is
 /// a folder wide enough to overrun an argument list.
 ///
-/// Written and then read, in that order and with the pipe closed in between —
-/// which is what [`std::process::Child::wait_with_output`] does for the caller,
-/// and is the whole of why this is not [`accepting`] with one more argument. A
-/// write that left the pipe open would be a `--stdin` waiting for an end that
-/// never came, and a server waiting on it.
+/// **Written and read at the same time**, which is the whole of why this is not
+/// [`accepting`] with one more argument. `check-ignore` answers as it reads —
+/// every path it has decided is ignored goes back down its own pipe before it
+/// has finished with the ones still coming — so a caller that wrote the input
+/// whole before reading a byte of the answer would deadlock on exactly the
+/// folder this exists for: once the answer fills a pipe, git blocks writing
+/// while this side blocks writing, and neither moves again. Around eight
+/// hundred ignored entries in one folder is enough. So the input goes down a
+/// thread of its own while [`std::process::Child::wait_with_output`] drains the
+/// answer, and the pipe is closed by that thread ending, which is the end
+/// `--stdin` is waiting for.
+///
+/// Scoped rather than spawned loose, so the thread cannot outlive the borrow it
+/// writes from and nothing is copied to give it one.
 pub(crate) fn feeding(dir: &Path, args: &[&str], input: &str, ok: &[i32]) -> Option<String> {
     use std::io::Write;
 
@@ -620,15 +629,20 @@ pub(crate) fn feeding(dir: &Path, args: &[&str], input: &str, ok: &[i32]) -> Opt
         .spawn()
         .ok()?;
 
-    // A git that has already exited — the directory is no repository, say — is
-    // a pipe with nobody at the other end, which is an error to swallow rather
-    // than a reason to fail: what it exited with is read below like any other
-    // answer.
-    if let Some(mut writing) = child.stdin.take() {
-        let _ = writing.write_all(input.as_bytes());
-    }
+    let output = std::thread::scope(|writers| {
+        // A git that has already exited — the directory is no repository, say —
+        // is a pipe with nobody at the other end, which is an error to swallow
+        // rather than a reason to fail: what it exited with is read below like
+        // any other answer. The same goes for one that stops reading partway.
+        if let Some(mut writing) = child.stdin.take() {
+            writers.spawn(move || {
+                let _ = writing.write_all(input.as_bytes());
+            });
+        }
 
-    let output = child.wait_with_output().ok()?;
+        child.wait_with_output()
+    })
+    .ok()?;
 
     if !ok.contains(&output.status.code()?) {
         return None;

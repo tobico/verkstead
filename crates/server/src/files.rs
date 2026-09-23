@@ -680,6 +680,40 @@ mod tests {
         );
     }
 
+    /// And a folder wide enough that git answers about it while it is still
+    /// being asked still comes back.
+    ///
+    /// `check-ignore` prints each ignored path as it reads, so a caller that
+    /// wrote the whole question before reading a word of the answer would stop
+    /// dead here: git blocks writing into a pipe nobody is draining, this side
+    /// blocks writing into the one git has stopped reading, and the folder
+    /// never opens. See [`crate::repos::feeding`], which writes and reads at
+    /// once for this reason.
+    ///
+    /// Two thousand of them, under names long enough that the question is a
+    /// good deal more than the sixty-four kilobytes a pipe holds however short
+    /// the directory it is run in happens to be — the hang is a pipe filling,
+    /// so a test that proved it would have to be sure of filling one. A build
+    /// directory ignored file by file rather than by its name is an ordinary
+    /// thing for a checkout to hold.
+    #[test]
+    fn a_folder_of_ignored_files_wide_enough_to_fill_a_pipe_still_answers() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+
+        for number in 0..2_000 {
+            let name = format!("build-artefact-{number:05}-of-a-run-nobody-committed.log");
+            std::fs::write(worktree.join(name), "").unwrap();
+        }
+
+        std::fs::write(worktree.join("kept.rs"), "").unwrap();
+
+        assert_eq!(
+            names(folder(&[root(&worktree)], &worktree)),
+            [".gitignore", "README.md", "kept.rs"]
+        );
+    }
+
     /// A path under none of the roots is refused, and says which of the
     /// refusals it is: the whole of what bounds the files API.
     #[test]
