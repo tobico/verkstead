@@ -214,8 +214,11 @@ with. The cask is gone from the planner and the tab.
 `hw.optional.arm64`, which answers for the Mac rather than for the slice the
 server happens to run as, so a server under Rosetta still reads as Apple
 silicon — and the wizard has two Mac tabs, `MacOs` and `MacOsIntel`, detected
-the way the Linux tabs are and both reachable. The Intel tab has no Homebrew
-line above it and says in one sentence why it differs. Its planner runs no
+the way the Linux tabs are, drawn beside each other and both reachable. Beside
+each other because the strip scrolls on a phone and the human reading it is the
+one the detection went wrong about, so the other Mac is the tab next door
+rather than the one past every Linux. The Intel tab has no Homebrew line above
+it and says in one sentence why it differs. Its planner runs no
 `brew` and raises nothing: Claude, Grok and OpenCode run their vendors' own
 installers as the user, each landing under the home and written to
 `session_path`; `gh` is GitHub's release zip, the version taken from the

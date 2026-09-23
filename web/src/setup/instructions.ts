@@ -116,9 +116,9 @@ export type Guide = {
 };
 
 /// The nine tabs, in the order they are drawn — the order
-/// `verkstead_render::Distro` is written in, which is the two platforms, the
-/// five distributions whose commands are written down, everything else, and the
-/// second Mac at the end of it.
+/// `verkstead_render::Distro` is written in, which is the two Macs beside each
+/// other, Windows, the five distributions whose commands are written down, and
+/// everything else.
 ///
 /// **A list a `Distro` can fall out of**, which nothing but a test can hold to
 /// the type: a union of strings is gone by the time this runs, so a tab left
@@ -128,6 +128,7 @@ export type Guide = {
 /// against each other.
 export const DISTROS: readonly Distro[] = [
   "MacOs",
+  "MacOsIntel",
   "Windows",
   "NixOs",
   "Ubuntu",
@@ -135,7 +136,6 @@ export const DISTROS: readonly Distro[] = [
   "Debian",
   "Arch",
   "OtherLinux",
-  "MacOsIntel",
 ];
 
 /// Claude Code the way Anthropic installs it, which is what every Linux tab
@@ -353,6 +353,67 @@ export const GUIDES: Record<Distro, Guide> = {
     },
   },
 
+  /// And the Mac Homebrew has dropped, which is the tab beside it: two tabs
+  /// reading *macOS* belong next to each other, and the human reading the
+  /// strip is the one whose detection went wrong.
+  ///
+  /// **Nothing here is a `brew install`**, so there is no Homebrew line above
+  /// it: Homebrew's installer refuses an Intel Mac outright, and its formulae
+  /// there get no bottles. What is left is what a Mac with no package manager
+  /// can be told — Apple's own tools, the vendors' own installers, and a
+  /// binary to unpack into a directory every Mac session looks in.
+  MacOsIntel: {
+    title: "macOS (Intel)",
+
+    about:
+      "Homebrew no longer supports Intel Macs — its installer refuses one " +
+      "outright — so nothing on this tab is a brew install.",
+
+    rows: {
+      Sandbox: {
+        note:
+          "Apple's own sandbox-exec is on every Mac, and it is what a session " +
+          "runs inside here. There is nothing to install.",
+      },
+
+      // Apple's own dialog rather than a package: every Mac has a
+      // `/usr/bin/git`, and without the command line tools behind it that file
+      // is a stub that opens this same dialog when a session runs it.
+      Git: {
+        command: "xcode-select --install",
+        note:
+          "git comes with Apple's command line tools, and this opens Apple's " +
+          "own dialog to install them. The git in /usr/bin without them is a " +
+          "stub that opens the same dialog instead of running.",
+      },
+
+      Claude: CLAUDE_ON_A_MAC,
+
+      // Neither a script nor a package this machine can use: the npm the other
+      // Unix tabs install it from wants a node this Mac has no package manager
+      // to fetch, and the cask beside it is Homebrew's.
+      Codex: {
+        link: "https://github.com/openai/codex/releases",
+        note:
+          "Codex has no installer script, and the package the other tabs use " +
+          "wants an npm this Mac has no package manager to install. Put the " +
+          "binary in ~/.local/bin, which is on every Mac session's PATH " +
+          "whichever way Verkstead was started.",
+      },
+
+      Grok: GROK_UNIX,
+      OpenCode: OPENCODE_NATIVE,
+
+      Gh: {
+        link: "https://github.com/cli/cli/releases",
+        note:
+          "GitHub ships a zip for this Mac rather than a package it can " +
+          "install. Unpack gh into ~/.local/bin, which is on every Mac " +
+          "session's PATH whichever way Verkstead was started.",
+      },
+    },
+  },
+
   Windows: {
     title: "Windows",
     rows: {
@@ -488,65 +549,6 @@ export const GUIDES: Record<Distro, Guide> = {
         note:
           "Install your distribution's GitHub CLI package, which is gh or " +
           "github-cli.",
-      },
-    },
-  },
-
-  /// And the Mac Homebrew has dropped, which is the tab drawn last.
-  ///
-  /// **Nothing here is a `brew install`**, so there is no Homebrew line above
-  /// it: Homebrew's installer refuses an Intel Mac outright, and its formulae
-  /// there get no bottles. What is left is what a Mac with no package manager
-  /// can be told — Apple's own tools, the vendors' own installers, and a
-  /// binary to unpack into a directory every Mac session looks in.
-  MacOsIntel: {
-    title: "macOS (Intel)",
-
-    about:
-      "Homebrew no longer supports Intel Macs — its installer refuses one " +
-      "outright — so nothing on this tab is a brew install.",
-
-    rows: {
-      Sandbox: {
-        note:
-          "Apple's own sandbox-exec is on every Mac, and it is what a session " +
-          "runs inside here. There is nothing to install.",
-      },
-
-      // Apple's own dialog rather than a package: every Mac has a
-      // `/usr/bin/git`, and without the command line tools behind it that file
-      // is a stub that opens this same dialog when a session runs it.
-      Git: {
-        command: "xcode-select --install",
-        note:
-          "git comes with Apple's command line tools, and this opens Apple's " +
-          "own dialog to install them. The git in /usr/bin without them is a " +
-          "stub that opens the same dialog instead of running.",
-      },
-
-      Claude: CLAUDE_ON_A_MAC,
-
-      // Neither a script nor a package this machine can use: the npm the other
-      // Unix tabs install it from wants a node this Mac has no package manager
-      // to fetch, and the cask beside it is Homebrew's.
-      Codex: {
-        link: "https://github.com/openai/codex/releases",
-        note:
-          "Codex has no installer script, and the package the other tabs use " +
-          "wants an npm this Mac has no package manager to install. Put the " +
-          "binary in ~/.local/bin, which is on every Mac session's PATH " +
-          "whichever way Verkstead was started.",
-      },
-
-      Grok: GROK_UNIX,
-      OpenCode: OPENCODE_NATIVE,
-
-      Gh: {
-        link: "https://github.com/cli/cli/releases",
-        note:
-          "GitHub ships a zip for this Mac rather than a package it can " +
-          "install. Unpack gh into ~/.local/bin, which is on every Mac " +
-          "session's PATH whichever way Verkstead was started.",
       },
     },
   },

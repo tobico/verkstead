@@ -592,6 +592,17 @@ describe("the hint screen", () => {
   /// at all, and nothing in the viewer would say so. `GUIDES` is the half the
   /// type checker holds exhaustive — a `Record<Distro, Guide>` — so the two
   /// are read against each other here.
+  /// And the two Macs are drawn side by side. The strip scrolls on a phone, and
+  /// the human reading it is the one the detection went wrong about — so the
+  /// other Mac has to be the tab next door rather than the one past every
+  /// Linux.
+  it("draws the two Macs beside each other", () => {
+    const { container } = hinting(ONE_FAILED);
+    const drawn = tabs(container).map((tab) => tab.dataset.distro);
+
+    expect(drawn.indexOf("MacOsIntel")).toBe(drawn.indexOf("MacOs") + 1);
+  });
+
   it("draws a tab for every machine the server can say it is", () => {
     expect([...DISTROS].sort()).toEqual(Object.keys(GUIDES).sort());
   });

@@ -156,13 +156,22 @@ pub enum Platform {
 /// then `ID_LIKE`, so that a derivative gets its parent's commands rather than
 /// the generic list.
 ///
-/// **The order is the order the tabs are drawn in**, and the second Mac is at
-/// the end of it: the eight above are the list the wizard has always drawn, and
-/// an Intel Mac is the machine that fell out of one of them.
+/// **The order is the order the tabs are drawn in**, and the two Macs are
+/// beside each other: the strip scrolls on a phone, and the human reading it is
+/// the one whose detection went wrong — so the other Mac is the tab next door
+/// rather than the one past every Linux.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Distro {
     MacOs,
+
+    /// And a Mac that is not Homebrew's: its installer refuses an Intel Mac
+    /// outright and its formulae there get no bottles, so that machine has a
+    /// tab of its own with no `brew` on it — see ADR-0016's *Macs*. Told apart
+    /// by `hw.optional.arm64`, which answers for the Mac rather than for the
+    /// slice this server happens to be running as.
+    MacOsIntel,
+
     Windows,
     NixOs,
     Ubuntu,
@@ -173,13 +182,6 @@ pub enum Distro {
     /// A Linux naming none of them, which gets the generic list of what is
     /// needed rather than a command that would be wrong.
     OtherLinux,
-
-    /// And a Mac that is not Homebrew's: its installer refuses an Intel Mac
-    /// outright and its formulae there get no bottles, so that machine has a
-    /// tab of its own with no `brew` on it — see ADR-0016's *Macs*. Told apart
-    /// by `hw.optional.arm64`, which answers for the Mac rather than for the
-    /// slice this server happens to be running as.
-    MacOsIntel,
 }
 
 /// One row of the dependencies step: a thing a session needs, and whether this

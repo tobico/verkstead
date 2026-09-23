@@ -1906,11 +1906,12 @@ path: string | null, entries: Array<DirectoryEntry>, } } | "NotAbsolute" | "Miss
  * then `ID_LIKE`, so that a derivative gets its parent's commands rather than
  * the generic list.
  *
- * **The order is the order the tabs are drawn in**, and the second Mac is at
- * the end of it: the eight above are the list the wizard has always drawn, and
- * an Intel Mac is the machine that fell out of one of them.
+ * **The order is the order the tabs are drawn in**, and the two Macs are
+ * beside each other: the strip scrolls on a phone, and the human reading it is
+ * the one whose detection went wrong — so the other Mac is the tab next door
+ * rather than the one past every Linux.
  */
-export type Distro = "MacOs" | "Windows" | "NixOs" | "Ubuntu" | "Fedora" | "Debian" | "Arch" | "OtherLinux" | "MacOsIntel";
+export type Distro = "MacOs" | "MacOsIntel" | "Windows" | "NixOs" | "Ubuntu" | "Fedora" | "Debian" | "Arch" | "OtherLinux";
 
 /**
  * What one entry is, which decides what the field drawing it does with the row.
