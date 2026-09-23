@@ -378,8 +378,11 @@ in it. So on a Mac that directory is on every session's `PATH` whether or not
 the server was started with it, read-only inside like every other install, and
 ahead of Apple's own `/usr/bin` along with Homebrew's two prefixes and
 `/usr/local/bin`: a session started from the Dock finds the same `git` as one
-started from a terminal. On Linux what your `PATH` names is still the whole of
-it.
+started from a terminal. It is Apple's system directories those lead and
+nothing else you wrote — anything your own `PATH` puts in front of `/usr/bin`,
+a version manager's shims or a `~/bin` of your own, a session still finds
+first, in the order you wrote it. On Linux what your `PATH` names is still the
+whole of it.
 
 **`/tmp` is the one place a Mac session reaches more than a Linux one**, and
 the one thing on that list that is not the same on both. On Linux it is a

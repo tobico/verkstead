@@ -936,18 +936,28 @@ pub(crate) fn entries(platform: Platform, path: &OsStr) -> Vec<PathBuf> {
 /// module's *told, not found*: a directory Verkstead installed into is one the
 /// human ticked rather than one a guess turned up.
 ///
-/// **A Mac's floor is two halves, and the installs are the half that leads.**
-/// [`APPLE_INSTALLS`] — the home's own `.local/bin`, then the two Homebrew
-/// prefixes and `/usr/local/bin` — is composed *ahead* of the server's own
-/// entries, and [`APPLE_SYSTEM_PATH`] behind them, first occurrence still
-/// winning: a terminal whose `PATH` already led with Homebrew composes exactly
-/// as it did. An app started from the Dock has launchd's system directories and
-/// nothing else, and composed the other way round those shadowed the tools the
-/// machine was actually set up with — Apple's older `/usr/bin/git` ahead of
-/// Homebrew's, the same app reading one way from the Dock and another from a
-/// terminal. Linux keeps its one floor under everything, for the reason the
-/// rule above is the rule there: a Linux server is started from a session whose
-/// `PATH` the human's own profile wrote.
+/// **A Mac's floor is two halves, and the installs are the half that leads the
+/// system directories.** [`APPLE_INSTALLS`] — the home's own `.local/bin`, then
+/// the two Homebrew prefixes and `/usr/local/bin` — is composed ahead of
+/// whichever of the server's own entries [`APPLE_SYSTEM_PATH`] already names,
+/// and behind every other entry the server was started with; the rest of
+/// [`APPLE_SYSTEM_PATH`] goes under all of it, first occurrence still winning.
+/// An app started from the Dock has launchd's system directories and nothing
+/// else, and composed under them those shadowed the tools the machine was
+/// actually set up with — Apple's older `/usr/bin/git` ahead of Homebrew's, the
+/// same app reading one way from the Dock and another from a terminal.
+///
+/// **What the human put in front of a system directory stays in front of the
+/// floor.** It is the system half of the server's `PATH` the installs lead, and
+/// only that: a terminal whose profile prepends a version manager's shims — or
+/// a `~/bin`, or a toolchain of its own — hands a session those first, exactly
+/// as it did before, because a `PATH` somebody wrote is an ordering somebody
+/// meant. From the Dock there is no such ordering to keep: launchd's four
+/// directories are the whole of that `PATH` and are every one of them the
+/// system half, so there the installs lead everything. Linux keeps its one
+/// floor under everything, for the reason the rule above is the rule there: a
+/// Linux server is started from a session whose `PATH` the human's own profile
+/// wrote.
 ///
 /// **And the home's `.local/bin` is composed rather than written**, which is
 /// why the leading half is a list and a path rather than one constant: it is
@@ -999,13 +1009,28 @@ pub(crate) fn composed(
         .into_iter()
         .chain(apart(OsStr::new(ahead)));
 
-    let servers_own = apart(servers).filter(could_look_in);
+    // And the server's own, in two where there is a half to lead: what the
+    // system list already names goes under the installs, and everything else
+    // the human wrote stays in front of them — see the two paragraphs above,
+    // which is the whole of the rule. Linux has no leading half, so there the
+    // first of these is the whole of the `PATH` and the second is empty, which
+    // is that platform's order untouched.
+    let system = |entry: &&OsStr| {
+        !ahead.is_empty() && apart(OsStr::new(behind)).any(|named| same(named, entry))
+    };
+
+    let their_own = apart(servers)
+        .filter(could_look_in)
+        .filter(|entry| !system(entry));
+
+    let the_systems = apart(servers).filter(could_look_in).filter(system);
 
     let mut kept: Vec<&OsStr> = Vec::new();
 
     for entry in installed
+        .chain(their_own)
         .chain(leading)
-        .chain(servers_own)
+        .chain(the_systems)
         .chain(apart(OsStr::new(behind)))
     {
         if !kept.iter().any(|held| same(held, entry)) {
@@ -2013,8 +2038,8 @@ const LINUX_PATH: &str = "/run/current-system/sw/bin:/nix/var/nix/profiles/defau
 
 /// And the first half of a Mac's, which has none of NixOS in it until somebody
 /// installs one: the directories somebody's own installs land in, composed
-/// ahead of the server's own entries — see [`composed`], where that half is
-/// argued.
+/// ahead of whichever of the server's own entries [`APPLE_SYSTEM_PATH`] names
+/// and behind every other one — see [`composed`], where that half is argued.
 ///
 /// Homebrew's two prefixes — the Apple-silicon one and the Intel one, which is
 /// under `/usr/local` — because a Mac used for development has its actual
@@ -5527,14 +5552,16 @@ mod tests {
     }
 
     /// And the order a Mac composes them in, which is ADR-0016's *Macs*: what
-    /// Verkstead installed, then the installs half of the floor with the home's
-    /// own `.local/bin` at its head, then the server's own entries, then the
-    /// system.
+    /// Verkstead installed, then whatever of the server's own entries is
+    /// nobody's system directory, then the installs half of the floor with the
+    /// home's own `.local/bin` at its head, then the system directories — the
+    /// server's own among them.
     ///
     /// Asked of launchd's `PATH`, which is the case it is about: an app started
-    /// from the Dock is handed those four directories and nothing else, and a
-    /// session composed the other way round found Apple's `/usr/bin/git` ahead
-    /// of Homebrew's and no `~/.local/bin` at all.
+    /// from the Dock is handed those four directories and nothing else, every
+    /// one of them a system directory, so there the installs lead the whole of
+    /// what it was started with. A session composed the other way round found
+    /// Apple's `/usr/bin/git` ahead of Homebrew's and no `~/.local/bin` at all.
     #[test]
     fn a_mac_composes_the_local_installs_ahead_of_what_the_server_was_started_with() {
         let home = Path::new("/Users/you");
@@ -5566,33 +5593,71 @@ mod tests {
         );
     }
 
-    /// And a `PATH` that already led with Homebrew composes exactly as it did,
-    /// first occurrence winning over the half in front of it.
+    /// And a terminal's own `PATH` keeps the order the human wrote it in: what
+    /// they put in front of a system directory is still in front of the floor.
     ///
-    /// Which is what says this costs a terminal nothing: the same app started
-    /// from a shell whose profile wrote a `PATH` reads as it always has, and it
-    /// is the Dock that has been brought up to meet it.
+    /// Which is what says this costs a terminal nothing. A profile that
+    /// prepends a version manager's shims meant those to be found first, and a
+    /// floor that led them would hand a session Homebrew's `node` instead of
+    /// the one the human selected — the installs lead the *system* half of that
+    /// `PATH`, which is the half the Dock is made of and the only half nobody
+    /// chose. See [`composed`].
     #[test]
     fn a_mac_terminals_own_path_composes_as_it_always_did() {
         let home = Path::new("/Users/you");
-        let terminals = OsString::from("/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin");
+        let terminals =
+            OsString::from("/Users/you/.nvm/versions/node/v22/bin:/opt/homebrew/bin:/usr/bin:/bin");
+
+        let composed = composed(Platform::MacOs, NOTHING_INSTALLED, &terminals, Some(home));
+        let entries: Vec<&OsStr> = apart(&composed).collect();
+
+        assert_eq!(
+            entries,
+            [
+                "/Users/you/.nvm/versions/node/v22/bin",
+                "/opt/homebrew/bin",
+                "/Users/you/.local/bin",
+                "/opt/homebrew/sbin",
+                "/usr/local/bin",
+                "/usr/bin",
+                "/bin",
+                "/usr/sbin",
+                "/sbin",
+                "/run/current-system/sw/bin",
+                "/nix/var/nix/profiles/default/bin",
+            ]
+            .map(OsStr::new),
+            "the two entries the human wrote in front of a system directory are \
+             still in front of everything, the installs lead `/usr/bin` and the \
+             system half is under the lot"
+        );
+    }
+
+    /// And the shims stay in front however far down the human's own `PATH` the
+    /// first system directory is: it is that directory the installs lead rather
+    /// than the entry before it.
+    #[test]
+    fn a_mac_leads_the_system_half_of_a_path_rather_than_the_whole_of_it() {
+        let home = Path::new("/Users/you");
+        let terminals = OsString::from("/usr/bin:/Users/you/bin:/bin");
 
         let composed = composed(Platform::MacOs, NOTHING_INSTALLED, &terminals, Some(home));
         let entries: Vec<&OsStr> = apart(&composed).collect();
 
         assert_eq!(
             entries.first(),
-            Some(&OsStr::new("/Users/you/.local/bin")),
-            "the one entry that was never on it leads: {entries:?}"
+            Some(&OsStr::new("/Users/you/bin")),
+            "the one entry of theirs that is nobody's system directory: {entries:?}"
         );
-        assert_eq!(
+        assert!(
             entries
                 .iter()
-                .position(|entry| *entry == OsStr::new("/opt/homebrew/bin")),
-            Some(1),
-            "and Homebrew's prefix is where the human wrote it, the floor's own \
-             copy being the second occurrence of a directory already kept: \
-             {entries:?}"
+                .position(|entry| *entry == OsStr::new("/Users/you/.local/bin"))
+                < entries
+                    .iter()
+                    .position(|entry| *entry == OsStr::new("/usr/bin")),
+            "and the floor's installs are ahead of the `/usr/bin` they wrote \
+             first, which is the shadowing this is here to stop: {entries:?}"
         );
     }
 

@@ -193,10 +193,17 @@ app was started.** Composed as it was, a session from the Dock had launchd's
 `/usr/bin` ahead of the floor's `/opt/homebrew/bin`, so Apple's older tools
 shadowed Homebrew's — the other way round from the same app started in a
 terminal. On a Mac the floor's install half — `~/.local/bin`, the two Homebrew
-prefixes and `/usr/local/bin` — is composed ahead of the server's own entries
-and the system half behind them, first occurrence still winning; a terminal
-whose `PATH` already led with Homebrew reads the same as before, and the Dock
-now reads the same as the terminal.
+prefixes and `/usr/local/bin` — is composed ahead of whichever of the server's
+own entries the system half already names, and behind every other one; the
+system half goes under the lot, first occurrence still winning. **It is the
+system half of that `PATH` the installs lead and only that**: what a profile
+put in front of `/usr/bin` it meant to be found first — a version manager's
+shims, a `~/bin`, a toolchain of somebody's own — and a floor that led those
+would hand a session Homebrew's `node` over the one the human selected. From
+the Dock there is no such ordering to keep: launchd's four directories are the
+whole of that `PATH` and every one of them is the system half, so there the
+installs lead all of it. A terminal reads as it always did, and the Dock now
+reads the same as the terminal.
 
 **Claude is Anthropic's installer on every Mac.** The cask existed for the
 Dock's `PATH` alone; with `~/.local/bin` on the floor the installer that stays
