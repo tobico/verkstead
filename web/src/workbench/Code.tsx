@@ -34,7 +34,14 @@
 //! per terminal, in the order they were opened, and a plus at the end opens
 //! another. It is the Output pane's Transcript/Screen switch built again —
 //! pressed-or-not buttons in a group rather than a tablist, which is the house's
-//! answer to this shape.
+//! answer to this shape — restyled after VS Code's bar, which is what the pane
+//! is drawn after from here on: a kind icon at one end of every tab and a × at
+//! the other, and the tabs abutting rather than spaced. The kind is the whole
+//! of what an icon there says, and the one kind there is so far is a terminal.
+//!
+//! The bar is drawn where there are tabs to draw. A strip holding nothing but
+//! its own plus is furniture about tabs that are not there, and a pane with
+//! nothing open has the hint under it to say the same thing in words.
 //!
 //! **And a tab is called what its shell calls itself.** A prompt sets the
 //! terminal's title at every prompt — the directory it is in, the command it is
@@ -57,25 +64,33 @@
 //!
 //! **The server holds the shells, so this pane is the way back to them rather
 //! than where they live.** On load it asks which of the Conversation's terminals
-//! are live and draws a tab for each, and opens one only where there is none —
-//! so a reload, a second device or a tab closed by accident comes back to what
-//! was already there, still running and showing what it last showed.
+//! are live and draws a tab for each — so a reload, a second device or a tab
+//! closed by accident comes back to what was already there, still running and
+//! showing what it last showed.
 //!
-//! **And a tab is closed on purpose or not at all.** Close is a row on the
-//! tab's own context menu — a right-click under a pointer, a long press under a
-//! finger — rather than a × on the tab, because a × beside a label this small is
-//! a thing to hit by accident and what it would end is a shell somebody is
-//! working in. The row asks the server to end that shell, and the tab then goes
-//! the way every ended shell's tab goes: its socket closes, and where it was the
-//! last one another opens.
+//! **And a tab is closed by the × at its end.** ADR 0013 kept Close on a context
+//! menu, a × beside a label this small being a thing to hit by accident and what
+//! it would end a shell somebody is working in; ADR 0019 puts it on the tab,
+//! because the × is what VS Code's bar has, what carries that worry now is the
+//! confirm a *busy* shell asks for, and a long press with no menu behind it is
+//! what frees the gesture for dragging a tab. The press asks the server to end
+//! that shell, and the tab then goes the way every ended shell's tab goes: its
+//! socket closes, and the tab closes with it.
 //!
-//! **And the pane never stands empty.** A shell that exits closes its socket,
-//! which is how this side hears about it: the tab goes, and where it was the
-//! last one another opens. The whole of the guard on that is time — a shell that
+//! **And the pane opens empty.** It opens no shell of its own accord: the live
+//! ones come back as tabs, and where there are none it draws a hint and a **New
+//! terminal** button where a tab's content goes. The Terminal pane never stood
+//! empty because a shell was the whole of what it held; a pane that will hold
+//! files has something to show without one, and a shell nobody asked for is a
+//! Sandbox started by the opening of a pane. A shell that exits closes its
+//! socket, which is how this side hears about it: the tab goes, and where it was
+//! the last the pane stands empty again.
+//!
+//! The guard on a shell that could not start stays, and is time — a shell that
 //! ended within [`AT_ONCE`] of being asked for, or that the server refused to
 //! open at all, is one that could not start rather than one that ran, so its tab
-//! *stays* saying why and nothing opens until plus is pressed, which replaces
-//! it. Without it a Sandbox that will not start would be an endless spawn loop.
+//! *stays* saying why, and **New terminal** replaces it. Without it a Sandbox
+//! that will not start would leave an empty pane and nothing to read about why.
 //! The clock is this pane's own, started when it asked: the server opens nothing
 //! of its own accord and knows nothing about tabs.
 //!
@@ -84,7 +99,11 @@
 //! human doing something, exactly as typing into a Screen is, and somebody who
 //! means to take the work on presses **Stop** first.
 
-import { faPlus } from "@fortawesome/free-solid-svg-icons";
+import {
+  faPlus,
+  faTerminal,
+  faXmark,
+} from "@fortawesome/free-solid-svg-icons";
 import { useQueryClient } from "@tanstack/solid-query";
 import {
   For,
@@ -98,9 +117,10 @@ import {
   type JSX,
 } from "solid-js";
 
+import { Icon } from "../Icon";
 import { IconButton } from "../IconButton";
-import { ContextMenu } from "../Menu";
 import { PaneSticky } from "../Panes";
+import { QuietButton } from "../QuietButton";
 import {
   closeTerminal,
   listTerminals,
@@ -172,7 +192,16 @@ export const AT_ONCE = 5_000;
 /// the press that would try again is named, since nothing is going to try on its
 /// own.
 export const ENDED_AT_ONCE =
-  "The shell ended as soon as it started. Press plus to open another.";
+  "The shell ended as soon as it started. Press New terminal to open another.";
+
+/// And what the pane says when it is holding nothing at all.
+///
+/// The state the Terminal pane never had. What it says is what there is here to
+/// open, which for now is a shell — the tree and the files it opens are the
+/// stages after this one, and a hint naming a tree that is not drawn yet would
+/// be a sentence about somewhere else.
+export const NOTHING_OPEN =
+  "Nothing is open. A terminal here is a shell of your own in this conversation's worktree.";
 
 export function Code(props: {
   conversation: ConversationView;
@@ -189,11 +218,11 @@ export function Code(props: {
   /// **And kept no longer than the pane it was read for.** Frozen means frozen:
   /// an answer still in the cache is never asked for again, on a mount or on a
   /// focus. So a pane coming back to a cached one would be reading the register
-  /// as it stood when this pane last closed — and where it had opened the shell
-  /// itself, that is the empty list it started from, so it would open a second
-  /// beside the first and leave the first running with no tab over it and no
-  /// way to close it. Dropped with the pane instead, which is what makes "read
-  /// when the pane opens" true of every opening rather than of the first.
+  /// as it stood when this pane last closed — and where the shell was opened in
+  /// this pane, that is the empty list it started from, so it would come back to
+  /// no tabs at all and leave the shell running with nothing over it and no way
+  /// to close it. Dropped with the pane instead, which is what makes "read when
+  /// the pane opens" true of every opening rather than of the first.
   ///
   /// Said twice, because `gcTime` is a timer: it is zero, so nothing is kept
   /// past the pane, and the answer is dropped outright as the pane goes so that
@@ -241,21 +270,11 @@ export function Code(props: {
   /// Which tab the human turned to, where they have turned to one.
   const [chosen, setChosen] = createSignal<number | undefined>();
 
-  /// The tab whose menu is open and where the hand asked for it, or `null` while
-  /// no menu is down.
-  ///
-  /// Which tab it is about is kept here rather than in a menu per tab, for the
-  /// reason the sidebar's is: one menu is open at a time, and one of these per
-  /// tab would be a component held open by a pane that only ever wants one.
-  const [pointed, setPointed] = createSignal<{
-    tab: number;
-    x: number;
-    y: number;
-  } | null>(null);
-
   /// Whether the list has been read, which is what says the pane knows how many
-  /// terminals there are. Before it, an empty tab bar is a pane that has not
-  /// looked yet rather than a Conversation with no shells.
+  /// terminals there are. Before it, a pane with no tabs is one that has not
+  /// looked yet rather than a Conversation with no shells — so the hint waits on
+  /// this, a sentence about an empty pane being a thing to say once somebody has
+  /// looked.
   const [read, setRead] = createSignal(false);
 
   /// When this pane asked for each terminal it opened, which is what
@@ -264,8 +283,8 @@ export function Code(props: {
   /// ran.
   const askedAt = new Map<number, number>();
 
-  /// Whether an open is in flight, so that nothing asks for a second while the
-  /// pane is empty and waiting on the first.
+  /// Whether an open is in flight, so that a second press while the first is
+  /// still being answered does not open two shells.
   let opening = false;
 
   /// The key the next tab standing on a refusal gets. Below every number the
@@ -303,9 +322,9 @@ export function Code(props: {
     return tab > 0 ? `Terminal ${tab}` : "Terminal";
   };
 
-  /// Take away whatever is only standing there to say why, which is what plus
-  /// replacing one means: a tab that is a sentence about a shell that never
-  /// started is not something to keep beside a shell that has.
+  /// Take away whatever is only standing there to say why, which is what **New
+  /// terminal** replacing one means: a tab that is a sentence about a shell that
+  /// never started is not something to keep beside a shell that has.
   const replace = (): void => {
     const standing = Object.keys(over()).map(Number);
 
@@ -317,8 +336,12 @@ export function Code(props: {
     setTabs((was) => was.filter((one) => !standing.includes(one)));
   };
 
-  /// A tab that says why there is no shell in it, and stops the pane opening
-  /// another until somebody presses plus.
+  /// A tab that says why there is no shell in it, which stands until somebody
+  /// asks for another.
+  ///
+  /// A sentence rather than nothing at all: a pane that simply went back to
+  /// empty would say the same thing about a Sandbox that will not start as it
+  /// says about a Conversation nobody has opened a shell in.
   const stand = (why: string): void => {
     replace();
 
@@ -330,8 +353,9 @@ export function Code(props: {
     setChosen(tab);
   };
 
-  /// Open another, and show it. What plus does, and what the pane does for
-  /// itself where there is nothing live to come back to.
+  /// Open another, and show it. What **New terminal** does, from the plus at the
+  /// end of the strip or from the press in the empty pane — the only two things
+  /// that ask for a shell, the pane asking for none of its own accord.
   const open = (): Promise<void> => {
     if (opening) {
       return Promise.resolve();
@@ -367,9 +391,9 @@ export function Code(props: {
   /// socket closes with it.
   ///
   /// What follows is the whole of the ending rule. A shell that ran goes, and
-  /// the pane opens another where it was the last; one that ended inside
-  /// [`AT_ONCE`] of being asked for could not start, so its tab stays saying so
-  /// and nothing opens on its own after it.
+  /// where it was the last the pane stands empty behind it; one that ended
+  /// inside [`AT_ONCE`] of being asked for could not start, so its tab stays
+  /// saying so until somebody asks for another.
   const ended = (tab: number): void => {
     const asked = askedAt.get(tab);
 
@@ -382,19 +406,7 @@ export function Code(props: {
     setOver((was) => ({ ...was, [tab]: ENDED_AT_ONCE }));
   };
 
-  /// What there is to do about a tab, asked for with a right-click or a long
-  /// press: the browser's own menu is not what either is asking for, so that
-  /// goes.
-  ///
-  /// Both hands, unlike the sidebar's cards — a long press on one of those is
-  /// already how a card is picked up to be dragged, and a tab has no second
-  /// gesture to protect.
-  const ask = (event: MouseEvent, tab: number): void => {
-    event.preventDefault();
-    setPointed({ tab, x: event.clientX, y: event.clientY });
-  };
-
-  /// Close one, which is the whole of what that menu holds.
+  /// Close one, which is what the × at the end of a tab does.
   ///
   /// The shell is ended at the server and the tab goes when its socket closes,
   /// which is how a tab hears about every shell that ends — one rule, whichever
@@ -408,8 +420,6 @@ export function Code(props: {
   /// that failed: the shell is the server's, and a tab still there is what says
   /// it is still running.
   const close = (tab: number): void => {
-    setPointed(null);
-
     if (tab < 0 || over()[tab] !== undefined) {
       setOver((was) => {
         const rest = { ...was };
@@ -446,22 +456,6 @@ export function Code(props: {
     setRead(true);
   });
 
-  /// And the pane never standing empty: nothing live is a terminal opened,
-  /// whether that is a Conversation that had none or the last of its shells
-  /// having just exited.
-  ///
-  /// A tab standing on a shell that could not start counts as a tab, which is
-  /// what stops this asking again over a Sandbox that will not have it — see
-  /// [`AT_ONCE`]. Plus is a press and is under no such rule: somebody who asks
-  /// again meant to.
-  createEffect(() => {
-    if (!read() || tabs().length > 0 || opening) {
-      return;
-    }
-
-    void open();
-  });
-
   return (
     <>
       <PaneSticky>
@@ -470,62 +464,70 @@ export function Code(props: {
               way to another at the end of them. Buttons that say which they are
               rather than tabs: they are all always there, `aria-pressed` is the
               one word that says which is showing, and what each one does is
-              show a grid that is already drawn. */}
-          <div
-            class={styles.tabs}
-            role="group"
-            aria-label="This conversation's terminals"
-          >
-            <For each={tabs()}>
-              {(tab) => (
-                <button
-                  type="button"
-                  class={styles.tab}
-                  aria-pressed={showing() === tab}
-                  onClick={() => setChosen(tab)}
-                  onContextMenu={(event) => ask(event, tab)}
-                >
-                  {called(tab)}
-                </button>
-              )}
-            </For>
+              show a grid that is already drawn.
 
-            <IconButton
-              of={faPlus}
-              label="New terminal"
-              class={styles.plus}
-              // Nothing of this one is open: it opens a shell rather than a
-              // pane, and there is no state of the page it is the way back
-              // into.
-              open={false}
-              press={() => void open()}
-            />
-          </div>
+              Drawn where there are tabs. A strip holding nothing but its own
+              plus says nothing the empty state under it does not say in
+              words. */}
+          <Show when={tabs().length > 0}>
+            <div
+              class={styles.tabs}
+              role="group"
+              aria-label="This conversation's terminals"
+            >
+              <For each={tabs()}>
+                {(tab) => (
+                  // Two buttons rather than one: the tab is pressed to show
+                  // what it holds and the × is pressed to close it, and a
+                  // button inside a button is not a thing a browser draws. The
+                  // frame around them is the tab as the eye reads it, and is
+                  // what takes the fill of the one showing.
+                  <div class={styles.tabFrame}>
+                    <button
+                      type="button"
+                      class={styles.tab}
+                      aria-pressed={showing() === tab}
+                      onClick={() => setChosen(tab)}
+                    >
+                      {/* What kind of thing the tab holds, which is the one
+                          thing an icon at that end says. Files bring their own
+                          when there are files. */}
+                      <Icon of={faTerminal} class={styles.kind} />
+                      <span class={styles.name}>{called(tab)}</span>
+                    </button>
+
+                    {/* And the way to end it. Called by the tab it would close:
+                        an icon says nothing when it is read aloud, and a row of
+                        these all saying "Close" would say nothing about
+                        which. */}
+                    <button
+                      type="button"
+                      class={styles.close}
+                      aria-label={`Close ${called(tab)}`}
+                      onClick={() => close(tab)}
+                    >
+                      <Icon of={faXmark} />
+                    </button>
+                  </div>
+                )}
+              </For>
+
+              <IconButton
+                of={faPlus}
+                label="New terminal"
+                class={styles.plus}
+                // Nothing of this one is open: it opens a shell rather than a
+                // pane, and there is no state of the page it is the way back
+                // into.
+                open={false}
+                press={() => void open()}
+              />
+            </div>
+          </Show>
         </PaneHead>
       </PaneSticky>
 
-      {/* What there is to do about a tab, where the hand asked for it. One row,
-          because closing is the one thing a tab has that pressing it does not
-          already do — and on a menu rather than on the tab because a shell
-          somebody is working in is not a thing to end by a misplaced press. */}
-      <ContextMenu
-        class={styles.tabActions!}
-        name="Terminal actions"
-        at={pointed()}
-        close={() => setPointed(null)}
-      >
-        {() => (
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => close(pointed()!.tab)}
-          >
-            Close
-          </button>
-        )}
-      </ContextMenu>
-
-      <Switch fallback={<Empty>Opening a terminal…</Empty>}>
+      <Switch fallback={<Empty>Reading this conversation's terminals…</Empty>}>
         <Match when={terminals.isError}>
           <ErrorLine>
             Could not read this conversation's terminals:{" "}
@@ -561,6 +563,18 @@ export function Code(props: {
               )
             }
           </For>
+        </Match>
+
+        {/* And the pane with nothing in it, which is where a Conversation with
+            no shells running lands and where the last of them leaves it. Drawn
+            where a tab's content goes rather than over the whole pane: the tree
+            stands beside this, and a pane-wide notice would be a sentence over
+            that too. */}
+        <Match when={read()}>
+          <div class={styles.nothing}>
+            <Empty>{NOTHING_OPEN}</Empty>
+            <QuietButton onClick={() => void open()}>New terminal</QuietButton>
+          </div>
         </Match>
       </Switch>
     </>

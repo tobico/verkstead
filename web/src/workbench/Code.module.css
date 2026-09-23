@@ -1,66 +1,137 @@
 /* Code's tab bar, holding a Conversation's own terminals one per tab — see
    `Code.tsx`.
 
-   The bar is the Output pane's Transcript/Screen switch again: a group of
+   The bar is the Output pane's Transcript/Screen switch again — a group of
    pressed-or-not buttons in a bordered strip, standing in the pane's header
-   beside the title. What it does not copy is the mark that travels under the
-   pressed one — that one slides between two labels that are always both there,
-   and these come and go as shells are opened and end, so a mark that had to
-   find its way to an element that may have just appeared would be machinery
-   bought for nothing. The fill is on the pressed tab instead, which is what a
-   switch of more than two says everywhere else. */
+   beside the title — restyled after VS Code's (ADR 0019, *Tabs and groups*):
+   the tabs abut rather than sit spaced, each with a kind icon at one end and a
+   × at the other, and the one showing takes the paper the pane is drawn on
+   while the rest stay in the strip's own fill. What it does not copy is the
+   mark that travels under the pressed one — that one slides between two labels
+   that are always both there, and these come and go as shells are opened and
+   end, so a mark that had to find its way to an element that may have just
+   appeared would be machinery bought for nothing. */
 .tabs {
   display: flex;
   flex: 0 1 auto;
-  align-items: center;
-  gap: 0.25rem;
+  align-items: stretch;
   max-width: 100%;
   margin: 0;
-  padding: 0.2rem;
   overflow-x: auto;
-  background: var(--card);
+  background: var(--code-wash);
   border: 1px solid var(--edge);
   border-radius: 0.6rem;
 }
 
-/* One terminal. Named rather than taken as the strip's buttons, because the
-   plus at the end is a button of the strip too and is not one of these. */
-.tab {
+/* One tab, as the eye reads it: the label and the × in one shape, because a
+   button inside a button is not a thing a browser draws and two buttons side by
+   side are not a thing the eye should read as two tabs.
+
+   The edge between them is the tab's own left, so the first of them has none —
+   VS Code's separator, which is what tells abutting tabs apart when neither is
+   the one showing. */
+.tabFrame {
+  display: flex;
   flex: none;
-  padding: 0.35rem 0.7rem;
+  align-items: center;
+  border-left: 1px solid var(--edge);
+}
+
+.tabFrame:first-child {
+  border-left: 0;
+}
+
+/* And the one showing, in the paper the pane's content is drawn on: VS Code's
+   active tab is the editor's own ground carried up into the bar, which is what
+   says the tab and what is under it are one thing. Read off the label button
+   rather than written on the frame, `aria-pressed` being the one word that says
+   which is showing. */
+.tabFrame:has(.tab[aria-pressed="true"]) {
+  background: var(--paper);
+}
+
+/* The label: what kind of thing the tab holds, and what it is called. Named
+   rather than taken as the strip's buttons, because the plus at the end is a
+   button of the strip too and is not one of these. */
+.tab {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.2rem 0.35rem 0.6rem;
   font: inherit;
   font-size: 0.85rem;
-
-  /* A tab is called what its shell calls itself, and what a shell calls itself
-     is whatever it likes — a prompt that puts a whole path in its title would
-     otherwise be one tab wide enough to push every other one out of the strip.
-     Cut off at a measure a name reads in, and the strip scrolls as it always
-     did for the ones past the edge. */
-  max-width: 12rem;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
   color: var(--ink-soft);
   background: none;
   border: 0;
-  border-radius: 0.4rem;
   cursor: pointer;
 
-  /* A long press on a tab is how its menu is asked for on a phone, and a long
-     press on a word is how text is selected. A tab is a label to press rather
-     than one to copy out of here, so the selection goes — which is what the
-     sidebar's cards say about the same gesture. */
+  /* A long press on a word is how text is selected. A tab is a label to press
+     rather than one to copy out of here, so the selection goes — which is what
+     the sidebar's cards say about the same gesture, and what leaves the gesture
+     free for the drag that will pick a tab up. */
   user-select: none;
 }
 
 .tab[aria-pressed="true"] {
-  color: var(--paper);
-  background: var(--accent);
+  color: var(--ink);
 }
 
 @media (hover: hover) {
   .tab:not([aria-pressed="true"]):hover {
     color: var(--ink);
+  }
+}
+
+/* The kind icon, a shade quieter than the name beside it: what it says is what
+   sort of thing this is, which is worth a glance rather than a read. */
+.kind {
+  flex: none;
+  font-size: 0.9em;
+  opacity: 0.75;
+}
+
+/* And the name. A tab is called what its shell calls itself, and what a shell
+   calls itself is whatever it likes — a prompt that puts a whole path in its
+   title would otherwise be one tab wide enough to push every other one out of
+   the strip. Cut off at a measure a name reads in, and the strip scrolls as it
+   always did for the ones past the edge. */
+.name {
+  max-width: 12rem;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The × that closes it. Sized to the label it stands beside rather than to the
+   icon buttons elsewhere in the app, whose padding is a header's.
+
+   Always drawn, rather than VS Code's appear-on-hover: there is no hover on a
+   phone, and a × that only a pointer can find is a tab a finger cannot close.
+   What it costs on a pointer is a mark in the quiet ink until the hand reaches
+   it. */
+.close {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem 0.45rem;
+  font: inherit;
+  font-size: 0.75rem;
+  line-height: 1;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+  border-radius: 0.3rem;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+@media (hover: hover) {
+  .close:hover {
+    color: var(--ink);
+    background: var(--card);
+    opacity: 1;
   }
 }
 
@@ -74,14 +145,21 @@
    settled by which sheet the bundler happened to put second. */
 .tabs .plus {
   flex: none;
+  align-self: center;
+  margin: 0 0.15rem;
   padding: 0.35rem 0.5rem;
   font-size: 0.85rem;
 }
 
-/* What a right-click or a long press on a tab drops: one row, **Close**. The
-   card, where it hangs and the two ways out of it are `Menu.module.css`'s, as
-   every other menu's are — what is here is how wide it comes down, which is the
-   one thing a menu of one short word decides for itself. */
-.tabActions > [role="menu"] {
-  width: 9rem;
+/* What the pane draws while it holds nothing: the hint, and the press that
+   opens a shell. Where a tab's content goes rather than over the whole pane —
+   the tree will stand beside this — and centred in it, there being nothing else
+   on the page for it to line up with. */
+.nothing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 3rem 0;
+  text-align: center;
 }
