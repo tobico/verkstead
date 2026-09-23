@@ -22,8 +22,8 @@ use crate::{
     BriefSaved, Capture, CommitPane, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
     CompanionModeChoice, CompanionModeChosen, CompanionRemoved, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
-    ConversationUnarchived, ConversationView, Created, Creation, DirectoryListing, FileRootsView,
-    FolderListing, GrillingStarted, InstallPress, Locked, NewAdoption, NewCompanion,
+    ConversationUnarchived, ConversationView, Created, Creation, DirectoryListing, FileReading,
+    FileRootsView, FolderListing, GrillingStarted, InstallPress, Locked, NewAdoption, NewCompanion,
     NewConversation, NewOrder, NewPullRequestAdoption, OnboardingView, OpenPullRequestRepo,
     PrefillView, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
     ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RemoteBanner, RemoteView,
@@ -234,6 +234,12 @@ fn the_viewers_types_are_written_from_these() {
     // *The tree*). The listing writes its entries with it.
     FileRootsView::export_all(&config).unwrap();
     FolderListing::export_all(&config).unwrap();
+
+    // And one file of one of those folders, opened: what kind of thing it
+    // turned out to be, the version a write will name itself as being over, and
+    // the same refusals said about a file (ADR 0019, *Versioned reads, and a
+    // stale write is refused*).
+    FileReading::export_all(&config).unwrap();
 
     // And what a session committed: the summary drawn out, and the diff, both of
     // which are this payload's alone — the Timeline's own card is the subject

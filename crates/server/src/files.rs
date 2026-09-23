@@ -1,5 +1,6 @@
 //! Reading the Worktrees a Conversation has, for the Code pane: the roots its
-//! tree stands on, and one folder of one of them at a time.
+//! tree stands on, one folder of one of them at a time, and one file of one of
+//! those opened.
 //!
 //! **The server reads as itself, with no Sandbox in front of it**
 //! ([ADR 0019](../../../docs/adr/0019-the-code-pane.md), *The server reads and
@@ -30,6 +31,12 @@
 //! all — what that costs is a `target/` in the tree, and what refusing would
 //! cost is the tree.
 //!
+//! **A file is read whole, and says what kind of thing it was** — see [`read`]:
+//! text, an image, a binary the server will not send, or a file over
+//! [`MAX_BYTES`]. Text carries a version, which is a hash of the bytes it was
+//! read as and what a write will name itself as being over (ADR 0019,
+//! *Versioned reads, and a stale write is refused*).
+//!
 //! **Nothing here refuses by status code**, the way registering a Repo refuses
 //! and the way a browse's listing does: each refusal is a sentence the tree
 //! draws where its rows would be — see [`verkstead_render::FolderListing`].
@@ -42,7 +49,10 @@
 use std::collections::HashSet;
 use std::path::{Component, Path};
 
-use verkstead_render::{FileRoot, FolderEntry, FolderListing};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
+use sha2::{Digest, Sha256};
+use verkstead_render::{FileReading, FileRoot, FolderEntry, FolderListing};
 
 use crate::repos::feeding;
 use crate::resolved::{Resolved, resolve};
@@ -102,31 +112,13 @@ pub(crate) fn roots(conversation: &store::Conversation) -> Vec<FileRoot> {
 /// that has one; `.git` next, because a path under it is refused whether or not
 /// anything is there; and the disk is asked only once a path has been allowed.
 pub(crate) fn folder(roots: &[FileRoot], path: &Path) -> FolderListing {
-    let Some(root) = owning(roots, path) else {
-        return FolderListing::Outside;
+    let (root, real) = match bound(roots, path) {
+        Bound::Inside { root, real } => (Path::new(&root.path), real),
+        Bound::Outside => return FolderListing::Outside,
+        Bound::UnderGit => return FolderListing::UnderGit,
+        Bound::RootGone => return FolderListing::RootGone,
+        Bound::Missing => return FolderListing::Missing,
     };
-
-    if inside_git(root, path) {
-        return FolderListing::UnderGit;
-    }
-
-    // The root first, so that a Worktree that has gone says so rather than
-    // reading as a folder that has: they are one filesystem answer and two
-    // different things to be told.
-    let Resolved::At(real_root) = resolve(root) else {
-        return FolderListing::RootGone;
-    };
-
-    let Resolved::At(real) = resolve(path) else {
-        return FolderListing::Missing;
-    };
-
-    // And measured again, resolved — which is the half of the bound that a
-    // symlink out of the checkout has to get past. The spelling was checked
-    // above; this is where the filesystem's own answer is.
-    if !real.starts_with(&real_root) {
-        return FolderListing::Outside;
-    }
 
     if !real.is_dir() {
         return FolderListing::NotAFolder;
@@ -176,26 +168,218 @@ pub(crate) fn folder(roots: &[FileRoot], path: &Path) -> FolderListing {
     }
 }
 
-/// Which root `path` is in, as it is spelled.
+/// What one file of one of those roots is, read — or the named reason it is not
+/// drawn.
 ///
-/// The first one it is under, roots being directories nothing nests inside
-/// another. A root itself is in itself: the tree asks for a root's own listing
-/// the moment somebody expands it.
+/// Blocking: a file is opened and read whole.
+///
+/// The bound is the folder's, measured by the same [`bound`] — the roots are
+/// the whole of what this API may reach, and a file is reached no more widely
+/// than a folder is. What follows it is the kinds: the size is asked before the
+/// bytes are, so a file too large to open is never read; an image is named by
+/// its extension and sent as bytes; and everything else is text or is not,
+/// which is the bytes' own answer.
+pub(crate) fn read(roots: &[FileRoot], path: &Path) -> FileReading {
+    let (root, real) = match bound(roots, path) {
+        Bound::Inside { root, real } => (root, real),
+        Bound::Outside => return FileReading::Outside,
+        Bound::UnderGit => return FileReading::UnderGit,
+        Bound::RootGone => return FileReading::RootGone,
+        Bound::Missing => return FileReading::Missing,
+    };
+
+    let about = match std::fs::metadata(&real) {
+        Ok(about) => about,
+        Err(error) => return unreadable(&error),
+    };
+
+    if about.is_dir() {
+        return FileReading::NotAFile;
+    }
+
+    // Asked of the size before the bytes, which is the whole point of having a
+    // cap: a file nothing is going to draw is a file nothing should read into
+    // memory to find that out.
+    if about.len() > MAX_BYTES {
+        return FileReading::TooLarge;
+    }
+
+    let bytes = match std::fs::read(&real) {
+        Ok(bytes) => bytes,
+        Err(error) => return unreadable(&error),
+    };
+
+    // And again on what was read, a file being something a build may have grown
+    // between the one call and the other.
+    if bytes.len() as u64 > MAX_BYTES {
+        return FileReading::TooLarge;
+    }
+
+    if let Some(media_type) = pictured(path) {
+        return FileReading::Image {
+            path: path.display().to_string(),
+            media_type: media_type.to_owned(),
+            base64: STANDARD.encode(&bytes),
+        };
+    }
+
+    match texted(bytes) {
+        // Hashed off the text rather than off what was read, those being the
+        // same bytes: a `String` holds exactly the UTF-8 it was decoded from, so
+        // this is the version of the file rather than of the reading of it, and
+        // nothing is copied to say so.
+        Some(text) => FileReading::Text {
+            version: version(text.as_bytes()),
+            path: path.display().to_string(),
+            text,
+            writable: root.writable,
+        },
+        None => FileReading::Binary,
+    }
+}
+
+/// How large a file Code opens.
+///
+/// A few megabytes, which is the number ADR 0019 puts on it: what is over it is
+/// a build artefact, a database or a log, and none of the three is something to
+/// hand an editor in a browser. A terminal beside the tab opens any of them.
+///
+/// **Decimal**, so that the cap is the number the viewer's refusal names —
+/// [`crate::attachments::MAX_BYTES`]'s rule, for its reason: a binary cap under
+/// a decimal sentence is a human told *larger than 2 MB* about a file that was
+/// opened.
+pub(crate) const MAX_BYTES: u64 = 2 * 1000 * 1000;
+
+/// The version a read carries: a hash of the bytes it read.
+///
+/// SHA-256, spelled hex. Of the bytes rather than of the text, and a hash
+/// rather than a modification time: two writes inside one clock tick are
+/// exactly the collision this exists to catch, and what a save is measured
+/// against is what is on the disk.
+fn version(bytes: &[u8]) -> String {
+    let mut hashing = Sha256::new();
+    hashing.update(bytes);
+
+    format!("{:x}", hashing.finalize())
+}
+
+/// The media type to draw `path` as, where it names a picture.
+///
+/// Read off the extension rather than off the bytes, because what decides
+/// whether a browser draws it is this string: a file named `.png` that is
+/// something else is a broken picture either way, and sniffing would only move
+/// which of the two kinds it is broken as.
+///
+/// The formats a browser draws and no more. An `.svg` is not among them — it is
+/// XML, it opens in the editor as what it is, and a browser handed one as a
+/// picture is a browser running whatever script is in it.
+fn pictured(path: &Path) -> Option<&'static str> {
+    let named = path.extension()?.to_str()?.to_ascii_lowercase();
+
+    match named.as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        "avif" => Some("image/avif"),
+        "bmp" => Some("image/bmp"),
+        "ico" => Some("image/x-icon"),
+        _ => None,
+    }
+}
+
+/// `bytes` as text, where they are text.
+///
+/// Git's own reading of it, and for git's reason: a repository is full of files
+/// named for nothing in particular, so what says whether one is text is what is
+/// in it rather than what it is called. Valid UTF-8 with no NUL byte in it —
+/// the NUL being what tells an object file from a source file that happens to
+/// decode, and what git itself looks for.
+fn texted(bytes: Vec<u8>) -> Option<String> {
+    if bytes.contains(&0) {
+        return None;
+    }
+
+    String::from_utf8(bytes).ok()
+}
+
+/// What the filesystem said, worded as the sentence the tab draws.
+fn unreadable(error: &std::io::Error) -> FileReading {
+    FileReading::Unreadable {
+        why: format!("the server cannot read it: {error}"),
+    }
+}
+
+/// Where `path` is against the roots, measured twice.
+///
+/// The one bound both halves of this API are behind, because a file is reached
+/// no more widely than the folder it is in: which root a path is under is
+/// settled first, `.git` next — a path under it is refused whether or not
+/// anything is there — and the disk is asked only once a path has been allowed.
 ///
 /// **A path that climbs is under nothing.** `..` is refused outright rather
 /// than folded away, and so is a `.`: the tree only ever asks for paths it was
 /// handed, so a path spelled with either is a request somebody wrote by hand,
 /// and lexical folding is the step that gets a bound wrong. What a symlink out
-/// of a checkout does is caught in [`folder`], on the resolved pair.
-fn owning<'a>(roots: &'a [FileRoot], path: &Path) -> Option<&'a Path> {
+/// of a checkout does is caught below, on the resolved pair.
+fn bound<'a>(roots: &'a [FileRoot], path: &Path) -> Bound<'a> {
     if !path.is_absolute() || path.components().any(|part| !plain(&part)) {
-        return None;
+        return Bound::Outside;
     }
 
-    roots
+    // The first root it is under, roots being directories nothing nests inside
+    // another. A root itself is in itself: the tree asks for a root's own
+    // listing the moment somebody expands it.
+    let Some(root) = roots
         .iter()
-        .map(|root| Path::new(&root.path))
-        .find(|root| path.starts_with(root))
+        .find(|root| path.starts_with(Path::new(&root.path)))
+    else {
+        return Bound::Outside;
+    };
+
+    if inside_git(Path::new(&root.path), path) {
+        return Bound::UnderGit;
+    }
+
+    // The root first, so that a Worktree that has gone says so rather than
+    // reading as a folder that has: they are one filesystem answer and two
+    // different things to be told.
+    let Resolved::At(real_root) = resolve(Path::new(&root.path)) else {
+        return Bound::RootGone;
+    };
+
+    let Resolved::At(real) = resolve(path) else {
+        return Bound::Missing;
+    };
+
+    // And measured again, resolved — which is the half of the bound that a
+    // symlink out of the checkout has to get past. The spelling was checked
+    // above; this is where the filesystem's own answer is.
+    if !real.starts_with(&real_root) {
+        return Bound::Outside;
+    }
+
+    Bound::Inside { root, real }
+}
+
+/// What that measuring came to: the root the path is in and where it really is,
+/// or which of the four refusals it is.
+///
+/// The refusals are named rather than folded into one because each of them is a
+/// different sentence in front of the human — and they are the same four
+/// whether what was asked for was a folder or a file, which is why this is one
+/// shape rather than two.
+enum Bound<'a> {
+    Inside {
+        root: &'a FileRoot,
+        /// The path as the filesystem has it, which is what is opened from here
+        /// on.
+        real: std::path::PathBuf,
+    },
+    Outside,
+    UnderGit,
+    RootGone,
+    Missing,
 }
 
 /// Whether a component is one that names a directory rather than one that moves
@@ -531,5 +715,207 @@ mod tests {
             names(folder(&roots, &companion)),
             [".gitignore", "README.md", "askance.md"]
         );
+    }
+
+    /// A one-pixel PNG, which is what a test wants when the subject is that the
+    /// bytes come back rather than what is in them.
+    const PIXEL: &[u8] = &[
+        0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, b'I', b'H', b'D',
+        b'R', 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f,
+        0x15, 0xc4, 0x89,
+    ];
+
+    /// Text comes back as text, with a version — which is what a write will
+    /// later name itself as being over.
+    #[test]
+    fn a_text_file_comes_back_with_what_is_in_it_and_a_version() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+
+        let at = worktree.join("README.md");
+
+        let FileReading::Text {
+            path,
+            version,
+            text,
+            writable,
+        } = read(&[root(&worktree)], &at)
+        else {
+            panic!("expected text, got {:?}", read(&[root(&worktree)], &at));
+        };
+
+        assert_eq!(path, at.display().to_string());
+        assert_eq!(text, "# a repository\n");
+        assert!(writable);
+        assert!(!version.is_empty());
+    }
+
+    /// And the version is of the bytes: it holds while the file does, and moves
+    /// the moment anything writes to it. The whole of what a refused stale
+    /// write stands on.
+    #[test]
+    fn the_version_holds_while_the_file_does_and_moves_when_it_moves() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+        let at = worktree.join("README.md");
+
+        let first = versioned(read(&[root(&worktree)], &at));
+        assert_eq!(first, versioned(read(&[root(&worktree)], &at)));
+
+        std::fs::write(&at, "# a repository, rewritten\n").unwrap();
+
+        assert_ne!(first, versioned(read(&[root(&worktree)], &at)));
+    }
+
+    /// A picture comes back as bytes to draw, named by what to draw it as.
+    #[test]
+    fn a_picture_comes_back_as_the_bytes_to_draw_it_from() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+
+        let at = worktree.join("assets/icon.PNG");
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        std::fs::write(&at, PIXEL).unwrap();
+
+        let FileReading::Image {
+            media_type, base64, ..
+        } = read(&[root(&worktree)], &at)
+        else {
+            panic!("expected an image, got {:?}", read(&[root(&worktree)], &at));
+        };
+
+        // The extension however it is spelled: a repository holds `.PNG` as
+        // readily as `.png`, and what a browser draws is the media type.
+        assert_eq!(media_type, "image/png");
+        assert_eq!(STANDARD.decode(base64).unwrap(), PIXEL);
+    }
+
+    /// And an `.svg` is not one of them: it is XML, it opens in the editor as
+    /// what it is, and a browser handed one as a picture is a browser running
+    /// whatever script is in it.
+    #[test]
+    fn a_drawing_that_is_xml_opens_as_the_text_it_is() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+
+        let at = worktree.join("logo.svg");
+        std::fs::write(&at, "<svg xmlns=\"http://www.w3.org/2000/svg\"/>").unwrap();
+
+        assert!(matches!(
+            read(&[root(&worktree)], &at),
+            FileReading::Text { .. }
+        ));
+    }
+
+    /// Anything else binary is a line saying so rather than bytes on the wire:
+    /// an object file in an editor is mojibake, and one in a tab is a megabyte
+    /// across the wire for nothing.
+    #[test]
+    fn anything_else_binary_is_said_rather_than_sent() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+
+        let at = worktree.join("verkstead.o");
+        std::fs::write(&at, [0x7f, b'E', b'L', b'F', 0x02, 0x00, 0x01]).unwrap();
+
+        assert_eq!(read(&[root(&worktree)], &at), FileReading::Binary);
+
+        // What says which it is is the bytes rather than the name: a file
+        // called nothing in particular is read as what is in it.
+        let named = worktree.join("notes");
+        std::fs::write(&named, "a note\n").unwrap();
+        assert!(matches!(
+            read(&[root(&worktree)], &named),
+            FileReading::Text { .. }
+        ));
+    }
+
+    /// And a file over the cap is its own answer, whether or not it is text:
+    /// nothing is wrong with it, and a terminal beside the tab will open it.
+    #[test]
+    fn a_file_over_the_cap_is_not_read_at_all() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+
+        let at = worktree.join("build.log");
+        std::fs::write(&at, vec![b'x'; MAX_BYTES as usize + 1]).unwrap();
+
+        assert_eq!(read(&[root(&worktree)], &at), FileReading::TooLarge);
+    }
+
+    /// The cap is a round number in the words this product says sizes in, which
+    /// is what lets the viewer's line name it: *larger than 2 MB* is true of
+    /// everything this refuses and of nothing it opens.
+    #[test]
+    fn the_cap_is_the_number_the_line_names() {
+        assert_eq!(crate::skills::sized(MAX_BYTES as i64), "2.0 MB");
+    }
+
+    /// A file in a read-only root opens read-only, which is the root's own flag
+    /// rather than the file's mode: a companion checked out detached is a root
+    /// to read whatever its permissions say.
+    #[test]
+    fn a_file_in_a_read_only_root_opens_read_only() {
+        let held = tempfile::tempdir().unwrap();
+        let companion = repository(&held.path().join("companion"));
+
+        let roots = [FileRoot {
+            repo: "askance".to_owned(),
+            path: companion.display().to_string(),
+            own: false,
+            writable: false,
+        }];
+
+        let FileReading::Text { writable, .. } = read(&roots, &companion.join("README.md")) else {
+            panic!("expected text");
+        };
+
+        assert!(!writable);
+    }
+
+    /// And the refusals are the folder's, said about a file: the bound is one
+    /// bound, and a file is reached no more widely than the folder it is in.
+    #[test]
+    fn a_file_is_bounded_the_way_a_folder_is() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+        let elsewhere = held.path().join("elsewhere");
+        std::fs::create_dir(&elsewhere).unwrap();
+        std::fs::write(elsewhere.join("secrets"), "").unwrap();
+
+        assert_eq!(
+            read(&[root(&worktree)], &elsewhere.join("secrets")),
+            FileReading::Outside
+        );
+        assert_eq!(
+            read(&[root(&worktree)], &worktree.join("../elsewhere/secrets")),
+            FileReading::Outside
+        );
+        assert_eq!(
+            read(&[root(&worktree)], &worktree.join(".git/config")),
+            FileReading::UnderGit
+        );
+        assert_eq!(
+            read(&[root(&worktree)], &worktree.join("never-written")),
+            FileReading::Missing
+        );
+
+        // A folder is a row the tree expands rather than a tab it opens, which
+        // is its own sentence for whoever asked for one by hand.
+        assert_eq!(read(&[root(&worktree)], &worktree), FileReading::NotAFile);
+
+        std::fs::remove_dir_all(&worktree).unwrap();
+        assert_eq!(
+            read(&[root(&worktree)], &worktree.join("README.md")),
+            FileReading::RootGone
+        );
+    }
+
+    /// The version a reading carries, or a panic saying what came back instead.
+    fn versioned(reading: FileReading) -> String {
+        match reading {
+            FileReading::Text { version, .. } => version,
+            other => panic!("expected text, got {other:?}"),
+        }
     }
 }

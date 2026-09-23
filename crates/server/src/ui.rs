@@ -35,16 +35,16 @@ use verkstead_render::{
     CompanionBranchRenamed, CompanionMode, CompanionModeChoice, CompanionModeChosen,
     CompanionRemoved, CompanionView, CompileCaching, ConflictResolution, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
-    ConversationUnarchived, ConversationView, Creation, Cursor, FileRootsView, FolderListing,
-    GrillingStarted, IgnoreRule, IgnoredCommentsEdit, InstallPress, Lifecycle, Locked, Merging,
-    MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption,
-    Parked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner,
-    RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField,
-    RuleRefused, ServeEdit, ServePress, SetReading, SetView, SettingsEdit, SettingsSaved,
-    SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
-    ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription,
-    TakenUp, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe,
-    UpdateNotice, Verified,
+    ConversationUnarchived, ConversationView, Creation, Cursor, FileReading, FileRootsView,
+    FolderListing, GrillingStarted, IgnoreRule, IgnoredCommentsEdit, InstallPress, Lifecycle,
+    Locked, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder,
+    NewPullRequestAdoption, Parked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
+    Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed,
+    RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress, SetReading, SetView, SettingsEdit,
+    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
+    ShowArchived, ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed,
+    Subscription, TakenUp, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet,
+    Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -235,6 +235,11 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // else's — see [`crate::files`].
         .route("/api/ui/conversations/{id}/files/roots", get(file_roots))
         .route("/api/ui/conversations/{id}/files/folder", get(folder))
+        // And one file of one of those folders, opened: what it holds, what
+        // kind of thing that turned out to be, and the version a write will
+        // name itself as being over — see [`file`]. Asked for by path like the
+        // folder beside it, and bounded by the same roots.
+        .route("/api/ui/conversations/{id}/files/file", get(file))
         // And one commit — its summary and its diff — fetched the same way and
         // for the same reason; see [`commit_pane`].
         .route(
@@ -2958,6 +2963,61 @@ async fn folder(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "listing a folder of a Worktree failed");
             unavailable("the folder could not be listed")
+        }
+    }
+}
+
+/// `GET /api/ui/conversations/{id}/files/file?path=<path>` — one file of one of
+/// those roots, opened.
+///
+/// What comes back says which of four kinds of thing it read — text, an image,
+/// a binary it will not send, or a file over the size cap — and text carries a
+/// version, which is a hash of the bytes and is what a write will name itself
+/// as being over (ADR 0019, *Versioned reads, and a stale write is refused*).
+///
+/// Asked for by path like the folder beside it, and refused in the body the
+/// same way: a path outside every root, a path under `.git`, a Worktree that
+/// has gone and a file that has are each their own sentence — see
+/// [`verkstead_render::FileReading`].
+async fn file(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(asking): Query<Browsing>,
+) -> HttpResponse {
+    // No path at all is a path under no root, which is what an empty one comes
+    // to below: a tab is opened from a row of the tree, which was handed the
+    // path it presses with.
+    let asked = asking.path.unwrap_or_default();
+
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(FileReading::Outside).into_response();
+    };
+
+    let conversation = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation,
+        // A Conversation that is not there has no roots, so nothing is under
+        // one of them — the folder's answer, and the same thing is true of it.
+        Ok(None) => return Json(FileReading::Outside).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
+            return unavailable("this conversation's worktrees could not be read");
+        }
+    };
+
+    // Off the runtime: a file is opened and read whole.
+    let read = tokio::task::spawn_blocking(move || {
+        crate::files::read(
+            &crate::files::roots(&conversation),
+            std::path::Path::new(&asked),
+        )
+    })
+    .await;
+
+    match read {
+        Ok(reading) => Json(reading).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a file of a Worktree failed");
+            unavailable("the file could not be read")
         }
     }
 }

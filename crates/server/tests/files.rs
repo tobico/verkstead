@@ -22,11 +22,12 @@ use std::process::{Command, Stdio};
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use base64::Engine;
 use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::{FileRootsView, FolderEntry, FolderListing};
+use verkstead_render::{FileReading, FileRootsView, FolderEntry, FolderListing};
 use verkstead_server::{open_database, router, store};
 
 /// A router over a fresh database, and the directory holding both it and every
@@ -376,5 +377,159 @@ async fn a_worktree_that_is_gone_is_told_apart_from_a_folder_that_is() {
     assert_eq!(
         folder(&app, conversation, &worktree).await,
         FolderListing::RootGone
+    );
+}
+
+/// One file of one of those roots, asked for the way a tab opens one.
+async fn file(app: &Router, conversation: i64, at: &Path) -> FileReading {
+    get(
+        app,
+        &format!(
+            "/api/ui/conversations/{conversation}/files/file?path={}",
+            at.display()
+        ),
+    )
+    .await
+}
+
+/// A one-pixel PNG: enough for the endpoint to have something to send back and
+/// name, which is the whole of what the image half is about out here.
+const PIXEL: &[u8] = &[
+    0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, b'I', b'H', b'D', b'R',
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+    0x89,
+];
+
+/// A file pressed in the tree comes back as what is in it, with a version —
+/// which is what a write will later name itself as being over.
+#[tokio::test]
+async fn a_file_of_the_worktree_comes_back_with_its_contents_and_a_version() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling_alongside(&pool, dir.path(), &[]).await;
+
+    std::fs::create_dir_all(worktree.join("crates/server")).unwrap();
+    let at = worktree.join("crates/server/lib.rs");
+    std::fs::write(&at, "//! the server\n").unwrap();
+
+    let FileReading::Text {
+        path,
+        version,
+        text,
+        writable,
+    } = file(&app, conversation, &at).await
+    else {
+        panic!("expected text");
+    };
+
+    assert_eq!(path, at.display().to_string());
+    assert_eq!(text, "//! the server\n");
+    assert!(writable, "the conversation's own worktree is written in");
+    assert!(!version.is_empty());
+
+    // And the version is of the bytes: a file somebody rewrote between two
+    // reads comes back under a different one, which is what a refused stale
+    // write stands on.
+    std::fs::write(&at, "//! the server, rewritten\n").unwrap();
+
+    let FileReading::Text { version: after, .. } = file(&app, conversation, &at).await else {
+        panic!("expected text");
+    };
+
+    assert_ne!(version, after);
+}
+
+/// A file in a read-only companion opens read-only: the root's own flag, which
+/// is what saves a human finding out by typing.
+#[tokio::test]
+async fn a_file_in_a_read_only_companion_opens_read_only() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, companions) = grilling_alongside(
+        &pool,
+        dir.path(),
+        &[("askance", store::CompanionMode::ReadOnly)],
+    )
+    .await;
+
+    let FileReading::Text { writable, .. } =
+        file(&app, conversation, &companions[0].join("README.md")).await
+    else {
+        panic!("expected text");
+    };
+
+    assert!(!writable);
+
+    // And the Conversation's own is written in, which is the other half of the
+    // same sentence.
+    let FileReading::Text { writable: own, .. } =
+        file(&app, conversation, &worktree.join("README.md")).await
+    else {
+        panic!("expected text");
+    };
+
+    assert!(own);
+}
+
+/// And each of the other three kinds: a picture to draw, a binary that is a
+/// line rather than bytes on the wire, and a file too large to open.
+#[tokio::test]
+async fn a_picture_a_binary_and_a_file_over_the_cap_each_say_what_they_are() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling_alongside(&pool, dir.path(), &[]).await;
+
+    let picture = worktree.join("icon.png");
+    std::fs::write(&picture, PIXEL).unwrap();
+
+    let FileReading::Image {
+        media_type, base64, ..
+    } = file(&app, conversation, &picture).await
+    else {
+        panic!("expected an image");
+    };
+
+    assert_eq!(media_type, "image/png");
+    assert_eq!(
+        base64::engine::general_purpose::STANDARD
+            .decode(base64)
+            .unwrap(),
+        PIXEL
+    );
+
+    let object = worktree.join("verkstead.o");
+    std::fs::write(&object, [0x7f, b'E', b'L', b'F', 0x00, 0x01]).unwrap();
+    assert_eq!(file(&app, conversation, &object).await, FileReading::Binary);
+
+    let log = worktree.join("build.log");
+    std::fs::write(&log, vec![b'x'; 2 * 1000 * 1000 + 1]).unwrap();
+    assert_eq!(file(&app, conversation, &log).await, FileReading::TooLarge);
+}
+
+/// And a file is bounded by the roots the way a folder is: this Conversation's
+/// checkouts and nothing else on the machine.
+#[tokio::test]
+async fn a_file_outside_this_conversations_roots_is_refused() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling_alongside(&pool, dir.path(), &[]).await;
+
+    // The Repo the Worktree was cut from: a directory of the human's that this
+    // Conversation is not working in.
+    assert_eq!(
+        file(&app, conversation, &dir.path().join("verkstead/README.md")).await,
+        FileReading::Outside
+    );
+
+    assert_eq!(
+        file(&app, conversation, &worktree.join(".git/config")).await,
+        FileReading::UnderGit
+    );
+
+    assert_eq!(
+        file(&app, conversation, &worktree.join("never-written")).await,
+        FileReading::Missing
+    );
+
+    // And a folder is a row the tree expands rather than a tab it opens.
+    assert_eq!(
+        file(&app, conversation, &worktree).await,
+        FileReading::NotAFile
     );
 }

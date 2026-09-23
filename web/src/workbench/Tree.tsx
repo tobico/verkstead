@@ -25,9 +25,10 @@
 //! server's doing — git is asked rather than reimplemented — so what arrives
 //! here is already a listing with no `target/` in it.
 //!
-//! **A file is a row and not yet a press.** What a press on one opens is
-//! Monaco, which is the task after this one; until then the tree draws what is
-//! there and the tabs beside it hold terminals.
+//! **A file pressed opens a tab.** The press is the whole of what the tree does
+//! with a file: what it is handed is the path, and what happens to it is the
+//! group of tabs beside this — see `Code.tsx`, which is where a reading of one
+//! is held. The same file pressed twice turns to the tab it already has.
 //!
 //! No row menu, no quick open and no git status marks: those are stages 02 and
 //! 03 of the roadmap, and each of them wants this tree to be here first.
@@ -89,7 +90,12 @@ function rows(listing: FolderListing): FolderEntry[] | null {
     : listing.Listed.entries;
 }
 
-export function Tree(props: { conversation: number }): JSX.Element {
+export function Tree(props: {
+  conversation: number;
+  /// What a file pressed in it opens: the path, handed to the group of tabs
+  /// beside the tree.
+  open: (path: string) => void;
+}): JSX.Element {
   /// The worktrees this conversation has.
   ///
   /// Merged by path rather than frozen: a companion added to a drafting
@@ -114,7 +120,11 @@ export function Tree(props: { conversation: number }): JSX.Element {
   /// the press and the answer.
   const [reading, setReading] = createSignal<string[]>([]);
 
-  const open = (path: string): boolean =>
+  /// Whether a folder is open, which is the caret and the rows under it.
+  ///
+  /// Named apart from the press that opens a *file*: one is a fact about a row
+  /// of this tree, and the other is what the pane beside it does with a path.
+  const expanded = (path: string): boolean =>
     held()[path] !== undefined || reading().includes(path);
 
   /// Open a folder, or shut it.
@@ -123,7 +133,7 @@ export function Tree(props: { conversation: number }): JSX.Element {
   /// time, because nothing here is told when the disk moves and the folder may
   /// have been rewritten by the agent since it was last drawn.
   const toggle = (path: string): void => {
-    if (open(path)) {
+    if (expanded(path)) {
       setReading((was) => was.filter((one) => one !== path));
       setHeld((was) => {
         const rest = { ...was };
@@ -166,9 +176,10 @@ export function Tree(props: { conversation: number }): JSX.Element {
                   path={root.path}
                   folder={true}
                   depth={0}
-                  open={open}
+                  expanded={expanded}
                   held={held}
                   toggle={toggle}
+                  open={props.open}
                 />
               )}
             </For>
@@ -187,8 +198,8 @@ export function Tree(props: { conversation: number }): JSX.Element {
 ///
 /// The mark is on the row rather than in a legend, because it is the one thing
 /// about a root that changes what a press inside it will do — a file opened out
-/// of one takes no typing (which is the task after this one), and a human who
-/// finds that out by typing has been told too late.
+/// of one takes no typing, and a human who finds that out by typing has been
+/// told too late.
 function RootName(props: { root: FileRoot }): JSX.Element {
   return (
     <>
@@ -202,9 +213,10 @@ function RootName(props: { root: FileRoot }): JSX.Element {
 
 /// One row of the tree, and — where it is an open folder — what is under it.
 ///
-/// A folder is a button, because pressing it does something. A file is not, yet:
-/// what a press on one opens is Monaco, and this stage draws the tree the tabs
-/// beside it will open into.
+/// Both kinds are buttons, because pressing either does something: a folder is
+/// read off the disk, and a file is opened as a tab in the group beside the
+/// tree. What tells them apart in the markup is the caret and `aria-expanded`,
+/// which a file has neither of.
 function Row(props: {
   /// What the row says, which is a repository's name for a root and an entry's
   /// own name for everything below one.
@@ -213,12 +225,22 @@ function Row(props: {
   folder: boolean;
   /// How deep it is, which is the whole of what indents it.
   depth: number;
-  open: (path: string) => boolean;
+  /// Whether this folder is open, which a file is never.
+  expanded: (path: string) => boolean;
   held: () => Record<string, FolderListing>;
+  /// Open this folder or shut it.
   toggle: (path: string) => void;
+  /// And open this file, which is the group of tabs beside the tree.
+  open: (path: string) => void;
 }): JSX.Element {
   /// The indent, in the one unit a tree has: a level.
   const inset = (): string => `${0.5 + props.depth * 0.75}rem`;
+
+  /// And a file's, which stands where a folder's caret would be: the caret's own
+  /// width and the gap beside it, so the names line up down the column whichever
+  /// kind each row is. Said here rather than in the sheet because the indent
+  /// itself is a style on the row, and one rule cannot be half of two.
+  const fileInset = (): string => `calc(${inset()} + 0.7em + 0.4rem)`;
 
   const listing = (): FolderListing | undefined => props.held()[props.path];
 
@@ -227,20 +249,25 @@ function Row(props: {
       <Show
         when={props.folder}
         fallback={
-          <span class={styles.file} style={{ "padding-left": inset() }}>
+          <button
+            type="button"
+            class={styles.file}
+            style={{ "padding-left": fileInset() }}
+            onClick={() => props.open(props.path)}
+          >
             <span class={styles.name}>{props.name}</span>
-          </span>
+          </button>
         }
       >
         <button
           type="button"
           class={styles.folder}
           style={{ "padding-left": inset() }}
-          aria-expanded={props.open(props.path)}
+          aria-expanded={props.expanded(props.path)}
           onClick={() => props.toggle(props.path)}
         >
           <Icon
-            of={props.open(props.path) ? faChevronDown : faChevronRight}
+            of={props.expanded(props.path) ? faChevronDown : faChevronRight}
             class={styles.caret}
           />
           <span class={styles.name}>{props.name}</span>
@@ -265,9 +292,10 @@ function Row(props: {
                         path={entry.path}
                         folder={entry.folder}
                         depth={props.depth + 1}
-                        open={props.open}
+                        expanded={props.expanded}
                         held={props.held}
                         toggle={props.toggle}
+                        open={props.open}
                       />
                     )}
                   </For>

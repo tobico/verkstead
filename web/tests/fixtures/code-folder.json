@@ -25,6 +25,11 @@
         "folder": false,
         "name": "README.md",
         "path": "/var/lib/verkstead/worktrees/verkstead-code-pane/README.md"
+      },
+      {
+        "folder": false,
+        "name": "icon.png",
+        "path": "/var/lib/verkstead/worktrees/verkstead-code-pane/icon.png"
       }
     ],
     "path": "/var/lib/verkstead/worktrees/verkstead-code-pane"

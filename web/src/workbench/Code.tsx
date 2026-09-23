@@ -1,4 +1,5 @@
-//! **Code**: the Conversation's editor, which so far is its terminals.
+//! **Code**: the Conversation's editor — its files, and its terminals beside
+//! them.
 //!
 //! Shells of the human's inside its Sandbox, with its Worktree as the working
 //! directory — for the moment the agent's work is done and somebody wants to
@@ -15,8 +16,28 @@
 //! **A tree down the side and a group of tabs beside it**, which is the shape
 //! of the whole pane. The tree is [`./Tree`]: a root per Worktree the
 //! Conversation has, one folder read when it is expanded. The group is what is
-//! in this file, and what it holds so far is terminals — a file pressed in the
-//! tree opens in a tab of this group, which is the task after this one.
+//! in this file, and it holds files and terminals alike — one bar, one set of
+//! tabs, because a shell and a file are two things to have open rather than two
+//! kinds of pane (ADR 0019, *Tabs and groups*).
+//!
+//! **A file pressed in the tree opens as a tab of this group.** What the server
+//! answers a read with says which of four kinds of thing it read — text, an
+//! image, a binary it will not send, or a file over the size cap — and the tab
+//! draws each as what it is: the text in an editor, the picture in its tab, and
+//! either of the last two as the line saying why there is nothing to draw. A
+//! file in a read-only root opens read-only and takes no typing, which is the
+//! root's own flag rather than the file's mode.
+//!
+//! The editor here is a plain box of text, and Monaco is the task after this
+//! one: what this stage builds is the tab, the kinds and the buffer behind
+//! them, so that the editor is swapped in against something that already works.
+//! The buffer is what the human's text is in and the reading is what the disk
+//! said — two things rather than one, because the save of the task after that
+//! is a comparison between them over the version the read carried.
+//!
+//! **And the same file opened twice is one buffer.** There is one group in this
+//! stage, so that means one tab: pressing a file already open turns to its tab
+//! rather than opening a second beside it.
 //!
 //! Opened by the code icon on the Timeline's header — see `Timeline.tsx` —
 //! which is a details pane like every other, at a path of its own so it survives
@@ -34,19 +55,24 @@
 //! and the terminal are sized to the pane rather than scrolling it.
 //!
 //! **Several of them, one per tab.** The bar in the pane's header holds a tab
-//! per terminal, in the order they were opened, and a plus at the end opens
-//! another. It is the Output pane's Transcript/Screen switch built again —
-//! pressed-or-not buttons in a group rather than a tablist, which is the house's
-//! answer to this shape — restyled after VS Code's bar, which is what the pane
-//! is drawn after from here on: a kind icon at one end of every tab and a × at
-//! the other, and the tabs abutting rather than spaced. The kind is the whole
-//! of what an icon there says, and the one kind there is so far is a terminal.
+//! per thing open, in the order they were opened, and a plus at the end opens
+//! another terminal. It is the Output pane's Transcript/Screen switch built
+//! again — pressed-or-not buttons in a group rather than a tablist, which is the
+//! house's answer to this shape — restyled after VS Code's bar, which is what
+//! the pane is drawn after from here on: a kind icon at one end of every tab and
+//! a × at the other, and the tabs abutting rather than spaced. The kind is the
+//! whole of what an icon there says, and there are two of them: a shell, and a
+//! file.
 //!
 //! The bar is drawn where there are tabs to draw. A strip holding nothing but
 //! its own plus is furniture about tabs that are not there, and a pane with
 //! nothing open has the hint under it to say the same thing in words.
 //!
-//! **And a tab is called what its shell calls itself.** A prompt sets the
+//! **And a file's tab is called what the file is.** Its name rather than its
+//! path: a tab is a few rems wide and a path in a checkout is a sentence, and
+//! the tree beside it is where a file is found by where it sits.
+//!
+//! **And a terminal's tab is called what its shell calls itself.** A prompt sets the
 //! terminal's title at every prompt — the directory it is in, the command it is
 //! running — and that is a better name for a tab than anything this side could
 //! invent, so xterm's reading of the title escape is the label. Where the shell
@@ -71,7 +97,9 @@
 //! closed by accident comes back to what was already there, still running and
 //! showing what it last showed.
 //!
-//! **And a tab is closed by the × at its end.** ADR 0013 kept Close on a context
+//! **And a tab is closed by the × at its end** — a file's as much as a shell's,
+//! the file's taking its reading and its buffer with it, so that opening it
+//! again is a fresh reading of the disk the way expanding a folder is. ADR 0013 kept Close on a context
 //! menu, a × beside a label this small being a thing to hit by accident and what
 //! it would end a shell somebody is working in; ADR 0019 puts it on the tab,
 //! because the × is what VS Code's bar has, what carries that worry now is the
@@ -95,8 +123,8 @@
 //! **And the pane opens empty.** It opens no shell of its own accord: the live
 //! ones come back as tabs, and where there are none it draws a hint and a **New
 //! terminal** button where a tab's content goes. The Terminal pane never stood
-//! empty because a shell was the whole of what it held; a pane that will hold
-//! files has something to show without one, and a shell nobody asked for is a
+//! empty because a shell was the whole of what it held; a pane that holds files
+//! has something to show without one, and a shell nobody asked for is a
 //! Sandbox started by the opening of a pane. A shell that exits closes its
 //! socket, which is how this side hears about it: the tab goes, and where it was
 //! the last the pane stands empty again.
@@ -115,6 +143,7 @@
 //! means to take the work on presses **Stop** first.
 
 import {
+  faFile,
   faPlus,
   faTerminal,
   faXmark,
@@ -142,9 +171,14 @@ import {
   closeTerminal,
   listTerminals,
   openTerminal,
+  readFile,
   terminalSocket,
 } from "../api/client";
-import type { ConversationView, TerminalOpened } from "../api/types";
+import type {
+  ConversationView,
+  FileReading,
+  TerminalOpened,
+} from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { Attached } from "./Attached";
@@ -214,12 +248,66 @@ export const ENDED_AT_ONCE =
 
 /// And what the pane says when it is holding nothing at all.
 ///
-/// The state the Terminal pane never had. What it says is what there is here to
-/// open, which for now is a shell — the tree and the files it opens are the
-/// stages after this one, and a hint naming a tree that is not drawn yet would
-/// be a sentence about somewhere else.
+/// The state the Terminal pane never had. What it says is the two ways there
+/// are into this group: a file out of the tree beside it, and a shell of the
+/// human's own in the Worktree. The press under it opens the second, the first
+/// being a press on something already drawn.
 export const NOTHING_OPEN =
-  "Nothing is open. A terminal here is a shell of your own in this conversation's worktree.";
+  "Nothing is open. Press a file in the tree to edit it, or open a terminal — a shell of your own in this conversation's worktree.";
+
+/// Each way a file can come back with nothing to draw, in the words of what it
+/// is.
+///
+/// One sentence each rather than a single "could not be opened", for the reason
+/// the tree's `FOLDER_REFUSAL` has one apiece: the server names them separately
+/// because each is a different thing for the human to do about it, and only
+/// they can tell which they are looking at.
+///
+/// The first two are not refusals at all — the file is there and the server
+/// read it — they are the two kinds this pane does not draw. They are worded
+/// the same way for the same reason: what the tab has to say is why there is
+/// nothing in it.
+///
+/// **The cap is named** rather than left as "too large", the way the composer's
+/// own refusal names it — see `ATTACH_REFUSAL` in `Composer.tsx`. It is
+/// `MAX_BYTES` in the server's `files`, and a round number in the words this
+/// product says sizes in so that this sentence can carry it.
+export const FILE_REFUSAL: Record<Extract<FileReading, string>, string> = {
+  Binary: "This file is not text, so there is nothing here to edit.",
+  TooLarge:
+    "This file is larger than 2 MB, so Code does not open it. A terminal will.",
+  Outside: "That is not in any of this conversation's worktrees.",
+  UnderGit: "Code does not show what is inside a repository's .git.",
+  RootGone: "This worktree is no longer on disk.",
+  Missing: "That file is no longer there.",
+  NotAFile: "That is a folder rather than a file.",
+};
+
+/// One tab of the group: a terminal by the number the server issued it, or a
+/// file by its path.
+///
+/// Two shapes rather than one with a kind beside it, because the two are named
+/// by different things and nothing here ever has to ask a tab what it is
+/// without then using the answer.
+export type Tab = { terminal: number } | { file: string };
+
+/// What a tab is known by, which is the one string that can stand for either.
+///
+/// Which tab is showing, and which the human turned to, are both this rather
+/// than the tab itself: a path and a number would be two signals holding one
+/// answer between them.
+export function keyed(tab: Tab): string {
+  return "terminal" in tab ? `terminal ${tab.terminal}` : `file ${tab.file}`;
+}
+
+/// And what a file's tab is called: its name.
+///
+/// Rather than its path — a tab is a few rems wide, a path in a checkout is a
+/// sentence, and where a file sits is what the tree beside it says. A path of
+/// nothing but separators has no name, and reads as itself.
+export function named(path: string): string {
+  return path.split(/[/\\]/).filter(Boolean).pop() ?? path;
+}
 
 export function Code(props: {
   conversation: ConversationView;
@@ -260,13 +348,28 @@ export function Code(props: {
   onCleanup(() => held.removeQueries({ queryKey: holding(), exact: true }));
 
   /// Every tab there is, in the order they were opened: what was live when the
-  /// pane loaded, and what it has opened since.
+  /// pane loaded, and what has been opened since — files and terminals alike,
+  /// in the one order, because they are the one bar.
   ///
   /// The server issues its numbers in order and never reuses one, so the list it
   /// answers with is already in that order and everything opened here goes on
   /// the end. A tab standing on a shell that never started is one of these too,
   /// under a key of its own — see [`stand`].
-  const [tabs, setTabs] = createSignal<number[]>([]);
+  const [tabs, setTabs] = createSignal<Tab[]>([]);
+
+  /// What each open file came back as: the text and its version, the picture,
+  /// or the line saying why there is nothing to draw. Nothing at all while the
+  /// read is in flight, which is the moment between the press and the answer.
+  const [readings, setReadings] = createSignal<Record<string, FileReading>>({});
+
+  /// And the buffer behind each: the text as it stands in the editor, which
+  /// starts as what was read and is what the human types into.
+  ///
+  /// Held apart from the reading rather than written back over it, because the
+  /// two are different things: the reading is what the disk said at the version
+  /// it said it at, and this is what would be written over it. The save of the
+  /// task after this one is the comparison between them.
+  const [buffers, setBuffers] = createSignal<Record<string, string>>({});
 
   /// And what each tab that is standing rather than running says: the shell
   /// ended at once, or the refusal the server answered the open with.
@@ -285,8 +388,9 @@ export function Code(props: {
   /// server never reuses a number, so nothing can ever come back under it.
   const [titles, setTitles] = createSignal<Record<number, string>>({});
 
-  /// Which tab the human turned to, where they have turned to one.
-  const [chosen, setChosen] = createSignal<number | undefined>();
+  /// Which tab the human turned to, where they have turned to one — by its key,
+  /// that being the one word that names either kind.
+  const [chosen, setChosen] = createSignal<string | undefined>();
 
   /// And which one they are being asked about, where a close was refused for a
   /// shell somebody is working in.
@@ -321,13 +425,17 @@ export function Code(props: {
   /// The one showing: the tab turned to, or the first while nobody has turned
   /// to one — and the first again once the one turned to is gone, which is what
   /// keeps the pane showing a terminal rather than a gap where one was.
-  const showing = createMemo(() => {
+  const showing = createMemo((): string | undefined => {
     const open = tabs();
     const turnedTo = chosen();
 
-    return turnedTo !== undefined && open.includes(turnedTo)
-      ? turnedTo
-      : open[0];
+    if (turnedTo !== undefined && open.some((one) => keyed(one) === turnedTo)) {
+      return turnedTo;
+    }
+
+    const first = open[0];
+
+    return first === undefined ? undefined : keyed(first);
   });
 
   /// What a tab is called. What its shell last called itself, where it has
@@ -338,14 +446,18 @@ export function Code(props: {
   /// standing on an open that was refused, the server never having got as far as
   /// a number for that one, where a made-up one would be a name for a shell that
   /// is not there.
-  const called = (tab: number): string => {
-    const said = titles()[tab]?.trim();
+  const called = (tab: Tab): string => {
+    if ("file" in tab) {
+      return named(tab.file);
+    }
+
+    const said = titles()[tab.terminal]?.trim();
 
     if (said) {
       return said;
     }
 
-    return tab > 0 ? `Terminal ${tab}` : "Terminal";
+    return tab.terminal > 0 ? `Terminal ${tab.terminal}` : "Terminal";
   };
 
   /// Take away whatever is only standing there to say why, which is what **New
@@ -359,7 +471,9 @@ export function Code(props: {
     }
 
     setOver({});
-    setTabs((was) => was.filter((one) => !standing.includes(one)));
+    setTabs((was) =>
+      was.filter((one) => !("terminal" in one && standing.includes(one.terminal))),
+    );
   };
 
   /// A tab that says why there is no shell in it, which stands until somebody
@@ -374,9 +488,9 @@ export function Code(props: {
     refusals -= 1;
     const tab = refusals;
 
-    setTabs((was) => [...was, tab]);
+    setTabs((was) => [...was, { terminal: tab }]);
     setOver((was) => ({ ...was, [tab]: why }));
-    setChosen(tab);
+    setChosen(keyed({ terminal: tab }));
   };
 
   /// Open another, and show it. What **New terminal** does, from the plus at the
@@ -400,8 +514,8 @@ export function Code(props: {
 
         replace();
         askedAt.set(number, Date.now());
-        setTabs((was) => [...was, number]);
-        setChosen(number);
+        setTabs((was) => [...was, { terminal: number }]);
+        setChosen(keyed({ terminal: number }));
       })
       // A request that never landed is a shell that did not start, and it is
       // read as one: the pane says so in a tab and waits to be asked again,
@@ -425,7 +539,9 @@ export function Code(props: {
 
     if (asked === undefined || Date.now() - asked >= AT_ONCE) {
       askedAt.delete(tab);
-      setTabs((was) => was.filter((one) => one !== tab));
+      setTabs((was) =>
+        was.filter((one) => !("terminal" in one && one.terminal === tab)),
+      );
       return;
     }
 
@@ -455,20 +571,91 @@ export function Code(props: {
   /// socket to hear it on, so it simply goes. Nothing is drawn about a request
   /// that failed: the shell is the server's, and a tab still there is what says
   /// it is still running.
-  const close = (tab: number): void => {
-    if (tab < 0 || over()[tab] !== undefined) {
-      setOver((was) => {
-        const rest = { ...was };
-        delete rest[tab];
-        return rest;
-      });
-      setTabs((was) => was.filter((one) => one !== tab));
+  ///
+  /// **And a file's × is the whole of closing it**: there is nothing at the
+  /// server to end, so the tab goes at the press, taking its reading and its
+  /// buffer with it. Opening it again is a fresh reading of the disk, which is
+  /// what expanding a folder in the tree beside it is too — nothing yet tells
+  /// this page that the disk moved.
+  const close = (tab: Tab): void => {
+    if ("file" in tab) {
+      forget(tab.file);
+      setTabs((was) => was.filter((one) => keyed(one) !== keyed(tab)));
       return;
     }
 
-    askedAt.delete(tab);
+    const number = tab.terminal;
 
-    void end(tab, false);
+    if (number < 0 || over()[number] !== undefined) {
+      setOver((was) => {
+        const rest = { ...was };
+        delete rest[number];
+        return rest;
+      });
+      setTabs((was) => was.filter((one) => keyed(one) !== keyed(tab)));
+      return;
+    }
+
+    askedAt.delete(number);
+
+    void end(number, false);
+  };
+
+  /// What a file's tab leaves behind when it goes: nothing.
+  const forget = (path: string): void => {
+    setReadings((was) => {
+      const rest = { ...was };
+      delete rest[path];
+      return rest;
+    });
+    setBuffers((was) => {
+      const rest = { ...was };
+      delete rest[path];
+      return rest;
+    });
+  };
+
+  /// Open a file and show it, which is what a press in the tree does.
+  ///
+  /// Named apart from [`open`] above rather than overloaded on it: that one
+  /// asks the server for a shell, and this one reads a path. Two verbs would be
+  /// one word telling a reader nothing about which.
+  ///
+  /// **The same file opened twice is one buffer**, so a file already open is a
+  /// tab to turn to rather than a second tab beside the first (ADR 0019, *Tabs
+  /// and groups*). There is one group in this stage, so one buffer is one tab.
+  ///
+  /// The read is made here rather than in the tree, because what it answers
+  /// belongs to the tab: the version it carries is what a save will name itself
+  /// as being over, and the tree is a list of names.
+  const openFile = (path: string): void => {
+    const tab: Tab = { file: path };
+
+    setChosen(keyed(tab));
+
+    if (tabs().some((one) => keyed(one) === keyed(tab))) {
+      return;
+    }
+
+    setTabs((was) => [...was, tab]);
+
+    void readFile(props.conversation.id, path)
+      .then((reading) => {
+        setReadings((was) => ({ ...was, [path]: reading }));
+
+        if (typeof reading !== "string" && "Text" in reading) {
+          setBuffers((was) => ({ ...was, [path]: reading.Text.text }));
+        }
+      })
+      // A request that never landed is a file that says why there is nothing in
+      // its tab, the way a file the server refused does: the sentence is the
+      // server's where there is one, and this is the sentence there is instead.
+      .catch((error: Error) =>
+        setReadings((was) => ({
+          ...was,
+          [path]: { Unreadable: { why: error.message } },
+        })),
+      );
   };
 
   /// The close itself, made once with nobody asked and again with the answer.
@@ -508,7 +695,10 @@ export function Code(props: {
     }
 
     seeded = props.conversation.id;
-    setTabs(live.map((terminal) => terminal.number));
+    setTabs((was) => [
+      ...live.map((terminal): Tab => ({ terminal: terminal.number })),
+      ...was,
+    ]);
     setRead(true);
   });
 
@@ -529,7 +719,7 @@ export function Code(props: {
             <div
               class={styles.tabs}
               role="group"
-              aria-label="This conversation's terminals"
+              aria-label="What is open in this conversation"
             >
               <For each={tabs()}>
                 {(tab) => (
@@ -542,13 +732,16 @@ export function Code(props: {
                     <button
                       type="button"
                       class={styles.tab}
-                      aria-pressed={showing() === tab}
-                      onClick={() => setChosen(tab)}
+                      aria-pressed={showing() === keyed(tab)}
+                      onClick={() => setChosen(keyed(tab))}
                     >
                       {/* What kind of thing the tab holds, which is the one
-                          thing an icon at that end says. Files bring their own
-                          when there are files. */}
-                      <Icon of={faTerminal} class={styles.kind} />
+                          thing an icon at that end says: a shell, or a
+                          file. */}
+                      <Icon
+                        of={"file" in tab ? faFile : faTerminal}
+                        class={styles.kind}
+                      />
                       <span class={styles.name}>{called(tab)}</span>
                     </button>
 
@@ -590,7 +783,7 @@ export function Code(props: {
           a terminal are neither of them prose, and every column they are given
           is a column they use. */}
       <div class={`${styles.body} ${shell.paneScreen} ${shell.paneWide}`}>
-        <Tree conversation={props.conversation.id} />
+        <Tree conversation={props.conversation.id} open={openFile} />
 
         <div class={styles.group}>
           <Switch
@@ -605,16 +798,33 @@ export function Code(props: {
             <Match when={tabs().length > 0}>
               <For each={tabs()}>
                 {(tab) =>
-                  tab > 0 ? (
+                  "file" in tab ? (
+                    // A file is drawn while it is the one showing and not
+                    // otherwise: what it holds is the reading and the buffer
+                    // above, so a tab turned away from and back to finds its
+                    // text where it was. A terminal cannot be drawn that way —
+                    // its grid is the socket's, and a socket closed on being
+                    // hidden is a shell nobody could come back to.
+                    <Show when={showing() === keyed(tab)}>
+                      <Opened
+                        reading={readings()[tab.file]}
+                        text={buffers()[tab.file]}
+                        name={named(tab.file)}
+                        typed={(text) =>
+                          setBuffers((was) => ({ ...was, [tab.file]: text }))
+                        }
+                      />
+                    </Show>
+                  ) : tab.terminal > 0 ? (
                     <Attached
-                      at={terminalSocket(props.conversation.id, tab)}
-                      showing={showing() === tab}
+                      at={terminalSocket(props.conversation.id, tab.terminal)}
+                      showing={showing() === keyed(tab)}
                       scrollback={SCROLLBACK}
-                      over={over()[tab]}
+                      over={over()[tab.terminal]}
                       titled={(title) =>
-                        setTitles((was) => ({ ...was, [tab]: title }))
+                        setTitles((was) => ({ ...was, [tab.terminal]: title }))
                       }
-                      ended={() => ended(tab)}
+                      ended={() => ended(tab.terminal)}
                       say={{
                         waiting:
                           "Starting a shell in this conversation's worktree…",
@@ -625,8 +835,8 @@ export function Code(props: {
                     // A tab the server never opened a shell for has no grid to
                     // stand under the sentence, and nothing to attach to: the
                     // refusal is the whole of it.
-                    <Show when={showing() === tab}>
-                      <ErrorLine>{over()[tab]}</ErrorLine>
+                    <Show when={showing() === keyed(tab)}>
+                      <ErrorLine>{over()[tab.terminal]}</ErrorLine>
                     </Show>
                   )
                 }
@@ -655,7 +865,9 @@ export function Code(props: {
           page rather than in the pane: what is behind it is whichever of those
           arms the pane is in. */}
       <Busy
-        asked={asking() === undefined ? null : called(asking()!)}
+        asked={
+          asking() === undefined ? null : called({ terminal: asking()! })
+        }
         keep={() => setAsking(undefined)}
         close={() => {
           const tab = asking();
@@ -727,5 +939,95 @@ function Busy(props: {
         </button>
       </div>
     </Modal>
+  );
+}
+
+/// What is in a file's tab: the text in an editor, the picture, or the line
+/// saying why there is nothing to draw.
+///
+/// The four kinds a read can come back as, and the two ways one can come back
+/// saying nothing (ADR 0019, *Monaco, whole*). Which it is is the server's
+/// reading of the bytes rather than a guess made from the name — the bytes are
+/// the server's, and the whole point of the last two kinds is that they never
+/// cross the wire.
+///
+/// **The editor is a plain box of text**, and Monaco is the task after this
+/// one. What is worth having built first is everything around it: the tab, the
+/// kinds, and the buffer the text is in, so that the editor is swapped in
+/// against something that already works.
+function Opened(props: {
+  /// What came back, or nothing at all while the read is in flight.
+  reading: FileReading | undefined;
+  /// The buffer: the text as it stands, which starts as what was read.
+  text: string | undefined;
+  /// What the file is called, which is what a picture is read aloud as.
+  name: string;
+  /// And what typing into it does.
+  typed: (text: string) => void;
+}): JSX.Element {
+  /// The refusal this came back as, where it came back as one — the server's
+  /// own sentence for the unreadable, which is the only one of them that says
+  /// something this side could not have worked out.
+  const why = (): string | null => {
+    const read = props.reading;
+
+    if (read === undefined) {
+      return null;
+    }
+
+    if (typeof read !== "string") {
+      return "Unreadable" in read ? read.Unreadable.why : null;
+    }
+
+    return FILE_REFUSAL[read];
+  };
+
+  const text = (): Extract<FileReading, { Text: unknown }>["Text"] | null => {
+    const read = props.reading;
+
+    return read !== undefined && typeof read !== "string" && "Text" in read
+      ? read.Text
+      : null;
+  };
+
+  const image = (): Extract<FileReading, { Image: unknown }>["Image"] | null => {
+    const read = props.reading;
+
+    return read !== undefined && typeof read !== "string" && "Image" in read
+      ? read.Image
+      : null;
+  };
+
+  return (
+    <Switch fallback={<Empty>Opening this file…</Empty>}>
+      <Match when={why()}>{(said) => <ErrorLine>{said()}</ErrorLine>}</Match>
+      <Match when={text()}>
+        {(read) => (
+          // A box of text, and a read-only root's file is a box that takes no
+          // typing — the root's own flag rather than the file's mode, which is
+          // what saves a human finding out by typing.
+          <textarea
+            class={styles.editor}
+            aria-label={props.name}
+            readOnly={!read().writable}
+            spellcheck={false}
+            value={props.text ?? read().text}
+            onInput={(said) => props.typed(said.currentTarget.value)}
+          />
+        )}
+      </Match>
+      <Match when={image()}>
+        {(drawn) => (
+          // The bytes came with the reading rather than through a second
+          // request, so the picture is drawn out of what is already here.
+          <div class={styles.picture}>
+            <img
+              src={`data:${drawn().media_type};base64,${drawn().base64}`}
+              alt={props.name}
+            />
+          </div>
+        )}
+      </Match>
+    </Switch>
   );
 }

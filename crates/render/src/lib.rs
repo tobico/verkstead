@@ -62,7 +62,7 @@ pub use conversations::{
     stage_list_event, stage_list_reached, steer_event, task_list, task_list_event,
     task_list_reached, unreadable_set_event,
 };
-pub use files::{FileRoot, FileRootsView, FolderEntry, FolderListing};
+pub use files::{FileReading, FileRoot, FileRootsView, FolderEntry, FolderListing};
 pub use onboarding::{
     AccountView, Dependency, DependencyState, DependencyView, Distro, InstallPress, InstallState,
     OnboardingView, Platform, PrefillView, Prefilled, RunPhase, RunView, Seen, Source, StepsView,

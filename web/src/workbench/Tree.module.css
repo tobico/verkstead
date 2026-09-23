@@ -44,8 +44,9 @@
   margin: 0;
 }
 
-/* A folder: the caret, and what it is called. A button, because pressing it
-   reads that folder off the disk.
+/* A row: the caret where there is one, and what it is called. Both kinds are
+   buttons, because pressing either does something — a folder is read off the
+   disk, and a file is opened as a tab in the group beside the tree.
 
    Full width, so the lit strip runs the width of the tree the way a file
    manager's does, and left-aligned inside it. */
@@ -62,6 +63,7 @@
   text-align: left;
   background: none;
   border: 0;
+  cursor: pointer;
 
   /* A long press on a row is how text is selected. A row is a thing to press
      rather than to copy out of here, which is what the tabs above it say about
@@ -69,12 +71,9 @@
   user-select: none;
 }
 
-.folder {
-  cursor: pointer;
-}
-
 @media (hover: hover) {
-  .folder:hover {
+  .folder:hover,
+  .file:hover {
     color: var(--ink);
     background: var(--card);
   }

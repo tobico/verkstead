@@ -36,6 +36,7 @@ import type {
   Created,
   Dependency,
   DirectoryListing,
+  FileReading,
   FileRootsView,
   FolderListing,
   GrillingStarted,
@@ -585,6 +586,22 @@ export function listFolder(id: number, path: string): Promise<FolderListing> {
   return get<FolderListing>(
     `/api/ui/conversations/${id}/files/folder?${asking}`,
   );
+}
+
+/// And one file of one of those folders, opened.
+///
+/// What comes back says which of four kinds of thing it read — text, an image,
+/// a binary it will not send, or a file over the size cap — and text carries a
+/// version, which is a hash of the bytes and is what a write names itself as
+/// being over (ADR 0019).
+///
+/// Refused in the body like the folder beside it: a path outside every root, a
+/// path under `.git`, a worktree that has gone and a file that has are each
+/// their own sentence rather than a status to retry.
+export function readFile(id: number, path: string): Promise<FileReading> {
+  const asking = new URLSearchParams({ path });
+
+  return get<FileReading>(`/api/ui/conversations/${id}/files/file?${asking}`);
 }
 
 /// One commit, rendered: what it said about itself, and its diff.

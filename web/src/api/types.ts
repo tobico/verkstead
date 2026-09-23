@@ -1917,6 +1917,71 @@ export type Distro = "MacOs" | "Windows" | "NixOs" | "Ubuntu" | "Fedora" | "Debi
 export type EntryKind = "Directory" | "File" | "Repository";
 
 /**
+ * What one file of one of those roots is, read — or the named reason it is
+ * not drawn.
+ *
+ * **A read says which of four kinds of thing it read**
+ * ([ADR 0019](../../../docs/adr/0019-the-code-pane.md), *Monaco, whole*):
+ * text, which opens in the editor; an image, which is previewed in its tab;
+ * any other binary, which is a line saying so; and a file over the size cap,
+ * which is another. The kinds are the server's reading rather than the
+ * viewer's guess, because the bytes are the server's and the whole point of
+ * the last two is that they never cross the wire.
+ *
+ * **And a read carries a version**, which is a hash of the bytes it read: the
+ * write of the next task names the version it is over, and a write over a file
+ * the agent has changed since is refused (*Versioned reads, and a stale write
+ * is refused*). On the text alone, that being the only kind anything writes
+ * back.
+ *
+ * The refusals are [`FolderListing`]'s, said about a file: each of them is a
+ * different sentence for the human and none of them is a status code.
+ */
+export type FileReading = { "Text": { 
+/**
+ * The file this read, as it was asked for — the folder listing's own
+ * rule, and for its reason: a path answered back through a resolution
+ * would read as somewhere else on a machine whose temporary directory
+ * is a symlink.
+ */
+path: string, 
+/**
+ * A hash of the bytes that were read, which a write names itself as
+ * being over.
+ *
+ * Of the bytes rather than of the text, so that what a write is
+ * measured against is what is on the disk: a file is read and hashed
+ * in one pass, and the same pass is what a save compares against.
+ */
+version: string, 
+/**
+ * What is in it.
+ */
+text: string, 
+/**
+ * Whether the root it is in can be written.
+ *
+ * The root's own flag rather than the file's mode: a read-only
+ * companion is checked out detached and nothing in it is to be
+ * written, whatever its permissions happen to say. A file that opens
+ * read-only takes no typing, which is what saves a human finding out
+ * by typing.
+ */
+writable: boolean, } } | { "Image": { path: string, 
+/**
+ * What to draw it as — `image/png` and the rest — read off the name.
+ *
+ * The extension rather than the bytes: what a browser will draw is
+ * decided by this string, and a file named `.png` that is not one is
+ * a broken picture either way.
+ */
+media_type: string, 
+/**
+ * Its bytes, base64.
+ */
+base64: string, } } | "Binary" | "TooLarge" | "Outside" | "UnderGit" | "RootGone" | "Missing" | "NotAFile" | { "Unreadable": { why: string, } };
+
+/**
  * One of them: which repository it is a checkout of, where it is, and what may
  * be done in it.
  */

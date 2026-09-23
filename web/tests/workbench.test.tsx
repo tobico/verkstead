@@ -34,6 +34,8 @@ import type {
   ConversationStopped,
   ConversationUnarchived,
   ConversationView,
+  FileReading,
+  FileRoot,
   FileRootsView,
   FolderListing,
   GrillingStarted,
@@ -174,6 +176,7 @@ import {
   // different sense of the words and was here first.
   AT_ONCE as ENDED_WITHIN,
   ENDED_AT_ONCE,
+  FILE_REFUSAL,
   NOTHING_OPEN,
   TERMINAL_REFUSAL,
 } from "../src/workbench/Code";
@@ -187,7 +190,12 @@ import treePane from "../src/workbench/Tree.module.css";
 // themselves come straight from Font Awesome, so that a test naming one and the
 // component drawing it are two independent statements about the same icon.
 import { faCircle } from "@fortawesome/free-regular-svg-icons";
-import { faCheck, faTerminal, faXmark } from "@fortawesome/free-solid-svg-icons";
+import {
+  faCheck,
+  faFile,
+  faTerminal,
+  faXmark,
+} from "@fortawesome/free-solid-svg-icons";
 import {
   SAID as CHECKS_SAID,
   SPOKEN as CHECKS_SPOKEN,
@@ -304,6 +312,8 @@ import more from "./fixtures/transcript-more.json" with { type: "json" };
 import screenOfIt from "./fixtures/screen.json" with { type: "json" };
 import codeRoots from "./fixtures/code-roots.json" with { type: "json" };
 import codeFolder from "./fixtures/code-folder.json" with { type: "json" };
+import codeFile from "./fixtures/code-file.json" with { type: "json" };
+import codeImage from "./fixtures/code-image.json" with { type: "json" };
 import wrapping from "./fixtures/conversation-wrapping.json" with { type: "json" };
 import repoView from "./fixtures/repo.json" with { type: "json" };
 import told from "./fixtures/settings.json" with { type: "json" };
@@ -16769,6 +16779,12 @@ function folderOf(path: string): string {
   return `/api/ui/conversations/${GRILLING.id}/files/folder?path=${encodeURIComponent(path)}`;
 }
 
+/// And where one file of one of them is read, which is what pressing a row of
+/// the tree asks for.
+function fileOf(path: string): string {
+  return `/api/ui/conversations/${GRILLING.id}/files/file?path=${encodeURIComponent(path)}`;
+}
+
 /// The roots the fixtures carry: the conversation's own worktree, and a
 /// read-only companion's beside it.
 const OWN_ROOT = (codeRoots as FileRootsView).roots[0]!;
@@ -18348,6 +18364,7 @@ describe("the code pane's file tree", () => {
         ".gitignore",
         "Cargo.toml",
         "README.md",
+        "icon.png",
         `${COMPANION_ROOT.repo}read-only`,
       ]),
     );
@@ -18488,6 +18505,334 @@ describe("the code pane's file tree", () => {
         "true",
       ),
     );
+  });
+});
+
+/// What a file pressed in that tree opens as: a tab of the group beside it,
+/// holding whatever the server read — the text in an editor, a picture in its
+/// tab, and a line where there is nothing to draw (ADR 0019, *Monaco, whole*).
+describe("a file opened out of the code pane's tree", () => {
+  /// The text file the fixtures carry, and the picture beside it, taken out of
+  /// the readings the endpoint wrote rather than made up here.
+  const TEXT = (codeFile as Extract<FileReading, { Text: unknown }>).Text;
+  const PICTURE = (codeImage as Extract<FileReading, { Image: unknown }>).Image;
+
+  /// The file rows of the tree, which are presses of their own: a folder is
+  /// read off the disk, and a file is opened as a tab.
+  function files(container: ParentNode): HTMLButtonElement[] {
+    return [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        `.${shell.detailsPane} .${treePane.file}`,
+      ),
+    ];
+  }
+
+  /// One of them, found by what it is called — which is how a human finds one.
+  function press(container: ParentNode, name: string): void {
+    const found = files(container).find((one) => one.textContent === name);
+
+    if (!found) {
+      throw new Error(
+        `no file called ${name}; the tree has ${files(container)
+          .map((one) => one.textContent)
+          .join(", ")}`,
+      );
+    }
+
+    fireEvent.click(found);
+  }
+
+  /// The tabs of the group, and the × at the end of each.
+  function tabs(container: ParentNode): HTMLButtonElement[] {
+    return [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        `.${shell.detailsPane} .${codePane.tab}`,
+      ),
+    ];
+  }
+
+  function crosses(container: ParentNode): HTMLButtonElement[] {
+    return [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        `.${shell.detailsPane} .${codePane.close}`,
+      ),
+    ];
+  }
+
+  /// And what a file's tab holds: the box its text is in, the picture, or the
+  /// line saying why there is neither.
+  function editor(container: ParentNode): HTMLTextAreaElement | null {
+    return container.querySelector<HTMLTextAreaElement>(
+      `.${shell.detailsPane} .${codePane.editor}`,
+    );
+  }
+
+  function said(container: ParentNode): string | null | undefined {
+    return container.querySelector(`.${shell.detailsPane} .${notices.error}`)
+      ?.textContent;
+  }
+
+  /// The workbench with one root of the tree expanded, which is how a file is
+  /// reached: nothing is read until a row is pressed, and a file is a row under
+  /// the folder it is in.
+  async function expanded(
+    at: FileRoot,
+    listing: FolderListing,
+    ...answers: Parameters<typeof serving>
+  ) {
+    const fetching = withTerminals(
+      [1],
+      whenever(folderOf(at.path), json(listing)),
+      ...answers,
+    );
+    const mounted = mount(`/conversations/${GRILLING.id}/code`);
+
+    const rows = await waitFor(() => {
+      const found = [
+        ...mounted.container.querySelectorAll<HTMLButtonElement>(
+          `.${shell.detailsPane} .${treePane.folder}`,
+        ),
+      ];
+
+      if (found.length < 2) {
+        throw new Error("the tree has not drawn its roots yet");
+      }
+
+      return found;
+    });
+
+    fireEvent.click(rows.find((row) => row.textContent?.startsWith(at.repo))!);
+    await waitFor(() =>
+      expect(files(mounted.container).length).toBeGreaterThan(0),
+    );
+
+    return { ...mounted, fetching };
+  }
+
+  /// A file pressed opens as a tab of the group, called what the file is and
+  /// holding what the server read.
+  it("opens a file pressed in the tree as a tab beside the terminals", async () => {
+    const { container, fetching } = await expanded(
+      OWN_ROOT,
+      codeFolder as FolderListing,
+      whenever(fileOf(TEXT.path), json(codeFile)),
+    );
+
+    // Nothing is read until the press: a tree of names costs nothing to draw,
+    // and a file is read when somebody asks for it.
+    expect(askedFor(fetching, fileOf(TEXT.path))).toBe(0);
+    expect(tabs(container)).toHaveLength(1);
+
+    press(container, "Cargo.toml");
+
+    await waitFor(() => expect(tabs(container)).toHaveLength(2));
+    expect(tabs(container)[1]!.textContent).toBe("Cargo.toml");
+
+    // The kind at its end, which is the one thing an icon there says: this one
+    // is a file rather than a shell.
+    expect(
+      tabs(container)[1]!.querySelector("svg path")?.getAttribute("d"),
+    ).toBe(faFile.icon[4]);
+
+    // And it is the one showing, a file pressed being a file somebody is about
+    // to read.
+    await waitFor(() => expect(editor(container)?.value).toBe(TEXT.text));
+    expect(
+      tabs(container).map((tab) => tab.getAttribute("aria-pressed")),
+    ).toEqual(["false", "true"]);
+
+    expect(askedFor(fetching, fileOf(TEXT.path))).toBe(1);
+
+    // And the read carried a version — a hash of the bytes, which is what a
+    // save will name itself as being over. The endpoint wrote this fixture, so
+    // what is asserted is the answer the pane is really handed.
+    expect(TEXT.version).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  /// A picture is drawn in its tab rather than opened in the editor: the bytes
+  /// came with the reading, so there is nothing more to fetch.
+  it("draws a picture as a picture", async () => {
+    const { container } = await expanded(
+      OWN_ROOT,
+      codeFolder as FolderListing,
+      whenever(fileOf(PICTURE.path), json(codeImage)),
+    );
+
+    press(container, "icon.png");
+
+    const drawn = await waitFor(() => {
+      const found = container.querySelector<HTMLImageElement>(
+        `.${shell.detailsPane} .${codePane.picture} img`,
+      );
+
+      if (!found) {
+        throw new Error("nothing is drawn in the tab");
+      }
+
+      return found;
+    });
+
+    expect(drawn.getAttribute("src")).toBe(
+      `data:${PICTURE.media_type};base64,${PICTURE.base64}`,
+    );
+    // Read aloud as the file it is: an alt of nothing would be a picture a
+    // screen reader passes over without saying what was opened.
+    expect(drawn.getAttribute("alt")).toBe("icon.png");
+    expect(editor(container)).toBeNull();
+  });
+
+  /// And the two kinds there is nothing to draw of are each their own line: a
+  /// binary the server will not send, and a file over the size cap.
+  it("says why where there is nothing to draw", async () => {
+    for (const [answer, sentence] of [
+      ["Binary", FILE_REFUSAL.Binary],
+      ["TooLarge", FILE_REFUSAL.TooLarge],
+    ] as const) {
+      const { container, unmount } = await expanded(
+        OWN_ROOT,
+        codeFolder as FolderListing,
+        whenever(fileOf(TEXT.path), json(answer satisfies FileReading)),
+      );
+
+      press(container, "Cargo.toml");
+
+      await waitFor(() => expect(said(container)).toBe(sentence));
+      expect(editor(container)).toBeNull();
+
+      unmount();
+    }
+  });
+
+  /// And each of those lines is its own sentence rather than one "could not be
+  /// opened", because only the human can tell which of them they are looking
+  /// at — and the cap is named, the way the composer's own refusal names it.
+  it("words every reason a file draws nothing as the thing it is", () => {
+    expect(new Set(Object.values(FILE_REFUSAL)).size).toBe(
+      Object.keys(FILE_REFUSAL).length,
+    );
+
+    expect(FILE_REFUSAL.Binary).toContain("not text");
+    expect(FILE_REFUSAL.TooLarge).toContain("2 MB");
+    expect(FILE_REFUSAL.Missing).toContain("no longer");
+    expect(FILE_REFUSAL.NotAFile).toContain("folder");
+  });
+
+  /// A file in a read-only companion opens read-only and takes no typing: the
+  /// root's own flag, which is what saves a human finding out by typing.
+  it("opens a file in a read-only companion read-only", async () => {
+    const at = `${COMPANION_ROOT.path}/ASKING.md`;
+
+    const { container } = await expanded(
+      COMPANION_ROOT,
+      {
+        Listed: {
+          path: COMPANION_ROOT.path,
+          entries: [{ name: "ASKING.md", path: at, folder: false }],
+        },
+      } satisfies FolderListing,
+      whenever(
+        fileOf(at),
+        json({
+          Text: {
+            path: at,
+            version: "3f1a",
+            text: "# asking\n",
+            writable: false,
+          },
+        } satisfies FileReading),
+      ),
+    );
+
+    press(container, "ASKING.md");
+
+    await waitFor(() => expect(editor(container)?.value).toBe("# asking\n"));
+    expect(editor(container)!.readOnly).toBe(true);
+  });
+
+  /// And one in the conversation's own worktree is not, which is the other half
+  /// of the same sentence.
+  it("opens a file of the conversation's own worktree to be typed in", async () => {
+    const { container } = await expanded(
+      OWN_ROOT,
+      codeFolder as FolderListing,
+      whenever(fileOf(TEXT.path), json(codeFile)),
+    );
+
+    press(container, "Cargo.toml");
+
+    await waitFor(() => expect(editor(container)?.value).toBe(TEXT.text));
+    expect(editor(container)!.readOnly).toBe(false);
+
+    // And what is typed is held in the buffer behind the tab rather than
+    // thrown away: the save of the next task is what this becomes.
+    fireEvent.input(editor(container)!, {
+      target: { value: "[workspace]\nmembers = []\n" },
+    });
+
+    await waitFor(() =>
+      expect(editor(container)?.value).toBe("[workspace]\nmembers = []\n"),
+    );
+  });
+
+  /// The same file pressed twice is one buffer under one tab — there is one
+  /// group in this stage — so the second press turns to the tab it already has
+  /// rather than opening a second beside it.
+  it("turns to the tab a file already has rather than opening a second", async () => {
+    const { container, fetching } = await expanded(
+      OWN_ROOT,
+      codeFolder as FolderListing,
+      whenever(fileOf(TEXT.path), json(codeFile)),
+    );
+
+    press(container, "Cargo.toml");
+    await waitFor(() => expect(tabs(container)).toHaveLength(2));
+
+    // Away to the terminal beside it, so that the second press has somewhere to
+    // come back from.
+    fireEvent.click(tabs(container)[0]!);
+    await waitFor(() =>
+      expect(
+        tabs(container).map((tab) => tab.getAttribute("aria-pressed")),
+      ).toEqual(["true", "false"]),
+    );
+
+    press(container, "Cargo.toml");
+
+    await waitFor(() =>
+      expect(
+        tabs(container).map((tab) => tab.getAttribute("aria-pressed")),
+      ).toEqual(["false", "true"]),
+    );
+
+    expect(tabs(container)).toHaveLength(2);
+    expect(askedFor(fetching, fileOf(TEXT.path))).toBe(1);
+  });
+
+  /// And the × at the end of a file's tab closes it, taking its reading with
+  /// it: there is nothing at the server to end, and opening it again is a fresh
+  /// reading of the disk the way expanding a folder is.
+  it("closes a file on its × and reads it afresh next time", async () => {
+    const { container, fetching } = await expanded(
+      OWN_ROOT,
+      codeFolder as FolderListing,
+      whenever(fileOf(TEXT.path), json(codeFile)),
+    );
+
+    press(container, "Cargo.toml");
+    await waitFor(() => expect(tabs(container)).toHaveLength(2));
+
+    expect(crosses(container)[1]!.getAttribute("aria-label")).toBe(
+      "Close Cargo.toml",
+    );
+
+    fireEvent.click(crosses(container)[1]!);
+
+    await waitFor(() => expect(tabs(container)).toHaveLength(1));
+    expect(editor(container)).toBeNull();
+
+    press(container, "Cargo.toml");
+
+    await waitFor(() => expect(askedFor(fetching, fileOf(TEXT.path))).toBe(2));
   });
 });
 

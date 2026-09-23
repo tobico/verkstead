@@ -3236,6 +3236,54 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         ),
     );
 
+    // And what a file pressed in that tree opens as: the two kinds that carry
+    // content — text, which is what the editor draws, and a picture, which is
+    // previewed in its tab.
+    //
+    // Real files in that checkout rather than made-up answers, for the folder
+    // listing's reason and one of its own: the version a read carries is a hash
+    // of the bytes, so a hand-written one would be a number nothing on either
+    // side could have arrived at.
+    //
+    // No fixture for the other two kinds or for the refusals — each of those is
+    // a word and a sentence the viewer draws from it, which is a test about the
+    // wording rather than a payload to be pinned.
+    write(
+        "code-file.json",
+        &pin_under(
+            &get(
+                &code_app,
+                &format!(
+                    "/api/ui/conversations/{coding}/files/file?path={}",
+                    code_root
+                        .join("worktrees/verkstead-code-pane/Cargo.toml")
+                        .display()
+                ),
+            )
+            .await,
+            &code_root,
+            "/var/lib/verkstead",
+        ),
+    );
+
+    write(
+        "code-image.json",
+        &pin_under(
+            &get(
+                &code_app,
+                &format!(
+                    "/api/ui/conversations/{coding}/files/file?path={}",
+                    code_root
+                        .join("worktrees/verkstead-code-pane/icon.png")
+                        .display()
+                ),
+            )
+            .await,
+            &code_root,
+            "/var/lib/verkstead",
+        ),
+    );
+
     // And what the Remote access section reads: what this machine's Tailscale
     // is doing. One fixture per state the pane draws differently, because each
     // of them is a different sentence in front of the human — a machine with
@@ -3666,6 +3714,11 @@ async fn coded(pool: &SqlitePool, under: &Path) -> i64 {
     std::fs::write(worktree.join("crates/server/lib.rs"), "").unwrap();
     std::fs::write(worktree.join("target/debug/verkstead"), "").unwrap();
 
+    // And a picture in it, which is the one kind of file the pane draws rather
+    // than edits: a one-pixel PNG, there being nothing about what is *in* it
+    // that a fixture is pinning.
+    std::fs::write(worktree.join("icon.png"), PIXEL).unwrap();
+
     // And the companion beside it, read-only: checked out detached, and a root
     // the tree marks rather than one it leaves out.
     let alongside = coded_repository(&under.join("repos/askance"));
@@ -3715,6 +3768,14 @@ async fn coded(pool: &SqlitePool, under: &Path) -> i64 {
 
     conversation
 }
+
+/// The picture in that checkout: a one-pixel PNG, which is the smallest thing
+/// that is really one.
+const PIXEL: &[u8] = &[
+    0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, b'I', b'H', b'D', b'R',
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+    0x89,
+];
 
 /// A repository with one commit in it, ignoring what a Rust checkout ignores.
 fn coded_repository(path: &Path) -> std::path::PathBuf {
