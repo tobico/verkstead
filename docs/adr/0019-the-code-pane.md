@@ -47,6 +47,18 @@ or names anything under `.git`, is refused. Routing writes through a shell in
 the Sandbox was rejected — a boundary built for an agent, put around the
 human's own hand, at the cost of a process per save.
 
+**What keeps a session out of it is the Workbench Key**
+([ADR-0015](0015-open-boundary-and-workbench-key.md)). A session's network is
+the host's own, so nothing about the socket tells a session's request from the
+browser's, and "the workbench is the human" is a claim the key is the whole of:
+it is kept in the Data Directory, which no Sandbox binds, and everything under
+`/api/ui/` is refused without it. That is where the files API goes — beside the
+terminals' routes — and it is the widest thing the key has stood in front of
+yet, a read and a write of any file in any of the Conversation's Worktrees. A
+files API reachable without the key would hand a session the reach the Sandbox
+was built to take away, so the gate is named here rather than left to be
+inferred from the prefix.
+
 On Windows a session runs as an account of Verkstead's own, granted entries on
 the Worktree, and a file the server writes there is written as the human. A
 file the session cannot then read would be the one thing that breaks this, and

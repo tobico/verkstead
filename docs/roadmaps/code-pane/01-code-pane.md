@@ -22,14 +22,16 @@ pane is gone.
   pane — the groups themselves are stage 02); *Monaco, whole*; *What Code is
   not*.
 - **The files API is conversation-scoped under `/api/ui/`**, beside the
-  terminals' routes, and answers refusals in the body the way registering a Repo
-  does: a path outside a root, a path under `.git`, a root that is read-only, a
-  file that is binary or too large, and a version that has moved are each a
-  different sentence for the human, none of them a status code. Roots are the
-  Conversation's own Worktree and each companion's, in the order the
-  Conversation carries them, each saying whether it is writable; the module
-  that composes a Set's Diff already lists the writable ones and is the pattern
-  to follow.
+  terminals' routes — which is what puts it behind the Workbench Key, and the
+  key is what keeps a session out of it (ADR-0019, *The server reads and writes
+  the Worktree, outside the Sandbox*). It answers refusals in the body the way
+  registering a Repo does: a path outside a root, a path under `.git`, a root
+  that is read-only, a file that is binary or too large, and a version that has
+  moved are each a different sentence for the human, none of them a status
+  code. Roots are the Conversation's own Worktree and each companion's, in the
+  order the Conversation carries them, each saying whether it is writable; the
+  module that composes a Set's Diff already lists the writable ones and is the
+  pattern to follow.
 - **A folder listing is one folder**, read when it is expanded, never a walk:
   the path field's directory browse is the shape. Git-ignored paths and `.git`
   are left out, which git is asked about rather than reimplemented.
