@@ -697,3 +697,39 @@ async fn a_save_outside_this_conversations_roots_is_refused() {
         FileWritten::Missing
     );
 }
+
+/// And the largest file Code will open is one it will also save.
+///
+/// The read's cap is decimal and axum's own body limit is two *mebibytes*,
+/// which is under it — so without a limit of its own on this route a file just
+/// inside the cap would be one the tree opens, the editor takes typing in, and
+/// the save is refused for by a status rather than by any of this API's
+/// sentences. See `MAX_WRITE_BYTES` in the server's `files`.
+///
+/// Written in short lines, because that is where a text file's JSON escaping
+/// comes from: every newline is two bytes on the wire, so a file of short lines
+/// near the cap is a body well over two mebibytes — which is the whole of why
+/// the limit is not simply the read's. A hundred and thirty thousand short
+/// lines is a generated file or a column of data, not a contrivance.
+#[tokio::test]
+async fn a_file_at_the_top_of_what_code_opens_is_still_one_it_saves() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling_alongside(&pool, dir.path(), &[]).await;
+
+    // Just inside the cap, and short enough that what JSON makes of the
+    // newlines carries the body past two mebibytes on its own.
+    let line = format!("{}\n", "x".repeat(14));
+    let big: String = line.repeat(1_999_000 / line.len());
+
+    let at = worktree.join("generated.rs");
+    std::fs::write(&at, &big).unwrap();
+
+    let was = versioned(file(&app, conversation, &at).await);
+    let saved = save(&app, conversation, &at, &was, &big).await;
+
+    let FileWritten::Written { .. } = saved else {
+        panic!("expected a write, got {saved:?}");
+    };
+
+    assert_eq!(std::fs::read_to_string(&at).unwrap(), big);
+}

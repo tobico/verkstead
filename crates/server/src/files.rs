@@ -354,6 +354,23 @@ fn unwritable(error: &std::io::Error) -> FileWritten {
 /// opened.
 pub(crate) const MAX_BYTES: u64 = 2 * 1000 * 1000;
 
+/// And how large a body the write takes, which is not the same number.
+///
+/// What goes up is the text as a JSON string, with the path and the version
+/// beside it — so a file exactly at the cap is a body some way over it: a
+/// newline is two bytes written, a quote or a backslash two, and a control
+/// character six. Six times the cap is what JSON can make of the widest of
+/// those, and no text file reaches it — [`texted`] has already refused anything
+/// with a NUL in it — so this refuses nothing a read allowed while still
+/// bounding what one request can put in memory.
+///
+/// **Named at all because axum's own default is two mebibytes**, which is
+/// *under* [`MAX_BYTES`]: without this the largest files Code opens would be
+/// ones it lets somebody type into and then refuses to save — and refuses by
+/// status, where every other refusal in this module is a sentence the tab
+/// draws. The attachment routes raise theirs for the same reason.
+pub(crate) const MAX_WRITE_BYTES: usize = 6 * MAX_BYTES as usize + 64 * 1024;
+
 /// The version a read carries: a hash of the bytes it read.
 ///
 /// SHA-256, spelled hex. Of the bytes rather than of the text, and a hash

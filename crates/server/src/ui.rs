@@ -245,9 +245,20 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // read and a write of one thing, which is what a `GET` and a `POST` on
         // one route are for. What goes up is the path, that version and the
         // text — see [`write_file`].
+        //
+        // With a body limit of its own over the router's default, the way the
+        // attachment routes and the Question Set raise theirs — and here
+        // because the default is *smaller* than the file a read is allowed to
+        // hand over: without it the largest files Code opens would be ones it
+        // lets somebody type into and then refuses to save, by a status rather
+        // than by one of this API's sentences. See
+        // [`crate::files::MAX_WRITE_BYTES`], which is what JSON can make of the
+        // read's own cap.
         .route(
             "/api/ui/conversations/{id}/files/file",
-            get(file).post(write_file),
+            get(file)
+                .post(write_file)
+                .layer(DefaultBodyLimit::max(crate::files::MAX_WRITE_BYTES)),
         )
         // And one commit — its summary and its diff — fetched the same way and
         // for the same reason; see [`commit_pane`].
