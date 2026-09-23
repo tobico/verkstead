@@ -214,8 +214,12 @@ jobs:
       # every one of those stated tests and then hold the wizard on a Mac whose
       # command line tools are installed, which is the whole of what these two
       # are for.
+      #
+      # Quoted because the filter ends in a colon, and YAML reads a trailing
+      # one as the start of a mapping: unquoted, the file stops parsing and
+      # every job in it — not just this step — never runs at all.
       - name: What the wizard asks a real Mac
-        run: cargo test -p verkstead-server --lib onboarding::
+        run: 'cargo test -p verkstead-server --lib onboarding::'
 
   # And what the same workspace comes to on Windows, asked of Windows. The
   # session machinery is compiled there like everything else — what a Windows
