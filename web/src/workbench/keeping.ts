@@ -14,6 +14,16 @@
 //! Conversation, because every one of these is: a file is a path in a Worktree,
 //! and a terminal is a number in one Conversation's register.
 //!
+//! **The buffers are here too**, which is the one thing in this list that is
+//! not simply the human's doing (ADR 0019, *Tabs and groups*). A Monaco model
+//! is registered at the file's own address and the package refuses a second one
+//! there, so a buffer made by the editor drawing it could never be the buffer a
+//! second editor of the same file was drawn over — and one text under two views
+//! is what a file open in two groups has to be. Made when a file is first
+//! opened and disposed when its last view closes; everything that reads or
+//! writes the text — the dot, Ctrl+S, **Reload** — goes through [`Buffer`]
+//! rather than through a string beside it.
+//!
 //! **In the page rather than on the device**, which is this stage's half of it.
 //! Stage 02 of the roadmap puts the same thing in the browser's storage so that
 //! a reload comes back to it as well (ADR 0019, *Tabs and groups*); what is
@@ -30,6 +40,7 @@
 import { createSignal, type Accessor, type Setter } from "solid-js";
 
 import type { FileReading, FolderListing } from "../api/types";
+import { load, type Model } from "./editing";
 
 /// One tab of the group: a terminal by the number the server issued it, or a
 /// file by its path.
@@ -47,6 +58,38 @@ export type Tab = { terminal: number } | { file: string };
 /// and nothing ever asks which one it is holding without then using the answer.
 export type Bar = "moved" | { why: string };
 
+/// One open file's buffer: the text the human is typing into.
+///
+/// The model is Monaco's own, and is where the text, the undo stack and the
+/// language all are. It is made at `Uri.file(<the path>)`, which is the whole
+/// of how a file is coloured — the package registered every extension when it
+/// registered every language, so a `.rs` file is Rust because Monaco says it is
+/// — and it is that address that makes there be exactly one of these per file.
+///
+/// **The signal beside it is what this side reads.** A model is not reactive,
+/// so a dot that asked one for its text would be drawn once and never again;
+/// what keeps the two in step is the model's own change event, which is the
+/// only thing that writes the signal. So the model is where the text *is* and
+/// the signal is how anything here asks what it says.
+export interface Buffer {
+  /// The model, which is what an editor is opened over.
+  model: Model;
+
+  /// The text as it stands, followed: what the dot on the tab, Ctrl+S and the
+  /// warning on the way out of the page all compare against the reading.
+  text: Accessor<string>;
+
+  /// And text put in from somewhere that is not an editor, which is **Reload**:
+  /// the disk's text, into a buffer still holding the human's. Every view of
+  /// the file shows it, there being one buffer under them.
+  ///
+  /// Only where the two have come apart. Writing a model what it already says
+  /// would cost the caret and the undo stack of every view of it, and **Reload**
+  /// on a file the agent moved back to what it was is a press that should come
+  /// to nothing.
+  put: (text: string) => void;
+}
+
 /// Everything one Conversation has open in Code.
 ///
 /// The pane's own signals, made out here instead of in it. Handed over whole
@@ -63,10 +106,25 @@ export interface Kept {
   readings: Accessor<Record<string, FileReading>>;
   setReadings: Setter<Record<string, FileReading>>;
 
-  /// And the buffer behind each: the text as it stands in the editor, which
-  /// starts as what was read and is what the human types into.
-  buffers: Accessor<Record<string, string>>;
-  setBuffers: Setter<Record<string, string>>;
+  /// And the buffer behind each: the text as it stands, which starts as what
+  /// was read and is what the human types into. One per open file path, however
+  /// many views of it there are — see [`Buffer`].
+  buffers: Accessor<Record<string, Buffer>>;
+
+  /// Open a file's buffer at what the disk said, or — where the file already
+  /// has one — put that text into it, which is what **Reload** does.
+  ///
+  /// The one way a buffer is ever made. Monaco is fetched first, so nothing is
+  /// here the moment this is called and a file let go of before the chunk lands
+  /// gets no buffer at all; a chunk that never arrives is the line the editor
+  /// draws in place of itself, and this has nothing to add to it.
+  hold: (path: string, text: string) => void;
+
+  /// And let one go, which disposes the model.
+  ///
+  /// Called when a file's last view closes, because the address is Monaco's own
+  /// register: a model left in it is a file that could never be opened again.
+  release: (path: string) => void;
 
   /// Which folders of the tree are open, and what each of them last read.
   ///
@@ -154,7 +212,7 @@ export function keeping(): Keeping {
 function empty(): Kept {
   const [tabs, setTabs] = createSignal<Tab[]>([]);
   const [readings, setReadings] = createSignal<Record<string, FileReading>>({});
-  const [buffers, setBuffers] = createSignal<Record<string, string>>({});
+  const [buffers, setBuffers] = createSignal<Record<string, Buffer>>({});
   const [expanded, setExpanded] = createSignal<Record<string, FolderListing>>(
     {},
   );
@@ -165,13 +223,78 @@ function empty(): Kept {
 
   let refusals = 0;
 
+  /// Which paths a buffer is wanted for, which is what a chunk that lands after
+  /// the tab has gone is checked against: the fetch is a promise, and a file
+  /// closed while it was in flight would otherwise be a model registered at an
+  /// address nothing is ever going to dispose.
+  const wanted = new Set<string>();
+
+  const hold = (path: string, text: string): void => {
+    const already = buffers()[path];
+
+    if (already !== undefined) {
+      already.put(text);
+      return;
+    }
+
+    wanted.add(path);
+
+    void load()
+      .then((monaco) => {
+        if (!wanted.has(path) || buffers()[path] !== undefined) {
+          return;
+        }
+
+        const model = monaco.editor.createModel(
+          text,
+          undefined,
+          monaco.Uri.file(path),
+        );
+        const [held, setHeld] = createSignal(text);
+
+        // The one thing that writes the signal: every edit, wherever it was
+        // typed, arrives here — which is how two views of one file wear the one
+        // dot. Disposed with the model, Monaco's listeners being the model's.
+        model.onDidChangeContent(() => setHeld(model.getValue()));
+
+        const put = (next: string): void => {
+          if (model.getValue() !== next) {
+            model.setValue(next);
+          }
+        };
+
+        setBuffers((was) => ({ ...was, [path]: { model, text: held, put } }));
+      })
+      // A chunk that never arrived is a tab with no editor in it, which is what
+      // `Editor.tsx` says in words. Nothing to add to it from here.
+      .catch(() => {});
+  };
+
+  const release = (path: string): void => {
+    wanted.delete(path);
+
+    const buffer = buffers()[path];
+
+    if (buffer === undefined) {
+      return;
+    }
+
+    buffer.model.dispose();
+    setBuffers((was) => {
+      const rest = { ...was };
+      delete rest[path];
+      return rest;
+    });
+  };
+
   return {
     tabs,
     setTabs,
     readings,
     setReadings,
     buffers,
-    setBuffers,
+    hold,
+    release,
     expanded,
     setExpanded,
     over,
@@ -217,5 +340,5 @@ export function dirty(kept: Kept, path: string): boolean {
   const read = disk(kept, path);
   const held = kept.buffers()[path];
 
-  return read !== undefined && held !== undefined && held !== read.text;
+  return read !== undefined && held !== undefined && held.text() !== read.text;
 }

@@ -254,6 +254,27 @@
   }
 }
 
+/* What a file's tab holds, which is the bar over a refused save and then the
+   editor, the picture or the line saying why there is neither — see `Opened` in
+   `Code.tsx`. A column of the group's own height, so that the editor under it
+   takes the room the way a terminal's grid does.
+
+   Drawn whether or not its tab is the one showing, and hidden when it is not:
+   an editor taken down and made again is a caret and an undo stack the human
+   cannot come back to. `hidden` needs saying twice here for the reason
+   `Attached.module.css` says it twice — the browser's own sheet makes it
+   `display: none`, and a `display: flex` from a page beats it. */
+.opened {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.opened[hidden] {
+  display: none;
+}
+
 /* A file's tab holds the editor, and what that is drawn in is its own —
    `Editor.module.css`, beside the component that opens Monaco into it.
 

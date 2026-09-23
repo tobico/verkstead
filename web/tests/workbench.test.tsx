@@ -313,6 +313,7 @@ import {
 // ordinary way — so this is that instance and not a second one.
 import {
   loading,
+  opened as editors,
   refusing,
   reset as resetEditing,
   theEditor,
@@ -19624,6 +19625,17 @@ describe("a file opened out of the code pane's tree", () => {
       ?.textContent;
   }
 
+  /// What a file's tab is holding, which is drawn whether or not the tab is the
+  /// one showing and hidden when it is not — the editor under it is what keeps
+  /// the caret and the undo stack across a turn away and back.
+  function content(container: ParentNode): HTMLElement[] {
+    return [
+      ...container.querySelectorAll<HTMLElement>(
+        `.${shell.detailsPane} .${codePane.opened}`,
+      ),
+    ];
+  }
+
   /// The workbench with one root of the tree expanded, which is how a file is
   /// reached: nothing is read until a row is pressed, and a file is a row under
   /// the folder it is in.
@@ -19918,6 +19930,51 @@ describe("a file opened out of the code pane's tree", () => {
     expect(askedFor(fetching, fileOf(TEXT.path))).toBe(1);
   });
 
+  /// And a tab turned away from keeps its editor, which is the one thing a
+  /// human can see about the buffer having moved above the pane: the caret and
+  /// the undo stack are where they were left, because nothing was made afresh.
+  ///
+  /// The tab is hidden rather than taken down, the way a terminal's grid is.
+  /// What is read back here is the caret — the box the stand-in puts where the
+  /// real editor's view would be is the same box, and its selection is the same
+  /// selection — and the editor object itself, which the pane opened once.
+  it("keeps the editor of a tab turned away from, caret and all", async () => {
+    const { container } = await expanded(
+      OWN_ROOT,
+      codeFolder as FolderListing,
+      whenever(fileOf(TEXT.path), json(codeFile)),
+    );
+
+    press(container, "Cargo.toml");
+    await waitFor(() => expect(editor(container)?.value).toBe(TEXT.text));
+
+    const made = theEditor();
+
+    made.typing.setSelectionRange(4, 4);
+
+    // Away to the terminal beside it. The file's tab is still drawn — hidden,
+    // which is the browser's own word for it and what a screen reader reads.
+    fireEvent.click(tabs(container)[0]!);
+    await waitFor(() =>
+      expect(
+        tabs(container).map((tab) => tab.getAttribute("aria-pressed")),
+      ).toEqual(["true", "false"]),
+    );
+
+    expect(content(container)).toHaveLength(1);
+    expect(content(container)[0]!.hidden).toBe(true);
+    expect(made.disposed).toBe(false);
+
+    // And back, to the editor that was there — not a second one over the same
+    // buffer.
+    fireEvent.click(tabs(container)[1]!);
+    await waitFor(() => expect(content(container)[0]!.hidden).toBe(false));
+
+    expect(theEditor()).toBe(made);
+    expect(editors).toHaveLength(1);
+    expect(editor(container)?.selectionStart).toBe(4);
+  });
+
   /// And the × at the end of a file's tab closes it, taking its reading with
   /// it: there is nothing at the server to end, and opening it again is a fresh
   /// reading of the disk the way expanding a folder is.
@@ -19935,14 +19992,28 @@ describe("a file opened out of the code pane's tree", () => {
       "Close Cargo.toml",
     );
 
+    await waitFor(() => expect(editor(container)?.value).toBe(TEXT.text));
+
+    const made = theEditor();
+
     fireEvent.click(crosses(container)[1]!);
 
     await waitFor(() => expect(tabs(container)).toHaveLength(1));
     expect(editor(container)).toBeNull();
 
+    // And the buffer with it, which is a disposal rather than a forgetting: the
+    // model is registered at the file's own address in Monaco's own register,
+    // and one left there is a file that could never be opened again.
+    expect(made.model.disposed).toBe(true);
+
     press(container, "Cargo.toml");
 
     await waitFor(() => expect(askedFor(fetching, fileOf(TEXT.path))).toBe(2));
+
+    // A fresh read, and a fresh buffer over it.
+    await waitFor(() => expect(editor(container)?.value).toBe(TEXT.text));
+    expect(theEditor().model).not.toBe(made.model);
+    expect(theEditor().model.disposed).toBe(false);
   });
 
   /// The editor is a chunk of its own, fetched because Code was opened and for
@@ -20619,6 +20690,40 @@ describe("a file opened out of the code pane's tree", () => {
       expect(dots(container)).toHaveLength(1);
 
       expect(askedFor(fetching, fileOf(TEXT.path))).toBe(1);
+    });
+
+    /// And what carries the text across the swap is the buffer itself, which is
+    /// above the pane rather than in the editor drawing it.
+    ///
+    /// The editor goes with the pane — it is a view, and the pane it was drawn
+    /// in has been taken down — and the model it was drawn over does not: the
+    /// one that comes back is a second editor over the first buffer, which is
+    /// the same arrangement two groups showing one file are in (ADR 0019, *Tabs
+    /// and groups*).
+    it("keeps the buffer across the swap and draws a new editor over it", async () => {
+      const { container, history } = await expanded(
+        OWN_ROOT,
+        codeFolder as FolderListing,
+        whenever(fileOf(TEXT.path), json(codeFile)),
+      );
+
+      press(container, "Cargo.toml");
+      await waitFor(() => expect(editor(container)?.value).toBe(TEXT.text));
+
+      await types(container, "[workspace]\nmembers = []\n");
+
+      const made = theEditor();
+
+      await away(container, history);
+
+      await waitFor(() =>
+        expect(editor(container)?.value).toBe("[workspace]\nmembers = []\n"),
+      );
+
+      expect(made.disposed).toBe(true);
+      expect(made.model.disposed).toBe(false);
+      expect(theEditor()).not.toBe(made);
+      expect(theEditor().model).toBe(made.model);
     });
 
     /// And the tree comes back open where it was left, which is the other

@@ -38,6 +38,15 @@
 //! said — two things rather than one, because the whole of saving is a
 //! comparison between them over the version the read carried.
 //!
+//! **And the buffer is held above this pane**, with the tabs and the readings,
+//! rather than inside the editor drawing it — see [`./keeping`]. A buffer is a
+//! Monaco model registered at the file's own address and the package refuses a
+//! second one there, so one made by an editor could never be shared with a
+//! second editor of the same file: holding it above is what lets the same file
+//! be open in two groups over one text, one undo stack and one dot (ADR 0019,
+//! *Tabs and groups*). Everything here that reads or writes the text — the dot,
+//! Ctrl+S, **Reload** and **Keep mine** — goes through it.
+//!
 //! **Saving is explicit**, which is Ctrl+S: a dot on a tab whose buffer has
 //! come apart from its reading, a write that names the version that reading
 //! carried, and a confirm on closing a tab still wearing the dot. VS Code's
@@ -112,6 +121,11 @@
 //! has printed it by the time they turn back. Only the tab showing measures the
 //! pane and says so up its socket — see [`./Attached`], where the hiding, the
 //! measuring and the focus all are.
+//!
+//! **A file's tab is hidden rather than taken down too**, for the near reason:
+//! an editor taken down is a caret and an undo stack nobody can come back to.
+//! The text was never what was at risk — the buffer is above this pane — so
+//! what the hiding keeps is where in the file the human was.
 //!
 //! **The server holds the shells, so this pane is the way back to them rather
 //! than where they live.** On load it asks which of the Conversation's terminals
@@ -241,6 +255,7 @@ import {
   dirty as unsavedIn,
   disk as onDisk,
   type Bar,
+  type Buffer,
   type Kept,
   type Tab,
 } from "./keeping";
@@ -489,7 +504,8 @@ export function Code(props: {
     readings,
     setReadings,
     buffers,
-    setBuffers,
+    hold,
+    release,
     expanded,
     setExpanded,
     over,
@@ -736,6 +752,11 @@ export function Code(props: {
   };
 
   /// What a file's tab leaves behind when it goes: nothing.
+  ///
+  /// The buffer with it, which is a disposal rather than a forgetting: the
+  /// model is registered at the file's own address in Monaco's own register,
+  /// and one left there is a file that could never be opened again. There is
+  /// one group in this stage, so a tab going is that file's last view going.
   const forget = (path: string): void => {
     saving.delete(path);
     setReadings((was) => {
@@ -743,11 +764,7 @@ export function Code(props: {
       delete rest[path];
       return rest;
     });
-    setBuffers((was) => {
-      const rest = { ...was };
-      delete rest[path];
-      return rest;
-    });
+    release(path);
     unbar(path);
   };
 
@@ -788,17 +805,14 @@ export function Code(props: {
           return;
         }
 
-        setBuffers((was) => {
-          const rest = { ...was };
-
-          if (typeof reading !== "string" && "Text" in reading) {
-            rest[path] = reading.Text.text;
-          } else {
-            delete rest[path];
-          }
-
-          return rest;
-        });
+        if (typeof reading !== "string" && "Text" in reading) {
+          // The buffer, made out of what was read where the file has none yet
+          // and written with it where it has — which is the whole of the
+          // difference between opening a file and **Reload**.
+          hold(path, reading.Text.text);
+        } else {
+          release(path);
+        }
       })
       // A request that never landed is a file that says why there is nothing in
       // its tab, the way a file the server refused does: the sentence is the
@@ -835,7 +849,7 @@ export function Code(props: {
   /// would still move the file's timestamp under every watcher there is.
   const save = (path: string): Promise<void> => {
     const read = disk(path);
-    const text = buffers()[path];
+    const text = buffers()[path]?.text();
 
     if (read === undefined || text === undefined || saving.has(path)) {
       return Promise.resolve();
@@ -1215,25 +1229,22 @@ export function Code(props: {
               <For each={tabs()}>
                 {(tab) =>
                   "file" in tab ? (
-                    // A file is drawn while it is the one showing and not
-                    // otherwise: what it holds is the reading and the buffer
-                    // above, so a tab turned away from and back to finds its
-                    // text where it was. A terminal cannot be drawn that way —
-                    // its grid is the socket's, and a socket closed on being
-                    // hidden is a shell nobody could come back to.
-                    <Show when={showing() === keyed(tab)}>
-                      <Opened
-                        reading={readings()[tab.file]}
-                        text={buffers()[tab.file]}
-                        name={named(tab.file)}
-                        bar={bars()[tab.file]}
-                        typed={(text) =>
-                          setBuffers((was) => ({ ...was, [tab.file]: text }))
-                        }
-                        reload={() => void reread(tab.file)}
-                        keep={() => void reread(tab.file, true)}
-                      />
-                    </Show>
+                    // A file's tab is drawn whether or not it is the one
+                    // showing, and hidden when it is not — the way a terminal's
+                    // is, and for the near reason: a grid taken down is a shell
+                    // nobody could come back to, and an editor taken down is a
+                    // caret and an undo stack nobody can come back to. The text
+                    // itself was never at risk, the buffer being above this
+                    // pane; what the hiding keeps is where the human was in it.
+                    <Opened
+                      showing={showing() === keyed(tab)}
+                      reading={readings()[tab.file]}
+                      buffer={buffers()[tab.file]}
+                      name={named(tab.file)}
+                      bar={bars()[tab.file]}
+                      reload={() => void reread(tab.file)}
+                      keep={() => void reread(tab.file, true)}
+                    />
                   ) : tab.terminal > 0 ? (
                     <Attached
                       at={terminalSocket(props.conversation.id, tab.terminal)}
@@ -1450,20 +1461,26 @@ function Busy(props: {
 ///
 /// **The editor is [`./Editor`]**, which is Monaco. What is kept here is what
 /// is around it: which of the four kinds came back, and the buffer the text is
-/// in — so the editor is handed a file and its text and has nothing else to
-/// know.
+/// in — so the editor is handed a buffer and has nothing else to know.
+///
+/// **Drawn hidden rather than taken down** when its tab is not the one showing,
+/// which is what keeps the caret and the undo stack across a turn away and
+/// back. `hidden` and a rule in the stylesheet, the way `./Attached` hides a
+/// terminal's grid: the browser's own word for it, and the one thing a screen
+/// reader reads the same way.
 function Opened(props: {
+  /// Whether this is the tab showing. Hidden rather than gone when it is not.
+  showing: boolean;
   /// What came back, or nothing at all while the read is in flight.
   reading: FileReading | undefined;
-  /// The buffer: the text as it stands, which starts as what was read.
-  text: string | undefined;
+  /// The buffer: the text as it stands, which starts as what was read, and is
+  /// nothing at all until Monaco has landed.
+  buffer: Buffer | undefined;
   /// What the file is called, which is what an editor and a picture alike are
   /// read aloud as.
   name: string;
   /// What the last save came to, where it came to anything to draw.
   bar: Bar | undefined;
-  /// And what typing into it does.
-  typed: (text: string) => void;
   /// **Reload**: take what is on the disk now, text and version together.
   reload: () => void;
   /// And **Keep mine**: read the disk for its version, and keep the text that
@@ -1514,7 +1531,7 @@ function Opened(props: {
     props.bar !== undefined && props.bar !== "moved" ? props.bar.why : null;
 
   return (
-    <>
+    <div class={styles.opened} hidden={!props.showing}>
       {/* Above whatever the tab is holding, because it is about the file rather
           than about the editor: a file that turned into something there is no
           editor for between the read and the save still has a save to say
@@ -1528,16 +1545,14 @@ function Opened(props: {
         <Match when={why()}>{(said) => <ErrorLine>{said()}</ErrorLine>}</Match>
         <Match when={text()}>
           {(read) => (
-            // Monaco, coloured by the path it was read at — and a file in a
-            // read-only root is an editor that takes no typing, the root's own
-            // flag rather than the file's mode, which is what saves a human
-            // finding out by typing.
+            // Monaco over the buffer above, coloured by the path that buffer
+            // was made at — and a file in a read-only root is an editor that
+            // takes no typing, the root's own flag rather than the file's mode,
+            // which is what saves a human finding out by typing.
             <Editor
-              path={read().path}
               name={props.name}
-              text={props.text ?? read().text}
+              model={props.buffer?.model}
               writable={read().writable}
-              typed={props.typed}
             />
           )}
         </Match>
@@ -1554,7 +1569,7 @@ function Opened(props: {
           )}
         </Match>
       </Switch>
-    </>
+    </div>
   );
 }
 

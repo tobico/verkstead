@@ -34,16 +34,23 @@ export type Uri = Package.Uri;
 /// service reads the same path as the name of the file it is compiling. Which
 /// is why there is no table of extensions anywhere here — the package has one,
 /// and it is the same one VS Code has.
+///
+/// **Held above the pane rather than inside an editor** — see `./keeping`. A
+/// model is registered at the file's own address and Monaco refuses a second
+/// one there, so it is the one thing there can only ever be one of per file:
+/// which is exactly what makes the same file open in two groups two views over
+/// one text, one undo stack and one dot (ADR 0019, *Tabs and groups*).
 export type Model = Package.editor.ITextModel;
 
 /// One editor, as much of it as this pane uses.
+///
+/// Two calls, because an editor here is a *view*: what it shows is the model it
+/// was opened over, and everything that reads or writes the text reads or
+/// writes that — so there is nothing here to take a value out of and nothing to
+/// put one back in with. See [`Model`].
 export type Standalone = Pick<
   Package.editor.IStandaloneCodeEditor,
-  | "getValue"
-  | "setValue"
-  | "onDidChangeModelContent"
-  | "updateOptions"
-  | "dispose"
+  "updateOptions" | "dispose"
 >;
 
 /// What an editor is opened with — the buffer, what it is read aloud as, the

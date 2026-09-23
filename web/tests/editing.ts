@@ -8,9 +8,12 @@
 //! theme, read-only or not, and where the typing went — and all of that is
 //! askable of this.
 //!
-//! So the box the text is really in here is a `textarea`. It is not what Monaco
-//! draws and is not meant to be: it is somewhere for a test to read a value off
-//! and fire an input at, standing where the real editor's own view would be.
+//! So what stands where the real editor's own view would be is a `textarea`:
+//! somewhere for a test to read a value off and fire an input at. It is not
+//! what Monaco draws and is not meant to be — and it is not where the text is
+//! either, any more than it is in a real editor. The text is in the model above
+//! the pane, and the box is a view of it: typing into the box writes the model,
+//! and a model written from anywhere else shows in the box.
 //!
 //! Installed by a test file with
 //!
@@ -32,17 +35,27 @@ export type Opening = {
   model?: Model;
 };
 
-/// A buffer, which is the path it was made at and the text that was in it.
+/// A buffer, which is the path it was made at and the text that is in it.
 ///
 /// The path is the whole of how a language is chosen — see `Editor.tsx` — so it
 /// is what a test about colouring asks after.
+///
+/// Made above the pane rather than by an editor — see `keeping.ts` — and this
+/// stands in for the real one closely enough to say so: the text really is
+/// here, an editor drawn over it is a view of it, and every change to it is
+/// told to whoever asked to hear.
 export type Model = {
   path: string;
-  text: string;
-  /// Whether the tab it was made for has gone. Monaco registers a buffer
-  /// against the file's own address and refuses a second one there, so a tab
-  /// that did not dispose its own would be a file that could never be reopened.
+  /// The text as it stands, which is what an editor over it is showing.
+  readonly text: string;
+  /// Whether it has been disposed. Monaco registers a buffer against the file's
+  /// own address and refuses a second one there, so a file whose last view
+  /// closed without disposing its own would be one that could never be
+  /// reopened.
   disposed: boolean;
+  getValue(): string;
+  setValue(text: string): void;
+  onDidChangeContent(said: () => void): { dispose(): void };
   dispose(): void;
 };
 
@@ -97,12 +110,31 @@ export function theEditor(): Editor {
 const monaco = {
   editor: {
     createModel(text: string, _language: string | undefined, at: Uri): Model {
+      let held = text;
+      const watching = new Set<() => void>();
+
       const model: Model = {
         path: at.path,
-        text,
+        get text() {
+          return held;
+        },
         disposed: false,
+        getValue: () => held,
+        setValue: (next: string) => {
+          held = next;
+
+          for (const said of [...watching]) {
+            said();
+          }
+        },
+        onDidChangeContent: (said: () => void) => {
+          watching.add(said);
+
+          return { dispose: () => watching.delete(said) };
+        },
         dispose: () => {
           model.disposed = true;
+          watching.clear();
         },
       };
 
@@ -115,12 +147,30 @@ const monaco = {
 
       const typing = at.ownerDocument.createElement("textarea");
 
-      typing.value = model.text;
+      typing.value = model.getValue();
       typing.readOnly = opening.readOnly === true;
 
       if (opening.ariaLabel !== undefined) {
         typing.setAttribute("aria-label", opening.ariaLabel);
       }
+
+      // Typing into the box is typing into the buffer, which is what it is in
+      // the real editor: an editor is a view *of* a model, and everything that
+      // follows the text — the dot, Ctrl+S, the second view of the same file —
+      // follows it from there.
+      typing.addEventListener("input", () => {
+        if (model.getValue() !== typing.value) {
+          model.setValue(typing.value);
+        }
+      });
+
+      // And a buffer written from outside any editor — Reload — shows here, the
+      // way it shows in an editor Monaco is drawing.
+      const watching = model.onDidChangeContent(() => {
+        if (typing.value !== model.getValue()) {
+          typing.value = model.getValue();
+        }
+      });
 
       at.append(typing);
 
@@ -129,13 +179,6 @@ const monaco = {
       opened.push(made);
 
       return {
-        getValue: () => typing.value,
-        setValue: (text: string) => {
-          typing.value = text;
-        },
-        onDidChangeModelContent: (said: () => void) => {
-          typing.addEventListener("input", said);
-        },
         updateOptions: (options: { readOnly?: boolean }) => {
           if (options.readOnly !== undefined) {
             typing.readOnly = options.readOnly;
@@ -143,6 +186,7 @@ const monaco = {
         },
         dispose: () => {
           made.disposed = true;
+          watching.dispose();
           typing.remove();
         },
       };
@@ -162,11 +206,9 @@ const monaco = {
 /// matters here is that the path arrives.
 type Uri = { path: string };
 
-/// And one editor, as much of it as the pane calls.
+/// And one editor, as much of it as the pane calls — which is two things, an
+/// editor here being a view over a buffer rather than somewhere text is kept.
 type Standalone = {
-  getValue(): string;
-  setValue(text: string): void;
-  onDidChangeModelContent(said: () => void): void;
   updateOptions(options: { readOnly?: boolean }): void;
   dispose(): void;
 };
