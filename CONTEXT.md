@@ -1226,14 +1226,15 @@ Sandbox; on Windows, Windows PowerShell — no passwd database to read a login
 shell out of and no dev shell to enter, as the session account and behind the
 Conversation's own entries the same way, and not `pwsh` even where somebody has
 installed PowerShell 7, that on most machines being a Store execution alias
-under the human's own profile and refused to any other account. Opened from the
-**Terminal icon on the Timeline's header** into a
-details pane of its own at `/terminal`, where each one is a tab: one opens when
-the pane loads with none live, plus opens another, a tab goes when its shell
-ends, and the pane never stands empty — the last tab going opens a fresh one,
-unless the shell ended within moments of starting or could not start at all, in
-which case the tab stays saying why until plus is pressed. Close is on the tab's
-menu, a right-click or a long press.
+under the human's own profile and refused to any other account. **A tab of the
+Code pane** — see **Code** — beside the files open there: the pane opens with
+the shells that are live as tabs and opens none of its own accord, **New
+terminal** opens another, a tab goes when its shell ends, and a shell that
+ended within moments of starting or could not start at all leaves its tab
+saying why. Closed by the × on its tab, which ends the shell, and asks first
+where the shell is **busy** — its foreground process something other than the
+shell itself, which the server can tell where it holds a pty and takes as
+always so where it does not.
 A tab is called whatever its shell sets the terminal's title to, and *Terminal N*
 by the server's number where it has set none — a fresh attach reads the number
 again, a repaint carrying the grid and not the title.
@@ -1244,8 +1245,38 @@ window's own and go with the tab. And the same rule about the human: typing into
 one holds nothing off and records nothing. **Not a record**: memory only, no Capture, no Event, nothing in
 a Share, and gone with the server. Lives until its shell exits, it is closed, the
 Conversation closes or the server stops, and comes back as a tab whenever the
-pane is reopened in between. See ADR-0013.
-_Avoid_: shell (what runs in it), console, Screen (a session's), tty
+pane is reopened in between. See ADR-0013, and ADR-0019 for the tab rules as
+they now stand.
+_Avoid_: shell (what runs in it), console, Screen (a session's), tty, Terminal
+pane (it is a tab of Code now)
+
+**Code**:
+The Conversation's editor: a details pane at `/code`, opened by the code icon
+beside Share on the Timeline's header, for trying the agent's work and
+finishing it by hand without leaving the workbench. Down one side a **tree**
+with a root per Worktree — the Conversation's own first, then each Companion,
+a read-only one opening read-only — hiding what git ignores and `.git`, marked
+where git says a file is modified or untracked, with new file, new folder,
+rename and delete on a row's menu and quick open over every name. Beside it
+**groups** of tabs, each tab a file in Monaco, an image, or a Terminal, in a
+tab bar styled after VS Code's: a kind icon and a × on every tab, a dot where a
+file is dirty. A group splits beside or below itself from a tab's menu, from
+the icon at the end of its bar, or by a tab dragged to its edge, any depth,
+with draggable dividers; a group whose last tab leaves is gone; the same file
+in two groups is one buffer seen twice. Saving is explicit: Ctrl+S, and a
+write over a file that has moved on disk since it was read is refused until
+the human chooses — a clean editor takes the disk's text on its own when the
+Worktree moves, a dirty one keeps theirs and offers **Reload** or **Keep
+mine**. The Worktree moving reaches the pane as a `files` Nudge from a watcher
+the server runs while a Code pane is attached. What is open — the groups, the
+tabs, the unsaved text — is the device's, kept per Conversation in the browser
+and back after a reload; so is the **maximise** toggle in the header, which
+hides the sidebar and the Timeline on a window wide enough to have drawn them.
+**Reads and writes are the server's own, outside the Sandbox**, bounded by the
+roots: nothing under `.git`, nothing outside a Worktree, nothing written to a
+read-only Companion. Desktop-first — nothing is promised on a phone. **Not a
+record** and **not a hold on the run**, as a Terminal is not. See ADR-0019.
+_Avoid_: IDE, editor pane, Terminal pane, workspace, explorer (the tree)
 
 **Idle**:
 A running session that has stopped — not gone, but sitting there with its turn
