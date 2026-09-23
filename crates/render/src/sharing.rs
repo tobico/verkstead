@@ -248,6 +248,13 @@ pub fn shared(
             waiting_on_checks: false,
             resets: None,
 
+            // And the steer somebody is part-way through writing, which never
+            // boards. It has not happened yet, so it is no part of the record a
+            // share is; the item drawn for it opens a form the reader has no
+            // workbench to submit, and what it would tell them is where the
+            // work might be going rather than where it went.
+            pending_steer: None,
+
             // And where a share of this Conversation was last published, which
             // is the workbench's fact about the record rather than part of it:
             // a reader already holds a share, and one carrying the link to

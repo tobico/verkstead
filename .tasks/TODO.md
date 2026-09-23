@@ -20,7 +20,7 @@ frozen record.
 
 ## Tasks
 
-- [ ] 01: The pending steer, out of the modal — [details](01-out-of-the-modal.md)
+- [x] 01: The pending steer, out of the modal — [details](01-out-of-the-modal.md)
 - [ ] 02: The form saves itself — [details](02-the-form-saves-itself.md)
 - [ ] 03: What the rest of the workbench says about it — [details](03-around-a-pending-steer.md)
 - [ ] 04: The record is the whole form — [details](04-the-whole-form-on-the-record.md)

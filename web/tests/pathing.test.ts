@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ConversationView } from "../src/api/types";
 import {
+  landing,
   lastOpening,
   openingAt,
   openingOf,
@@ -54,6 +55,7 @@ const PATHS: Array<[Opening, string]> = [
   ["backlog", "/conversations/3/backlog"],
   ["share", "/conversations/3/share"],
   ["terminal", "/conversations/3/terminal"],
+  ["steer", "/conversations/3/steer"],
   [opensRoadmap("mvp"), "/conversations/3/roadmaps/mvp"],
   [opensRoadmap("companion-repos"), "/conversations/3/roadmaps/companion-repos"],
 ];
@@ -117,6 +119,7 @@ describe("what a path says is open", () => {
     expect(openingAt("/conversations/3/backlog/nowhere")).toBeNull();
     expect(openingAt("/conversations/3/share/nowhere")).toBeNull();
     expect(openingAt("/conversations/3/terminal/1")).toBeNull();
+    expect(openingAt("/conversations/3/steer/1")).toBeNull();
     expect(openingAt("/conversations/3/events/1e3")).toBeNull();
     expect(openingAt("/conversations/3/roadmaps/mvp/1")).toBeNull();
   });
@@ -188,5 +191,40 @@ describe("the end of a record", () => {
       lastOpening(WRAPPING.timeline.filter((event) => "Moved" in event)),
     ).toBeNull();
     expect(lastOpening([])).toBeNull();
+  });
+});
+
+describe("where opening a conversation lands", () => {
+  /// The end of the record, where nobody is steering it: the last thing that
+  /// has a pane behind it, which is where the work got to.
+  it("lands on the end of the record where no steer is pending", () => {
+    expect(GRILLING.pending_steer).toBeNull();
+    expect(landing(GRILLING)).toBe(lastOpening(GRILLING.timeline));
+  });
+
+  /// And on the pending steer where there is one, because that is drawn after
+  /// the record: it is the one item on the pane that has not happened yet, so
+  /// the end of the pane is the form rather than the last event. Somebody who
+  /// left a steer half written and came back is shown what they were writing.
+  it("lands on the pending steer where one stands", () => {
+    const steering: ConversationView = {
+      ...GRILLING,
+      pending_steer: { at: "2026-09-23T09:14:00Z", target: null },
+    };
+
+    expect(landing(steering)).toBe("steer");
+  });
+
+  /// Whatever is on the record under it, and even where none of it opens
+  /// anything: the form is the last item either way.
+  it("lands on it over a record with nothing openable on it", () => {
+    const steering: ConversationView = {
+      ...GRILLING,
+      timeline: GRILLING.timeline.filter((event) => "Moved" in event),
+      pending_steer: { at: "2026-09-23T09:14:00Z", target: "Implementing" },
+    };
+
+    expect(lastOpening(steering.timeline)).toBeNull();
+    expect(landing(steering)).toBe("steer");
   });
 });

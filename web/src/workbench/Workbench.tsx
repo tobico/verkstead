@@ -113,11 +113,12 @@ import { Output } from "./Output";
 import { PullRequest } from "./PullRequest";
 import { Roadmap } from "./Roadmap";
 import { Share } from "./Share";
+import { Steer } from "./Steer";
 import { Terminal } from "./Terminal";
 import { Timeline } from "./Timeline";
 import { pressed } from "./eager";
 import {
-  lastOpening,
+  landing,
   openingAt,
   pathOf,
   pathTo,
@@ -464,6 +465,42 @@ export function Workbench(): JSX.Element {
       ? { to: "Conversations", go: () => navigate("/") }
       : { to: "Timeline", go: () => setPane("middle") };
 
+  /// And the way off a pane whose subject has gone: what the pending steer's
+  /// form does when it is cancelled or submitted.
+  ///
+  /// Two acts rather than one, because what it lets go of is two things. The
+  /// level goes back the way [`leaving`] takes it — the Timeline, or the
+  /// conversations where there is no Timeline drawn — and the URL lets go of
+  /// the address itself, so the landing effect above opens the end of the
+  /// record: which after a cancel is where the Timeline was open before, and
+  /// after a submit is the record the steer just wrote.
+  ///
+  /// Nothing is navigated where the way out was already a navigation: a
+  /// Conversation whose record is one Event has left the workbench by then, and
+  /// a second navigation would hand it straight back.
+  const shut = () => {
+    const away = alone();
+    leaving().go();
+
+    if (!away) {
+      navigate(pathOf(selected()), { replace: true });
+    }
+  };
+
+  // And a narrow window walks into the details when the URL comes to name the
+  // pending steer, the way pressing any card does. The press that opens one is
+  // in the actions menu — see `Actions.tsx` — which has no level to change and
+  // navigates instead, so the walk is made here off the address it wrote. The
+  // effect on [`selected`] above covers arriving at the Conversation itself; it
+  // never runs when the Conversation the page already stands on grows a form.
+  createEffect(
+    on(event, (opening, was) => {
+      if (opening === "steer" && was !== "steer") {
+        setPane("details");
+      }
+    }),
+  );
+
   // Arriving at a Conversation with nothing open lands on the end of its record:
   // the last Event that has a pane behind it, opened by rewriting the URL to its
   // path with replace. What somebody pressing a Conversation asked for is where
@@ -483,6 +520,11 @@ export function Workbench(): JSX.Element {
   // A record with nothing openable on it selects nothing and the pane stays bare
   // paper, which is a Draft with only the Brief being written.
   //
+  // A pending steer is the end of the pane too, and it is where landing goes
+  // first: it is the one item drawn after the record, so the human who left a
+  // steer half written and came back is shown the form they were writing. See
+  // [`landing`].
+  //
   // Which level a narrow window is showing is not touched, and that is the point:
   // it follows the Conversation changing, and this changes no Conversation. So a
   // phone lands on the Timeline with the newest thing marked open and the details
@@ -501,7 +543,7 @@ export function Workbench(): JSX.Element {
       return;
     }
 
-    const last = lastOpening(read.timeline);
+    const last = landing(read);
     if (last !== null) {
       navigate(pathTo(id, last), { replace: true });
       setFollowed(id);
@@ -529,7 +571,7 @@ export function Workbench(): JSX.Element {
       return;
     }
 
-    const last = lastOpening(read.timeline);
+    const last = landing(read);
     if (last !== null && last !== event()) {
       navigate(pathTo(id, last), { replace: true });
     }
@@ -569,6 +611,7 @@ export function Workbench(): JSX.Element {
               conversation={conversation}
               event={event()}
               back={leaving()}
+              shut={shut}
             />
           </Show>
         }
@@ -659,6 +702,12 @@ function DetailsPane(props: {
   /// always opened from. Nothing on a record of one Event opens them: the cards
   /// and the icon that do are the Timeline's, and the Timeline is not drawn.
   back: { to: string; go: () => void };
+
+  /// And the way off a pane whose subject has gone, which is the pending
+  /// steer's alone: cancelling or submitting the form leaves no form to be
+  /// drawn, so the page lets go of the address as well as of the level. See
+  /// `shut` in [`Workbench`].
+  shut: () => void;
 }): JSX.Element {
   /// The Event the details pane is showing, where it is one that has a full
   /// self to show. An id whose Event has gone leaves the pane empty, which is
@@ -681,11 +730,12 @@ function DetailsPane(props: {
   /// timeline, because that is where it is drawn: it is the one event that
   /// stays in view rather than scrolling past, and it opens all the same.
   ///
-  /// The backlog, the roadmap, the Share pane and the Terminal are none of these
-  /// and are not looked for here at all: none of the four has an Event — the two
-  /// lists are read off the worktree every time the Conversation is, and sharing
-  /// and a shell in the Sandbox belong to the Conversation rather than to any
-  /// moment on it — so the pane draws them from the selection itself, see the
+  /// The backlog, the roadmap, the Share pane, the Terminal and the pending
+  /// steer are none of these and are not looked for here at all: none of the
+  /// five has an Event — the two lists are read off the worktree every time the
+  /// Conversation is, sharing and a shell in the Sandbox belong to the
+  /// Conversation rather than to any moment on it, and a pending steer has not
+  /// happened yet — so the pane draws them from the selection itself, see the
   /// `Switch` below.
   const opened = (conversation: ConversationView): Opened | undefined => {
     const id = props.event;
@@ -738,14 +788,15 @@ function DetailsPane(props: {
     <Show when={props.conversation.data}>
       {(conversation) => (
         <Switch>
-          {/* The backlog, the roadmap, the Share pane and the Terminal, which
-              are the four things this pane draws that are not Events: the two
-              lists are read off the worktree every time the Conversation is,
-              and sharing and a shell in the Sandbox belong to the Conversation
-              rather than to anything on its record. So there is nothing on the
-              record to name any of them by, and each is named by a word
+          {/* The backlog, the roadmap, the Share pane, the Terminal and the
+              steer being written, which are the five things this pane draws
+              that are not Events: the two lists are read off the worktree every
+              time the Conversation is, sharing and a shell in the Sandbox
+              belong to the Conversation rather than to anything on its record,
+              and a pending steer has not happened yet. So there is nothing on
+              the record to name any of them by, and each is named by a word
               instead. Ahead of the Events because they are not among them —
-              [`opened`] looks for an id, and none of the four selections is
+              [`opened`] looks for an id, and none of the five selections is
               one. */}
           <Match when={props.event === "backlog"}>
             <Backlog
@@ -768,6 +819,20 @@ function DetailsPane(props: {
             <Terminal
               conversation={conversation()}
               back={props.back.go}
+            />
+          </Match>
+          {/* And the steer being written, which is the fifth: the pending steer
+              beside the Conversation, whose form this pane is. Drawn only where
+              there is one — the address with nothing behind it is the empty
+              pane an unknown Event id gets, a pending steer going at the submit
+              or the cancel and a kept link outliving both. */}
+          <Match
+            when={props.event === "steer" && conversation().pending_steer}
+          >
+            <Steer
+              conversation={conversation()}
+              back={props.back.go}
+              done={props.shut}
             />
           </Match>
           {/* And which roadmap, a worktree being allowed any number of

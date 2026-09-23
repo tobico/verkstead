@@ -37,6 +37,7 @@ import type {
   GrillingStarted,
   Merging,
   NoticeEvent,
+  PendingSteerView,
   PairingView,
   ProfileEntry,
   PinnedEvent,
@@ -53,6 +54,7 @@ import type {
   Shown,
   ShowingArchived,
   StageListEvent,
+  SteerCancelled,
   SteerOpened,
   Submitted,
   TakenUp,
@@ -209,7 +211,7 @@ import { STATE } from "../src/workbench/states";
 // What is still the human's to settle on the brief card.
 import setup from "../src/workbench/Setup.module.css";
 import setupCss from "../src/workbench/Setup.module.css?raw";
-import steerModal from "../src/workbench/Steer.module.css";
+import steerForm from "../src/workbench/Steer.module.css";
 // The band naming the pull request a draft is holding, over the box it writes
 // its Brief in — and the press under it that takes the pull request up.
 import { TAKE_UP_REFUSAL } from "../src/workbench/TakeUp";
@@ -10100,31 +10102,56 @@ describe("sharing a conversation to its pull requests", () => {
   });
 });
 
-/// Where a steer is clicked, and where the modal it opens is submitted.
+/// Where a steer is pressed, cancelled, and submitted.
 const STEERING = `/api/ui/conversations/${GRILLING.id}/steer`;
+const STEER_CANCEL = `/api/ui/conversations/${GRILLING.id}/steer/cancel`;
 const STEER_SUBMIT = `/api/ui/conversations/${GRILLING.id}/steer/submit`;
 
-/// What the click answers with when it found a session still running, and when
-/// it found none — which is the whole of what the modal is drawn from.
-const OVER_A_SESSION = json({ Opened: { working: true } } satisfies SteerOpened);
-const OVER_NOTHING = json({ Opened: { working: false } } satisfies SteerOpened);
+/// What the press answers with when it found a session still running, and when
+/// it found none — which is what the **Interrupt current task** tick is drawn
+/// against.
+const OVER_A_SESSION = json({
+  Opened: { working: true, already: false },
+} satisfies SteerOpened);
+const OVER_NOTHING = json({
+  Opened: { working: false, already: false },
+} satisfies SteerOpened);
 
-/// Click Steer in the actions menu, and wait for the modal it opens.
+/// And what a second press answers with: the form was already there, and the
+/// page goes to it rather than making another.
+const ALREADY = json({
+  Opened: { working: false, already: true },
+} satisfies SteerOpened);
+
+/// The pending steer the press writes, as the conversation carries it back.
+const PENDING: PendingSteerView = { at: "2026-09-23T09:14:00Z", target: null };
+
+/// The grilling with a steer pending on it, which is what the page reads back
+/// after the press: the row the press wrote is on the conversation, so the item
+/// is at the end of its timeline and the form is that item's details pane.
+function theGrillingSteering(
+  over: Partial<ConversationView>,
+  ...answers: Parameters<typeof serving>
+) {
+  return theGrillingStanding({ pending_steer: PENDING, ...over }, ...answers);
+}
+
+/// Press Steer in the actions menu, and wait for the form it opens.
 ///
-/// The modal is looked for on the document rather than in the container: a
-/// native `dialog` opened with `showModal` is drawn in the top layer, which is
-/// not inside the page's own tree.
+/// A pane now rather than a window over the page, so it is looked for in the
+/// container: what the press does is navigate to the pending steer's own
+/// address, and the details pane draws the form there.
 async function openSteer(container: ParentNode): Promise<HTMLElement> {
   const menu = await openActions(container);
   fireEvent.click(await drawn(menu, `.${actions.steer}`));
-  return drawn(document.body, `.${steerModal.steerConversation}`);
+  return drawn(container, `.${steerForm.steerConversation}`);
 }
 
-/// The states the modal is offering to send the conversation into, in the order
+/// The states the pane is offering to send the conversation into, in the order
 /// it draws them.
-function targets(modal: ParentNode): string[] {
+function targets(pane: ParentNode): string[] {
   return [
-    ...modal.querySelectorAll<HTMLInputElement>(`.${steerModal.steerTarget} input`),
+    ...pane.querySelectorAll<HTMLInputElement>(`.${steerForm.steerTarget} input`),
   ].map((input) => input.value);
 }
 
@@ -10132,9 +10159,9 @@ describe("steering a conversation", () => {
   /// Every state is somewhere to steer *from* — a draft nothing has run in, a
   /// run in flight, work Verkstead has finished with — so the row is drawn
   /// wherever the menu is, unlike the two stops beside it. Which states it can
-  /// be steered *to* is the modal's to offer.
+  /// be steered *to* is the pane's to offer.
   it("offers the row whatever state the conversation is in", async () => {
-    theGrillingStanding({ ready_to_stop: false, working: false });
+    theGrillingSteering({ ready_to_stop: false, working: false });
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     await openActions(container);
@@ -10143,15 +10170,19 @@ describe("steering a conversation", () => {
     expect(container.querySelector(`.${actions.conversationActions} .${actions.stop}`)).toBeNull();
   });
 
-  /// The click is a press before it is a modal: it stops the drive, so nothing
-  /// new is launched while the human composes and the world the modal was drawn
+
+  /// The press is an act before it is a form: it stops the drive, so nothing
+  /// new is launched while the human composes and the world the form is written
   /// against is the world the submit arrives in.
-  it("stops the drive on the click, and reads the conversation back", async () => {
-    const fetching = theGrillingStanding(
+  ///
+  /// And then the page goes to the pending steer it wrote, which is an address
+  /// of its own beside the share pane's and the terminal's.
+  it("stops the drive on the press, and opens the pending steer", async () => {
+    const fetching = theGrillingSteering(
       { ready_to_stop: true, working: true },
       whenever(STEERING, OVER_A_SESSION, "POST"),
     );
-    const { container } = mount(`/conversations/${GRILLING.id}`);
+    const { container, history } = mount(`/conversations/${GRILLING.id}`);
 
     const before = askedFor(fetching, `/api/ui/conversations/${GRILLING.id}`);
 
@@ -10159,10 +10190,94 @@ describe("steering a conversation", () => {
 
     expect(sent(fetching, STEERING)).toEqual({});
     await waitFor(() =>
+      expect(history.get()).toBe(`/conversations/${GRILLING.id}/steer`),
+    );
+    await waitFor(() =>
       expect(
         askedFor(fetching, `/api/ui/conversations/${GRILLING.id}`),
       ).toBeGreaterThan(before),
     );
+  });
+
+  /// And the item is at the end of the timeline, after everything that has
+  /// happened: it has not happened yet, so it is no event and has no place in
+  /// the record. Pressing the card opens the same form the press landed on.
+  it("draws the pending steer as the last item on the timeline", async () => {
+    theGrillingSteering({}, whenever(STEERING, OVER_NOTHING, "POST"));
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const item = await drawn(container, `.${timeline.pendingSteer}`);
+
+    expect(item.textContent).toContain("Steer");
+    expect(
+      [...container.querySelectorAll(`.${timeline.timelineEvent}`)].at(-1),
+    ).toBe(item.closest(`.${timeline.timelineEvent}`));
+  });
+
+  /// And it says where the steer is going once a target is picked, so a human
+  /// coming back to it reads what they had decided off the card.
+  it("says on the card where a steer with a target picked is going", async () => {
+    theGrillingSteering({
+      pending_steer: { at: PENDING.at, target: "Implementing" },
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const item = await drawn(container, `.${timeline.pendingSteer}`);
+
+    expect(item.textContent).toContain("Steering into Implementing");
+  });
+
+  /// A reload draws it again, because the pending steer is the server's rather
+  /// than the device's — and the address it stands at is one a link can keep.
+  it("draws the form again on a cold load of its address", async () => {
+    theGrillingSteering({});
+    const { container } = mount(`/conversations/${GRILLING.id}/steer`);
+
+    await drawn(container, `.${steerForm.steerConversation}`);
+  });
+
+  /// And landing on a conversation with one lands on it, the way landing on a
+  /// conversation lands on the last openable thing on its record: the form is
+  /// the last item on the pane.
+  it("lands on the form when the conversation is opened", async () => {
+    theGrillingSteering({});
+    const { container, history } = mount(`/conversations/${GRILLING.id}`);
+
+    await drawn(container, `.${steerForm.steerConversation}`);
+    await waitFor(() =>
+      expect(history.get()).toBe(`/conversations/${GRILLING.id}/steer`),
+    );
+  });
+
+  /// A second press makes nothing and selects the one there is. The server says
+  /// which of the two it was; the page does the same thing either way, which is
+  /// go to the form.
+  it("selects the pending steer a second press finds", async () => {
+    const fetching = theGrillingSteering(
+      {},
+      whenever(STEERING, ALREADY, "POST"),
+    );
+    const { container, history } = mount(`/conversations/${GRILLING.id}/backlog`);
+
+    await openSteer(container);
+
+    expect(askedFor(fetching, STEERING)).toBe(1);
+    await waitFor(() =>
+      expect(history.get()).toBe(`/conversations/${GRILLING.id}/steer`),
+    );
+  });
+
+  /// The address with no pending steer behind it is the empty pane an unknown
+  /// event id gets: a link kept past the submit or the cancel opens nothing
+  /// rather than a form over a steer that is over.
+  it("draws nothing at the address once the pending steer has gone", async () => {
+    theGrillingStanding({});
+    const { container } = mount(`/conversations/${GRILLING.id}/steer`);
+
+    await drawn(container, `.${timeline.timeline}`);
+    expect(
+      container.querySelector(`.${steerForm.steerConversation}`),
+    ).toBeNull();
   });
 
   /// Wrapping up is a move onto a pull request that is already there rather than
@@ -10173,7 +10288,7 @@ describe("steering a conversation", () => {
   /// Each says what it means, because the words between two of these are the
   /// difference between an hour of work and none.
   it("offers wrapping up only where the work is on a pull request", async () => {
-    theGrillingStanding(
+    theGrillingSteering(
       { ready_to_stop: true, working: true },
       whenever(STEERING, OVER_A_SESSION, "POST"),
     );
@@ -10187,15 +10302,15 @@ describe("steering a conversation", () => {
     expect(screen.getByText(/Finished with. Nothing runs/)).toBeTruthy();
     unmount();
 
-    theGrillingStanding(
+    theGrillingSteering(
       { ready_to_stop: true, working: true, pinned: WRAPPING.pinned },
       whenever(STEERING, OVER_A_SESSION, "POST"),
     );
     const wrapped = mount(`/conversations/${GRILLING.id}`);
 
-    const modal = await openSteer(wrapped.container);
+    const pane = await openSteer(wrapped.container);
 
-    expect(targets(modal)).toEqual([
+    expect(targets(pane)).toEqual([
       "Grilling",
       "Implementing",
       "Wrapping",
@@ -10210,7 +10325,7 @@ describe("steering a conversation", () => {
   /// drawn out there — and a steer is the only way into the state at all, which
   /// is why it is here rather than reachable some other way.
   it("offers following up only from done or wrapping up on a pull request", async () => {
-    theGrillingStanding(
+    theGrillingSteering(
       { ready_to_stop: true, working: true, pinned: WRAPPING.pinned },
       whenever(STEERING, OVER_A_SESSION, "POST"),
     );
@@ -10224,7 +10339,7 @@ describe("steering a conversation", () => {
     ]);
     unmount();
 
-    theGrillingStanding(
+    theGrillingSteering(
       {
         ready_to_stop: false,
         working: false,
@@ -10250,7 +10365,7 @@ describe("steering a conversation", () => {
   /// the human wanted rather than a step of the run. So the field is what the
   /// target is, and the submit is held shut until it says something.
   it("requires the brief a follow-up is opened on, and sends it", async () => {
-    const fetching = theGrillingStanding(
+    const fetching = theGrillingSteering(
       {
         ready_to_stop: false,
         working: false,
@@ -10267,22 +10382,22 @@ describe("steering a conversation", () => {
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    const modal = await openSteer(container);
+    const pane = await openSteer(container);
 
-    expect(modal.querySelector("#steer-follow-up")).toBeNull();
+    expect(pane.querySelector("#steer-follow-up")).toBeNull();
 
     fireEvent.click(
-      await drawn(modal, `.${steerModal.steerTarget} input[value="FollowUp"]`),
+      await drawn(pane, `.${steerForm.steerTarget} input[value="FollowUp"]`),
     );
 
     const press = (await drawn(
-      modal,
-      `.${steerModal.steerButtons} .${steerModal.steer}`,
+      pane,
+      `.${steerForm.steerButtons} .${steerForm.steer}`,
     )) as HTMLButtonElement;
 
     await waitFor(() => expect(press.disabled).toBe(true));
 
-    fireEvent.input(await drawn(modal, "#steer-follow-up"), {
+    fireEvent.input(await drawn(pane, "#steer-follow-up"), {
       target: { value: "Does it count the 429s it sends?" },
     });
 
@@ -10321,7 +10436,7 @@ describe("steering a conversation", () => {
   /// a list of ticked tasks still has to run, which no reading of the entries
   /// here could see.
   it("requires the instruction where nothing stands to be carried on", async () => {
-    theGrillingStanding(
+    theGrillingSteering(
       { ready_to_stop: true, working: true },
       whenever(STEERING, OVER_A_SESSION, "POST"),
     );
@@ -10329,11 +10444,11 @@ describe("steering a conversation", () => {
 
     const bare = await openSteer(container);
 
-    fireEvent.click(await drawn(bare, `.${steerModal.steerTarget} input[value="Implementing"]`));
+    fireEvent.click(await drawn(bare, `.${steerForm.steerTarget} input[value="Implementing"]`));
 
     const held = (await drawn(
       bare,
-      `.${steerModal.steerButtons} .${steerModal.steer}`,
+      `.${steerForm.steerButtons} .${steerForm.steer}`,
     )) as HTMLButtonElement;
 
     await waitFor(() => expect(held.disabled).toBe(true));
@@ -10351,26 +10466,26 @@ describe("steering a conversation", () => {
 
     // And where something does stand, writing nothing means carry it on: the
     // field is still there, and the submit was never held shut.
-    theGrillingStanding(
+    theGrillingSteering(
       { ready_to_stop: true, working: true, ready_to_continue: true },
       whenever(STEERING, OVER_A_SESSION, "POST"),
     );
     const standing = mount(`/conversations/${GRILLING.id}`);
 
-    const modal = await openSteer(standing.container);
+    const pane = await openSteer(standing.container);
 
     fireEvent.click(
-      await drawn(modal, `.${steerModal.steerTarget} input[value="Implementing"]`),
+      await drawn(pane, `.${steerForm.steerTarget} input[value="Implementing"]`),
     );
 
     const press = (await drawn(
-      modal,
-      `.${steerModal.steerButtons} .${steerModal.steer}`,
+      pane,
+      `.${steerForm.steerButtons} .${steerForm.steer}`,
     )) as HTMLButtonElement;
 
     await waitFor(() => expect(press.disabled).toBe(false));
     expect(
-      (modal.querySelector("#steer-instruction") as HTMLTextAreaElement)
+      (pane.querySelector("#steer-instruction") as HTMLTextAreaElement)
         .placeholder,
     ).toContain("carry on with what the branch already holds");
   });
@@ -10384,7 +10499,7 @@ describe("steering a conversation", () => {
   /// with, so an empty one is an interview about nothing that nothing can go
   /// back and write into.
   it("requires the brief where the conversation has none written", async () => {
-    theGrillingStanding(
+    theGrillingSteering(
       {
         ready_to_stop: true,
         working: false,
@@ -10400,11 +10515,11 @@ describe("steering a conversation", () => {
 
     const bare = await openSteer(container);
 
-    fireEvent.click(await drawn(bare, `.${steerModal.steerTarget} input[value="Grilling"]`));
+    fireEvent.click(await drawn(bare, `.${steerForm.steerTarget} input[value="Grilling"]`));
 
     const held = (await drawn(
       bare,
-      `.${steerModal.steerButtons} .${steerModal.steer}`,
+      `.${steerForm.steerButtons} .${steerForm.steer}`,
     )) as HTMLButtonElement;
 
     await waitFor(() => expect(held.disabled).toBe(true));
@@ -10421,31 +10536,31 @@ describe("steering a conversation", () => {
 
     // And where one stands, writing nothing means grill the one that is there:
     // the field is still drawn, and the submit was never held shut.
-    theGrillingStanding(
+    theGrillingSteering(
       { ready_to_stop: true, working: false },
       whenever(STEERING, OVER_NOTHING, "POST"),
     );
     const standing = mount(`/conversations/${GRILLING.id}`);
 
-    const modal = await openSteer(standing.container);
+    const pane = await openSteer(standing.container);
 
-    fireEvent.click(await drawn(modal, `.${steerModal.steerTarget} input[value="Grilling"]`));
+    fireEvent.click(await drawn(pane, `.${steerForm.steerTarget} input[value="Grilling"]`));
 
     const press = (await drawn(
-      modal,
-      `.${steerModal.steerButtons} .${steerModal.steer}`,
+      pane,
+      `.${steerForm.steerButtons} .${steerForm.steer}`,
     )) as HTMLButtonElement;
 
     await waitFor(() => expect(press.disabled).toBe(false));
     expect(
-      (modal.querySelector("#steer-brief") as HTMLTextAreaElement).placeholder,
+      (pane.querySelector("#steer-brief") as HTMLTextAreaElement).placeholder,
     ).toContain("brief that is already there");
   });
 
   /// And the instruction is drawn under implementing alone: what a hand-written
   /// job under a wrap-up would mean is nothing at all.
   it("draws the instruction only under implementing", async () => {
-    const fetching = theGrillingStanding(
+    const fetching = theGrillingSteering(
       { ready_to_stop: true, working: false, ready_to_continue: true },
       whenever(STEERING, OVER_NOTHING, "POST"),
       whenever(
@@ -10456,18 +10571,18 @@ describe("steering a conversation", () => {
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    const modal = await openSteer(container);
+    const pane = await openSteer(container);
 
-    expect(modal.querySelector("#steer-instruction")).toBeNull();
+    expect(pane.querySelector("#steer-instruction")).toBeNull();
 
     fireEvent.click(
-      await drawn(modal, `.${steerModal.steerTarget} input[value="Implementing"]`),
+      await drawn(pane, `.${steerForm.steerTarget} input[value="Implementing"]`),
     );
 
-    fireEvent.input(await drawn(modal, "#steer-instruction"), {
+    fireEvent.input(await drawn(pane, "#steer-instruction"), {
       target: { value: "Note the window the count is against." },
     });
-    fireEvent.click(await drawn(modal, `.${steerModal.steerButtons} .${steerModal.steer}`));
+    fireEvent.click(await drawn(pane, `.${steerForm.steerButtons} .${steerForm.steer}`));
 
     const building = GRILLING.implementation_pairing!;
 
@@ -10497,7 +10612,7 @@ describe("steering a conversation", () => {
   /// builds runs under the other. Drawn only under a target something runs in:
   /// done runs nothing, so there is nothing there to pick.
   it("prefills the pairing of the role steered into", async () => {
-    const fetching = theGrillingStanding(
+    const fetching = theGrillingSteering(
       { ready_to_stop: true, working: false, pinned: WRAPPING.pinned },
       whenever(STEERING, OVER_NOTHING, "POST"),
       whenever(
@@ -10511,9 +10626,9 @@ describe("steering a conversation", () => {
     // It opens on grilling, that being the first target offered, so the picker
     // is drawn from the start — filled in with what the conversation is grilled
     // under.
-    const modal = await openSteer(container);
+    const pane = await openSteer(container);
 
-    await drawn(modal, "#steer-pairing");
+    await drawn(pane, "#steer-pairing");
     const interviewing = under(GRILLING.grilling_pairing)!;
 
     await waitFor(() =>
@@ -10521,14 +10636,14 @@ describe("steering a conversation", () => {
     );
 
     // Nothing runs in done, so there is nothing there to pick.
-    fireEvent.click(await drawn(modal, `.${steerModal.steerTarget} input[value="Done"]`));
+    fireEvent.click(await drawn(pane, `.${steerForm.steerTarget} input[value="Done"]`));
     await waitFor(() =>
-      expect(modal.querySelector("#steer-pairing")).toBeNull(),
+      expect(pane.querySelector("#steer-pairing")).toBeNull(),
     );
 
     // And wrapping up is work being built, so it is the other pairing that is
     // prefilled there — a different choice about different work.
-    fireEvent.click(await drawn(modal, `.${steerModal.steerTarget} input[value="Wrapping"]`));
+    fireEvent.click(await drawn(pane, `.${steerForm.steerTarget} input[value="Wrapping"]`));
 
     const building = GRILLING.implementation_pairing!;
 
@@ -10537,7 +10652,7 @@ describe("steering a conversation", () => {
     );
 
     pick("Run it under", READINGS[0]!);
-    fireEvent.click(await drawn(modal, `.${steerModal.steerButtons} .${steerModal.steer}`));
+    fireEvent.click(await drawn(pane, `.${steerForm.steerButtons} .${steerForm.steer}`));
 
     await waitFor(() =>
       expect(sent(fetching, STEER_SUBMIT)).toEqual({
@@ -10557,18 +10672,18 @@ describe("steering a conversation", () => {
     );
   });
 
-  /// The modal's picker is the setup card's control in another place, so it draws
+  /// The pane's picker is the setup card's control in another place, so it draws
   /// what that one draws: the harness's mark in front of every reading, and in
   /// front of the one it is showing.
   it("marks the harness on every row of its own picker", async () => {
-    theGrillingStanding(
+    theGrillingSteering(
       { ready_to_stop: true, working: false, pinned: WRAPPING.pinned },
       whenever(STEERING, OVER_NOTHING, "POST"),
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    const modal = await openSteer(container);
-    await drawn(modal, "#steer-pairing");
+    const pane = await openSteer(container);
+    await drawn(pane, "#steer-pairing");
 
     expect(offers("Run it under")).toEqual(READINGS);
     expect(offered("Run it under").map(marked)).toEqual(
@@ -10581,7 +10696,7 @@ describe("steering a conversation", () => {
   /// opens, and a choice about how much of the last interview primes it. Both
   /// are optional, and both default to the quietest thing they could mean.
   it("sends the new round's brief and what it is primed with", async () => {
-    const fetching = theGrillingStanding(
+    const fetching = theGrillingSteering(
       { ready_to_stop: true, working: false },
       whenever(STEERING, OVER_NOTHING, "POST"),
       whenever(
@@ -10593,13 +10708,13 @@ describe("steering a conversation", () => {
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     // It opens on grilling, so both are drawn from the start.
-    const modal = await openSteer(container);
+    const pane = await openSteer(container);
 
-    fireEvent.input(await drawn(modal, "#steer-brief"), {
+    fireEvent.input(await drawn(pane, "#steer-brief"), {
       target: { value: "# Retries\n\nThe backoff is wrong.\n" },
     });
-    fireEvent.click(await drawn(modal, `.${steerModal.steerDigest} input`));
-    fireEvent.click(await drawn(modal, `.${steerModal.steerButtons} .${steerModal.steer}`));
+    fireEvent.click(await drawn(pane, `.${steerForm.steerDigest} input`));
+    fireEvent.click(await drawn(pane, `.${steerForm.steerButtons} .${steerForm.steer}`));
 
     const own = under(GRILLING.grilling_pairing)!;
 
@@ -10621,63 +10736,76 @@ describe("steering a conversation", () => {
   /// And neither is drawn under a target that opens no round: what a brief under
   /// a wrap-up would mean is nothing at all.
   it("draws the brief only under grilling", async () => {
-    theGrillingStanding(
+    theGrillingSteering(
       { ready_to_stop: true, working: false, pinned: WRAPPING.pinned },
       whenever(STEERING, OVER_NOTHING, "POST"),
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    const modal = await openSteer(container);
-    await drawn(modal, `.${steerModal.steerBrief}`);
+    const pane = await openSteer(container);
+    await drawn(pane, `.${steerForm.steerBrief}`);
 
-    fireEvent.click(await drawn(modal, `.${steerModal.steerTarget} input[value="Wrapping"]`));
+    fireEvent.click(await drawn(pane, `.${steerForm.steerTarget} input[value="Wrapping"]`));
 
-    await waitFor(() => expect(modal.querySelector(`.${steerModal.steerBrief}`)).toBeNull());
+    await waitFor(() => expect(pane.querySelector(`.${steerForm.steerBrief}`)).toBeNull());
   });
 
   /// The checkbox is about the world rather than about the move, so it is drawn
   /// against what the click found: with nothing running it would promise
   /// something about a session that is not there.
   it("offers the interrupt only where a session is running", async () => {
-    theGrillingStanding(
+    theGrillingSteering(
       { ready_to_stop: true, working: true },
       whenever(STEERING, OVER_A_SESSION, "POST"),
     );
     const { container, unmount } = mount(`/conversations/${GRILLING.id}`);
 
     const over = await openSteer(container);
-    expect(over.querySelector(`.${steerModal.steerInterrupt}`)).toBeTruthy();
+    expect(over.querySelector(`.${steerForm.steerInterrupt}`)).toBeTruthy();
     unmount();
 
-    theGrillingStanding(
+    theGrillingSteering(
       { ready_to_stop: true, working: false },
       whenever(STEERING, OVER_NOTHING, "POST"),
     );
     const quiet = mount(`/conversations/${GRILLING.id}`);
 
-    const modal = await openSteer(quiet.container);
-    expect(modal.querySelector(`.${steerModal.steerInterrupt}`)).toBeNull();
+    const pane = await openSteer(quiet.container);
+    expect(pane.querySelector(`.${steerForm.steerInterrupt}`)).toBeNull();
   });
 
   /// What the submit carries: where the work goes, and whether to end what is
   /// running where it stands.
-  it("sends the target and the interrupt, and closes on the move", async () => {
-    const fetching = theGrillingStanding(
-      { ready_to_stop: true, working: true },
+  it("sends the target and the interrupt, and follows the record it wrote", async () => {
+    // The pending steer goes with the record it became, so the conversation
+    // stops carrying it the moment the submit lands.
+    let pending = true;
+    const fetching = theGrilling(
+      whenever(`/api/ui/conversations/${GRILLING.id}`, () =>
+        json({
+          ...GRILLING,
+          ready_to_stop: true,
+          working: true,
+          pending_steer: pending ? PENDING : null,
+        })(),
+      ),
       whenever(STEERING, OVER_A_SESSION, "POST"),
       whenever(
         STEER_SUBMIT,
-        json("Steered" satisfies ConversationSteered),
+        () => {
+          pending = false;
+          return json("Steered" satisfies ConversationSteered)();
+        },
         "POST",
       ),
     );
-    const { container } = mount(`/conversations/${GRILLING.id}`);
+    const { container, history } = mount(`/conversations/${GRILLING.id}`);
 
-    const modal = await openSteer(container);
+    const pane = await openSteer(container);
 
-    fireEvent.click(await drawn(modal, `.${steerModal.steerTarget} input[value="Done"]`));
-    fireEvent.click(await drawn(modal, `.${steerModal.steerInterrupt} input`));
-    fireEvent.click(await drawn(modal, `.${steerModal.steerButtons} .${steerModal.steer}`));
+    fireEvent.click(await drawn(pane, `.${steerForm.steerTarget} input[value="Done"]`));
+    fireEvent.click(await drawn(pane, `.${steerForm.steerInterrupt} input`));
+    fireEvent.click(await drawn(pane, `.${steerForm.steerButtons} .${steerForm.steer}`));
 
     await waitFor(() =>
       expect(sent(fetching, STEER_SUBMIT)).toEqual({
@@ -10698,27 +10826,61 @@ describe("steering a conversation", () => {
     );
 
     await waitFor(() =>
-      expect(document.body.querySelector(`.${steerModal.steerConversation}`)).toBeNull(),
+      expect(
+        container.querySelector(`.${steerForm.steerConversation}`),
+      ).toBeNull(),
+    );
+    await waitFor(() =>
+      expect(history.get()).not.toBe(`/conversations/${GRILLING.id}/steer`),
     );
   });
 
-  /// Cancel is no press at all: the conversation stays where the click left it,
-  /// stopped, with resume offered on it. That is accepted rather than a bug —
-  /// the click is what froze the world while the human was composing.
-  it("sends nothing when it is cancelled, and leaves resume offered", async () => {
-    // The conversation as the server says it stands once the click has landed:
-    // stopped, so there is nothing left to stop and one press that undoes it.
-    const fetching = theGrillingStanding(
-      { ready_to_stop: false, ready_to_resume: true, working: true },
+  /// Cancel is a press now rather than a window being dismissed: it deletes the
+  /// pending steer, and the conversation stays where the press left it —
+  /// stopped, with resume offered on it. That is accepted rather than a bug: the
+  /// press is what froze the world while the human was composing, and unfreezing
+  /// is a press of its own.
+  ///
+  /// Nothing is submitted, and the page lets go of the form's address: with the
+  /// pending steer gone there is nothing at it to draw.
+  it("deletes the pending steer when it is cancelled, and leaves resume offered", async () => {
+    // The conversation as the server says it stands once the press has landed:
+    // stopped, so there is nothing left to stop and one press that undoes it —
+    // and carrying the form until the cancel takes it away.
+    let pending = true;
+    const fetching = theGrilling(
+      whenever(`/api/ui/conversations/${GRILLING.id}`, () =>
+        json({
+          ...GRILLING,
+          ready_to_stop: false,
+          ready_to_resume: true,
+          working: true,
+          pending_steer: pending ? PENDING : null,
+        })(),
+      ),
       whenever(STEERING, OVER_A_SESSION, "POST"),
+      whenever(
+        STEER_CANCEL,
+        () => {
+          pending = false;
+          return json("Cancelled" satisfies SteerCancelled)();
+        },
+        "POST",
+      ),
     );
-    const { container } = mount(`/conversations/${GRILLING.id}`);
+    const { container, history } = mount(`/conversations/${GRILLING.id}`);
 
-    const modal = await openSteer(container);
-    fireEvent.click(await drawn(modal, `.${steerModal.steerButtons} .${steerModal.cancel}`));
+    const pane = await openSteer(container);
+    fireEvent.click(
+      await drawn(pane, `.${steerForm.steerButtons} .${steerForm.cancel}`),
+    );
 
+    await waitFor(() => expect(sent(fetching, STEER_CANCEL)).toEqual({}));
     await waitFor(() =>
-      expect(document.body.querySelector(`.${steerModal.steerConversation}`)).toBeNull(),
+      expect(container.querySelector(`.${steerForm.steerConversation}`)).toBeNull(),
+    );
+    await waitFor(() =>
+      expect(history.get()).not.toBe(`/conversations/${GRILLING.id}/steer`),
     );
 
     expect(
@@ -10732,7 +10894,7 @@ describe("steering a conversation", () => {
   /// And a submit the server refused says so where it was pressed, rather than
   /// closing as though it had gone.
   it("says in words when the move was refused", async () => {
-    theGrillingStanding(
+    theGrillingSteering(
       { ready_to_stop: true, working: false },
       whenever(STEERING, OVER_NOTHING, "POST"),
       whenever(
@@ -10743,10 +10905,10 @@ describe("steering a conversation", () => {
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    const modal = await openSteer(container);
-    fireEvent.click(await drawn(modal, `.${steerModal.steerButtons} .${steerModal.steer}`));
+    const pane = await openSteer(container);
+    fireEvent.click(await drawn(pane, `.${steerForm.steerButtons} .${steerForm.steer}`));
 
-    const refused = await drawn(document.body, `.${steerModal.steerConversation} .${steerModal.failure}`);
+    const refused = await drawn(document.body, `.${steerForm.steerConversation} .${steerForm.failure}`);
 
     expect(refused.textContent).toBe(STEER_REFUSAL.NoSuchConversation);
   });
@@ -10755,33 +10917,33 @@ describe("steering a conversation", () => {
   /// so it is drawn under every target work goes on in — and not under done,
   /// where nothing runs and there is nothing a companion could be for.
   it("offers the repos to work alongside on every target work goes on in", async () => {
-    theGrillingStanding(
+    theGrillingSteering(
       { ready_to_stop: true, working: false, ready_to_continue: true },
       whenever(STEERING, OVER_NOTHING, "POST"),
       whenever(`/api/ui/repos/${REPOS[0]!.id}/branches`, json(COMPANION_BRANCHES)),
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    const modal = await openSteer(container);
+    const pane = await openSteer(container);
 
     for (const target of ["Grilling", "Implementing"]) {
       fireEvent.click(
-        await drawn(modal, `.${steerModal.steerTarget} input[value="${target}"]`),
+        await drawn(pane, `.${steerForm.steerTarget} input[value="${target}"]`),
       );
 
-      const offered = await drawn(modal, `.${steerModal.steerAdding}`);
+      const offered = await drawn(pane, `.${steerForm.steerAdding}`);
 
       expect(
-        [...offered.querySelectorAll(`.${steerModal.steerAddName}`)].map(
+        [...offered.querySelectorAll(`.${steerForm.steerAddName}`)].map(
           (row) => row.textContent,
         ),
       ).toEqual(["askance"]);
     }
 
-    fireEvent.click(await drawn(modal, `.${steerModal.steerTarget} input[value="Done"]`));
+    fireEvent.click(await drawn(pane, `.${steerForm.steerTarget} input[value="Done"]`));
 
     await waitFor(() =>
-      expect(modal.querySelector(`.${steerModal.steerCompanions}`)).toBeNull(),
+      expect(pane.querySelector(`.${steerForm.steerCompanions}`)).toBeNull(),
     );
   });
 
@@ -10791,7 +10953,7 @@ describe("steering a conversation", () => {
   /// read-only companion is checked out detached.
   it("sends the repos ticked to go into the sandbox", async () => {
     const alongside = REPOS[0]!;
-    const fetching = theGrillingStanding(
+    const fetching = theGrillingSteering(
       { ready_to_stop: true, working: false, ready_to_continue: true },
       whenever(STEERING, OVER_NOTHING, "POST"),
       whenever(`/api/ui/repos/${alongside.id}/branches`, json(COMPANION_BRANCHES)),
@@ -10803,19 +10965,19 @@ describe("steering a conversation", () => {
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    const modal = await openSteer(container);
+    const pane = await openSteer(container);
 
     // Nothing opens until the row is ticked: an untouched row says only that
     // the repository is registered.
-    expect(modal.querySelector(`.${steerModal.steerAddConfig}`)).toBeNull();
+    expect(pane.querySelector(`.${steerForm.steerAddConfig}`)).toBeNull();
 
-    fireEvent.click(await drawn(modal, `.${steerModal.steerAddName} input`));
+    fireEvent.click(await drawn(pane, `.${steerForm.steerAddName} input`));
 
-    const opened = await drawn(modal, `.${steerModal.steerAddConfig}`);
+    const opened = await drawn(pane, `.${steerForm.steerAddConfig}`);
 
     // Read-only to begin with, which is the least a human has to say — and a
     // read-only checkout is detached, so there is no branch to name.
-    expect(opened.querySelector(`.${steerModal.steerAddBranch}`)).toBeNull();
+    expect(opened.querySelector(`.${steerForm.steerAddBranch}`)).toBeNull();
 
     fireEvent.click(await drawn(opened, "input[type='checkbox']"));
 
@@ -10846,7 +11008,7 @@ describe("steering a conversation", () => {
 
     fireEvent.change(base, { target: { value: COMPANION_BRANCHES[0]! } });
 
-    fireEvent.click(await drawn(modal, `.${steerModal.steerButtons} .${steerModal.steer}`));
+    fireEvent.click(await drawn(pane, `.${steerForm.steerButtons} .${steerForm.steer}`));
 
     await waitFor(() =>
       expect(sent(fetching, STEER_SUBMIT)).toMatchObject({
@@ -10878,7 +11040,7 @@ describe("steering a conversation", () => {
       worktree: { path: "/state/worktrees/askance-trunk", missing: false },
       base_commit: "c0ffee",
     };
-    const fetching = theGrillingStanding(
+    const fetching = theGrillingSteering(
       {
         ready_to_stop: true,
         working: false,
@@ -10894,15 +11056,15 @@ describe("steering a conversation", () => {
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    const modal = await openSteer(container);
-    const row = await drawn(modal, `.${steerModal.steerAlong}`);
+    const pane = await openSteer(container);
+    const row = await drawn(pane, `.${steerForm.steerAlong}`);
 
     // Nothing opens until the tick: the row says what the repo is and how far
     // into it the work reaches, and that is all.
-    expect(row.querySelector(`.${steerModal.steerOpenBranch}`)).toBeNull();
+    expect(row.querySelector(`.${steerForm.steerOpenBranch}`)).toBeNull();
     expect(row.textContent).toContain("read-only");
 
-    fireEvent.click(await drawn(row, `.${steerModal.steerOpenUp} input`));
+    fireEvent.click(await drawn(row, `.${steerForm.steerOpenUp} input`));
 
     // Ticked, the row says what it will be rather than what it was, and the
     // branch to cut opens under it.
@@ -10918,7 +11080,7 @@ describe("steering a conversation", () => {
     expect(branch.value).toBe(GRILLING.branch);
 
     fireEvent.input(branch, { target: { value: "alongside" } });
-    fireEvent.click(await drawn(modal, `.${steerModal.steerButtons} .${steerModal.steer}`));
+    fireEvent.click(await drawn(pane, `.${steerForm.steerButtons} .${steerForm.steer}`));
 
     // No mode on the wire, because there is one direction: a row that could
     // carry read-only would be a row that could take back what was given.
@@ -10933,7 +11095,7 @@ describe("steering a conversation", () => {
   /// And a read-write companion offers nothing at all: it is already as open as
   /// a repo gets, and there is no way back from it.
   it("offers no control on a companion that is read-write already", async () => {
-    theGrillingStanding(
+    theGrillingSteering(
       {
         ready_to_stop: true,
         working: false,
@@ -10953,10 +11115,10 @@ describe("steering a conversation", () => {
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    const modal = await openSteer(container);
-    const row = await drawn(modal, `.${steerModal.steerAlong}`);
+    const pane = await openSteer(container);
+    const row = await drawn(pane, `.${steerForm.steerAlong}`);
 
-    expect(row.querySelector(`.${steerModal.steerOpenUp}`)).toBeNull();
+    expect(row.querySelector(`.${steerForm.steerOpenUp}`)).toBeNull();
     expect(row.querySelector("input")).toBeNull();
   });
 
@@ -10964,7 +11126,7 @@ describe("steering a conversation", () => {
   /// it. A timeline of moves alone could never be read back for the difference
   /// between the pipeline arriving somewhere and somebody putting it there.
   it("draws the steer beside the move it wrote", async () => {
-    theGrillingStanding({
+    theGrillingSteering({
       state: "Done",
       timeline: [
         ...GRILLING.timeline,
@@ -11001,7 +11163,7 @@ describe("steering a conversation", () => {
   /// to done standing. Which of them happened is what a record months old has to
   /// be readable back for.
   it("draws the resolve press as itself rather than as a steer", async () => {
-    theGrillingStanding({
+    theGrillingSteering({
       state: "Wrapping",
       timeline: [
         ...GRILLING.timeline,
@@ -11039,7 +11201,7 @@ describe("steering a conversation", () => {
   /// handoff, and is read the same way — clamped beside the move, whole in the
   /// details pane.
   it("draws the instruction a steer carried, and opens the whole of it", async () => {
-    theGrillingStanding({
+    theGrillingSteering({
       state: "Implementing",
       timeline: [
         ...GRILLING.timeline,

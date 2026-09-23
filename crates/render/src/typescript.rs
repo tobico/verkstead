@@ -30,8 +30,8 @@ use crate::{
     RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane,
     RoleChoice, Screen, ServeEdit, ServePress, SetReading, SettingsEdit, SettingsSaved,
     SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
-    ShowingArchived, Shown, Started, SteerOpened, SteerSubmission, Submitted, Subscribed,
-    Subscription, TakenUp, TerminalOpened, TerminalsView, TranscriptView, Unsubscribe,
+    ShowingArchived, Shown, Started, SteerCancelled, SteerOpened, SteerSubmission, Submitted,
+    Subscribed, Subscription, TakenUp, TerminalOpened, TerminalsView, TranscriptView, Unsubscribe,
     UpdateNotice, Watching,
 };
 
@@ -265,11 +265,14 @@ fn the_viewers_types_are_written_from_these() {
     // reason there was nothing to stop.
     ConversationStopped::export_all(&config).unwrap();
 
-    // And the two presses that steer it. The first takes no request shape — the
-    // click stops the drive and reports what it found running — and the second
-    // carries what the modal settled. The Steer's own Event rides on the
-    // `ConversationView` above, beside the move it wrote.
+    // And the three presses that steer it. The first takes no request shape —
+    // it stops the drive, writes the pending steer and reports what it found
+    // running — and the last carries what the form settled; cancelling takes
+    // none either, the pending steer being the whole of what it names. The
+    // Steer's own Event rides on the `ConversationView` above, beside the move
+    // it wrote, and so does the pending steer it became.
     SteerOpened::export_all(&config).unwrap();
+    SteerCancelled::export_all(&config).unwrap();
     SteerSubmission::export_all(&config).unwrap();
     ConversationSteered::export_all(&config).unwrap();
 

@@ -1,13 +1,31 @@
-//! Steering a conversation: the modal the menu row opens, and what it settles.
+//! Steering a conversation: the form the pending steer's item opens, and what
+//! it settles.
 //!
-//! The click has already happened by the time any of this is drawn — see the
-//! menu row in [`Timeline`](./Timeline.tsx), which posts it and opens this on
+//! The press has already happened by the time any of this is drawn — see the
+//! menu row in [`Actions`](./Actions.tsx), which posts it and navigates here on
 //! what comes back. That press stopped the drive, so nothing new is launching
-//! while the human composes, and **cancel** is no press at all: the conversation
-//! stays where the click left it, stopped, with resume drawn on it.
+//! while the human composes, and it wrote the **pending steer** this form is
+//! drawn on: the item at the end of the timeline, whose details pane is this.
 //!
-//! What the modal is, therefore, is a form over one question — where does this
-//! go? — with whatever that target needs under it. **Done** needs nothing: there
+//! **A pane rather than a window over the page**, which is the whole of why it
+//! is here. A steer is often a great deal of text, and a form that blocks the
+//! workbench while it is written is the wrong place to write it: the human
+//! wants to read the timeline, look at another conversation, and finish the
+//! form when they are ready. So the item stays at the end of the timeline until
+//! they decide, and the form is somewhere to come back to.
+//!
+//! **Cancel is a press now.** It takes the pending steer away and leaves the
+//! conversation stopped, with resume drawn on it — the press is what froze it,
+//! and unfreezing is a press of its own. Nothing lands on the timeline: a steer
+//! that decided nothing is no event.
+//!
+//! **It is drawn against the live conversation** rather than one frozen at the
+//! press. The item may sit open for an afternoon, so what the form reads —
+//! whether a session is still running, what the branch has to carry on, which
+//! repos are alongside — is what is true now.
+//!
+//! What the form is, therefore, is one question — where does this go? — with
+//! whatever that target needs under it. **Done** needs nothing: there
 //! is nothing to drive in done, so no pairing is picked and no payload is
 //! carried, and the submit is the move alone. **Wrapping** needs no payload
 //! either — the wrap-up's watchers work out for themselves what is left to do —
@@ -42,9 +60,9 @@
 //! the work.
 //!
 //! **Interrupt current task** is the one thing here that is about the world
-//! rather than about the move. The click left whatever was running exactly where
-//! it was; ticking the box ends it where it stands, and the step is left however
-//! far it had got.
+//! rather than about the move. The press left whatever was running exactly
+//! where it was; ticking the box ends it where it stands, and the step is left
+//! however far it had got.
 //!
 //! Left alone it is seen out, and what *out* means follows the target. One
 //! worktree holds one agent, so a target something runs in ends it by starting:
@@ -52,12 +70,13 @@
 //! and once the session in front of it has finished where it cannot — a review
 //! waiting on an ask. **Done** launches nothing, so there it runs to its own end
 //! and the box is the only thing that would stop it. The box is drawn only where
-//! the click found a session running — there is otherwise nothing to interrupt.
+//! a session is running *now* — the item may have sat open for hours, and there
+//! is otherwise nothing to interrupt.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Show, createMemo, createSignal, type JSX } from "solid-js";
 
-import { listProfiles, listRepos, steer } from "../api/client";
+import { cancelSteer, listProfiles, listRepos, steer } from "../api/client";
 import type {
   CompanionAddition,
   CompanionMode,
@@ -71,11 +90,12 @@ import type {
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
-import { Modal } from "../Modal";
+import { PaneSticky } from "../Panes";
 import * as pairing from "../pairing";
 import { Listbox } from "../picking";
 import { Switch as Toggle } from "../Switch";
 import { chosen } from "./naming";
+import { PaneHead } from "./PaneHead";
 import { BasePicker, RULE } from "./Setup";
 import styles from "./Steer.module.css";
 
@@ -579,15 +599,19 @@ function Adding(props: {
   );
 }
 
-/// The modal, and everything it settles before the move.
+/// The pending steer's details pane: the form, and everything it settles before
+/// the move.
 export function Steer(props: {
   conversation: ConversationView;
-  /// Whether the click found a session still running, which is the only thing
-  /// **Interrupt current task** is offered against.
-  working: boolean;
-  /// Said when the modal has gone, however it went — cancelled, escaped,
-  /// pressed away, or submitted.
-  close: () => void;
+  /// The way off this pane, which a narrow window walks out through — the same
+  /// way out every other details pane carries. Cancel and submit go further
+  /// than this: what they leave behind is a Conversation with no pending steer
+  /// on it, so the page has to let go of the address as well.
+  back: () => void;
+  /// Said when there is no pending steer left to draw — cancelled or submitted.
+  /// The page goes back to where the timeline was open before, which after a
+  /// submit is the record the steer just wrote.
+  done: () => void;
 }): JSX.Element {
   const queries = useQueryClient();
 
@@ -824,37 +848,62 @@ export function Steer(props: {
       }),
     onSuccess: (outcome: ConversationSteered) => {
       // The page it was submitted from is out of date either way: the work has
-      // moved, or the world had moved under the modal. Reading it again is both
+      // moved, or the world had moved under the form. Reading it again is both
       // the correction and, where it was refused, the explanation.
       void queries.invalidateQueries({ queryKey: ["conversation"] });
       void queries.invalidateQueries({ queryKey: ["conversations"] });
 
+      // The pending steer went with the record it became, so there is nothing
+      // at this address any more: the page follows the record it wrote.
       if (outcome === "Steered") {
-        props.close();
+        props.done();
         return;
       }
 
-      // A pairing refused is a profile list this modal read a moment ago, so
-      // that is re-read too.
+      // A refused submit leaves the pending steer exactly where it was, so the
+      // form stays open and says why. A pairing refused is a profile list this
+      // pane read a moment ago, so that is re-read too.
       void queries.invalidateQueries({ queryKey: ["profiles"] });
       setRefused(outcome);
     },
   }));
 
+  /// And the other way out, which is a press rather than a dismissal: the
+  /// pending steer goes and the conversation is left stopped, with resume on
+  /// offer.
+  ///
+  /// Nothing is confirmed first. What it throws away is the form, and the
+  /// conversation it was written about is exactly where the press that opened
+  /// it left the work.
+  const cancelling = useMutation(() => ({
+    mutationFn: () => cancelSteer(props.conversation.id),
+    onSuccess: () => {
+      void queries.invalidateQueries({ queryKey: ["conversation"] });
+      void queries.invalidateQueries({ queryKey: ["conversations"] });
+
+      // Either way there is no pending steer at this address: a conversation
+      // that is gone has no form to go back to, and a cancel that landed took
+      // the form with it.
+      props.done();
+    },
+  }));
+
   return (
-    <Modal
-      class={styles.steerConversation!}
-      open
-      close={props.close}
-      labelledBy="steer-title"
-    >
+    <>
+      <PaneSticky>
+        <PaneHead
+          back={{ to: "Timeline", go: props.back }}
+          title="Steer this conversation"
+        />
+      </PaneSticky>
+
       <form
+        class={styles.steerConversation}
         onSubmit={(event) => {
           event.preventDefault();
           submit.mutate();
         }}
       >
-        <h3 id="steer-title">Steer this conversation</h3>
         <Note class={styles.lead}>
           The run has stopped while you decide. Cancel leaves it stopped, with
           resume on offer.
@@ -1038,7 +1087,7 @@ export function Steer(props: {
 
         {/* Only where there is one to interrupt. With nothing running the box
             would promise something about a session that is not there. */}
-        <Show when={props.working}>
+        <Show when={props.conversation.working}>
           <div class={styles.steerInterrupt}>
             <label>
               <input
@@ -1066,6 +1115,7 @@ export function Steer(props: {
             class={styles.steer}
             disabled={
               submit.isPending ||
+              cancelling.isPending ||
               (runs() && !picked()) ||
               needsInstruction() ||
               needsBrief() ||
@@ -1074,21 +1124,24 @@ export function Steer(props: {
           >
             {submit.isPending ? "Steering…" : "Steer"}
           </button>
-          {/* Drawn as well as the ways out the modal already has: escape and a
-              press on the backdrop are for a keyboard and a cursor, and this is
-              the one a thumb has. */}
+          {/* A press of its own now rather than a way of dismissing a window:
+              what it throws away is the pending steer, and the conversation is
+              left stopped with resume on offer. */}
           <button
             type="button"
             class={`${styles.cancel} secondary`}
-            onClick={props.close}
+            disabled={submit.isPending || cancelling.isPending}
+            onClick={() => cancelling.mutate()}
           >
-            Cancel
+            {cancelling.isPending ? "Cancelling…" : "Cancel"}
           </button>
         </div>
 
         <Show when={refused()}>
           {(outcome) => (
-            <ErrorLine class={styles.failure}>{steerRefusal(outcome())}</ErrorLine>
+            <ErrorLine class={styles.failure}>
+              {steerRefusal(outcome())}
+            </ErrorLine>
           )}
         </Show>
         {/* A server that could not answer at all, which is the one thing here
@@ -1098,7 +1151,12 @@ export function Steer(props: {
             The conversation could not be steered: {submit.error?.message}
           </ErrorLine>
         </Show>
+        <Show when={cancelling.isError}>
+          <ErrorLine class={styles.failure}>
+            The steer could not be cancelled: {cancelling.error?.message}
+          </ErrorLine>
+        </Show>
       </form>
-    </Modal>
+    </>
   );
 }

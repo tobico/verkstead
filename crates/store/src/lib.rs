@@ -43,6 +43,7 @@ mod escalations;
 mod migrations;
 mod pairings;
 mod pauses;
+mod pending_steers;
 mod placements;
 mod profiles;
 mod pull_requests;
@@ -101,6 +102,10 @@ pub use endings::{ended_on, nothing_else};
 pub use escalations::{escalate, escalated, settle_escalation};
 pub use pairings::{RepoPairings, last_started_pairings, remembered_pairings};
 pub use pauses::Pause;
+pub use pending_steers::{
+    Pending, PendingAddition, PendingForm, PendingPairing, PendingSteer, PendingUpgrade,
+    discard_pending_steer, open_pending_steer, pending_steer, save_pending_steer,
+};
 pub use placements::place_conversations;
 pub use profiles::{
     Account, AgentType, Channel, Clash, Deleting, Pairing, Picked, Profile, ProfileFacts, Saving,
@@ -744,6 +749,12 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // run the way everything else does — and the table stays because those
     // Events are the record of what happened and still have to read back.
     pauses::apply_schema(pool).await?;
+
+    // And the steer somebody has started and not yet decided, which is beside
+    // the Conversation rather than on its Timeline: it has not happened yet, so
+    // it is no part of the record — see [`pending_steers`]. After the
+    // Conversations and the Repos, both of which its rows point at.
+    pending_steers::apply_schema(pool).await?;
 
     // And that driving has stopped, which is columns on the Conversation
     // itself: a stop is how things are rather than something that happened,

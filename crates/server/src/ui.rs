@@ -37,13 +37,14 @@ use verkstead_render::{
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, Creation, Cursor, GrillingStarted, IgnoreRule,
     IgnoredCommentsEdit, InstallPress, Lifecycle, Locked, Merging, MissedOut, NewAdoption,
-    NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption, Parked, ProfileChoice,
-    ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice,
-    RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit,
-    ServePress, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
-    SharePublished, SharedCommit, SharedConversation, ShowArchived, ShowingArchived, Standing,
-    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalOpened,
-    TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption, Parked, PendingSteerView,
+    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView,
+    RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
+    ServeEdit, ServePress, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
+    ShowingArchived, Standing, SteerCancelled, SteerOpened, SteerSubmission, Submitted, Subscribed,
+    Subscription, TakenUp, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet,
+    Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -378,13 +379,19 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // not.
         .route("/api/ui/conversations/{id}/stop", post(stop))
         .route("/api/ui/conversations/{id}/force-stop", post(force_stop))
-        // And the two presses that steer it, which are the row beside those in
-        // the same menu. Two rather than one because the click is an act of its
-        // own: it stops the drive so that nothing launches while the human
-        // composes, and answers with what it found running — see
-        // [`crate::steering`]. The submit under it carries what the modal
-        // settled, which is the only body of the four.
+        // And the three presses that steer it, which are the row beside those
+        // in the same menu and the two the item that row opens offers. The
+        // press is an act of its own rather than the first half of the submit:
+        // it stops the drive so that nothing launches while the human composes,
+        // writes the pending steer the form is drawn on, and answers with what
+        // it found running — see [`crate::steering`]. Cancel takes that pending
+        // steer away and leaves the Conversation stopped; the submit carries
+        // what the form settled, which is the only body of the five.
         .route("/api/ui/conversations/{id}/steer", post(steer))
+        .route(
+            "/api/ui/conversations/{id}/steer/cancel",
+            post(steer_cancel),
+        )
         .route(
             "/api/ui/conversations/{id}/steer/submit",
             post(steer_submit),
@@ -1731,6 +1738,32 @@ pub(crate) async fn conversation_view(
         }
     };
 
+    // And the steer somebody has started on it and not yet decided, which the
+    // Timeline draws as its last item and the details pane draws the form of.
+    // Read the way the archive mark is: a row beside the Conversation rather
+    // than a column on it — and no part of the record, so nothing of it is in
+    // the Timeline above.
+    //
+    // A read that fails reads as *none pending*, which is the way round that
+    // draws the record as it always was: the row is untouched and the next read
+    // of the Conversation finds the item again. The other way round would be an
+    // item drawn over a form that is not there.
+    let pending_steer = match store::pending_steer(&state.pool, id).await {
+        Ok(pending) => pending.map(|pending| PendingSteerView {
+            at: pending.at,
+            // Said in the form's own vocabulary rather than the record's, the
+            // item being what the form has come to — see
+            // [`crate::steering::steered`]. A target nothing can be steered
+            // into reads as none picked, which is what a form left on one would
+            // have to be.
+            target: pending.form.target.and_then(crate::steering::steered),
+        }),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading the pending steer of a Conversation failed");
+            None
+        }
+    };
+
     // One clock for the whole Timeline: every Set on it is aged against the same
     // moment, so two rows written a millisecond apart cannot come back reading as
     // if they were read at different times.
@@ -1783,6 +1816,7 @@ pub(crate) async fn conversation_view(
         trimmed,
         shared,
         attachments: attached,
+        pending_steer,
         // The same reading the Events above are drawn against, said as a fact
         // about the Conversation: the Timeline offers Force stop exactly where
         // something is running, and one Event of a session's is not the question
@@ -3469,12 +3503,14 @@ async fn force_stop(State(state): State<AppState>, Path(id): Path<String>) -> Ht
     }
 }
 
-/// `POST /api/ui/conversations/{id}/steer` — stop the drive and open the modal.
+/// `POST /api/ui/conversations/{id}/steer` — stop the drive and open the
+/// pending steer.
 ///
-/// The click rather than the move. What comes back says the modal may open and
-/// whether a session is still running, which is what the **Interrupt current
-/// task** checkbox is offered against. Cancelling from here leaves the
-/// Conversation stopped with Resume on offer, which is what the click is for.
+/// The press rather than the move. What comes back says there is a pending
+/// steer to go to, whether the press found one already standing, and whether a
+/// session is still running — which is what the **Interrupt current task** tick
+/// is offered against. Cancelling from here leaves the Conversation stopped
+/// with Resume on offer, which is what the press is for.
 async fn steer(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return Json(SteerOpened::NoSuchConversation).into_response();
@@ -3485,6 +3521,27 @@ async fn steer(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "stopping a Conversation to steer it failed");
             unavailable("the conversation could not be stopped to steer it")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/steer/cancel` — take the pending steer
+/// away.
+///
+/// No body, for the reason the two stops have none: which Conversation it is is
+/// the whole of what it says, there being one pending steer per Conversation.
+/// Nothing is posted to the Timeline and the stop is left exactly where the
+/// press put it — see [`crate::steering::cancel`].
+async fn steer_cancel(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(SteerCancelled::NoSuchConversation).into_response();
+    };
+
+    match crate::steering::cancel(&state, id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "cancelling a steer failed");
+            unavailable("the steer could not be cancelled")
         }
     }
 }

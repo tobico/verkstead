@@ -126,7 +126,7 @@ function Verkstead(): JSX.Element {
       <Route path="/" component={Workbench} />
       {/* And each of that Conversation's details panes under it, so what is
           open survives a reload and can be linked to. Nested rather than
-          written out as five routes of their own, because the workbench is
+          written out as six routes of their own, because the workbench is
           one page across all of them: a route the router swaps for another
           takes its component down with it, and everything the middle pane was
           holding — a Brief half typed into above all — would go every time a
@@ -142,6 +142,7 @@ function Verkstead(): JSX.Element {
         <Route path="/backlog" />
         <Route path="/share" />
         <Route path="/terminal" />
+        <Route path="/steer" />
         <Route path="/roadmaps/:name" />
       </Route>
       {/* And the composer before there is anything for it to be about: the

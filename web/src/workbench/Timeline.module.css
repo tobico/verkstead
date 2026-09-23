@@ -1057,3 +1057,34 @@
     background: var(--ink-soft);
   }
 }
+
+/* The steer being written: the one item on this pane that has not happened yet.
+
+   A card, because it opens the form in the details pane the way every other
+   card opens what it is about. Drawn after the record, which is where the
+   component puts it — this sheet says only what it looks like.
+
+   In the accent, which nothing else on the record takes. Every other card is
+   something that happened; this is something waiting on the human, so it is
+   said in the colour the sidebar's disc and the *blocked on you* badge are said
+   in. The border rather than a fill: the fill is what an open card takes, and a
+   card that painted both could not be told open from shut. */
+.pendingSteer {
+  border-color: var(--accent);
+}
+
+.pendingSteerLine {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+/* And the line under it, which says the one thing about the conversation that
+   the card cannot: the press stopped the run, and it stays stopped until this
+   form is answered one way or the other. */
+.pendingSteerNote {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}

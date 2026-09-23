@@ -165,8 +165,7 @@ import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import styles from "./Actions.module.css";
 import { eagerly, pressed, pressedRows, rowFor } from "./eager";
-import { pathOf } from "./openings";
-import { Steer } from "./Steer";
+import { pathOf, pathTo } from "./openings";
 
 /// Each way of being refused a stop, whichever of the two was pressed, in the
 /// words the human is told them in.
@@ -469,9 +468,9 @@ function Confirm(props: {
 ///
 /// A factory rather than a component, because the rows are drawn in two menus of
 /// two different shapes and everything behind them is the same: one set of
-/// mutations, one steer modal, one way to shut whatever is open. A component
-/// would have had to be the menu as well as the presses, and there are two
-/// menus.
+/// mutations, one set of navigations, one way to shut whatever is open. A
+/// component would have had to be the menu as well as the presses, and there
+/// are two menus.
 ///
 /// The Conversation arrives as an accessor rather than a value, and per call
 /// rather than once: the sidebar's menu is about whichever card was
@@ -483,9 +482,12 @@ function actions(): {
   closes: (close: () => void) => void;
   /// The rows, for the Conversation given.
   rows: (conversation: () => ConversationView) => JSX.Element;
-  /// And what the rows open over the page — the steer form, the card a refused
-  /// press is answered with, and the card a close pressed over a run in flight
-  /// asks before it makes it. All three outlive the menu that opened them.
+  /// And what the rows open over the page — the card a refused press is
+  /// answered with, and the card a close pressed over a run in flight asks
+  /// before it makes it. Both outlive the menu that opened them.
+  ///
+  /// The steer form is not among them any more: it is a details pane of its own
+  /// now, and the row that used to open it navigates there — see [`Steer`].
   modal: () => JSX.Element;
 } {
   const queries = useQueryClient();
@@ -555,19 +557,6 @@ function actions(): {
       replace: true,
     });
   };
-
-  /// What the click found, once it has answered, and `null` while the modal is
-  /// shut. Held out here rather than in the menu's rows, because the menu's rows
-  /// are built when it opens and thrown away when it closes — and the modal
-  /// outlives the menu that opened it by design: the press shuts the menu.
-  ///
-  /// The Conversation is kept beside it as it stood when the press went out,
-  /// which is the world the steer was decided in: the press stops the drive, so
-  /// nothing the modal is drawn against moves under it.
-  const [steering, setSteering] = createSignal<{
-    conversation: ConversationView;
-    working: boolean;
-  } | null>(null);
 
   /// The sentence a refused press is answered with, and `null` while there is
   /// nothing to answer. Held out here for the reason the steer is: what opens
@@ -661,13 +650,24 @@ function actions(): {
   const stop = useMutation(() => pressing(stopConversation));
 
   const force = useMutation(() => pressing(forceStopConversation));
-
-  /// Clicking Steer, which is a press before it is a modal: it stops the drive,
+  /// Pressing Steer, which is a press before it is a form: it stops the drive,
   /// so that nothing new is launched while the human composes and the world the
-  /// modal is drawn against is the world the submit arrives in.
+  /// form is written against is the world the submit arrives in — and it writes
+  /// the pending steer the form is drawn on.
   ///
-  /// The menu shuts on the way through — what opens over it is the modal, and a
-  /// dropdown left hanging behind one is a menu nobody can see to close.
+  /// Then the page goes to it. The pending steer is drawn as the last item on
+  /// the conversation's timeline and the form is that item's details pane, so
+  /// what this press does with the page is open a details pane: it replaces
+  /// rather than pushes, the details of one conversation being places in a page
+  /// rather than pages, and Back leaves the conversation the way it does from
+  /// any other pane.
+  ///
+  /// A second press finds the one there is, which is the same navigation: the
+  /// row says *go to the steer*, and whether it had to make one is the
+  /// server's business.
+  ///
+  /// The menu shuts on the way through — a dropdown left hanging over a page
+  /// that has just changed under it is a menu nobody meant to leave open.
   const click = useMutation(() => ({
     mutationFn: (conversation: ConversationView) =>
       steerConversation(conversation.id),
@@ -679,13 +679,13 @@ function actions(): {
       }
 
       // The menu first, as a refusal does it: shutting hands the focus back to
-      // the button the press came from, and the modal opening after that is
-      // what makes that button where the focus lands again when it is closed.
+      // the button the press came from, which is where a narrow window is
+      // walking away from.
       shut();
-      setSteering({ conversation, working: outcome.Opened.working });
+      navigate(pathTo(conversation.id, "steer"), { replace: true });
 
-      // The conversation has stopped, whatever the human goes on to decide, so
-      // the page behind the modal is already out of date.
+      // The conversation has stopped and is carrying a pending steer, whatever
+      // the human goes on to decide, so the page is already out of date.
       void reread();
     },
     onError: (error: Error) =>
@@ -880,8 +880,9 @@ function actions(): {
           {/* Drawn whatever state the conversation is in, unlike everything
               around it: every state is somewhere to steer *from* — a draft
               nothing has run in, a run in flight, work Verkstead has finished
-              with — and which states it can be steered *to* is the modal's to
-              offer. */}
+              with — and which states it can be steered *to* is the form's to
+              offer. The press stops the run and opens the form as an item at
+              the end of the timeline, where it stays until the human decides. */}
           <Action
             class={styles.steer}
             label="Steer"
@@ -975,25 +976,6 @@ function actions(): {
           keep={() => setConfirming(null)}
           close={() => confirmed()}
         />
-
-        <Show when={steering()}>
-          {(opened) => {
-            // Read on the way in rather than left as a getter on the modal's
-            // props: what the steer is about was settled by the press, and a
-            // `Show`'s accessor goes stale the moment the modal is closed —
-            // which is precisely when the modal is still tearing its own memos
-            // down over what it was drawn against.
-            const { conversation, working } = opened();
-
-            return (
-              <Steer
-                conversation={conversation}
-                working={working}
-                close={() => setSteering(null)}
-              />
-            );
-          }}
-        </Show>
       </>
     ),
   };

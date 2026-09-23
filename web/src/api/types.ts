@@ -1714,7 +1714,23 @@ shared: ShareView | null,
  * was handed over and none of the files themselves — see
  * [`AttachmentView`].
  */
-attachments: Array<AttachmentView>, };
+attachments: Array<AttachmentView>, 
+/**
+ * The steer somebody has started on this Conversation and not yet decided,
+ * where there is one.
+ *
+ * `null` is the ordinary Conversation, which is nearly all of them. A
+ * pending steer is written by the press on **Steer** and goes at the
+ * submit or the cancel, so what it says while it stands is that there is a
+ * form to be finished: the workbench draws it as the last item on the
+ * Timeline and the form is that item's details pane.
+ *
+ * **Not a Timeline Event, which is why it is here rather than in the
+ * list.** It is the one thing on the pane that has not happened yet, so it
+ * has no place in the record and is drawn after everything that does — and
+ * a Share, which is the record, carries no trace of it.
+ */
+pending_steer: PendingSteerView | null, };
 
 /**
  * What became of a create.
@@ -2495,6 +2511,25 @@ export type PathsView = {
  * Every configured bind, which is a directory every sandbox gets.
  */
 binds: Array<BindEntry>, };
+
+/**
+ * A pending steer as the page receives it: when the press was made, and where
+ * the form says the work is going.
+ *
+ * The two things the Timeline's own item is drawn from — it reads *Steer*
+ * until a target is picked and *Steering into X* after — with the rest of the
+ * form read by the pane the item opens.
+ */
+export type PendingSteerView = { 
+/**
+ * When Steer was pressed, RFC 3339.
+ */
+at: string, 
+/**
+ * Where the human has said the work goes, or `null` while they have not
+ * said. Every form opens on nothing picked.
+ */
+target: SteerTarget | null, };
 
 /**
  * What a Conversation has settled about one of its roles, as the page shows
@@ -4171,6 +4206,22 @@ export type Standing = { "Waiting": Liveness } | { "Answered": Answered } | { "L
 export type Started = { "Started": { id: number, } } | "NoSuchRepo";
 
 /**
+ * What cancelling a pending steer came to.
+ *
+ * Cancel is a press now rather than a modal being dismissed: it takes the
+ * pending steer away and leaves the Conversation exactly as the first press
+ * left it — stopped, with Resume on offer. Nothing is posted to the Timeline,
+ * a steer that decided nothing being no Event, and the stop's own Notice
+ * already says the human pressed.
+ *
+ * Nothing to cancel is [`Cancelled`] all the same: a cancel landing behind a
+ * submit or another device's cancel has got what it asked for.
+ *
+ * [`Cancelled`]: SteerCancelled::Cancelled
+ */
+export type SteerCancelled = "Cancelled" | "NoSuchConversation";
+
+/**
  * Which of a companion's ways of not being delivered by a steer this was.
  *
  * [`CompanionRefusal`]'s four asked again at the other moment a companion is
@@ -4220,29 +4271,42 @@ target: Lifecycle,
 html: string | null, };
 
 /**
- * What clicking Steer found, which is what the modal it opens is drawn from.
+ * What pressing Steer found, which is what the press does with the page next.
  *
- * The click is a press of its own rather than the first half of the submit: it
- * stops the drive before the modal opens, so that nothing new is launched while
- * the human composes and the world the modal was drawn against is the world the
- * submit arrives in. Cancel leaves the Conversation stopped with Resume on
- * offer, which is accepted rather than a bug — the click is what freezes it.
+ * The press is an act of its own rather than the first half of the submit: it
+ * stops the drive and writes the **pending steer** the form is drawn on, so
+ * that nothing new is launched while the human composes and the world the form
+ * was written against is the world the submit arrives in. Cancel leaves the
+ * Conversation stopped with Resume on offer, which is accepted rather than a
+ * bug — the press is what froze it.
+ *
+ * One outcome for both presses, because what the page does with either is the
+ * same: the item is drawn at the end of the Timeline and the page goes to it.
+ * Which of them happened is [`Opened::already`]'s to say.
  */
 export type SteerOpened = { "Opened": { 
 /**
- * Whether a session is still running as the modal opens.
+ * Whether a session is still running as the press lands.
  *
- * What **Interrupt current task** is offered for: the click leaves what
- * is running exactly where it is, and the checkbox is the only way to
- * end it where it stands. What ends it otherwise is the submit's own
- * launch — one Worktree holds one agent, so the session a steer starts
- * takes the Worktree from whatever is still in it — and into Done,
- * where nothing is launched, nothing ends it at all.
- *
- * Where nothing is running there is nothing to interrupt, so the
- * checkbox is not drawn at all.
+ * What the press has to say that the record cannot: a session is a
+ * process, and the page asks the register through this. **Interrupt
+ * current task** is what it is offered for — the press leaves what is
+ * running exactly where it is, and the tick is the only way to end it
+ * where it stands. What ends it otherwise is the submit's own launch —
+ * one Worktree holds one agent, so the session a steer starts takes
+ * the Worktree from whatever is still in it — and into Done, where
+ * nothing is launched, nothing ends it at all.
  */
-working: boolean, } } | "NoSuchConversation";
+working: boolean, 
+/**
+ * Whether the press found a pending steer already standing.
+ *
+ * `true` is the second press: nothing was written and nothing was
+ * stopped a second time, and what the page does is go to the form
+ * somebody is part-way through. A Conversation already carrying a
+ * half-written steer is not one to start another beside.
+ */
+already: boolean, } } | "NoSuchConversation";
 
 /**
  * What the human settled in the modal: where the Conversation goes, what runs
@@ -4384,7 +4448,7 @@ upgraded: Array<CompanionUpgrade>, };
  * Draft and Closed are not among them and never will be: each has a way in of
  * its own, and a steer is for the states the work is *done in* — the four rungs
  * of the ladder, and Follow-up beside them, which has no other way in at all. A
- * target the modal offers is a target something can be set going in, which is
+ * target the form offers is a target something can be set going in, which is
  * why the two that turn on a pull request are drawn out where there is none: an
  * instruction is writable anywhere and Done needs nothing, but there is no
  * wrapping up and no following up of work nobody can see.

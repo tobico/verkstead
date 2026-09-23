@@ -71,6 +71,7 @@ import type {
   SharePublished,
   ShowingArchived,
   Started,
+  SteerCancelled,
   SteerOpened,
   SteerSubmission,
   Submitted,
@@ -939,12 +940,17 @@ export function stopConversation(id: number): Promise<ConversationStopped> {
   return post<ConversationStopped>(`/api/ui/conversations/${id}/stop`, {});
 }
 
-/// Click steer: stop the drive, and find out what was running when it stopped.
+/// Press steer: stop the drive, open the pending steer the form is written on,
+/// and find out what was running when it stopped.
 ///
-/// The click rather than the move, and a press of its own for that reason.
-/// Nothing new is launched while the human composes, so the world the modal is
-/// drawn against is the world the submit arrives in — and cancelling leaves the
-/// conversation stopped with resume on offer, which is what the click bought.
+/// The press rather than the move, and an act of its own for that reason.
+/// Nothing new is launched while the human composes, so the world the form is
+/// written against is the world the submit arrives in — and cancelling leaves
+/// the conversation stopped with resume on offer, which is what the press
+/// bought.
+///
+/// A second press writes nothing: what comes back says the form was already
+/// there, and the page goes to it either way.
 ///
 /// Nothing is sent, as nothing is sent with either stop: which conversation it
 /// is is the whole of it.
@@ -952,12 +958,22 @@ export function steerConversation(id: number): Promise<SteerOpened> {
   return post<SteerOpened>(`/api/ui/conversations/${id}/steer`, {});
 }
 
-/// And submit the modal it opened: where the work goes, and whether to end what
-/// is running where it stands.
+/// Cancel it: the pending steer goes, and the conversation is left exactly as
+/// the press found it — stopped, with resume on offer.
+///
+/// Nothing is sent for the same reason, and nothing lands on the timeline: a
+/// steer that decided nothing is no event.
+export function cancelSteer(id: number): Promise<SteerCancelled> {
+  return post<SteerCancelled>(`/api/ui/conversations/${id}/steer/cancel`, {});
+}
+
+/// And submit the form: where the work goes, and whether to end what is running
+/// where it stands.
 ///
 /// Into done there is nothing to start, so this is the move alone — the
 /// conversation is finished with, the steer is on the timeline beside the move
-/// it wrote, and the stop the click left is taken away.
+/// it wrote, the stop the press left is taken away, and the pending steer goes
+/// in the same transaction as the record it became.
 export function steer(
   id: number,
   submission: SteerSubmission,

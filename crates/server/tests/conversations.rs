@@ -27,7 +27,7 @@ use verkstead_render::{
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationUnarchived,
     ConversationView, GrillingStarted, Lifecycle, Merging, PickedView, PinnedEvent, ProfileChosen,
     ProfileSaved, Registered, RepoEntry, RepoSwitched, Resolved, RoadmapPane, ShowingArchived,
-    Standing, Started, SteerCompanionRefusal, SteerOpened, TakenUp, TimelineEvent,
+    Standing, Started, SteerCancelled, SteerCompanionRefusal, SteerOpened, TakenUp, TimelineEvent,
 };
 use verkstead_server::{open_database, router_keeping, store};
 
@@ -1362,10 +1362,11 @@ async fn show_archived(app: &Router, showing: bool) {
     assert_eq!(status, StatusCode::NO_CONTENT, "the toggle failed: {body}");
 }
 
-/// Click Steer, which is the press that stops the drive and opens the modal.
+/// Press Steer, which stops the drive and opens the pending steer the form is
+/// written on.
 ///
 /// Nothing goes with it, as nothing goes with either stop: which Conversation it
-/// is is the whole of what a click says.
+/// is is the whole of what a press says.
 async fn steer(app: &Router, id: i64) -> SteerOpened {
     post(
         app,
@@ -1375,7 +1376,18 @@ async fn steer(app: &Router, id: i64) -> SteerOpened {
     .await
 }
 
-/// And submit the modal it opened: where the work goes, and what to do about
+/// And cancel it, which takes the pending steer away and leaves the
+/// Conversation stopped. No body either, for the same reason.
+async fn cancel_steer(app: &Router, id: i64) -> SteerCancelled {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/steer/cancel"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
+/// And submit the form it opened: where the work goes, and what to do about
 /// anything still running.
 async fn steer_into(app: &Router, id: i64, target: &str, interrupt: bool) -> ConversationSteered {
     post(
@@ -2521,49 +2533,195 @@ async fn starting_with_no_git_author_is_refused_by_name() {
         worktrees(&repo),
     );
 }
-
-/// Clicking Steer stops the drive, and cancelling leaves it stopped.
+/// Pressing Steer stops the drive, writes the pending steer, and leaves the
+/// Conversation stopped for as long as the form stands.
 ///
-/// The click is a press of its own rather than the first half of the submit:
-/// nothing new launches while the human composes, so the world the modal was
-/// drawn against is the world the submit arrives in. Cancel is then no press at
-/// all — the Conversation stays where the click left it, with Resume drawn on it,
-/// which is accepted rather than a bug.
+/// The press is an act of its own rather than the first half of the submit:
+/// nothing new launches while the human composes, so the world the form is
+/// written against is the world the submit arrives in. What it leaves behind is
+/// the pending steer — the item at the end of the Timeline, whose details pane
+/// is the form — and a Conversation with Resume drawn on it.
 ///
-/// Nothing is running in these fixtures, so the click stops the run where it
-/// stands and says as much: what **Interrupt current task** is offered against is
-/// a session, and there is none.
+/// Nothing is running in these fixtures, so the press stops the run where it
+/// stands and says as much: what **Interrupt current task** is offered against
+/// is a session, and there is none.
 #[tokio::test]
-async fn clicking_steer_stops_the_drive_and_leaves_it_stopped_when_nothing_follows() {
+async fn pressing_steer_stops_the_drive_and_opens_a_pending_steer() {
     let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = ready(&app, elsewhere.path(), repo_id).await;
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false },
-        "the modal opens with nothing to interrupt behind it",
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        },
+        "the form opens with nothing to interrupt behind it",
     );
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Grilling, "the click moves nothing");
+    assert_eq!(view.state, Lifecycle::Grilling, "the press moves nothing");
     assert!(
         view.blocked_on.is_some(),
         "the drive has stopped, and the Notice saying so is what the badge points at",
     );
     assert!(
         view.ready_to_resume,
-        "so the one press that undoes a click nobody followed up is drawn on it",
+        "so the one press that undoes a press nobody followed up is drawn on it",
     );
     assert!(
         !view.ready_to_stop,
-        "and there is nothing left to stop: the click already did",
+        "and there is nothing left to stop: the press already did",
     );
     assert_eq!(
         steered(&view),
         [("moved", Lifecycle::Grilling)],
         "and nothing was steered, so nothing on the record says it was",
+    );
+
+    let pending = view
+        .pending_steer
+        .expect("the press wrote the form's own row");
+
+    assert!(!pending.at.is_empty(), "it says when the press was made");
+    assert_eq!(
+        pending.target, None,
+        "and nothing is picked: every form opens on nothing picked",
+    );
+}
+
+/// A second press makes nothing and reports the one there is.
+///
+/// A Conversation already carrying a half-written form is not one to start
+/// another beside, so the press says where that form is and the page goes to
+/// it. Nothing is stopped a second time either — there is nothing left to stop
+/// — and the row is left exactly as it stands, down to when it was opened.
+#[tokio::test]
+async fn a_second_press_on_steer_finds_the_one_there_is() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
+    );
+
+    let opened_at = opened(&app, id).await.pending_steer.unwrap().at;
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened {
+            working: false,
+            already: true,
+        },
+        "the second press says the form was already there",
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(
+        view.pending_steer
+            .as_ref()
+            .map(|pending| pending.at.clone()),
+        Some(opened_at),
+        "and it is the same row, rather than a second one written over it",
+    );
+    assert_eq!(
+        steered(&view),
+        [("moved", Lifecycle::Grilling)],
+        "neither press put anything on the record",
+    );
+}
+
+/// Cancel takes the pending steer away and leaves the Conversation stopped.
+///
+/// The press is what froze it, so unfreezing is Resume's to do: Cancel decides
+/// nothing about the work, and posts nothing to the Timeline — a steer that
+/// decided nothing is no Event, and the stop's own Notice already says a human
+/// pressed.
+///
+/// A second cancel is the same answer. One landing behind a submit or behind
+/// another device's cancel has got what it asked for.
+#[tokio::test]
+async fn cancelling_takes_the_pending_steer_away_and_leaves_it_stopped() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
+    );
+    assert_eq!(cancel_steer(&app, id).await, SteerCancelled::Cancelled);
+
+    let view = opened(&app, id).await;
+
+    assert!(
+        view.pending_steer.is_none(),
+        "the form is gone, so nothing is drawn at the end of the Timeline",
+    );
+    assert_eq!(view.state, Lifecycle::Grilling, "and nothing moved");
+    assert!(
+        view.ready_to_resume,
+        "the Conversation is left stopped, with Resume on offer",
+    );
+    assert_eq!(
+        steered(&view),
+        [("moved", Lifecycle::Grilling)],
+        "and a steer that decided nothing is no Event",
+    );
+
+    assert_eq!(
+        cancel_steer(&app, id).await,
+        SteerCancelled::Cancelled,
+        "a cancel with nothing to cancel has got what it asked for",
+    );
+    assert_eq!(
+        cancel_steer(&app, 404).await,
+        SteerCancelled::NoSuchConversation,
+        "and a Conversation that is not there is refused by name",
+    );
+}
+
+/// And the submit takes it away with the record it became: the Steer and the
+/// Moved line land, and the form they were filled in on is gone from the view.
+#[tokio::test]
+async fn submitting_takes_the_pending_steer_away_with_the_record() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
+    );
+    assert_eq!(
+        steer_into(&app, id, "Done", false).await,
+        ConversationSteered::Steered,
+    );
+
+    let view = opened(&app, id).await;
+
+    assert!(
+        view.pending_steer.is_none(),
+        "the form is the record now, so there is nothing left at the end of the Timeline",
+    );
+    assert_eq!(
+        steered(&view).last(),
+        Some(&("moved", Lifecycle::Done)),
+        "and the pair the steer leaves is on the record",
     );
 }
 
@@ -2582,7 +2740,10 @@ async fn steering_into_done_moves_it_and_starts_nothing() {
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
     assert_eq!(
         steer_into(&app, id, "Done", false).await,
@@ -2630,7 +2791,10 @@ async fn a_draft_is_somewhere_to_steer_from_too() {
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
 
     let view = opened(&app, id).await;
@@ -2674,7 +2838,10 @@ async fn steering_a_draft_into_grilling_makes_its_branch_and_worktree() {
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
     assert_eq!(
         steer_grilling(&app, id, Some("# Retries\n\nThe backoff is wrong.\n")).await,
@@ -2748,7 +2915,10 @@ async fn steering_into_grilling_without_a_brief_writes_none() {
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
     assert_eq!(
         steer_grilling(&app, id, None).await,
@@ -2795,7 +2965,10 @@ async fn steering_into_grilling_with_no_brief_anywhere_is_refused_by_name() {
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
     assert_eq!(
         steer_grilling(&app, id, None).await,
@@ -2868,7 +3041,10 @@ async fn a_conversation_whose_profile_was_removed_is_steered_back_onto_another()
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
     assert_eq!(
         steer_grilling(&app, id, None).await,
@@ -2922,7 +3098,10 @@ async fn steering_into_grilling_settles_the_grilling_pairing() {
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
 
     let steered: ConversationSteered = post(
@@ -3008,7 +3187,10 @@ async fn steering_into_wrapping_leaves_a_review_account_the_human_chose_alone() 
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
 
     let steered: ConversationSteered = post(
@@ -3075,7 +3257,10 @@ async fn steering_into_wrapping_fills_a_review_nobody_picked_an_account_for() {
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
 
     let steered: ConversationSteered = post(
@@ -3121,7 +3306,10 @@ async fn steering_into_wrapping_fills_a_review_nobody_picked_an_account_for() {
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
 
     let steered: ConversationSteered = post(
@@ -3189,7 +3377,10 @@ async fn steering_into_wrapping_leaves_a_conversation_with_no_review_unreviewed(
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
 
     let steered: ConversationSteered = post(
@@ -3248,7 +3439,10 @@ async fn steering_into_implementing_with_nothing_to_do_is_refused_by_name() {
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
     assert_eq!(
         steer_into(&app, id, "Implementing", false).await,
@@ -3296,7 +3490,10 @@ async fn steering_into_implementing_with_an_instruction_records_what_was_asked_f
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
     assert_eq!(
         steer_instructed(&app, id, "Rebase this onto `main`.\n").await,
@@ -3361,7 +3558,10 @@ async fn steering_a_closed_conversation_into_grilling_gives_it_a_worktree_back()
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
     assert_eq!(
         steer_grilling(&app, id, Some("# Rate limiting, per account\n")).await,
@@ -3427,7 +3627,10 @@ async fn a_finished_conversation_steered_into_grilling_opens_a_second_round() {
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
     assert_eq!(
         steer_into(&app, id, "Done", false).await,
@@ -3442,7 +3645,10 @@ async fn a_finished_conversation_steered_into_grilling_opens_a_second_round() {
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
     assert_eq!(
         steer_grilling(&app, id, Some("# Rate limiting, per account\n")).await,
@@ -3527,7 +3733,10 @@ async fn steering_a_finished_conversation_into_follow_up_records_the_brief() {
     // one more thing to ask about it.
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
     assert_eq!(
         steer_into(&app, id, "Done", false).await,
@@ -3536,7 +3745,10 @@ async fn steering_a_finished_conversation_into_follow_up_records_the_brief() {
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
     assert_eq!(
         steer_following_up(&app, id, Some("Does it count the `429`s it sends?\n")).await,
@@ -3601,7 +3813,10 @@ async fn steering_into_follow_up_with_nothing_to_follow_up_is_refused_by_name() 
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
     assert_eq!(
         steer_following_up(&app, id, Some("Does it count the 429s?\n")).await,
@@ -3673,7 +3888,10 @@ async fn steering_into_wrapping_without_a_pull_request_is_refused_by_name() {
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
     assert_eq!(
         steer_into(&app, id, "Wrapping", false).await,
@@ -3709,7 +3927,10 @@ async fn a_draft_has_no_pull_request_to_be_steered_onto() {
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
     assert_eq!(
         steer_into(&app, id, "Wrapping", false).await,
@@ -4959,7 +5180,10 @@ async fn a_closed_conversation_carries_neither_waiting_mark() {
     // and opens the modal, and nothing here submits one.
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
     assert!(
         opened(&app, id).await.blocked_on.is_some(),
@@ -5033,7 +5257,10 @@ async fn a_done_conversation_with_an_open_set_is_still_waiting() {
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
     assert_eq!(
         steer_into(&app, id, "Done", false).await,
@@ -6557,7 +6784,10 @@ async fn steering_puts_a_companion_in_and_checks_it_out() {
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
     assert_eq!(
         steer_alongside(
@@ -6666,7 +6896,10 @@ async fn steering_into_done_puts_no_companion_in() {
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
     assert_eq!(
         steer_companions(
@@ -6748,7 +6981,10 @@ async fn a_companion_a_steer_cannot_deliver_refuses_it_by_name() {
 
         assert_eq!(
             steer(&app, id).await,
-            SteerOpened::Opened { working: false }
+            SteerOpened::Opened {
+                working: false,
+                already: false,
+            }
         );
         assert_eq!(
             steer_alongside(&app, id, "Grilling", serde_json::json!([row])).await,
@@ -6811,10 +7047,12 @@ async fn a_repo_a_steer_cannot_put_in_is_refused_by_name() {
     ];
 
     for (repo, refusal) in asked {
-        assert_eq!(
+        // The form stands through a refused submit, so every press after the
+        // first finds the one it left.
+        assert!(matches!(
             steer(&app, id).await,
-            SteerOpened::Opened { working: false }
-        );
+            SteerOpened::Opened { working: false, .. }
+        ));
         assert_eq!(
             steer_alongside(
                 &app,
@@ -6879,7 +7117,10 @@ async fn steering_opens_a_read_only_companion_up() {
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
     assert_eq!(
         steer_opening(
@@ -7029,9 +7270,14 @@ async fn an_upgrade_git_will_not_make_refuses_the_steer_by_name() {
             }
         }
 
-        assert_eq!(
-            steer(&app, id).await,
-            SteerOpened::Opened { working: false }
+        // The form stands through a refused submit, so every press after the
+        // first finds the one it left — which is what `already` is for.
+        assert!(
+            matches!(
+                steer(&app, id).await,
+                SteerOpened::Opened { working: false, .. }
+            ),
+            "the press stops a drive that is not running and opens the form",
         );
         assert_eq!(
             steer_opening(&app, id, "Grilling", serde_json::json!([opening(reading)])).await,
@@ -7150,10 +7396,12 @@ async fn no_downgrade_and_no_removal_is_obeyed() {
     ];
 
     for (added, upgraded, refusal) in asked {
-        assert_eq!(
+        // The form stands through a refused submit, so every press after the
+        // first finds the one it left.
+        assert!(matches!(
             steer(&app, id).await,
-            SteerOpened::Opened { working: false }
-        );
+            SteerOpened::Opened { working: false, .. }
+        ));
         assert_eq!(
             steer_companions(&app, id, "Grilling", added, upgraded.clone()).await,
             refusal,
@@ -7202,7 +7450,10 @@ async fn steering_a_draft_checks_out_the_companions_it_was_configured_with() {
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
     assert_eq!(
         steer_grilling(&app, id, None).await,
@@ -7242,7 +7493,10 @@ async fn steering_a_draft_invents_around_a_name_the_repository_holds() {
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
     assert_eq!(
         steer_grilling(&app, id, None).await,
@@ -7291,7 +7545,10 @@ async fn steering_a_conversation_that_has_worked_keeps_the_branch_it_was_on() {
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
     assert_eq!(
         steer_grilling(&app, id, None).await,
@@ -7348,7 +7605,10 @@ async fn steering_a_closed_conversation_checks_its_companions_out_again() {
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
     assert_eq!(
         steer_into(&app, id, "Grilling", false).await,
@@ -7689,7 +7949,10 @@ async fn a_stage_steered_into_a_second_round_is_not_a_stage_to_adopt_again() {
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false }
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
     );
     assert_eq!(
         steer_grilling(&app, id, Some("# The implementation, again\n")).await,

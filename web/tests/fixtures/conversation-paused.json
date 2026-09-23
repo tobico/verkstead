@@ -51,6 +51,7 @@
   },
   "naming": false,
   "parked": null,
+  "pending_steer": null,
   "pinned": [],
   "ready_to_continue": false,
   "ready_to_grill": false,

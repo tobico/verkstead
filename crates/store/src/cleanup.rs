@@ -170,6 +170,11 @@ const CONVERSATION_KEYED: &[&str] = &[
     "skipped_roles",
     "adoptions",
     "pull_request_adoptions",
+    // And the steer somebody had started and not decided, which is beside the
+    // Conversation rather than on its Timeline.
+    "pending_steers",
+    "pending_steer_additions",
+    "pending_steer_upgrades",
     // The archiving that authorised all of this, and the trim mark under it.
     "archived_conversations",
     "trimmed_conversations",

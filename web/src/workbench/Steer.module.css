@@ -1,16 +1,20 @@
 /* Steering a conversation: one question — where does this go? — with whatever
-   the target it picks needs under it, drawn over the page as the profile form
-   above is. The card is the modal's; what is here is the form inside it.
+   the target it picks needs under it, drawn as the details pane of the item the
+   press puts at the end of the timeline. The pane's own chrome is the shared
+   `PaneHead`; what is here is the form under it.
 
-   The run has already stopped by the time any of this is on the screen, which is
-   what the line under the heading says: the click froze the world, and cancel
+   A pane rather than a window over the page, which is the whole of why a steer
+   can take an afternoon to write: the workbench stays readable beside it, and
+   the item stays at the end of the timeline until the human decides.
+
+   The run has already stopped by the time any of this is on the screen, which
+   is what the line under the header says: the press froze the world, and cancel
    leaves it frozen with resume on offer. */
-.steerConversation h3 {
-  margin: 0 0 0.35rem;
-  font-size: 1rem;
+.steerConversation {
+  padding: 1rem 0 0;
 }
 
-.steerConversation > form > .lead {
+.steerConversation > .lead {
   margin: 0 0 1rem;
   font-size: 0.85rem;
   color: var(--ink-soft);

@@ -4356,6 +4356,19 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
         .with_context(|| format!("writing the steered round's Brief of Conversation {id}"))?;
     }
 
+    // And the pending steer this submit is the end of, gone in the act that
+    // writes the record it became. In the same transaction as the move because
+    // it is the same act: a Conversation that steered while still carrying the
+    // form it steered with would draw the item again the moment the page was
+    // read, and the human would be looking at a half-written form beside the
+    // Steer Event it had already landed as.
+    //
+    // Nothing to discard is an ordinary outcome. The record is written by the
+    // one caller here — the server's steering module, which is where the press
+    // comes in — and a database whose row went with a cancel from another
+    // device a moment before is still a steer that happened.
+    super::pending_steers::discard(&mut tx, id).await?;
+
     for pairing in pairings {
         if !settle(
             &mut tx,

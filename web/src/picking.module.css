@@ -4,7 +4,7 @@
 
    This one is the other way about, and deliberately: the control is the same
    control in all six places it stands — four on the setup card, the Repo among
-   them, one in the steer modal, one on the profile form — so what it looks like
+   them, one on the steer form, one on the profile form — so what it looks like
    is written once here, and a caller is left with where it sits and how much
    room it has. Six copies of a border and a radius are six things to drift,
    which is exactly what the `select` rules this replaces had begun to do. */

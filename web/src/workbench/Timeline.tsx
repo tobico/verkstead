@@ -41,6 +41,15 @@
 //! down to the end. The same following a running session's output is read with,
 //! and the same code (`../scrolling`).
 //!
+//! **And one item that is not an Event at all, at the very end: the steer being
+//! written.** Pressing Steer stops the drive and writes a pending steer beside
+//! the Conversation; this draws it as the last item on the pane and the form
+//! that settles it is that item's details pane — see `Steer.tsx`. It is drawn
+//! after everything on the record because it has not happened yet, so it has no
+//! place in the record and no id on it: it is selected by a word, as the
+//! backlog and the Share are, and it boards no Share at all. What it becomes is
+//! the Steer Event the submit writes, at which point the item goes.
+//!
 //! An Event that has a full self shows its summary here and is opened in the
 //! details pane, which is why this takes a way of selecting one — and so do the
 //! backlog and the roadmap, whose cards open the documents their entries name
@@ -113,6 +122,7 @@ import type {
   ManualTaskEvent,
   MovedEvent,
   NoticeEvent,
+  PendingSteerView,
   PinnedEvent,
   ProfileEntry,
   PullRequestEvent,
@@ -731,6 +741,31 @@ export function Timeline(props: {
             </Show>
           )}
         </For>
+
+        {/* And the steer being written, at the end of everything that has
+            happened — because it has not happened yet. It is no Timeline Event
+            and has no place in the record, so it is drawn after all of it,
+            whatever a seen-out session went on landing under the press that
+            opened it. See `pending_steer` on the Conversation.
+
+            Inside the same list, because it is an item of the pane and reads as
+            one: the eye follows a column of cards, and a form held somewhere
+            else would be a second place to look for the thing the press just
+            made. */}
+        <Show when={props.conversation.pending_steer}>
+          {(pending) => (
+            <li class={styles.timelineEvent}>
+              <PendingSteer
+                pending={pending()}
+                selected={props.selected === "steer"}
+                open={() => {
+                  props.select("steer");
+                  props.details();
+                }}
+              />
+            </li>
+          )}
+        </Show>
       </ol>
     </>
   );
@@ -1651,6 +1686,46 @@ function Steered(props: {
         </Openable>
       )}
     </Show>
+  );
+}
+
+/// The steer being written: the one item on this pane that has not happened
+/// yet.
+///
+/// A card at the end of everything that has, because that is what it is — the
+/// press that opened it stopped the drive and left a form beside the
+/// conversation, and the form is this card's details pane. It is no event and
+/// has no place in the record, which is why it is drawn after all of it and why
+/// a share carries no trace of it.
+///
+/// **In the accent**, which nothing else on the record takes: every other card
+/// is something that happened and this is something waiting on the human, said
+/// in the colour the sidebar's disc and the *blocked on you* badge are said in.
+///
+/// **It says where the steer is going as soon as that is picked.** *Steer*
+/// until then, and *Steering into X* after — so a human coming back to a
+/// conversation a day later reads what they had decided off the card rather
+/// than by opening it.
+function PendingSteer(props: {
+  pending: PendingSteerView;
+  selected: boolean;
+  open: () => void;
+}): JSX.Element {
+  return (
+    <CardButton
+      class={styles.pendingSteer}
+      open={props.selected}
+      press={props.open}
+    >
+      <p class={styles.pendingSteerLine}>
+        {props.pending.target === null
+          ? "Steer"
+          : `Steering into ${STATE[props.pending.target]}`}
+      </p>
+      <p class={styles.pendingSteerNote}>
+        The run has stopped while you decide.
+      </p>
+    </CardButton>
   );
 }
 
