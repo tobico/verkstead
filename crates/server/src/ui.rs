@@ -3050,9 +3050,14 @@ async fn file(
 /// *Versioned reads, and a stale write is refused*).
 ///
 /// Refused in the body like the read beside it, and with one refusal of its own:
-/// a write over a version that has moved answers with the version the disk has
-/// now, which is what draws the *Reload* / *Keep mine* bar in front of the
-/// human. A read-only root refuses before the disk is touched.
+/// a write over a version that has moved is refused with nothing written and
+/// nothing to go on, which is what draws the *Reload* / *Keep mine* bar in
+/// front of the human. **And nothing to go on is the point of it** — both
+/// presses under that bar read the file afresh through the endpoint beside
+/// this one, and a version handed back without the text it belongs to would be
+/// half an answer; see [`FileWritten::Stale`], where the asymmetry with
+/// [`FileWritten::Written`] is argued. A read-only root refuses before the disk
+/// is touched.
 ///
 /// **Not a record**, for the reason nothing else in `files` is: a save is the
 /// human's own hand in their own checkout, and what records it is the commit
