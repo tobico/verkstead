@@ -24,4 +24,4 @@ frozen record.
 - [x] 02: The form saves itself — [details](02-the-form-saves-itself.md)
 - [x] 03: What the rest of the workbench says about it — [details](03-around-a-pending-steer.md)
 - [x] 04: The record is the whole form — [details](04-the-whole-form-on-the-record.md)
-- [ ] 05: The vocabulary — [details](05-the-vocabulary.md)
+- [x] 05: The vocabulary — [details](05-the-vocabulary.md)

@@ -2,11 +2,12 @@
 //!
 //! Pressing **Steer** stops the drive and writes one of these beside the
 //! Conversation. The workbench draws it as the last item on the Timeline and
-//! the form that was a modal is its details pane, so a steer that takes an
-//! afternoon to write is written the way anything long is written — coming and
-//! going, on whichever device is to hand, with the rest of the workbench still
-//! there to be read. Submitting freezes it into the Steer Event and takes the
-//! row away; cancelling takes the row away and leaves the Conversation stopped.
+//! the form is its details pane rather than a window over the page, so a steer
+//! that takes an afternoon to write is written the way anything long is
+//! written — coming and going, on whichever device is to hand, with the rest of
+//! the workbench still there to be read. Submitting freezes it into the Steer
+//! Event and takes the row away; cancelling takes the row away and leaves the
+//! Conversation stopped.
 //!
 //! **Beside the Conversation rather than on its Timeline.** A Timeline is
 //! ordered by row id, so a row written at the press could not be moved to the

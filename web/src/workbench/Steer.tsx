@@ -306,7 +306,7 @@ export function onAPullRequest(conversation: ConversationView): boolean {
 /// The newest one on the timeline, which is the round's own — a conversation
 /// gets a brief per round, and a steered one adds a second beside the first
 /// rather than editing it. A grilling starts from a brief, so where this is
-/// false the modal's brief field is what the target *is*, and the server
+/// false the form's brief field is what the target *is*, and the server
 /// refuses a submit without one by name.
 ///
 /// Empty is the ordinary draft: every conversation is created with a brief
@@ -761,7 +761,7 @@ export function Steer(props: {
   ///
   /// Implementing is not drawn out anywhere, however little the branch holds —
   /// an instruction can always be written, and what that instruction says is
-  /// the one thing about this modal nothing can work out in advance.
+  /// the one thing about this form nothing can work out in advance.
   const offered = createMemo(() =>
     TARGETS.filter((offered) => {
       switch (offered.target) {
@@ -840,7 +840,7 @@ export function Steer(props: {
   );
 
   // The profile list is read here rather than passed in, so the picker is whole
-  // wherever the modal is opened from — the setup pane does the same.
+  // wherever the form is opened from — the setup pane does the same.
   const profiles = useReading(() => ({
     queryKey: ["profiles"],
     queryFn: listProfiles,
@@ -1348,7 +1348,7 @@ export function Steer(props: {
             <label for="steer-pairing">Run it under</label>
             {/* Drawn only once the list is here, the way the setup's pickers
                 are: a control whose choice is set before its rows exist is a
-                control showing nothing, and the modal reads the profiles when
+                control showing nothing, and the form reads the profiles when
                 it opens rather than finding them already read. */}
             <Show
               when={profiles.data}
