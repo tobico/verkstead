@@ -20190,10 +20190,36 @@ impl Watcher {
     }
 
     /// Either of them: dial the socket and take the repaint it opens with.
+    ///
+    /// **Dialled until it opens rather than once**, because *running* and
+    /// *attachable* are two different moments and every caller here reaches
+    /// this one off the first. A session's Event is drawn as running from the
+    /// moment its Capture opens — see `Sessions::writing`, where the launch
+    /// note answers for a whole launch before the register does — and the
+    /// Screen it is being drawn on reaches the register only once the relay is
+    /// up, at the far end of that launch. So [`Grilling::running`] and
+    /// [`Grilling::attachable`] return an Event whose Screen may not be there
+    /// yet, and a single dial inside that window is refused: a 404, which is
+    /// what this used to panic on and what a loaded runner opens wide enough to
+    /// hit.
+    ///
+    /// Waiting it out is what tells that refusal from the other one with the
+    /// same status — a Screen that has ended, and never will be there — because
+    /// one of them opens within `PATIENCE` and the other does not. The panic is
+    /// the same message either way, and now it means the second.
     async fn watching(url: String) -> Watcher {
-        let (socket, _) = tokio_tungstenite::connect_async(&url)
-            .await
-            .unwrap_or_else(|error| panic!("{url} to be attachable: {error}"));
+        let deadline = Instant::now() + *PATIENCE;
+
+        let socket = loop {
+            match tokio_tungstenite::connect_async(&url).await {
+                Ok((socket, _)) => break socket,
+                Err(error) => {
+                    assert!(Instant::now() < deadline, "{url} to be attachable: {error}",);
+
+                    pause(Duration::from_millis(25)).await;
+                }
+            }
+        };
 
         let mut watcher = Watcher {
             socket,
