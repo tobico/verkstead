@@ -818,11 +818,10 @@ impl Machine {
 
         // Apple's own file on a Mac, which is the one case there is a second
         // question about.
-        let stub = self.platform == Platform::MacOs
-            && matches!(
-                &standing,
-                sandbox::Standing::Found { landed, .. } if landed.ends_with(APPLES_GIT),
-            );
+        let stub = matches!(
+            &standing,
+            sandbox::Standing::Found { landed, .. } if self.is_apples_git(landed),
+        );
 
         if stub {
             if let Err(trouble) = self.command_line_tools() {
@@ -834,6 +833,19 @@ impl Machine {
         }
 
         stood(standing)
+    }
+
+    /// Whether `git` is the file Apple ships under `/usr/bin`, which is the one
+    /// `git` on any machine there is a second question about — see
+    /// [`APPLES_GIT`], which is that file read by its shape.
+    ///
+    /// **Asked by both the things that hold a resolved `git`**: the row, which
+    /// says whether a session could use it, and the git step's prefill, which
+    /// would otherwise run it. A `git` anywhere else, and a `git` on a machine
+    /// that is not a Mac, is whatever somebody installed and has no dialog
+    /// behind it.
+    fn is_apples_git(&self, git: &Path) -> bool {
+        self.platform == Platform::MacOs && git.ends_with(APPLES_GIT)
     }
 
     /// Whether Apple's command line tools are on this Mac, and what
@@ -888,12 +900,25 @@ impl Machine {
     /// Nothing where there is no `git`, where it would not run, or where it
     /// printed nothing — all of which are the same thing to a field: there is
     /// nothing to offer, so it stays empty.
+    ///
+    /// **And nothing where the `git` it resolved is Apple's stub**, which is
+    /// the one machine where asking is worse than not knowing. A `git config`
+    /// on a Mac with no command line tools opens Apple's install dialog as
+    /// surely as any other invocation of that file does, on a machine nobody is
+    /// standing at — see [`Machine::git`], where the row asks `xcode-select`
+    /// instead rather than run it. The field stays empty, which is what every
+    /// other unanswerable probe here comes to, and the human types their name.
     fn configured(&self, wanted: bool, key: &str) -> Option<Prefilled> {
         if !wanted {
             return None;
         }
 
         let git = self.found(sandbox::GIT)?;
+
+        if self.is_apples_git(&git) && self.command_line_tools().is_err() {
+            return None;
+        }
+
         let run = Command::new(git)
             .args(["config", "--global", "--get", key])
             .unseen()
@@ -3029,6 +3054,59 @@ echo {token}
 
         assert_eq!(prefill.name, None);
         assert_eq!(prefill.email, None);
+    }
+
+    /// And a Mac whose `git` is Apple's stub prefills nothing without running
+    /// it, which is the dependency row's rule kept by the one other thing that
+    /// holds a resolved `git`.
+    ///
+    /// A `git config` on a Mac with no command line tools opens Apple's install
+    /// dialog exactly as any other invocation of that file does — see
+    /// [`Machine::git`], which asks `xcode-select` rather than run it. The step
+    /// after it would have put that dialog on the machine's screen anyway, with
+    /// nobody standing at it, for two fields the human can type.
+    #[cfg(unix)]
+    #[test]
+    fn a_macs_git_step_never_runs_apples_stub_either() {
+        let dir = tempfile::tempdir().unwrap();
+        let ran = dir.path().join("ran");
+        a_git_nothing_runs(&dir.path().join(APPLES_GIT), &ran);
+        program(&dir.path().join(XCODE_SELECT), WITHOUT_THE_TOOLS);
+        let gh = a_gh(dir.path(), None);
+
+        let prefill = with_a_usr_bin(Platform::MacOs, dir.path()).prefilled(&gh, EVERYTHING);
+
+        assert_eq!(
+            prefill.name, None,
+            "nothing was asked, so nothing is offered"
+        );
+        assert_eq!(prefill.email, None);
+        assert!(
+            !ran.exists(),
+            "and the stub was not run, which is the dialog it exists not to open",
+        );
+    }
+
+    /// And where the tools are installed the same file is asked after all: what
+    /// the guard is about is the stub rather than Apple's `git`.
+    #[cfg(unix)]
+    #[test]
+    fn a_macs_git_step_reads_apples_git_where_the_tools_are_installed() {
+        let dir = tempfile::tempdir().unwrap();
+        let apples = dir.path().join(APPLES_GIT);
+
+        std::fs::create_dir_all(apples.parent().unwrap()).unwrap();
+        a_git(apples.parent().unwrap(), Some("Ada Lovelace"), None);
+        program(&dir.path().join(XCODE_SELECT), WITH_THE_TOOLS);
+        let gh = a_gh(dir.path(), None);
+
+        let prefill = with_a_usr_bin(Platform::MacOs, dir.path()).prefilled(&gh, EVERYTHING);
+
+        assert_eq!(
+            prefill.name,
+            Some(prefilled("Ada Lovelace".to_owned(), Source::GitConfig)),
+            "a git the command line tools stand behind is a git to read a config out of",
+        );
     }
 
     /// The token comes out of the server's own environment first, in the order

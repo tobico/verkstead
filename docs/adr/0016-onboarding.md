@@ -237,9 +237,12 @@ named Intel's `/usr/local` and raised the `chmod` that fails.
 dialog — so the probe ticked git on a Mac where a session's `git` would fail.
 The Mac git row is present where the resolved `git` is not Apple's stub, or
 `xcode-select -p` says the tools are installed; a failure's words go under the
-row, and the probe never runs the stub itself. Both Mac tabs' git rows lead
-with `xcode-select --install`, Apple silicon keeping `brew install git` as the
-alternative.
+row, and the probe never runs the stub itself. **Nor does the git step**: its
+prefill reads `user.name` and `user.email` out of the resolved `git`, and on the
+stub that is the same dialog, so where the resolved `git` is Apple's and the
+tools are missing it offers nothing and the human types the two fields. Both Mac
+tabs' git rows lead with `xcode-select --install`, Apple silicon keeping
+`brew install git` as the alternative.
 
 ## The zero state
 
