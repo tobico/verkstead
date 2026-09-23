@@ -99,12 +99,20 @@ The tab rules of ADR-0013 are amended.
 - **× on every tab**, files and terminals alike, with a kind icon at the other
   end. Closing a dirty file confirms. Closing a terminal ends its shell, and
   confirms first where the shell is **busy** — its foreground process is
-  something other than the shell itself, which the server can tell because it
-  holds the pty. A platform where it cannot tell confirms every time. ADR-0013
-  kept Close on a context menu because a × beside a small label is easy to hit;
-  that stands as the reason a busy shell asks, and the × is what VS Code's tab
-  bar has and what this one is styled after. A long press is no longer needed
-  for the menu, which is what frees it for dragging on a touch screen.
+  something other than the shell itself, which the server reads off the pty it
+  holds. What it reads is that process's *name* rather than its identity:
+  `tcgetpgrp` on the pty answers with a pid, and busy is that pid running
+  something other than the shell the terminal was started with. Comparing the
+  pid against the shell's own was considered and cannot be done — the child
+  the server holds is the sandbox wrapper, the shell is a grandchild inside
+  its own pid namespace and behind the worktree's dev shell besides, and the
+  wrapper is the pty's session leader as well, so the shell's own number never
+  reaches this side. A platform where it cannot tell confirms every time.
+  ADR-0013 kept Close on a context menu because a × beside a small label is
+  easy to hit; that stands as the reason a busy shell asks, and the × is what
+  VS Code's tab bar has and what this one is styled after. A long press is no
+  longer needed for the menu, which is what frees it for dragging on a touch
+  screen.
 - **The pane no longer opens a shell on load.** It opens empty, with a hint and
   a New terminal button, and live shells come back as tabs. The Terminal pane
   never stood empty because a shell was the whole of what it held; a pane that

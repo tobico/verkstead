@@ -38,11 +38,18 @@ pane is gone.
   Keep mine bar in this stage; stage 04 makes the same bar appear the moment the
   disk moves rather than at the next save. A read says which kind of thing it
   read: text, an image, a binary it will not send, or a file over the size cap.
-- **The busy flag is the server's.** The terminals list and the close both say
-  whether a terminal's foreground process is something other than its shell —
-  `tcgetpgrp` on the pty the server holds against the shell's own process
-  group, on the platforms with a pty. Where the platform cannot answer — the
-  ConPTY on Windows — the flag reads busy and every close confirms.
+- **The busy flag is the server's, and it is read by name.** The terminals list
+  and the close both say whether a terminal's foreground process is something
+  other than its shell: `tcgetpgrp` on the pty the server holds answers with a
+  pid, and what that pid is running — `/proc/<pid>/comm` on Linux — is compared
+  against the shell the terminal was started with. Against the shell's *pid*
+  would be the obvious check and there is no such number here: the child the
+  register's terminal was spawned as is the sandbox wrapper, `bwrap` under
+  `--unshare-all`, so the shell is a grandchild in a pid namespace of its own
+  and behind the worktree's dev shell where its flake has one — and the `setsid`
+  in `Terminal::spawn` lands on that wrapper, so the pty's session id is the
+  wrapper's too. Where the platform cannot answer — the ConPTY on Windows —
+  the flag reads busy and every close confirms.
 - **Code's state is held above the details pane**, so swapping the pane for an
   Event and back finds the tabs, the buffers and the dirty text where they
   were. The device's storage that survives a reload is stage 02's; this stage
@@ -70,10 +77,11 @@ pane is gone.
    hint and New terminal button; nothing opens on load. AC: every terminal test
    passes against the new pane; the pane opens empty with live shells as tabs;
    pressing × on a terminal ends its shell; the old path lands on the new one.
-2. **Busy shells** — the server reports the flag on the list and on close; a ×
-   on a busy tab confirms, and on a platform that cannot tell always confirms.
-   AC: a `sleep` in a terminal makes its × ask; an idle prompt does not; the
-   Windows suite sees the flag read busy.
+2. **Busy shells** — the pty reaches the register, which is where the flag is
+   read from; the server reports it on the list and on close; a × on a busy tab
+   confirms, and on a platform that cannot tell always confirms. AC: a `sleep`
+   in a terminal makes its × ask; an idle prompt does not, in a worktree with a
+   dev shell as well as one without; the Windows suite sees the flag read busy.
 3. **Roots and folders** — the files API lists roots and one folder each,
    ignored paths and `.git` left out; the tree draws the roots, expands a folder
    by reading it, and re-reads on each expand. AC: a companion appears as a
@@ -104,8 +112,14 @@ pane is gone.
 
 - The Terminal pane is still a details pane opened from the Timeline's header
   at `/terminal`, and `openings.ts` still lists the word-named panes by name.
-- The terminals register still holds the pty handle and the child's id, which
-  is what the busy check reads.
+- The terminals register holds a Screen and the two channels that end a
+  terminal, and neither the pty nor the child — so the pty has to be put on it
+  for the busy check to have anything to read. That the pty is already an
+  `Arc<Terminal>` shared with the Screen is what makes that cheap.
+- That the foreground pid `tcgetpgrp` answers with is one the server can look
+  up: the shell sits in a pid namespace of the sandbox's, and a descendant
+  namespace's pids do translate into the server's — worth proving before the
+  check is written on top of it.
 - Monaco's current release, and whether its vite integration still wants
   workers imported with `?worker` or ships a bundled loader.
 - On Windows, that a file the server writes into a Worktree is readable by the
