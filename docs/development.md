@@ -537,9 +537,15 @@ nowhere to say one — so it wants the dev shell for the same reason that build
 does.
 
 The dmg is `Verkstead.app` — the same binary built for both Apple targets and
-`lipo`-ed into one, the icns from `packaging/`, and an `Info.plist` that says
-`net.tobico.Verkstead` and `LSUIElement`, which is what makes it a menu-bar app
-with no Dock tile. It runs on a Mac only: `lipo`, `codesign` and `hdiutil` are
+`lipo`-ed into one, the icns from `packaging/`, and an `Info.plist` whose
+`CFBundleIdentifier` is `net.tobico.Verkstead` and whose `LSUIElement` is what
+makes it a menu-bar app with no Dock tile. Its `CFBundleIconFile` names that
+icns with the extension on it — macOS appends `.icns` only to a value that has
+none, and a dotted identifier reads as having one already, so a value without
+it is a name no file answers to and Finder draws the generic app icon. The
+release's dmg leg reads the key back off the mounted bundle and has `iconutil`
+open what it names, which is the only way that failure is visible from outside
+a Finder window. It runs on a Mac only: `lipo`, `codesign` and `hdiutil` are
 the operating system's own tools, and there is no cross build of it from here.
 The bundle is ad-hoc signed rather than signed with a Developer ID, because
 Apple silicon will not execute a binary with no signature at all — that is not

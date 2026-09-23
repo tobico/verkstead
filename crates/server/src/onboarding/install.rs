@@ -40,14 +40,16 @@
 //! `PATH` with no shell profile edited and nothing restarted — see
 //! [`crate::sandbox::installed_into`].
 //!
-//! **A Mac is Homebrew's, and Homebrew refuses to run as root.** So there the
-//! order is the other way up: every ticked row is a `brew install` of its own,
-//! run as the user, and the one thing that is ever raised is the step that
-//! makes Homebrew's prefix on a Mac that has no `brew` yet. That is the whole of
-//! what Homebrew's own installer would have called `sudo` for, so the installer
-//! after it runs as the user too and asks for nothing — see [`homebrew`], and
-//! [`Chain`], which is what makes a prefix nobody could make fail every `brew`
-//! line behind it rather than each of them separately.
+//! **A Mac's packages are Homebrew's, and Homebrew refuses to run as root.** So
+//! there the order is the other way up: every ticked row Homebrew carries is a
+//! `brew install` of its own, run as the user, and the one thing that is ever
+//! raised is the step that makes Homebrew's prefix on a Mac that has no `brew`
+//! yet. That is the whole of what Homebrew's own installer would have called
+//! `sudo` for, so the installer after it runs as the user too and asks for
+//! nothing — see [`homebrew`], and [`Chain`], which is what makes a prefix
+//! nobody could make fail every `brew` line behind it rather than each of them
+//! separately. The two vendors' own installers are the same unit there as
+//! everywhere else, wanting no Homebrew and raising nothing.
 //!
 //! **And a Windows machine raises everything.** There the dialog is UAC and
 //! what is behind it is the same user with their administrator token, so
@@ -110,6 +112,11 @@ const NODE: &[&str] = &["nodejs", "npm"];
 /// What a skipped row reads.
 const CANCELLED: &str = "cancelled";
 
+/// The directory under the home a local install lands in, and the one a Mac
+/// session reaches whichever way Verkstead was started: it leads the Mac floor
+/// — see ADR-0016's *Macs*, and `sandbox`'s `composed`.
+const LOCAL_BIN: &str = ".local/bin";
+
 /// Anthropic's own installer, which is what a ticked Claude row runs.
 ///
 /// **The command the wizard already shows**, and the install that stays
@@ -121,7 +128,7 @@ const CANCELLED: &str = "cancelled";
 const CLAUDE: Vendor = Vendor {
     who: "Anthropic",
     line: "curl -fsSL https://claude.ai/install.sh | bash",
-    lands: ".local/bin",
+    lands: LOCAL_BIN,
 };
 
 /// And xAI's, which is what a ticked Grok Build row runs.
@@ -135,6 +142,25 @@ const GROK: Vendor = Vendor {
     who: "xAI",
     line: "curl -fsSL https://x.ai/cli/install.sh | bash",
     lands: ".grok/bin",
+};
+
+/// And OpenCode's own, which is what a ticked OpenCode row runs on the Mac that
+/// has no Homebrew to install it with.
+///
+/// The line and the directory are the ones its install page serves: the script
+/// puts `opencode` in `$HOME/.opencode/bin` where `OPENCODE_INSTALL_DIR` says
+/// nothing, and that directory is what the unit writes to `session_path` — it
+/// is under the home rather than on any floor, which is the whole of why the
+/// write matters.
+///
+/// **The Intel Mac's alone, for now.** Every other machine here has a package
+/// for OpenCode — Homebrew's formula, the three archives' npm — and this is the
+/// one that has none; the same script runs on a Linux and is not what a ticked
+/// row there runs.
+const OPENCODE: Vendor = Vendor {
+    who: "OpenCode",
+    line: "curl -fsSL https://opencode.ai/install | bash",
+    lands: ".opencode/bin",
 };
 
 /// Anthropic's installer on Windows, which is the PowerShell one.
@@ -189,14 +215,23 @@ const MAKE_THE_ACCOUNT: &str = "session-account create --data-dir";
 /// puts Homebrew's own two units in front of them.
 const BREW: &str = "brew";
 
-/// Where Homebrew installs, worked out by the machine the line runs on.
+/// Where Homebrew installs, which on the one Mac that reaches this is Apple
+/// silicon's prefix and no other.
 ///
-/// **Which prefix it is, is that machine's own word.** `/opt/homebrew` is Apple
-/// silicon's and `/usr/local` is Intel's, and nothing on this side of the dialog
-/// knows which Mac it is talking to: a server built for one architecture may be
-/// the one running under Rosetta on the other. So the line asks `uname` where it
-/// lands, which is what Homebrew's own installer does.
-const WHERE: &str = "prefix=/usr/local; [ \"$(uname -m)\" = arm64 ] && prefix=/opt/homebrew";
+/// **Said rather than worked out, the machine having already answered.** The
+/// line used to ask `uname -m` and fall back to Intel's `/usr/local`, from when
+/// one Mac tab covered both. [`plan`] sends an Intel Mac to [`intel`] now, so
+/// [`homebrew`] is reached for `Distro::MacOs` alone — the Mac
+/// `hw.optional.arm64` said was Apple's, see `onboarding::mac` — and
+/// `/opt/homebrew` is the only prefix this arm can rightly make.
+///
+/// **And `uname -m` was the wrong question to be left asking.** It answers for
+/// the slice the process is rather than for the Mac under it, and a shell a
+/// translated process starts is translated too — so a Verkstead under Rosetta
+/// drew Homebrew's tab correctly off `sysctl` and then raised a `chmod ug=rwx
+/// /usr/local`, which is the `Operation not permitted` this branch is here
+/// about. See ADR-0016's *Macs*.
+const PREFIX: &str = "/opt/homebrew";
 
 /// And Homebrew's own installer, run as the user over the prefix the step in
 /// front of it made.
@@ -220,6 +255,60 @@ const FAILED_SILENTLY: &str = "the installer failed and said nothing";
 /// What a server with no way to raise a dialog says on every ticked row.
 const NO_DIALOG: &str = "Verkstead has no way to ask this machine for a password: the desktop \
                          app is what raises the dialog, and this server was not started by it.";
+
+/// What the git row on an Intel Mac says.
+///
+/// **A dialog of Apple's rather than a command of anybody's.** Every Mac has a
+/// `/usr/bin/git`, and without the command line tools it is a stub that opens
+/// this dialog when it is run; `xcode-select --install` opens the same one. It
+/// is somebody standing at that machine agreeing to a download, which is not a
+/// thing an install run can do for them — and on the machine this wizard is
+/// most often read from, a phone on the tailnet, it is not even visible.
+const XCODE_TOOLS: &str = "git comes with Apple's command line tools. Run xcode-select --install on \
+                           that Mac and agree to Apple's own dialog, which is on its screen rather \
+                           than a command Verkstead can run for you.";
+
+/// And what the Codex row there says.
+///
+/// Its npm package is what every other Unix tab installs it from and its cask
+/// is what the other Mac's does; a Mac with no Homebrew and no node has
+/// neither, and the binary on its releases page is what is left.
+const CODEX_ON_INTEL: &str = "Codex has no installer script, and the package the other tabs use \
+                              wants an npm this Mac has no package manager to install. Its binary \
+                              is on its releases page, and it goes in ~/.local/bin, which every \
+                              Mac session looks in.";
+
+/// And GitHub's own release, which is what a ticked `gh` row runs on the Mac
+/// with no Homebrew to `brew install gh` with.
+///
+/// **A download rather than an installer**, GitHub publishing no script: every
+/// release carries a `gh_<version>_macOS_amd64.zip` with the binary at `bin/gh`
+/// inside it, and this is the four steps that turn one into a `gh` on a
+/// session's `PATH` — the version, the zip, the unpacking, and the copy into
+/// the home's own `.local/bin`.
+///
+/// **The version is this machine's to find, at the moment it installs.** It is
+/// the last path segment of wherever `releases/latest` redirects to — the tag,
+/// `v` and all, which the asset's name wants without it — so a Verkstead built
+/// months ago installs today's `gh`, where a version written down here would go
+/// stale with every release and be wrong for every human who pressed Next after
+/// it.
+///
+/// **Unpacked somewhere temporary and copied from there**, rather than
+/// extracted over a directory a session searches: a download that died halfway
+/// leaves a broken `gh` on the `PATH` if the zip is opened in place, and leaves
+/// nothing at all if it is opened in a directory that is thrown away either way.
+/// The exit status is the chain's own, kept across the cleanup, so the row
+/// carries what `curl` or `unzip` said rather than what `rm` did.
+const GH_RELEASE: &str = "unpacked=$(mktemp -d \"${TMPDIR:-/tmp}/verkstead-gh.XXXXXX\") && \
+     tag=$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
+     https://github.com/cli/cli/releases/latest) && tag=${tag##*/} && \
+     curl -fsSL -o \"$unpacked/gh.zip\" \
+     \"https://github.com/cli/cli/releases/download/$tag/gh_${tag#v}_macOS_amd64.zip\" && \
+     unzip -q -j \"$unpacked/gh.zip\" '*/bin/gh' -d \"$unpacked\" && \
+     mkdir -p \"$HOME/.local/bin\" && cp \"$unpacked/gh\" \"$HOME/.local/bin/gh\" && \
+     chmod +x \"$HOME/.local/bin/gh\"; \
+     landed=$?; rm -rf \"$unpacked\"; exit $landed";
 
 /// And what a Mac with no Homebrew and nobody to hand a prefix to says on every
 /// ticked row Homebrew would have installed.
@@ -939,27 +1028,36 @@ fn watch(run: &Arc<Run>, marker: PathBuf, doing: String) -> (Arc<AtomicBool>, Jo
 /// What `ticked` comes to on this machine: the commands, and the rows nothing
 /// here installs.
 ///
-/// **Three shapes, and which one a machine is, is the platform's answer rather
+/// **Four shapes, and which one a machine is, is the platform's answer rather
 /// than a preference.** A Linux installs out of the archive its distribution
-/// carries, raised once; a Mac installs out of Homebrew, raised never — see
-/// [`homebrew`]; and a Windows raises every ticked row on its own — see
-/// [`windows`].
+/// carries, raised once; an Apple-silicon Mac installs out of Homebrew, raised
+/// never — see [`homebrew`]; an Intel Mac has no Homebrew to install out of and
+/// runs the vendors' own installers alone — see [`intel`]; and a Windows raises
+/// every ticked row on its own — see [`windows`].
+///
+/// **A match rather than a comparison**, so that a machine the wizard learns to
+/// tell apart is a machine this has to be told what to do with: an arm missing
+/// here would be a new Distro quietly handed the Linux packager's *nothing*,
+/// which is a hint screen saying there is no command for a machine there is one
+/// for.
 fn plan(machine: &Machine, ticked: &[Dependency]) -> Plan {
     let distro = machine.distro();
 
-    if distro == Distro::MacOs {
-        return homebrew(machine, ticked);
+    match distro {
+        Distro::MacOs => homebrew(machine, ticked),
+        Distro::MacOsIntel => intel(machine, ticked),
+        Distro::Windows => windows(machine, ticked),
+
+        Distro::NixOs
+        | Distro::Ubuntu
+        | Distro::Fedora
+        | Distro::Debian
+        | Distro::Arch
+        | Distro::OtherLinux => match packager(distro) {
+            Some(packager) => packages(machine, ticked, packager),
+            None => nothing(machine, ticked, &no_command(distro)),
+        },
     }
-
-    if distro == Distro::Windows {
-        return windows(machine, ticked);
-    }
-
-    let Some(packager) = packager(distro) else {
-        return nothing(machine, ticked, &no_command(distro));
-    };
-
-    packages(machine, ticked, packager)
 }
 
 /// Every ticked row on a machine whose archive carries what it is asking for:
@@ -1081,13 +1179,16 @@ fn vendors_own(row: Dependency, vendor: Vendor, lands: PathBuf) -> Unit {
     }
 }
 
-/// And every ticked row on a Mac, which is Homebrew's.
+/// And every ticked row on a Mac, which is Homebrew's but for the two that are
+/// their vendors' own.
 ///
 /// **One unit per row, and each of them as the user**, Homebrew refusing to run
-/// as root at all. Nothing lands anywhere worth writing down: both prefixes are
-/// on the floor a Mac session's `PATH` is composed from — see
-/// `sandbox::APPLE_PATH` — so the row goes present off the very next probe
-/// without `session_path` being touched.
+/// as root at all. A `brew install` lands nowhere worth writing down: both
+/// prefixes are on the floor a Mac session's `PATH` is composed from — see
+/// `sandbox::APPLE_INSTALLS` — so the row goes present off the very next probe
+/// without `session_path` being touched. A vendor's installer writes what it
+/// landed in the way it does on a Linux: the home's `.local/bin` is on that
+/// floor too, and writing it is what the unit's `lands` has always meant.
 ///
 /// **And where there is no `brew` yet, two units in front of them.** The
 /// elevated one makes the prefix and hands it over, which is the whole of what
@@ -1115,9 +1216,9 @@ fn homebrew(machine: &Machine, ticked: &[Dependency]) -> Plan {
                 _ => units.push(brew.unit(*row)),
             },
 
-            // The one row here that is not Homebrew's, and it is the one row
-            // Homebrew has no cask for: xAI's own installer, under this user's
-            // home the way it is on a Linux — see [`GROK`].
+            // The two rows here that are not Homebrew's: their vendors' own
+            // installers, under this user's home the way they are on a Linux —
+            // see [`CLAUDE`] and [`GROK`].
             OnAMac::Vendor(vendor) => match machine.home() {
                 Some(home) => units.push(vendors_own(*row, vendor, home.join(vendor.lands))),
                 None => beyond.push((*row, no_home(*row))),
@@ -1178,8 +1279,8 @@ fn getting(machine: &Machine, ticked: &[Dependency]) -> Getting {
     Getting::First(vec![
         Unit {
             line: format!(
-                "{WHERE}; mkdir -p \"$prefix\" && chmod ug=rwx \"$prefix\" && \
-                 chgrp admin \"$prefix\" && chown {} \"$prefix\"",
+                "mkdir -p {PREFIX} && chmod ug=rwx {PREFIX} && \
+                 chgrp admin {PREFIX} && chown {} {PREFIX}",
                 quoted(user),
             ),
             covers: Vec::new(),
@@ -1246,8 +1347,10 @@ enum OnAMac {
     /// which is where the human who has to type one reads them.
     Brew(Brew),
 
-    /// Or the vendor's own installer, there being no Homebrew name that is
-    /// really xAI's grok — see [`GROK`].
+    /// Or the vendor's own installer: Claude Code, which Anthropic's own
+    /// installer keeps current where Homebrew's cask was only ever there for
+    /// the Dock's `PATH`, and Grok Build, there being no Homebrew name that is
+    /// really xAI's grok — see [`CLAUDE`] and [`GROK`].
     Vendor(Vendor),
 }
 
@@ -1269,22 +1372,135 @@ fn on_a_mac(dependency: Dependency) -> OnAMac {
             cask: false,
         }),
 
-        // The two that ship as applications rather than as formulae. Claude
-        // Code's cask is the install a Mac session finds whichever way
-        // Verkstead was started, which is why it is the row here and the
-        // native installer is not: an app started from the Dock has launchd's
-        // `PATH` rather than a shell's, and that one never names
-        // `~/.local/bin`.
-        Dependency::Claude => OnAMac::Brew(Brew {
-            name: "claude-code",
-            cask: true,
-        }),
+        // Which ships as an application rather than as a formula, so it is a
+        // cask rather than a plain `brew install`.
         Dependency::Codex => OnAMac::Brew(Brew {
             name: "codex",
             cask: true,
         }),
 
+        // And the two rows that are their vendors' own installers here, the
+        // way they are on a Linux. Claude Code's cask was the row for as long
+        // as `~/.local/bin` was somewhere a Mac session could not look; the
+        // Mac floor carries it now, so what a tick runs is the install that
+        // stays current — see [`CLAUDE`], and ADR-0016's *Macs*.
+        Dependency::Claude => OnAMac::Vendor(CLAUDE),
         Dependency::Grok => OnAMac::Vendor(GROK),
+    }
+}
+
+/// And every ticked row on an Intel Mac, which is the vendors' own installers
+/// and nothing else.
+///
+/// **Nothing is raised here at all, and there is no `brew` line to raise it
+/// for.** Homebrew has dropped this machine: its installer refuses an Intel Mac
+/// outright and its formulae there get no bottles, so the elevated step that
+/// made its prefix — a `chmod /usr/local`, on a firmlink root no Mac since
+/// Catalina allows one on — is a dialog this arm never puts up. See ADR-0016's
+/// *Macs*.
+///
+/// **What is left is what installs under this user's home**: Anthropic's for
+/// Claude Code, xAI's for Grok Build and OpenCode's own, each of them the same
+/// unit the other arms run as the user, each landing under the home and each
+/// written to `session_path` — `.opencode/bin` being on no floor at all.
+///
+/// **And `gh` is GitHub's own release**, which is the one row here that is
+/// neither a package nor a vendor's script: a zip per release, unpacked into
+/// the home's `.local/bin` as the user, at the version `releases/latest`
+/// redirects to when the human presses Next — see [`GH_RELEASE`].
+///
+/// **And two rows go to the hint screen**, which is what a row with nothing to
+/// run has always done: `git` is Apple's command line tools and the dialog that
+/// installs them is on that machine's screen, and Codex has neither a script
+/// nor a package a Mac without Homebrew can use. Each carries the sentence that
+/// says so — see [`XCODE_TOOLS`] and [`CODEX_ON_INTEL`].
+///
+/// **The sandbox row is neither**, as it is on the other Mac: `sandbox-exec` is
+/// Apple's own and the probe ticks it.
+fn intel(machine: &Machine, ticked: &[Dependency]) -> Plan {
+    let mut units: Vec<Unit> = Vec::new();
+    let mut beyond: Vec<(Dependency, String)> = Vec::new();
+
+    for row in ticked {
+        match on_an_intel_mac(*row) {
+            OnAnIntelMac::Nothing => {}
+
+            OnAnIntelMac::Vendor(vendor) => match machine.home() {
+                Some(home) => units.push(vendors_own(*row, vendor, home.join(vendor.lands))),
+                None => beyond.push((*row, no_home(*row))),
+            },
+
+            // Which lands under the home the same way a vendor's installer
+            // does, and is the hint screen's for the same reason where there
+            // is none to land under.
+            OnAnIntelMac::Release => match machine.home() {
+                Some(home) => units.push(ghs_release(home)),
+                None => beyond.push((*row, no_home(*row))),
+            },
+
+            OnAnIntelMac::Beyond(why) => beyond.push((*row, why.to_owned())),
+        }
+    }
+
+    Plan {
+        units,
+        beyond,
+        platform: machine.platform,
+    }
+}
+
+/// How one row is installed on an Intel Mac: the vendor's own installer,
+/// GitHub's own release, nothing at all, or nothing that can be done from here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OnAnIntelMac {
+    /// The sandbox row, and only it: `sandbox-exec` is Apple's own.
+    Nothing,
+
+    /// A vendor's own installer, run as the user under this user's home.
+    Vendor(Vendor),
+
+    /// Or GitHub's release zip, unpacked under that home — the `gh` row, and
+    /// only it. See [`GH_RELEASE`].
+    Release,
+
+    /// Or a row this machine has nothing to run for, with the sentence that
+    /// goes under it on the hint screen.
+    Beyond(&'static str),
+}
+
+/// Which of the four one row is.
+fn on_an_intel_mac(dependency: Dependency) -> OnAnIntelMac {
+    match dependency {
+        Dependency::Sandbox => OnAnIntelMac::Nothing,
+
+        Dependency::Claude => OnAnIntelMac::Vendor(CLAUDE),
+        Dependency::Grok => OnAnIntelMac::Vendor(GROK),
+        Dependency::OpenCode => OnAnIntelMac::Vendor(OPENCODE),
+        Dependency::Gh => OnAnIntelMac::Release,
+
+        Dependency::Git => OnAnIntelMac::Beyond(XCODE_TOOLS),
+        Dependency::Codex => OnAnIntelMac::Beyond(CODEX_ON_INTEL),
+    }
+}
+
+/// One unit unpacking GitHub's release of `gh` into `home`'s own `.local/bin`,
+/// as the user.
+///
+/// **The shape every as-the-user unit here has**, and for the reason they all
+/// do: nothing it writes is outside this user's home, so a password dialog in
+/// front of it would be asking for a privilege it has no use for. What it
+/// landed in is written to `session_path` like any other — `.local/bin` is on
+/// the Mac floor already, and writing it is what the unit's `lands` has always
+/// meant.
+fn ghs_release(home: &Path) -> Unit {
+    Unit {
+        line: GH_RELEASE.to_owned(),
+        covers: vec![Dependency::Gh],
+        doing: "Unpacking GitHub's release of gh".to_owned(),
+        how: How::AsTheUser,
+        lands: Some(home.join(LOCAL_BIN)),
+        chain: None,
+        regrants: None,
     }
 }
 
@@ -1589,7 +1805,11 @@ fn packager(distro: Distro) -> Option<Packager> {
             refresh: None,
             gh: "github-cli",
         }),
-        Distro::NixOs | Distro::OtherLinux | Distro::MacOs | Distro::Windows => None,
+        Distro::NixOs
+        | Distro::OtherLinux
+        | Distro::MacOs
+        | Distro::MacOsIntel
+        | Distro::Windows => None,
     }
 }
 
@@ -1783,7 +2003,9 @@ mod tests {
     /// And the whole of it, for the other machine that names nobody.
     fn named(distro: Distro, dir: &Path, home: Option<PathBuf>, user: Option<String>) -> Machine {
         let (platform, os_release) = match distro {
-            Distro::MacOs => (Platform::MacOs, None),
+            // Both Macs are the one platform, and what tells them apart is
+            // what `sysctl` said — which is stated below.
+            Distro::MacOs | Distro::MacOsIntel => (Platform::MacOs, None),
             Distro::Windows => (Platform::Windows, None),
             Distro::NixOs => (Platform::Linux, Some("ID=nixos\n")),
             Distro::Ubuntu => (Platform::Linux, Some("ID=ubuntu\n")),
@@ -1817,6 +2039,10 @@ mod tests {
             os_release.map(str::to_owned),
             &environment,
         )
+        // The one a Mac answers `hw.optional.arm64` with, which is what makes
+        // it Homebrew's Mac — see `onboarding::mac`. Every other machine says
+        // nothing, an Intel Mac included.
+        .arm64((distro == Distro::MacOs).then(|| "1".to_owned()))
     }
 
     /// The profile a stated Windows machine runs under, which is where its
@@ -2044,8 +2270,9 @@ mod tests {
         );
     }
 
-    /// A Mac with Homebrew is one `brew` line per ticked row, every one of them
-    /// run as the user and nothing raised at all.
+    /// A Mac with Homebrew is one `brew` line per packaged row, every one of
+    /// them run as the user and nothing raised at all — with the two vendors'
+    /// own installers beside them, the way they are on a Linux.
     ///
     /// The sandbox row is neither a unit nor a sentence: `sandbox-exec` is on
     /// every Mac, so a press that named it has nothing to do about it.
@@ -2057,7 +2284,7 @@ mod tests {
     /// nothing on its `PATH` and asked about on every runner.
     #[cfg(unix)]
     #[test]
-    fn a_mac_with_homebrew_installs_every_ticked_row_with_it() {
+    fn a_mac_with_homebrew_installs_every_packaged_row_with_it() {
         let dir = tempfile::tempdir().unwrap();
         crate::stand_ins::program(&dir.path().join(BREW), "#!/bin/sh\nexit 0\n");
 
@@ -2082,16 +2309,61 @@ mod tests {
         assert_eq!(git.covers, [Dependency::Git]);
         assert_eq!(git.lands, None, "Homebrew's prefix is on the Apple floor");
 
-        // A cask rather than a formula, which is the install a Mac session
-        // finds whichever way Verkstead was started.
-        assert_eq!(claude.line, "brew install --cask claude-code");
+        // Anthropic's own installer rather than Homebrew's cask, which is the
+        // install that stays current — and what it lands is written down, the
+        // home's `.local/bin` being where it puts `claude` here as everywhere
+        // else.
+        assert_eq!(
+            claude.line,
+            "curl -fsSL https://claude.ai/install.sh | bash"
+        );
         assert_eq!(claude.how, How::AsTheUser);
+        assert_eq!(claude.doing, "Running Anthropic's installer");
+        assert_eq!(claude.lands, Some(PathBuf::from(HOME).join(".local/bin")));
+        assert_eq!(
+            claude.chain, None,
+            "Anthropic's installer wants no Homebrew"
+        );
 
-        // And the one row Homebrew has no name for is xAI's own installer,
-        // under this user's home the way it is everywhere else.
+        // And xAI's beside it, under this user's home the way it is everywhere
+        // else.
         assert_eq!(grok.line, "curl -fsSL https://x.ai/cli/install.sh | bash");
         assert_eq!(grok.lands, Some(PathBuf::from(HOME).join(".grok/bin")));
         assert_eq!(grok.chain, None, "xAI's installer wants no Homebrew");
+    }
+
+    /// And a Mac with no `brew` and Claude alone ticked installs no Homebrew:
+    /// the prefix and the installer are raised in front of a `brew` line, and
+    /// there is none.
+    ///
+    /// **Which is the press this task is for.** Claude Code was the Mac's one
+    /// cask that mattered, so ticking it by itself used to be a run that made
+    /// Homebrew's prefix behind the password dialog and installed Homebrew
+    /// before it could install anything — on an Intel Mac, the `chmod
+    /// /usr/local` that fails outright. Now it is one unit of one command, run
+    /// as the user and raising nothing.
+    #[test]
+    fn a_mac_with_claude_alone_ticked_installs_no_homebrew() {
+        let plan = plan(&machine(Distro::MacOs), &[Dependency::Claude]);
+
+        assert!(plan.beyond.is_empty(), "{plan:?}");
+
+        let [claude] = plan.units.as_slice() else {
+            panic!("the one row, and one unit for it: {plan:?}");
+        };
+
+        assert_eq!(
+            claude.line,
+            "curl -fsSL https://claude.ai/install.sh | bash"
+        );
+        assert_eq!(claude.how, How::AsTheUser);
+        assert_eq!(claude.covers, [Dependency::Claude]);
+        assert_eq!(
+            claude.lands,
+            Some(PathBuf::from(HOME).join(".local/bin")),
+            "which is what goes on `session_path`, so the row ticks off the next probe",
+        );
+        assert_eq!(claude.chain, None);
     }
 
     /// And a Mac without it makes Homebrew's prefix and installs Homebrew
@@ -2116,10 +2388,20 @@ mod tests {
         assert!(prefix.covers.is_empty(), "a prefix is nobody's row");
         assert_eq!(
             prefix.line,
-            "prefix=/usr/local; [ \"$(uname -m)\" = arm64 ] && prefix=/opt/homebrew; \
-             mkdir -p \"$prefix\" && chmod ug=rwx \"$prefix\" && chgrp admin \"$prefix\" && \
-             chown 'ada' \"$prefix\"",
-            "both prefixes, told apart by the machine it runs on, and handed to the user",
+            "mkdir -p /opt/homebrew && chmod ug=rwx /opt/homebrew && \
+             chgrp admin /opt/homebrew && chown 'ada' /opt/homebrew",
+            "Apple silicon's prefix, which is the only Mac this arm is reached \
+             for, made and handed to the user",
+        );
+
+        // And the machine is never asked which slice it is: `uname -m` answers
+        // for the process rather than for the Mac, so under Rosetta it named
+        // the one prefix whose `chmod` fails — see [`PREFIX`].
+        assert!(
+            !prefix.line.contains("uname") && !prefix.line.contains("/usr/local"),
+            "nothing here asks the process what it is, and nothing names Intel's \
+             prefix: {}",
+            prefix.line,
         );
 
         assert_eq!(
@@ -2219,6 +2501,187 @@ mod tests {
             "the row says what could not be done: {:?}",
             plan.beyond[0].1,
         );
+    }
+
+    /// An Intel Mac runs the vendors' own installers and raises nothing: no
+    /// `brew` line, no prefix, and no dialog on anybody's screen.
+    ///
+    /// **Which is the press that failed.** Ticking these four on this machine
+    /// used to be a run that made Homebrew's prefix first — `chmod /usr/local`,
+    /// which no Mac since Catalina allows — and then installed a Homebrew whose
+    /// installer refuses the machine anyway. Now every one of them lands under
+    /// this user's own home.
+    #[test]
+    fn an_intel_mac_installs_with_the_vendors_own_and_raises_nothing() {
+        let plan = plan(
+            &machine(Distro::MacOsIntel),
+            &[
+                Dependency::Sandbox,
+                Dependency::Claude,
+                Dependency::Grok,
+                Dependency::OpenCode,
+                Dependency::Gh,
+            ],
+        );
+
+        let [claude, grok, opencode, gh] = plan.units.as_slice() else {
+            panic!("one unit per row that installs, and no other: {plan:?}");
+        };
+
+        assert_eq!(
+            claude.line,
+            "curl -fsSL https://claude.ai/install.sh | bash"
+        );
+        assert_eq!(claude.how, How::AsTheUser);
+        assert_eq!(claude.covers, [Dependency::Claude]);
+        assert_eq!(claude.lands, Some(PathBuf::from(HOME).join(".local/bin")));
+
+        // And xAI's, which is the same unit here as on every other machine.
+        assert_eq!(grok.line, "curl -fsSL https://x.ai/cli/install.sh | bash");
+        assert_eq!(grok.how, How::AsTheUser);
+        assert_eq!(grok.lands, Some(PathBuf::from(HOME).join(".grok/bin")));
+
+        // OpenCode's own, which is this machine's alone: every other tab has a
+        // package for it, and this one has no Homebrew to install one with.
+        assert_eq!(
+            opencode.line,
+            "curl -fsSL https://opencode.ai/install | bash"
+        );
+        assert_eq!(opencode.how, How::AsTheUser);
+        assert_eq!(opencode.doing, "Running OpenCode's installer");
+        assert_eq!(opencode.covers, [Dependency::OpenCode]);
+        assert_eq!(
+            opencode.lands,
+            Some(PathBuf::from(HOME).join(".opencode/bin")),
+            "which is on no floor at all, so the write to `session_path` is the whole of it",
+        );
+
+        for unit in plan.units.as_slice() {
+            assert_eq!(
+                unit.how,
+                How::AsTheUser,
+                "nothing on this machine is raised: {unit:?}",
+            );
+            assert_eq!(
+                unit.chain, None,
+                "and nothing stands on a Homebrew: {unit:?}"
+            );
+        }
+
+        // And GitHub's own release, which is the row that is neither a package
+        // nor a vendor's script: a zip a release carries, unpacked into the
+        // same directory Anthropic's installer writes into.
+        assert_eq!(gh.covers, [Dependency::Gh]);
+        assert_eq!(gh.doing, "Unpacking GitHub's release of gh");
+        assert_eq!(gh.lands, Some(PathBuf::from(HOME).join(LOCAL_BIN)));
+        assert!(
+            gh.line
+                .contains("https://github.com/cli/cli/releases/latest"),
+            "which is where the version is read from: {}",
+            gh.line,
+        );
+
+        // And it is read there rather than written down here: a pinned version
+        // goes stale with every gh release, and the human pressing Next wants
+        // today's. `amd64` is the only number in the line, and it is the
+        // architecture rather than a version.
+        assert!(
+            !gh.line
+                .replace("amd64", "")
+                .chars()
+                .any(|character| character.is_ascii_digit()),
+            "no gh version is written into the line: {}",
+            gh.line,
+        );
+
+        // The sandbox row is neither a unit nor a sentence, `sandbox-exec`
+        // being Apple's own on this Mac as on the other.
+        assert_eq!(beyond(&plan), []);
+    }
+
+    /// And the two rows an Intel Mac has nothing to run for go to the hint
+    /// screen with a sentence apiece, naming what each of them wants.
+    #[test]
+    fn an_intel_mac_sends_the_rows_it_cannot_install_to_the_hint_screen() {
+        let plan = plan(
+            &machine(Distro::MacOsIntel),
+            &[Dependency::Git, Dependency::Codex],
+        );
+
+        assert!(
+            plan.units.is_empty(),
+            "nothing to run for either of them: {plan:?}"
+        );
+        assert_eq!(beyond(&plan), [Dependency::Git, Dependency::Codex]);
+
+        let said = |row: Dependency| {
+            plan.beyond
+                .iter()
+                .find(|(dependency, _)| *dependency == row)
+                .map(|(_, why)| why.clone())
+                .expect("every row that installs nothing carries a sentence")
+        };
+
+        assert!(
+            said(Dependency::Git).contains("xcode-select --install"),
+            "{}",
+            said(Dependency::Git),
+        );
+        assert!(
+            said(Dependency::Codex).contains("~/.local/bin"),
+            "{}",
+            said(Dependency::Codex),
+        );
+
+        for row in [Dependency::Git, Dependency::Codex] {
+            assert!(
+                !said(row).contains("brew") && !said(row).contains("Homebrew"),
+                "nothing on this machine is Homebrew's: {}",
+                said(row),
+            );
+        }
+    }
+
+    /// And an Intel Mac whose environment names no home has nowhere for any of
+    /// the four installs to land, so every one of them is the hint screen's —
+    /// GitHub's release with the rest, it being a copy into that same home.
+    #[test]
+    fn an_intel_mac_with_no_home_installs_nothing() {
+        let plan = plan(
+            &under(Distro::MacOsIntel, &PathBuf::new(), None),
+            &[Dependency::Claude, Dependency::OpenCode, Dependency::Gh],
+        );
+
+        assert!(plan.units.is_empty(), "{plan:?}");
+        assert_eq!(
+            beyond(&plan),
+            [Dependency::Claude, Dependency::OpenCode, Dependency::Gh],
+        );
+        assert!(
+            plan.beyond[1].1.contains("OpenCode") && plan.beyond[1].1.contains("home"),
+            "the row is named in its own words: {:?}",
+            plan.beyond[1].1,
+        );
+        assert!(
+            plan.beyond[2].1.contains("GitHub CLI") && plan.beyond[2].1.contains("home"),
+            "and so is this one: {:?}",
+            plan.beyond[2].1,
+        );
+    }
+
+    /// And the Apple-silicon Mac is untouched by any of it: a `brew` there
+    /// still installs what Homebrew carries, OpenCode included.
+    #[test]
+    fn the_apple_silicon_mac_still_installs_opencode_with_homebrew() {
+        let plan = plan(&machine(Distro::MacOs), &[Dependency::OpenCode]);
+
+        let [prefix, installing, opencode] = plan.units.as_slice() else {
+            panic!("the prefix, Homebrew, and the row: {plan:?}");
+        };
+
+        assert_eq!(prefix.how, How::Raised);
+        assert_eq!(installing.line, HOMEBREW);
+        assert_eq!(opencode.line, "brew install opencode");
     }
 
     /// A Windows machine raises a unit per ticked row, with the node winget

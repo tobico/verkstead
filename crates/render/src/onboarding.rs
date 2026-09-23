@@ -16,12 +16,12 @@
 //! wizard is a first run rather than a state to fall back into, and what says
 //! so is the settings page's own empty state.
 //!
-//! **The distro is one of eight**, and they are the wizard's tabs: the two
-//! platforms that have no distro to speak of, the five Linux distributions
-//! whose install commands are written down, and everything else. The detected
-//! one opens and the other seven stay reachable, because a detection read off
-//! `ID_LIKE` is a guess about a derivative and the human is the one looking at
-//! the machine.
+//! **The distro is one of nine**, and they are the wizard's tabs: the platforms
+//! that have no distro to speak of — of which a Mac is two, Homebrew having
+//! dropped Intel — the five Linux distributions whose install commands are
+//! written down, and everything else. The detected one opens and the other
+//! eight stay reachable, because a detection read off `ID_LIKE` is a guess
+//! about a derivative and the human is the one looking at the machine.
 //!
 //! **The accounts are the machine's too.** What is found in the server's own
 //! home is one account per harness at most — each shape is a fixed path under a
@@ -135,10 +135,11 @@ pub struct OnboardingView {
 
 /// The three platforms, as the viewer receives one.
 ///
-/// Its own type beside [`Distro`], which carries the same fact for two of its
-/// eight values: the distro is which set of commands to draw, and this is which
+/// Its own type beside [`Distro`], which carries the same fact for three of its
+/// nine values: the distro is which set of commands to draw, and this is which
 /// machine they are for — a sandbox row that ticks, one that is run, and one
-/// that is nothing to install.
+/// that is nothing to install. Both Macs are this one platform, `sandbox-exec`
+/// being Apple's own on either.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Platform {
@@ -147,16 +148,30 @@ pub enum Platform {
     Windows,
 }
 
-/// And which of the wizard's eight tabs this machine is.
+/// And which of the wizard's nine tabs this machine is.
 ///
 /// The five Linux distributions whose commands are written down, everything
-/// else that is a Linux, and the two platforms whose answer is the platform's
-/// own. Read off `/etc/os-release` — `ID` first and then `ID_LIKE`, so that a
-/// derivative gets its parent's commands rather than the generic list.
+/// else that is a Linux, and the platforms whose answer is the platform's own —
+/// which is two machines on a Mac. Read off `/etc/os-release` — `ID` first and
+/// then `ID_LIKE`, so that a derivative gets its parent's commands rather than
+/// the generic list.
+///
+/// **The order is the order the tabs are drawn in**, and the two Macs are
+/// beside each other: the strip scrolls on a phone, and the human reading it is
+/// the one whose detection went wrong — so the other Mac is the tab next door
+/// rather than the one past every Linux.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum Distro {
     MacOs,
+
+    /// And a Mac that is not Homebrew's: its installer refuses an Intel Mac
+    /// outright and its formulae there get no bottles, so that machine has a
+    /// tab of its own with no `brew` on it — see ADR-0016's *Macs*. Told apart
+    /// by `hw.optional.arm64`, which answers for the Mac rather than for the
+    /// slice this server happens to be running as.
+    MacOsIntel,
+
     Windows,
     NixOs,
     Ubuntu,

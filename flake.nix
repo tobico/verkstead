@@ -139,6 +139,15 @@
               # network by reaching a listener the test itself is holding open,
               # which is the sharing proved without touching the internet.
               curl
+              # What a ticked `gh` row unpacks on an Intel Mac, which has no
+              # Homebrew to install one with — see
+              # `crates/server/src/onboarding/install.rs`'s `GH_RELEASE`. Both
+              # halves: `unzip` is what that line runs, and `zip` is what
+              # `crates/server/tests/installing.rs` builds the release its stub
+              # `curl` answers with. Every Mac carries `unzip` already, and the
+              # runner images carry both.
+              zip
+              unzip
               # The PWA icons are one PNG downscaled to the sizes the favicon,
               # the manifest and iOS need — see tools/generate-icons.sh. The
               # same tool downscales the same artwork into the sizes a desktop's
