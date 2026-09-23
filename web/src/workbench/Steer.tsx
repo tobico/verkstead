@@ -804,10 +804,17 @@ export function Steer(props: {
   const [kept, setKept] = createSignal<SteerForm | null>(null);
   const recorded = () => kept() ?? held();
 
-  // Where it goes, once the human has said. Null until they do — the item at
-  // the end of the timeline reads *Steer* until a target is picked — and what
-  // the picker shows meanwhile is the first target offered rather than nothing:
-  // a picker with nothing picked would be a form the human has to answer twice.
+  // Where it goes, where the human has said it here. Null until they do, and
+  // what the picker shows meanwhile is the record's or the first target
+  // offered: a picker with nothing picked would be a form the human has to
+  // answer twice.
+  //
+  // What is *saved* is never this — it is [`going`], the target the picker is
+  // on. The radio for the first target offered opens already checked, so
+  // pressing it fires nothing and this would stay null for every steer into
+  // grilling there has ever been: the card at the end of the timeline would
+  // read *Steer* for the life of the form, and the pairing below would have no
+  // target to be read back against.
   const [target, setTarget] = createSignal<SteerTarget | null>(null);
 
   /// What the picker is on: what has been picked here, what the record holds,
@@ -1053,11 +1060,17 @@ export function Steer(props: {
   ///
   /// Everything the form holds rather than only what this target would submit:
   /// the payloads and the companion rows are kept across a change of mind about
-  /// where the work goes, so the record keeps them too. The target is the one
-  /// exception, and it is what the human *said* rather than what the picker
-  /// shows — the item at the end of the timeline reads *Steer* until they say.
+  /// where the work goes, so the record keeps them too.
+  ///
+  /// The target is what the picker is *on* rather than what was pressed, which
+  /// is the same rule as the pairing's a line below: what a save carries is
+  /// what this form would submit. A radio that opens already checked is never
+  /// pressed, so saving only what was pressed would leave every steer into the
+  /// first target offered holding no target at all — the card reading *Steer*
+  /// for the life of the form, and [`answered`] with nothing to read the saved
+  /// pairing back against.
   const form = createMemo<SteerForm>(() => ({
-    target: target() ?? held().target,
+    target: going(),
     brief: written() || null,
     digest: priming(),
     instruction: doing() || null,

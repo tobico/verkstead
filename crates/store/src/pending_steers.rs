@@ -62,8 +62,11 @@ pub struct PendingSteer {
 /// nothing ticked and no companion row touched.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PendingForm {
-    /// Where the human has said the work goes, or `None` while they have not
-    /// said.
+    /// Where the work goes: the target the pane's picker is on, as the last
+    /// save left it.
+    ///
+    /// `None` is a form nothing has been saved on yet, which is every one of
+    /// them between the press and the first thing typed or ticked.
     pub target: Option<Lifecycle>,
 
     /// The new round's Brief, for a steer into Grilling.

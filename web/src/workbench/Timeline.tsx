@@ -1729,10 +1729,12 @@ function Steered(props: {
 /// is something that happened and this is something waiting on the human, said
 /// in the colour the sidebar's disc and the *blocked on you* badge are said in.
 ///
-/// **It says where the steer is going as soon as that is picked.** *Steer*
-/// until then, and *Steering into X* after — so a human coming back to a
-/// conversation a day later reads what they had decided off the card rather
-/// than by opening it.
+/// **It says where the steer is going as soon as the form has saved once.**
+/// *Steer* until then, and *Steering into X* after — so a human coming back to
+/// a conversation a day later reads what they had decided off the card rather
+/// than by opening it. What the form saves is the target its picker is on, so
+/// the first thing typed or ticked is what settles this, whether or not the
+/// human ever moved the radio.
 function PendingSteer(props: {
   pending: PendingSteerView;
   selected: boolean;

@@ -11367,6 +11367,63 @@ describe("steering a conversation", () => {
     );
   });
 
+  /// What a save carries as its target is the target the picker is *on*, not
+  /// the one that was pressed.
+  ///
+  /// The radio for the first target offered opens already checked, so a steer
+  /// into grilling is a steer nobody ever presses a radio for — and a row left
+  /// holding no target would leave the card at the end of the timeline reading
+  /// *Steer* for the life of the form, and the pairing below it with nothing to
+  /// be read back against.
+  it("saves the target the picker opened on, though nothing pressed it", async () => {
+    const fetching = theGrillingSteering({});
+    const { container } = mount(`/conversations/${GRILLING.id}/steer`);
+
+    const pane = await drawn(container, `.${steerForm.steerConversation}`);
+
+    // Grilling is the first target offered on every conversation, so this is
+    // the radio the pane opens checked.
+    expect(targets(pane)[0]).toBe("Grilling");
+    expect(
+      (
+        await drawn<HTMLInputElement>(
+          pane,
+          `.${steerForm.steerTarget} input[value="Grilling"]`,
+        )
+      ).checked,
+    ).toBe(true);
+
+    await drawn(pane, "#steer-pairing");
+    pick("Run it under", READINGS[3]!);
+
+    await waitFor(() => expect(writes(fetching, STEER_SAVE)).toBe(1));
+    expect(sent(fetching, STEER_SAVE)).toMatchObject({
+      target: "Grilling",
+      pairing: { profile_id: 3, model: "claude-sonnet-5" },
+    });
+  });
+
+  /// And the account on the row is what the picker comes back on, which is the
+  /// other half of that: the target beside it is what says which role the
+  /// pairing answers for, so a row holding one and not the other would hand the
+  /// human the conversation's own account back over the one they chose.
+  it("opens the pairing picker on the account the row holds", async () => {
+    theGrillingSteering({
+      pending_steer: pending({
+        target: "Grilling",
+        pairing: { profile_id: 3, model: "claude-sonnet-5" },
+      }),
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}/steer`);
+
+    await drawn(container, `.${steerForm.steerConversation}`);
+    await drawn(container, "#steer-pairing");
+
+    // Rather than the fable account this conversation grills under, which is
+    // what the picker is prefilled with where the row says nothing.
+    await waitFor(() => expect(showing("Run it under")).toBe(READINGS[3]));
+  });
+
   /// A save the server will not take stops the form for good and says so. Both
   /// refusals are permanent — the commonest by far is this same steer being
   /// submitted or cancelled from another device — so asking again on every

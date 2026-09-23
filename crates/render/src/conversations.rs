@@ -850,8 +850,8 @@ pub struct ConversationView {
 /// form as the last save left it.
 ///
 /// The Timeline's own item is drawn from the target inside it — it reads
-/// *Steer* until one is picked and *Steering into X* after — and the pane that
-/// item opens fills every one of its fields from the rest.
+/// *Steer* until the form has saved once and *Steering into X* after — and the
+/// pane that item opens fills every one of its fields from the rest.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct PendingSteerView {
@@ -882,13 +882,18 @@ pub struct PendingSteerView {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct SteerForm {
-    /// Where the human has said the work goes, or `null` while they have not
-    /// said — which is what the Timeline's item reads *Steer* for.
+    /// Where the work goes: the target the pane's picker is on, as the last
+    /// save left it.
     ///
-    /// The pane opens its picker on the first target it offers all the same:
-    /// a form the human has to answer twice is worse than one that starts
-    /// somewhere. What is here is what they *said*, and a submit sends what the
-    /// picker shows either way.
+    /// What the picker *shows* rather than only what was pressed, because that
+    /// is what a submit would send — the pane opens on the first target it
+    /// offers, a form the human has to answer twice being worse than one that
+    /// starts somewhere, and a radio that opens already checked is never
+    /// pressed. The same rule [`Self::pairing`] is kept under.
+    ///
+    /// `null` is a form nothing has been saved on yet, which is every one of
+    /// them between the press and the first thing typed or ticked — and what
+    /// the Timeline's item reads *Steer* for.
     #[serde(default)]
     pub target: Option<SteerTarget>,
 
