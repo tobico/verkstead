@@ -1933,6 +1933,31 @@ async fn starting_is_refused_when_the_named_branch_is_already_there() {
     assert_eq!(view.branch, "rate-limiting", "and the name is still theirs");
 }
 
+/// And a name git will not give anybody, which is not the same question. It
+/// keeps a branch as a file under `refs/heads/`, so a name with refs beneath it
+/// is a name no branch can be cut at: a repository holding a stage's
+/// `roadmaps/mvp/01-packaging` is one where `roadmaps` cannot be a branch, ever.
+///
+/// Refused here rather than left to the `git worktree add` further down, whose
+/// complaint reaches the server log and leaves the human with nothing but *the
+/// worktree could not be made* — the failure stage branches were moved under a
+/// fixed component to stop happening, asked from the other side.
+#[tokio::test]
+async fn starting_is_refused_when_the_named_branch_is_a_path_git_will_not_give() {
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+
+    assert_eq!(rename(&app, id, "roadmaps").await, BranchRenamed::Renamed);
+    git(&repo, &["branch", "roadmaps/mvp/01-packaging"]);
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::BranchExists);
+
+    let view = opened(&app, id).await;
+    assert_eq!(view.state, Lifecycle::Draft);
+    assert_eq!(view.worktree, None);
+    assert_eq!(worktrees(&repo).len(), 1, "only the repository itself");
+}
+
 /// But a name Verkstead invented is nobody's, so a repository that already has a
 /// branch by it is a reason to invent another rather than a reason to refuse:
 /// the human never saw that name and cannot have meant it.
@@ -2244,7 +2269,7 @@ async fn a_companion_that_cannot_be_delivered_refuses_the_start_by_name() {
             grill(&app, id).await,
             GrillingStarted::Companion {
                 repo: "askance".to_owned(),
-                why,
+                why: why.clone(),
             }
         );
 
@@ -2258,13 +2283,63 @@ async fn a_companion_that_cannot_be_delivered_refuses_the_start_by_name() {
     }
 }
 
+/// And a branch of that repository standing where a component of the companion's
+/// own branch path goes, which is refused by name — both names, the repository
+/// and the branch.
+///
+/// A stage's branch is mirrored into its read-write companions whole,
+/// `roadmaps/` and all, so the one collision that scheme leaves behind is the
+/// companion's to have too. Left to git it is *git would not make its checkout*
+/// and a line in the server log, which is the refusal this one exists to be
+/// instead.
+#[tokio::test]
+async fn a_companion_with_a_branch_in_the_way_refuses_the_start_by_both_names() {
+    for blocker in ["roadmaps", "roadmaps/mvp"] {
+        let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+        let companion = second_repo(&app, elsewhere.path(), "askance").await;
+        let id = ready(&app, elsewhere.path(), repo_id).await;
+
+        add_companion(&app, id, companion).await;
+        companion_mode(&app, id, companion, CompanionMode::ReadWrite).await;
+        assert_eq!(
+            companion_branch(&app, id, companion, "roadmaps/mvp/01-packaging").await,
+            CompanionBranchRenamed::Renamed
+        );
+
+        let askance = elsewhere.path().join("askance");
+        git(&askance, &["branch", blocker]);
+
+        assert_eq!(
+            grill(&app, id).await,
+            GrillingStarted::Companion {
+                repo: "askance".to_owned(),
+                why: CompanionRefusal::BranchInTheWay {
+                    by: blocker.to_owned(),
+                },
+            },
+        );
+
+        // And nothing made anywhere on the way to finding out, the same as every
+        // other question asked before the making.
+        let view = opened(&app, id).await;
+        assert_eq!(view.state, Lifecycle::Draft, "{blocker}");
+        assert_eq!(view.worktree, None, "{blocker}");
+        assert_eq!(view.companions[0].worktree, None, "{blocker}");
+        assert!(!has_branch(&repo, &view.branch), "{blocker}");
+        assert_eq!(worktrees(&repo).len(), 1, "only the repository itself");
+        assert_eq!(worktrees(&askance).len(), 1, "and only the companion");
+    }
+}
+
 /// A start refused over the *last* companion leaves nothing behind either — not
 /// the checkouts already made, and not the branches they were cut on.
 ///
 /// Which is the case asking every question first cannot cover: this one gets
-/// past the asking, because what git refuses is the making. `feature/x` is a
-/// name no branch answers to and git will still not take, `feature` being a ref
-/// in the way of the directory it would need.
+/// past the asking, because what git refuses is the making. `feature` is a name
+/// no branch answers to and git will still not take, `feature/x` being a ref
+/// beneath the file it would have to be — and it is the one half of that
+/// collision nothing asks about, the other being
+/// [`CompanionRefusal::BranchInTheWay`].
 #[tokio::test]
 async fn a_start_refused_over_a_companion_unmakes_the_checkouts_it_had_made() {
     let (elsewhere, dir, app, repo, repo_id) = workbench().await;
@@ -2280,9 +2355,9 @@ async fn a_start_refused_over_a_companion_unmakes_the_checkouts_it_had_made() {
     let askance = elsewhere.path().join("askance");
     let granit = elsewhere.path().join("granit");
 
-    git(&granit, &["branch", "feature"]);
+    git(&granit, &["branch", "feature/x"]);
     assert_eq!(
-        companion_branch(&app, id, last, "feature/x").await,
+        companion_branch(&app, id, last, "feature").await,
         CompanionBranchRenamed::Renamed
     );
 
@@ -6216,7 +6291,7 @@ async fn adopting_a_roadmap_starts_a_draft_naming_it_and_its_next_stage() {
     assert_eq!(stage.title, "Implementation");
     assert_eq!(stage.brief_path, "docs/roadmaps/mvp/03-implementation.md");
     assert_eq!(
-        stage.branch, "mvp/03-implementation",
+        stage.branch, "roadmaps/mvp/03-implementation",
         "the stage's own name, which the press names the branch by",
     );
 
@@ -7390,7 +7465,7 @@ async fn adopting_starts_the_stage_on_its_own_branch_off_the_base_commit() {
 
     // The stage's own name, rather than the one the server invented for the
     // row: its brief under the roadmap it belongs to.
-    assert_eq!(view.branch, "mvp/03-implementation");
+    assert_eq!(view.branch, "roadmaps/mvp/03-implementation");
     assert_eq!(view.state, Lifecycle::Implementing);
     assert_eq!(
         moves(&view),
@@ -7405,7 +7480,11 @@ async fn adopting_starts_the_stage_on_its_own_branch_off_the_base_commit() {
     // The branch is in the Repo's own git directory, standing on that commit
     // and nothing else — adoption never stacks.
     assert_eq!(
-        git(&repo, &["rev-parse", "refs/heads/mvp/03-implementation"]).trim(),
+        git(
+            &repo,
+            &["rev-parse", "refs/heads/roadmaps/mvp/03-implementation"]
+        )
+        .trim(),
         tip,
     );
 
@@ -7459,7 +7538,7 @@ async fn adopting_checks_out_the_companions_it_was_configured_with() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.branch, "mvp/03-implementation");
+    assert_eq!(view.branch, "roadmaps/mvp/03-implementation");
     assert_eq!(view.state, Lifecycle::Implementing);
     assert_eq!(companions(&app, id).await, ["askance", "granit"]);
 
@@ -7486,9 +7565,9 @@ async fn adopting_checks_out_the_companions_it_was_configured_with() {
 
     assert_eq!(
         git(&worked, &["symbolic-ref", "--short", "HEAD"]).trim(),
-        "mvp/03-implementation",
+        "roadmaps/mvp/03-implementation",
     );
-    assert!(has_branch(&granit, "mvp/03-implementation"));
+    assert!(has_branch(&granit, "roadmaps/mvp/03-implementation"));
 
     // Both under the data directory, and both registered with git — which is
     // what makes them worktrees rather than copies.
@@ -7528,7 +7607,7 @@ async fn a_companion_adoption_cannot_deliver_refuses_the_press_by_name() {
     // Somebody else's branch, by the name the companion's would take: the
     // stage's own name, which is what mirroring comes to here.
     let askance = elsewhere.path().join("askance");
-    git(&askance, &["branch", "mvp/03-implementation"]);
+    git(&askance, &["branch", "roadmaps/mvp/03-implementation"]);
 
     assert_eq!(
         press_adopt(&app, id).await,
@@ -7546,7 +7625,7 @@ async fn a_companion_adoption_cannot_deliver_refuses_the_press_by_name() {
     assert_eq!(view.state, Lifecycle::Draft);
     assert!(view.worktree.is_none());
     assert!(companion(&view, "askance").worktree.is_none());
-    assert!(!has_branch(&repo, "mvp/03-implementation"));
+    assert!(!has_branch(&repo, "roadmaps/mvp/03-implementation"));
     assert_eq!(
         worktrees(&askance).len(),
         1,
@@ -7654,7 +7733,7 @@ async fn adopting_with_no_git_author_is_refused_by_name() {
 
     assert_eq!(view.state, Lifecycle::Draft);
     assert_eq!(view.worktree, None);
-    assert!(!has_branch(&repo, "mvp/03-implementation"));
+    assert!(!has_branch(&repo, "roadmaps/mvp/03-implementation"));
     assert_eq!(
         worktrees(&repo).len(),
         1,
@@ -7749,7 +7828,8 @@ async fn an_adopted_stage_carries_its_brief_and_says_what_it_adopted() {
         "and which brief it was adopted from: {said:?}",
     );
     assert!(
-        said.contains("<code>mvp/03-implementation</code>") && said.contains("<code>main</code>"),
+        said.contains("<code>roadmaps/mvp/03-implementation</code>")
+            && said.contains("<code>main</code>"),
         "and where its branch came off: {said:?}",
     );
 }
@@ -7782,7 +7862,7 @@ async fn the_stage_adopted_is_the_one_the_base_commit_has_open() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.branch, "mvp/03-implementation");
+    assert_eq!(view.branch, "roadmaps/mvp/03-implementation");
     assert_eq!(view.base_commit.as_deref(), Some(before.as_str()));
 }
 
@@ -7828,9 +7908,12 @@ async fn nothing_adopted(app: &Router, id: i64, repo: &Path) {
         "only the repository itself is checked out anywhere",
     );
     assert!(
-        git(repo, &["branch", "--list", "mvp/03-implementation"])
-            .trim()
-            .is_empty(),
+        git(
+            repo,
+            &["branch", "--list", "roadmaps/mvp/03-implementation"]
+        )
+        .trim()
+        .is_empty(),
         "and the stage's own branch was never made",
     );
     assert_eq!(
@@ -8090,7 +8173,7 @@ async fn adopting_is_refused_when_the_stages_own_branch_is_taken() {
     );
 
     let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
-    git(&repo, &["branch", "mvp/03-implementation"]);
+    git(&repo, &["branch", "roadmaps/mvp/03-implementation"]);
 
     assert_eq!(press_adopt(&app, id).await, Adopted::BranchExists);
 
@@ -8099,10 +8182,67 @@ async fn adopting_is_refused_when_the_stages_own_branch_is_taken() {
     assert_eq!(view.worktree, None);
     assert_eq!(worktrees(&repo).len(), 1, "only the repository itself");
     assert_eq!(
-        git(&repo, &["rev-parse", "refs/heads/mvp/03-implementation"]).trim(),
+        git(
+            &repo,
+            &["rev-parse", "refs/heads/roadmaps/mvp/03-implementation"]
+        )
+        .trim(),
         git(&repo, &["rev-parse", "HEAD"]).trim(),
         "and the branch that was there is where it was",
     );
+}
+
+/// And under the name a stage was given before `roadmaps/` went in front of the
+/// scheme, which is where a stage started a week ago still is. Its plan commit
+/// ticking the box rides on that branch until its pull request merges, so the
+/// branch is the only thing saying the stage is under way — and adopting it a
+/// second time would be two Conversations on one stage.
+#[tokio::test]
+async fn adopting_is_refused_when_the_stage_is_taken_under_its_former_name() {
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+    git(&repo, &["branch", "mvp/03-implementation"]);
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::BranchExists);
+    nothing_adopted(&app, id, &repo).await;
+}
+
+/// A branch standing where a component of the stage's own branch path goes is
+/// one git will not make at all: it keeps a branch as a file under
+/// `refs/heads/`, so `refs/heads/roadmaps` being a file is `refs/heads/roadmaps/`
+/// never being a directory.
+///
+/// The one refusal that carries a name, because it is the one the page cannot
+/// work out for itself: everything else it refuses for is the roadmap, the brief
+/// or the stage it is already showing, and this is a branch somewhere else in
+/// the repository that the human has to go and move.
+#[tokio::test]
+async fn adopting_is_refused_by_name_when_a_branch_stands_in_the_stages_way() {
+    for blocker in ["roadmaps", "roadmaps/mvp"] {
+        let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+        roadmap(
+            &repo,
+            OPEN_AT_THREE,
+            &["03-implementation.md", "04-wrap-up.md"],
+        );
+
+        let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+        git(&repo, &["branch", blocker]);
+
+        assert_eq!(
+            press_adopt(&app, id).await,
+            Adopted::BranchInTheWay {
+                by: blocker.to_owned(),
+            },
+        );
+        nothing_adopted(&app, id, &repo).await;
+    }
 }
 
 /// A roadmap the base commit knows nothing about is not a roadmap that
@@ -8130,7 +8270,7 @@ async fn adopting_is_refused_when_no_such_roadmap_is_at_the_base() {
 async fn the_cheap_refusals_are_answered_before_the_ones_git_is_paid_for() {
     let (_elsewhere, _dir, app, repo, repo_id) = workbench().await;
     roadmap(&repo, ALL_DONE, &["03-implementation.md"]);
-    git(&repo, &["branch", "mvp/03-implementation"]);
+    git(&repo, &["branch", "roadmaps/mvp/03-implementation"]);
 
     let id = adopting(&app, repo_id, "mvp").await;
 

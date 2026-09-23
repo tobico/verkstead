@@ -2436,6 +2436,31 @@ describe("the adoption page", () => {
       unmount();
     }
   });
+
+  /// And the one refusal that carries a name says it. A branch standing where
+  /// the stage's own branch path goes is a branch git will not make, and which
+  /// one it is is the whole of what there is to go and rename — the other
+  /// refusals all name something the page is already showing.
+  it("names the branch standing in the way of the stage's own", async () => {
+    theAdoption(
+      whenever(
+        `/api/ui/conversations/${ADOPTING.id}/adopt`,
+        json({ BranchInTheWay: { by: "roadmaps" } } satisfies Adopted),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${ADOPTING.id}`);
+
+    fireEvent.click(await drawn(container, `.${adoption.adoption} .${adoption.adopt}`));
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${adoption.adoption} .${notices.error}`)!.textContent,
+      ).toBe(
+        "A branch named roadmaps stands in the way of the stage's own branch, and Verkstead did not make it.",
+      ),
+    );
+  });
 });
 
 /// And the page a conversation started from the level beside that notice opens
@@ -6378,6 +6403,32 @@ describe("starting the work", () => {
       await waitFor(() => screen.getByText(said));
     },
   );
+
+  /// And the companion refusal that carries a name says it, beside the
+  /// repository. A branch standing where the companion's own branch path goes is
+  /// one git will not make there, and which one it is is the whole of what there
+  /// is to go and rename — the other companion refusals name something the page
+  /// is already showing.
+  it("names both the companion and the branch standing in its way", async () => {
+    theWorkbench(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/grill`,
+        json({
+          Companion: { repo: "askance", why: { BranchInTheWay: { by: "roadmaps" } } },
+        } satisfies GrillingStarted),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    fireEvent.click(await drawn(container, `.${composer.startGrilling} .${composer.start}`));
+
+    await waitFor(() =>
+      screen.getByText(
+        "askance: A branch named roadmaps stands in the way of the branch it would be given there, and Verkstead did not make it.",
+      ),
+    );
+  });
 
   /// A conversation that has started has nothing to start, so there is nothing
   /// to draw — not a button that would be refused.

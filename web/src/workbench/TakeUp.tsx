@@ -33,7 +33,7 @@ import { createSignal, Show, type JSX } from "solid-js";
 import { takeUpPullRequest } from "../api/client";
 import type { ConversationView, TakenUp } from "../api/types";
 import { ErrorLine, Note } from "../notices";
-import { COMPANION_REFUSAL } from "./Timeline";
+import { companionRefusal } from "./Timeline";
 import styles from "./TakeUp.module.css";
 
 /// The pull request being held, as either composer names it.
@@ -139,7 +139,7 @@ export const TAKE_UP_REFUSAL: Record<
 export function takeUpRefusal(outcome: TakenUp): string {
   if (typeof outcome === "object") {
     if ("Companion" in outcome) {
-      return `${outcome.Companion.repo}: ${COMPANION_REFUSAL[outcome.Companion.why]}`;
+      return `${outcome.Companion.repo}: ${companionRefusal(outcome.Companion.why)}`;
     }
 
     return `That branch is already checked out at ${outcome.CheckedOutElsewhere.at}, and git holds one checkout per branch.`;

@@ -68,6 +68,13 @@ pub(crate) const ROADMAPS: &str = "docs/roadmaps";
 /// The index of one roadmap, inside its own directory under that.
 pub(crate) const INDEX: &str = "ROADMAP.md";
 
+/// What every stage's branch is named under — see [`Stage::branch`], which is
+/// the only thing that spells it.
+///
+/// The roadmaps' own directory name, one level up from where they live, so that
+/// a stage branch reads as the roadmap's work at a glance.
+pub(crate) const STAGES: &str = "roadmaps";
+
 /// The stage lists a Conversation's Timeline draws: the roadmaps its branch has
 /// written to, where there are any.
 ///
@@ -309,9 +316,9 @@ pub(crate) struct Stage {
 }
 
 impl Stage {
-    /// What to call the branch this stage is worked on: the roadmap it belongs
-    /// to, then its brief's name as the brief is named — `docs/roadmaps/mvp/
-    /// 04-wrap-up.md` becomes `mvp/04-wrap-up`.
+    /// What to call the branch this stage is worked on: [`STAGES`], then the
+    /// roadmap it belongs to, then its brief's name as the brief is named —
+    /// `docs/roadmaps/mvp/04-wrap-up.md` becomes `roadmaps/mvp/04-wrap-up`.
     ///
     /// Under the roadmap's own name rather than the bare slug, because the bare
     /// slug is a name the repository may already be using for something that has
@@ -321,6 +328,17 @@ impl Stage {
     /// is told about until they come and look. Qualified this way the only thing
     /// it can collide with is another attempt at the same stage of the same
     /// roadmap, which is exactly the collision the refusal is for.
+    ///
+    /// And under [`STAGES`] rather than straight under the roadmap — which is
+    /// what [`former_branch`](Self::former_branch) still is — because git keeps
+    /// a branch as a file under `refs/heads/`. `refs/heads/mvp` being a file is
+    /// `refs/heads/mvp/` never being a directory, so a roadmap whose own
+    /// Conversation branch is named for the roadmap, which is what a roadmap
+    /// Conversation is usually called, blocks every stage that roadmap plans —
+    /// and closing the Conversation keeps the branch, so it blocks them for
+    /// good. A fixed component in front puts the whole scheme out from under
+    /// every name a roadmap can have. See [`in_the_way`], which is what says so
+    /// where even that is standing on something.
     ///
     /// The number kept in front of the slug for the same reason it is in the
     /// brief's name: it is what puts the stages of one roadmap in their order,
@@ -332,6 +350,25 @@ impl Stage {
     /// A brief with nothing usable in its name falls back to the number alone,
     /// which is the one thing every entry has.
     pub(crate) fn branch(&self) -> String {
+        format!("{STAGES}/{}/{}", self.roadmap, self.named())
+    }
+
+    /// What this same stage was called before [`STAGES`] went in front of it.
+    ///
+    /// Asked wherever a stage is looked at for having been started already, and
+    /// asked for good rather than for a while. A stage started under the former
+    /// scheme is on a branch of that shape for as long as the branch is there,
+    /// and the plan commit ticking its box rides on that branch until its pull
+    /// request merges — so the branch is the only thing saying the stage is
+    /// under way, and a reading that did not ask would offer the stage a second
+    /// time. One ref lookup, and it never lies.
+    pub(crate) fn former_branch(&self) -> String {
+        format!("{}/{}", self.roadmap, self.named())
+    }
+
+    /// The part both shapes share: the stage's number, and its brief's slug
+    /// where the brief's name has one to give.
+    fn named(&self) -> String {
         let stem = self
             .brief_path
             .rsplit('/')
@@ -345,10 +382,43 @@ impl Stage {
             .trim_start_matches(['-', '_']);
 
         match slug.is_empty() {
-            true => format!("{}/{}", self.roadmap, self.label),
-            false => format!("{}/{}-{}", self.roadmap, self.label, slug),
+            true => self.label.clone(),
+            false => format!("{}-{slug}", self.label),
         }
     }
+}
+
+/// The branch of `repo` standing where a component of `branch`'s own path would
+/// go, where there is one.
+///
+/// Git keeps a branch as a file under `refs/heads/`, so a branch whose name is a
+/// prefix of another's path is a file where that other one needs a directory:
+/// `roadmaps` and `roadmaps/mvp/01-packaging` cannot both exist, and git refuses
+/// to make the second while the first is there. What it refuses with goes to the
+/// server log, and what the human is left with is a stage that did not start.
+///
+/// So every proper prefix is asked about before the branch is cut — `roadmaps`
+/// and `roadmaps/mvp`, for `roadmaps/mvp/01-packaging` — and the one that is
+/// there is named in the refusal. Rare, now that [`STAGES`] is in front of every
+/// stage: it takes somebody having a branch called `roadmaps`, or one named for
+/// a roadmap underneath it. But the moment it happens the roadmap stalls, and a
+/// stall nobody is told the reason for is one nobody fixes.
+///
+/// [`worktrees::branch_at`] rather than [`worktrees::branch_exists`], because a
+/// read git would not make is answered as *there is something there*: what this
+/// stands in front of is making a branch and letting an agent loose on it.
+///
+/// And rather than [`worktrees::branch_taken`], which is the wrong question by
+/// one word. That one is *is this name free*, and a name with `roadmaps/mvp/01`
+/// under it is not free — which is right where it is asked and wrong here, a
+/// roadmap with a stage branch already cut being what every working roadmap
+/// looks like. What is in the way is a branch *at* the prefix, and nothing else.
+pub(crate) fn in_the_way(repo: &Path, branch: &str) -> Option<String> {
+    branch
+        .match_indices('/')
+        .map(|(end, _)| &branch[..end])
+        .find(|prefix| worktrees::branch_at(repo, prefix))
+        .map(str::to_owned)
 }
 
 /// What `roadmap` has left to start, with `branch` the Conversation that has
@@ -678,8 +748,21 @@ pub(crate) enum Startable {
     NoBrief,
 
     /// The stage's own branch is taken in the Repo, which is a stage
-    /// already under way whatever the boxes say.
+    /// already under way whatever the boxes say — under the name it has now, or
+    /// under the [former one](Stage::former_branch).
     BranchTaken,
+
+    /// A branch of the Repo stands where a component of the stage's branch path
+    /// would go, so git will not make that branch at all — see [`in_the_way`],
+    /// which is what found it.
+    ///
+    /// Carries the branch that is in the way, because that is the whole of what
+    /// there is to go and do about it: no other clause of this reading can tell
+    /// the human which name to rename, and git's own refusal never reaches them.
+    BranchInTheWay {
+        /// The branch of the Repo standing in the stage's way.
+        by: String,
+    },
 }
 
 impl Startable {
@@ -933,7 +1016,7 @@ fn indexed(path: &str) -> Option<&str> {
 /// the branch-skipping [`ours`] does for the settling path has no part in it —
 /// a roadmap read here belongs to nobody yet.
 ///
-/// Both branch readings are the fail-safe [`worktrees::branch_taken`] rather
+/// Every branch reading is the fail-safe [`worktrees::branch_taken`] rather
 /// than [`worktrees::branch_exists`]: what each of them stands in front of is
 /// making a branch and letting an agent loose on it, so git failing to answer
 /// is answered as *taken*.
@@ -990,8 +1073,21 @@ pub(crate) fn startable(repo: &Path, commit: &str, name: &str) -> Startable {
     // in flight under Verkstead out of the list — its branch is in this git
     // directory from the moment the stage started, long before the plan commit
     // that ticks its box reaches the default branch.
-    if worktrees::branch_taken(repo, &stage.branch()) {
+    //
+    // Both names, because a stage started before the scheme changed is on the
+    // former one and that branch is the only thing saying so. Permanently rather
+    // than for a while: it is one more ref lookup, and it never lies.
+    let branch = stage.branch();
+    let former = stage.former_branch();
+
+    if worktrees::branch_taken(repo, &branch) || worktrees::branch_taken(repo, &former) {
         return Startable::BranchTaken;
+    }
+
+    // And nothing standing where the path of that name goes, which is a branch
+    // git would refuse to make rather than one somebody is already on.
+    if let Some(by) = in_the_way(repo, &branch) {
+        return Startable::BranchInTheWay { by };
     }
 
     Startable::Stage(Box::new(Abandoned {
@@ -1680,8 +1776,54 @@ Turns this askance clone into Verkstead.
         assert_eq!(stage.brief, "# 03. Implementation\n");
         assert_eq!(
             stage.branch(),
+            "roadmaps/mvp/03-implementation",
+            "the branch is the brief's own name, under the roadmap it belongs to and the \
+             fixed component no roadmap's own branch can be called",
+        );
+        assert_eq!(
+            stage.former_branch(),
             "mvp/03-implementation",
-            "the branch is the brief's own name, under the roadmap it belongs to",
+            "and the shape it had before that component went in front of it",
+        );
+    }
+
+    /// And the fallback, which is the number alone: a brief whose name is
+    /// nothing but its number has no slug to put after it, and the number is the
+    /// one thing every entry of every roadmap has.
+    #[test]
+    fn a_brief_with_no_slug_is_worked_on_its_number_alone() {
+        let stage = Stage {
+            roadmap: "mvp".to_owned(),
+            label: "04".to_owned(),
+            title: "Wrap-up".to_owned(),
+            brief_path: "docs/roadmaps/mvp/04.md".to_owned(),
+            brief: "# 04.\n".to_owned(),
+        };
+
+        assert_eq!(stage.branch(), "roadmaps/mvp/04");
+        assert_eq!(stage.former_branch(), "mvp/04");
+    }
+
+    /// Only the proper prefixes are asked about, which for a stage branch is
+    /// two names and no more — and the branch itself is not one of them. Whether
+    /// *it* is there is clause 4's question, and it is a different answer: a
+    /// stage already under way rather than a name to go and move.
+    #[test]
+    fn a_branch_is_never_in_its_own_way() {
+        let repo = Repo::with(&[]);
+
+        assert_eq!(
+            in_the_way(repo.path(), "roadmaps/mvp/03-implementation"),
+            None,
+            "a repository with no branch on that path has nothing in the way",
+        );
+
+        repo.branch("roadmaps/mvp/03-implementation");
+
+        assert_eq!(
+            in_the_way(repo.path(), "roadmaps/mvp/03-implementation"),
+            None,
+            "and the stage's own branch is not something standing in front of it",
         );
     }
 
@@ -2054,7 +2196,7 @@ Turns this askance clone into Verkstead.
         assert_eq!(abandoned[0].stage.brief, "# 03. Implementation\n");
         assert_eq!(
             abandoned[0].stage.branch(),
-            "mvp/03-implementation",
+            "roadmaps/mvp/03-implementation",
             "adopting it takes the stage's own name, as the unattended start does",
         );
     }
@@ -2166,11 +2308,86 @@ Turns this askance clone into Verkstead.
 
         assert_eq!(repo.abandoned().len(), 1, "nothing is on it yet");
 
+        repo.branch("roadmaps/mvp/03-implementation");
+
+        assert!(
+            repo.abandoned().is_empty(),
+            "`roadmaps/mvp/03-implementation` is taken, so stage 03 is under way somewhere",
+        );
+    }
+
+    /// And clause 4 under the name the scheme gave a stage before `roadmaps/`
+    /// went in front of it. A stage started last week is on a branch of that
+    /// shape and nothing has renamed it, so a reading that asked only about the
+    /// new name would offer a stage somebody is already working — and the
+    /// unattended start would start it a second time.
+    #[test]
+    fn a_stage_taken_under_its_former_name_is_taken_still() {
+        let repo = Repo::with(&[("mvp", MVP)]);
+        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+        repo.commit();
+
         repo.branch("mvp/03-implementation");
 
         assert!(
             repo.abandoned().is_empty(),
-            "`mvp/03-implementation` is taken, so stage 03 is under way somewhere",
+            "`mvp/03-implementation` is what stage 03 was called, and it is taken",
+        );
+        assert_eq!(repo.startable("mvp"), Startable::BranchTaken);
+    }
+
+    /// What is left of the collision this scheme is shaped around: a branch
+    /// standing where a component of the stage's own path goes. Git keeps a
+    /// branch as a file under `refs/heads/`, so it will not make
+    /// `roadmaps/mvp/03-implementation` while `roadmaps` is a file — and what
+    /// it refuses with goes to the server log rather than to the human.
+    ///
+    /// So the refusal names the branch. Nothing else in the reading can: the
+    /// roadmap is fine, the brief is there, and the stage's own name is free.
+    #[test]
+    fn a_branch_in_the_stage_branchs_way_is_refused_by_name() {
+        for blocker in ["roadmaps", "roadmaps/mvp"] {
+            let repo = Repo::with(&[("mvp", MVP)]);
+            repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+            repo.commit();
+
+            assert_eq!(repo.abandoned().len(), 1, "nothing is in its way yet");
+
+            repo.branch(blocker);
+
+            assert_eq!(
+                repo.startable("mvp"),
+                Startable::BranchInTheWay {
+                    by: blocker.to_owned(),
+                },
+                "`{blocker}` is a file where git needs a directory",
+            );
+            assert!(
+                repo.abandoned().is_empty(),
+                "so there is nothing to offer either: {blocker}",
+            );
+        }
+    }
+
+    /// And the whole point of the scheme: the roadmap's own Conversation branch
+    /// is named for the roadmap, which is what a grilling session calls it, and
+    /// it stays in the repository after the Conversation closes. Under the old
+    /// shape that branch blocked every stage the roadmap planned, for good.
+    #[test]
+    fn a_roadmaps_own_branch_does_not_block_its_stages() {
+        let repo = Repo::with(&[("mvp", MVP)]);
+        repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
+        repo.commit();
+
+        repo.branch("mvp");
+
+        let abandoned = repo.abandoned();
+
+        assert_eq!(abandoned.len(), 1, "`mvp` is the roadmap's own branch");
+        assert_eq!(
+            abandoned[0].stage.branch(),
+            "roadmaps/mvp/03-implementation",
+            "which git will make while `mvp` is there, the two sharing no path",
         );
     }
 
@@ -2267,7 +2484,7 @@ Turns this askance clone into Verkstead.
         assert_eq!(repo.startable("in-flight"), Startable::NoBrief);
 
         // And clause 4, which is the one the roadmap says nothing about at all.
-        repo.branch("mvp/03-implementation");
+        repo.branch("roadmaps/mvp/03-implementation");
 
         assert_eq!(repo.startable("mvp"), Startable::BranchTaken);
     }
@@ -2294,7 +2511,7 @@ Turns this askance clone into Verkstead.
             ),
         );
         repo.commit_on(
-            "mvp/03-implementation",
+            "roadmaps/mvp/03-implementation",
             "chore: plan the implementation stage",
         );
 
@@ -2310,7 +2527,10 @@ Turns this askance clone into Verkstead.
 
         // The branch goes and nothing is running it, which is exactly the state
         // adoption is for.
-        run(repo.path(), &["branch", "-D", "mvp/03-implementation"]);
+        run(
+            repo.path(),
+            &["branch", "-D", "roadmaps/mvp/03-implementation"],
+        );
 
         assert_eq!(repo.abandoned().len(), 1);
     }
@@ -2609,7 +2829,7 @@ Turns this askance clone into Verkstead.
         assert_eq!(stage.title, "Implementation");
         assert_eq!(stage.brief_path, "docs/roadmaps/mvp/03-implementation.md");
         assert_eq!(
-            stage.branch, "mvp/03-implementation",
+            stage.branch, "roadmaps/mvp/03-implementation",
             "the stage's own name, as the unattended start names one",
         );
     }
@@ -2692,7 +2912,7 @@ Turns this askance clone into Verkstead.
         let repo = Repo::with(&[("mvp", MVP)]);
         repo.brief("mvp", "03-implementation.md", "# 03. Implementation\n");
         repo.commit();
-        repo.branch("mvp/03-implementation");
+        repo.branch("roadmaps/mvp/03-implementation");
 
         let view = adopting(repo.registered(), None, "mvp".to_owned()).await;
 

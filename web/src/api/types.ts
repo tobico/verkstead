@@ -107,7 +107,11 @@ harness: boolean, };
  * watching says itself on a Timeline instead — see the server's `continuing`
  * module, which starts the same stage by the other route.
  */
-export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "NoGitAuthor" | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | "RoadmapComplete" | "NoBrief" | "StageInFlight" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
+export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "NoGitAuthor" | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | "RoadmapComplete" | "NoBrief" | "StageInFlight" | "BranchExists" | { "BranchInTheWay": { 
+/**
+ * The branch that is in the way.
+ */
+by: string, } } | "WorktreeRefused" | { "Companion": { 
 /**
  * The Repo's registered name.
  */
@@ -1000,14 +1004,18 @@ export type CompanionModeChoice = { mode: CompanionMode, };
 export type CompanionModeChosen = "Chosen" | "NoSuchConversation" | "NotDrafting" | "NoSuchCompanion";
 
 /**
- * Which of a companion repo's four ways of not being checked out this was.
+ * Which of a companion repo's ways of not being checked out this was.
  *
- * The Conversation's own four, asked of a companion: everything git is asked
- * for one is what it is asked for the other, in the same order and for the same
- * reasons. Separate from [`GrillingStarted`] rather than four more variants of
- * it, so that the repository is named once instead of four times.
+ * The Conversation's own, asked of a companion: everything git is asked for one
+ * is what it is asked for the other, in the same order and for the same
+ * reasons. Separate from [`GrillingStarted`] rather than that many more
+ * variants of it, so that the repository is named once instead of once apiece.
  */
-export type CompanionRefusal = "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused";
+export type CompanionRefusal = "FetchFailed" | "NoBaseCommit" | "BranchExists" | { "BranchInTheWay": { 
+/**
+ * The branch of that repository standing in the companion's way.
+ */
+by: string, } } | "WorktreeRefused";
 
 /**
  * And of taking one away.

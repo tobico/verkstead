@@ -168,6 +168,42 @@ pub(crate) fn branch_exists(repo: &Path, branch: &str) -> bool {
 /// in the first case and does not come back at all in the second, and the
 /// difference between those two is the difference this turns on.
 pub(crate) fn branch_taken(repo: &Path, branch: &str) -> bool {
+    match listing(repo, branch) {
+        Some(refs) => !refs.is_empty(),
+        None => true,
+    }
+}
+
+/// Whether `repo` has a branch at exactly this name, with a read that could not
+/// be made counting as one that has.
+///
+/// [`branch_taken`] answers the wider question, and answers it that way on
+/// purpose: what it stands in front of is *making* this branch, and git will
+/// refuse to make `roadmaps/mvp` while `roadmaps/mvp/01-packaging` is there just
+/// as surely as while `roadmaps/mvp` itself is — a name with refs under it is a
+/// name that is not free. `git for-each-ref` matches a pattern with no glob in it
+/// either whole or up to a slash, so that is what it comes back with for free.
+///
+/// This is the narrower question, and the one [`crate::stages::in_the_way`]
+/// wants: whether the branch *itself* is there. A path with stage branches
+/// underneath it is exactly what a working roadmap looks like, and reading that
+/// as something standing in the way would stop every stage after the first.
+///
+/// Fail-safe the same way and for the same reason, which is why it is this
+/// rather than [`branch_exists`]: git saying nothing at all is not git saying
+/// the path is clear.
+pub(crate) fn branch_at(repo: &Path, branch: &str) -> bool {
+    let named = format!("refs/heads/{branch}");
+
+    match listing(repo, branch) {
+        Some(refs) => refs.contains(&named),
+        None => true,
+    }
+}
+
+/// Every ref of `repo` at or under `refs/heads/<branch>`, or nothing at all
+/// where git would not say — which both readings above answer as *taken*.
+fn listing(repo: &Path, branch: &str) -> Option<Vec<String>> {
     let listed = git(
         repo,
         &[
@@ -176,12 +212,9 @@ pub(crate) fn branch_taken(repo: &Path, branch: &str) -> bool {
             "--end-of-options",
             &format!("refs/heads/{branch}"),
         ],
-    );
+    )?;
 
-    match listed {
-        Some(refs) => !refs.trim().is_empty(),
-        None => true,
-    }
+    Some(listed.lines().map(str::to_owned).collect())
 }
 
 /// The name `branch` answers to on its remote: what its upstream points at,
@@ -1561,6 +1594,42 @@ mod tests {
         assert!(
             !branch_exists(nowhere.path(), "wrap-up"),
             "which is the whole difference between the two readings",
+        );
+    }
+
+    /// And the difference between the other two. A name with refs beneath it is
+    /// a name git will not let anybody have, so [`branch_taken`] says taken —
+    /// but nothing is *at* it, so [`branch_at`] says there is nothing there, and
+    /// the stage branch two components further down is free to be cut.
+    #[test]
+    fn a_path_with_branches_under_it_is_taken_without_being_a_branch() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+
+        run(repo, &["init", "--initial-branch", "main"]);
+        run(repo, &["config", "user.email", "test@verkstead.invalid"]);
+        run(repo, &["config", "user.name", "Verkstead Test"]);
+        std::fs::write(repo.join("README.md"), "# a repository\n").unwrap();
+        run(repo, &["add", "-A"]);
+        run(repo, &["commit", "-m", "chore: something to branch from"]);
+
+        run(repo, &["branch", "roadmaps/mvp/01-packaging"]);
+
+        assert!(
+            branch_taken(repo, "roadmaps/mvp"),
+            "git will not give anybody that name while a ref is under it",
+        );
+        assert!(
+            !branch_at(repo, "roadmaps/mvp"),
+            "and nothing is standing at it, which is the question a stage asks",
+        );
+        assert!(branch_at(repo, "roadmaps/mvp/01-packaging"));
+
+        let nowhere = tempfile::tempdir().unwrap();
+
+        assert!(
+            branch_at(nowhere.path(), "roadmaps"),
+            "and a reading git would not make is answered as one that is there",
         );
     }
 

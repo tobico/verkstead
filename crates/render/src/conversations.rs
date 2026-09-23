@@ -3313,13 +3313,13 @@ pub enum GrillingStarted {
     },
 }
 
-/// Which of a companion repo's four ways of not being checked out this was.
+/// Which of a companion repo's ways of not being checked out this was.
 ///
-/// The Conversation's own four, asked of a companion: everything git is asked
-/// for one is what it is asked for the other, in the same order and for the same
-/// reasons. Separate from [`GrillingStarted`] rather than four more variants of
-/// it, so that the repository is named once instead of four times.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// The Conversation's own, asked of a companion: everything git is asked for one
+/// is what it is asked for the other, in the same order and for the same
+/// reasons. Separate from [`GrillingStarted`] rather than that many more
+/// variants of it, so that the repository is named once instead of once apiece.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum CompanionRefusal {
     /// Git would not fetch from that repository's remote, so what its checkout
@@ -3333,6 +3333,19 @@ pub enum CompanionRefusal {
     /// A read-write companion's branch is already there, in that repository.
     /// Verkstead did not make it, so it will not take it over.
     BranchExists,
+
+    /// A branch of that repository stands where a component of the companion's
+    /// own branch path would go, so git will not make that branch there at all —
+    /// `roadmaps`, where what is being mirrored is a stage's branch.
+    ///
+    /// Carries it for the reason [`Adopted::BranchInTheWay`] does: the
+    /// repository is half of what there is to go and do about it and the branch
+    /// to move is the other half, and git's own refusal reaches the server log
+    /// and nobody else.
+    BranchInTheWay {
+        /// The branch of that repository standing in the companion's way.
+        by: String,
+    },
 
     /// Git would not make the worktree. The reason is in the server's log.
     WorktreeRefused,
@@ -4009,7 +4022,25 @@ pub enum Adopted {
     /// The stage's own slug branch is already there. Verkstead did not make it
     /// for this, so it will not take it over — and a branch git would not answer
     /// about counts as one that is there.
+    ///
+    /// Either under the name a stage is given now or under the one the scheme
+    /// gave it before, a stage started under the former shape being just as
+    /// started as one started under this shape.
     BranchExists,
+
+    /// A branch of the repository stands where a component of the stage's own
+    /// branch path would go — `roadmaps`, or `roadmaps/<roadmap>` — and git
+    /// keeps a branch as a file, so it will not make the stage's branch while
+    /// that one is there.
+    ///
+    /// The one refusal that names something for the human to rename, which is
+    /// why it carries a name at all: git's own complaint about it goes to the
+    /// server log, and the roadmap stalls for good until somebody moves the
+    /// branch out of the way.
+    BranchInTheWay {
+        /// The branch that is in the way.
+        by: String,
+    },
 
     /// Git would not make the worktree. The reason is in the server's log — this
     /// is the one refusal with nothing for the human to correct.

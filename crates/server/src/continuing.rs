@@ -346,14 +346,52 @@ async fn start(
     // has started already. Refused rather than worked around: the alternative is
     // a second Conversation quietly doing a stage that is already under way, on a
     // branch named after neither of them.
-    if taken(&repo, &branch).await {
+    //
+    // Either name, because a stage started before the scheme changed is on the
+    // former one — and its plan commit ticking the box rides on that branch
+    // until the pull request merges, so the branch is the only thing saying the
+    // stage is under way. The notice names whichever was found, that being the
+    // one the human would go and look at.
+    let already = match taken(&repo, &branch).await {
+        true => Some(branch.clone()),
+        false => {
+            let former = stage.former_branch();
+
+            taken(&repo, &former).await.then_some(former)
+        }
+    };
+
+    if let Some(found) = already {
         return say(
             state,
             settled,
             &format!(
-                "Stage {} of the `{}` roadmap is next, and `{branch}` is already a branch of \
+                "Stage {} of the `{}` roadmap is next, and `{found}` is already a branch of \
                  this repository — so it looks to have been started already. Nothing was \
                  started.",
+                stage.label, stage.roadmap,
+            ),
+        )
+        .await;
+    }
+
+    // And a branch standing where a component of the stage's own branch path
+    // goes is one git will not make at all — see [`crate::stages::in_the_way`].
+    // Named rather than left to git, whose refusal reaches the server log and
+    // nobody else: this runs where nobody is watching, and a roadmap that stops
+    // for a reason nobody is told is a roadmap nobody restarts.
+    //
+    // Here with the taken check and before the fetch, for its reason: it asks
+    // nothing of any remote, and a halt that costs nothing is a halt that
+    // happens before anything has been made.
+    if let Some(by) = blocking(&repo, &branch).await {
+        return say(
+            state,
+            settled,
+            &format!(
+                "Stage {} of the `{}` roadmap is next, and `{by}` is already a branch of this \
+                 repository, which stands in the way of `{branch}`. Nothing was started, and \
+                 nothing will start until that branch is renamed or gone.",
                 stage.label, stage.roadmap,
             ),
         )
@@ -856,12 +894,13 @@ enum Halted {
     Companion { repo: String, why: Why },
 }
 
-/// What git would not do for a companion, in the order it is asked: the three
+/// What git would not do for a companion, in the order it is asked: what
 /// [`beside`] asks before anything is made, and then the making itself.
 enum Why {
     FetchFailed,
     NoBaseCommit,
     BranchExists,
+    BranchInTheWay { by: String },
     WorktreeRefused,
 }
 
@@ -892,18 +931,30 @@ impl Halted {
 
 impl Why {
     /// The clause that goes after the repository's name.
-    fn said(&self) -> &'static str {
+    ///
+    /// A `String` rather than a `&'static str` for the one of them that names a
+    /// branch: which branch it is is the whole of what the human goes and does
+    /// something about, so it is said rather than left to the server log.
+    fn said(&self) -> String {
         match self {
             Self::FetchFailed => {
                 "git would not fetch from that repository's remote — so what its checkout would \
                  come off cannot be trusted to be what origin is holding, and the server log \
                  says why the fetch failed"
+                    .to_owned()
             }
-            Self::NoBaseCommit => "what its checkout comes off resolves to no commit there",
+            Self::NoBaseCommit => {
+                "what its checkout comes off resolves to no commit there".to_owned()
+            }
             Self::BranchExists => {
                 "the branch this stage would cut in it is already a branch of that repository"
+                    .to_owned()
             }
-            Self::WorktreeRefused => "git would not make its checkout",
+            Self::BranchInTheWay { by } => format!(
+                "`{by}` is already a branch of that repository, which stands in the way of the \
+                 branch this stage would cut in it"
+            ),
+            Self::WorktreeRefused => "git would not make its checkout".to_owned(),
         }
     }
 }
@@ -997,6 +1048,19 @@ fn beside(
         && worktrees::branch_exists(&repo, cut)
     {
         return Err(halted(Why::BranchExists));
+    }
+
+    // And nothing of that repository's standing where a component of that name's
+    // own path goes, which is a branch git will not make rather than one
+    // somebody is already on — see [`crate::stages::in_the_way`]. The stage's
+    // branch is mirrored into a companion whole, `roadmaps/` and all, so the
+    // collision this scheme leaves behind is the companion's to have too — and
+    // left to git it halts the roadmap with nothing said but *git would not make
+    // its checkout*, which is what naming it here is for.
+    if let Some(cut) = &cut
+        && let Some(by) = crate::stages::in_the_way(&repo, cut)
+    {
+        return Err(halted(Why::BranchInTheWay { by }));
     }
 
     // Named for the Repo and what the checkout holds, as the stage's own is: the
@@ -1277,6 +1341,31 @@ async fn gave_up(state: &AppState, id: i64) {
     if let Err(error) = store::close_conversation(&state.pool, id).await {
         tracing::error!(error = ?error, conversation_id = id, "stopping a half-made stage failed");
     }
+}
+
+/// Which branch of `repo` stands in the way of one called `branch`, where any
+/// does — [`crate::stages::in_the_way`], off the runtime's threads.
+///
+/// A git read that failed has already read as *something is there* inside, for
+/// the reason [`taken`] reads one that way. A *join* that failed is the other
+/// thing, and it comes back as nothing in the way — unlike [`taken`], and
+/// deliberately: the only thing this decides is whether a halt says a name or
+/// says nothing, and the name is the whole of its value. Nothing is taken over
+/// by being wrong here, because git refuses the worktree at the branch that is
+/// really in the way and the stage halts there instead, with the vaguer notice
+/// this one exists to improve on. Naming a branch that was never in the way
+/// would send the human to rename something that is not the problem.
+async fn blocking(repo: &Path, branch: &str) -> Option<String> {
+    let repo = repo.to_owned();
+    let named = branch.to_owned();
+
+    tokio::task::spawn_blocking(move || crate::stages::in_the_way(&repo, &named))
+        .await
+        .unwrap_or_else(|error| {
+            tracing::error!(error = ?error, "asking what stood in a stage branch's way failed");
+
+            None
+        })
 }
 
 /// Whether `repo` already has a branch by that name.

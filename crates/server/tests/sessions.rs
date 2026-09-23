@@ -17226,7 +17226,7 @@ case "$2" in
     mkdir -p .tasks
     printf '# Count the requests\n\nRoadmap stage: [01: Count the requests](docs/roadmaps/rate-limiting/01-counter.md)\n\n## Tasks\n\n- [ ] 01: count them — [details](01-count.md)\n' > .tasks/TODO.md
     printf '# 01. count them\n' > .tasks/01-count.md
-    sed -i 's|\[brief\](01-counter.md)|[brief](01-counter.md) *(in progress: `rate-limiting/01-counter`)*|' docs/roadmaps/rate-limiting/ROADMAP.md 2>/dev/null || true
+    sed -i 's|\[brief\](01-counter.md)|[brief](01-counter.md) *(in progress: `roadmaps/rate-limiting/01-counter`)*|' docs/roadmaps/rate-limiting/ROADMAP.md 2>/dev/null || true
     git add -A
     git commit --quiet -m 'chore: plan counter tasks'
     : > /tmp/verkstead/done
@@ -17471,7 +17471,7 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
     let stage = stage_of(&fixture).await;
 
     assert_eq!(
-        stage.branch, "rate-limiting/01-counter",
+        stage.branch, "roadmaps/rate-limiting/01-counter",
         "the branch is the stage brief's own name, under the roadmap it belongs to",
     );
     assert_eq!(
@@ -17547,7 +17547,7 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
 
     assert!(
         carried_on.contains("Stage 01")
-            && carried_on.contains("<code>rate-limiting/01-counter</code>"),
+            && carried_on.contains("<code>roadmaps/rate-limiting/01-counter</code>"),
         "the settled Conversation says which stage started and on what: {carried_on:?}",
     );
 
@@ -17628,7 +17628,7 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
         .expect("the roadmap is on the stage's branch too");
 
     assert!(
-        index.contains("*(in progress: `rate-limiting/01-counter`)*"),
+        index.contains("*(in progress: `roadmaps/rate-limiting/01-counter`)*"),
         "the roadmap says which branch stage 01 is being worked on: {index:?}",
     );
 }
@@ -18163,7 +18163,7 @@ async fn a_settle_with_no_git_author_starts_no_stage_and_says_so() {
     assert!(
         !git(
             &fixture.repo(),
-            &["branch", "--list", "rate-limiting/01-counter"]
+            &["branch", "--list", "roadmaps/rate-limiting/01-counter"]
         )
         .contains("01-counter"),
         "and no branch was cut for it",
@@ -18193,6 +18193,128 @@ async fn a_settle_with_no_git_author_starts_no_stage_and_says_so() {
     assert!(
         titles.contains(&format!("{} is done", roadmap.branch)),
         "beside the Conversation that settled saying so: {titles:?}",
+    );
+}
+
+/// A stage already on a branch is a stage already under way, and the unattended
+/// start asks that under the name the scheme gives a stage now *and* under the
+/// one it gave before `roadmaps/` went in front of it.
+///
+/// Which is where a stage started last week still is: nothing renamed it, and
+/// the plan commit ticking its box rides on that branch until its pull request
+/// merges — so the branch is the only thing saying so, and a start that asked
+/// only about the new name would run the stage a second time on a branch named
+/// after neither Conversation. The notice names the branch that was found,
+/// because that is the one the human goes and looks at.
+#[tokio::test]
+async fn a_stage_taken_under_its_former_name_starts_nothing_and_says_so() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING, ""),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    // Stage 01 under the name it would have been cut at before the scheme
+    // changed, which is what somebody working it a week ago left behind.
+    git(&fixture.repo(), &["branch", "rate-limiting/01-counter"]);
+
+    staged(&fixture).await;
+
+    let said = said_on(&fixture, fixture.id, "started already").await;
+
+    assert!(
+        said.contains("Stage 01") && said.contains("<code>rate-limiting</code>"),
+        "the notice names the stage that would have started: {said:?}",
+    );
+    assert!(
+        said.contains("<code>rate-limiting/01-counter</code>"),
+        "and the branch it found, under the name it really has: {said:?}",
+    );
+    assert!(
+        !said.contains("<code>roadmaps/rate-limiting/01-counter</code>"),
+        "rather than the name the stage would have been cut at: {said:?}",
+    );
+    assert!(
+        said.contains("Nothing was started"),
+        "and that nothing was left behind: {said:?}",
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        1,
+        "no stage was started",
+    );
+    assert!(
+        !git(
+            &fixture.repo(),
+            &["branch", "--list", "roadmaps/rate-limiting/01-counter"]
+        )
+        .contains("01-counter"),
+        "and no branch was cut under the new name either",
+    );
+    assert!(
+        !planning.exists(),
+        "so no session was launched inside the next-stage fork either",
+    );
+}
+
+/// And a branch standing where a component of the stage's own branch path goes
+/// is one git will not make at all: it keeps a branch as a file under
+/// `refs/heads/`, so `refs/heads/roadmaps` being a file is `refs/heads/roadmaps/`
+/// never being a directory.
+///
+/// Halted before anything is made, like every other thing that stops a stage —
+/// and halted *by name*. Git's own complaint about it reaches the server log and
+/// nobody else, this runs where nobody is watching, and the branch stays there
+/// until somebody moves it, so a roadmap that stalled on one stalls for good.
+#[tokio::test]
+async fn a_branch_in_a_stages_way_starts_nothing_and_says_which_one() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING, ""),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    // Somebody's own branch, at the one name every stage branch of every roadmap
+    // in this repository has to pass through.
+    git(&fixture.repo(), &["branch", "roadmaps"]);
+
+    staged(&fixture).await;
+
+    let said = said_on(&fixture, fixture.id, "stands in the way").await;
+
+    assert!(
+        said.contains("Stage 01") && said.contains("<code>rate-limiting</code>"),
+        "the notice names the stage that would have started: {said:?}",
+    );
+    assert!(
+        said.contains("<code>roadmaps</code>")
+            && said.contains("<code>roadmaps/rate-limiting/01-counter</code>"),
+        "and the branch in the way, beside the one it is in the way of: {said:?}",
+    );
+    assert!(
+        said.contains("Nothing was started"),
+        "and that nothing was left behind: {said:?}",
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        1,
+        "no stage was started",
+    );
+    assert!(
+        !planning.exists(),
+        "so no session was launched inside the next-stage fork either",
     );
 }
 
@@ -18463,10 +18585,10 @@ async fn a_stage_whose_companion_cannot_be_delivered_starts_nothing() {
     .await;
 
     // Somebody else's branch, by the name this stage's companion branch would
-    // take: `rate-limiting/01-counter` is the first stage's own name, which is
-    // what the stage's branch and so its companion branch are called.
+    // take: `roadmaps/rate-limiting/01-counter` is the first stage's own name,
+    // which is what the stage's branch and so its companion branch are called.
     let companion = PathBuf::from(&alongside(&fixture.view().await, "askance").repo.path);
-    git(&companion, &["branch", "rate-limiting/01-counter"]);
+    git(&companion, &["branch", "roadmaps/rate-limiting/01-counter"]);
 
     staged_and_settled(&fixture).await;
 
@@ -18522,7 +18644,73 @@ async fn a_stage_whose_companion_cannot_be_delivered_starts_nothing() {
     assert!(
         !git(
             &fixture.repo(),
-            &["branch", "--list", "rate-limiting/01-counter"]
+            &["branch", "--list", "roadmaps/rate-limiting/01-counter"]
+        )
+        .trim()
+        .contains("counter"),
+        "and the stage's own branch was never cut, every question being asked \
+         before any of them is answered",
+    );
+    assert!(
+        !git(&companion, &["worktree", "list"]).contains("counter"),
+        "nor was anything checked out in the companion",
+    );
+}
+
+/// And a branch of the companion's standing where a component of that mirrored
+/// name's path goes, which halts the stage by both names.
+///
+/// The stage's branch is mirrored into a read-write companion whole, `roadmaps/`
+/// and all, so the collision the stage scheme leaves behind is the companion's
+/// to have as much as the Conversation's own repository's. Left to git it is
+/// *git would not make its checkout* and a line in the server log — which, on a
+/// roadmap running with nobody watching, is a stall nobody is told the reason
+/// for.
+#[tokio::test]
+async fn a_companion_with_a_branch_in_a_stages_way_halts_it_by_name() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_at_pace(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, "", ""),
+        &gh_about(GREEN, "", ""),
+        *BRISKLY,
+        &[("askance", CompanionMode::ReadWrite)],
+    )
+    .await;
+
+    // Somebody's own branch in the companion, at the one name every stage branch
+    // of every roadmap mirrored into it has to pass through.
+    let companion = PathBuf::from(&alongside(&fixture.view().await, "askance").repo.path);
+    git(&companion, &["branch", "roadmaps"]);
+
+    staged_and_settled(&fixture).await;
+
+    let said = said_by(&fixture).await;
+
+    assert!(
+        said.contains("<code>askance</code>") && said.contains("<code>roadmaps</code>"),
+        "the repository that stopped it and the branch that did: {said:?}",
+    );
+    assert!(
+        said.contains("stands in the way"),
+        "and what that branch is doing to the stage: {said:?}",
+    );
+    assert!(
+        said.contains("Nothing was started"),
+        "and that nothing was left behind: {said:?}",
+    );
+
+    assert!(
+        !planning.exists(),
+        "so no session was launched inside the next-stage fork either",
+    );
+    assert!(
+        !git(
+            &fixture.repo(),
+            &["branch", "--list", "roadmaps/rate-limiting/01-counter"]
         )
         .trim()
         .contains("counter"),
@@ -19239,7 +19427,7 @@ async fn adopting_a_roadmap_starts_its_next_stage_with_a_planning_session() {
     let view = fixture.view().await;
 
     assert_eq!(
-        view.branch, "rate-limiting/01-counter",
+        view.branch, "roadmaps/rate-limiting/01-counter",
         "the branch is the stage brief's own name, under the roadmap it belongs to",
     );
     assert_eq!(
@@ -19550,16 +19738,16 @@ async fn an_adopted_stage_that_settles_starts_the_stage_after_it() {
         .await;
 
     assert!(
-        until_written_saying(&planning, "planned=rate-limiting/01-counter")
+        until_written_saying(&planning, "planned=roadmaps/rate-limiting/01-counter")
             .await
-            .contains("planned=rate-limiting/01-counter"),
+            .contains("planned=roadmaps/rate-limiting/01-counter"),
         "the adopted stage is the one that was planned",
     );
 
     let next = stage_of(&fixture).await;
 
     assert_eq!(
-        next.branch, "rate-limiting/02-refusing",
+        next.branch, "roadmaps/rate-limiting/02-refusing",
         "the stage after the adopted one, on a branch of its own",
     );
     assert_eq!(
@@ -19611,13 +19799,14 @@ async fn an_adopted_stage_that_settles_starts_the_stage_after_it() {
         .await;
 
     assert!(
-        carried_on.contains("<code>rate-limiting/02-refusing</code>"),
+        carried_on.contains("<code>roadmaps/rate-limiting/02-refusing</code>"),
         "the adopted Conversation says which stage started and on what: {carried_on:?}",
     );
 
     // And the session it started is the same fork of next-stage the adopted stage
     // itself was planned by, this time with nobody at the workbench at all.
-    let planned = until_written_saying(&planning, "planned=rate-limiting/02-refusing").await;
+    let planned =
+        until_written_saying(&planning, "planned=roadmaps/rate-limiting/02-refusing").await;
 
     assert_eq!(
         planned.matches("planned=").count(),
