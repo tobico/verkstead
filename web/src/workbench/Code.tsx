@@ -13,19 +13,46 @@
 //! drawn twice — so there is no Terminal pane any more, and the path it stood
 //! at redirects here (see `App.tsx`).
 //!
-//! **A tree down the side and a group of tabs beside it**, which is the shape
+//! **A tree down the side and groups of tabs beside it**, which is the shape
 //! of the whole pane. The tree is [`./Tree`]: a root per Worktree the
-//! Conversation has, one folder read when it is expanded. The group is what is
-//! in this file, and it holds files and terminals alike — one bar, one set of
-//! tabs, because a shell and a file are two things to have open rather than two
-//! kinds of pane (ADR 0019, *Tabs and groups*).
+//! Conversation has, one folder read when it is expanded. The groups are what
+//! is in this file, and each of them holds files and terminals alike — one bar,
+//! one set of tabs, because a shell and a file are two things to have open
+//! rather than two kinds of pane (ADR 0019, *Tabs and groups*).
 //!
-//! **A file pressed in the tree opens as a tab of this group.** What the server
-//! answers a read with says which of four kinds of thing it read — text, an
-//! image, a binary it will not send, or a file over the size cap — and the tab
-//! draws each as what it is: the text in an editor, the picture in its tab, and
-//! either of the last two as the line saying why there is nothing to draw. A
-//! file in a read-only root opens read-only and takes no typing, which is the
+//! **And how they stand is a tree** — see [`./layout`]. A group splits to the
+//! right of itself or below itself, either half splits again to any depth, and
+//! what holds them is split nodes with a share per child and groups at the
+//! leaves. It is the one thing this pane is drawn from: what is showing, where
+//! the borders between the groups are, and which group is **active** are all
+//! read off it. The shares are percentages of the parent for the reason the
+//! frame's pane widths are percentages of the window — a border settled on a
+//! laptop should mean the same on a wider screen (see `widths.ts`).
+//!
+//! **Two ways to make one, and a third later in this stage.** A group splits
+//! from the menu a right-click on one of its tabs drops, which names both
+//! directions, and from the icon at the end of its bar, which is the common
+//! one — VS Code's own bar button, splitting beside. The third is a tab dragged
+//! to an edge. The tab the split was made from goes on showing in both groups,
+//! which since the buffers moved above this pane is one text under two views.
+//!
+//! **And a group whose last tab leaves disappears**, its neighbour taking the
+//! room. That is the whole of unsplitting — there is no command for it (ADR
+//! 0019) — so a nested group emptied collapses the split it stood in and the
+//! tree shrinks a level. The last group is the exception and stays, empty: a
+//! pane with nothing open is one group saying so.
+//!
+//! **The active group is the one last pressed into**, wherever in it the press
+//! landed, and it is where an opening goes: a file pressed in the tree, a
+//! terminal asked for, the tab standing on a shell that would not start. A
+//! split's own new group is active, that being where the work was going.
+//!
+//! **A file pressed in the tree opens as a tab of the active group.** What the
+//! server answers a read with says which of four kinds of thing it read — text,
+//! an image, a binary it will not send, or a file over the size cap — and the
+//! tab draws each as what it is: the text in an editor, the picture in its tab,
+//! and either of the last two as the line saying why there is nothing to draw.
+//! A file in a read-only root opens read-only and takes no typing, which is the
 //! root's own flag rather than the file's mode.
 //!
 //! **The editor is Monaco**, whole, in [`./Editor`]: every built-in language
@@ -66,9 +93,11 @@
 //! moment the disk moves rather than at the next save; here it is drawn by the
 //! refusal.
 //!
-//! **And the same file opened twice is one buffer.** There is one group in this
-//! stage, so that means one tab: pressing a file already open turns to its tab
-//! rather than opening a second beside it.
+//! **And the same file opened twice is one buffer.** Pressing a file already
+//! open in the active group turns to its tab rather than opening a second
+//! beside it; pressed while it is open in another group, it opens here as well
+//! — two tabs, one buffer, and two views of the one text. Typing in either
+//! shows in the other, the dot is on both tabs and one save clears both.
 //!
 //! Opened by the code icon on the Timeline's header — see `Timeline.tsx` —
 //! which is a details pane like every other, at a path of its own so it survives
@@ -76,28 +105,30 @@
 //! terminal belongs to the Conversation rather than to any moment on it, the way
 //! sharing does.
 //!
-//! **The Screen's own viewer, filling the group.** What is drawn in a terminal
-//! tab is [`./Attached`], the same xterm over the same socket to the same
-//! server-held virtual terminal a session's Screen is watched through — what
-//! runs on this one is a shell rather than an agent, and that is the whole of
-//! the difference. The pane gives the pair every inch it has: the reading
+//! **The Screen's own viewer, filling the group it is in.** What is drawn in a
+//! terminal tab is [`./Attached`], the same xterm over the same socket to the
+//! same server-held virtual terminal a session's Screen is watched through —
+//! what runs on this one is a shell rather than an agent, and that is the whole
+//! of the difference. The pane gives the pair every inch it has: the reading
 //! measure every other details pane pads its content to comes off, the way the
 //! composer takes it off, and the pane ends where the window does, so the tree
 //! and the terminal are sized to the pane rather than scrolling it.
 //!
-//! **Several of them, one per tab.** The bar in the pane's header holds a tab
-//! per thing open, in the order they were opened, and a plus at the end opens
-//! another terminal. It is the Output pane's Transcript/Screen switch built
-//! again — pressed-or-not buttons in a group rather than a tablist, which is the
-//! house's answer to this shape — restyled after VS Code's bar, which is what
-//! the pane is drawn after from here on: a kind icon at one end of every tab and
-//! a × at the other, and the tabs abutting rather than spaced. The kind is the
-//! whole of what an icon there says, and there are two of them: a shell, and a
-//! file.
+//! **Several of them, one per tab.** A group's bar holds a tab per thing open
+//! in it, in the order they were opened, with the split and then a plus that
+//! opens another terminal at the end. It is the Output pane's Transcript/Screen
+//! switch built again — pressed-or-not buttons in a group rather than a
+//! tablist, which is the house's answer to this shape — restyled after VS
+//! Code's bar, which is what the pane is drawn after from here on: a kind icon
+//! at one end of every tab and a × at the other, and the tabs abutting rather
+//! than spaced. The kind is the whole of what an icon there says, and there are
+//! two of them: a shell, and a file.
 //!
-//! The bar is drawn where there are tabs to draw. A strip holding nothing but
+//! A bar is drawn where its group has tabs to draw. A strip holding nothing but
 //! its own plus is furniture about tabs that are not there, and a pane with
-//! nothing open has the hint under it to say the same thing in words.
+//! nothing open has the hint under it to say the same thing in words — which is
+//! only ever the last group, every other one going the moment its last tab
+//! does.
 //!
 //! **And a file's tab is called what the file is.** Its name rather than its
 //! path: a tab is a few rems wide and a path in a checkout is a sentence, and
@@ -147,9 +178,11 @@
 //!
 //! The terminals are the exception, and the register is why: a shell is the
 //! server's, so the list is read on every opening and the tabs are settled
-//! against it. One whose shell has ended since is dropped rather than drawn,
-//! and one the register has that this page has not is taken up — which is how a
-//! shell opened on another device arrives.
+//! against it. That settling walks the tree rather than a list: one whose shell
+//! has ended since is dropped from whichever group holds it — and the group
+//! with it, where it was that group's last tab — and one the register has that
+//! no group does joins the active group, which is how a shell opened on another
+//! device arrives.
 //!
 //! **And a maximise toggle at the end of the header**, which gives the editor
 //! the window: the sidebar and the Timeline go, and this pane takes what they
@@ -161,15 +194,18 @@
 //! handed the state — see `Workbench.tsx`.
 //!
 //! **And a tab is closed by the × at its end** — a file's as much as a shell's,
-//! the file's taking its reading and its buffer with it, so that opening it
-//! again is a fresh reading of the disk the way expanding a folder is. ADR 0013 kept Close on a context
-//! menu, a × beside a label this small being a thing to hit by accident and what
-//! it would end a shell somebody is working in; ADR 0019 puts it on the tab,
-//! because the × is what VS Code's bar has, what carries that worry now is the
-//! confirm a *busy* shell asks for, and a long press with no menu behind it is
-//! what frees the gesture for dragging a tab. The press asks the server to end
-//! that shell, and the tab then goes the way every ended shell's tab goes: its
-//! socket closes, and the tab closes with it.
+//! the file's taking its reading and its buffer with it where it was that
+//! file's last view, so that opening it again is a fresh reading of the disk
+//! the way expanding a folder is. A second group still showing it is the one
+//! buffer still being read, and what closes there is a view rather than a file.
+//! ADR 0013 kept Close on a context menu, a × beside a label this small being a
+//! thing to hit by accident and what it would end a shell somebody is working
+//! in; ADR 0019 puts it on the tab, because the × is what VS Code's bar has,
+//! what carries that worry now is the confirm a *busy* shell asks for, and a
+//! long press with no menu on the mouse's side of it is what frees the gesture
+//! for dragging a tab. The press asks the server to end that shell, and the tab
+//! then goes the way every ended shell's tab goes: its socket closes, and the
+//! tab closes with it, in every group that was showing it.
 //!
 //! **And the confirm is the server's answer rather than this side's reading.**
 //! Whether somebody is working in a shell is something only the server can see
@@ -210,6 +246,7 @@ import {
   faExpand,
   faFile,
   faPlus,
+  faTableColumns,
   faTerminal,
   faXmark,
 } from "@fortawesome/free-solid-svg-icons";
@@ -229,6 +266,7 @@ import {
 
 import { Icon } from "../Icon";
 import { IconButton } from "../IconButton";
+import { ContextMenu } from "../Menu";
 import { Modal } from "../Modal";
 import { PaneSticky } from "../Panes";
 import { QuietButton } from "../QuietButton";
@@ -259,6 +297,16 @@ import {
   type Kept,
   type Tab,
 } from "./keeping";
+import {
+  found,
+  groups as groupsOf,
+  neighbour,
+  placed,
+  split,
+  without,
+  type Group,
+  type Way,
+} from "./layout";
 import { PaneHead } from "./PaneHead";
 import { Tree } from "./Tree";
 import styles from "./Code.module.css";
@@ -326,9 +374,12 @@ export const ENDED_AT_ONCE =
 /// And what the pane says when it is holding nothing at all.
 ///
 /// The state the Terminal pane never had. What it says is the two ways there
-/// are into this group: a file out of the tree beside it, and a shell of the
+/// are into a group: a file out of the tree beside it, and a shell of the
 /// human's own in the Worktree. The press under it opens the second, the first
 /// being a press on something already drawn.
+///
+/// Only ever the last group says it. Every other group goes the moment its last
+/// tab does, and one that is the whole of the pane has nowhere to go.
 export const NOTHING_OPEN =
   "Nothing is open. Press a file in the tree to edit it, or open a terminal — a shell of your own in this conversation's worktree.";
 
@@ -485,13 +536,13 @@ export function Code(props: {
   // the one fetch either way — see [`./editing`].
   void load().catch(() => {});
 
-  /// Everything the pane holds, which is the keeping it was handed: the tabs,
-  /// what each file was read as, the buffers the human is typing into, which
-  /// folders of the tree beside them are open, the
-  /// sentences over the tabs standing on a shell that never started, the names
-  /// the shells have given themselves, which tab was turned to, what each
-  /// save came to, which saves are in flight, and when each shell this pane
-  /// opened was asked for.
+  /// Everything the pane holds, which is the keeping it was handed: how the
+  /// pane is divided and which group was last pressed into, what each file was
+  /// read as, the buffers the human is typing into, which folders of the tree
+  /// beside them are open, the sentences over the tabs standing on a shell that
+  /// never started, the names the shells have given themselves, what each save
+  /// came to, which saves are in flight, and when each shell this pane opened
+  /// was asked for.
   ///
   /// Taken apart once rather than reached through the prop at every use: the
   /// pane is mounted afresh when the Conversation changes, so what is here is
@@ -499,8 +550,11 @@ export function Code(props: {
   /// writes these exactly as it did when they were the pane's own — which is
   /// the point of handing them over whole.
   const {
-    tabs,
-    setTabs,
+    layout,
+    setLayout,
+    active,
+    setActive,
+    group: fresh,
     readings,
     setReadings,
     buffers,
@@ -512,8 +566,6 @@ export function Code(props: {
     setOver,
     titles,
     setTitles,
-    chosen,
-    setChosen,
     bars,
     setBars,
     saving,
@@ -529,13 +581,38 @@ export function Code(props: {
   /// about to end. Nothing while there is nothing to ask.
   const [asking, setAsking] = createSignal<number | undefined>();
 
-  /// And which file they are being asked about, where a × was pressed on a tab
-  /// holding text nobody has saved.
+  /// And which view of which file they are being asked about, where a × was
+  /// pressed on a tab holding text nobody has saved.
   ///
   /// The path rather than a flag, for the reason the number beside it is one: a
   /// pane with several files open is a card that has to say which of them is
-  /// about to lose its text.
-  const [leaving, setLeaving] = createSignal<string | undefined>();
+  /// about to lose its text. And the group with it, because the press that
+  /// comes back from the card closes the tab it was made on rather than every
+  /// view of that file.
+  const [leaving, setLeaving] = createSignal<
+    { group: Group; path: string } | undefined
+  >();
+
+  /// And which tab was right-clicked, where a tab's own menu is open: where the
+  /// pointer was, and the group and the tab it was over.
+  ///
+  /// The whole of what the menu is about — a split is made *from* a tab, of the
+  /// group that tab is in — and `null` while there is nothing open.
+  const [pointed, setPointed] = createSignal<{
+    at: { x: number; y: number };
+    group: Group;
+    tab: Tab;
+  } | null>(null);
+
+  /// Whether the gesture that is opening a menu began under a finger.
+  ///
+  /// A phone has no right-click and fires `contextmenu` from a long press,
+  /// which is the gesture a tab is dragged with (ADR 0019, *Tabs and groups*).
+  /// So the menu is the mouse's alone, and what tells the two apart is the
+  /// pointer that started the press rather than the event itself, which carries
+  /// nothing about the hand that made it — the sidebar's cards say the same
+  /// thing the same way, in `Conversations.tsx`.
+  let fromTouch = false;
 
   /// Whether the list has been read, which is what says the pane knows how many
   /// terminals there are. Before it, a pane with no tabs is one that has not
@@ -552,12 +629,47 @@ export function Code(props: {
   /// flight has no press left to guard.
   let opening = false;
 
-  /// The one showing: the tab turned to, or the first while nobody has turned
-  /// to one — and the first again once the one turned to is gone, which is what
-  /// keeps the pane showing a terminal rather than a gap where one was.
-  const showing = createMemo((): string | undefined => {
-    const open = tabs();
-    const turnedTo = chosen();
+  /// Every group there is, in the order the pane draws them, and where each of
+  /// them stands — both read off the tree, which is the one thing the pane is
+  /// drawn from (see [`./layout`]).
+  ///
+  /// The groups are objects that outlive the tree they are in: a tab opened,
+  /// turned to or closed writes a signal inside one rather than making a new
+  /// tree, so `For` below reconciles these by identity and nothing is taken
+  /// down and made again for a press in the group beside it.
+  const groups = createMemo(() => groupsOf(layout()));
+  const placing = createMemo(() => placed(layout()));
+
+  /// The group last pressed into, which is where an opening lands: a file
+  /// pressed in the tree, a terminal asked for, the tab standing on a shell
+  /// that would not start.
+  ///
+  /// The first group where the active one has gone, which is what a layout in
+  /// the middle of collapsing looks like for the length of one press.
+  const into = (): Group => found(layout(), active()) ?? groups()[0]!;
+
+  /// Where a group stands, as the percentages the tree works out: the whole of
+  /// how the pane is divided, said to the browser.
+  const stood = (id: number): JSX.CSSProperties => {
+    const at = placing()[id];
+
+    return at === undefined
+      ? {}
+      : {
+          left: `${at.x}%`,
+          top: `${at.y}%`,
+          width: `${at.width}%`,
+          height: `${at.height}%`,
+        };
+  };
+
+  /// The one showing in a group: the tab turned to, or the first while nobody
+  /// has turned to one — and the first again once the one turned to is gone,
+  /// which is what keeps a group showing a terminal rather than a gap where one
+  /// was.
+  const showing = (group: Group): string | undefined => {
+    const open = group.tabs();
+    const turnedTo = group.chosen();
 
     if (turnedTo !== undefined && open.some((one) => keyed(one) === turnedTo)) {
       return turnedTo;
@@ -566,7 +678,101 @@ export function Code(props: {
     const first = open[0];
 
     return first === undefined ? undefined : keyed(first);
-  });
+  };
+
+  /// How many groups are showing a file, which is how many views its one buffer
+  /// has: what says whether a tab closing is the last of them.
+  const views = (path: string): number =>
+    groups().filter((one) =>
+      one.tabs().some((tab) => keyed(tab) === keyed({ file: path })),
+    ).length;
+
+  /// Take a group out of the layout, which is what its last tab leaving does.
+  ///
+  /// The split it stood in collapses and its neighbour takes the room — the
+  /// whole of unsplitting, there being no command for it (ADR 0019, *Tabs and
+  /// groups*). The last group is left where it is: there is always a group, and
+  /// a pane with nothing open is one empty group saying so.
+  ///
+  /// Where the group that went was the active one, the neighbour that took its
+  /// room becomes active: that is where the eye already is, and something has
+  /// to be.
+  const shut = (group: Group): void => {
+    if (groups().length < 2) {
+      return;
+    }
+
+    const next = neighbour(layout(), group.id);
+
+    setLayout((was) => without(was, group.id));
+
+    if (active() === group.id && next !== undefined) {
+      setActive(next.id);
+    }
+  };
+
+  /// A tab out of one group, and the group with it where that was its last.
+  const take = (group: Group, tab: Tab): void => {
+    group.setTabs((was) => was.filter((one) => keyed(one) !== keyed(tab)));
+
+    if (group.tabs().length === 0) {
+      shut(group);
+    }
+  };
+
+  /// The same, of every group at once — what a shell ending does, there being
+  /// no such thing as a terminal that ended in one group and not another.
+  const everywhere = (change: (was: Tab[]) => Tab[]): void => {
+    const drawn = groups();
+
+    for (const group of drawn) {
+      group.setTabs(change);
+    }
+
+    for (const group of drawn) {
+      if (group.tabs().length === 0 && found(layout(), group.id) !== undefined) {
+        shut(group);
+      }
+    }
+  };
+
+  /// A right-click on a tab asks which way to split the group it is in, which
+  /// is the second of the two ways there are to make one — the first being the
+  /// icon at the end of the bar, and the third a tab dragged to an edge, which
+  /// is later in this stage.
+  ///
+  /// The browser's own menu is not what the hand is asking for, so that goes.
+  /// A mouse's gesture and only a mouse's: a phone fires the same event from a
+  /// long press, and a long press on a tab is how it will be picked up to be
+  /// dragged (ADR 0019, *Tabs and groups*).
+  const ask = (event: MouseEvent, group: Group, tab: Tab): void => {
+    if (fromTouch) {
+      return;
+    }
+
+    event.preventDefault();
+    setActive(group.id);
+    setPointed({ at: { x: event.clientX, y: event.clientY }, group, tab });
+  };
+
+  /// Split a group, with the tab the split was made from showing in both.
+  ///
+  /// As VS Code's split does, and since the buffers moved above the pane that
+  /// is one text under two views: typing in either shows in the other, the dot
+  /// is on both tabs and one save clears both (ADR 0019, *Tabs and groups*).
+  ///
+  /// The new group is the active one. It is where the split was asked for and
+  /// where the work is going, so it is where the next file pressed in the tree
+  /// should open.
+  const divide = (group: Group, tab: Tab, way: Way): void => {
+    const made = fresh();
+
+    made.setTabs([tab]);
+    made.setChosen(keyed(tab));
+
+    setLayout((was) => split(was, group.id, way, made));
+    setActive(made.id);
+  };
 
   /// What a tab is called. What its shell last called itself, where it has
   /// called itself anything at all: a title of nothing but spaces is a shell
@@ -601,7 +807,7 @@ export function Code(props: {
     }
 
     setOver({});
-    setTabs((was) =>
+    everywhere((was) =>
       was.filter((one) => !("terminal" in one && standing.includes(one.terminal))),
     );
   };
@@ -616,10 +822,11 @@ export function Code(props: {
     replace();
 
     const tab = refuse();
+    const group = into();
 
-    setTabs((was) => [...was, { terminal: tab }]);
+    group.setTabs((was) => [...was, { terminal: tab }]);
     setOver((was) => ({ ...was, [tab]: why }));
-    setChosen(keyed({ terminal: tab }));
+    group.setChosen(keyed({ terminal: tab }));
   };
 
   /// Open another, and show it. What **New terminal** does, from the plus at the
@@ -643,8 +850,11 @@ export function Code(props: {
 
         replace();
         askedAt.set(number, Date.now());
-        setTabs((was) => [...was, { terminal: number }]);
-        setChosen(keyed({ terminal: number }));
+
+        const group = into();
+
+        group.setTabs((was) => [...was, { terminal: number }]);
+        group.setChosen(keyed({ terminal: number }));
       })
       // A request that never landed is a shell that did not start, and it is
       // read as one: the pane says so in a tab and waits to be asked again,
@@ -668,7 +878,7 @@ export function Code(props: {
 
     if (asked === undefined || Date.now() - asked >= AT_ONCE) {
       askedAt.delete(tab);
-      setTabs((was) =>
+      everywhere((was) =>
         was.filter((one) => !("terminal" in one && one.terminal === tab)),
       );
       return;
@@ -713,14 +923,17 @@ export function Code(props: {
   /// the text away. Asked of this page rather than of the server, unlike the
   /// shell's — what is unsaved is the buffer here, and the server has never
   /// heard of it.
-  const close = (tab: Tab): void => {
+  const close = (group: Group, tab: Tab): void => {
     if ("file" in tab) {
-      if (dirty(tab.file)) {
-        setLeaving(tab.file);
+      // Only where this is the file's last view. A second group showing the
+      // same file is the same buffer, so a tab closed while it stands loses
+      // nothing at all and there is nothing to ask about.
+      if (views(tab.file) === 1 && dirty(tab.file)) {
+        setLeaving({ group, path: tab.file });
         return;
       }
 
-      drop(tab.file);
+      drop(group, tab.file);
       return;
     }
 
@@ -732,7 +945,7 @@ export function Code(props: {
         delete rest[number];
         return rest;
       });
-      setTabs((was) => was.filter((one) => keyed(one) !== keyed(tab)));
+      take(group, tab);
       return;
     }
 
@@ -746,17 +959,22 @@ export function Code(props: {
   /// Apart from [`close`] because it is the far side of the card as well as the
   /// near side of a clean press — what the card's own button makes is this,
   /// with the human having said so.
-  const drop = (path: string): void => {
-    forget(path);
-    setTabs((was) => was.filter((one) => keyed(one) !== keyed({ file: path })));
+  const drop = (group: Group, path: string): void => {
+    take(group, { file: path });
+
+    // And what is behind it, where that tab was the last view of the file. A
+    // second group still showing it is the one buffer still being read, and
+    // forgetting it here would take the text out from under that view.
+    if (views(path) === 0) {
+      forget(path);
+    }
   };
 
-  /// What a file's tab leaves behind when it goes: nothing.
+  /// What a file's last view leaves behind when it goes: nothing.
   ///
   /// The buffer with it, which is a disposal rather than a forgetting: the
   /// model is registered at the file's own address in Monaco's own register,
-  /// and one left there is a file that could never be opened again. There is
-  /// one group in this stage, so a tab going is that file's last view going.
+  /// and one left there is a file that could never be opened again.
   const forget = (path: string): void => {
     saving.delete(path);
     setReadings((was) => {
@@ -921,25 +1139,36 @@ export function Code(props: {
   /// asks the server for a shell, and this one reads a path. Two verbs would be
   /// one word telling a reader nothing about which.
   ///
-  /// **The same file opened twice is one buffer**, so a file already open is a
-  /// tab to turn to rather than a second tab beside the first (ADR 0019, *Tabs
-  /// and groups*). There is one group in this stage, so one buffer is one tab.
+  /// **Into the group last pressed into**, which is what active means: the
+  /// press was made on the tree rather than in any group, and the group the
+  /// human was last working in is the one they meant.
+  ///
+  /// **The same file opened twice is one buffer**, so a file already open in
+  /// *this* group is a tab to turn to rather than a second tab beside the first
+  /// (ADR 0019, *Tabs and groups*). Open in another group, it opens here as
+  /// well: two tabs, one buffer, two views of the one text.
   ///
   /// The read is made here rather than in the tree, because what it answers
   /// belongs to the tab: the version it carries is what a save will name itself
-  /// as being over, and the tree is a list of names.
+  /// as being over, and the tree is a list of names. Made once per file rather
+  /// than once per view — a second view of a file somebody has typed into and
+  /// not saved would otherwise read the disk over their text.
   const openFile = (path: string): void => {
     const tab: Tab = { file: path };
+    const group = into();
+    const anywhere = views(path) > 0;
 
-    setChosen(keyed(tab));
+    group.setChosen(keyed(tab));
 
-    if (tabs().some((one) => keyed(one) === keyed(tab))) {
+    if (group.tabs().some((one) => keyed(one) === keyed(tab))) {
       return;
     }
 
-    setTabs((was) => [...was, tab]);
+    group.setTabs((was) => [...was, tab]);
 
-    void reread(path);
+    if (!anywhere) {
+      void reread(path);
+    }
   };
 
   /// The close itself, made once with nobody asked and again with the answer.
@@ -967,10 +1196,11 @@ export function Code(props: {
   ///
   /// On the document rather than on the editor. Monaco binds nothing to this
   /// itself, so the press arrives here whether the caret is in a file, in a
-  /// terminal beside it or on the tree — and what it saves is the file
-  /// *showing*, which is the file the human is looking at whichever of those
-  /// their hands were on. Refused by the browser first, its own Save Page being
-  /// nothing anybody meant.
+  /// terminal beside it or on the tree — and what it saves is the file showing
+  /// in the **active** group, which is the group the human last pressed into
+  /// and so the file they are looking at whichever of those their hands were
+  /// on. Refused by the browser first, its own Save Page being nothing anybody
+  /// meant.
   ///
   /// Only while this pane is mounted, which is the whole reach of the listener:
   /// Code is the only thing in this workbench with a file in it to write.
@@ -983,7 +1213,8 @@ export function Code(props: {
       return;
     }
 
-    const open = tabs().find((one) => keyed(one) === showing());
+    const group = into();
+    const open = group.tabs().find((one) => keyed(one) === showing(group));
 
     if (open === undefined || !("file" in open)) {
       return;
@@ -1034,25 +1265,33 @@ export function Code(props: {
 
     const running = new Set(live.map((terminal) => terminal.number));
 
-    setTabs((was) => {
-      const kept = was.filter(
+    // Dropped from whichever group holds it, wherever that is — and a group
+    // whose last tab was a shell that has ended goes the way any other emptied
+    // group goes.
+    everywhere((was) =>
+      was.filter(
         (one) =>
           "file" in one ||
           running.has(one.terminal) ||
           over()[one.terminal] !== undefined,
-      );
+      ),
+    );
 
-      const drawn = new Set(
-        kept.flatMap((one) => ("file" in one ? [] : [one.terminal])),
-      );
+    const drawn = new Set(
+      groups().flatMap((group) =>
+        group.tabs().flatMap((one) => ("file" in one ? [] : [one.terminal])),
+      ),
+    );
 
-      return [
-        ...kept,
-        ...live
-          .filter((terminal) => !drawn.has(terminal.number))
-          .map((terminal): Tab => ({ terminal: terminal.number })),
-      ];
-    });
+    const arrived = live
+      .filter((terminal) => !drawn.has(terminal.number))
+      .map((terminal): Tab => ({ terminal: terminal.number }));
+
+    // And one the register has that no group does joins the active group,
+    // which is how a shell opened on another device arrives.
+    if (arrived.length > 0) {
+      into().setTabs((was) => [...was, ...arrived]);
+    }
 
     setRead(true);
   });
@@ -1070,91 +1309,6 @@ export function Code(props: {
           }
           title="Code"
         >
-          {/* The tabs beside the title, where a pane's own controls go, and the
-              way to another at the end of them. Buttons that say which they are
-              rather than tabs: they are all always there, `aria-pressed` is the
-              one word that says which is showing, and what each one does is
-              show a grid that is already drawn.
-
-              Drawn where there are tabs. A strip holding nothing but its own
-              plus says nothing the empty state under it does not say in
-              words. */}
-          <Show when={tabs().length > 0}>
-            <div
-              class={styles.tabs}
-              role="group"
-              aria-label="What is open in this conversation"
-            >
-              <For each={tabs()}>
-                {(tab) => (
-                  // Two buttons rather than one: the tab is pressed to show
-                  // what it holds and the × is pressed to close it, and a
-                  // button inside a button is not a thing a browser draws. The
-                  // frame around them is the tab as the eye reads it, and is
-                  // what takes the fill of the one showing.
-                  <div class={styles.tabFrame}>
-                    <button
-                      type="button"
-                      class={styles.tab}
-                      aria-pressed={showing() === keyed(tab)}
-                      onClick={() => setChosen(keyed(tab))}
-                    >
-                      {/* What kind of thing the tab holds, which is the one
-                          thing an icon at that end says: a shell, or a
-                          file. */}
-                      <Icon
-                        of={"file" in tab ? faFile : faTerminal}
-                        class={styles.kind}
-                      />
-                      <span class={styles.name}>{called(tab)}</span>
-
-                      {/* And the dot that says there is text in it nobody has
-                          saved — VS Code's own mark, beside the name rather
-                          than in place of the × it draws it in place of: there
-                          is no hover on a phone, and a × a finger cannot find
-                          is a tab a finger cannot close.
-
-                          Empty, and read aloud off its label: what it says
-                          belongs to the tab's own name, which is what a screen
-                          reader reads when it reaches the button. */}
-                      <Show when={"file" in tab && dirty(tab.file)}>
-                        <span
-                          class={styles.dot}
-                          role="img"
-                          aria-label="unsaved"
-                        />
-                      </Show>
-                    </button>
-
-                    {/* And the way to end it. Called by the tab it would close:
-                        an icon says nothing when it is read aloud, and a row of
-                        these all saying "Close" would say nothing about
-                        which. */}
-                    <button
-                      type="button"
-                      class={styles.close}
-                      aria-label={`Close ${called(tab)}`}
-                      onClick={() => close(tab)}
-                    >
-                      <Icon of={faXmark} />
-                    </button>
-                  </div>
-                )}
-              </For>
-
-              <IconButton
-                of={faPlus}
-                label="New terminal"
-                class={styles.plus}
-                // Nothing of this one is open: it opens a shell rather than a
-                // pane, and there is no state of the page it is the way back
-                // into.
-                open={false}
-                press={() => void open()}
-              />
-            </div>
-          </Show>
-
           {/* And the way to give the editor the window, at the end of the
               header: the sidebar and the Timeline go, and the details pane —
               which is this one — takes what they were standing in (ADR 0019,
@@ -1189,7 +1343,7 @@ export function Code(props: {
         </PaneHead>
       </PaneSticky>
 
-      {/* The tree and the group of tabs, side by side, which is the whole of
+      {/* The tree and the groups of tabs, side by side, which is the whole of
           the pane under its header. Both names are the frame's: `paneScreen`
           is what says this is the thing the pane sizes to its own height, and
           `paneWide` is what takes the reading measure off the pane — a tree and
@@ -1206,15 +1360,19 @@ export function Code(props: {
           setHeld={setExpanded}
         />
 
-        <div class={styles.group}>
+        <div class={styles.groups}>
           {/* The register not answering is a line *above* whatever is open
               rather than in place of it. The terminals are the server's and
               this says so when it cannot be asked; the files beside them are
               this page's own — read, typed into and not yet saved — and a tab
               nobody can reach because a different half of the pane could not
               be read would be the one failure that loses somebody's text. The
-              tabs are still in the bar either way, so drawing the error where
-              their content goes left them pressable and empty. */}
+              tabs are still in their bars either way, so drawing the error
+              where their content goes left them pressable and empty.
+
+              Once for the pane rather than once per group: what could not be
+              read is the Conversation's register, which no group owns a part
+              of. */}
           <Show when={terminals.isError}>
             <ErrorLine>
               Could not read this conversation's terminals:{" "}
@@ -1222,80 +1380,303 @@ export function Code(props: {
             </ErrorLine>
           </Show>
 
-          <Switch
-            fallback={<Empty>Reading this conversation's terminals…</Empty>}
-          >
-            <Match when={tabs().length > 0}>
-              <For each={tabs()}>
-                {(tab) =>
-                  "file" in tab ? (
-                    // A file's tab is drawn whether or not it is the one
-                    // showing, and hidden when it is not — the way a terminal's
-                    // is, and for the near reason: a grid taken down is a shell
-                    // nobody could come back to, and an editor taken down is a
-                    // caret and an undo stack nobody can come back to. The text
-                    // itself was never at risk, the buffer being above this
-                    // pane; what the hiding keeps is where the human was in it.
-                    <Opened
-                      showing={showing() === keyed(tab)}
-                      reading={readings()[tab.file]}
-                      buffer={buffers()[tab.file]}
-                      name={named(tab.file)}
-                      bar={bars()[tab.file]}
-                      reload={() => void reread(tab.file)}
-                      keep={() => void reread(tab.file, true)}
-                    />
-                  ) : tab.terminal > 0 ? (
-                    <Attached
-                      at={terminalSocket(props.conversation.id, tab.terminal)}
-                      showing={showing() === keyed(tab)}
-                      scrollback={SCROLLBACK}
-                      over={over()[tab.terminal]}
-                      titled={(title) =>
-                        setTitles((was) => ({ ...was, [tab.terminal]: title }))
-                      }
-                      ended={() => ended(tab.terminal)}
-                      say={{
-                        waiting:
-                          "Starting a shell in this conversation's worktree…",
-                        lost: "The connection to this terminal was lost.",
-                      }}
-                    />
-                  ) : (
-                    // A tab the server never opened a shell for has no grid to
-                    // stand under the sentence, and nothing to attach to: the
-                    // refusal is the whole of it.
-                    <Show when={showing() === keyed(tab)}>
-                      <ErrorLine>{over()[tab.terminal]}</ErrorLine>
-                    </Show>
-                  )
-                }
-              </For>
-            </Match>
+          {/* And the groups themselves, every one of them drawn in the one
+              layer and placed by the tree — see [`./layout`]. Placed rather
+              than nested, so that a split, a collapse or a tab moved between
+              two of them moves boxes about instead of taking a group's whole
+              content down and making it again: a nest of boxes would cost a
+              terminal its socket and an editor its caret for a press made in
+              the group beside it. */}
+          <div class={styles.stack}>
+            <For each={groups()}>
+              {(group) => (
+                <div
+                  class={styles.group}
+                  style={stood(group.id)}
+                  // Which group a file pressed in the tree will open in, said
+                  // where it can be read as well as seen — and said only where
+                  // there is more than one of them, a lone group being not the
+                  // current one of a set but the whole of the pane.
+                  aria-current={
+                    groups().length > 1 && active() === group.id
+                      ? "true"
+                      : undefined
+                  }
+                  // The active group is the one last pressed into, wherever in
+                  // it the press landed: a tab, a terminal's grid, an editor.
+                  // Focus counts as a press for the keyboard's sake, there
+                  // being no pointer to make one with.
+                  onPointerDown={() => setActive(group.id)}
+                  onFocusIn={() => setActive(group.id)}
+                >
+                  {/* The bar of this group, and the two ways on from it at the
+                      end. Buttons that say which they are rather than tabs:
+                      they are all always there, `aria-pressed` is the one word
+                      that says which is showing, and what each one does is show
+                      something that is already drawn.
 
-            {/* And the group with nothing in it, which is where a Conversation
-                with no shells running lands and where the last of them leaves
-                it. Drawn where a tab's content goes rather than over the whole
-                pane: the tree stands beside this, and a pane-wide notice would
-                be a sentence over that too.
+                      Drawn where there are tabs. A strip holding nothing but
+                      its own plus says nothing the empty state under it does
+                      not say in words — and only the last group is ever empty,
+                      every other one going the moment its last tab does. */}
+                  <Show when={group.tabs().length > 0}>
+                    <div
+                      class={styles.tabs}
+                      role="group"
+                      aria-label="What is open in this group"
+                    >
+                      <For each={group.tabs()}>
+                        {(tab) => (
+                          // Two buttons rather than one: the tab is pressed to
+                          // show what it holds and the × is pressed to close
+                          // it, and a button inside a button is not a thing a
+                          // browser draws. The frame around them is the tab as
+                          // the eye reads it, and is what takes the fill of the
+                          // one showing.
+                          <div class={styles.tabFrame}>
+                            <button
+                              type="button"
+                              class={styles.tab}
+                              aria-pressed={showing(group) === keyed(tab)}
+                              // Which hand is making the gesture, for the menu
+                              // below: a long press is how a tab will be picked
+                              // up, so the menu is the mouse's alone.
+                              onPointerDown={(event) => {
+                                fromTouch = event.pointerType !== "mouse";
+                              }}
+                              onContextMenu={(event) => ask(event, group, tab)}
+                              onClick={() => {
+                                setActive(group.id);
+                                group.setChosen(keyed(tab));
+                              }}
+                            >
+                              {/* What kind of thing the tab holds, which is the
+                                  one thing an icon at that end says: a shell,
+                                  or a file. */}
+                              <Icon
+                                of={"file" in tab ? faFile : faTerminal}
+                                class={styles.kind}
+                              />
+                              <span class={styles.name}>{called(tab)}</span>
 
-                A list that would not read settles it as well as one that did.
-                The hint waits on somebody having looked, and a read that ended
-                in the line above is a look that is over — without this the
-                pane would sit on *Reading this conversation's terminals…*
-                under a sentence saying it could not, with no way to open one
-                and try again. */}
-            <Match when={read() || terminals.isError}>
-              <div class={styles.nothing}>
-                <Empty>{NOTHING_OPEN}</Empty>
-                <QuietButton onClick={() => void open()}>
-                  New terminal
-                </QuietButton>
-              </div>
-            </Match>
-          </Switch>
+                              {/* And the dot that says there is text in it
+                                  nobody has saved — VS Code's own mark, beside
+                                  the name rather than in place of the × it
+                                  draws it in place of: there is no hover on a
+                                  phone, and a × a finger cannot find is a tab a
+                                  finger cannot close.
+
+                                  On every view of the file, there being one
+                                  buffer under them: the dot is the buffer's
+                                  against the disk rather than this tab's.
+
+                                  Empty, and read aloud off its label: what it
+                                  says belongs to the tab's own name, which is
+                                  what a screen reader reads when it reaches the
+                                  button. */}
+                              <Show when={"file" in tab && dirty(tab.file)}>
+                                <span
+                                  class={styles.dot}
+                                  role="img"
+                                  aria-label="unsaved"
+                                />
+                              </Show>
+                            </button>
+
+                            {/* And the way to end it. Called by the tab it
+                                would close: an icon says nothing when it is
+                                read aloud, and a row of these all saying
+                                "Close" would say nothing about which. */}
+                            <button
+                              type="button"
+                              class={styles.close}
+                              aria-label={`Close ${called(tab)}`}
+                              onClick={() => close(group, tab)}
+                            >
+                              <Icon of={faXmark} />
+                            </button>
+                          </div>
+                        )}
+                      </For>
+
+                      {/* The split, at the end of the bar: this group again
+                          beside itself, showing the tab that was showing (ADR
+                          0019, *Tabs and groups*). One way rather than two,
+                          which is VS Code's bar as well — the other is a
+                          right-click on the tab, where both of them are named
+                          in words. */}
+                      <IconButton
+                        of={faTableColumns}
+                        label="Split right"
+                        class={styles.divide}
+                        // Nothing of this one is open either: it makes a group
+                        // rather than opens a pane.
+                        open={false}
+                        press={() => {
+                          const shown = group
+                            .tabs()
+                            .find((one) => keyed(one) === showing(group));
+
+                          if (shown !== undefined) {
+                            divide(group, shown, "beside");
+                          }
+                        }}
+                      />
+
+                      <IconButton
+                        of={faPlus}
+                        label="New terminal"
+                        class={styles.plus}
+                        // Nothing of this one is open: it opens a shell rather
+                        // than a pane, and there is no state of the page it is
+                        // the way back into.
+                        open={false}
+                        press={() => {
+                          setActive(group.id);
+                          void open();
+                        }}
+                      />
+                    </div>
+                  </Show>
+
+                  <Switch
+                    fallback={
+                      <Empty>Reading this conversation's terminals…</Empty>
+                    }
+                  >
+                    <Match when={group.tabs().length > 0}>
+                      <For each={group.tabs()}>
+                        {(tab) =>
+                          "file" in tab ? (
+                            // A file's tab is drawn whether or not it is the
+                            // one showing, and hidden when it is not — the way
+                            // a terminal's is, and for the near reason: a grid
+                            // taken down is a shell nobody could come back to,
+                            // and an editor taken down is a caret and an undo
+                            // stack nobody can come back to. The text itself
+                            // was never at risk, the buffer being above this
+                            // pane; what the hiding keeps is where the human
+                            // was in it.
+                            //
+                            // One of these per *view*: the same file in two
+                            // groups is two of these over the one buffer, which
+                            // is what makes them type together.
+                            <Opened
+                              showing={showing(group) === keyed(tab)}
+                              reading={readings()[tab.file]}
+                              buffer={buffers()[tab.file]}
+                              name={named(tab.file)}
+                              bar={bars()[tab.file]}
+                              reload={() => void reread(tab.file)}
+                              keep={() => void reread(tab.file, true)}
+                            />
+                          ) : tab.terminal > 0 ? (
+                            <Attached
+                              at={terminalSocket(
+                                props.conversation.id,
+                                tab.terminal,
+                              )}
+                              showing={showing(group) === keyed(tab)}
+                              scrollback={SCROLLBACK}
+                              over={over()[tab.terminal]}
+                              titled={(title) =>
+                                setTitles((was) => ({
+                                  ...was,
+                                  [tab.terminal]: title,
+                                }))
+                              }
+                              ended={() => ended(tab.terminal)}
+                              say={{
+                                waiting:
+                                  "Starting a shell in this conversation's worktree…",
+                                lost: "The connection to this terminal was lost.",
+                              }}
+                            />
+                          ) : (
+                            // A tab the server never opened a shell for has no
+                            // grid to stand under the sentence, and nothing to
+                            // attach to: the refusal is the whole of it.
+                            <Show when={showing(group) === keyed(tab)}>
+                              <ErrorLine>{over()[tab.terminal]}</ErrorLine>
+                            </Show>
+                          )
+                        }
+                      </For>
+                    </Match>
+
+                    {/* And the group with nothing in it, which is where a
+                        Conversation with no shells running lands and where the
+                        last of them leaves it. Drawn where a tab's content goes
+                        rather than over the whole pane: the tree stands beside
+                        this, and a pane-wide notice would be a sentence over
+                        that too.
+
+                        A list that would not read settles it as well as one
+                        that did. The hint waits on somebody having looked, and
+                        a read that ended in the line above is a look that is
+                        over — without this the pane would sit on *Reading this
+                        conversation's terminals…* under a sentence saying it
+                        could not, with no way to open one and try again. */}
+                    <Match when={read() || terminals.isError}>
+                      <div class={styles.nothing}>
+                        <Empty>{NOTHING_OPEN}</Empty>
+                        <QuietButton
+                          onClick={() => {
+                            setActive(group.id);
+                            void open();
+                          }}
+                        >
+                          New terminal
+                        </QuietButton>
+                      </div>
+                    </Match>
+                  </Switch>
+                </div>
+              )}
+            </For>
+          </div>
         </div>
       </div>
+
+      {/* And what a right-click on a tab drops: the two ways to split the group
+          it is in, with that tab showing in both. The pane's only menu, and the
+          only place either split is named in words (ADR 0019, *Tabs and
+          groups*). */}
+      <ContextMenu
+        class={styles.tabActions!}
+        name="Tab actions"
+        at={pointed()?.at ?? null}
+        close={() => setPointed(null)}
+      >
+        {() => (
+          <For
+            each={
+              [
+                ["Split right", "beside"],
+                ["Split down", "below"],
+              ] as const
+            }
+          >
+            {([says, way]) => (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  const asked = pointed();
+
+                  setPointed(null);
+
+                  if (asked !== null) {
+                    divide(asked.group, asked.tab, way);
+                  }
+                }}
+              >
+                {says}
+              </button>
+            )}
+          </For>
+        )}
+      </ContextMenu>
 
       {/* And the card a × on a busy tab puts up, which the press that made it
           is waiting on. Outside the Switch above because it is drawn over the
@@ -1320,15 +1701,15 @@ export function Code(props: {
       {/* And the one a × on a file with unsaved text in it puts up, which is
           the same question about the other kind of tab. */}
       <Unsaved
-        asked={leaving() === undefined ? null : named(leaving()!)}
+        asked={leaving() === undefined ? null : named(leaving()!.path)}
         keep={() => setLeaving(undefined)}
         close={() => {
-          const path = leaving();
+          const view = leaving();
 
           setLeaving(undefined);
 
-          if (path !== undefined) {
-            drop(path);
+          if (view !== undefined) {
+            drop(view.group, view.path);
           }
         }}
       />

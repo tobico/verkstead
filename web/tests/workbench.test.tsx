@@ -18417,17 +18417,46 @@ describe("the code pane's tabs", () => {
     }
   });
 
-  /// And nothing comes down on a right-click any more. Close was on a menu
-  /// because a × beside a small label is easy to hit by accident; the × is what
-  /// VS Code's bar has, and a busy shell asking first is what carries that
-  /// worry now. What the gesture is freed for is dragging a tab.
-  it("leaves a right-click on a tab to the browser", async () => {
+  /// Close is not on the menu any more — it is the × on the tab, and a busy
+  /// shell asking first is what carries the worry that put it on a menu in ADR
+  /// 0013. What a right-click offers instead is the two splits, this being one
+  /// of the two ways to make one that are not a drag (ADR 0019, *Tabs and
+  /// groups*).
+  it("offers the two splits on a right-click on a tab", async () => {
     withTerminals([1]);
     const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
     await waitFor(() => expect(tabs(container)).toHaveLength(1));
 
-    // Not prevented, which is the whole of what this pane now does about it.
+    // Nothing is down until it is asked for.
+    expect(container.querySelector(`.${dropdown.drop}`)).toBeNull();
+
+    // The browser's own menu is taken off the press, which is what says this
+    // one is the answer to it.
+    expect(
+      fireEvent.contextMenu(tabs(container)[0]!, {
+        clientX: 120,
+        clientY: 40,
+      }),
+    ).toBe(false);
+
+    const menu = await drawn(container, `.${dropdown.drop}`);
+
+    expect(
+      [...menu.querySelectorAll("button")].map((row) => row.textContent),
+    ).toEqual(["Split right", "Split down"]);
+  });
+
+  /// And a long press is left alone: a phone fires the same event from one, and
+  /// that gesture is what a tab is picked up with.
+  it("opens nothing from a phone's long press on a tab", async () => {
+    withTerminals([1]);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() => expect(tabs(container)).toHaveLength(1));
+
+    fireEvent.pointerDown(tabs(container)[0]!, { pointerType: "touch" });
+
     expect(
       fireEvent.contextMenu(tabs(container)[0]!, {
         clientX: 120,
@@ -20933,6 +20962,384 @@ describe("a file opened out of the code pane's tree", () => {
         new Event("beforeunload", { cancelable: true }),
       );
     }
+  });
+});
+
+/// Code's groups: the layout tree the pane is drawn from, and the two ways to
+/// split one that are not a drag.
+///
+/// One group was the whole of the pane. A split puts another beside it or below
+/// it, either half splits again to any depth, and a group whose last tab leaves
+/// is gone — which is the whole of unsplitting, there being no command for it
+/// (ADR 0019, *Tabs and groups*).
+describe("the code pane's groups", () => {
+  /// Where a file of this conversation is written back — the path it was read
+  /// at, posted to.
+  const SAVING = `/api/ui/conversations/${GRILLING.id}/files/file`;
+
+  /// The groups the pane is drawing, in the order the tree puts them in: the
+  /// near half of a split before the far one.
+  function groups(container: ParentNode): HTMLElement[] {
+    return [
+      ...container.querySelectorAll<HTMLElement>(
+        `.${shell.detailsPane} .${codePane.group}`,
+      ),
+    ];
+  }
+
+  /// And where one of them stands, which is the whole of what the tree says
+  /// about it: percentages of the layer they are all drawn in.
+  function stood(group: HTMLElement): Record<string, string> {
+    return {
+      left: group.style.left,
+      top: group.style.top,
+      width: group.style.width,
+      height: group.style.height,
+    };
+  }
+
+  /// The tabs of one group, or of the whole pane where it is handed the lot.
+  function tabs(of: ParentNode): HTMLButtonElement[] {
+    return [...of.querySelectorAll<HTMLButtonElement>(`.${codePane.tab}`)];
+  }
+
+  /// What each group is holding, as the names on its tabs — which is the one
+  /// reading that says the layout *and* what is in it.
+  function holding(container: ParentNode): string[][] {
+    return groups(container).map((group) =>
+      tabs(group).map((tab) => tab.textContent ?? ""),
+    );
+  }
+
+  /// The × at the end of each tab of one group.
+  function crosses(of: ParentNode): HTMLButtonElement[] {
+    return [...of.querySelectorAll<HTMLButtonElement>(`.${codePane.close}`)];
+  }
+
+  /// The editors the pane has open, one per view of a file — the `textarea` the
+  /// stand-in puts where Monaco's own view would be. See `tests/editing.ts`.
+  function editors(container: ParentNode): HTMLTextAreaElement[] {
+    return [
+      ...container.querySelectorAll<HTMLTextAreaElement>(
+        `.${shell.detailsPane} .${editorPane.editor} textarea`,
+      ),
+    ];
+  }
+
+  /// And the dots: one per tab holding text the disk has not got.
+  function dots(container: ParentNode): Element[] {
+    return [
+      ...container.querySelectorAll(
+        `.${shell.detailsPane} .${codePane.tab} .${codePane.dot}`,
+      ),
+    ];
+  }
+
+  /// One of the fixture folder's files, by name: where the row that opens it
+  /// points.
+  function pathOf(name: string): string {
+    const listed = codeFolder as Extract<FolderListing, { Listed: unknown }>;
+    const found = listed.Listed.entries.find((entry) => entry.name === name);
+
+    if (!found) {
+      throw new Error(`the fixture folder has no ${name}`);
+    }
+
+    return found.path;
+  }
+
+  /// What the server answers a read of one of them with.
+  function reading(name: string, text: string): FileReading {
+    return {
+      Text: { path: pathOf(name), text, version: `${name}-1`, writable: true },
+    };
+  }
+
+  /// Split the group a tab is in, the way the tab's own menu says it.
+  async function split(
+    container: ParentNode,
+    on: HTMLElement,
+    way: "Split right" | "Split down",
+  ): Promise<void> {
+    fireEvent.contextMenu(on, { clientX: 10, clientY: 10 });
+
+    const menu = await drawn(container, `.${dropdown.drop}`);
+    const row = [...menu.querySelectorAll("button")].find(
+      (one) => one.textContent === way,
+    );
+
+    if (!row) {
+      throw new Error(`the tab's menu has no ${way}`);
+    }
+
+    fireEvent.click(row);
+    await waitFor(() =>
+      expect(container.querySelector(`.${dropdown.drop}`)).toBeNull(),
+    );
+  }
+
+  /// A file row of the tree, pressed — which is how a file is opened.
+  function press(container: ParentNode, name: string): void {
+    const found = [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        `.${shell.detailsPane} .${treePane.file}`,
+      ),
+    ].find((one) => one.textContent === name);
+
+    if (!found) {
+      throw new Error(`the tree has no file called ${name}`);
+    }
+
+    fireEvent.click(found);
+  }
+
+  /// The pane with the conversation's own root expanded, so its files are rows
+  /// to press, and every one of them answered with text.
+  ///
+  /// No terminals, so what is in a group is only ever what this test put there.
+  async function opened(...answers: Parameters<typeof serving>) {
+    const fetching = withTerminals(
+      [],
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+      whenever(fileOf(pathOf("Cargo.toml")), json(codeFile)),
+      whenever(
+        fileOf(pathOf("README.md")),
+        json(reading("README.md", "# verkstead\n")),
+      ),
+      whenever(
+        fileOf(pathOf(".gitignore")),
+        json(reading(".gitignore", "/target\n")),
+      ),
+      ...answers,
+    );
+    const mounted = mount(`/conversations/${GRILLING.id}/code`);
+
+    const rows = await waitFor(() => {
+      const found = [
+        ...mounted.container.querySelectorAll<HTMLButtonElement>(
+          `.${shell.detailsPane} .${treePane.folder}`,
+        ),
+      ];
+
+      if (found.length < 2) {
+        throw new Error("the tree has not drawn its roots yet");
+      }
+
+      return found;
+    });
+
+    fireEvent.click(
+      rows.find((row) => row.textContent?.startsWith(OWN_ROOT.repo))!,
+    );
+
+    await waitFor(() =>
+      expect(
+        mounted.container.querySelectorAll(
+          `.${shell.detailsPane} .${treePane.file}`,
+        ).length,
+      ).toBeGreaterThan(0),
+    );
+
+    return { ...mounted, fetching };
+  }
+
+  /// Two splits nest, and each of the three groups is a bar of its own over
+  /// content of its own — a split is a *group* beside a group rather than a
+  /// second view inside one.
+  it("nests two splits, each group drawing its own bar and content", async () => {
+    withTerminals([1]);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() => expect(tabs(container)).toHaveLength(1));
+    expect(groups(container)).toHaveLength(1);
+    expect(stood(groups(container)[0]!)).toEqual({
+      left: "0%",
+      top: "0%",
+      width: "100%",
+      height: "100%",
+    });
+
+    // Beside itself first, which halves the pane down the middle.
+    await split(container, tabs(container)[0]!, "Split right");
+
+    await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+    // And then below the group that split made, which halves that half across
+    // — the second split inside the first, which is what nesting is.
+    await split(container, tabs(groups(container)[1]!)[0]!, "Split down");
+
+    await waitFor(() => expect(groups(container)).toHaveLength(3));
+
+    expect(groups(container).map(stood)).toEqual([
+      { left: "0%", top: "0%", width: "50%", height: "100%" },
+      { left: "50%", top: "0%", width: "50%", height: "50%" },
+      { left: "50%", top: "50%", width: "50%", height: "50%" },
+    ]);
+
+    // The tab the split was made from goes on showing in both, as VS Code's
+    // does — so all three are watching the one shell, each through a window of
+    // its own.
+    expect(holding(container)).toEqual([
+      ["Terminal 1"],
+      ["Terminal 1"],
+      ["Terminal 1"],
+    ]);
+
+    for (const group of groups(container)) {
+      expect(group.querySelectorAll(`.${codePane.tabs}`)).toHaveLength(1);
+      expect(group.querySelectorAll(`.${attachedPane.screen}`)).toHaveLength(1);
+    }
+  });
+
+  /// And the icon at the end of a bar is the other way in, which splits that
+  /// group beside itself — VS Code's own bar button, and the common half of
+  /// what the menu offers in words.
+  it("splits beside from the icon at the end of the bar", async () => {
+    withTerminals([1]);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() => expect(tabs(container)).toHaveLength(1));
+
+    fireEvent.click(
+      await drawn(
+        container,
+        `.${shell.detailsPane} .${codePane.divide}`,
+      ),
+    );
+
+    await waitFor(() => expect(groups(container)).toHaveLength(2));
+    expect(groups(container).map(stood)).toEqual([
+      { left: "0%", top: "0%", width: "50%", height: "100%" },
+      { left: "50%", top: "0%", width: "50%", height: "100%" },
+    ]);
+  });
+
+  /// A group whose last tab goes disappears, and its neighbour takes the room.
+  /// That is the whole of unsplitting: there is no command for it, and nothing
+  /// here is asked for one.
+  it("collapses a group whose last tab is closed, and gives the room back", async () => {
+    const { container } = await opened();
+
+    press(container, "Cargo.toml");
+    await waitFor(() => expect(editors(container)).toHaveLength(1));
+
+    await split(container, tabs(container)[0]!, "Split right");
+    await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+    await split(container, tabs(groups(container)[1]!)[0]!, "Split down");
+    await waitFor(() => expect(groups(container)).toHaveLength(3));
+
+    // The nested group's only tab, closed — which collapses the split it stood
+    // in, and the tree is a level shallower for it: the half that was the top
+    // of the far column is the whole of that column again.
+    fireEvent.click(crosses(groups(container)[2]!)[0]!);
+
+    await waitFor(() => expect(groups(container)).toHaveLength(2));
+    expect(groups(container).map(stood)).toEqual([
+      { left: "0%", top: "0%", width: "50%", height: "100%" },
+      { left: "50%", top: "0%", width: "50%", height: "100%" },
+    ]);
+
+    // And the last of the far half, which takes the split with it.
+    fireEvent.click(crosses(groups(container)[1]!)[0]!);
+
+    await waitFor(() => expect(groups(container)).toHaveLength(1));
+    expect(stood(groups(container)[0]!)).toEqual({
+      left: "0%",
+      top: "0%",
+      width: "100%",
+      height: "100%",
+    });
+
+    // And the file is still open in the half that stayed, over the buffer it
+    // was always over: one view closing is not the file closing.
+    expect(holding(container)).toEqual([["Cargo.toml"]]);
+    expect(editors(container)).toHaveLength(1);
+    expect(theEditor().model.disposed).toBe(false);
+  });
+
+  /// The same file in two groups is one buffer under two views: typing in
+  /// either shows in the other, the dot is on both tabs, and one save clears
+  /// both (ADR 0019, *Tabs and groups*).
+  it("shows one buffer through both views of a file", async () => {
+    const { container, fetching } = await opened(
+      whenever(SAVING, json(codeWritten), "POST"),
+    );
+
+    press(container, "Cargo.toml");
+    await waitFor(() => expect(editors(container)).toHaveLength(1));
+
+    await split(container, tabs(container)[0]!, "Split right");
+    await waitFor(() => expect(editors(container)).toHaveLength(2));
+
+    // One read for the file however many views there are: a second view of
+    // something somebody has typed into must not read the disk over their text.
+    expect(askedFor(fetching, fileOf(pathOf("Cargo.toml")))).toBe(1);
+
+    fireEvent.input(editors(container)[0]!, {
+      target: { value: "[workspace]\nmembers = []\n" },
+    });
+
+    // Typed in one, shown in the other, there being one text under them.
+    await waitFor(() =>
+      expect(editors(container)[1]!.value).toBe(
+        "[workspace]\nmembers = []\n",
+      ),
+    );
+
+    // And the dot on both tabs: it is the buffer's mark against the disk rather
+    // than the tab's own.
+    expect(dots(container)).toHaveLength(2);
+
+    fireEvent.keyDown(document.body, { key: "s", ctrlKey: true });
+
+    // One save, and both tabs clean behind it.
+    await waitFor(() => expect(dots(container)).toHaveLength(0));
+    expect(
+      fetching.mock.calls.filter(
+        ([path, init]) => String(path) === SAVING && init?.method === "POST",
+      ),
+    ).toHaveLength(1);
+  });
+
+  /// And a file pressed in the tree opens in the group last pressed into, which
+  /// is what active means: the press was made on the tree rather than in any
+  /// group, and the one the human was last working in is the one they meant.
+  it("opens a file pressed in the tree into the group last pressed into", async () => {
+    const { container } = await opened();
+
+    press(container, "Cargo.toml");
+    await waitFor(() => expect(editors(container)).toHaveLength(1));
+
+    // The split's own group is where the work is going, so it is the active
+    // one — and the next file lands there.
+    await split(container, tabs(container)[0]!, "Split right");
+    await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+    press(container, "README.md");
+    await waitFor(() =>
+      expect(holding(container)).toEqual([
+        ["Cargo.toml"],
+        ["Cargo.toml", "README.md"],
+      ]),
+    );
+
+    // A press into the near half makes that one active again, and the file
+    // after it opens there.
+    fireEvent.click(tabs(groups(container)[0]!)[0]!);
+    press(container, ".gitignore");
+
+    await waitFor(() =>
+      expect(holding(container)).toEqual([
+        ["Cargo.toml", ".gitignore"],
+        ["Cargo.toml", "README.md"],
+      ]),
+    );
+
+    // And which one it is is said where it can be read as well as seen.
+    expect(
+      groups(container).map((group) => group.getAttribute("aria-current")),
+    ).toEqual(["true", null]);
   });
 });
 

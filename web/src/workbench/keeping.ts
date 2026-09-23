@@ -14,6 +14,12 @@
 //! Conversation, because every one of these is: a file is a path in a Worktree,
 //! and a terminal is a number in one Conversation's register.
 //!
+//! **The layout is here too**, which is where the tabs are: the tree of splits
+//! with a group of tabs at every leaf, and which of those groups was last
+//! pressed into — see [`./layout`]. How somebody divided the pane is as much
+//! theirs as what they opened in it, and a swap to an Event and back that came
+//! back undivided would be that work thrown away with the rest.
+//!
 //! **The buffers are here too**, which is the one thing in this list that is
 //! not simply the human's doing (ADR 0019, *Tabs and groups*). A Monaco model
 //! is registered at the file's own address and the package refuses a second one
@@ -41,8 +47,9 @@ import { createSignal, type Accessor, type Setter } from "solid-js";
 
 import type { FileReading, FolderListing } from "../api/types";
 import { load, type Model } from "./editing";
+import { group as made, type Group, type Layout } from "./layout";
 
-/// One tab of the group: a terminal by the number the server issued it, or a
+/// One tab of a group: a terminal by the number the server issued it, or a
 /// file by its path.
 ///
 /// Two shapes rather than one with a kind beside it, because the two are named
@@ -96,10 +103,22 @@ export interface Buffer {
 /// rather than read through an accessor apiece: what the pane does with them is
 /// what it did when they were its own.
 export interface Kept {
-  /// Every tab there is, in the order they were opened — files and terminals
-  /// alike, in the one order, because they are the one bar.
-  tabs: Accessor<Tab[]>;
-  setTabs: Setter<Tab[]>;
+  /// How the pane is divided: the tree of splits, with a group of tabs at
+  /// every leaf — see [`./layout`]. The one thing the pane draws from, which
+  /// is what the flat list of tabs and the single record of which one was
+  /// showing became.
+  layout: Accessor<Layout>;
+  setLayout: Setter<Layout>;
+
+  /// The group last pressed into, by its id: where a file pressed in the tree
+  /// opens, where a new terminal lands, and what Ctrl+S is a save of.
+  active: Accessor<number>;
+  setActive: Setter<number>;
+
+  /// A group with nothing in it, which is what a split puts beside or below
+  /// the one it was made from. The id is this keeping's own count and is never
+  /// reused, so it names one group for as long as the page stands.
+  group: () => Group;
 
   /// What each open file came back as: the text and its version, the picture,
   /// or the line saying why there is nothing to draw.
@@ -146,10 +165,6 @@ export interface Kept {
   /// anything.
   titles: Accessor<Record<number, string>>;
   setTitles: Setter<Record<number, string>>;
-
-  /// Which tab the human turned to, where they have turned to one — by its key.
-  chosen: Accessor<string | undefined>;
-  setChosen: Setter<string | undefined>;
 
   /// And what each open file's save last came to, where it came to anything to
   /// draw.
@@ -210,7 +225,19 @@ export function keeping(): Keeping {
 
 /// One Conversation's, with nothing open in it yet.
 function empty(): Kept {
-  const [tabs, setTabs] = createSignal<Tab[]>([]);
+  /// What the next group is called. Counted up and never reused, so a group
+  /// closed and another opened are two groups rather than one name meaning two
+  /// things.
+  let groups = 0;
+
+  const group = (): Group => made((groups += 1));
+
+  // The pane starts undivided, which is one group with nothing in it: a split
+  // is something the human asks for, and the group it is asked of is this one.
+  const first = group();
+
+  const [layout, setLayout] = createSignal<Layout>({ group: first });
+  const [active, setActive] = createSignal(first.id);
   const [readings, setReadings] = createSignal<Record<string, FileReading>>({});
   const [buffers, setBuffers] = createSignal<Record<string, Buffer>>({});
   const [expanded, setExpanded] = createSignal<Record<string, FolderListing>>(
@@ -218,7 +245,6 @@ function empty(): Kept {
   );
   const [over, setOver] = createSignal<Record<number, string>>({});
   const [titles, setTitles] = createSignal<Record<number, string>>({});
-  const [chosen, setChosen] = createSignal<string | undefined>();
   const [bars, setBars] = createSignal<Record<string, Bar>>({});
 
   let refusals = 0;
@@ -288,8 +314,11 @@ function empty(): Kept {
   };
 
   return {
-    tabs,
-    setTabs,
+    layout,
+    setLayout,
+    active,
+    setActive,
+    group,
     readings,
     setReadings,
     buffers,
@@ -301,8 +330,6 @@ function empty(): Kept {
     setOver,
     titles,
     setTitles,
-    chosen,
-    setChosen,
     bars,
     setBars,
     saving: new Set<string>(),

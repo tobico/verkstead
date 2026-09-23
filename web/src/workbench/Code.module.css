@@ -1,12 +1,19 @@
-/* The pane under its header: the tree down the side, and the group of tabs
+/* The pane under its header: the tree down the side, and the groups of tabs
    beside it.
 
    A row that is the pane's own height — it wears the frame's `paneScreen`, so
    `Panes.module.css` gives it the room the header leaves and nothing scrolls
-   behind it — with the tree keeping its width and the group taking the rest.
+   behind it — with the tree keeping its width and the groups taking the rest.
    `min-height: 0` on both halves for the reason a column of terminals always
    needs it: a flex item's floor is its content, and a grid that would not
    shrink is a pane that grows past the window.
+
+   And it *takes* that room rather than being left it, which is the `flex: 1`:
+   the pane is a flex column of a settled height, and a row in one grows only
+   where it is told to. What it holds is a tree that scrolls and groups that
+   are placed inside the room they are given — neither of them a column of
+   prose with a height of its own to hand back — so the height has to come down
+   from the pane rather than up from what is open.
 
    On a phone they stack. Sixteen rems of names beside a terminal on a screen
    twenty-three wide is neither of them, so the tree goes above the group with a
@@ -16,16 +23,61 @@
    with the height it is given is its own, in `Tree.module.css`. */
 .body {
   display: flex;
+  flex: 1;
   gap: 0.75rem;
   min-height: 0;
 }
 
-.group {
+/* Everything beside the tree: the line saying the register would not read, and
+   under it the layer the groups are drawn in. */
+.groups {
   display: flex;
   flex: 1;
   flex-direction: column;
+  gap: 0.5rem;
   min-width: 0;
   min-height: 0;
+}
+
+/* The layer itself, which every group of the layout tree is placed inside of —
+   see `layout.ts`. The arithmetic a nest of boxes would have done in the
+   browser is done there instead, in percentages, and what is here is the
+   ground those percentages are measured against.
+
+   Placed rather than nested so that a split, a group collapsing or a tab moved
+   between two of them moves boxes about rather than taking a group's contents
+   down and making them again: a terminal's socket and an editor's caret are
+   what that would cost, for a press made in the group beside it. */
+.stack {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+/* One group, at the share of the layer the tree gives it: its own bar of tabs,
+   and what the tab showing is holding under it.
+
+   Its own padding rather than a gap between them, there being no flow to put a
+   gap in: two groups meeting have half of it each, and the edge of the layer
+   has the same half again, which is what keeps a bar off the pane's own
+   border. */
+.group {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.2rem;
+  overflow: hidden;
+}
+
+/* And which of them a file pressed in the tree will open in, said in the one
+   word that says it — the active group is read off `aria-current` the way the
+   tab showing is read off `aria-pressed`. The bar's own border in the accent
+   rather than a wash over the group: what it marks is where the next thing
+   opened will land, and a fill over everything in it would say instead that all
+   of it is pressed. */
+.group[aria-current="true"] .tabs {
+  border-color: var(--accent);
 }
 
 @media (max-width: 40rem) {
@@ -179,12 +231,28 @@
    what is being said is smaller than what `IconButton.module.css` says about
    every one of these, and a rule of one class against a rule of one class is
    settled by which sheet the bundler happened to put second. */
-.tabs .plus {
+.tabs .plus,
+.tabs .divide {
   flex: none;
   align-self: center;
   margin: 0 0.15rem;
   padding: 0.35rem 0.5rem;
   font-size: 0.85rem;
+}
+
+/* The split, beside it: this group again beside itself, with the tab that was
+   showing in both. The same size and the same quiet as the plus — they are the
+   two things at the end of a bar, and neither of them is louder than a tab. */
+.tabs .divide {
+  margin-right: 0;
+}
+
+/* And what a right-click on a tab drops: the two ways to split the group it is
+   in. The chrome is the shared menu's — `Menu.module.css` draws the card, the
+   backdrop and every row of it — so what is said here is the width of the drop,
+   which is a card of two short rows rather than the sidebar's sentences. */
+.tabActions > [role="menu"] {
+  width: 11rem;
 }
 
 /* What the group draws while it holds nothing: the hint, and the press that

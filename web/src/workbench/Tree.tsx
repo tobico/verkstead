@@ -35,8 +35,9 @@
 //!
 //! **A file pressed opens a tab.** The press is the whole of what the tree does
 //! with a file: what it is handed is the path, and what happens to it is the
-//! group of tabs beside this — see `Code.tsx`, which is where a reading of one
-//! is held. The same file pressed twice turns to the tab it already has.
+//! groups of tabs beside this — see `Code.tsx`, which is where a reading of one
+//! is held, and where the active group is the one it opens in. The same file
+//! pressed twice turns to the tab it already has.
 //!
 //! No row menu, no quick open and no git status marks: those are stages 02 and
 //! 03 of the roadmap, and each of them wants this tree to be here first.
@@ -109,8 +110,8 @@ function rows(listing: FolderListing): FolderEntry[] | null {
 
 export function Tree(props: {
   conversation: number;
-  /// What a file pressed in it opens: the path, handed to the group of tabs
-  /// beside the tree.
+  /// What a file pressed in it opens: the path, handed to the groups of tabs
+  /// beside the tree, where it opens in the active one.
   open: (path: string) => void;
 
   /// Which folders are open, and what each of them last read.
@@ -248,8 +249,8 @@ function RootName(props: { root: FileRoot }): JSX.Element {
 /// One row of the tree, and — where it is an open folder — what is under it.
 ///
 /// Both kinds are buttons, because pressing either does something: a folder is
-/// read off the disk, and a file is opened as a tab in the group beside the
-/// tree. What tells them apart in the markup is the caret and `aria-expanded`,
+/// read off the disk, and a file is opened as a tab in the active group beside
+/// the tree. What tells them apart in the markup is the caret and `aria-expanded`,
 /// which a file has neither of.
 function Row(props: {
   /// What the row says, which is a repository's name for a root and an entry's
@@ -264,7 +265,7 @@ function Row(props: {
   held: () => Record<string, FolderListing>;
   /// Open this folder or shut it.
   toggle: (path: string) => void;
-  /// And open this file, which is the group of tabs beside the tree.
+  /// And open this file, which is the groups of tabs beside the tree.
   open: (path: string) => void;
 }): JSX.Element {
   /// The indent, in the one unit a tree has: a level.

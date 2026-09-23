@@ -23,7 +23,7 @@ Roadmap stage: [02: Groups and drags](docs/roadmaps/code-pane/02-groups-and-drag
 ## Tasks
 
 - [x] 01: One buffer behind every view — [details](01-one-buffer-behind-every-view.md)
-- [ ] 02: The layout tree, and splitting a group — [details](02-the-layout-tree.md)
+- [x] 02: The layout tree, and splitting a group — [details](02-the-layout-tree.md)
 - [ ] 03: Dividers between groups — [details](03-dividers-between-groups.md)
 - [ ] 04: Dragging a tab along a bar and into another — [details](04-dragging-a-tab.md)
 - [ ] 05: Dropping a tab on a group's content — [details](05-dropping-on-content.md)
