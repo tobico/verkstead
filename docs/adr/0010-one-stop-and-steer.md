@@ -97,3 +97,51 @@ makes it a new one.
 - **Auto-resuming usage-window stops** (the status quo) — dropped: one resume
   rule for every stop is worth more than the convenience, and the reset time
   still reads as information.
+
+## Amended: the form is a Timeline item
+
+*(2026-09-23. This replaces the modal in *Steer* above, and nothing else in
+it.)*
+
+**The Steer form is an item on the Timeline rather than a modal over the
+workbench.** A steer is often a lot of text, and a modal that blocks the
+workbench while it is written is the wrong place to write it: the human wants
+to read the Timeline, look at another Conversation, and finish the form when
+they are ready. So the press that opened the modal writes a **pending steer**
+beside the Conversation, the Timeline draws it as its last item, the form is
+that item's details pane, and every field is saved to the pending steer as it
+is typed — the draft Brief's shape, so it survives a reload and is found from
+any device. Submitting freezes the whole form into the Steer Event, which now
+records the digest and interrupt ticks, the pairing picked and the companion
+rows asked for beside the target and body it always carried, and the details
+pane draws the record as the form, read-only. The item stays as the record of
+what was chosen.
+
+**What stays.** The stop at the press, for the reason above: it is the one
+stop applied to steering, and the world the form is drawn against is the
+world the submit lands in. Cancel leaves the Conversation stopped with Resume
+on offer, and posts nothing but the pending steer's deletion: a steer that
+decided nothing is no Event, and the stop Notice already says the human
+pressed. Submit lands the Steer and Moved lines as it did.
+
+**What is new.** Resume is the opposite decision and discards the pending
+steer before it starts; Close discards it as it shuts every open Set; Stop and
+Force stop, being about the run, leave it. A second press on Steer selects the
+pending steer rather than making a second. A pending steer counts as waiting
+on the human — the sidebar disc and *Waiting on you* — and raises no
+notification, the press being their own. The interrupt tick follows the live
+Conversation rather than what the press found. A pending steer never boards a
+Share.
+
+**Kept beside the Conversation rather than as a Timeline row.** The Timeline
+is ordered by row id, so a row written at the press could not be moved to the
+end at submit without changing its id and breaking the address selecting it.
+One pending steer per Conversation, drawn last by the page and opened at an
+address of its own beside the share pane's and the terminal's; the record is
+written at submit, so the Steer and Moved lines stay adjacent however long a
+seen-out session went on landing commits under the press.
+
+Considered and dropped: a device-held item drawn by the page, which no other
+device would see and a reload would lose; stopping at submit instead of at the
+press, which reverses the argument above and draws the form against a moving
+world; and a Timeline row re-stamped at submit, for the ordering reason given.
