@@ -70,6 +70,21 @@
   overflow: hidden;
 }
 
+/* The room a group's views stand in, and the drop target with five zones in it:
+   the box a drag over this group's content is measured against, and the ground
+   the band a release would take is drawn on.
+
+   A box of its own around the slot rather than the slot itself, because nothing
+   of the page's may be drawn inside that one — see `.content` below — and the
+   band is something of the page's drawn exactly over it. */
+.room {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
 /* Where a group's views go, and the one thing in it that grows: the tab
    showing, and every other tab of the group drawn and hidden beside it.
 
@@ -83,6 +98,49 @@
   flex: 1;
   flex-direction: column;
   min-height: 0;
+}
+
+/* And the band a release over this group's content would take: the whole of the
+   room where the hand is in the centre, which is the tab moving into this
+   group, and the half a new group would take where it is over one of the four
+   edges, which is the split it would make there.
+
+   The half rather than the quarter the hand has to be inside to be in that edge
+   at all — `EDGE` in `Code.tsx` — because what the band says is what would
+   happen rather than where the hand is: a quarter drawn where a half is coming
+   would be the page answering with the wrong shape.
+
+   A wash in the accent under an edge in it, which is what this pane paints *the
+   page has heard you* in: the line along a bar and the active group's own
+   border are the same colour. Nothing to the pointer, which is still carrying a
+   tab and is measured against the room under this. */
+.zone {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+}
+
+.zone[data-zone="centre"] {
+  inset: 0;
+}
+
+.zone[data-zone="left"] {
+  inset: 0 50% 0 0;
+}
+
+.zone[data-zone="right"] {
+  inset: 0 0 0 50%;
+}
+
+.zone[data-zone="above"] {
+  inset: 0 0 50% 0;
+}
+
+.zone[data-zone="below"] {
+  inset: 50% 0 0 0;
 }
 
 /* And one view inside it, which is nothing to the layout: what it wraps is

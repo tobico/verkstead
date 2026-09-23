@@ -21672,13 +21672,25 @@ describe("the code pane's groups", () => {
     /// room past the last of them to let a tab go.
     const WIDE = 400;
 
-    /// What everything that is not a bar or a tab still answers with.
+    /// And how tall the content under a bar, which is the box the five zones of
+    /// a drop are read off.
+    const ROOM = 200;
+
+    /// So a group is a band of the layer this tall: a bar, and its content
+    /// under it. Every group is drawn as a row of its own here whichever way
+    /// the tree actually divides them — what a drag is asked is which box a
+    /// point is in, and a row apiece is the plainest way to give each of them
+    /// one of its own.
+    const ROW = BAR + ROOM;
+
+    /// What everything that is not a bar, a tab or a group's content still
+    /// answers with.
     const measured = Element.prototype.getBoundingClientRect;
 
-    /// Where a bar stands: a row of its own down the layer, in the order the
-    /// groups are drawn in it.
-    function rowOf(bar: Element): number {
-      const box = bar.closest(`.${codePane.group}`)!;
+    /// Which row a thing inside a group stands in, in the order the groups are
+    /// drawn in the layer.
+    function rowOf(within: Element): number {
+      const box = within.closest(`.${codePane.group}`)!;
       const layer = box.closest(`.${codePane.stack}`)!;
 
       return [...layer.querySelectorAll(`.${codePane.group}`)].indexOf(box);
@@ -21705,21 +21717,27 @@ describe("the code pane's groups", () => {
       Element.prototype.getBoundingClientRect = function (this: Element) {
         const bar = this.closest(`.${codePane.tabs}`);
 
-        if (bar === null) {
-          return measured.call(this);
+        if (bar !== null) {
+          const top = rowOf(bar) * ROW;
+
+          if (this === bar) {
+            return boxed(0, top, WIDE, BAR);
+          }
+
+          const at = [
+            ...bar.querySelectorAll(`.${codePane.tabFrame}`),
+          ].indexOf(this);
+
+          return at < 0 ? measured.call(this) : boxed(at * TAB, top, TAB, BAR);
         }
 
-        const top = rowOf(bar) * BAR;
-
-        if (this === bar) {
-          return boxed(0, top, WIDE, BAR);
+        // And the room a group's views stand in, which is the box the zones of
+        // a drop on its content are fractions of.
+        if (this.classList.contains(codePane.room!)) {
+          return boxed(0, rowOf(this) * ROW + BAR, WIDE, ROOM);
         }
 
-        const at = [
-          ...bar.querySelectorAll(`.${codePane.tabFrame}`),
-        ].indexOf(this);
-
-        return at < 0 ? measured.call(this) : boxed(at * TAB, top, TAB, BAR);
+        return measured.call(this);
       };
     });
 
@@ -21732,7 +21750,26 @@ describe("the code pane's groups", () => {
     /// where one place along a bar becomes the next. Past the last of them
     /// where there is no tab there, which is the end of the bar.
     function place(row: number, at: number): { x: number; y: number } {
-      return { x: at * TAB + 10, y: row * BAR + BAR / 2 };
+      return { x: at * TAB + 10, y: row * ROW + BAR / 2 };
+    }
+
+    /// And a point in the content of the group drawn Nth: the middle of one of
+    /// its five zones, which is where a release decides which of the five
+    /// things it does.
+    function zone(
+      row: number,
+      which: "centre" | "left" | "right" | "above" | "below",
+    ): { x: number; y: number } {
+      const top = row * ROW + BAR;
+      const middle = { x: WIDE / 2, y: top + ROOM / 2 };
+
+      return {
+        centre: middle,
+        left: { x: WIDE * 0.05, y: middle.y },
+        right: { x: WIDE * 0.95, y: middle.y },
+        above: { x: middle.x, y: top + ROOM * 0.05 },
+        below: { x: middle.x, y: top + ROOM * 0.95 },
+      }[which];
     }
 
     /// The tab of this name, which is what a drag takes hold of.
@@ -22151,6 +22188,235 @@ describe("the code pane's groups", () => {
       // still there, this having closed a view rather than the file.
       expect(editors(container)).toHaveLength(1);
       expect(theEditor().model.disposed).toBe(false);
+    });
+
+    /// And the other half of where a tab can land: the five zones of what a
+    /// group is *showing*. The centre moves the tab into that group, the way a
+    /// place along its bar does; each of the four edges splits the group there,
+    /// with the dragged tab alone in the new half — which is the third of ADR
+    /// 0019's three ways to make a split, the other two being the tab's own
+    /// menu and the icon at the end of a bar.
+    describe("and dropped on a group's content", () => {
+      /// The zone under the hand, where one is drawn: which group it is in, and
+      /// which of the five it is.
+      ///
+      /// One at most across the whole pane, a pointer being in one zone of one
+      /// group — and none at all every moment nobody is carrying a tab.
+      function bands(container: ParentNode): string[] {
+        return groups(container).flatMap((group, at) =>
+          [...group.querySelectorAll<HTMLElement>(`.${codePane.zone}`)].map(
+            (band) => `${at} ${band.dataset.zone!}`,
+          ),
+        );
+      }
+
+      /// A tab dropped on an edge splits the group there, with that tab alone
+      /// in the new half and the rest of the group's tabs staying where they
+      /// were — halves, which is where every split starts.
+      it("splits a group at the edge a tab is dropped on", async () => {
+        const { container } = await three();
+
+        await waitFor(() => expect(editors(container)).toHaveLength(3));
+        expect(groups(container)).toHaveLength(1);
+
+        carry(tabbed(container, ".gitignore"), zone(0, "right"));
+
+        await waitFor(() => expect(groups(container)).toHaveLength(2));
+        expect(holding(container)).toEqual([
+          ["Cargo.toml", "README.md"],
+          [".gitignore"],
+        ]);
+        expect(groups(container).map(stood)).toEqual([
+          { left: "0%", top: "0%", width: "50%", height: "100%" },
+          { left: "50%", top: "0%", width: "50%", height: "100%" },
+        ]);
+
+        // The new group is where the work has just gone, so it is the active
+        // one — and the file is open in it over the buffer it was always over.
+        expect(
+          groups(container).map((group) => group.getAttribute("aria-current")),
+        ).toEqual([null, "true"]);
+        expect(editors(container)).toHaveLength(3);
+
+        // And a group's only tab dropped on an edge of that same group asks for
+        // the group it already is: the new half would hold everything the old
+        // one held, and the old one would go the moment it was made.
+        carry(tabbed(groups(container)[1]!, ".gitignore"), zone(1, "right"));
+
+        expect(groups(container)).toHaveLength(2);
+        expect(holding(container)).toEqual([
+          ["Cargo.toml", "README.md"],
+          [".gitignore"],
+        ]);
+      });
+
+      /// And which side the new group takes is the side the hand pointed at —
+      /// so a left edge puts it before the group it split and a top edge above
+      /// it, where the menu's two and the bar's icon always put it after.
+      ///
+      /// The second of these is a drop on a group that is already half of a
+      /// split, and it nests a level inside that half rather than adding a
+      /// third group beside it: the split is made where the group stands in the
+      /// tree.
+      it("puts the new group on the side the hand pointed at", async () => {
+        const { container } = await three();
+
+        carry(tabbed(container, "Cargo.toml"), zone(0, "left"));
+
+        await waitFor(() => expect(groups(container)).toHaveLength(2));
+        expect(holding(container)).toEqual([
+          ["Cargo.toml"],
+          ["README.md", ".gitignore"],
+        ]);
+        expect(groups(container).map(stood)).toEqual([
+          { left: "0%", top: "0%", width: "50%", height: "100%" },
+          { left: "50%", top: "0%", width: "50%", height: "100%" },
+        ]);
+
+        // And the far half split across, from a drop on its top edge: the half
+        // it had, divided again, rather than a third column beside the two.
+        carry(tabbed(groups(container)[1]!, ".gitignore"), zone(1, "above"));
+
+        await waitFor(() => expect(groups(container)).toHaveLength(3));
+        expect(holding(container)).toEqual([
+          ["Cargo.toml"],
+          [".gitignore"],
+          ["README.md"],
+        ]);
+        expect(groups(container).map(stood)).toEqual([
+          { left: "0%", top: "0%", width: "50%", height: "100%" },
+          { left: "50%", top: "0%", width: "50%", height: "50%" },
+          { left: "50%", top: "50%", width: "50%", height: "50%" },
+        ]);
+      });
+
+      /// And the centre moves the tab into that group without splitting
+      /// anything, the way a place along its bar does: the group it lands in
+      /// becomes the active one, and a group whose last tab has just left
+      /// disappears.
+      it("moves a tab into the group whose centre it was dropped on", async () => {
+        const { container } = await opened();
+
+        press(container, "Cargo.toml");
+        await waitFor(() => expect(editors(container)).toHaveLength(1));
+
+        await split(container, tabs(container)[0]!, "Split right");
+        await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+        // The split's own group is the active one, so this opens there.
+        press(container, "README.md");
+        await waitFor(() =>
+          expect(holding(container)).toEqual([
+            ["Cargo.toml"],
+            ["Cargo.toml", "README.md"],
+          ]),
+        );
+
+        carry(tabbed(groups(container)[1]!, "README.md"), zone(0, "centre"));
+
+        await waitFor(() =>
+          expect(holding(container)).toEqual([
+            ["Cargo.toml", "README.md"],
+            ["Cargo.toml"],
+          ]),
+        );
+
+        // Two groups still: a centre drop asks for the group rather than for a
+        // side of it. And the one it landed in is the active one, so the next
+        // file pressed in the tree opens there.
+        expect(groups(container)).toHaveLength(2);
+        expect(
+          groups(container).map((group) => group.getAttribute("aria-current")),
+        ).toEqual(["true", null]);
+
+        // And a lone tab dropped on its own group's centre asks for the group
+        // it is already in, which is nothing at all to do.
+        carry(tabbed(groups(container)[1]!, "Cargo.toml"), zone(1, "centre"));
+
+        expect(groups(container)).toHaveLength(2);
+        expect(holding(container)).toEqual([
+          ["Cargo.toml", "README.md"],
+          ["Cargo.toml"],
+        ]);
+      });
+
+      /// And the zone under the hand is drawn while it is over one, so that
+      /// which of the five a release would do is on the page before the hand
+      /// lets go. One anywhere at a time: a pointer is in one zone of one
+      /// group, and a bar under the hand is a line rather than a zone.
+      it("draws the zone under the hand, and only ever one of them", async () => {
+        const { container } = await opened();
+
+        press(container, "Cargo.toml");
+        await waitFor(() => expect(editors(container)).toHaveLength(1));
+
+        await split(container, tabs(container)[0]!, "Split right");
+        await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+        press(container, "README.md");
+        await waitFor(() =>
+          expect(holding(container)).toEqual([
+            ["Cargo.toml"],
+            ["Cargo.toml", "README.md"],
+          ]),
+        );
+
+        const held = tabbed(groups(container)[1]!, "README.md");
+
+        fireEvent.pointerDown(held, {
+          button: 0,
+          pointerId: 1,
+          pointerType: "mouse",
+          clientX: place(1, 1).x,
+          clientY: place(1, 1).y,
+        });
+
+        expect(bands(container)).toEqual([]);
+
+        const over = (at: { x: number; y: number }) =>
+          fireEvent.pointerMove(window, {
+            pointerId: 1,
+            clientX: at.x,
+            clientY: at.y,
+          });
+
+        over(zone(0, "right"));
+
+        await waitFor(() => expect(bands(container)).toEqual(["0 right"]));
+
+        // The middle of the same content is the centre instead, and still the
+        // one band anywhere on the pane.
+        over(zone(0, "centre"));
+
+        await waitFor(() => expect(bands(container)).toEqual(["0 centre"]));
+
+        // A bar is a place along a bar rather than a zone, so what is drawn
+        // there is the line and no band at all.
+        over(place(0, 0));
+
+        await waitFor(() =>
+          expect(lines(container)).toEqual(["0 before Cargo.toml"]),
+        );
+        expect(bands(container)).toEqual([]);
+
+        // And away from every group there is nothing to draw and nothing to do
+        // about the release.
+        over({ x: 50, y: 2000 });
+
+        await waitFor(() => expect(bands(container)).toEqual([]));
+
+        fireEvent.pointerUp(window, {
+          pointerId: 1,
+          clientX: 50,
+          clientY: 2000,
+        });
+
+        expect(bands(container)).toEqual([]);
+        expect(holding(container)).toEqual([
+          ["Cargo.toml"],
+          ["Cargo.toml", "README.md"],
+        ]);
+      });
     });
   });
 });

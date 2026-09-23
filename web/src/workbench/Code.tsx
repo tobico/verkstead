@@ -40,12 +40,14 @@
 //! this pane measures the layer its groups are drawn in, the way the frame
 //! measures itself.
 //!
-//! **Two ways to make one, and a third later in this stage.** A group splits
-//! from the menu a right-click on one of its tabs drops, which names both
-//! directions, and from the icon at the end of its bar, which is the common
-//! one — VS Code's own bar button, splitting beside. The third is a tab dragged
-//! to an edge. The tab the split was made from goes on showing in both groups,
-//! which since the buffers moved above this pane is one text under two views.
+//! **Three ways to make one.** A group splits from the menu a right-click on
+//! one of its tabs drops, which names both directions, and from the icon at the
+//! end of its bar, which is the common one — VS Code's own bar button,
+//! splitting beside. The tab the split was made from goes on showing in both
+//! groups, which since the buffers moved above this pane is one text under two
+//! views. The third is a tab dragged to one of a group's four edges, which
+//! splits it there with that tab alone in the new group (ADR 0019, *Tabs and
+//! groups*).
 //!
 //! **And a group whose last tab leaves disappears**, its neighbour taking the
 //! room. That is the whole of unsplitting — there is no command for it (ADR
@@ -67,10 +69,20 @@
 //! drawn before the hand lets go. Dropping reorders the tab in its own bar, or
 //! takes it out of one group and into another at that place and makes that
 //! group the active one; a drag that comes back to where it started changes
-//! nothing, and one let go of away from every bar changes nothing either. A
-//! group whose last tab has just been dragged out of it disappears, which is
-//! the rule its last tab being closed already follows. Dropping on a group's
-//! *content* is the next task of this stage.
+//! nothing, and one let go of away from every bar and every group changes
+//! nothing either. A group whose last tab has just been dragged out of it
+//! disappears, which is the rule its last tab being closed already follows.
+//!
+//! **Or one of five zones of a group's content**, which is the other half of
+//! where a tab can land. The centre moves it into that group, the way a place
+//! along that group's bar does; each of the four edges splits the group there,
+//! with the dragged tab alone in the new half and the rest of the group's tabs
+//! staying where they were. The side the hand pointed at is the side the new
+//! group takes, and the split is made where the group stands in the tree, so an
+//! edge drop on a group that is already half of one nests a level rather than
+//! adding a sibling. The zone under the hand is drawn while it is over one —
+//! the centre as the whole of the content, an edge as the band the new group
+//! would take — and one zone anywhere at a time, a pointer being in one place.
 //!
 //! **And a view is drawn once and placed into the group holding it**, which is
 //! what lets a tab move without being made again. A terminal's tab carries a
@@ -1005,16 +1017,13 @@ export function Code(props: {
     setActive(made.id);
   };
 
-  /// Which tab the hand is carrying, and where along which bar it would land if
-  /// it let go now.
+  /// Which tab the hand is carrying, and where it would land if it let go now.
   ///
-  /// The tab is what the bar draws as lifted, and the place is where it draws
-  /// the line. Both null every moment nobody is dragging one, which is nearly
-  /// all of them.
+  /// The tab is what the bar draws as lifted, and the landing is what the pane
+  /// marks: a line along a bar, or the band of a group's content. Both null
+  /// every moment nobody is dragging one, which is nearly all of them.
   const [carried, setCarried] = createSignal<Tab | null>(null);
-  const [mark, setMark] = createSignal<{ group: Group; at: number } | null>(
-    null,
-  );
+  const [mark, setMark] = createSignal<Landing | null>(null);
 
   /// The press in flight: which tab of which group it began on, where on the
   /// screen it began, whether it is a finger, and whether the tab has lifted
@@ -1173,16 +1182,17 @@ export function Code(props: {
       lift(at);
     }
 
-    setMark(insertion(event.clientX, event.clientY));
+    setMark(landing(event.clientX, event.clientY));
   };
 
-  /// The drag is over: the tab goes where the line stood.
+  /// The drag is over: the tab goes where the mark stood.
   ///
   /// Every ending comes through here — the release, a cancel, a press that
   /// turned out to be a scroll, and the next press finding this one standing —
   /// so there is one place the listeners come off and one place the tab is put
-  /// down. A release away from every bar is an ending like any other, and moves
-  /// nothing: the bars are the whole of what this task drops onto.
+  /// down. A release away from every bar and every group is an ending like any
+  /// other, and moves nothing: what it was let go over is what says what a
+  /// release does, and out there is nothing.
   const put = (): void => {
     const at = press;
     const where = mark();
@@ -1206,8 +1216,14 @@ export function Code(props: {
     document.removeEventListener("touchmove", refuseScroll);
     carrying = true;
 
-    if (where !== null) {
+    if (where === null) {
+      return;
+    }
+
+    if ("at" in where) {
       move(at.group, at.tab, where.group, where.at);
+    } else {
+      onto(at.group, at.tab, where.group, where.zone);
     }
   };
 
@@ -1279,52 +1295,117 @@ export function Code(props: {
     });
   };
 
-  /// Where a pointer at this point would put a tab: the group whose bar it is
-  /// over and the place along that bar, or nothing at all where it is over no
-  /// bar at all.
+  /// A tab put down on what a group is *showing*, which is the third of the
+  /// three ways to make a split (ADR 0019, *Tabs and groups*).
   ///
-  /// Asked of the bars as they are drawn rather than worked out from the tree,
-  /// for the reason the sidebar asks its own rows where they are: how wide a tab
-  /// stands is a name's length and a browser's font, and a drag that guessed
-  /// would mark a place the hand is not pointing at.
-  const insertion = (
-    x: number,
-    y: number,
-  ): { group: Group; at: number } | null => {
+  /// The centre moves it into that group, the way a place along its bar does
+  /// and with the same rules under it: the group it lands in becomes active, a
+  /// group whose last tab has just left disappears, and the tab it is carrying
+  /// keeps its socket or its caret, being the one view it always was.
+  ///
+  /// Each edge splits the group there instead, with the dragged tab alone in
+  /// the new half and every other tab of the group staying where it was. The
+  /// side the hand pointed at is the side the new group takes, which is what
+  /// tells left from right and above from below — and the split is made where
+  /// the group stands in the tree, so an edge drop on a group that is already
+  /// half of one nests a level rather than adding a sibling.
+  const onto = (from: Group, tab: Tab, to: Group, zone: Zone): void => {
+    if (zone === "centre") {
+      // Already in the group the hand let it go over. A centre drop asks for
+      // the group rather than for a place along its bar, so there is nothing to
+      // move and what is left to answer is which tab the group shows — which is
+      // what a lone tab dropped on its own group's content comes to.
+      if (from === to) {
+        batch(() => {
+          to.setChosen(keyed(tab));
+          setActive(to.id);
+        });
+
+        return;
+      }
+
+      // At the end of the bar, there being no place along one in this gesture:
+      // what the hand pointed at was the group.
+      move(from, tab, to, to.tabs().length);
+
+      return;
+    }
+
+    const way: Way = zone === "left" || zone === "right" ? "beside" : "below";
+
+    // A group's only tab dropped on an edge of that same group asks for the
+    // group it already is: the new half would hold everything the old one held,
+    // and the old one would go the moment it was made.
+    if (from === to && from.tabs().length < 2) {
+      return;
+    }
+
+    const made = fresh();
+
+    // In one go, for the reason a move between two bars is: the pane draws a
+    // box per view and reads the views off the groups, so a moment with the tab
+    // in neither group is that box taken down and made again — which is the
+    // socket and the scrollback this arrangement is here to keep.
+    batch(() => {
+      from.setTabs((was) => was.filter((one) => one !== tab));
+
+      made.setTabs([tab]);
+      made.setChosen(keyed(tab));
+
+      setLayout((was) =>
+        split(was, to.id, way, made, zone === "left" || zone === "above"),
+      );
+
+      if (from.tabs().length === 0) {
+        shut(from);
+      }
+
+      setActive(made.id);
+    });
+  };
+
+  /// Where a pointer at this point would put a tab: a place along the bar it is
+  /// over, a zone of the content it is over, or nothing at all where it is over
+  /// neither.
+  ///
+  /// Asked of the groups as they are drawn rather than worked out from the
+  /// tree, for the reason the sidebar asks its own rows where they are: how
+  /// wide a tab stands is a name's length and a browser's font, and a drag that
+  /// guessed would mark a place the hand is not pointing at.
+  const landing = (x: number, y: number): Landing | null => {
     for (const box of layer.querySelectorAll<HTMLElement>(`.${styles.group}`)) {
-      const bar = box.querySelector<HTMLElement>(`.${styles.tabs}`);
-
-      if (bar === null) {
-        continue;
-      }
-
-      const over = bar.getBoundingClientRect();
-
-      if (x < over.left || x > over.right || y < over.top || y > over.bottom) {
-        continue;
-      }
-
       const group = groups().find(
         (one) => one.id === Number(box.dataset.group),
       );
 
       if (group === undefined) {
-        return null;
+        continue;
       }
 
-      // The first tab the point falls in front of — a tab's own middle being
-      // where one place along the bar becomes the next — and the end of the bar
-      // where it falls past every one of them.
-      const frames = [
-        ...bar.querySelectorAll<HTMLElement>(`.${styles.tabFrame}`),
-      ];
-      const at = frames.findIndex((frame) => {
-        const its = frame.getBoundingClientRect();
+      const bar = box.querySelector<HTMLElement>(`.${styles.tabs}`);
 
-        return x < its.left + its.width / 2;
-      });
+      if (bar !== null && inside(bar.getBoundingClientRect(), x, y)) {
+        // The first tab the point falls in front of — a tab's own middle being
+        // where one place along the bar becomes the next — and the end of the
+        // bar where it falls past every one of them.
+        const frames = [
+          ...bar.querySelectorAll<HTMLElement>(`.${styles.tabFrame}`),
+        ];
+        const at = frames.findIndex((frame) => {
+          const its = frame.getBoundingClientRect();
 
-      return { group, at: at < 0 ? frames.length : at };
+          return x < its.left + its.width / 2;
+        });
+
+        return { group, at: at < 0 ? frames.length : at };
+      }
+
+      const room = box.querySelector<HTMLElement>(`.${styles.room}`);
+      const over = room?.getBoundingClientRect();
+
+      if (over !== undefined && inside(over, x, y)) {
+        return { group, zone: zoned(over, x, y) };
+      }
     }
 
     return null;
@@ -1340,7 +1421,7 @@ export function Code(props: {
   const lined = (group: Group, at: number): "before" | "after" | undefined => {
     const where = mark();
 
-    if (where === null || where.group !== group) {
+    if (where === null || where.group !== group || !("at" in where)) {
       return undefined;
     }
 
@@ -1350,6 +1431,20 @@ export function Code(props: {
 
     return where.at === group.tabs().length && at === where.at - 1
       ? "after"
+      : undefined;
+  };
+
+  /// And which of a group's five zones the hand is over, where it is over that
+  /// group's content at all.
+  ///
+  /// What the band is drawn from, and the whole of what says which band: one
+  /// landing at a time across the pane, so one group of the pane draws one of
+  /// these and the rest draw none.
+  const banded = (group: Group): Zone | undefined => {
+    const where = mark();
+
+    return where !== null && "zone" in where && where.group === group
+      ? where.zone
       : undefined;
   };
 
@@ -2189,33 +2284,52 @@ export function Code(props: {
                     </Show>
                   </Show>
 
-                  {/* And where what this group has open is drawn: a slot rather
-                      than the views themselves, because a view is drawn once for
-                      the whole pane and *put* into whichever group holds it —
-                      see the `For` below the groups. One box per group and one
-                      for the life of the group, so that a tab arriving in it has
-                      somewhere to be put.
+                  {/* The room this group's views stand in, which is also the
+                      drop target with five zones in it: the box a drag is
+                      measured against, and the box the band it would take is
+                      drawn over. */}
+                  <div class={styles.room}>
+                    {/* Where what this group has open is drawn: a slot rather
+                        than the views themselves, because a view is drawn once
+                        for the whole pane and *put* into whichever group holds
+                        it — see the `For` below the groups. One box per group
+                        and one for the life of the group, so that a tab
+                        arriving in it has somewhere to be put.
 
-                      Nothing of this page's is ever drawn inside it, which is
-                      what the empty state above is doing out here: a box whose
-                      children a framework is keeping is a box it empties when
-                      those children go, and it would take the views placed in it
-                      along with them. */}
-                  <div
-                    class={styles.content}
-                    ref={(box) => {
-                      setSlots((was) => ({ ...was, [group.id]: box }));
-                      onCleanup(() =>
-                        setSlots((was) => {
-                          const rest = { ...was };
+                        Nothing of this page's is ever drawn inside it, which is
+                        what the empty state above and the band below are doing
+                        outside it: a box whose children a framework is keeping
+                        is a box it empties when those children go, and it would
+                        take the views placed in it along with them. */}
+                    <div
+                      class={styles.content}
+                      ref={(box) => {
+                        setSlots((was) => ({ ...was, [group.id]: box }));
+                        onCleanup(() =>
+                          setSlots((was) => {
+                            const rest = { ...was };
 
-                          delete rest[group.id];
+                            delete rest[group.id];
 
-                          return rest;
-                        }),
-                      );
-                    }}
-                  />
+                            return rest;
+                          }),
+                        );
+                      }}
+                    />
+
+                    {/* And the zone under the hand, where the hand is over this
+                        group's content: what a release would do, drawn before
+                        it is done. The centre is the whole of the room, that
+                        being the tab moving in; an edge is the half the new
+                        group would take, that being the split it would make.
+
+                        One at a time across the whole pane — a pointer is in
+                        one zone of one group — and none at all every moment
+                        nobody is carrying a tab. */}
+                    <Show when={banded(group)}>
+                      {(zone) => <div class={styles.zone} data-zone={zone()} />}
+                    </Show>
+                  </div>
                 </div>
               )}
             </For>
@@ -2738,6 +2852,70 @@ const GRACE = 5;
 /// enough that holding one is not waiting for it — the sidebar's again, and a
 /// gesture the human meets in two places should ask the same of them in both.
 const LIFT = 400;
+
+/// How much of a group's content each of its four edges takes, as a fraction of
+/// the way across it.
+///
+/// A quarter apiece leaves the middle half of the content in both directions as
+/// the centre, which is what a hand aiming at the middle of a group hits and
+/// what a hand aiming at a side has to mean. A corner belongs to whichever edge
+/// it is nearer, there being no fifth thing to do with one.
+///
+/// What is *drawn* for an edge is the half the new group would take rather than
+/// this — see `.zone` in the stylesheet: the band is what the drop would leave
+/// behind, and a quarter drawn where a half is coming would be the page
+/// answering with the wrong shape.
+const EDGE = 0.25;
+
+/// One of the five things a release over a group's content would do.
+///
+/// The centre moves the tab into that group, the way a release over its bar
+/// does. Each edge splits the group there, with the tab alone in the new half
+/// (ADR 0019, *Tabs and groups*).
+type Zone = "centre" | "left" | "right" | "above" | "below";
+
+/// And where a tab in the hand would land if it were let go now: a place along
+/// some group's bar, or a zone of some group's content.
+///
+/// The two things a drag can be over, and what the pane marks while it is over
+/// one — a line between two tabs, or the band a zone would take. One at a time
+/// across the whole pane, a pointer being in one place.
+type Landing = { group: Group; at: number } | { group: Group; zone: Zone };
+
+/// Whether a point is in a box, which is the whole of what a drop target is
+/// asked.
+function inside(box: DOMRect, x: number, y: number): boolean {
+  return x >= box.left && x <= box.right && y >= box.top && y <= box.bottom;
+}
+
+/// And which zone of a group's content a point in it is in: the edge it is
+/// nearest where it is inside that edge's band, and the centre everywhere else.
+///
+/// Measured as fractions of the box rather than as lengths, so the bands of a
+/// group half the pane wide and one a quarter of it are the same share of each
+/// — an edge is a place on a group rather than a distance from a line.
+///
+/// A box with no size yet has no zones to speak of, and every fraction of it
+/// would be infinite: it reads as the centre, which is the zone that does the
+/// least.
+function zoned(box: DOMRect, x: number, y: number): Zone {
+  if (box.width <= 0 || box.height <= 0) {
+    return "centre";
+  }
+
+  const edges: [Zone, number][] = [
+    ["left", (x - box.left) / box.width],
+    ["right", (box.right - x) / box.width],
+    ["above", (y - box.top) / box.height],
+    ["below", (box.bottom - y) / box.height],
+  ];
+
+  const [which, how] = edges.reduce((nearest, edge) =>
+    edge[1] < nearest[1] ? edge : nearest,
+  );
+
+  return how < EDGE ? which : "centre";
+}
 
 /// What a tab being dragged does to the scroll under it: refuses it. Hung on
 /// the document at the lift and taken off at the drop, so a finger scrolls a

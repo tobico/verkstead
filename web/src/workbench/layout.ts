@@ -401,29 +401,38 @@ function divided(node: Layout, path: Path, share: number): Layout {
 /// if it is not where the human wants it. The tree back, with the one node
 /// replaced — everything else in it is the object it was, which is what keeps
 /// the groups the split was not about drawn exactly as they were.
+///
+/// `first` puts the new group in the *near* half instead, which is what a tab
+/// dropped on a group's left or top edge asks for: the side of the group the
+/// hand pointed at is the side the new one goes on. The two splits made from a
+/// menu and from the bar's own icon always point the other way.
 export function split(
   node: Layout,
   id: number,
   way: Way,
   made: Group,
+  first = false,
 ): Layout {
   if ("group" in node) {
-    return node.group.id === id
-      ? {
-          split: way,
-          parts: [
-            { share: 50, node },
-            { share: 50, node: { group: made } },
-          ],
-        }
-      : node;
+    if (node.group.id !== id) {
+      return node;
+    }
+
+    const both: [Layout, Layout] = first
+      ? [{ group: made }, node]
+      : [node, { group: made }];
+
+    return {
+      split: way,
+      parts: both.map((half) => ({ share: 50, node: half })) as [Part, Part],
+    };
   }
 
   return {
     split: node.split,
     parts: node.parts.map((part) => ({
       ...part,
-      node: split(part.node, id, way, made),
+      node: split(part.node, id, way, made, first),
     })) as [Part, Part],
   };
 }
