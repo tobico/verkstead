@@ -22,6 +22,6 @@ it makes earlier is the bar stage 01 already draws on a refused save.
 ## Stages
 
 - [x] 01: The Code pane — [brief](01-code-pane.md)
-- [ ] 02: Groups and drags — [brief](02-groups-and-drags.md) *(in progress: `code-pane/02-groups-and-drags`)*
+- [x] 02: Groups and drags — [brief](02-groups-and-drags.md)
 - [ ] 03: Working the tree — [brief](03-working-the-tree.md)
 - [ ] 04: Following the disk — [brief](04-following-the-disk.md)
