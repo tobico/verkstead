@@ -254,31 +254,11 @@
   }
 }
 
-/* A file's tab: the box its text is in.
+/* A file's tab holds the editor, and what that is drawn in is its own —
+   `Editor.module.css`, beside the component that opens Monaco into it.
 
-   The whole of the group, the way a terminal's grid is — a file open in an
-   editor is what the pane is for, and every inch the pane has is an inch of it.
-   Monospaced, because what is in it is code, and the wrap off for the same
-   reason: a line of code is a line, and a scrollbar is how VS Code says so.
-   What replaces this is Monaco, which brings its own of all three. */
-.editor {
-  flex: 1;
-  min-height: 0;
-  padding: 0.6rem 0.75rem;
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  font-size: 0.85rem;
-  line-height: 1.5;
-  color: var(--ink);
-  tab-size: 4;
-  white-space: pre;
-  background: var(--paper);
-  border: 1px solid var(--edge);
-  border-radius: 0.6rem;
-  resize: none;
-}
-
-/* And a picture's, which is the other thing a tab can hold: the file itself,
-   drawn at the size it is and no larger than the pane.
+   What a picture's tab holds is here, which is the other thing a tab can be:
+   the file itself, drawn at the size it is and no larger than the pane.
 
    Centred in the room the group gives it, the way a picture in a viewer sits,
    and on the chequer-free plain ground the rest of the pane is on — what is

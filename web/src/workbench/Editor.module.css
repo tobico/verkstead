@@ -1,0 +1,33 @@
+/* The editor filling a file's tab — see `Editor.tsx`.
+
+   The whole of the group, the way a terminal's grid is: a file open in an
+   editor is what the pane is for, and every inch the pane has is an inch of it.
+   The card it sits in is this element's — the border and the rounding are the
+   pane's own vocabulary, which Monaco knows nothing about — and what is inside
+   it is Monaco's, right down to the font and the wrap. Which is the whole point
+   of the editor being whole: a stylesheet here that started telling it how to
+   draw a line of code would be VS Code's defaults being undone one rule at a
+   time. */
+.editor {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--paper);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+/* What Monaco is opened in. Its own element rather than the card above, because
+   the editor fills whatever it is given and the line saying the chunk never
+   arrived has to stand somewhere.
+
+   `min-height: 0` for the reason every column in this pane needs it: a flex
+   item's floor is its content, and Monaco measures the element it was given —
+   so an element that would not shrink is an editor that grows past the window
+   and then reports the size it grew to. */
+.host {
+  flex: 1;
+  min-height: 0;
+}

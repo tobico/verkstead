@@ -182,6 +182,12 @@ import {
 } from "../src/workbench/Code";
 // And the tab bar over its several shells, which is the pane's own module.
 import codePane from "../src/workbench/Code.module.css";
+// And the editor a file opens in, which is Monaco — stood in for below. The
+// module that imports the package is read as text as well as mocked away: what
+// it imports is the decision ADR 0019 made, and nothing mounted could assert it.
+import { DARK, LIGHT, NO_EDITOR } from "../src/workbench/Editor";
+import editorPane from "../src/workbench/Editor.module.css";
+import monacoModule from "../src/workbench/monaco.ts?raw";
 // And the tree down its side, over every worktree the conversation has.
 import { FOLDER_REFUSAL, NO_ROOTS } from "../src/workbench/Tree";
 import treePane from "../src/workbench/Tree.module.css";
@@ -289,6 +295,16 @@ import {
   unreadable,
   whenever,
 } from "./serving";
+// The stand-in for Monaco, and what it wrote down about what the pane did with
+// it. The same module `vi.mock` above put in place of the seam, imported the
+// ordinary way — so this is that instance and not a second one.
+import {
+  loading,
+  refusing,
+  reset as resetEditing,
+  theEditor,
+  themed,
+} from "./editing";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
 import adopting from "./fixtures/conversation-adopting.json" with { type: "json" };
 import holdingPull from "./fixtures/conversation-pull-request.json" with {
@@ -326,6 +342,13 @@ const drawing = vi.hoisted(() =>
   vi.fn((_how?: { root?: ParentNode }) => vi.fn()),
 );
 vi.mock("../src/set/diagrams", () => ({ drawDiagrams: drawing }));
+
+/// And the editor, which is the pane's own doing rather than this file's: what
+/// is asked here is which file Code opened and how, never what Monaco drew with
+/// it. Stood in for so that nothing here mounts twenty-three megabytes of
+/// editor in a jsdom with no layout — see `tests/editing.ts`, which is also
+/// where the chunk the real seam would fetch is never fetched from.
+vi.mock("../src/workbench/editing", () => import("./editing"));
 
 /// How many columns fit in the pane, which is what the Screen of a live session
 /// sends up its socket.
@@ -404,6 +427,50 @@ function theClipboard(): string[] {
   return written;
 }
 
+/// The colour scheme the browser is in, and a way to change it under the page.
+///
+/// `tests/setup.ts` answers every media query with a flat no, which is what
+/// xterm wants and what every other test here wants: nothing in the app asks
+/// about a scheme but the editor and the diagrams. This stands over that for
+/// the one test that does, answering the question and reporting a change the way
+/// a `MediaQueryList` does.
+///
+/// Every listener spelling, for the reason the setup's stub has both: xterm is
+/// mounted beside the editor in this pane, and it reaches for whichever it
+/// finds.
+function theScheme(dark: boolean) {
+  const listening = new Set<(event: MediaQueryListEvent) => void>();
+  const list = {
+    get matches() {
+      return dark;
+    },
+    media: "(prefers-color-scheme: dark)",
+    onchange: null,
+    addListener() {},
+    removeListener() {},
+    addEventListener: (_of: string, said: (event: MediaQueryListEvent) => void) =>
+      listening.add(said),
+    removeEventListener: (
+      _of: string,
+      said: (event: MediaQueryListEvent) => void,
+    ) => listening.delete(said),
+    dispatchEvent: () => false,
+  };
+
+  vi.stubGlobal("matchMedia", () => list);
+
+  return {
+    /// The device moving between light and dark, which is the only warning the
+    /// page gets.
+    into(now: boolean) {
+      dark = now;
+      for (const said of listening) {
+        said({ matches: now } as MediaQueryListEvent);
+      }
+    },
+  };
+}
+
 const ABANDONED = abandoned as AbandonedRepo[];
 
 /// The conversation that clicking one of those roadmaps made: a draft adopting
@@ -436,6 +503,13 @@ function briefOf(conversation: ConversationView): BriefEvent {
 
 /// The Brief on the opened Conversation's Timeline.
 const BRIEF = briefOf(OPEN);
+
+// What the editor was asked for and opened with, forgotten before each test
+// rather than after it: the pane reads a file and then draws it, so a read
+// answered as the last test ended lands an editor in the moment between that
+// test's own teardown and this one's first line. Cleared here, that straggler
+// is the previous test's rather than the next test's first surprise.
+beforeEach(resetEditing);
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -18559,11 +18633,16 @@ describe("a file opened out of the code pane's tree", () => {
     ];
   }
 
-  /// And what a file's tab holds: the box its text is in, the picture, or the
-  /// line saying why there is neither.
+  /// And what a file's tab holds: the editor its text is in, the picture, or
+  /// the line saying why there is neither.
+  ///
+  /// The box inside it rather than the card, because the editor is Monaco and
+  /// Monaco is stood in for — what a test reads a value off and types into is
+  /// the `textarea` the stand-in put where the real editor's view would be. See
+  /// `tests/editing.ts`.
   function editor(container: ParentNode): HTMLTextAreaElement | null {
     return container.querySelector<HTMLTextAreaElement>(
-      `.${shell.detailsPane} .${codePane.editor}`,
+      `.${shell.detailsPane} .${editorPane.editor} textarea`,
     );
   }
 
@@ -18833,6 +18912,131 @@ describe("a file opened out of the code pane's tree", () => {
     press(container, "Cargo.toml");
 
     await waitFor(() => expect(askedFor(fetching, fileOf(TEXT.path))).toBe(2));
+  });
+
+  /// The editor is a chunk of its own, fetched because Code was opened and for
+  /// no other reason (ADR 0019, *Monaco, whole*). The rest of the workbench
+  /// never pays for it.
+  it("fetches the editor when Code first opens and not before", async () => {
+    withTerminals([1], whenever(folderOf(OWN_ROOT.path), json(codeFolder)));
+
+    const { history, container } = mount(`/conversations/${GRILLING.id}`);
+
+    // The Conversation's own page, drawn whole — the record, the sidebar, the
+    // header with the code icon on it — and nothing of the editor asked for.
+    await drawn(container, `.${shell.detailsPane}`);
+    expect(loading.times).toBe(0);
+
+    history.set({ value: `/conversations/${GRILLING.id}/code` });
+
+    // And opening the pane is what asks for it, before anybody has pressed a
+    // file: the chunk is warmed by the pane so that a file pressed a moment
+    // later opens into an editor that is already here.
+    await waitFor(() => expect(loading.times).toBeGreaterThan(0));
+  });
+
+  /// And what a file is coloured in is the path it was read at, which is the
+  /// whole of how a language is chosen: Monaco registered every extension when
+  /// it registered every language, so a `.rs` file is Rust and a `.ts` file is
+  /// one the TypeScript service will answer about. Nothing on this side has a
+  /// table of extensions, and nothing on this side should ever grow one.
+  it("makes the buffer at the file's own path, which is what colours it", async () => {
+    const { container } = await expanded(
+      OWN_ROOT,
+      codeFolder as FolderListing,
+      whenever(fileOf(TEXT.path), json(codeFile)),
+    );
+
+    press(container, "Cargo.toml");
+
+    await waitFor(() => expect(editor(container)?.value).toBe(TEXT.text));
+
+    const made = theEditor();
+
+    expect(made.model.path).toBe(TEXT.path);
+    expect(made.model.text).toBe(TEXT.text);
+
+    // And it is read aloud as the file it is showing. Left alone Monaco names
+    // its own typing *Editor content*, which says nothing about which file is
+    // open in it.
+    expect(made.opening.ariaLabel).toBe("Cargo.toml");
+  });
+
+  /// It follows the workbench's light and dark, which is the one thing about the
+  /// editor this stage sets: VS Code's own two themes, picked by the scheme the
+  /// browser is in and followed live — there is no theme switch anywhere in this
+  /// workbench, so the media query is both the setting and the only warning of a
+  /// change.
+  it("opens in the workbench's own theme and follows it into dark", async () => {
+    const scheme = theScheme(false);
+
+    const { container } = await expanded(
+      OWN_ROOT,
+      codeFolder as FolderListing,
+      whenever(fileOf(TEXT.path), json(codeFile)),
+    );
+
+    press(container, "Cargo.toml");
+
+    await waitFor(() => expect(editor(container)?.value).toBe(TEXT.text));
+    expect(theEditor().opening.theme).toBe(LIGHT);
+
+    scheme.into(true);
+
+    // Set on the package rather than on the editor, Monaco's themes being the
+    // package's — which is why what is read back is what it was last told
+    // rather than anything about the one editor open.
+    await waitFor(() => expect(themed.last).toBe(DARK));
+
+    scheme.into(false);
+    await waitFor(() => expect(themed.last).toBe(LIGHT));
+  });
+
+  /// And where the chunk never arrives, the tab says so. The editor comes over
+  /// the same network the rest of the workbench is on, so a tab that simply
+  /// stayed blank would be the pane saying nothing at all about one that had
+  /// gone.
+  it("says so where the editor could not be fetched", async () => {
+    refusing.chunk = true;
+
+    const { container } = await expanded(
+      OWN_ROOT,
+      codeFolder as FolderListing,
+      whenever(fileOf(TEXT.path), json(codeFile)),
+    );
+
+    press(container, "Cargo.toml");
+
+    await waitFor(() => expect(said(container)).toBe(NO_EDITOR));
+    expect(editor(container)).toBeNull();
+  });
+
+  /// And the editor is kept whole, which is the decision this stage is built on
+  /// (ADR 0019, *Monaco, whole*): the package's own root entry, which registers
+  /// every built-in language by itself, and the four bundled services beside it
+  /// — TypeScript and JavaScript, JSON, CSS, HTML.
+  ///
+  /// Read off the module rather than asked of a mounted editor, because the
+  /// suite deliberately mounts none: what this guards against is the import
+  /// being narrowed to a list of the languages somebody happened to think of,
+  /// which is exactly the diet ADR 0019 decided against.
+  it("imports the editor whole, with a worker for each of its services", () => {
+    // The package root, rather than one of the per-language entries under it.
+    expect(monacoModule).toContain('from "monaco-editor"');
+    expect(monacoModule).not.toMatch(/from "monaco-editor\/(?!\w+\/)/);
+
+    // And the five workers, which the package ships one file each of and Vite
+    // bundles from the `?worker` suffix. The TypeScript one carries the
+    // TypeScript compiler and is the weight a diet would take first; it stays.
+    for (const worker of [
+      "monaco-editor/editor/editor.worker?worker",
+      "monaco-editor/language/css/css.worker?worker",
+      "monaco-editor/language/html/html.worker?worker",
+      "monaco-editor/language/json/json.worker?worker",
+      "monaco-editor/language/typescript/ts.worker?worker",
+    ]) {
+      expect(monacoModule).toContain(worker);
+    }
   });
 });
 

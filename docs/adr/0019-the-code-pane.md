@@ -175,6 +175,16 @@ the moment it is wanted. What the trim would be, should a release ever have to
 go on a diet, is the TypeScript worker rather than the languages — colouring is
 most of the pane's value and almost none of its weight.
 
+**What it came to, measured** on the release build that first carried it
+(monaco-editor 0.56.0, `cargo build --release -p verkstead-cli` on Linux
+x86-64): the binary went from **48.7 MB to 62.9 MB**, so Monaco is **14.2 MB**
+of every release and every update. Of that, the editor chunk is 4.0 MB, its
+stylesheet and icon font 0.3 MB, and the five workers 9.5 MB — of which the
+TypeScript one alone is **7.0 MB**, just over half the editor's total weight
+and the one thing a diet would take. The workbench's own chunk grew by 1.4 kB,
+which is the whole of what a page that never opens Code pays: the editor is
+fetched when Code first opens and never before.
+
 An image opens as a preview in its tab; any other binary, and any file over a
 few megabytes, opens as a line saying why rather than in the editor.
 

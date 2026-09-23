@@ -28,12 +28,15 @@
 //! file in a read-only root opens read-only and takes no typing, which is the
 //! root's own flag rather than the file's mode.
 //!
-//! The editor here is a plain box of text, and Monaco is the task after this
-//! one: what this stage builds is the tab, the kinds and the buffer behind
-//! them, so that the editor is swapped in against something that already works.
+//! **The editor is Monaco**, whole, in [`./Editor`]: every built-in language
+//! coloured and the four bundled services answering, fetched as a chunk of its
+//! own the first time this pane opens and never before (ADR 0019, *Monaco,
+//! whole*). This pane's part in that is the `load` below, which is the fetch
+//! starting because Code was opened rather than because a file was pressed.
+//!
 //! The buffer is what the human's text is in and the reading is what the disk
-//! said — two things rather than one, because the save of the task after that
-//! is a comparison between them over the version the read carried.
+//! said — two things rather than one, because the save of the next task is a
+//! comparison between them over the version the read carried.
 //!
 //! **And the same file opened twice is one buffer.** There is one group in this
 //! stage, so that means one tab: pressing a file already open turns to its tab
@@ -182,6 +185,8 @@ import type {
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { Attached } from "./Attached";
+import { Editor } from "./Editor";
+import { load } from "./editing";
 import { PaneHead } from "./PaneHead";
 import { Tree } from "./Tree";
 import styles from "./Code.module.css";
@@ -346,6 +351,17 @@ export function Code(props: {
   }));
 
   onCleanup(() => held.removeQueries({ queryKey: holding(), exact: true }));
+
+  // And the editor, fetched because this pane is open and for no other reason
+  // (ADR 0019, *Monaco, whole*). Here rather than in the tab that will want it,
+  // so that the chunk is usually already in the browser by the time somebody
+  // has picked a file to put in it — and here rather than anywhere above this
+  // pane, because a workbench that never opens Code never fetches a byte of it.
+  //
+  // Nothing waits on it and nothing is drawn about it: the tab that opens a
+  // file asks again, which is the one that has somewhere to say so. The call is
+  // the one fetch either way — see [`./editing`].
+  void load().catch(() => {});
 
   /// Every tab there is, in the order they were opened: what was live when the
   /// pane loaded, and what has been opened since — files and terminals alike,
@@ -951,16 +967,17 @@ function Busy(props: {
 /// the server's, and the whole point of the last two kinds is that they never
 /// cross the wire.
 ///
-/// **The editor is a plain box of text**, and Monaco is the task after this
-/// one. What is worth having built first is everything around it: the tab, the
-/// kinds, and the buffer the text is in, so that the editor is swapped in
-/// against something that already works.
+/// **The editor is [`./Editor`]**, which is Monaco. What is kept here is what
+/// is around it: which of the four kinds came back, and the buffer the text is
+/// in — so the editor is handed a file and its text and has nothing else to
+/// know.
 function Opened(props: {
   /// What came back, or nothing at all while the read is in flight.
   reading: FileReading | undefined;
   /// The buffer: the text as it stands, which starts as what was read.
   text: string | undefined;
-  /// What the file is called, which is what a picture is read aloud as.
+  /// What the file is called, which is what an editor and a picture alike are
+  /// read aloud as.
   name: string;
   /// And what typing into it does.
   typed: (text: string) => void;
@@ -1003,16 +1020,16 @@ function Opened(props: {
       <Match when={why()}>{(said) => <ErrorLine>{said()}</ErrorLine>}</Match>
       <Match when={text()}>
         {(read) => (
-          // A box of text, and a read-only root's file is a box that takes no
-          // typing — the root's own flag rather than the file's mode, which is
-          // what saves a human finding out by typing.
-          <textarea
-            class={styles.editor}
-            aria-label={props.name}
-            readOnly={!read().writable}
-            spellcheck={false}
-            value={props.text ?? read().text}
-            onInput={(said) => props.typed(said.currentTarget.value)}
+          // Monaco, coloured by the path it was read at — and a file in a
+          // read-only root is an editor that takes no typing, the root's own
+          // flag rather than the file's mode, which is what saves a human
+          // finding out by typing.
+          <Editor
+            path={read().path}
+            name={props.name}
+            text={props.text ?? read().text}
+            writable={read().writable}
+            typed={props.typed}
           />
         )}
       </Match>
