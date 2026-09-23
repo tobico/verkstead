@@ -195,6 +195,10 @@ import {
 } from "../src/workbench/Code";
 // And the tab bar over its several shells, which is the pane's own module.
 import codePane from "../src/workbench/Code.module.css";
+// And the least a group may be left with, which is what a border dragged too
+// far stops at — a length rather than a share, so a test asking about one has
+// to say how large the layer it is measured in stands.
+import { FLOORS } from "../src/workbench/layout";
 // And the editor a file opens in, which is Monaco — stood in for below. The
 // module that imports the package is read as text as well as mocked away: what
 // it imports is the decision ADR 0019 made, and nothing mounted could assert it.
@@ -21340,6 +21344,307 @@ describe("the code pane's groups", () => {
     expect(
       groups(container).map((group) => group.getAttribute("aria-current")),
     ).toEqual(["true", null]);
+  });
+
+  /// And the borders between them, every one of which is a divider that drags.
+  ///
+  /// A split node has one between its two halves, and moving it moves the
+  /// shares either side of it: the half that grows takes exactly what the half
+  /// that shrinks gives, and nothing outside that split moves at all. The
+  /// frame's own divider is the pattern — a separator carrying the value it
+  /// decides, reachable from the keyboard, nudged by the same travel a drag
+  /// gives it — with the difference that Code's splits go both ways, so the
+  /// orientation, the keys and the axis all follow the split's direction.
+  ///
+  /// jsdom lays nothing out, so the layer the groups are placed in is stood in
+  /// for. A drag is a point on the screen until something measures it against
+  /// the thing it is a share of; and the floors under the shares are lengths,
+  /// which are worth nothing as shares until the layer they are measured in has
+  /// a size to be one of.
+  describe("and the borders between them", () => {
+    /// How large the layer is pretending to be, in the pixels a drag is
+    /// reported in: fifty rems across and thirty-seven and a half down, at the
+    /// sixteen pixels a rem is here.
+    const ACROSS = 800;
+    const DOWN = 600;
+
+    /// And how large it is at the moment, which the last test changes under the
+    /// groups: a window resized keeps the shares the borders were left at.
+    let across = ACROSS;
+
+    /// What everything else in the document still answers with — the layer
+    /// alone is stood in for, so that the rest of the pane is the unlaid-out
+    /// nothing the rest of this suite reads.
+    const measured = Element.prototype.getBoundingClientRect;
+
+    /// And what the suite's own `ResizeObserver` is, which this block swaps for
+    /// one that reports — written rather than stubbed, `setup.ts` having
+    /// defined the property rather than assigned it.
+    const observing = window.ResizeObserver;
+
+    /// Whatever the pane asked to be told when the layer changes shape. jsdom's
+    /// own stand-in observes and never reports, so this is how a test says the
+    /// window moved.
+    let watching: (() => void)[] = [];
+
+    const resized = (): void => {
+      for (const told of watching) {
+        told();
+      }
+    };
+
+    beforeEach(() => {
+      across = ACROSS;
+      watching = [];
+
+      Element.prototype.getBoundingClientRect = function (this: Element) {
+        return this.matches(`.${codePane.stack}`)
+          ? ({
+              left: 0,
+              top: 0,
+              right: across,
+              bottom: DOWN,
+              width: across,
+              height: DOWN,
+            } as DOMRect)
+          : measured.call(this);
+      };
+
+      // Only the layer's own is kept: every other observer on the page is
+      // watching something jsdom has no layout for, and telling those the
+      // window moved would be this block driving panes it is not about.
+      window.ResizeObserver = class {
+        private readonly told: () => void;
+
+        constructor(told: () => void) {
+          this.told = told;
+        }
+
+        observe(target: Element) {
+          if (target.matches(`.${codePane.stack}`)) {
+            watching.push(this.told);
+          }
+        }
+
+        unobserve() {}
+        disconnect() {}
+      } as unknown as typeof ResizeObserver;
+    });
+
+    afterEach(() => {
+      Element.prototype.getBoundingClientRect = measured;
+      window.ResizeObserver = observing;
+    });
+
+    /// The dividers the pane is drawing, in the order the tree reads its
+    /// splits: the one a pair is divided by before either half's own.
+    function dividers(container: ParentNode): HTMLElement[] {
+      return [
+        ...container.querySelectorAll<HTMLElement>(
+          `.${shell.detailsPane} .${codePane.divider}`,
+        ),
+      ];
+    }
+
+    /// Drag one to a point on the layer and let go of it.
+    function dragTo(divider: HTMLElement, at: { x?: number; y?: number }): void {
+      const to = { clientX: at.x ?? 0, clientY: at.y ?? 0 };
+
+      fireEvent.pointerDown(divider, to);
+      fireEvent.pointerMove(window, to);
+      fireEvent.pointerUp(window, to);
+    }
+
+    /// What a group's share of the layer comes to when a floor is what it is
+    /// left with: a length against the layer it is measured in.
+    function floor(way: "beside" | "below"): number {
+      return (FLOORS[way] / ((way === "beside" ? ACROSS : DOWN) / 16)) * 100;
+    }
+
+    /// The pane with one terminal in it, split beside itself — which is the
+    /// layout with one border in it.
+    async function halved(): Promise<HTMLElement> {
+      withTerminals([1]);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+      await waitFor(() => expect(tabs(container)).toHaveLength(1));
+      await split(container, tabs(container)[0]!, "Split right");
+      await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+      return container;
+    }
+
+    /// A drag moves the shares either side of the one border it is of, and
+    /// leaves every other group exactly where it was.
+    it("moves the shares either side of a border, and nothing beyond it", async () => {
+      const container = await halved();
+
+      // Halves, which is where every split starts, and a border over the line
+      // the two of them meet on.
+      expect(groups(container).map(stood)).toEqual([
+        { left: "0%", top: "0%", width: "50%", height: "100%" },
+        { left: "50%", top: "0%", width: "50%", height: "100%" },
+      ]);
+      expect(dividers(container)).toHaveLength(1);
+      expect(dividers(container)[0]!.style.left).toBe("50%");
+
+      dragTo(dividers(container)[0]!, { x: ACROSS * 0.3 });
+
+      // What the near half takes, the far half gives: the two of a split sum
+      // to a hundred.
+      await waitFor(() =>
+        expect(groups(container).map(stood)).toEqual([
+          { left: "0%", top: "0%", width: "30%", height: "100%" },
+          { left: "30%", top: "0%", width: "70%", height: "100%" },
+        ]),
+      );
+
+      // And a split inside the far half, which is a border of its own — across
+      // rather than down, and over the room that half has rather than the
+      // layer.
+      await split(container, tabs(groups(container)[1]!)[0]!, "Split down");
+
+      await waitFor(() => expect(groups(container)).toHaveLength(3));
+      expect(dividers(container)).toHaveLength(2);
+      expect(dividers(container)[1]!.style.left).toBe("30%");
+      expect(dividers(container)[1]!.style.width).toBe("70%");
+
+      dragTo(dividers(container)[1]!, { y: DOWN * 0.75 });
+
+      // The far column is divided three quarters of the way down, and the
+      // near one is exactly where the first drag left it: a border moves the
+      // split it is of and nothing above it.
+      await waitFor(() =>
+        expect(groups(container).map(stood)).toEqual([
+          { left: "0%", top: "0%", width: "30%", height: "100%" },
+          { left: "30%", top: "0%", width: "70%", height: "75%" },
+          { left: "30%", top: "75%", width: "70%", height: "25%" },
+        ]),
+      );
+    });
+
+    /// A handle nobody can put a pointer on is still a handle, so the arrow
+    /// keys move it — along its own split's axis, and settling at once, there
+    /// being no letting go of a key.
+    it("nudges a border with the arrow keys along its own axis", async () => {
+      const container = await halved();
+      const beside = dividers(container)[0]!;
+
+      expect(beside.getAttribute("role")).toBe("separator");
+      expect(beside.getAttribute("aria-orientation")).toBe("vertical");
+      expect(beside.getAttribute("aria-valuenow")).toBe("50");
+      expect(beside.getAttribute("aria-valuemin")).toBe(
+        String(Math.round(floor("beside"))),
+      );
+      expect(beside.getAttribute("aria-valuemax")).toBe(
+        String(Math.round(100 - floor("beside"))),
+      );
+
+      fireEvent.keyDown(beside, { key: "ArrowRight" });
+
+      await waitFor(() =>
+        expect(groups(container)[0]!.style.width).toBe("51%"),
+      );
+
+      fireEvent.keyDown(beside, { key: "ArrowLeft" });
+
+      await waitFor(() =>
+        expect(groups(container)[0]!.style.width).toBe("50%"),
+      );
+
+      // And the axis it does not travel along is not its: up and down belong
+      // to a border that divides across, and this one divides down the middle.
+      fireEvent.keyDown(beside, { key: "ArrowDown" });
+
+      expect(groups(container)[0]!.style.width).toBe("50%");
+
+      // A stacked split's border is the other way about in every one of those
+      // respects.
+      await split(container, tabs(groups(container)[1]!)[0]!, "Split down");
+      await waitFor(() => expect(groups(container)).toHaveLength(3));
+
+      const below = dividers(container)[1]!;
+
+      expect(below.getAttribute("aria-orientation")).toBe("horizontal");
+
+      fireEvent.keyDown(below, { key: "ArrowRight" });
+
+      expect(groups(container)[1]!.style.height).toBe("50%");
+
+      fireEvent.keyDown(below, { key: "ArrowDown" });
+
+      await waitFor(() =>
+        expect(groups(container)[1]!.style.height).toBe("51%"),
+      );
+    });
+
+    /// And a drag past what a group is owed stops there. The floor is a length
+    /// — what makes a group too narrow is the bar standing in it — so what it
+    /// is worth as a share is arithmetic against the split it is measured in.
+    it("stops a drag at the floor under a group", async () => {
+      const container = await halved();
+
+      dragTo(dividers(container)[0]!, { x: 2 });
+
+      await waitFor(() =>
+        expect(groups(container)[0]!.style.width).toBe(`${floor("beside")}%`),
+      );
+
+      dragTo(dividers(container)[0]!, { x: ACROSS - 2 });
+
+      await waitFor(() =>
+        expect(groups(container)[0]!.style.width).toBe(
+          `${100 - floor("beside")}%`,
+        ),
+      );
+
+      // And the floor on the other axis is a height, which is a different
+      // length and a different share of a layer that is not square.
+      await split(container, tabs(groups(container)[1]!)[0]!, "Split down");
+      await waitFor(() => expect(groups(container)).toHaveLength(3));
+
+      dragTo(dividers(container)[1]!, { y: DOWN });
+
+      await waitFor(() =>
+        expect(groups(container)[1]!.style.height).toBe(
+          `${100 - floor("below")}%`,
+        ),
+      );
+    });
+
+    /// And a window that changes shape moves no share. The groups are drawn at
+    /// the percentages they were left at, met afresh against the floors at the
+    /// new size — which is the whole reason a border settles a percentage
+    /// rather than a column.
+    it("keeps the shares a border was left at when the layer changes shape", async () => {
+      const container = await halved();
+
+      dragTo(dividers(container)[0]!, { x: ACROSS * 0.3 });
+
+      await waitFor(() =>
+        expect(groups(container)[0]!.style.width).toBe("30%"),
+      );
+
+      // Narrowed to thirty-one rems, where three tenths is less than a bar of
+      // tabs is owed: what is *drawn* is the floor.
+      across = 500;
+      resized();
+
+      await waitFor(() =>
+        expect(groups(container)[0]!.style.width).toBe(
+          `${(FLOORS.beside / (500 / 16)) * 100}%`,
+        ),
+      );
+
+      // And the room given back: the share comes back with it, the thirty
+      // having been what was held all along.
+      across = ACROSS;
+      resized();
+
+      await waitFor(() =>
+        expect(groups(container)[0]!.style.width).toBe("30%"),
+      );
+    });
   });
 });
 

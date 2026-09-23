@@ -29,6 +29,17 @@
 //! frame's pane widths are percentages of the window — a border settled on a
 //! laptop should mean the same on a wider screen (see `widths.ts`).
 //!
+//! **And every border in it is a divider that drags.** One per split, over the
+//! line its two halves meet on: dragging it moves the shares either side of it
+//! and nothing else in the tree, and the arrow keys nudge it by the same travel
+//! along its own split's axis — left and right for a split down the middle, up
+//! and down for one across. The frame's own divider is the pattern, and what is
+//! different is that Code's splits go both ways. It is clamped to a floor per
+//! group, which is a length rather than a share for the reason the frame's
+//! minimums are: what makes a group too narrow is the bar standing in it. So
+//! this pane measures the layer its groups are drawn in, the way the frame
+//! measures itself.
+//!
 //! **Two ways to make one, and a third later in this stage.** A group splits
 //! from the menu a right-click on one of its tabs drops, which names both
 //! directions, and from the icon at the end of its bar, which is the common
@@ -253,6 +264,7 @@ import {
 import { useQueryClient } from "@tanstack/solid-query";
 import {
   For,
+  Index,
   Match,
   Show,
   Switch,
@@ -261,6 +273,7 @@ import {
   createSignal,
   createUniqueId,
   onCleanup,
+  onMount,
   type JSX,
 } from "solid-js";
 
@@ -298,13 +311,19 @@ import {
   type Tab,
 } from "./keeping";
 import {
+  borders,
+  clamped,
   found,
   groups as groupsOf,
+  moved,
   neighbour,
+  nudged,
   placed,
   split,
   without,
+  type Border,
   type Group,
+  type Layer,
   type Way,
 } from "./layout";
 import { PaneHead } from "./PaneHead";
@@ -638,7 +657,68 @@ export function Code(props: {
   /// tree, so `For` below reconciles these by identity and nothing is taken
   /// down and made again for a press in the group beside it.
   const groups = createMemo(() => groupsOf(layout()));
-  const placing = createMemo(() => placed(layout()));
+
+  /// The layer every group is drawn in, which is the ground their percentages
+  /// are measured against — and, once it has been measured, what turns the
+  /// floors under those percentages into shares.
+  let layer!: HTMLDivElement;
+
+  /// How large it stands, in rem. Nought until the page has laid out, which the
+  /// arithmetic reads as no floors yet rather than as floors of nothing (see
+  /// [`./layout`]).
+  ///
+  /// In rem rather than pixels, and converted here where the browser can be
+  /// asked what a rem is: a human who has told their browser to draw text
+  /// larger has said a group should hold what it held.
+  const [across, setAcross] = createSignal(0);
+  const [down, setDown] = createSignal(0);
+
+  const measure = (box = layer.getBoundingClientRect()) => {
+    const root =
+      parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+
+    if (box.width > 0) {
+      setAcross(box.width / root);
+    }
+
+    if (box.height > 0) {
+      setDown(box.height / root);
+    }
+  };
+
+  /// Measured when the pane is first drawn, and again whenever the layer
+  /// changes shape under the groups — a window dragged narrower is exactly
+  /// when a group stops being wide enough for a bar. A browser with no
+  /// `ResizeObserver` to ask keeps the size it opened at, and measures again at
+  /// the start of every drag. The frame's own dividers say all of this the same
+  /// way, in `Panes.tsx`.
+  onMount(() => {
+    measure();
+
+    if (typeof ResizeObserver !== "function") {
+      return;
+    }
+
+    const watching = new ResizeObserver(() => measure());
+
+    watching.observe(layer);
+    onCleanup(() => watching.disconnect());
+  });
+
+  const sized = (): Layer => ({ width: across(), height: down() });
+
+  /// The tree as it is actually drawn: every share met against the floors under
+  /// the groups either side of it, given how large the layer stands now.
+  ///
+  /// Which is why a window changing shape moves nothing. What the layout holds
+  /// is where the human left each border, and this is that held against the
+  /// room there is — so a layer that grows again hands the share straight back.
+  const drawn = createMemo(() => clamped(layout(), sized()));
+  const placing = createMemo(() => placed(drawn()));
+
+  /// And every border between them, which is where the dividers go: one per
+  /// split, carrying the share it decides and how far it may be taken.
+  const bordering = createMemo(() => borders(drawn(), sized()));
 
   /// The group last pressed into, which is where an opening lands: a file
   /// pressed in the tree, a terminal asked for, the tab standing on a shell
@@ -661,6 +741,93 @@ export function Code(props: {
           width: `${at.width}%`,
           height: `${at.height}%`,
         };
+  };
+
+  /// And where a border stands: the line itself, across the room its split
+  /// divides, at the share the half before it is worth.
+  ///
+  /// A line rather than a box — it is the one thing in the layer with no room
+  /// of its own, the groups either side of it having every percent between
+  /// them. What gives it something to take hold of is the half-rem the
+  /// stylesheet centres on it, which is the frame's divider again.
+  const along = (border: Border): JSX.CSSProperties => {
+    const { x, y, width, height } = border.within;
+
+    return border.way === "beside"
+      ? {
+          left: `${x + (width * border.share) / 100}%`,
+          top: `${y}%`,
+          height: `${height}%`,
+        }
+      : {
+          left: `${x}%`,
+          top: `${y + (height * border.share) / 100}%`,
+          width: `${width}%`,
+        };
+  };
+
+  /// Dragging one, which is the frame's own divider again (`Panes.tsx`): the
+  /// listeners go on the window rather than on the handle, because a pointer
+  /// that has outrun the line — which every drag's does — is still dragging it.
+  ///
+  /// What the pointer is measured against is the layer, and what comes of that
+  /// is a share of the one split this border divides: the half before it takes
+  /// what the half after it gives, and nothing else in the tree moves.
+  const drag = (border: Border, event: PointerEvent) => {
+    // Which stops the drag selecting the text of both groups on the way past.
+    event.preventDefault();
+
+    const box = layer.getBoundingClientRect();
+    const across = border.way === "beside";
+    const room = across ? border.within.width : border.within.height;
+
+    if (box.width === 0 || box.height === 0 || room === 0) {
+      return;
+    }
+
+    // Free, the box being in hand: it keeps a browser with no observer to ask
+    // from meeting the floors against a layer the window has resized out from
+    // under.
+    measure(box);
+
+    const moving = (at: PointerEvent) => {
+      const point = across
+        ? ((at.clientX - box.left) / box.width) * 100
+        : ((at.clientY - box.top) / box.height) * 100;
+      const share =
+        ((point - (across ? border.within.x : border.within.y)) / room) * 100;
+
+      setLayout((was) => moved(was, border, share));
+    };
+
+    const dropped = () => {
+      window.removeEventListener("pointermove", moving);
+      window.removeEventListener("pointerup", dropped);
+      window.removeEventListener("pointercancel", dropped);
+    };
+
+    window.addEventListener("pointermove", moving);
+    window.addEventListener("pointerup", dropped);
+    window.addEventListener("pointercancel", dropped);
+  };
+
+  /// And moving one with the keyboard, along the axis its own split divides:
+  /// a border down the middle answers left and right, and one across answers
+  /// up and down. The same travel a drag gives it, for the pointer nobody
+  /// dragging with a keyboard has.
+  const nudge = (border: Border, event: KeyboardEvent) => {
+    const keys =
+      border.way === "beside"
+        ? { ArrowLeft: -1, ArrowRight: 1 }
+        : { ArrowUp: -1, ArrowDown: 1 };
+    const by = (keys as Record<string, number | undefined>)[event.key];
+
+    if (by === undefined) {
+      return;
+    }
+
+    event.preventDefault();
+    setLayout((was) => nudged(was, border, by));
   };
 
   /// The one showing in a group: the tab turned to, or the first while nobody
@@ -1387,7 +1554,7 @@ export function Code(props: {
               content down and making it again: a nest of boxes would cost a
               terminal its socket and an editor its caret for a press made in
               the group beside it. */}
-          <div class={styles.stack}>
+          <div class={styles.stack} ref={layer}>
             <For each={groups()}>
               {(group) => (
                 <div
@@ -1634,6 +1801,49 @@ export function Code(props: {
                 </div>
               )}
             </For>
+
+            {/* And a divider on every border there is — one per split, drawn
+                over the line where its two halves meet.
+
+                A separator rather than a button, because what it does to the
+                page is a value rather than an action: the share of the split
+                the half before it is worth. Which is what it carries, and what
+                the arrow keys move it by for the pointer nobody dragging with
+                a keyboard has — along its own split's axis, so a border down
+                the middle answers left and right and one across answers up and
+                down. The frame's own divider is the pattern, in `Panes.tsx`.
+
+                `Index` rather than `For`: a drag rewrites the border it is
+                dragging on every pointer move, and a list reconciled by value
+                would take the handle down and make it again under the pointer
+                — and under the keyboard's focus, which is a nudge that can
+                only be made once. How many borders there are changes when the
+                tree is reshaped and at no other time, which is exactly what
+                indexing keys on. */}
+            <Index each={bordering()}>
+              {(border) => (
+                <div
+                  class={styles.divider}
+                  data-way={border().way}
+                  role="separator"
+                  aria-orientation={
+                    border().way === "beside" ? "vertical" : "horizontal"
+                  }
+                  aria-label={
+                    border().way === "beside"
+                      ? "Resize what is left of this border"
+                      : "Resize what is above this border"
+                  }
+                  aria-valuenow={Math.round(border().share)}
+                  aria-valuemin={Math.round(border().least)}
+                  aria-valuemax={Math.round(border().most)}
+                  tabindex="0"
+                  style={along(border())}
+                  onPointerDown={(event) => drag(border(), event)}
+                  onKeyDown={(event) => nudge(border(), event)}
+                />
+              )}
+            </Index>
           </div>
         </div>
       </div>

@@ -80,6 +80,81 @@
   border-color: var(--accent);
 }
 
+/* The line between two groups, and the handle that moves it — the frame's own
+   divider again (`Panes.module.css`), turned both ways: a `beside` split's
+   border is a column down the middle of the room it divides, and a `below`
+   one's is a row across it.
+
+   It stands in the layer with the groups rather than between them, there being
+   no flow to put it in: the page says where it goes in the same percentages
+   the groups are placed at, and what is written here is how thick it is and
+   which way round. Drawn after them in the document, so it takes the pointer
+   where the two overlap.
+
+   `touch-action` because a finger dragging this is dragging this: left to
+   itself the browser would take the gesture for a scroll of what is under it
+   and the divider would never see the second event. */
+.divider {
+  position: absolute;
+  z-index: 1;
+  touch-action: none;
+}
+
+.divider[data-way="beside"] {
+  width: 0.5rem;
+  margin-left: -0.25rem;
+  cursor: col-resize;
+}
+
+.divider[data-way="below"] {
+  height: 0.5rem;
+  margin-top: -0.25rem;
+  cursor: row-resize;
+}
+
+/* The line itself, down or across the middle of the half-rem that is only there
+   to be easier to hit than a pixel. It is the border as well as the handle, as
+   the frame's is: the groups themselves carry no edge between them, two lines a
+   pixel apart with one of them moving being the sort of thing nobody sees and
+   everybody notices. */
+.divider::before {
+  content: "";
+  position: absolute;
+  background: var(--edge);
+}
+
+.divider[data-way="beside"]::before {
+  inset-block: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+}
+
+.divider[data-way="below"]::before {
+  inset-inline: 0;
+  top: 50%;
+  height: 1px;
+  transform: translateY(-50%);
+}
+
+/* Under the keyboard's focus the line says it is a thing that moves. What
+   lights up is the line, the half-rem around it being only a target. */
+.divider:focus-visible::before {
+  background: var(--accent);
+}
+
+.divider[data-way="beside"]:focus-visible::before {
+  width: 2px;
+}
+
+.divider[data-way="below"]:focus-visible::before {
+  height: 2px;
+}
+
+.divider:focus-visible {
+  outline: none;
+}
+
 @media (max-width: 40rem) {
   .body {
     flex-direction: column;
