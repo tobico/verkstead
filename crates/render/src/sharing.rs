@@ -29,6 +29,12 @@
 //! pane draws neither of them in a share: see `Brief.tsx`, which is the other
 //! half of this and the reason the values left behind are never read.
 //!
+//! **The one Pairing that stays is a steer's**, because that one is not a
+//! setting — it is part of the form the human filled, and the pane a steer
+//! opens is that form read back. What comes off it is the half that is about
+//! the machine and not about the choice: the directories the account is kept
+//! in. See [`unpathed`].
+//!
 //! What the reader does have is the record and the way around it, which is the
 //! whole point: the Timeline on one side, and whatever it opens on the other.
 
@@ -36,8 +42,11 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "typescript")]
 use ts_rs::TS;
 
-use crate::conversations::{CommitPane, CompanionView, ConversationView, TimelineEvent};
-use crate::profiles::PickedView;
+use crate::conversations::{
+    CommitPane, CompanionView, ConversationView, SteerEvent, SteerPairingView, SteerRecordView,
+    TimelineEvent,
+};
+use crate::profiles::{PairingView, PickedView, ProfileAccount, ProfileEntry};
 use crate::repos::RepoEntry;
 use crate::view::SetView;
 
@@ -163,7 +172,7 @@ pub fn shared(
         .timeline
         .into_iter()
         .filter(boards)
-        .map(frozen)
+        .map(boarding)
         .collect();
 
     let boarded: Vec<i64> = timeline.iter().filter_map(asked).collect();
@@ -332,21 +341,75 @@ fn committed(event: &TimelineEvent) -> Option<i64> {
     }
 }
 
-/// And the one Event a share has to say something else about: the Brief, which
-/// is frozen here whatever it was.
+/// And the two Events a share has to say something else about, each as it
+/// boards.
 ///
-/// A Brief that has not frozen is a field the human types into, with the
-/// Conversation's setup under it. Frozen, it is the document it will be read as
-/// for the rest of the record's life — which is what a share of a Draft should
-/// show, and the only thing a reader with no server behind them could do
-/// anything with.
-fn frozen(event: TimelineEvent) -> TimelineEvent {
+/// **The Brief is frozen here whatever it was.** A Brief that has not frozen is
+/// a field the human types into, with the Conversation's setup under it.
+/// Frozen, it is the document it will be read as for the rest of the record's
+/// life — which is what a share of a Draft should show, and the only thing a
+/// reader with no server behind them could do anything with.
+///
+/// **And a steer loses where the account it picked is kept**, which is
+/// [`unpathed`]. Everything else about that Pairing is the record of what the
+/// human chose, and reads back as it was.
+fn boarding(event: TimelineEvent) -> TimelineEvent {
     match event {
         TimelineEvent::Brief(brief) => TimelineEvent::Brief(crate::conversations::BriefEvent {
             frozen: true,
             ..brief
         }),
+        TimelineEvent::Steer(steer) => TimelineEvent::Steer(SteerEvent {
+            record: steer.record.map(|record| SteerRecordView {
+                pairing: match record.pairing {
+                    SteerPairingView::Under(under) => SteerPairingView::Under(PairingView {
+                        profile: ProfileEntry {
+                            account: unpathed(under.profile.account),
+                            ..under.profile
+                        },
+                        ..under
+                    }),
+                    // Nothing picked and an account removed since say nothing
+                    // about this machine to begin with.
+                    said => said,
+                },
+                ..record
+            }),
+            ..steer
+        }),
         other => other,
+    }
+}
+
+/// One account with nowhere on this machine left in it.
+///
+/// The Pairing a steer settled rides its Event, because the pane draws the form
+/// the human filled and what they picked to run the work is part of that form.
+/// What a reader has no business with is the same thing the Repo's `path` and
+/// the Worktree are: **where** it is kept. An account is directories — Claude's
+/// pair, and the one home every type after it keeps — and a share is a file
+/// that is emailed about and attached to pull requests.
+///
+/// Emptied rather than dropped, for the reason the Repo's path is: what a share
+/// carries is the shape the workbench's own components are handed, so what
+/// changes is the value and never the field. The name, the type's own mark and
+/// the model stay — those are what the pane says, and they say nothing about
+/// this machine.
+fn unpathed(account: ProfileAccount) -> ProfileAccount {
+    match account {
+        ProfileAccount::Claude { .. } => ProfileAccount::Claude {
+            claude_dir: String::new(),
+            config_file: String::new(),
+        },
+        ProfileAccount::Codex { .. } => ProfileAccount::Codex {
+            home: String::new(),
+        },
+        ProfileAccount::Grok { .. } => ProfileAccount::Grok {
+            home: String::new(),
+        },
+        ProfileAccount::OpenCode { .. } => ProfileAccount::OpenCode {
+            home: String::new(),
+        },
     }
 }
 
