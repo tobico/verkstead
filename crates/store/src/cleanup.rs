@@ -112,6 +112,11 @@ const EVENT_KEYED: &[&str] = &[
     // And the summary a commit card is drawn from. The commit itself names the
     // Conversation as well and goes with the rest of those.
     "commit_summaries",
+    // And the companion rows a steer asked for, which hang off the row that
+    // says what else it settled — so these go before it and it goes with the
+    // rest of those.
+    "steer_additions",
+    "steer_upgrades",
 ];
 
 /// The tables one Question Set's own rows live in, emptied a Set at a time
@@ -142,6 +147,9 @@ const CONVERSATION_KEYED: &[&str] = &[
     "commits",
     "pull_requests",
     "pauses",
+    // And what each steer settled beside its Event, whose companion rows went
+    // with the event-keyed ones above.
+    "steers",
     // What GitHub last said about the work.
     "pull_request_checks",
     "pull_request_merges",
@@ -170,6 +178,11 @@ const CONVERSATION_KEYED: &[&str] = &[
     "skipped_roles",
     "adoptions",
     "pull_request_adoptions",
+    // And the steer somebody had started and not decided, which is beside the
+    // Conversation rather than on its Timeline.
+    "pending_steers",
+    "pending_steer_additions",
+    "pending_steer_upgrades",
     // The archiving that authorised all of this, and the trim mark under it.
     "archived_conversations",
     "trimmed_conversations",

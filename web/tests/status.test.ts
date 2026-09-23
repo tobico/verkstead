@@ -109,6 +109,20 @@ describe("the status word", () => {
     });
   });
 
+  /// Except while a steer is being written on it, which is a stop they pressed
+  /// *and* a form standing open for them to finish. The server folds the form
+  /// into `waiting`, and `waiting` is read first — so the word says what is
+  /// left to do rather than what was done to get here.
+  it("says Waiting on you over their own stop while a steer is pending", () => {
+    expect(
+      status(like({ blocked_on: 12, stopped_by_hand: true, waiting: true })),
+    ).toEqual({
+      word: "Waiting on you",
+      state: "Implementing",
+      attention: true,
+    });
+  });
+
   /// And on a Conversation something ought to be driving with no stop on the
   /// record at all: a run that was never started, or a server that came back up
   /// without it.

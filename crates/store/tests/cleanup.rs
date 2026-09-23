@@ -25,18 +25,19 @@ use std::time::Duration;
 use sqlx::SqlitePool;
 use verkstead_schema::{QuestionSet, Response};
 use verkstead_store::{
-    Account, Adding, Ask, Commit, CompanionWorktree, Decision, Deletion, Merging, Origin, Pairing,
-    ProfileFacts, PullRequest, Rollup, Settlements, Standing, Summary, Trimming, WaitingOn,
-    add_companion, append_capture, append_transcript, archive_conversation, ask, attach, capture,
+    Account, Adding, Ask, Commit, CompanionMode, CompanionWorktree, Decision, Deletion, Lifecycle,
+    Merging, Origin, Pairing, PendingAddition, PendingForm, PendingUpgrade, ProfileFacts,
+    PullRequest, Rollup, Settlements, Standing, Summary, Trimming, WaitingOn, add_companion,
+    append_capture, append_transcript, archive_conversation, ask, attach, capture,
     close_conversation, create_profile, deletable, delete_conversation, deleted_tables,
     end_session, load_conversation, load_response, lock_set, nothing_else, open_database,
-    pick_direction, place_conversations, reclaim, record_addressed_comments, record_backlog,
-    record_check_rollup, record_commit, record_conflict_fix_attempt, record_delivery,
-    record_fix_attempt, record_merging, record_pull_request, record_share, record_share_comment,
-    record_standing, register_repo, save_brief, session_id, set_grilling_pairing, settle_wrap_up,
-    skip_review, stamp_unseen, start_capture, start_conversation, start_grilling,
-    start_implementing, stop, submit_response, timeline, transcript, trim_conversation, trimmable,
-    trimmed, unarchive_conversation,
+    open_pending_steer, pick_direction, place_conversations, reclaim, record_addressed_comments,
+    record_backlog, record_check_rollup, record_commit, record_conflict_fix_attempt,
+    record_delivery, record_fix_attempt, record_merging, record_pull_request, record_share,
+    record_share_comment, record_standing, register_repo, save_brief, save_pending_steer,
+    session_id, set_grilling_pairing, settle_wrap_up, skip_review, stamp_unseen, start_capture,
+    start_conversation, start_grilling, start_implementing, stop, submit_response, timeline,
+    transcript, trim_conversation, trimmable, trimmed, unarchive_conversation,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -691,6 +692,7 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
     )
     .await
     .unwrap();
+
     place_conversations(pool, &[id]).await.unwrap();
     stamp_unseen(pool, id).await.unwrap();
 
@@ -717,6 +719,37 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
     unarchive_conversation(pool, id).await.unwrap();
     printed(pool, id, "second-session", "and said a great deal more").await;
     archive_conversation(pool, id).await.unwrap();
+
+    // And a steer somebody started and left, which is a row beside the
+    // Conversation rather than on its Timeline — with a companion row of each
+    // kind on it, those being tables of their own.
+    //
+    // After the close rather than before it, because a close takes a pending
+    // steer away: the form is about where the work goes next, and closing is
+    // the end of the work. What this fixture is for is a row in every table,
+    // so the press that leaves one comes last.
+    open_pending_steer(pool, id).await.unwrap();
+    save_pending_steer(
+        pool,
+        id,
+        &PendingForm {
+            target: Some(Lifecycle::Implementing),
+            instruction: Some("take the modal out".to_owned()),
+            added: vec![PendingAddition {
+                repo_id: repo,
+                mode: CompanionMode::ReadOnly,
+                base_ref: None,
+                branch: String::new(),
+            }],
+            upgraded: vec![PendingUpgrade {
+                repo_id: companion,
+                branch: String::new(),
+            }],
+            ..PendingForm::default()
+        },
+    )
+    .await
+    .unwrap();
 
     written_straight_in(pool, id, companion, event).await;
 
@@ -746,6 +779,36 @@ async fn written_straight_in(pool: &SqlitePool, id: i64, companion: i64, event: 
     .execute(pool)
     .await
     .unwrap();
+
+    // And what a steer settled, hung off the same Event: a Conversation nobody
+    // steered has none of these, and the walk still has to empty them for one
+    // that was.
+    sqlx::query(
+        "INSERT INTO steers (event_id, conversation_id, digest, interrupt, profile_id, model)
+         VALUES (?, ?, 0, 0, NULL, NULL)",
+    )
+    .bind(event)
+    .bind(id)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO steer_additions (event_id, repo_id, mode, base_ref, branch)
+         VALUES (?, ?, 'read-only', NULL, '')",
+    )
+    .bind(event)
+    .bind(companion)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    sqlx::query("INSERT INTO steer_upgrades (event_id, repo_id, branch) VALUES (?, ?, '')")
+        .bind(event)
+        .bind(companion)
+        .execute(pool)
+        .await
+        .unwrap();
 
     sqlx::query("INSERT INTO stage_branches (conversation_id, stacks_on) VALUES (?, NULL)")
         .bind(id)

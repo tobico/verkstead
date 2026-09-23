@@ -700,14 +700,17 @@ everything that was looked at.
 building settings-redesign*): the last event that has a pane behind it is
 selected and the URL is rewritten to its path, so the human arrives at where the
 work got to. The *last openable* one, because a record very often ends on
-something with nothing to show — a move, a manual task, a steer that carried no
-document. It is the page's rather than the card's — the sidebar has no timeline
-to pick from — and it happens only where the path names no pane already: a cold
-load of a details pane keeps its own selection. The timeline follows its bottom
-the way a running session's output does — pinned to the end until the human
-scrolls up, and again once they come back down. A phone lands on the timeline
-with the newest thing marked open, never carried past the record into the
-details.
+something with nothing to show — a move, a manual task (*revised 2026-09-23,
+building steer-timeline-item*: a steer that carried no document was one of these
+too, and is not now — every steer opens, drawing the form it settled; and where
+a pending steer stands the landing is on that instead, the item the timeline
+draws past the end of the record). It is the page's rather than the card's — the
+sidebar has no timeline to pick from — and it happens only where the path names
+no pane already: a cold load of a details pane keeps its own selection. The
+timeline follows its bottom the way a running session's output does — pinned
+to the end until the human scrolls up, and again once they come back down. A
+phone lands on the timeline with the newest thing marked open, never carried
+past the record into the details.
 
 **And the selection stays at that end** (*settled 2026-09-03, building
 auto-advance*): a timeline landed on the end of its record **auto-advances**,

@@ -501,3 +501,44 @@ async fn a_deferred_set_notifies_every_device_the_same_way() {
     );
     assert_eq!(notice["title"], "Rate limiting for the public API");
 }
+
+/// Pressing Steer lights up no phone.
+///
+/// The press writes a pending steer, which counts as waiting on the human like
+/// an open Set and a stop nobody chose — but the press was theirs. A phone
+/// buzzing about a form the person holding it opened a second ago is Verkstead
+/// telling them their own news, which is how a notification stops being worth
+/// reading. The stop it makes is the same rule said once already: a stop
+/// somebody decided on raises nothing either.
+#[tokio::test]
+async fn pressing_steer_lights_up_no_phone() {
+    let (service, received) = push_service().await;
+    let (_dir, _pool, app) = fresh_app().await;
+
+    subscribe(&app, &Device::new(&service, "take", "phone")).await;
+
+    let http = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/ui/conversations/{ASKING_FROM}/steer"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = http.status();
+    let body = body_text(http).await;
+    assert_eq!(status, StatusCode::OK, "the press failed: {body}");
+    assert!(body.contains("Opened"), "the press opened a form: {body}");
+
+    settle().await;
+
+    assert!(
+        received.lock().unwrap().is_empty(),
+        "the press is the human's own, so nothing was sent to a device",
+    );
+}

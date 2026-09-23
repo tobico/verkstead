@@ -71,7 +71,10 @@ import type {
   SharePublished,
   ShowingArchived,
   Started,
+  SteerCancelled,
+  SteerForm,
   SteerOpened,
+  SteerSaved,
   SteerSubmission,
   Submitted,
   Subscribed,
@@ -939,12 +942,17 @@ export function stopConversation(id: number): Promise<ConversationStopped> {
   return post<ConversationStopped>(`/api/ui/conversations/${id}/stop`, {});
 }
 
-/// Click steer: stop the drive, and find out what was running when it stopped.
+/// Press steer: stop the drive and open the pending steer the form is written
+/// on.
 ///
-/// The click rather than the move, and a press of its own for that reason.
-/// Nothing new is launched while the human composes, so the world the modal is
-/// drawn against is the world the submit arrives in — and cancelling leaves the
-/// conversation stopped with resume on offer, which is what the click bought.
+/// The press rather than the move, and an act of its own for that reason.
+/// Nothing new is launched while the human composes, so the world the form is
+/// written against is the world the submit arrives in — and cancelling leaves
+/// the conversation stopped with resume on offer, which is what the press
+/// bought.
+///
+/// A second press writes nothing and answers the same word: the page goes to
+/// the form there is either way, so which press it was is nothing to say here.
 ///
 /// Nothing is sent, as nothing is sent with either stop: which conversation it
 /// is is the whole of it.
@@ -952,12 +960,33 @@ export function steerConversation(id: number): Promise<SteerOpened> {
   return post<SteerOpened>(`/api/ui/conversations/${id}/steer`, {});
 }
 
-/// And submit the modal it opened: where the work goes, and whether to end what
-/// is running where it stands.
+/// Keep the form as it stands, so the item can be left and come back to.
+///
+/// The whole form rather than the field that moved: a row holding the target of
+/// one keystroke beside the instruction of another would be a form that was
+/// never on anybody's screen. Posted on a pause in the typing and on the way
+/// out of a field, the way a drafting brief's saves are — see
+/// `src/workbench/settling.ts`, which is the pause both of them keep.
+export function saveSteer(id: number, form: SteerForm): Promise<SteerSaved> {
+  return post<SteerSaved>(`/api/ui/conversations/${id}/steer/save`, form);
+}
+
+/// Cancel it: the pending steer goes, and the conversation is left exactly as
+/// the press found it — stopped, with resume on offer.
+///
+/// Nothing is sent for the same reason, and nothing lands on the timeline: a
+/// steer that decided nothing is no event.
+export function cancelSteer(id: number): Promise<SteerCancelled> {
+  return post<SteerCancelled>(`/api/ui/conversations/${id}/steer/cancel`, {});
+}
+
+/// And submit the form: where the work goes, and whether to end what is running
+/// where it stands.
 ///
 /// Into done there is nothing to start, so this is the move alone — the
 /// conversation is finished with, the steer is on the timeline beside the move
-/// it wrote, and the stop the click left is taken away.
+/// it wrote, the stop the press left is taken away, and the pending steer goes
+/// in the same transaction as the record it became.
 export function steer(
   id: number,
   submission: SteerSubmission,

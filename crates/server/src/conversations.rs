@@ -2702,6 +2702,11 @@ fn taken(held: &store::AdoptedPullRequest) -> String {
 /// The record says Closed by then, which is the order the rest of this is in:
 /// what has happened is written down, and then whatever outlived it is shut.
 ///
+/// A steer somebody had started and not decided is shut the same way and for
+/// the same reason — a form asking where the work goes next is about work that
+/// is over — but it goes inside [`store::close_conversation`] rather than
+/// after it: the row is the record's, and the close is the act that decides it.
+///
 /// **And the open pages are told**, which they were not: the row that closes and
 /// archives announced the list and this one announced nothing, so a second
 /// device went on drawing an open Conversation until something else happened to

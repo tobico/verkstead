@@ -1158,7 +1158,7 @@ export const RULE = "";
 /// The branch a checkout comes off, out of the repository's own branches.
 ///
 /// One control for the conversation's own base, for each companion's, and for
-/// each row of the steer modal's companion section, because it is one choice
+/// each row of the steer form's companion section, because it is one choice
 /// asked in three places: the rule — that repository's default branch as it
 /// stands when the checkout is made — as the first entry, then its branches.
 /// There is nothing to type: a sha or a tag would pin the work to a moment, and

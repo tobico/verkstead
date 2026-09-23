@@ -1,16 +1,20 @@
 /* Steering a conversation: one question — where does this go? — with whatever
-   the target it picks needs under it, drawn over the page as the profile form
-   above is. The card is the modal's; what is here is the form inside it.
+   the target it picks needs under it, drawn as the details pane of the item the
+   press puts at the end of the timeline. The pane's own chrome is the shared
+   `PaneHead`; what is here is the form under it.
 
-   The run has already stopped by the time any of this is on the screen, which is
-   what the line under the heading says: the click froze the world, and cancel
+   A pane rather than a window over the page, which is the whole of why a steer
+   can take an afternoon to write: the workbench stays readable beside it, and
+   the item stays at the end of the timeline until the human decides.
+
+   The run has already stopped by the time any of this is on the screen, which
+   is what the line under the header says: the press froze the world, and cancel
    leaves it frozen with resume on offer. */
-.steerConversation h3 {
-  margin: 0 0 0.35rem;
-  font-size: 1rem;
+.steerConversation {
+  padding: 1rem 0 0;
 }
 
-.steerConversation > form > .lead {
+.steerConversation > .lead {
   margin: 0 0 1rem;
   font-size: 0.85rem;
   color: var(--ink-soft);
@@ -114,7 +118,7 @@
 
 /* The pairing is picked with the listbox the app draws rather than a `<select>`,
    so that every row carries its harness's mark: what it looks like is
-   `picking.module.css`, this modal being one of the five places that one control
+   `picking.module.css`, this form being one of the six places that one control
    stands. Nothing of it is left here — it is as wide as the field already. */
 
 .steerPairing .fieldNote {
@@ -317,4 +321,89 @@
     background: var(--accent-deep);
     border-color: var(--accent-deep);
   }
+}
+
+/* And the same form once it has happened: the pane a Steer event opens, which
+   is the record drawn as the form the human filled. Read-only throughout — the
+   press is over — so what the form drew as controls this draws as lines, in the
+   form's own order and under the form's own words.
+
+   Its own block rather than the form's, because none of the form's spacing is
+   about it: there are no fields to separate, no buttons at the foot and nothing
+   that can be typed in. What is left is a column of short sections. */
+.steered {
+  padding: 1rem 0 0;
+}
+
+/* Where the work went, said in the sentence the timeline's own card says it in
+   — one moment read at two distances, and the words are the same at both. */
+.steeredInto {
+  margin: 0 0 1rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.steeredField + .steeredField,
+.steeredField + .steeredTick,
+.steeredTick + .steeredField,
+.steeredTick + .steeredTick {
+  margin-top: 1rem;
+}
+
+/* The name the field had when it was written in, which is the whole of why the
+   record reads as the form: the human filled in something called *What to do
+   first*, and this is that label said back to them. */
+.steeredLabel {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.steeredValue {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.steeredField .steeredNote {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The ticks, drawn as the boxes they were and disabled: a record saying
+   *Digest: no* would be the same answer in a shape nobody was ever shown. */
+.steeredTick {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  font-weight: 600;
+}
+
+/* And the repos the steer asked for, a line apiece — the form's own *already
+   alongside* rows, which are something to read rather than a row of controls. */
+.steeredRepos {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.steeredRepo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.3rem 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.steeredRepo + .steeredRepo {
+  border-top: 1px solid var(--edge);
+}
+
+.steeredRepoName {
+  font-weight: 600;
+  color: var(--ink);
 }

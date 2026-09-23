@@ -582,10 +582,10 @@ pub struct ConversationView {
     /// branch holds a backlog with work left in it, or a roadmap it has
     /// written.
     ///
-    /// What decides whether the steer modal offers *carrying on* — the target
+    /// What decides whether the steer form offers *carrying on* — the target
     /// itself is offered on every Conversation there is, because an instruction
     /// can always be written. Where this is false the instruction is the whole
-    /// of what that target can be, so the modal requires one.
+    /// of what that target can be, so the form requires one.
     ///
     /// The server’s rule rather than something the page works out from the
     /// fields around it: what stands is a reading of the Worktree as it is now,
@@ -599,7 +599,7 @@ pub struct ConversationView {
     /// and what decides it in the end is the relaunch that reads the directory
     /// the steer has just made.
     ///
-    /// Checked again when the modal is submitted, as every refusal here is;
+    /// Checked again when the form is submitted, as every refusal here is;
     /// this says only that it was worth offering as of the moment it was read.
     pub ready_to_continue: bool,
 
@@ -829,6 +829,132 @@ pub struct ConversationView {
     /// was handed over and none of the files themselves — see
     /// [`AttachmentView`].
     pub attachments: Vec<AttachmentView>,
+
+    /// The steer somebody has started on this Conversation and not yet decided,
+    /// where there is one.
+    ///
+    /// `null` is the ordinary Conversation, which is nearly all of them. A
+    /// pending steer is written by the press on **Steer** and goes at the
+    /// submit or the cancel, so what it says while it stands is that there is a
+    /// form to be finished: the workbench draws it as the last item on the
+    /// Timeline and the form is that item's details pane.
+    ///
+    /// **Not a Timeline Event, which is why it is here rather than in the
+    /// list.** It is the one thing on the pane that has not happened yet, so it
+    /// has no place in the record and is drawn after everything that does — and
+    /// a Share, which is the record, carries no trace of it.
+    pub pending_steer: Option<PendingSteerView>,
+}
+
+/// A pending steer as the page receives it: when the press was made, and the
+/// form as the last save left it.
+///
+/// The Timeline's own item is drawn from the target inside it — it reads
+/// *Steer* until the form has saved once and *Steering into X* after — and the
+/// pane that item opens fills every one of its fields from the rest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct PendingSteerView {
+    /// When Steer was pressed, RFC 3339.
+    pub at: String,
+
+    /// And the form, which is what the pane is prefilled from and what it saves
+    /// as it is typed.
+    ///
+    /// Empty on a form nobody has written in yet, which is what every press
+    /// opens: no target picked, nothing written and nothing ticked.
+    pub form: SteerForm,
+}
+
+/// The Steer form in the shape it is saved and read back in: every field the
+/// pane draws, with empty meaning what empty means on the pane.
+///
+/// **One value rather than a field at a time, and it travels both ways.** The
+/// pane is prefilled from it on the way in and saves the whole of it on the way
+/// out, so the row is never the target of one keystroke beside the instruction
+/// of another — a form that was never on anybody's screen.
+///
+/// **Not a [`SteerSubmission`]**, though it says nearly the same things. What a
+/// submit carries is what the form *decided*: one target, and only the payload
+/// that target takes. This is what the form holds while it is being written —
+/// a target nobody has picked yet, a brief kept across a change of mind about
+/// where the work goes, an instruction that is not being sent anywhere.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct SteerForm {
+    /// Where the work goes: the target the pane's picker is on, as the last
+    /// save left it.
+    ///
+    /// What the picker *shows* rather than only what was pressed, because that
+    /// is what a submit would send — the pane opens on the first target it
+    /// offers, a form the human has to answer twice being worse than one that
+    /// starts somewhere, and a radio that opens already checked is never
+    /// pressed. The same rule [`Self::pairing`] is kept under.
+    ///
+    /// `null` is a form nothing has been saved on yet, which is every one of
+    /// them between the press and the first thing typed or ticked — and what
+    /// the Timeline's item reads *Steer* for.
+    #[serde(default)]
+    pub target: Option<SteerTarget>,
+
+    /// The new round's Brief, for a steer into Grilling.
+    #[serde(default)]
+    pub brief: Option<String>,
+
+    /// And whether the round it opens is primed with everything already
+    /// answered.
+    #[serde(default)]
+    pub digest: bool,
+
+    /// The hand-written work, for a steer into Implementing.
+    #[serde(default)]
+    pub instruction: Option<String>,
+
+    /// And the brief, for a steer into Follow-up.
+    #[serde(default)]
+    pub follow_up: Option<String>,
+
+    /// What the work would run under from here, which is what the submit would
+    /// send — the Conversation's own prefill included, rather than only a pick
+    /// made by hand.
+    ///
+    /// One rather than one per role, because a submit carries one: which role
+    /// it answers for is what [`Self::target`] says, and a form whose target
+    /// moves to a role of the other kind saves that role's instead.
+    #[serde(default)]
+    pub pairing: Option<ProfileChoice>,
+
+    /// And whether the session running now is to be ended where it stands.
+    #[serde(default)]
+    pub interrupt: bool,
+
+    /// The Repos the steer would put into the sandbox, one entry per row
+    /// ticked.
+    #[serde(default)]
+    pub added: Vec<CompanionAddition>,
+
+    /// And the companions already there it would open up, one per row ticked
+    /// up.
+    #[serde(default)]
+    pub upgraded: Vec<CompanionUpgrade>,
+}
+
+/// What became of saving one.
+///
+/// Both refusals are permanent, which is what the pane does with them: a field
+/// told there is nothing left to save into stops saving and says so, rather
+/// than asking again on every pause for as long as the human goes on writing.
+/// The commonest by far is a submit or a cancel from another device landing
+/// mid-edit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum SteerSaved {
+    Saved,
+    NoSuchConversation,
+
+    /// There is no pending steer beside that Conversation any more: it was
+    /// submitted or cancelled from somewhere else.
+    NoPendingSteer,
 }
 
 /// One published share, as the workbench draws it: the link, the gist behind it,
@@ -1826,6 +1952,98 @@ pub struct SteerEvent {
     /// out as every piece of markdown on this wire is — and `None` for every
     /// steer that carried nothing written.
     pub html: Option<String>,
+
+    /// And the rest of the form that press filled: the ticks, the Pairing and
+    /// the companion rows it asked for.
+    ///
+    /// `null` is a steer recorded before any of this was written down, which
+    /// the pane draws with the fields it has — the target and the body — rather
+    /// than as a form whose every box was left empty. See
+    /// [`SteerRecordView`].
+    pub record: Option<SteerRecordView>,
+}
+
+/// Everything a steer settled that its own body cannot hold, as the pane draws
+/// it back.
+///
+/// The form frozen: what the human ticked, what they picked to run the work,
+/// and which repositories they asked for beside it. Read-only from the moment
+/// it lands — the press is over, and what this is, is the record of it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct SteerRecordView {
+    /// Whether the round a steer into Grilling opened was primed with
+    /// everything already answered.
+    pub digest: bool,
+
+    /// And whether the session running at the submit was ended where it stood.
+    pub interrupt: bool,
+
+    /// What the picker was on, which the steer settled as the Conversation's
+    /// own.
+    pub pairing: SteerPairingView,
+
+    /// The Repos the steer put into the sandbox, one entry per row ticked.
+    pub added: Vec<SteerAdditionView>,
+
+    /// And the companions already there it opened up, one per row ticked up.
+    pub upgraded: Vec<SteerUpgradeView>,
+}
+
+/// The Pairing a steer recorded, as it reads now.
+///
+/// Three states rather than a nullable Pairing, because the middle one is a
+/// fact about the record rather than an absence: a steer into Done picked
+/// nothing, and a steer whose account has been removed since picked something
+/// that is gone. A pane that drew them the same would say *nothing picked* over
+/// a choice the human made.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum SteerPairingView {
+    /// Nothing was picked: a steer into Done, where nothing runs and so nothing
+    /// is picked to run it.
+    Nothing,
+
+    /// One was picked and the Profile it named has been removed since, so there
+    /// is no account left to name it by.
+    Removed,
+
+    /// The Profile as it stands and the model picked beside it, which the page
+    /// reads the way its picker reads a row.
+    Under(PairingView),
+}
+
+/// One Repo a steer put into the sandbox, as the record keeps it.
+///
+/// [`CompanionAddition`] said the other way round: that is what a submit asks
+/// for, by the id the page picked it by, and this is what it came to, by the
+/// name a reader wants. A share carries these, so the path is not among them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct SteerAdditionView {
+    /// What the Repo is called.
+    pub repo: String,
+
+    pub mode: CompanionMode,
+
+    /// The branch of that repository's own its checkout came off, or `null` for
+    /// the rule: that repository's default branch as origin held it.
+    pub base_ref: Option<String>,
+
+    /// What a read-write one's branch was called, or empty for *mirroring* —
+    /// the Conversation's own branch name.
+    pub branch: String,
+}
+
+/// And one companion the steer opened up, which carries the one field an
+/// upgrade settles — see [`CompanionUpgrade`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct SteerUpgradeView {
+    pub repo: String,
+
+    /// What the branch cut in it was called, or empty for *mirroring*.
+    pub branch: String,
 }
 
 /// The **Resolve conflicts** press as the page receives it: when, and nothing
@@ -2773,17 +2991,22 @@ pub fn manual_task_event(id: i64, at: String, instruction: &str) -> TimelineEven
 ///
 /// Rendered the way the Brief is, and for the same reason: it is what the human
 /// asked for, written for somebody to read back.
+/// And the rest of the form beside it, where the record has it: what the pane
+/// this Event opens is drawn from, so a steer recorded before any of it was
+/// kept opens on the target and the body alone.
 pub fn steer_event(
     id: i64,
     at: String,
     target: Lifecycle,
     instruction: Option<&str>,
+    record: Option<SteerRecordView>,
 ) -> TimelineEvent {
     TimelineEvent::Steer(SteerEvent {
         id,
         at,
         target,
         html: instruction.map(crate::markdown::to_html),
+        record,
     })
 }
 
@@ -3474,33 +3697,50 @@ pub enum Resolved {
     WorktreeRefused,
 }
 
-/// What clicking Steer found, which is what the modal it opens is drawn from.
+/// What pressing Steer found, which is what the press does with the page next.
 ///
-/// The click is a press of its own rather than the first half of the submit: it
-/// stops the drive before the modal opens, so that nothing new is launched while
-/// the human composes and the world the modal was drawn against is the world the
-/// submit arrives in. Cancel leaves the Conversation stopped with Resume on
-/// offer, which is accepted rather than a bug — the click is what freezes it.
+/// The press is an act of its own rather than the first half of the submit: it
+/// stops the drive and writes the **pending steer** the form is drawn on, so
+/// that nothing new is launched while the human composes and the world the form
+/// was written against is the world the submit arrives in. Cancel leaves the
+/// Conversation stopped with Resume on offer, which is accepted rather than a
+/// bug — the press is what froze it.
+///
+/// **Two words, because the press has two answers and no more.** A first press
+/// and a second are one outcome between them: what the page does with either is
+/// go to the item at the end of the Timeline, so which of them happened is the
+/// server's own business and is said in its log rather than here.
+///
+/// Nor does this say what was running. The form's **Interrupt current task**
+/// tick follows the live Conversation's `working` — the item may sit open for
+/// hours and the session may have been seen out meanwhile — so what the press
+/// found is a fact that stops being true, and nothing draws it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum SteerOpened {
-    /// The drive has stopped — or there was never anything driving it — and the
-    /// modal may open.
-    Opened {
-        /// Whether a session is still running as the modal opens.
-        ///
-        /// What **Interrupt current task** is offered for: the click leaves what
-        /// is running exactly where it is, and the checkbox is the only way to
-        /// end it where it stands. What ends it otherwise is the submit's own
-        /// launch — one Worktree holds one agent, so the session a steer starts
-        /// takes the Worktree from whatever is still in it — and into Done,
-        /// where nothing is launched, nothing ends it at all.
-        ///
-        /// Where nothing is running there is nothing to interrupt, so the
-        /// checkbox is not drawn at all.
-        working: bool,
-    },
+    /// The drive has stopped — or there was never anything driving it — and
+    /// there is a pending steer to go to.
+    Opened,
 
+    NoSuchConversation,
+}
+
+/// What cancelling a pending steer came to.
+///
+/// Cancel is a press now rather than a modal being dismissed: it takes the
+/// pending steer away and leaves the Conversation exactly as the first press
+/// left it — stopped, with Resume on offer. Nothing is posted to the Timeline,
+/// a steer that decided nothing being no Event, and the stop's own Notice
+/// already says the human pressed.
+///
+/// Nothing to cancel is [`Cancelled`] all the same: a cancel landing behind a
+/// submit or another device's cancel has got what it asked for.
+///
+/// [`Cancelled`]: SteerCancelled::Cancelled
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum SteerCancelled {
+    Cancelled,
     NoSuchConversation,
 }
 
@@ -3509,7 +3749,7 @@ pub enum SteerOpened {
 /// Draft and Closed are not among them and never will be: each has a way in of
 /// its own, and a steer is for the states the work is *done in* — the four rungs
 /// of the ladder, and Follow-up beside them, which has no other way in at all. A
-/// target the modal offers is a target something can be set going in, which is
+/// target the form offers is a target something can be set going in, which is
 /// why the two that turn on a pull request are drawn out where there is none: an
 /// instruction is writable anywhere and Done needs nothing, but there is no
 /// wrapping up and no following up of work nobody can see.
@@ -3517,7 +3757,7 @@ pub enum SteerOpened {
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum SteerTarget {
     /// A new round: the work grilled again, from whatever brief the human writes
-    /// in the modal and against as much of the last interview as they ask for.
+    /// on the form and against as much of the last interview as they ask for.
     ///
     /// The target that recreates the most, because it is the one reachable from
     /// the states that hold the least. A Draft has neither branch nor Worktree
@@ -3528,13 +3768,13 @@ pub enum SteerTarget {
 
     /// The work built: either carrying on from what the branch already holds —
     /// the next task of the backlog, the roadmap it has written — or doing what
-    /// the human wrote in the modal.
+    /// the human wrote on the form.
     ///
     /// **The instruction is what makes this a target from anywhere.** Where
     /// something stands, writing nothing carries it on and what is next is the
     /// branch’s own answer, asked exactly as every other turn of the run asks
     /// it — see [`ConversationView::ready_to_continue`], which is the rule the
-    /// modal offers that by. Where nothing stands there is nothing to pick up,
+    /// form offers that by. Where nothing stands there is nothing to pick up,
     /// so an instruction is required and a submit without one is refused by
     /// name — see [`ConversationSteered::NoInstruction`].
     ///
@@ -3580,7 +3820,7 @@ pub enum SteerTarget {
 }
 
 impl SteerTarget {
-    /// Whether work goes on in this state, which is what the rest of the modal's
+    /// Whether work goes on in this state, which is what the rest of the form's
     /// shape follows from.
     ///
     /// A target something runs in needs a Pairing settled and a Worktree to run
@@ -3595,7 +3835,7 @@ impl SteerTarget {
     }
 }
 
-/// What the human settled in the modal: where the Conversation goes, what runs
+/// What the human settled on the form: where the Conversation goes, what runs
 /// the work there, and what to do about anything still running.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
@@ -3621,7 +3861,7 @@ pub struct SteerSubmission {
     /// Absent where the target runs nothing, and absent where the human left
     /// the picker on what the Conversation already had: both are a submit that
     /// changes no Pairing. A Conversation with none fixed yet — a steered draft
-    /// — is why the pick is part of the modal rather than an error path, and one
+    /// — is why the pick is part of the form rather than an error path, and one
     /// that arrives with neither this nor a Pairing of its own is refused by
     /// name.
     #[serde(default)]
@@ -3794,7 +4034,7 @@ pub enum ConversationSteered {
     /// A wrapping Conversation is defined by the one under it — the store writes
     /// the move and the pull-request row as one act — so there is no wrapping up
     /// to steer into here, and nothing for a follow-up to follow up either. The
-    /// modal does not offer either target on such a Conversation; this is the
+    /// form does not offer either target on such a Conversation; this is the
     /// same rule asked again on arrival, the way every named refusal here is.
     NoPullRequest,
 
@@ -3804,8 +4044,8 @@ pub enum ConversationSteered {
     ///
     /// One or the other, never neither. A steer into Implementing either picks
     /// up what stands or does what the human wrote, so a branch where nothing
-    /// stands and a modal where nothing was written is a session with no job.
-    /// The modal requires the instruction on such a Conversation rather than
+    /// stands and a form where nothing was written is a session with no job.
+    /// The form requires the instruction on such a Conversation rather than
     /// offering the submit and refusing it — see
     /// [`ConversationView::ready_to_continue`], which is what it draws that by
     /// — and this is the same rule asked again on arrival.
@@ -3832,12 +4072,12 @@ pub enum ConversationSteered {
     EmptyBrief,
 
     /// Nothing says which account and model the work runs under from here:
-    /// neither a Pairing picked in the modal nor one the Conversation already
+    /// neither a Pairing picked on the form nor one the Conversation already
     /// had.
     NoPairing,
 
     /// The Pairing picked names a Profile that is not there — it was removed
-    /// between the list the modal read and the pick it made from it.
+    /// between the list the form read and the pick it made from it.
     NoSuchProfile,
 
     /// Or a model that Profile does not list, for the same reason.
@@ -3856,8 +4096,8 @@ pub enum ConversationSteered {
     /// it again from the branch.
     WorktreeRefused,
 
-    /// One of the Repos the modal named is not on the registry — taken off it
-    /// between the list the modal read and the submit that named it.
+    /// One of the Repos the form named is not on the registry — taken off it
+    /// between the list the form read and the submit that named it.
     ///
     /// The one companion refusal with no repository in it, because there is no
     /// repository to name: a Repo that is not registered is a row Verkstead

@@ -125,7 +125,7 @@ fn steered(timeline: &[store::TimelineEvent]) -> Option<(usize, &str)> {
         .enumerate()
         .rev()
         .find_map(|(at, event)| match &event.event {
-            store::Event::Steer(store::Lifecycle::FollowUp, Some(brief)) => {
+            store::Event::Steer(store::Lifecycle::FollowUp, Some(brief), _) => {
                 Some((at, brief.as_str()))
             }
             _ => None,

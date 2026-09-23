@@ -100,6 +100,12 @@ export function chosen(pairing: PairingView | null): string {
   return pairing?.model ? `${pairing.profile.id}:${pairing.model}` : "";
 }
 
+/// And one choice off the record, back into the one string a picker carries:
+/// [`choice`] read the other way.
+export function spelled(choice: ProfileChoice): string {
+  return `${choice.profile_id}:${choice.model}`;
+}
+
 /// One picked string, back into the two halves the server is sent.
 export function choice(picked: string): ProfileChoice {
   const colon = picked.indexOf(":");

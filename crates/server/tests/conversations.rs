@@ -24,10 +24,11 @@ use verkstead_render::{
     Adopted, AgentType, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved, CheckRollup,
     CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
     CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationArchived,
-    ConversationClosed, ConversationEntry, ConversationSteered, ConversationUnarchived,
-    ConversationView, GrillingStarted, Lifecycle, Merging, PickedView, PinnedEvent, ProfileChosen,
-    ProfileSaved, Registered, RepoEntry, RepoSwitched, Resolved, RoadmapPane, ShowingArchived,
-    Standing, Started, SteerCompanionRefusal, SteerOpened, TakenUp, TimelineEvent,
+    ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
+    ConversationUnarchived, ConversationView, GrillingStarted, Lifecycle, Merging, PickedView,
+    PinnedEvent, ProfileChosen, ProfileSaved, Registered, RepoEntry, RepoSwitched, Resolved,
+    Resumed, RoadmapPane, ShowingArchived, Standing, Started, SteerCancelled,
+    SteerCompanionRefusal, SteerOpened, SteerPairingView, SteerSaved, TakenUp, TimelineEvent,
 };
 use verkstead_server::{open_database, router_keeping, store};
 
@@ -1297,6 +1298,48 @@ async fn close(app: &Router, id: i64) -> ConversationClosed {
     .await
 }
 
+/// Press Resume, which recomputes what ought to be driving the Conversation and
+/// starts it. Nothing goes with it, as nothing goes with any of these presses.
+async fn resume(app: &Router, id: i64) -> Resumed {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/resume"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
+/// And the two stops beside it: the one that sees a session out, and the one
+/// that ends it where it stands.
+async fn stop(app: &Router, id: i64) -> ConversationStopped {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/stop"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
+async fn force_stop(app: &Router, id: i64) -> ConversationStopped {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/force-stop"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
+/// And remove an Agent Profile, whoever had chosen it — which is how a
+/// Conversation comes to be one Resume refuses by name.
+async fn remove_profile(app: &Router, profile_id: i64) -> verkstead_render::ProfileDeleted {
+    post(
+        app,
+        &format!("/api/ui/profiles/{profile_id}/delete"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
 /// And the row that does both at once, which says as little as either of them.
 async fn close_and_archive(app: &Router, id: i64) -> ConversationClosed {
     post(
@@ -1362,10 +1405,11 @@ async fn show_archived(app: &Router, showing: bool) {
     assert_eq!(status, StatusCode::NO_CONTENT, "the toggle failed: {body}");
 }
 
-/// Click Steer, which is the press that stops the drive and opens the modal.
+/// Press Steer, which stops the drive and opens the pending steer the form is
+/// written on.
 ///
 /// Nothing goes with it, as nothing goes with either stop: which Conversation it
-/// is is the whole of what a click says.
+/// is is the whole of what a press says.
 async fn steer(app: &Router, id: i64) -> SteerOpened {
     post(
         app,
@@ -1375,7 +1419,27 @@ async fn steer(app: &Router, id: i64) -> SteerOpened {
     .await
 }
 
-/// And submit the modal it opened: where the work goes, and what to do about
+/// Keep the form as it stands, which is what the pane posts as it is typed.
+///
+/// The whole form as the body rather than the field that moved: a row holding
+/// the target of one keystroke beside the instruction of another would be a
+/// form that was never on anybody's screen.
+async fn save_steer(app: &Router, id: i64, form: &serde_json::Value) -> SteerSaved {
+    post(app, &format!("/api/ui/conversations/{id}/steer/save"), form).await
+}
+
+/// And cancel it, which takes the pending steer away and leaves the
+/// Conversation stopped. No body either, for the same reason.
+async fn cancel_steer(app: &Router, id: i64) -> SteerCancelled {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/steer/cancel"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
+/// And submit the form it opened: where the work goes, and what to do about
 /// anything still running.
 async fn steer_into(app: &Router, id: i64, target: &str, interrupt: bool) -> ConversationSteered {
     post(
@@ -2596,49 +2660,582 @@ async fn starting_with_no_git_author_is_refused_by_name() {
         worktrees(&repo),
     );
 }
-
-/// Clicking Steer stops the drive, and cancelling leaves it stopped.
+/// Pressing Steer stops the drive, writes the pending steer, and leaves the
+/// Conversation stopped for as long as the form stands.
 ///
-/// The click is a press of its own rather than the first half of the submit:
-/// nothing new launches while the human composes, so the world the modal was
-/// drawn against is the world the submit arrives in. Cancel is then no press at
-/// all — the Conversation stays where the click left it, with Resume drawn on it,
-/// which is accepted rather than a bug.
+/// The press is an act of its own rather than the first half of the submit:
+/// nothing new launches while the human composes, so the world the form is
+/// written against is the world the submit arrives in. What it leaves behind is
+/// the pending steer — the item at the end of the Timeline, whose details pane
+/// is the form — and a Conversation with Resume drawn on it.
 ///
-/// Nothing is running in these fixtures, so the click stops the run where it
-/// stands and says as much: what **Interrupt current task** is offered against is
-/// a session, and there is none.
+/// Nothing is running in these fixtures, so the press stops the run where it
+/// stands and says as much: what **Interrupt current task** is offered against
+/// is a session, and there is none.
 #[tokio::test]
-async fn clicking_steer_stops_the_drive_and_leaves_it_stopped_when_nothing_follows() {
+async fn pressing_steer_stops_the_drive_and_opens_a_pending_steer() {
     let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = ready(&app, elsewhere.path(), repo_id).await;
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
     assert_eq!(
         steer(&app, id).await,
-        SteerOpened::Opened { working: false },
-        "the modal opens with nothing to interrupt behind it",
+        SteerOpened::Opened,
+        "the form opens with nothing to interrupt behind it",
     );
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.state, Lifecycle::Grilling, "the click moves nothing");
+    assert_eq!(view.state, Lifecycle::Grilling, "the press moves nothing");
     assert!(
         view.blocked_on.is_some(),
         "the drive has stopped, and the Notice saying so is what the badge points at",
     );
     assert!(
         view.ready_to_resume,
-        "so the one press that undoes a click nobody followed up is drawn on it",
+        "so the one press that undoes a press nobody followed up is drawn on it",
     );
     assert!(
         !view.ready_to_stop,
-        "and there is nothing left to stop: the click already did",
+        "and there is nothing left to stop: the press already did",
     );
     assert_eq!(
         steered(&view),
         [("moved", Lifecycle::Grilling)],
         "and nothing was steered, so nothing on the record says it was",
+    );
+
+    let pending = view
+        .pending_steer
+        .expect("the press wrote the form's own row");
+
+    assert!(!pending.at.is_empty(), "it says when the press was made");
+    assert_eq!(
+        pending.form,
+        verkstead_render::SteerForm::default(),
+        "and the form is empty: nothing picked, nothing written, nothing ticked",
+    );
+}
+
+/// A second press makes nothing and reports the one there is.
+///
+/// A Conversation already carrying a half-written form is not one to start
+/// another beside, so the press says where that form is and the page goes to
+/// it. Nothing is stopped a second time either — there is nothing left to stop
+/// — and the row is left exactly as it stands, down to when it was opened.
+#[tokio::test]
+async fn a_second_press_on_steer_finds_the_one_there_is() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
+
+    let opened_at = opened(&app, id).await.pending_steer.unwrap().at;
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened,
+        "the second press answers as the first did: there is a form to go to",
+    );
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(
+        view.pending_steer
+            .as_ref()
+            .map(|pending| pending.at.clone()),
+        Some(opened_at),
+        "and it is the same row, rather than a second one written over it",
+    );
+    assert_eq!(
+        steered(&view),
+        [("moved", Lifecycle::Grilling)],
+        "neither press put anything on the record",
+    );
+}
+
+/// Cancel takes the pending steer away and leaves the Conversation stopped.
+///
+/// The press is what froze it, so unfreezing is Resume's to do: Cancel decides
+/// nothing about the work, and posts nothing to the Timeline — a steer that
+/// decided nothing is no Event, and the stop's own Notice already says a human
+/// pressed.
+///
+/// A second cancel is the same answer. One landing behind a submit or behind
+/// another device's cancel has got what it asked for.
+#[tokio::test]
+async fn cancelling_takes_the_pending_steer_away_and_leaves_it_stopped() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
+    assert_eq!(cancel_steer(&app, id).await, SteerCancelled::Cancelled);
+
+    let view = opened(&app, id).await;
+
+    assert!(
+        view.pending_steer.is_none(),
+        "the form is gone, so nothing is drawn at the end of the Timeline",
+    );
+    assert_eq!(view.state, Lifecycle::Grilling, "and nothing moved");
+    assert!(
+        view.ready_to_resume,
+        "the Conversation is left stopped, with Resume on offer",
+    );
+    assert_eq!(
+        steered(&view),
+        [("moved", Lifecycle::Grilling)],
+        "and a steer that decided nothing is no Event",
+    );
+
+    assert_eq!(
+        cancel_steer(&app, id).await,
+        SteerCancelled::Cancelled,
+        "a cancel with nothing to cancel has got what it asked for",
+    );
+    assert_eq!(
+        cancel_steer(&app, 404).await,
+        SteerCancelled::NoSuchConversation,
+        "and a Conversation that is not there is refused by name",
+    );
+}
+
+/// And the submit takes it away with the record it became: the Steer and the
+/// Moved line land, and the form they were filled in on is gone from the view.
+#[tokio::test]
+async fn submitting_takes_the_pending_steer_away_with_the_record() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
+    assert_eq!(
+        steer_into(&app, id, "Done", false).await,
+        ConversationSteered::Steered,
+    );
+
+    let view = opened(&app, id).await;
+
+    assert!(
+        view.pending_steer.is_none(),
+        "the form is the record now, so there is nothing left at the end of the Timeline",
+    );
+    assert_eq!(
+        steered(&view).last(),
+        Some(&("moved", Lifecycle::Done)),
+        "and the pair the steer leaves is on the record",
+    );
+}
+
+/// And what it became is the whole form: the ticks, the Pairing picked and the
+/// companion rows asked for, beside the target and body the Event has always
+/// carried.
+///
+/// Which is what makes the pane a steer opens the form read back rather than a
+/// sentence about it. Read off the Conversation's own view, because that is
+/// where the page reads it — the Profile as a row, named the way the picker
+/// names it, and each repository by name.
+#[tokio::test]
+async fn the_record_a_submit_leaves_is_the_whole_form() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let askance = second_repo(&app, elsewhere.path(), "askance").await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    let picked = profile(&app, elsewhere.path(), "steering").await;
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
+
+    let steered: ConversationSteered = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/steer/submit"),
+        &serde_json::json!({
+            "target": "Grilling",
+            "interrupt": true,
+            "digest": true,
+            "pairing": { "profile_id": picked, "model": "claude-opus-5" },
+            "added": [alongside(askance, "ReadOnly")],
+            "upgraded": [],
+        }),
+    )
+    .await;
+
+    assert_eq!(steered, ConversationSteered::Steered);
+
+    let view = opened(&app, id).await;
+    let record = view
+        .timeline
+        .iter()
+        .find_map(|event| match event {
+            TimelineEvent::Steer(steer) => steer.record.clone(),
+            _ => None,
+        })
+        .expect("the Steer Event carries the form it was made with");
+
+    assert!(record.digest, "the tick that primes the round it opened");
+    assert!(record.interrupt);
+
+    let SteerPairingView::Under(paired) = record.pairing else {
+        panic!("the account the picker was on is on the record");
+    };
+
+    assert_eq!(paired.profile.id, picked);
+    assert_eq!(paired.model.as_deref(), Some("claude-opus-5"));
+
+    assert_eq!(record.added.len(), 1);
+    assert_eq!(record.added[0].repo, "askance");
+    assert_eq!(record.added[0].mode, CompanionMode::ReadOnly);
+    assert_eq!(
+        record.added[0].base_ref, None,
+        "the rule the row was left on: that repository's own default branch",
+    );
+
+    assert!(record.upgraded.is_empty(), "it opened nothing up");
+}
+
+/// Resume is the opposite decision, so a press that starts something takes the
+/// pending steer with it.
+///
+/// The form was written against a run that had stopped, and this is the run
+/// starting again: a form left standing under it would be written against a
+/// world that has gone, and the item drawn for it would go on saying the drive
+/// had stopped while a session worked in the Worktree. Somebody who wants both
+/// cancels the steer.
+#[tokio::test]
+async fn resuming_discards_the_pending_steer_it_starts_over() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
+    assert_eq!(resume(&app, id).await, Resumed::Resumed);
+
+    let view = opened(&app, id).await;
+
+    assert!(
+        view.pending_steer.is_none(),
+        "the form goes with the decision that replaced it",
+    );
+    assert!(
+        view.blocked_on.is_none(),
+        "and the stop the press made goes too, which is what Resume is",
+    );
+    assert!(
+        !view.waiting,
+        "so nothing about it is waiting on the human any more",
+    );
+    assert_eq!(
+        steered(&view),
+        [("moved", Lifecycle::Grilling)],
+        "and a steer nobody submitted is still no Event",
+    );
+}
+
+/// And a Resume refused by name leaves it exactly where it stands.
+///
+/// The press decided nothing, so neither did it decide anything about the form:
+/// a human who is told the account their work grills under has gone is being
+/// pointed back at the steer, and a steer thrown away on the way would be the
+/// workbench taking the answer with the question.
+#[tokio::test]
+async fn a_refused_resume_leaves_the_pending_steer() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+
+    let grilling = profile(&app, elsewhere.path(), "fable").await;
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+    choose(&app, id, "grilling", grilling).await;
+    choose(&app, id, "implementation", implementation).await;
+    choose(&app, id, "review", review).await;
+    assert_eq!(
+        write_brief(&app, id, "# Rate limiting\n\nThe API has none.\n").await,
+        BriefSaved::Saved
+    );
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
+    assert_eq!(
+        save_steer(
+            &app,
+            id,
+            &serde_json::json!({
+                "target": "Implementing",
+                "instruction": "Take the modal out",
+                "digest": false,
+                "interrupt": false,
+                "added": [],
+                "upgraded": [],
+            }),
+        )
+        .await,
+        SteerSaved::Saved,
+    );
+
+    // The account this Conversation grills under, taken away: the one thing
+    // that makes Resume refuse a Conversation there is otherwise nothing wrong
+    // with, and the refusal that sends the human back to the steer.
+    assert_eq!(
+        remove_profile(&app, grilling).await,
+        verkstead_render::ProfileDeleted::Removed,
+    );
+
+    assert_eq!(resume(&app, id).await, Resumed::NoGrillingPairing);
+
+    let view = opened(&app, id).await;
+    let pending = view
+        .pending_steer
+        .expect("the refusal left the form where it stands");
+
+    assert_eq!(
+        pending.form.instruction.as_deref(),
+        Some("Take the modal out"),
+        "down to what had been written into it",
+    );
+    assert!(
+        view.blocked_on.is_some(),
+        "and the Conversation is still stopped, nothing having changed",
+    );
+}
+
+/// Close takes the pending steer away in the act that closes the Conversation.
+///
+/// Closing takes away every session there will ever be, the way it shuts every
+/// Question Set it finds open: a form asking where the work goes next is a form
+/// about work that is over.
+#[tokio::test]
+async fn closing_takes_the_pending_steer_away() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
+    assert_eq!(close(&app, id).await, ConversationClosed::Closed);
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Closed);
+    assert!(
+        view.pending_steer.is_none(),
+        "the form is gone with the work it was about",
+    );
+    assert!(!view.waiting, "so nothing is left waiting on anybody",);
+}
+
+/// And the two stops leave it exactly where it stands.
+///
+/// Both are about the run rather than about the move: the press that opened the
+/// form already stopped the drive, and neither of these decides anything about
+/// where the work is headed. A Stop that took the form with it would be a
+/// second press undoing the first one's work.
+#[tokio::test]
+async fn the_stops_leave_the_pending_steer_alone() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
+
+    // Already stopped by the press, which is what both of these answer here —
+    // and the point: neither press is a second decision about the form.
+    assert_eq!(stop(&app, id).await, ConversationStopped::AlreadyStopped);
+    assert!(
+        opened(&app, id).await.pending_steer.is_some(),
+        "Stop is about the run, so the form is left where it stands",
+    );
+
+    assert_eq!(
+        force_stop(&app, id).await,
+        ConversationStopped::AlreadyStopped
+    );
+    assert!(
+        opened(&app, id).await.pending_steer.is_some(),
+        "and so is Force stop",
+    );
+}
+
+/// A Conversation with a pending steer waits on the human, which is the one
+/// rule the sidebar's disc and the status button's word are both read from.
+///
+/// The press stopped the drive and nothing starts again until they submit or
+/// cancel, so the Conversation is theirs to finish. The stop it made is their
+/// own press and says nothing in the marks by itself — so without this a form
+/// left half written would read as quiet from the sidebar, which is the one
+/// place somebody who left it yesterday will look.
+#[tokio::test]
+async fn a_pending_steer_reads_as_waiting_on_the_human() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let row = |rows: Vec<ConversationEntry>| {
+        rows.into_iter()
+            .find(|row| row.id == id)
+            .expect("the Conversation is on the sidebar's list")
+    };
+
+    assert!(
+        !row(sidebar(&app).await).waiting,
+        "nothing is waiting on anybody before the press",
+    );
+
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
+
+    let view = opened(&app, id).await;
+
+    assert!(
+        view.waiting,
+        "the form is theirs to finish, so the page says so",
+    );
+    assert!(
+        view.stopped_by_hand,
+        "and the stop under it is their own press rather than a mark of its own",
+    );
+    assert!(
+        row(sidebar(&app).await).waiting,
+        "and the sidebar's row carries the disc, the two being one rule",
+    );
+
+    assert_eq!(cancel_steer(&app, id).await, SteerCancelled::Cancelled);
+    assert!(
+        !opened(&app, id).await.waiting,
+        "and it goes with the form rather than outliving it",
+    );
+}
+
+/// The form is written onto the pending steer and read back off the
+/// Conversation, whole: the pane is prefilled from it, so a human who left the
+/// item half written finds it as they left it on whatever device they pick up.
+///
+/// Every field, because a save carries every field. What is asked here is that
+/// none of them is dropped on the way through — the target's two vocabularies,
+/// the ticks, the Pairing's two halves and both halves of the companion
+/// section.
+#[tokio::test]
+async fn the_form_is_saved_onto_the_pending_steer_and_read_back() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    // A second repository, so that the companion rows name something other than
+    // the Conversation's own: the save writes what it is told, and which repos a
+    // steer could actually take is the submit's to refuse.
+    let askance = repository(elsewhere.path().join("askance"));
+    let registered: Registered = post(
+        &app,
+        "/api/ui/repos",
+        &serde_json::json!({ "path": askance }),
+    )
+    .await;
+    assert!(matches!(registered, Registered::Added(_)));
+
+    let alongside_id = get::<Vec<RepoEntry>>(&app, "/api/ui/repos")
+        .await
+        .into_iter()
+        .find(|entry| entry.name == "askance")
+        .expect("both are registered")
+        .id;
+
+    let running = profile(&app, elsewhere.path(), "sonnet").await;
+
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
+
+    let form = serde_json::json!({
+        "target": "Implementing",
+        "brief": "# Retries\n",
+        "digest": true,
+        "instruction": "Rebase this onto main.",
+        "follow_up": "Does it count the 429s it sends?",
+        "pairing": { "profile_id": running, "model": "claude-opus-5" },
+        "interrupt": true,
+        "added": [{
+            "repo_id": alongside_id,
+            "mode": "ReadWrite",
+            "base_ref": "trunk",
+            "branch": "alongside",
+        }],
+        "upgraded": [{ "repo_id": repo_id, "branch": "opened" }],
+    });
+
+    assert_eq!(save_steer(&app, id, &form).await, SteerSaved::Saved);
+
+    let pending = opened(&app, id)
+        .await
+        .pending_steer
+        .expect("the form is still being written");
+
+    assert_eq!(
+        serde_json::to_value(&pending.form).unwrap(),
+        form,
+        "the form comes back off the Conversation as it was saved",
+    );
+
+    // And a second save is the whole form again rather than an edit of the row:
+    // what is unticked has to leave, and there is no second call to notice it
+    // went.
+    let emptied = serde_json::json!({
+        "target": serde_json::Value::Null,
+        "brief": serde_json::Value::Null,
+        "digest": false,
+        "instruction": serde_json::Value::Null,
+        "follow_up": serde_json::Value::Null,
+        "pairing": serde_json::Value::Null,
+        "interrupt": false,
+        "added": [],
+        "upgraded": [],
+    });
+
+    assert_eq!(save_steer(&app, id, &emptied).await, SteerSaved::Saved);
+
+    let pending = opened(&app, id).await.pending_steer.unwrap();
+
+    assert_eq!(
+        serde_json::to_value(&pending.form).unwrap(),
+        emptied,
+        "a form emptied is a form with nothing on it, rows and all",
+    );
+    assert!(
+        !pending.at.is_empty(),
+        "and when the press was made is not the form's to move",
+    );
+}
+
+/// A save with nothing to save into is refused by name, and the field stops for
+/// good.
+///
+/// Two refusals rather than one, because what the human should go and look at
+/// differs: a Conversation that is gone, and a pending steer somebody submitted
+/// or cancelled from another device — which is much the commoner of the two, and
+/// is the one thing that can happen to a form sitting open for an afternoon.
+#[tokio::test]
+async fn a_save_with_no_pending_steer_behind_it_is_refused_by_name() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let form = serde_json::json!({ "target": "Done" });
+
+    assert_eq!(
+        save_steer(&app, id, &form).await,
+        SteerSaved::NoPendingSteer,
+        "nobody has pressed Steer, so there is no form to save",
+    );
+    assert_eq!(
+        save_steer(&app, 404, &form).await,
+        SteerSaved::NoSuchConversation,
+    );
+
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
+    assert_eq!(save_steer(&app, id, &form).await, SteerSaved::Saved);
+
+    // And the cancel takes the row away, which is what a second device doing it
+    // looks like from here: the next save has nothing to land on.
+    assert_eq!(cancel_steer(&app, id).await, SteerCancelled::Cancelled);
+    assert_eq!(
+        save_steer(&app, id, &form).await,
+        SteerSaved::NoPendingSteer,
     );
 }
 
@@ -2655,10 +3252,7 @@ async fn steering_into_done_moves_it_and_starts_nothing() {
     let id = ready(&app, elsewhere.path(), repo_id).await;
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert_eq!(
         steer_into(&app, id, "Done", false).await,
         ConversationSteered::Steered,
@@ -2695,7 +3289,7 @@ async fn steering_into_done_moves_it_and_starts_nothing() {
 /// from every other move: a draft nothing has ever run in is somewhere to steer
 /// from as much as a run in flight.
 ///
-/// The click finds nothing to stop there and opens the modal anyway. Nothing was
+/// The click finds nothing to stop there and opens the form anyway. Nothing was
 /// driving a draft, so there is no drive to stop and nothing about that is a
 /// refusal.
 #[tokio::test]
@@ -2703,10 +3297,7 @@ async fn a_draft_is_somewhere_to_steer_from_too() {
     let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = ready(&app, elsewhere.path(), repo_id).await;
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
 
     let view = opened(&app, id).await;
     assert_eq!(view.state, Lifecycle::Draft);
@@ -2737,7 +3328,7 @@ async fn a_draft_is_somewhere_to_steer_from_too() {
 /// the moment it resolves to a commit — the same rule
 /// [`starting_a_grilling_makes_the_branch_and_the_worktree`] asks of the button.
 ///
-/// And the round it opens is opened with the brief they typed in the modal: a
+/// And the round it opens is opened with the brief they typed on the form: a
 /// second Brief beside the draft's own, frozen where it lands, because the round
 /// it belongs to has no Draft to leave.
 #[tokio::test]
@@ -2747,10 +3338,7 @@ async fn steering_a_draft_into_grilling_makes_its_branch_and_worktree() {
 
     let tip = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert_eq!(
         steer_grilling(&app, id, Some("# Retries\n\nThe backoff is wrong.\n")).await,
         ConversationSteered::Steered,
@@ -2821,10 +3409,7 @@ async fn steering_into_grilling_without_a_brief_writes_none() {
     let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = ready(&app, elsewhere.path(), repo_id).await;
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert_eq!(
         steer_grilling(&app, id, None).await,
         ConversationSteered::Steered,
@@ -2868,10 +3453,7 @@ async fn steering_into_grilling_with_no_brief_anywhere_is_refused_by_name() {
     choose(&app, id, "implementation", implementation).await;
     choose(&app, id, "review", review).await;
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert_eq!(
         steer_grilling(&app, id, None).await,
         ConversationSteered::EmptyBrief,
@@ -2886,7 +3468,7 @@ async fn steering_into_grilling_with_no_brief_anywhere_is_refused_by_name() {
         "and nothing on the record says a steer happened",
     );
 
-    // The same steer with the round's Brief written in the modal, which is what
+    // The same steer with the round's Brief written on the form, which is what
     // that field is for on a Conversation holding none.
     assert_eq!(
         steer_grilling(&app, id, Some("# Retries\n\nThe backoff is wrong.\n")).await,
@@ -2911,7 +3493,7 @@ async fn steering_into_grilling_with_no_brief_anywhere_is_refused_by_name() {
 ///
 /// The steer is refused with nothing picked, because a Conversation with no
 /// account settled is one nothing could be started in — and that refusal is the
-/// modal asking for the account, so the same submit carrying one goes through
+/// form asking for the account, so the same submit carrying one goes through
 /// and the work runs under it. Nothing else about the Conversation moved: it is
 /// where it was, on the branch it was on, with the round it was in.
 #[tokio::test]
@@ -2941,14 +3523,11 @@ async fn a_conversation_whose_profile_was_removed_is_steered_back_onto_another()
         "the role that named it has nothing settled for it any more",
     );
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert_eq!(
         steer_grilling(&app, id, None).await,
         ConversationSteered::NoPairing,
-        "a state a session runs in needs one, and the modal is where it is picked",
+        "a state a session runs in needs one, and the form is where it is picked",
     );
 
     let rescue = profile(&app, elsewhere.path(), "rescue").await;
@@ -2978,7 +3557,7 @@ async fn a_conversation_whose_profile_was_removed_is_steered_back_onto_another()
     assert_eq!(view.state, Lifecycle::Grilling);
 }
 
-/// The Pairing picked in the modal for a steer into Grilling is the *grilling*
+/// The Pairing picked on the form for a steer into Grilling is the *grilling*
 /// one, and it is recorded as the Conversation's own.
 ///
 /// Which role follows the target, an interview running under the one and
@@ -2995,10 +3574,7 @@ async fn steering_into_grilling_settles_the_grilling_pairing() {
         .implementation_pairing
         .expect("the fixture picks one per role");
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
 
     let steered: ConversationSteered = post(
         &app,
@@ -3081,10 +3657,7 @@ async fn steering_into_wrapping_leaves_a_review_account_the_human_chose_alone() 
         .cloned()
         .expect("and one of them is an account of its own for the review");
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
 
     let steered: ConversationSteered = post(
         &app,
@@ -3148,10 +3721,7 @@ async fn steering_into_wrapping_fills_a_review_nobody_picked_an_account_for() {
     .await;
     choose(&app, id, "implementation", building).await;
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
 
     let steered: ConversationSteered = post(
         &app,
@@ -3194,10 +3764,7 @@ async fn steering_into_wrapping_fills_a_review_nobody_picked_an_account_for() {
 
     pool.close().await;
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
 
     let steered: ConversationSteered = post(
         &app,
@@ -3224,7 +3791,7 @@ async fn steering_into_wrapping_fills_a_review_nobody_picked_an_account_for() {
 }
 
 /// And a Conversation whose human picked *No review* keeps that through a steer
-/// into Wrapping: the modal's one pick is what the sessions run under, and a
+/// into Wrapping: the form's one pick is what the sessions run under, and a
 /// role that runs none is not among them.
 ///
 /// It is also settled, so the steer is not refused for a Pairing that is missing
@@ -3262,10 +3829,7 @@ async fn steering_into_wrapping_leaves_a_conversation_with_no_review_unreviewed(
 
     let picked = profile(&app, elsewhere.path(), "steering").await;
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
 
     let steered: ConversationSteered = post(
         &app,
@@ -3300,7 +3864,7 @@ async fn steering_into_wrapping_leaves_a_conversation_with_no_review_unreviewed(
 ///
 /// What stands is a backlog with work left in it or a roadmap the branch has
 /// written, and a Conversation still being grilled has neither: the session
-/// that would write one is the session the click just stopped. So the modal
+/// that would write one is the session the click just stopped. So the form
 /// requires the instruction there — [`ConversationView::ready_to_continue`] is
 /// what it reads that off — and the submit says the same thing again, this
 /// being the press that could have been made against a page read a moment
@@ -3317,14 +3881,11 @@ async fn steering_into_implementing_with_nothing_to_do_is_refused_by_name() {
 
     assert!(
         !opened(&app, id).await.ready_to_continue,
-        "there is no backlog and no roadmap on the branch, so the modal has \
+        "there is no backlog and no roadmap on the branch, so the form has \
          nothing to offer carrying on",
     );
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert_eq!(
         steer_into(&app, id, "Implementing", false).await,
         ConversationSteered::NoInstruction,
@@ -3369,10 +3930,7 @@ async fn steering_into_implementing_with_an_instruction_records_what_was_asked_f
     let id = ready(&app, elsewhere.path(), repo_id).await;
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert_eq!(
         steer_instructed(&app, id, "Rebase this onto `main`.\n").await,
         ConversationSteered::Steered,
@@ -3434,10 +3992,7 @@ async fn steering_a_closed_conversation_into_grilling_gives_it_a_worktree_back()
     assert!(!worked_in.exists(), "closing took the directory away");
     assert!(opened(&app, id).await.worktree.is_none());
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert_eq!(
         steer_grilling(&app, id, Some("# Rate limiting, per account\n")).await,
         ConversationSteered::Steered,
@@ -3450,7 +4005,7 @@ async fn steering_a_closed_conversation_into_grilling_gives_it_a_worktree_back()
 
     // And a round of its own, which is the whole of what a closed Conversation
     // is steered back in for: the Brief the first round was built from stays on
-    // the record, and the one written in the modal is frozen where it landed.
+    // the record, and the one written on the form is frozen where it landed.
     let briefs = briefs(&view);
     assert_eq!(
         briefs.len(),
@@ -3500,10 +4055,7 @@ async fn a_finished_conversation_steered_into_grilling_opens_a_second_round() {
     let id = ready(&app, elsewhere.path(), repo_id).await;
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert_eq!(
         steer_into(&app, id, "Done", false).await,
         ConversationSteered::Steered,
@@ -3515,10 +4067,7 @@ async fn a_finished_conversation_steered_into_grilling_opens_a_second_round() {
         .expect("Done keeps one")
         .path;
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert_eq!(
         steer_grilling(&app, id, Some("# Rate limiting, per account\n")).await,
         ConversationSteered::Steered,
@@ -3600,19 +4149,13 @@ async fn steering_a_finished_conversation_into_follow_up_records_the_brief() {
     // Finished with, which is where a follow-up is steered from in the ordinary
     // case: the wrap-up settled, the human read the pull request, and there is
     // one more thing to ask about it.
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert_eq!(
         steer_into(&app, id, "Done", false).await,
         ConversationSteered::Steered,
     );
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert_eq!(
         steer_following_up(&app, id, Some("Does it count the `429`s it sends?\n")).await,
         ConversationSteered::Steered,
@@ -3674,10 +4217,7 @@ async fn steering_into_follow_up_with_nothing_to_follow_up_is_refused_by_name() 
     let (elsewhere, dir, app, _repo, repo_id) = workbench().await;
     let id = grilling(&app, elsewhere.path(), repo_id).await;
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert_eq!(
         steer_following_up(&app, id, Some("Does it count the 429s?\n")).await,
         ConversationSteered::NoPullRequest,
@@ -3734,7 +4274,7 @@ async fn steering_into_follow_up_with_nothing_to_follow_up_is_refused_by_name() 
 ///
 /// A wrapping Conversation is defined by the pull request under it — the record
 /// writes the move and the pull-request row as one act — so there would be
-/// nothing to wrap up here. The modal does not offer the target on such a
+/// nothing to wrap up here. The form does not offer the target on such a
 /// Conversation; this is that same rule asked again on arrival, the way every
 /// named refusal here is.
 ///
@@ -3746,10 +4286,7 @@ async fn steering_into_wrapping_without_a_pull_request_is_refused_by_name() {
     let id = ready(&app, elsewhere.path(), repo_id).await;
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert_eq!(
         steer_into(&app, id, "Wrapping", false).await,
         ConversationSteered::NoPullRequest,
@@ -3782,10 +4319,7 @@ async fn a_draft_has_no_pull_request_to_be_steered_onto() {
     let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
     let id = ready(&app, elsewhere.path(), repo_id).await;
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert_eq!(
         steer_into(&app, id, "Wrapping", false).await,
         ConversationSteered::NoPullRequest,
@@ -5031,11 +5565,8 @@ async fn a_closed_conversation_carries_neither_waiting_mark() {
     let id = grilling(&app, elsewhere.path(), repo_id).await;
 
     // The click is the shortest way to a stop written down: it stops the drive
-    // and opens the modal, and nothing here submits one.
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    // and opens the form, and nothing here submits one.
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert!(
         opened(&app, id).await.blocked_on.is_some(),
         "the drive has stopped, and the header says so until it is closed",
@@ -5106,10 +5637,7 @@ async fn a_done_conversation_with_an_open_set_is_still_waiting() {
 
     ask(&app, id, ORDINARY).await;
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert_eq!(
         steer_into(&app, id, "Done", false).await,
         ConversationSteered::Steered,
@@ -6545,10 +7073,10 @@ fn notices(view: &ConversationView) -> Vec<String> {
         .collect()
 }
 
-/// Submit the modal with a companion section filled in: where the work goes, and
+/// Submit the form with a companion section filled in: where the work goes, and
 /// which registered Repos go into the sandbox with it.
 ///
-/// The rows as the modal sends them — the Repo, how far in, the branch its
+/// The rows as the form sends them — the Repo, how far in, the branch its
 /// checkout comes off and what a read-write one's branch is called — because
 /// that is the whole of what a setup row settles and this is the one other
 /// moment it can be settled.
@@ -6565,7 +7093,7 @@ async fn steer_alongside(
 /// being opened up, and what the branch cut in each is called.
 ///
 /// No mode on those rows, because there is one direction: read-only is not
-/// something the modal can ask for, so a downgrade cannot be spelled at all.
+/// something the form can ask for, so a downgrade cannot be spelled at all.
 async fn steer_opening(
     app: &Router,
     id: i64,
@@ -6575,7 +7103,7 @@ async fn steer_opening(
     steer_companions(app, id, target, serde_json::json!([]), upgraded).await
 }
 
-/// Both halves at once, which is what the modal always sends.
+/// Both halves at once, which is what the form always sends.
 async fn steer_companions(
     app: &Router,
     id: i64,
@@ -6630,10 +7158,7 @@ async fn steering_puts_a_companion_in_and_checks_it_out() {
     assert_eq!(grill(&app, id).await, GrillingStarted::Started);
     assert!(companions(&app, id).await.is_empty());
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert_eq!(
         steer_alongside(
             &app,
@@ -6723,7 +7248,7 @@ async fn steering_puts_a_companion_in_and_checks_it_out() {
 /// submit carried.
 ///
 /// Nothing runs there, so there is no sandbox to set up and nothing a companion
-/// could be for — which is why the modal draws no section on that target. A
+/// could be for — which is why the form draws no section on that target. A
 /// submit carrying one anyway is a page sending a field it should not have
 /// drawn, and it is answered the way a brief beside a wrap-up is: ignored rather
 /// than obeyed.
@@ -6739,10 +7264,7 @@ async fn steering_into_done_puts_no_companion_in() {
 
     let detached = checked_out(&opened(&app, id).await, "askance");
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert_eq!(
         steer_companions(
             &app,
@@ -6806,7 +7328,7 @@ async fn a_companion_a_steer_cannot_deliver_refuses_it_by_name() {
 
                 alongside(joining, "ReadOnly")
             }
-            // A base picked in the modal that the repository does not have.
+            // A base picked on the form that the repository does not have.
             SteerCompanionRefusal::NoBaseCommit => serde_json::json!({
                 "repo_id": joining,
                 "mode": "ReadOnly",
@@ -6821,10 +7343,7 @@ async fn a_companion_a_steer_cannot_deliver_refuses_it_by_name() {
             }
         };
 
-        assert_eq!(
-            steer(&app, id).await,
-            SteerOpened::Opened { working: false }
-        );
+        assert_eq!(steer(&app, id).await, SteerOpened::Opened);
         assert_eq!(
             steer_alongside(&app, id, "Grilling", serde_json::json!([row])).await,
             ConversationSteered::Companion {
@@ -6886,10 +7405,9 @@ async fn a_repo_a_steer_cannot_put_in_is_refused_by_name() {
     ];
 
     for (repo, refusal) in asked {
-        assert_eq!(
-            steer(&app, id).await,
-            SteerOpened::Opened { working: false }
-        );
+        // The form stands through a refused submit, so every press after the
+        // first finds the one it left.
+        assert!(matches!(steer(&app, id).await, SteerOpened::Opened));
         assert_eq!(
             steer_alongside(
                 &app,
@@ -6952,10 +7470,7 @@ async fn steering_opens_a_read_only_companion_up() {
     // from is here, and not where the detached checkouts were left.
     let moved_on = [commit(&askance, "halves.md"), commit(&granit, "halves.md")];
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert_eq!(
         steer_opening(
             &app,
@@ -7104,9 +7619,11 @@ async fn an_upgrade_git_will_not_make_refuses_the_steer_by_name() {
             }
         }
 
-        assert_eq!(
-            steer(&app, id).await,
-            SteerOpened::Opened { working: false }
+        // The form stands through a refused submit, so every press after the
+        // first finds the one it left — which is what `already` is for.
+        assert!(
+            matches!(steer(&app, id).await, SteerOpened::Opened),
+            "the press stops a drive that is not running and opens the form",
         );
         assert_eq!(
             steer_opening(&app, id, "Grilling", serde_json::json!([opening(reading)])).await,
@@ -7225,10 +7742,9 @@ async fn no_downgrade_and_no_removal_is_obeyed() {
     ];
 
     for (added, upgraded, refusal) in asked {
-        assert_eq!(
-            steer(&app, id).await,
-            SteerOpened::Opened { working: false }
-        );
+        // The form stands through a refused submit, so every press after the
+        // first finds the one it left.
+        assert!(matches!(steer(&app, id).await, SteerOpened::Opened));
         assert_eq!(
             steer_companions(&app, id, "Grilling", added, upgraded.clone()).await,
             refusal,
@@ -7275,10 +7791,7 @@ async fn steering_a_draft_checks_out_the_companions_it_was_configured_with() {
         "nothing has been checked out while it drafts",
     );
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert_eq!(
         steer_grilling(&app, id, None).await,
         ConversationSteered::Steered,
@@ -7315,10 +7828,7 @@ async fn steering_a_draft_invents_around_a_name_the_repository_holds() {
     git(&repo, &["branch", &carried]);
     let stranger = git(&repo, &["rev-parse", &carried]).trim().to_owned();
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert_eq!(
         steer_grilling(&app, id, None).await,
         ConversationSteered::Steered,
@@ -7364,10 +7874,7 @@ async fn steering_a_conversation_that_has_worked_keeps_the_branch_it_was_on() {
     assert!(!worked.exists());
     assert!(has_branch(&repo, &branch));
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert_eq!(
         steer_grilling(&app, id, None).await,
         ConversationSteered::Steered,
@@ -7421,10 +7928,7 @@ async fn steering_a_closed_conversation_checks_its_companions_out_again() {
         "and the branch the companion was worked on was kept",
     );
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert_eq!(
         steer_into(&app, id, "Grilling", false).await,
         ConversationSteered::Steered,
@@ -7766,10 +8270,7 @@ async fn a_stage_steered_into_a_second_round_is_not_a_stage_to_adopt_again() {
     let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
     assert_eq!(press_adopt(&app, id).await, Adopted::Adopted);
 
-    assert_eq!(
-        steer(&app, id).await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert_eq!(
         steer_grilling(&app, id, Some("# The implementation, again\n")).await,
         ConversationSteered::Steered,

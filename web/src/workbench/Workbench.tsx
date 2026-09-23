@@ -113,11 +113,12 @@ import { Output } from "./Output";
 import { PullRequest } from "./PullRequest";
 import { Roadmap } from "./Roadmap";
 import { Share } from "./Share";
+import { Frozen, Steer } from "./Steer";
 import { Terminal } from "./Terminal";
 import { Timeline } from "./Timeline";
 import { pressed } from "./eager";
 import {
-  lastOpening,
+  landing,
   openingAt,
   pathOf,
   pathTo,
@@ -464,6 +465,42 @@ export function Workbench(): JSX.Element {
       ? { to: "Conversations", go: () => navigate("/") }
       : { to: "Timeline", go: () => setPane("middle") };
 
+  /// And the way off a pane whose subject has gone: what the pending steer's
+  /// form does when it is cancelled or submitted.
+  ///
+  /// Two acts rather than one, because what it lets go of is two things. The
+  /// level goes back the way [`leaving`] takes it — the Timeline, or the
+  /// conversations where there is no Timeline drawn — and the URL lets go of
+  /// the address itself, so the landing effect above opens the end of the
+  /// record: which after a cancel is where the Timeline was open before, and
+  /// after a submit is the record the steer just wrote.
+  ///
+  /// Nothing is navigated where the way out was already a navigation: a
+  /// Conversation whose record is one Event has left the workbench by then, and
+  /// a second navigation would hand it straight back.
+  const shut = () => {
+    const away = alone();
+    leaving().go();
+
+    if (!away) {
+      navigate(pathOf(selected()), { replace: true });
+    }
+  };
+
+  // And a narrow window walks into the details when the URL comes to name the
+  // pending steer, the way pressing any card does. The press that opens one is
+  // in the actions menu — see `Actions.tsx` — which has no level to change and
+  // navigates instead, so the walk is made here off the address it wrote. The
+  // effect on [`selected`] above covers arriving at the Conversation itself; it
+  // never runs when the Conversation the page already stands on grows a form.
+  createEffect(
+    on(event, (opening, was) => {
+      if (opening === "steer" && was !== "steer") {
+        setPane("details");
+      }
+    }),
+  );
+
   // Arriving at a Conversation with nothing open lands on the end of its record:
   // the last Event that has a pane behind it, opened by rewriting the URL to its
   // path with replace. What somebody pressing a Conversation asked for is where
@@ -483,6 +520,11 @@ export function Workbench(): JSX.Element {
   // A record with nothing openable on it selects nothing and the pane stays bare
   // paper, which is a Draft with only the Brief being written.
   //
+  // A pending steer is the end of the pane too, and it is where landing goes
+  // first: it is the one item drawn after the record, so the human who left a
+  // steer half written and came back is shown the form they were writing. See
+  // [`landing`].
+  //
   // Which level a narrow window is showing is not touched, and that is the point:
   // it follows the Conversation changing, and this changes no Conversation. So a
   // phone lands on the Timeline with the newest thing marked open and the details
@@ -501,7 +543,7 @@ export function Workbench(): JSX.Element {
       return;
     }
 
-    const last = lastOpening(read.timeline);
+    const last = landing(read);
     if (last !== null) {
       navigate(pathTo(id, last), { replace: true });
       setFollowed(id);
@@ -529,7 +571,7 @@ export function Workbench(): JSX.Element {
       return;
     }
 
-    const last = lastOpening(read.timeline);
+    const last = landing(read);
     if (last !== null && last !== event()) {
       navigate(pathTo(id, last), { replace: true });
     }
@@ -569,6 +611,7 @@ export function Workbench(): JSX.Element {
               conversation={conversation}
               event={event()}
               back={leaving()}
+              shut={shut}
             />
           </Show>
         }
@@ -659,6 +702,12 @@ function DetailsPane(props: {
   /// always opened from. Nothing on a record of one Event opens them: the cards
   /// and the icon that do are the Timeline's, and the Timeline is not drawn.
   back: { to: string; go: () => void };
+
+  /// And the way off a pane whose subject has gone, which is the pending
+  /// steer's alone: cancelling or submitting the form leaves no form to be
+  /// drawn, so the page lets go of the address as well as of the level. See
+  /// `shut` in [`Workbench`].
+  shut: () => void;
 }): JSX.Element {
   /// The Event the details pane is showing, where it is one that has a full
   /// self to show. An id whose Event has gone leaves the pane empty, which is
@@ -667,10 +716,11 @@ function DetailsPane(props: {
   /// Seven kinds have one: a session's output, whose full self is its
   /// Capture; a Question Set, whose full self is the document it was asked
   /// as; a commit, whose full self is its diff; the pull request, whose full
-  /// self is what is on it at GitHub right now; and the three documents — the
-  /// Brief, the handoff and the instruction a steer carried — whose full self
-  /// is the markdown their card shows three lines of. The kind travels with it,
-  /// because it is what decides which pane is drawn.
+  /// self is what is on it at GitHub right now; a steer, whose full self is the
+  /// form the human filled to make it; and the two documents — the Brief and
+  /// the handoff — whose full self is the markdown their card shows three lines
+  /// of. The kind travels with it, because it is what decides which pane is
+  /// drawn.
   ///
   /// A Brief still being drafted is here too, and nothing ever selects it: the
   /// card is a field with the setup under it rather than a card to press, which
@@ -681,11 +731,12 @@ function DetailsPane(props: {
   /// timeline, because that is where it is drawn: it is the one event that
   /// stays in view rather than scrolling past, and it opens all the same.
   ///
-  /// The backlog, the roadmap, the Share pane and the Terminal are none of these
-  /// and are not looked for here at all: none of the four has an Event — the two
-  /// lists are read off the worktree every time the Conversation is, and sharing
-  /// and a shell in the Sandbox belong to the Conversation rather than to any
-  /// moment on it — so the pane draws them from the selection itself, see the
+  /// The backlog, the roadmap, the Share pane, the Terminal and the pending
+  /// steer are none of these and are not looked for here at all: none of the
+  /// five has an Event — the two lists are read off the worktree every time the
+  /// Conversation is, sharing and a shell in the Sandbox belong to the
+  /// Conversation rather than to any moment on it, and a pending steer has not
+  /// happened yet — so the pane draws them from the selection itself, see the
   /// `Switch` below.
   const opened = (conversation: ConversationView): Opened | undefined => {
     const id = props.event;
@@ -713,11 +764,10 @@ function DetailsPane(props: {
         if ("Handoff" in entry) {
           return { handoff: entry.Handoff };
         }
-        // Only where it carries one. A steer into wrapping up or done says
-        // nothing but the state, so there is no document under it to open —
-        // which is why the Timeline draws one of those as a line rather than a
-        // card.
-        if ("Steer" in entry && entry.Steer.html !== null) {
+        // Every one of them, whatever it carried: what a steer's pane draws is
+        // the form the human filled rather than the document they wrote in it,
+        // so a steer into wrapping up or done has one too.
+        if ("Steer" in entry) {
           return { steer: entry.Steer };
         }
         if ("Notice" in entry) {
@@ -738,14 +788,15 @@ function DetailsPane(props: {
     <Show when={props.conversation.data}>
       {(conversation) => (
         <Switch>
-          {/* The backlog, the roadmap, the Share pane and the Terminal, which
-              are the four things this pane draws that are not Events: the two
-              lists are read off the worktree every time the Conversation is,
-              and sharing and a shell in the Sandbox belong to the Conversation
-              rather than to anything on its record. So there is nothing on the
-              record to name any of them by, and each is named by a word
+          {/* The backlog, the roadmap, the Share pane, the Terminal and the
+              steer being written, which are the five things this pane draws
+              that are not Events: the two lists are read off the worktree every
+              time the Conversation is, sharing and a shell in the Sandbox
+              belong to the Conversation rather than to anything on its record,
+              and a pending steer has not happened yet. So there is nothing on
+              the record to name any of them by, and each is named by a word
               instead. Ahead of the Events because they are not among them —
-              [`opened`] looks for an id, and none of the four selections is
+              [`opened`] looks for an id, and none of the five selections is
               one. */}
           <Match when={props.event === "backlog"}>
             <Backlog
@@ -768,6 +819,20 @@ function DetailsPane(props: {
             <Terminal
               conversation={conversation()}
               back={props.back.go}
+            />
+          </Match>
+          {/* And the steer being written, which is the fifth: the pending steer
+              beside the Conversation, whose form this pane is. Drawn only where
+              there is one — the address with nothing behind it is the empty
+              pane an unknown Event id gets, a pending steer going at the submit
+              or the cancel and a kept link outliving both. */}
+          <Match
+            when={props.event === "steer" && conversation().pending_steer}
+          >
+            <Steer
+              conversation={conversation()}
+              back={props.back.go}
+              done={props.shut}
             />
           </Match>
           {/* And which roadmap, a worktree being allowed any number of
@@ -819,12 +884,11 @@ function DetailsPane(props: {
                     />
                   )}
                 </Match>
-                {/* And the three documents, each the whole of what its
-                    card showed three lines of. The handoff and the
-                    instruction are one pane — rendered markdown under the
-                    heading the card carries — and the Brief has two of its
-                    own, because a Brief is a document only once its round is
-                    past writing it.
+                {/* And the two documents, each the whole of what its card
+                    showed three lines of. The handoff is one pane — rendered
+                    markdown under the heading the card carries — and the Brief
+                    has two of its own, because a Brief is a document only once
+                    its round is past writing it.
 
                     While that round drafts, the pane is the composer: the
                     Brief as a field, the setup under it, and the press that
@@ -868,22 +932,16 @@ function DetailsPane(props: {
                     />
                   )}
                 </Match>
-                {/* What a steer sent a session off with, read the way every
-                    other document the human writes is read. Nothing opens a
-                    steer that carried none — and what it is called follows
-                    the target, an instruction being one session's whole job
-                    and a follow-up's brief being what a conversation was
-                    opened on. */}
+                {/* And a steer that happened, drawn as the form the human
+                    filled: where they sent it, what they wrote to send it
+                    there with, and everything else the record kept beside the
+                    event — read-only, the press being over. Every steer opens
+                    this, the one that wrote nothing included. */}
                 <Match when={steerIn(open())}>
                   {(steer) => (
-                    <Document
-                      heading={
-                        steer().target === "FollowUp"
-                          ? "Follow-up"
-                          : "Instruction"
-                      }
-                      html={steer().html ?? ""}
-                      empty="Nothing was asked for."
+                    <Frozen
+                      conversation={conversation()}
+                      steer={steer()}
                       back={props.back.go}
                     />
                   )}

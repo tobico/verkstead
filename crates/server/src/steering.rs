@@ -1,18 +1,54 @@
 //! Steer: the human saying where the work goes, from wherever it has got to.
 //!
-//! Two presses rather than one, and the gap between them is the point. Clicking
-//! **Steer** stops the drive and answers with what it found running; the modal
-//! then opens over a Conversation nothing is going to launch into while the
-//! human composes. What they submit lands as the move.
+//! Two presses rather than one, and the gap between them is the point. Pressing
+//! **Steer** stops the drive and writes a **pending steer** beside the
+//! Conversation; the workbench draws that as the last item on the Timeline and
+//! the form is its details pane, so the human composes over a Conversation
+//! nothing is going to launch into — and over a workbench they can go on
+//! reading, which is the whole of why the form came out of a window over it.
+//! What they submit lands as the move.
 //!
-//! **The click stops it, and that is deliberate.** It is the ordinary Stop —
+//! **The press stops it, and that is deliberate.** It is the ordinary Stop —
 //! nothing new starts, and a session already running is left exactly where it
-//! is — so the world the modal is drawn against is the world the submit arrives
-//! in. **Cancel leaves the Conversation stopped**, with Resume on offer: the
-//! click is what froze it, and unfreezing is a press of its own rather than
-//! something a dismissed modal does behind the human's back.
+//! is — so the world the form is written against is the world the submit
+//! arrives in. **Cancel leaves the Conversation stopped**, with Resume on
+//! offer: the press is what froze it, and unfreezing is a press of its own
+//! rather than something a dismissed form does behind the human's back. What
+//! Cancel posts is nothing but the pending steer's deletion — a steer that
+//! decided nothing is no Event, and the stop's own Notice already says the
+//! human pressed.
 //!
-//! **What ends that session is the submit rather than the click.** One Worktree
+//! **One pending steer per Conversation, and the second press finds the
+//! first.** A Conversation already carrying a half-written form is not one to
+//! start another beside, so the second press stops nothing a second time and
+//! writes no second row: it says where the form is, and the page goes there.
+//! See [`store::open_pending_steer`], which answers which of the two happened.
+//!
+//! **The form keeps itself on that row as it is typed**, which is what makes
+//! the item something to come back to: a steer that takes an afternoon is
+//! written the way anything long is written — coming and going, on whichever
+//! device is to hand. [`save`] is the whole form in one act, the draft Brief's
+//! shape down to the pause the pane keeps before it posts, and it is refused by
+//! name where there is nothing left to save into: a submit or a cancel from
+//! another device landing mid-edit is the commonest thing that happens to a
+//! form sitting open. What the Conversation's view hands back is that same form
+//! — see [`filled`] — so the pane is prefilled from the row rather than opened
+//! empty.
+//!
+//! **What the rest of the workbench does about a pending steer.** **Resume** is
+//! the opposite decision, so a press that starts something takes the row with
+//! it and a refused one leaves it — see [`crate::resume`]. **Close** takes it
+//! in the transaction that closes the Conversation, the way it shuts every Set
+//! it finds open: a form asking where the work goes next is about work that is
+//! over. **Stop** and **Force stop** leave it alone, both being about the run
+//! rather than about the move — the run is already stopped, and neither press
+//! decides anything about where the work is headed. And a pending steer
+//! **waits on the human**: it joins the one rule the sidebar disc and the
+//! status button's *Waiting on you* are read from, beside an open Set and a
+//! stop nobody chose — see `store::waiting`. It raises no notification, the
+//! press being the human's own.
+//!
+//! **What ends that session is the submit rather than the press.** One Worktree
 //! holds one agent, so the session a steer starts takes the Worktree from
 //! whatever is still in it — see the runner's `launch_in_turn`, which waits for
 //! a session that cannot be displaced and ends one that can. So a steer into a
@@ -53,7 +89,7 @@
 //! the one place any of it is created.
 //!
 //! **And a steer may widen the set it works alongside, and open a row of it
-//! up.** The modal's companion section puts another registered Repo in and ticks
+//! up.** The form's companion section puts another registered Repo in and ticks
 //! a read-only one up to read-write, and the steer checks each out as part of
 //! the move: fetch, resolve, cut or detach, bind — the grill start's shape,
 //! including the fetch this deliberately skips for the Conversation's own
@@ -71,7 +107,7 @@
 //! **The record is two Events, a Pairing and whatever was made.** The Steer is
 //! the human's — *I moved this* — the machine's plain Moved line stands under
 //! it, which is the order the moment happened in, and beside them go the Pairing
-//! the modal settled and the Worktree and base commit the steer had to make:
+//! the form settled and the Worktree and base commit the steer had to make:
 //! steering re-settles what runs the work rather than picking for one session.
 //! The Steer carries what was written with it, too: an instruction, or the brief
 //! a follow-up is opened on, is the Event's own body, so reading it back is
@@ -102,7 +138,8 @@
 use std::path::{Path, PathBuf};
 
 use verkstead_render::{
-    CompanionMode, ConversationSteered, SteerCompanionRefusal, SteerOpened, SteerSubmission,
+    CompanionAddition, CompanionMode, CompanionUpgrade, ConversationSteered, ProfileChoice,
+    SteerCancelled, SteerCompanionRefusal, SteerForm, SteerOpened, SteerSaved, SteerSubmission,
     SteerTarget,
 };
 use verkstead_schema::{Direction, Nudge};
@@ -112,47 +149,207 @@ use crate::grillings::Digest;
 use crate::profiles::Unlisted;
 use crate::store::{self, Conversation, Lifecycle, Role, Settling};
 
-/// Click Steer: stop the drive, and say what was running when it stopped.
+/// Press Steer: stop the drive and open the pending steer the form is written
+/// on.
 ///
 /// The ordinary Stop, through the ordinary press — see [`crate::stops::stop`],
 /// which writes the stop where nothing is running and records the request to
 /// stop where something is. Its refusals are not this press's refusals: a
 /// Conversation that has already stopped is already still, and one in a state
-/// nothing drives never had a drive to stop. Both are a modal that opens.
+/// nothing drives never had a drive to stop. Both are a form that opens.
 ///
-/// What comes back is whether a session is still running, which is the one thing
-/// the modal cannot work out for itself and the one thing **Interrupt current
-/// task** is offered for.
+/// **The pending steer is what the form is drawn on**, and it is the server's
+/// rather than the device's: it survives a reload, it is found from the next
+/// device the human picks up, and the workbench draws it as the last item on
+/// the Timeline until the submit or the cancel takes it away. See
+/// [`store::open_pending_steer`].
+///
+/// **A second press writes nothing and stops nothing a second time.** A
+/// Conversation already carrying one is one somebody is part-way through
+/// steering, so the press says where that form is and the page goes to it. The
+/// stop above it is made either way and is the same stop: a Conversation that
+/// stopped at the first press has nothing left for the second to stop.
+///
+/// Which of the two presses it was is nothing the page asks — either way it
+/// goes to the item at the end of the Timeline — so it is said in the log and
+/// nowhere else. And what was running is not said at all: the item may sit open
+/// for hours, so the **Interrupt current task** tick follows the live
+/// Conversation rather than the moment of the press.
 pub(crate) async fn click(state: &AppState, conversation_id: i64) -> anyhow::Result<SteerOpened> {
-    // Read back rather than trusted from the page, the way every press here
-    // reads it back: this is the only thing that can say there is a
-    // Conversation to steer at all.
-    if store::load_conversation(&state.pool, conversation_id)
-        .await?
-        .is_none()
-    {
-        return Ok(SteerOpened::NoSuchConversation);
-    }
+    // The press and the read in one: the insert selects from `conversations`,
+    // so what says there is no Conversation to steer is the row not landing
+    // rather than a look before it. See [`store::open_pending_steer`].
+    let already = match store::open_pending_steer(&state.pool, conversation_id).await? {
+        store::Pending::NoSuchConversation => return Ok(SteerOpened::NoSuchConversation),
+        store::Pending::Standing => true,
+        store::Pending::Opened => false,
+    };
 
     let stopped = crate::stops::stop(state, conversation_id).await?;
-
-    // Asked after the stop rather than before it. A Stop pressed with nothing
-    // running writes its stop where it stands and leaves nothing to see out, so
-    // the checkbox is offered against what is running *now* — which is what the
-    // submit a moment later will find.
-    let working = state.sessions.working().contains(&conversation_id);
 
     tracing::info!(
         conversation_id,
         ?stopped,
-        working,
+        already,
         "the human is steering a Conversation, so the drive has stopped while they compose",
     );
 
-    Ok(SteerOpened::Opened { working })
+    Ok(SteerOpened::Opened)
 }
 
-/// Submit the modal: move the Conversation where the human said, and record that
+/// Save the form onto the pending steer: what the pane posts as it is typed.
+///
+/// **The whole form in one act**, which is what keeps the row a thing somebody
+/// could have been looking at: the pane sends what is on the screen rather than
+/// the field that moved, so the row is never the target of one keystroke beside
+/// the instruction of another. See [`store::save_pending_steer`], which writes
+/// the companion rows the same way, and the pane in `web/src/workbench/Steer.tsx`,
+/// which puts every field through one keeper for the same reason.
+///
+/// **Both refusals are permanent, and that is what the pane needs of them.** A
+/// Conversation that is gone does not come back and a pending steer that was
+/// submitted or cancelled is not reopened, so a field told either of them stops
+/// saving and says so rather than asking again on every pause. Which is also
+/// why they are two rather than one: what the human should go and look at
+/// differs, and a steer somebody decided from their phone is much the commoner.
+///
+/// Nothing is logged. A save is a pause in somebody's typing rather than an act
+/// on the Conversation, and a line per sentence would bury the ones that are.
+pub(crate) async fn save(
+    state: &AppState,
+    conversation_id: i64,
+    form: &SteerForm,
+) -> anyhow::Result<SteerSaved> {
+    if store::load_conversation(&state.pool, conversation_id)
+        .await?
+        .is_none()
+    {
+        return Ok(SteerSaved::NoSuchConversation);
+    }
+
+    if !store::save_pending_steer(&state.pool, conversation_id, &held(form)).await? {
+        return Ok(SteerSaved::NoPendingSteer);
+    }
+
+    Ok(SteerSaved::Saved)
+}
+
+/// The form as the record keeps it, out of the form as the wire carries it.
+///
+/// The two vocabularies held to each other, which is what every pair here needs
+/// between them — see [`target`] for the states and [`mode`] for how far into a
+/// companion the work reaches.
+fn held(form: &SteerForm) -> store::PendingForm {
+    store::PendingForm {
+        target: form.target.map(target),
+        brief: form.brief.clone(),
+        digest: form.digest,
+        instruction: form.instruction.clone(),
+        follow_up: form.follow_up.clone(),
+        pairing: form.pairing.as_ref().map(|picked| store::PendingPairing {
+            profile_id: picked.profile_id,
+            model: picked.model.clone(),
+        }),
+        interrupt: form.interrupt,
+        added: form
+            .added
+            .iter()
+            .map(|addition| store::PendingAddition {
+                repo_id: addition.repo_id,
+                mode: mode(addition.mode),
+                base_ref: addition.base_ref.clone(),
+                branch: addition.branch.clone(),
+            })
+            .collect(),
+        upgraded: form
+            .upgraded
+            .iter()
+            .map(|upgrade| store::PendingUpgrade {
+                repo_id: upgrade.repo_id,
+                branch: upgrade.branch.clone(),
+            })
+            .collect(),
+    }
+}
+
+/// And the same read the other way, for the Conversation's own view: the form
+/// the pane is prefilled from.
+///
+/// A target nothing can be steered into reads as none picked — no form could
+/// have been left on one, [`steered`] being what wrote the row in the first
+/// place — which is what a form nobody has answered yet holds anyway.
+pub(crate) fn filled(form: store::PendingForm) -> SteerForm {
+    SteerForm {
+        target: form.target.and_then(steered),
+        brief: form.brief,
+        digest: form.digest,
+        instruction: form.instruction,
+        follow_up: form.follow_up,
+        pairing: form.pairing.map(|picked| ProfileChoice {
+            profile_id: picked.profile_id,
+            model: picked.model,
+        }),
+        interrupt: form.interrupt,
+        added: form
+            .added
+            .into_iter()
+            .map(|addition| CompanionAddition {
+                repo_id: addition.repo_id,
+                mode: reaching(addition.mode),
+                base_ref: addition.base_ref,
+                branch: addition.branch,
+            })
+            .collect(),
+        upgraded: form
+            .upgraded
+            .into_iter()
+            .map(|upgrade| CompanionUpgrade {
+                repo_id: upgrade.repo_id,
+                branch: upgrade.branch,
+            })
+            .collect(),
+    }
+}
+
+/// Cancel the pending steer: take the form away and leave the Conversation
+/// exactly as the press left it.
+///
+/// Stopped, with Resume on offer. The press is what froze the Conversation and
+/// unfreezing is a press of its own, so nothing here clears the stop and
+/// nothing here launches anything — the human who wants it going again presses
+/// Resume, which is the opposite decision said out loud.
+///
+/// And nothing is posted to the Timeline. A steer that decided nothing is no
+/// Event, and the stop's own Notice already says a human pressed: a line saying
+/// they then changed their mind is the record keeping score of somebody
+/// thinking.
+///
+/// Nothing to cancel is [`SteerCancelled::Cancelled`] all the same — a cancel
+/// landing behind a submit, or behind another device's cancel, has got what it
+/// asked for. What is refused by name is a Conversation that is not there.
+pub(crate) async fn cancel(
+    state: &AppState,
+    conversation_id: i64,
+) -> anyhow::Result<SteerCancelled> {
+    if store::load_conversation(&state.pool, conversation_id)
+        .await?
+        .is_none()
+    {
+        return Ok(SteerCancelled::NoSuchConversation);
+    }
+
+    let discarded = store::discard_pending_steer(&state.pool, conversation_id).await?;
+
+    tracing::info!(
+        conversation_id,
+        discarded,
+        "the human has cancelled a steer, so the Conversation is left stopped",
+    );
+
+    Ok(SteerCancelled::Cancelled)
+}
+
+/// Submit the form: move the Conversation where the human said, and record that
 /// they said it.
 ///
 /// In order: refuse what cannot be done at all; work out every checkout the
@@ -203,7 +400,7 @@ pub(crate) async fn submit(
     // the early returns does.
     let driving = state.drivers.driving(conversation_id);
 
-    // Which registered Repos the modal named, read back as rows and held against
+    // Which registered Repos the form named, read back as rows and held against
     // what the Conversation already has — and then everything git is asked about
     // a directory: what has to be made, and whether any of it can be.
     //
@@ -217,7 +414,7 @@ pub(crate) async fn submit(
     };
 
     // And which of the companions it already has are being opened up, read back
-    // as the rows they will become: read-write, with the branch the modal typed
+    // as the rows they will become: read-write, with the branch the form typed
     // or mirroring where it typed none.
     let opened = match upgrades(state, &conversation, submission).await? {
         Upgrades::Refused(refusal) => return Ok(refusal),
@@ -322,6 +519,24 @@ pub(crate) async fn submit(
         opened: &opening,
         checkouts: &made.checkouts,
         said: said.as_deref(),
+        // And the rest of the form, for the record beside the Event. As the
+        // form *sent* it rather than as [`settling`] read it: what this is is
+        // what the human picked, and the pick that changed nothing about the
+        // Conversation is still the pick they made. The ticks the same way —
+        // the digest is what primes a grilling and means nothing under another
+        // target, and the record keeps what the box said rather than what the
+        // target made of it.
+        recorded: store::Recorded {
+            digest: submission.digest,
+            interrupt: submission.interrupt,
+            pairing: submission
+                .pairing
+                .as_ref()
+                .map(|choice| store::PickedPairing {
+                    profile_id: choice.profile_id,
+                    model: &choice.model,
+                }),
+        },
     };
 
     match store::steer_conversation(&state.pool, conversation_id, steer).await? {
@@ -338,7 +553,7 @@ pub(crate) async fn submit(
         // A grilling from the beginning, which is the only kind there is: an
         // interview lives in the session having it, so there is never one to
         // pick up. What that session is primed with is the round's own Brief —
-        // the one the modal just wrote, or the one that was already there — and
+        // the one the form just wrote, or the one that was already there — and
         // the digest of everything answered where the human asked for it. See
         // [`crate::grillings::again`], which is the same launch a pressed Resume
         // makes and which holds the registration until its session has one.
@@ -478,7 +693,7 @@ async fn refusal(
     // the human taking something up about work that is already pushed, so it
     // turns on the same fact and is refused by the same name. The Conversation's
     // own repository's either way: a companion's is something a wrap-up covers
-    // rather than something that makes one. The modal offers neither where there
+    // rather than something that makes one. The form offers neither where there
     // is none; this is the same rule asked again on arrival.
     if matches!(
         submission.target,
@@ -492,7 +707,7 @@ async fn refusal(
 
     // And a follow-up is whatever the human wrote it about. Nothing on the branch
     // could stand in for it — a follow-up is not a step of the run to be picked
-    // up — so it is the one written payload with no quiet meaning, and the modal
+    // up — so it is the one written payload with no quiet meaning, and the form
     // holds the submit shut without one rather than offering it.
     if submission.target == SteerTarget::FollowUp && follow_up(submission).is_none() {
         return Ok(Some(ConversationSteered::NoFollowUpBrief));
@@ -500,7 +715,7 @@ async fn refusal(
 
     // And a steer into Implementing either carries on what the branch already
     // holds or does what the human wrote, so a branch holding nothing to carry
-    // on and a modal holding nothing written is a session with no job. The modal
+    // on and a form holding nothing written is a session with no job. The form
     // requires the instruction there rather than offering the submit —
     // [`standing`] is what it draws that by, and this is that same reading asked
     // again on arrival.
@@ -523,7 +738,7 @@ async fn refusal(
     }
 
     // And a grilling starts from a Brief, so a round opened with none written in
-    // the modal and none already on the Timeline is an interview about nothing.
+    // the form and none already on the Timeline is an interview about nothing.
     // The rule a pressed *Start grilling* is refused by — see
     // [`crate::conversations::start_grilling`] — asked of the other way in, and
     // it has to be asked here rather than left to the session: the Brief a
@@ -671,7 +886,7 @@ fn directing(conversation: &Conversation, instruction: Option<&str>) -> Option<D
 /// left the picker alone has changed nothing — [`refusal`] has already made sure
 /// that the Conversation's own is there in that case.
 ///
-/// And a role the human picked away is left picked away. The modal's one pick is
+/// And a role the human picked away is left picked away. The form's one pick is
 /// what the sessions run under, and a role that runs none is not among them:
 /// writing a Pairing over it would turn a review back on that nobody asked for.
 ///
@@ -759,7 +974,7 @@ impl Standing {
     /// Whether *carrying on* is worth offering, which is everything but a
     /// Worktree that was read and held nothing.
     ///
-    /// What [`crate::ui`] draws the modal by and what [`refusal`] refuses by,
+    /// What [`crate::ui`] draws the form by and what [`refusal`] refuses by,
     /// said once so that the page and the press cannot come to different answers
     /// about it.
     pub(crate) fn offerable(self) -> bool {
@@ -770,7 +985,7 @@ impl Standing {
 /// Whether there is work standing on the branch for a steer into Implementing
 /// to carry on.
 ///
-/// The one question that target turns on, said once here because the modal
+/// The one question that target turns on, said once here because the form
 /// draws by it and the submit refuses by it — see
 /// [`ConversationSteered::NoInstruction`], which is what a steer into
 /// Implementing is refused with where nothing stands and nothing was written.
@@ -787,7 +1002,7 @@ impl Standing {
 /// distinction rather than an omission: its work is the one session, so there
 /// is nothing on the branch to pick up where it left off. What such a
 /// Conversation is steered into Implementing with is an instruction of the
-/// human's own, which is what [`Standing::Nothing`] asks the modal for — and it
+/// human's own, which is what [`Standing::Nothing`] asks the form for — and it
 /// is answered before the directory is looked at, no reading of one being able
 /// to change it.
 ///
@@ -1012,12 +1227,12 @@ fn announced(
 /// downgrade dressed as an add.
 ///
 /// **And nothing at all where the target runs nothing.** Done has no sandbox to
-/// set up, so the modal draws no section there and a submit carrying one is
+/// set up, so the form draws no section there and a submit carrying one is
 /// answered the way [`brief`] and [`instruction`] answer a payload beside the
 /// wrong target: as a page sending a field it should not have drawn.
 ///
 /// What comes back is a [`store::Companion`] apiece, the shape the record holds
-/// — so everything past this treats a companion the modal has just named and one
+/// — so everything past this treats a companion the form has just named and one
 /// the Conversation has had all along as the one kind of thing.
 async fn additions(
     state: &AppState,
@@ -1025,7 +1240,7 @@ async fn additions(
     submission: &SteerSubmission,
 ) -> anyhow::Result<Additions> {
     // Nothing at all where the target runs nothing, whatever arrived: Done has
-    // no sandbox to set up and nothing a companion could be for, so the modal
+    // no sandbox to set up and nothing a companion could be for, so the form
     // does not draw the section there and a submit carrying one is a page
     // sending a field it should not have drawn. The rule [`brief`] and
     // [`instruction`] follow, asked of the third payload.
@@ -1096,7 +1311,7 @@ async fn additions(
     Ok(Additions::Ready(added))
 }
 
-/// What reading the companions the modal named came to.
+/// What reading the companions the form named came to.
 enum Additions {
     Ready(Vec<store::Companion>),
 
@@ -1104,7 +1319,7 @@ enum Additions {
     Refused(ConversationSteered),
 }
 
-/// How far into a companion the modal said the work may reach.
+/// How far into a companion the form said the work may reach.
 ///
 /// The wire's word and the record's held to each other, which is what the two
 /// vocabularies always need between them — see [`target`], which does the same
@@ -1113,6 +1328,20 @@ fn mode(mode: CompanionMode) -> store::CompanionMode {
     match mode {
         CompanionMode::ReadOnly => store::CompanionMode::ReadOnly,
         CompanionMode::ReadWrite => store::CompanionMode::ReadWrite,
+    }
+}
+
+/// And the same rule read the other way: the record's word, said on the wire.
+///
+/// Said for the row a pending steer hands back to be prefilled from — see
+/// [`filled`] — and for the companions a Conversation already holds and the
+/// ones a steer recorded, which is [`crate::ui`]'s two readers of it. One
+/// function for all three because a second copy would be a second place for the
+/// third mode to be forgotten.
+pub(crate) fn reaching(mode: store::CompanionMode) -> CompanionMode {
+    match mode {
+        store::CompanionMode::ReadOnly => CompanionMode::ReadOnly,
+        store::CompanionMode::ReadWrite => CompanionMode::ReadWrite,
     }
 }
 
@@ -1227,7 +1456,7 @@ async fn upgrades(
     Ok(Upgrades::Ready(opened))
 }
 
-/// What reading the companions the modal opened up came to.
+/// What reading the companions the form opened up came to.
 enum Upgrades {
     Ready(Vec<store::Companion>),
 
@@ -1245,10 +1474,10 @@ enum Upgrades {
 /// out again.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Joining {
-    /// The modal has just named it. Everything about its checkout is new.
+    /// The form has just named it. Everything about its checkout is new.
     Added,
 
-    /// The modal has just opened it up. It is joining the work now as much as an
+    /// The form has just opened it up. It is joining the work now as much as an
     /// added one is — the commit its detached checkout stands at is where that
     /// repository was when the Conversation started, and this is a companion
     /// beginning to be worked in *now* — so git is asked exactly what
@@ -1305,7 +1534,7 @@ enum Joining {
 /// git would not answer counts as a branch that is there.
 ///
 /// **And every companion with nothing on disk**, which is three sources between
-/// them: the ones the modal has just added, a steered Draft's — recorded on the
+/// them: the ones the form has just added, a steered Draft's — recorded on the
 /// setup card and never checked out — and those of a Conversation steered back
 /// out of Closed, whose directories were removed and whose rows were forgotten
 /// while their branches were kept. All three would otherwise reach a running
@@ -1367,7 +1596,7 @@ async fn plan(
     // A companion being opened is left out of the last group whether or not it
     // has a directory, because the upgrade is what says what its checkout will
     // be: one recorded with nowhere on disk — a steered Draft's read-only
-    // companion, ticked up in the same modal — would otherwise be planned twice
+    // companion, ticked up in the same form — would otherwise be planned twice
     // and handed two directories.
     let opening: Vec<i64> = opened.iter().map(|companion| companion.repo.id).collect();
 
@@ -1884,7 +2113,7 @@ struct Made {
 
 /// The state a target names.
 ///
-/// The one place the modal's vocabulary and the record's are held to each other,
+/// The one place the form's vocabulary and the record's are held to each other,
 /// the way [`crate::ui`] holds the lifecycle's two spellings together — and the
 /// reason the two are separate lists at all: every state is somewhere to steer
 /// *from*, and only some of them are somewhere to steer *to*.
@@ -1898,7 +2127,25 @@ fn target(target: SteerTarget) -> Lifecycle {
     }
 }
 
-/// Take the stop the click wrote away, along with any request to stop that has
+/// And the target a state names, which is the same rule read the other way.
+///
+/// What the pending steer's row is drawn back through: the record keeps where a
+/// half-written form says the work is going as a state, and the item on the
+/// Timeline says it in the form's own words. `None` is a state nothing can be
+/// steered into — Draft and Closed, each of which has a way in of its own — and
+/// no form can have been left on one, so it reads as a target nobody picked.
+pub(crate) fn steered(state: Lifecycle) -> Option<SteerTarget> {
+    Some(match state {
+        Lifecycle::Grilling => SteerTarget::Grilling,
+        Lifecycle::Implementing => SteerTarget::Implementing,
+        Lifecycle::Wrapping => SteerTarget::Wrapping,
+        Lifecycle::FollowUp => SteerTarget::FollowUp,
+        Lifecycle::Done => SteerTarget::Done,
+        Lifecycle::Draft | Lifecycle::Closed => return None,
+    })
+}
+
+/// Take the stop the press wrote away, along with any request to stop that has
 /// not landed yet.
 ///
 /// Both, for the reason a Resume clears both: the request is what the *next*

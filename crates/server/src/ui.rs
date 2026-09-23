@@ -20,6 +20,8 @@
 //! that cannot be read at all — a 404, because that is a page the viewer draws
 //! differently.
 
+use std::collections::HashMap;
+
 use axum::Json;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::StatusCode;
@@ -32,17 +34,18 @@ use verkstead_render::{
     Adopted, AdoptedPullRequestView, AnswerAttached, AnswerAttachmentRemoved, Attached,
     AttachmentRemoved, Author, BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView,
     CheckRollup, CleanupStepView, CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded,
-    CompanionBranchRenamed, CompanionMode, CompanionModeChoice, CompanionModeChosen,
-    CompanionRemoved, CompanionView, CompileCaching, ConflictResolution, ConversationArchived,
-    ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
-    ConversationUnarchived, ConversationView, Creation, Cursor, GrillingStarted, IgnoreRule,
-    IgnoredCommentsEdit, InstallPress, Lifecycle, Locked, Merging, MissedOut, NewAdoption,
-    NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption, Parked, ProfileChoice,
-    ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice,
-    RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit,
-    ServePress, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
-    SharePublished, SharedCommit, SharedConversation, ShowArchived, ShowingArchived, Standing,
-    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalOpened,
+    CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
+    CompanionView, CompileCaching, ConflictResolution, ConversationArchived, ConversationClosed,
+    ConversationEntry, ConversationSteered, ConversationStopped, ConversationUnarchived,
+    ConversationView, Creation, Cursor, GrillingStarted, IgnoreRule, IgnoredCommentsEdit,
+    InstallPress, Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion,
+    NewConversation, NewOrder, NewPullRequestAdoption, PairingView, Parked, PendingSteerView,
+    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView,
+    RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
+    ServeEdit, ServePress, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
+    ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView,
+    SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalOpened,
     TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
@@ -310,7 +313,7 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // the path rather than in the verb, as closing a Set unanswered is: the
         // viewer speaks one method. Nothing here opens a second round on one
         // Verkstead has finished with: a steer into Grilling is that, and it
-        // goes through the modal below like every other steer.
+        // goes through the steer below like every other one.
         .route("/api/ui/conversations/{id}/grill", post(start_grilling))
         // And the press that adopts a roadmap's next stage, which is the
         // grilling start's sibling: what the human presses on an adopting
@@ -378,13 +381,23 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // not.
         .route("/api/ui/conversations/{id}/stop", post(stop))
         .route("/api/ui/conversations/{id}/force-stop", post(force_stop))
-        // And the two presses that steer it, which are the row beside those in
-        // the same menu. Two rather than one because the click is an act of its
-        // own: it stops the drive so that nothing launches while the human
-        // composes, and answers with what it found running — see
-        // [`crate::steering`]. The submit under it carries what the modal
-        // settled, which is the only body of the four.
+        // And the four presses that steer it, which are the row beside those in
+        // the same menu and the three the item that row opens make. The press
+        // is an act of its own rather than the first half of the submit: it
+        // stops the drive so that nothing launches while the human composes,
+        // writes the pending steer the form is drawn on, and answers with what
+        // it found running — see [`crate::steering`]. Cancel takes that pending
+        // steer away and leaves the Conversation stopped; the submit carries
+        // what the form settled; and the save between them carries the form as
+        // it stands, written onto the pending steer as it is typed so that the
+        // human can leave the item, the Conversation or the device and find it
+        // as they left it.
         .route("/api/ui/conversations/{id}/steer", post(steer))
+        .route("/api/ui/conversations/{id}/steer/save", post(steer_save))
+        .route(
+            "/api/ui/conversations/{id}/steer/cancel",
+            post(steer_cancel),
+        )
         .route(
             "/api/ui/conversations/{id}/steer/submit",
             post(steer_submit),
@@ -1574,7 +1587,7 @@ pub(crate) async fn conversation_view(
 
     // And whether a steer into Implementing would have anything to carry on: a
     // backlog with work left in it, or a roadmap the branch has written. What
-    // the modal draws the *carrying on* by, the target itself being offered
+    // the form draws the *carrying on* by, the target itself being offered
     // wherever an instruction can be written, which is everywhere. Off the
     // Worktree as it stands, which is where the pinned Events above are read
     // from and for the same reason — the repository owns those files. See
@@ -1731,6 +1744,51 @@ pub(crate) async fn conversation_view(
         }
     };
 
+    // And the steer somebody has started on it and not yet decided, which the
+    // Timeline draws as its last item and the details pane draws the form of.
+    // Read the way the archive mark is: a row beside the Conversation rather
+    // than a column on it — and no part of the record, so nothing of it is in
+    // the Timeline above.
+    //
+    // A read that fails reads as *none pending*, which is the way round that
+    // draws the record as it always was: the row is untouched and the next read
+    // of the Conversation finds the item again. The other way round would be an
+    // item drawn over a form that is not there.
+    let pending_steer = match store::pending_steer(&state.pool, id).await {
+        Ok(pending) => pending.map(|pending| PendingSteerView {
+            at: pending.at,
+            // Said in the form's own vocabulary rather than the record's, the
+            // row being what the form has come to — see
+            // [`crate::steering::filled`]. The whole of it, because the pane
+            // this Conversation's view opens is prefilled from it: a human who
+            // left the form half written finds it as they left it, on whichever
+            // device they pick up.
+            form: crate::steering::filled(pending.form),
+        }),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading the pending steer of a Conversation failed");
+            None
+        }
+    };
+
+    // And the accounts the steers on this Timeline were made under, read as
+    // rows before any of them is drawn: the pane a steer opens names its
+    // Pairing the way the picker does, which wants the Profile as it stands
+    // rather than the id the record holds. One hop off the runtime for the lot
+    // of them — see [`crate::profiles::keyed`] — because the draw below is not
+    // a place anything can be awaited from.
+    //
+    // A read that fails leaves the steers to draw without their Pairing rather
+    // than taking the Conversation down with it: everything else about the
+    // record is in hand, and a pane short one line is better than no pane.
+    let steer_pairings = match crate::profiles::keyed(steered(&timeline)).await {
+        Ok(pairings) => pairings,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading what a steer picked failed");
+            HashMap::new()
+        }
+    };
+
     // One clock for the whole Timeline: every Set on it is aged against the same
     // moment, so two rows written a millisecond apart cannot come back reading as
     // if they were read at different times.
@@ -1783,6 +1841,7 @@ pub(crate) async fn conversation_view(
         trimmed,
         shared,
         attachments: attached,
+        pending_steer,
         // The same reading the Events above are drawn against, said as a fact
         // about the Conversation: the Timeline offers Force stop exactly where
         // something is running, and one Event of a session's is not the question
@@ -1936,12 +1995,22 @@ pub(crate) async fn conversation_view(
                     // Event that stands beside another: the move it wrote is
                     // right under it, and the pair is the whole record of a
                     // steer — who decided, and what became of it.
-                    store::Event::Steer(target, instruction) => verkstead_render::steer_event(
-                        event.id,
-                        event.at,
-                        lifecycle(target),
-                        instruction.as_deref(),
-                    ),
+                    store::Event::Steer(target, instruction, recorded) => {
+                        verkstead_render::steer_event(
+                            event.id,
+                            event.at,
+                            lifecycle(target),
+                            instruction.as_deref(),
+                            // And the rest of the form that press filled, where
+                            // the record has it: the pane this Event opens
+                            // draws it back as the form, read-only. A steer
+                            // recorded before any of it was kept has none, and
+                            // opens on the target and the body alone.
+                            recorded.map(|recorded| {
+                                steered_form(*recorded, steer_pairings.get(&event.id).cloned())
+                            }),
+                        )
+                    }
                     // And the other press that stands beside a move, which is
                     // its own kind for exactly that reason: a steer into
                     // Wrapping reads the branch again and this one deliberately
@@ -3469,12 +3538,14 @@ async fn force_stop(State(state): State<AppState>, Path(id): Path<String>) -> Ht
     }
 }
 
-/// `POST /api/ui/conversations/{id}/steer` — stop the drive and open the modal.
+/// `POST /api/ui/conversations/{id}/steer` — stop the drive and open the
+/// pending steer.
 ///
-/// The click rather than the move. What comes back says the modal may open and
-/// whether a session is still running, which is what the **Interrupt current
-/// task** checkbox is offered against. Cancelling from here leaves the
-/// Conversation stopped with Resume on offer, which is what the click is for.
+/// The press rather than the move. What comes back says there is a pending
+/// steer to go to, and nothing else: a first press and a second are the same
+/// navigation, and what was running is the live Conversation's to say — the
+/// item may sit open for hours. Cancelling from here leaves the Conversation
+/// stopped with Resume on offer, which is what the press is for.
 async fn steer(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return Json(SteerOpened::NoSuchConversation).into_response();
@@ -3485,6 +3556,52 @@ async fn steer(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "stopping a Conversation to steer it failed");
             unavailable("the conversation could not be stopped to steer it")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/steer/save` — keep the form as it stands.
+///
+/// The whole form as the body rather than the field that moved, which is what
+/// keeps the row a thing somebody could have been looking at — see
+/// [`crate::steering::save`]. Posted on a pause in the typing and on the way
+/// out of a field, the way a drafting Brief's saves are, so that the item can
+/// be left and come back to from anywhere.
+async fn steer_save(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(form): Json<SteerForm>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(SteerSaved::NoSuchConversation).into_response();
+    };
+
+    match crate::steering::save(&state, id, &form).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "saving a pending steer failed");
+            unavailable("the steer could not be saved")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/steer/cancel` — take the pending steer
+/// away.
+///
+/// No body, for the reason the two stops have none: which Conversation it is is
+/// the whole of what it says, there being one pending steer per Conversation.
+/// Nothing is posted to the Timeline and the stop is left exactly where the
+/// press put it — see [`crate::steering::cancel`].
+async fn steer_cancel(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(SteerCancelled::NoSuchConversation).into_response();
+    };
+
+    match crate::steering::cancel(&state, id).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "cancelling a steer failed");
+            unavailable("the steer could not be cancelled")
         }
     }
 }
@@ -3869,10 +3986,7 @@ async fn companion(companion: store::Companion) -> Result<CompanionView, anyhow:
             path: companion.repo.path.to_string_lossy().into_owned(),
             default_branch: companion.repo.default_branch,
         },
-        mode: match companion.mode {
-            store::CompanionMode::ReadOnly => CompanionMode::ReadOnly,
-            store::CompanionMode::ReadWrite => CompanionMode::ReadWrite,
-        },
+        mode: crate::steering::reaching(companion.mode),
         base_ref: companion.base_ref,
         branch: companion.branch,
         worktree,
@@ -3917,6 +4031,80 @@ fn own_checks(repo: &Option<String>, checks: Option<CheckRollup>) -> Option<Chec
     match repo {
         None => checks,
         Some(_) => None,
+    }
+}
+
+/// Which Profile each steer on a Timeline picked, by the Event it was recorded
+/// on.
+///
+/// The one thing about a steer's record that is not the record's to answer: the
+/// pane names its Pairing the way the picker does, and what the picker reads is
+/// the account as it stands. Gathered before the Timeline is drawn because the
+/// draw is not somewhere anything can be awaited from — see
+/// [`crate::profiles::keyed`], which reads the lot of them in one hop.
+///
+/// A steer that picked nothing and one whose Profile has been removed are both
+/// absent here, and the two are told apart by the record rather than by this:
+/// what it says is *removed since*, which is [`store::RecordedPairing`]'s to
+/// say.
+fn steered(timeline: &[store::TimelineEvent]) -> Vec<(i64, store::Pairing)> {
+    timeline
+        .iter()
+        .filter_map(|event| match &event.event {
+            store::Event::Steer(_, _, Some(recorded)) => match &recorded.pairing {
+                store::RecordedPairing::Under(pairing) => Some((event.id, pairing.clone())),
+                store::RecordedPairing::Nothing | store::RecordedPairing::Removed => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+/// One steer's record as the pane that draws it takes it: the form the human
+/// filled, frozen.
+///
+/// The Pairing arrives beside the record rather than inside it, for the reason
+/// [`steered`] gives: reading a Profile as a row is a look at the filesystem,
+/// and the Timeline is drawn without awaiting anything. A record that says a
+/// Pairing was picked and has no row here is a Profile removed since, which is
+/// what the pane says in place of naming it.
+fn steered_form(
+    recorded: store::SteerRecord,
+    pairing: Option<PairingView>,
+) -> verkstead_render::SteerRecordView {
+    verkstead_render::SteerRecordView {
+        digest: recorded.digest,
+        interrupt: recorded.interrupt,
+        pairing: match recorded.pairing {
+            store::RecordedPairing::Nothing => SteerPairingView::Nothing,
+            // Picked and gone: the record named an account, and there is no row
+            // left to name it by. Which is where a failed read of the Profiles
+            // lands too, and it says the truthful half of that — the human
+            // picked something this page cannot name.
+            store::RecordedPairing::Removed => SteerPairingView::Removed,
+            store::RecordedPairing::Under(_) => match pairing {
+                Some(pairing) => SteerPairingView::Under(pairing),
+                None => SteerPairingView::Removed,
+            },
+        },
+        added: recorded
+            .added
+            .into_iter()
+            .map(|companion| verkstead_render::SteerAdditionView {
+                repo: companion.repo,
+                mode: crate::steering::reaching(companion.mode),
+                base_ref: companion.base_ref,
+                branch: companion.branch,
+            })
+            .collect(),
+        upgraded: recorded
+            .upgraded
+            .into_iter()
+            .map(|companion| verkstead_render::SteerUpgradeView {
+                repo: companion.repo,
+                branch: companion.branch,
+            })
+            .collect(),
     }
 }
 

@@ -340,6 +340,7 @@ async fn everything(pool: &SqlitePool) -> i64 {
             opened: &[],
             checkouts: &[],
             said: None,
+            recorded: verkstead_store::Recorded::default(),
         },
     )
     .await
@@ -1587,4 +1588,156 @@ async fn a_conversation_that_is_not_there_is_a_miss() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+/// A pending steer never boards.
+///
+/// The Steer form is an item on the Timeline while it is being written, but it
+/// is no Event and has no place in the record: it has not happened yet. What it
+/// says is where the work *might* be going, which is not a fact about the work
+/// that was done — and the item drawn for it opens a form a reader has no
+/// workbench to submit.
+#[tokio::test]
+async fn a_pending_steer_never_boards_a_share() {
+    let (_dir, pool, app) = app().await;
+    let id = everything(&pool).await;
+
+    store::open_pending_steer(&pool, id).await.unwrap();
+    store::save_pending_steer(
+        &pool,
+        id,
+        &store::PendingForm {
+            target: Some(store::Lifecycle::Implementing),
+            instruction: Some("Take the counter out of the process".to_owned()),
+            ..store::PendingForm::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let shared = share(&app, id).await;
+
+    assert!(
+        shared.conversation.pending_steer.is_none(),
+        "a share carries the record, and this is not on it",
+    );
+
+    // And nothing of what was written into it either, which a parsed record
+    // could not say: the form is somebody's half-made decision about work in
+    // flight, and a file that leaves the tailnet is the last place for one.
+    let payload = raw(&app, &format!("/api/ui/conversations/{id}/share.json")).await;
+
+    assert!(
+        !payload.contains("Take the counter out of the process"),
+        "the form's own words are nowhere in the payload",
+    );
+}
+
+/// And a steer that boards says what it picked without saying where that
+/// account is kept.
+///
+/// The Pairing rides the Steer Event because the pane a steer opens is the form
+/// the human filled, and what they picked to run the work is part of that form.
+/// But an account *is* directories — Claude's pair, and the one home every type
+/// after it keeps — and a share is a file that is emailed about and attached to
+/// pull requests. So the same rule the Repo's path and the Worktree come off
+/// under is asked of the one Pairing a share still carries: the name, the mark
+/// and the model stay, and the paths are empty.
+#[tokio::test]
+async fn a_steer_that_boards_carries_no_path_to_the_account_it_picked() {
+    let (dir, pool, app) = app().await;
+    let id = everything(&pool).await;
+
+    // Kept somewhere nothing else in the payload names, so that finding it is
+    // finding the account's own paths rather than the repository's.
+    let account = dir.path().join("somewhere-of-their-own");
+    let config = account.join("claude.json");
+    std::fs::create_dir_all(&account).unwrap();
+    std::fs::write(&config, "{}").unwrap();
+
+    let profile = store::create_profile(
+        &pool,
+        &store::ProfileFacts {
+            name: Some("steering".to_owned()),
+            account: store::Account::Claude {
+                claude_dir: account.clone(),
+                config_file: config.clone(),
+            },
+            models: vec!["claude-opus-5".to_owned()],
+            memory: true,
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    store::steer_conversation(
+        &pool,
+        id,
+        verkstead_store::Steer {
+            target: store::Lifecycle::Wrapping,
+            pairings: &[],
+            brief: None,
+            instruction: None,
+            direction: None,
+            worktree: None,
+            base: None,
+            companions: &[],
+            opened: &[],
+            checkouts: &[],
+            said: None,
+            recorded: verkstead_store::Recorded {
+                digest: false,
+                interrupt: false,
+                pairing: Some(verkstead_store::PickedPairing {
+                    profile_id: profile.id,
+                    model: "claude-opus-5",
+                }),
+            },
+        },
+    )
+    .await
+    .unwrap();
+
+    let shared = share(&app, id).await;
+
+    let picked = shared
+        .conversation
+        .timeline
+        .iter()
+        .rev()
+        .find_map(|event| match event {
+            TimelineEvent::Steer(steer) => steer.record.as_ref(),
+            _ => None,
+        })
+        .expect("the steer that picked an account is on the curated Timeline");
+
+    let verkstead_render::SteerPairingView::Under(under) = &picked.pairing else {
+        panic!("what the human picked is what the pane draws, so it boards");
+    };
+
+    // What the pane says, which says nothing about this machine.
+    assert_eq!(under.profile.name.as_deref(), Some("steering"));
+    assert_eq!(under.model.as_deref(), Some("claude-opus-5"));
+
+    let verkstead_render::ProfileAccount::Claude {
+        claude_dir,
+        config_file,
+    } = &under.profile.account
+    else {
+        panic!("the type's own mark stays, it being what the row is read by");
+    };
+
+    assert_eq!(claude_dir, "", "where the account is kept does not board");
+    assert_eq!(config_file, "");
+
+    // And said of the payload whole, which is what a reader actually receives:
+    // a field blanked in one place and copied in another would pass everything
+    // above and still hand the path over.
+    let payload = raw(&app, &format!("/api/ui/conversations/{id}/share.json")).await;
+
+    assert!(
+        !payload.contains(account.to_str().unwrap()),
+        "nowhere in the payload is the directory the account is kept in",
+    );
 }
