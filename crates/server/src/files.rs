@@ -1166,7 +1166,11 @@ mod tests {
         let worktree = repository(&held.path().join("worktree"));
         let elsewhere = held.path().join("elsewhere");
         std::fs::create_dir(&elsewhere).unwrap();
-        std::fs::write(elsewhere.join("secrets"), "nothing of this conversation's\n").unwrap();
+        std::fs::write(
+            elsewhere.join("secrets"),
+            "nothing of this conversation's\n",
+        )
+        .unwrap();
 
         let roots = [root(&worktree)];
 
@@ -1175,12 +1179,7 @@ mod tests {
             FileWritten::Outside
         );
         assert_eq!(
-            write(
-                &roots,
-                &worktree.join("../elsewhere/secrets"),
-                "",
-                "mine\n"
-            ),
+            write(&roots, &worktree.join("../elsewhere/secrets"), "", "mine\n"),
             FileWritten::Outside
         );
         assert_eq!(

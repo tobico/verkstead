@@ -544,9 +544,7 @@ async fn save(app: &Router, conversation: i64, at: &Path, over: &str, text: &str
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(format!(
-                    "/api/ui/conversations/{conversation}/files/file"
-                ))
+                .uri(format!("/api/ui/conversations/{conversation}/files/file"))
                 .header("content-type", "application/json")
                 .body(Body::from(
                     serde_json::to_vec(&FileWrite {

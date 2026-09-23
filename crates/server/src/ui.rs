@@ -37,15 +37,14 @@ use verkstead_render::{
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, Creation, Cursor, FileReading, FileRootsView,
     FileWrite, FileWritten, FolderListing, GrillingStarted, IgnoreRule, IgnoredCommentsEdit,
-    InstallPress, Lifecycle,
-    Locked, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder,
-    NewPullRequestAdoption, Parked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
-    Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed,
-    RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress, SetReading, SetView, SettingsEdit,
-    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
-    ShowArchived, ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed,
-    Subscription, TakenUp, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet,
-    Unsubscribe, UpdateNotice, Verified,
+    InstallPress, Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion,
+    NewConversation, NewOrder, NewPullRequestAdoption, Parked, ProfileChoice, ProfileEdit,
+    ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
+    RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress,
+    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
+    SharedCommit, SharedConversation, ShowArchived, ShowingArchived, Standing, SteerOpened,
+    SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalOpened, TimelineEvent,
+    TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
