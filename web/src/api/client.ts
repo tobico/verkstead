@@ -36,6 +36,8 @@ import type {
   Created,
   Dependency,
   DirectoryListing,
+  FileRootsView,
+  FolderListing,
   GrillingStarted,
   OnboardingView,
   OpenPullRequestRepo,
@@ -555,6 +557,33 @@ export async function closeTerminal(
         headers: { accept: "application/json" },
       },
     ),
+  );
+}
+
+/// The worktrees Code's tree is drawn over: the conversation's own first, then
+/// each companion's, each saying whether anything in it can be written.
+///
+/// What bounds the files API, rather than a list for the eye: the server reads
+/// and writes the worktrees as itself, with no sandbox in front of it, and a
+/// path under none of these is refused (ADR 0019).
+export function listFileRoots(id: number): Promise<FileRootsView> {
+  return get<FileRootsView>(`/api/ui/conversations/${id}/files/roots`);
+}
+
+/// And what one folder of one of them holds.
+///
+/// One folder per ask and never a walk — the shape a path field browses with,
+/// and why the tree asks again for every level somebody expands. Git-ignored
+/// paths and `.git` are not in the answer.
+///
+/// Every refusal is in the body rather than in the status: a path outside every
+/// root, a path under `.git`, a worktree that has gone and a folder that has are
+/// four different sentences to draw where the rows would be.
+export function listFolder(id: number, path: string): Promise<FolderListing> {
+  const asking = new URLSearchParams({ path });
+
+  return get<FolderListing>(
+    `/api/ui/conversations/${id}/files/folder?${asking}`,
   );
 }
 

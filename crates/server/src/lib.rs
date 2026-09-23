@@ -59,6 +59,9 @@ mod diffs;
 mod done;
 mod drivers;
 mod exchanges;
+/// The Worktrees Code reads: the roots its tree stands on, and one folder of
+/// one of them at a time.
+mod files;
 /// What a follow-up session is started on, and read back from where it stands.
 mod follow_ups;
 mod followers;

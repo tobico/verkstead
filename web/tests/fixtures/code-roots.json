@@ -1,0 +1,16 @@
+{
+  "roots": [
+    {
+      "own": true,
+      "path": "/var/lib/verkstead/worktrees/verkstead-code-pane",
+      "repo": "verkstead",
+      "writable": true
+    },
+    {
+      "own": false,
+      "path": "/var/lib/verkstead/worktrees/askance-code-pane",
+      "repo": "askance",
+      "writable": false
+    }
+  ]
+}

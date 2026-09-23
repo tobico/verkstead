@@ -1,3 +1,39 @@
+/* The pane under its header: the tree down the side, and the group of tabs
+   beside it.
+
+   A row that is the pane's own height — it wears the frame's `paneScreen`, so
+   `Panes.module.css` gives it the room the header leaves and nothing scrolls
+   behind it — with the tree keeping its width and the group taking the rest.
+   `min-height: 0` on both halves for the reason a column of terminals always
+   needs it: a flex item's floor is its content, and a grid that would not
+   shrink is a pane that grows past the window.
+
+   On a phone they stack. Sixteen rems of names beside a terminal on a screen
+   twenty-three wide is neither of them, so the tree goes above the group with a
+   height of its own and the group takes what is left — which keeps both
+   reachable, where hiding the tree would put the files of a Conversation out of
+   reach of the device most of this workbench is read on. What the tree does
+   with the height it is given is its own, in `Tree.module.css`. */
+.body {
+  display: flex;
+  gap: 0.75rem;
+  min-height: 0;
+}
+
+.group {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+@media (max-width: 40rem) {
+  .body {
+    flex-direction: column;
+  }
+}
+
 /* Code's tab bar, holding a Conversation's own terminals one per tab — see
    `Code.tsx`.
 
@@ -151,10 +187,10 @@
   font-size: 0.85rem;
 }
 
-/* What the pane draws while it holds nothing: the hint, and the press that
+/* What the group draws while it holds nothing: the hint, and the press that
    opens a shell. Where a tab's content goes rather than over the whole pane —
-   the tree will stand beside this — and centred in it, there being nothing else
-   on the page for it to line up with. */
+   the tree stands beside this — and centred in it, there being nothing else on
+   the page for it to line up with. */
 .nothing {
   display: flex;
   flex-direction: column;

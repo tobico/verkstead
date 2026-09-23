@@ -590,3 +590,49 @@ pub(crate) fn accepting(dir: &Path, args: &[&str], ok: &[i32]) -> Option<String>
     // either way, so anything else is replaced rather than refused.
     Some(String::from_utf8_lossy(&output.stdout).into_owned())
 }
+
+/// And the same run again with something written to it, which is the one git
+/// read here that has an input as well as an answer.
+///
+/// [`crate::files`] asks `check-ignore` which of a folder's entries a checkout
+/// ignores, and the paths go in on standard input rather than on the command
+/// line: a folder wide enough for the question to be worth asking in one run is
+/// a folder wide enough to overrun an argument list.
+///
+/// Written and then read, in that order and with the pipe closed in between —
+/// which is what [`std::process::Child::wait_with_output`] does for the caller,
+/// and is the whole of why this is not [`accepting`] with one more argument. A
+/// write that left the pipe open would be a `--stdin` waiting for an end that
+/// never came, and a server waiting on it.
+pub(crate) fn feeding(dir: &Path, args: &[&str], input: &str, ok: &[i32]) -> Option<String> {
+    use std::io::Write;
+
+    let mut child = Command::new("git")
+        // Reading a repository should never take a lock on it — see
+        // [`accepting`], which is where that is said and why.
+        .arg("--no-optional-locks")
+        .args(args)
+        .unseen()
+        .current_dir(dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+
+    // A git that has already exited — the directory is no repository, say — is
+    // a pipe with nobody at the other end, which is an error to swallow rather
+    // than a reason to fail: what it exited with is read below like any other
+    // answer.
+    if let Some(mut writing) = child.stdin.take() {
+        let _ = writing.write_all(input.as_bytes());
+    }
+
+    let output = child.wait_with_output().ok()?;
+
+    if !ok.contains(&output.status.code()?) {
+        return None;
+    }
+
+    Some(String::from_utf8_lossy(&output.stdout).into_owned())
+}

@@ -34,6 +34,8 @@ import type {
   ConversationStopped,
   ConversationUnarchived,
   ConversationView,
+  FileRootsView,
+  FolderListing,
   GrillingStarted,
   Merging,
   NoticeEvent,
@@ -177,6 +179,9 @@ import {
 } from "../src/workbench/Code";
 // And the tab bar over its several shells, which is the pane's own module.
 import codePane from "../src/workbench/Code.module.css";
+// And the tree down its side, over every worktree the conversation has.
+import { FOLDER_REFUSAL, NO_ROOTS } from "../src/workbench/Tree";
+import treePane from "../src/workbench/Tree.module.css";
 // The mark a pull request's checks are said in, both ways: the hashed names to
 // query the card by, and the words the icon is read aloud in. The three shapes
 // themselves come straight from Font Awesome, so that a test naming one and the
@@ -297,6 +302,8 @@ import capture from "./fixtures/capture.json" with { type: "json" };
 import transcript from "./fixtures/transcript.json" with { type: "json" };
 import more from "./fixtures/transcript-more.json" with { type: "json" };
 import screenOfIt from "./fixtures/screen.json" with { type: "json" };
+import codeRoots from "./fixtures/code-roots.json" with { type: "json" };
+import codeFolder from "./fixtures/code-folder.json" with { type: "json" };
 import wrapping from "./fixtures/conversation-wrapping.json" with { type: "json" };
 import repoView from "./fixtures/repo.json" with { type: "json" };
 import told from "./fixtures/settings.json" with { type: "json" };
@@ -16752,6 +16759,21 @@ const TERMINALS_OF_IT = `/api/ui/conversations/${GRILLING.id}/terminals`;
 /// And where the first of them is watched.
 const TERMINAL_ATTACH = `${TERMINALS_OF_IT}/1/attach`;
 
+/// Where the worktrees Code's tree is drawn over are listed — the conversation's
+/// own and each companion's, which is what bounds the files API (ADR 0019).
+const ROOTS_OF_IT = `/api/ui/conversations/${GRILLING.id}/files/roots`;
+
+/// And where one folder of one of them is read, which is what expanding a row
+/// asks for.
+function folderOf(path: string): string {
+  return `/api/ui/conversations/${GRILLING.id}/files/folder?path=${encodeURIComponent(path)}`;
+}
+
+/// The roots the fixtures carry: the conversation's own worktree, and a
+/// read-only companion's beside it.
+const OWN_ROOT = (codeRoots as FileRootsView).roots[0]!;
+const COMPANION_ROOT = (codeRoots as FileRootsView).roots[1]!;
+
 /// The code icon on the Timeline's header, which is the whole of the way into
 /// the pane: no card opens it, Code belonging to the conversation rather than
 /// to any moment on its record.
@@ -16774,6 +16796,10 @@ function idle(live: number[]): TerminalsView {
 
 /// The workbench with a conversation holding one live terminal, the socket
 /// stubbed, and whatever else the test wants answered.
+///
+/// The roots come with it, every opening of the pane reading them: the tree is
+/// half of Code, and a test about its tabs should no more have to say what the
+/// tree asked for than it has to say what the sidebar did.
 function withTerminals(
   live: number[],
   ...answers: Parameters<typeof serving>
@@ -16784,6 +16810,7 @@ function withTerminals(
   return theGrillingStanding(
     {},
     whenever(TERMINALS_OF_IT, json(idle(live))),
+    whenever(ROOTS_OF_IT, json(codeRoots)),
     ...answers,
   );
 }
@@ -17089,8 +17116,9 @@ describe("a conversation's terminal in the code pane", () => {
     expect(socket.sent).toHaveLength(said);
   });
 
-  /// The terminal fills the pane: the reading measure comes off, and the pane
-  /// ends where the window does rather than scrolling on down the page.
+  /// The tree and the terminal fill the pane between them: the reading measure
+  /// comes off, and the pane ends where the window does rather than scrolling on
+  /// down the page.
   it("fills the pane, with no reading measure and nothing to scroll", async () => {
     withTerminals([1]);
     const { container } = mount(`/conversations/${GRILLING.id}/code`);
@@ -17098,19 +17126,30 @@ describe("a conversation's terminal in the code pane", () => {
     const socket = await attached();
     socket.says(PAINTED);
 
+    // The two names the frame reads are on the row holding both halves, which
+    // is the thing the pane is sized around now that the tree stands beside the
+    // tabs: the height rule every terminal pane takes, and the width rule this
+    // one takes on top of it.
+    const body = await drawn(
+      container,
+      `.${shell.detailsPane} .${codePane.body}`,
+    );
+
+    expect(body.classList).toContain(shell.paneScreen!);
+    expect(body.classList).toContain(shell.paneWide!);
+
+    expect(shellCss).toContain(
+      ".panes > .detailsPane:has(.paneWide) {\n  padding-inline: 1.25rem;\n}",
+    );
+
     const grid = await drawn(
       container,
       `.${shell.detailsPane} .${attachedPane.screen}`,
     );
 
-    // The two names the frame reads: the height rule every terminal pane takes,
-    // and the width rule this one takes on top of it.
+    // And the grid itself is still what the column fills, which is what puts a
+    // terminal's height in the pane's hands rather than in its content's.
     expect(grid.classList).toContain(shell.paneScreen!);
-    expect(grid.classList).toContain(shell.paneWide!);
-
-    expect(shellCss).toContain(
-      ".panes > .detailsPane:has(.paneWide) {\n  padding-inline: 1.25rem;\n}",
-    );
 
     // And it is a live one, so it is clipped rather than scrolled — see the
     // Screen's own reasoning about what a scrollbar costs a socket.
@@ -18200,6 +18239,255 @@ describe("the code pane's tabs", () => {
       expect(codeCss).toContain("max-width: 12rem;");
       expect(codeCss).toContain("text-overflow: ellipsis;");
     });
+  });
+});
+
+
+/// The tree down the side of Code: a root per worktree the conversation has, and
+/// one folder read when it is expanded (ADR 0019, *The tree*).
+///
+/// The fixtures behind it are what the real endpoints wrote — a conversation
+/// with its own worktree and a read-only companion beside it, and one folder of
+/// the first with git's ignores already taken out — so what is asserted here is
+/// what the tree does with an answer rather than what the answer says.
+describe("the code pane's file tree", () => {
+  /// The rows the tree is drawing, in the order it drew them: the roots, and
+  /// whatever is open under them.
+  function rows(container: ParentNode): HTMLElement[] {
+    return [
+      ...container.querySelectorAll<HTMLElement>(
+        `.${shell.detailsPane} .${treePane.tree} .${treePane.name}`,
+      ),
+    ];
+  }
+
+  /// And what each of them says.
+  function named(container: ParentNode): string[] {
+    return rows(container).map((row) => row.textContent ?? "");
+  }
+
+  /// The button for one row, found by what it is called — which is how a human
+  /// finds one, and is not the position it happens to be drawn at.
+  function row(container: ParentNode, name: string): HTMLButtonElement {
+    const found = [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        `.${shell.detailsPane} .${treePane.folder}`,
+      ),
+    ].find((one) => one.textContent?.startsWith(name));
+
+    if (!found) {
+      throw new Error(
+        `no row called ${name}; the tree has ${named(container).join(", ")}`,
+      );
+    }
+
+    return found;
+  }
+
+  /// The conversation's own worktree first, then each companion's — and the
+  /// read-only one marked, which is what says a file opened out of it will take
+  /// no typing.
+  it("draws a root for every worktree, a read-only companion marked", async () => {
+    withTerminals([]);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() => expect(rows(container)).toHaveLength(2));
+
+    expect(named(container)).toEqual([
+      OWN_ROOT.repo,
+      `${COMPANION_ROOT.repo}read-only`,
+    ]);
+
+    // The mark is on the companion alone: the conversation's own worktree is
+    // where the work is done.
+    expect(
+      rows(container).map(
+        (one) => one.querySelector(`.${treePane.readOnly}`)?.textContent,
+      ),
+    ).toEqual([undefined, "read-only"]);
+  });
+
+  /// And a conversation with no worktree has no tree, which is a sentence
+  /// rather than an empty box: a draft has nothing checked out yet, and a closed
+  /// conversation has had its checkouts taken back.
+  it("says so where the conversation has no worktree", async () => {
+    withTerminals([], whenever(ROOTS_OF_IT, json({ roots: [] })));
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    // Re-queried rather than held: the tree swaps one line for the other as the
+    // reading lands, and what it swaps is the element.
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${shell.detailsPane} .${treePane.tree} p`)
+          ?.textContent,
+      ).toContain(NO_ROOTS),
+    );
+  });
+
+  /// Nothing is read until somebody presses a row: a tree that read itself would
+  /// walk a rust checkout's `target/` before the pane had drawn.
+  it("reads no folder until a root is expanded", async () => {
+    const fetching = withTerminals(
+      [],
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() => expect(rows(container)).toHaveLength(2));
+    expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(0);
+
+    fireEvent.click(row(container, OWN_ROOT.repo));
+
+    // What git ignores is not in the answer, and neither is `.git`: both are
+    // the server's doing, so the tree draws what it was handed.
+    await waitFor(() =>
+      expect(named(container)).toEqual([
+        OWN_ROOT.repo,
+        "crates",
+        "web",
+        ".gitignore",
+        "Cargo.toml",
+        "README.md",
+        `${COMPANION_ROOT.repo}read-only`,
+      ]),
+    );
+
+    expect(named(container)).not.toContain("target");
+    expect(named(container)).not.toContain(".git");
+    expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(1);
+  });
+
+  /// One folder at a time, each expanded row asking for itself: a folder inside
+  /// one already open is a request of its own rather than something that came
+  /// down with the first.
+  it("reads one folder per expand, and never a walk", async () => {
+    const inside = `${OWN_ROOT.path}/crates`;
+    const fetching = withTerminals(
+      [],
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+      whenever(
+        folderOf(inside),
+        json({
+          Listed: {
+            path: inside,
+            entries: [
+              { name: "server", path: `${inside}/server`, folder: true },
+            ],
+          },
+        } satisfies FolderListing),
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() => expect(rows(container)).toHaveLength(2));
+    fireEvent.click(row(container, OWN_ROOT.repo));
+
+    await waitFor(() => expect(named(container)).toContain("crates"));
+    expect(askedFor(fetching, folderOf(inside))).toBe(0);
+
+    fireEvent.click(row(container, "crates"));
+
+    await waitFor(() => expect(named(container)).toContain("server"));
+    expect(askedFor(fetching, folderOf(inside))).toBe(1);
+  });
+
+  /// And it is read again on every expand. Nothing yet tells the page that the
+  /// disk moved — the agent writes, a build runs, a terminal tab checks out a
+  /// branch — so what a folder held last time is not what it holds now.
+  it("reads the folder again every time it is expanded", async () => {
+    // What is in the worktree, which the agent rewrites between the two
+    // expands. Answered afresh on every ask, which is the whole of what this is
+    // about.
+    let held = ["Cargo.toml"];
+
+    const fetching = withTerminals(
+      [],
+      whenever(folderOf(OWN_ROOT.path), () =>
+        json({
+          Listed: {
+            path: OWN_ROOT.path,
+            entries: held.map((name) => ({
+              name,
+              path: `${OWN_ROOT.path}/${name}`,
+              folder: false,
+            })),
+          },
+        } satisfies FolderListing)(),
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() => expect(rows(container)).toHaveLength(2));
+
+    fireEvent.click(row(container, OWN_ROOT.repo));
+    await waitFor(() => expect(named(container)).toContain("Cargo.toml"));
+
+    // Shut, which forgets what it held.
+    fireEvent.click(row(container, OWN_ROOT.repo));
+    await waitFor(() => expect(named(container)).not.toContain("Cargo.toml"));
+
+    held = ["Cargo.toml", "Cargo.lock"];
+    fireEvent.click(row(container, OWN_ROOT.repo));
+
+    await waitFor(() => expect(named(container)).toContain("Cargo.lock"));
+    expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(2);
+  });
+
+  /// A folder the server refused says which refusal it is, where its rows would
+  /// have been: each of them is a different thing for a human to read, and none
+  /// of them is a status code.
+  it("draws the sentence a refused folder came back with", async () => {
+    withTerminals(
+      [],
+      whenever(
+        folderOf(OWN_ROOT.path),
+        json("RootGone" satisfies FolderListing),
+      ),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() => expect(rows(container)).toHaveLength(2));
+    fireEvent.click(row(container, OWN_ROOT.repo));
+
+    const said = await drawn(
+      container,
+      `.${shell.detailsPane} .${treePane.why}`,
+    );
+
+    expect(said.textContent).toBe(FOLDER_REFUSAL.RootGone);
+  });
+
+  /// And each of the four is its own sentence rather than one "could not be
+  /// read", because only the human can tell which of them they are looking at.
+  it("words every refusal as the thing it is", () => {
+    expect(new Set(Object.values(FOLDER_REFUSAL)).size).toBe(
+      Object.keys(FOLDER_REFUSAL).length,
+    );
+
+    expect(FOLDER_REFUSAL.Outside).toContain("worktrees");
+    expect(FOLDER_REFUSAL.UnderGit).toContain(".git");
+    expect(FOLDER_REFUSAL.RootGone).toContain("worktree");
+    expect(FOLDER_REFUSAL.Missing).toContain("no longer");
+  });
+
+  /// A folder says which way it is, which is the one thing about a row that is
+  /// read aloud: a caret is a shape, and `aria-expanded` is the word for it.
+  it("says which way each folder is", async () => {
+    withTerminals([], whenever(folderOf(OWN_ROOT.path), json(codeFolder)));
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() => expect(rows(container)).toHaveLength(2));
+    expect(row(container, OWN_ROOT.repo).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+
+    fireEvent.click(row(container, OWN_ROOT.repo));
+
+    await waitFor(() =>
+      expect(row(container, OWN_ROOT.repo).getAttribute("aria-expanded")).toBe(
+        "true",
+      ),
+    );
   });
 });
 

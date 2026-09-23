@@ -1917,6 +1917,87 @@ export type Distro = "MacOs" | "Windows" | "NixOs" | "Ubuntu" | "Fedora" | "Debi
 export type EntryKind = "Directory" | "File" | "Repository";
 
 /**
+ * One of them: which repository it is a checkout of, where it is, and what may
+ * be done in it.
+ */
+export type FileRoot = { 
+/**
+ * The Repo's name, which is what the row is called: a root is a checkout
+ * and what the human knows it by is the repository it is of.
+ */
+repo: string, 
+/**
+ * And the directory itself, which is what a folder listing under it is
+ * asked for by.
+ *
+ * As the Conversation recorded it rather than resolved: the tree asks for
+ * paths built out of this one, and a path answered back through a
+ * resolution would read as somewhere else on a machine whose temporary
+ * directory is a symlink.
+ */
+path: string, 
+/**
+ * Whether this is the Conversation's own, as against a companion's.
+ *
+ * The first root is always the own one where there is one, so this says
+ * nothing a reader could not count — except on a Conversation whose own
+ * Worktree has gone and whose companions have not, which is where a tree
+ * drawing the first row as the work's own would be lying.
+ */
+own: boolean, 
+/**
+ * And whether anything here can be written. False for a read-only
+ * companion, which is checked out detached and is a root to read.
+ */
+writable: boolean, };
+
+/**
+ * The Worktrees Code draws a root apiece for.
+ *
+ * The Conversation's own first and each companion's after it, which is the
+ * order the tree draws them in. Empty for a Conversation that has no
+ * checkouts — one before grilling starts, and one that has been closed — which
+ * is a tree with nothing in it rather than anything to report.
+ */
+export type FileRootsView = { roots: Array<FileRoot>, };
+
+/**
+ * One thing in a folder.
+ *
+ * The name and the whole path both, for the reason a browse's entry carries
+ * both: the name is the row, and the path is what the next listing — or, from
+ * the stage after this one, the read that opens the file — is asked for.
+ */
+export type FolderEntry = { name: string, 
+/**
+ * Where it is: the folder that was asked for, with the name joined on.
+ *
+ * Built rather than read back off the directory, so that every path the
+ * tree holds is spelled the way the root it came from is. What follows a
+ * symlink is the reading, which happens afresh each time one of these is
+ * asked about.
+ */
+path: string, 
+/**
+ * Whether it is a folder to expand, as against a file to open.
+ *
+ * Two kinds rather than the browse's three: a `.git` inside a checkout is
+ * not something Code shows at all, so there is no repository to mark.
+ * Followed rather than read off the link, which is what the filesystem
+ * itself would do with it.
+ */
+folder: boolean, };
+
+/**
+ * What one folder of a root holds, or the named reason it holds nothing.
+ */
+export type FolderListing = { "Listed": { 
+/**
+ * The folder this lists, as it was asked for.
+ */
+path: string, entries: Array<FolderEntry>, } } | "Outside" | "UnderGit" | "RootGone" | "Missing" | "NotAFolder" | { "Unreadable": { why: string, } };
+
+/**
  * What became of starting a Conversation grilling.
  *
  * Every refusal is named rather than collapsed into one, because each of them

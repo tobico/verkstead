@@ -35,15 +35,16 @@ use verkstead_render::{
     CompanionBranchRenamed, CompanionMode, CompanionModeChoice, CompanionModeChosen,
     CompanionRemoved, CompanionView, CompileCaching, ConflictResolution, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
-    ConversationUnarchived, ConversationView, Creation, Cursor, GrillingStarted, IgnoreRule,
-    IgnoredCommentsEdit, InstallPress, Lifecycle, Locked, Merging, MissedOut, NewAdoption,
-    NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption, Parked, ProfileChoice,
-    ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice,
-    RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit,
-    ServePress, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented,
-    SharePublished, SharedCommit, SharedConversation, ShowArchived, ShowingArchived, Standing,
-    SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalOpened,
-    TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    ConversationUnarchived, ConversationView, Creation, Cursor, FileRootsView, FolderListing,
+    GrillingStarted, IgnoreRule, IgnoredCommentsEdit, InstallPress, Lifecycle, Locked, Merging,
+    MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption,
+    Parked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner,
+    RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField,
+    RuleRefused, ServeEdit, ServePress, SetReading, SetView, SettingsEdit, SettingsSaved,
+    SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
+    ShowingArchived, Standing, SteerOpened, SteerSubmission, Submitted, Subscribed, Subscription,
+    TakenUp, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe,
+    UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -221,6 +222,19 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/terminals/{number}/attach",
             get(crate::terminals::attach),
         )
+        // And the other half of Code: the files of the Worktrees it is drawn
+        // over. Beside the terminals' routes, which is what puts them behind the
+        // Workbench Key — a session's network is the host's own, so the key is
+        // the whole of what keeps a session out of a read of any file in any of
+        // the Conversation's Worktrees (ADR 0019, *The server reads and writes
+        // the Worktree, outside the Sandbox*).
+        //
+        // Two under the one path, because a tree asks two things: which roots
+        // there are, and what one folder of one of them holds. Conversation-
+        // scoped, the roots being that Conversation's checkouts and nothing
+        // else's — see [`crate::files`].
+        .route("/api/ui/conversations/{id}/files/roots", get(file_roots))
+        .route("/api/ui/conversations/{id}/files/folder", get(folder))
         // And one commit — its summary and its diff — fetched the same way and
         // for the same reason; see [`commit_pane`].
         .route(
@@ -2849,6 +2863,105 @@ async fn open_terminal(State(state): State<AppState>, Path(id): Path<String>) ->
     }
 }
 
+/// `GET /api/ui/conversations/{id}/files/roots` — the Worktrees Code draws a
+/// root apiece for.
+///
+/// The Conversation's own first, then each companion's in the order the
+/// Conversation carries them, a read-only one marked read-only rather than left
+/// out — see [`crate::files::roots`], which is where that parts company with
+/// the Diff a Set carries.
+///
+/// A Conversation this server has never checked anything out for has none, and
+/// so has one that has been closed. Neither is a 404: the roots are a reading
+/// of the record rather than a record of their own, and a tree with no roots in
+/// it is a tree.
+async fn file_roots(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    // Read as permissively as every other id here: one that names no number
+    // names no Conversation, and no Conversation has no Worktrees.
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(FileRootsView { roots: Vec::new() }).into_response();
+    };
+
+    let conversation = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return Json(FileRootsView { roots: Vec::new() }).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
+            return unavailable("this conversation's worktrees could not be read");
+        }
+    };
+
+    Json(FileRootsView {
+        roots: crate::files::roots(&conversation),
+    })
+    .into_response()
+}
+
+/// `GET /api/ui/conversations/{id}/files/folder?path=<path>` — what one folder
+/// of one of those roots holds.
+///
+/// One folder per request and never a walk, which is the shape the path field's
+/// browse answers in and is why the tree asks again for every level somebody
+/// expands.
+///
+/// Every refusal is a named outcome in the body rather than a status, the way
+/// registering a Repo refuses: a path outside every root, a path under `.git`,
+/// a Worktree that has gone and a folder that has are four different sentences
+/// for the human and none of them is a failure to retry — see
+/// [`verkstead_render::FolderListing`].
+///
+/// A path is asked for in full rather than as a root and a path under it. The
+/// tree holds the paths the roots endpoint gave it and joins names onto them,
+/// so a path is the one thing it has to say — and what bounds the read is the
+/// roots either way, which is a reading this server makes rather than anything
+/// a request can claim.
+async fn folder(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(asking): Query<Browsing>,
+) -> HttpResponse {
+    // No path at all is a path under no root, which is what an empty one comes
+    // to below: a tree asks about folders it was handed, and the roots are the
+    // first of those.
+    let asked = asking.path.unwrap_or_default();
+
+    // And an id that names no Conversation names no roots, so nothing is under
+    // one of them — read as permissively as every other id here.
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(FolderListing::Outside).into_response();
+    };
+
+    let conversation = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation,
+        // A Conversation that is not there has no roots, so nothing is under
+        // one of them. The same sentence a path off the machine gets, and the
+        // same thing is true of it.
+        Ok(None) => return Json(FolderListing::Outside).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
+            return unavailable("this conversation's worktrees could not be read");
+        }
+    };
+
+    // Off the runtime: opening a folder is a read, asking each of its entries
+    // what it is is a read, and git is a process.
+    let read = tokio::task::spawn_blocking(move || {
+        crate::files::folder(
+            &crate::files::roots(&conversation),
+            std::path::Path::new(&asked),
+        )
+    })
+    .await;
+
+    match read {
+        Ok(listing) => Json(listing).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "listing a folder of a Worktree failed");
+            unavailable("the folder could not be listed")
+        }
+    }
+}
+
 /// `GET /api/ui/conversations/{id}/backlog` — every task document the
 /// Conversation's Worktree holds, rendered.
 ///
@@ -4486,6 +4599,10 @@ fn last_four(token: &str) -> String {
 /// The path is optional because a field standing empty is where a browse
 /// begins, and an empty one is read as no path at all: `?path=` is what a
 /// cleared input sends, and it names the same nothing.
+///
+/// Shared with Code's folder read, which asks the same one thing of a different
+/// reading — see [`folder`], where no path is a path under no root rather than
+/// a browse's starting point.
 #[derive(Debug, serde::Deserialize)]
 struct Browsing {
     path: Option<String>,

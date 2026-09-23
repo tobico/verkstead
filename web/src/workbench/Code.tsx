@@ -7,13 +7,16 @@
 //! ([ADR 0013](../../../docs/adr/0013-conversation-terminals.md)).
 //!
 //! **The pane the Terminal pane became**
-//! ([ADR 0019](../../../docs/adr/0019-the-code-pane.md)). What it grows into is
-//! a file tree over every Worktree the Conversation has, with a group of tabs
-//! beside it holding files and terminals alike; what is here is that group's
-//! terminals, under the new name and the new path and otherwise untouched. Two
-//! panes, one holding shells and one holding shells and files, would be the
-//! same thing drawn twice — so there is no Terminal pane any more, and the path
-//! it stood at redirects here (see `App.tsx`).
+//! ([ADR 0019](../../../docs/adr/0019-the-code-pane.md)). Two panes, one
+//! holding shells and one holding shells and files, would be the same thing
+//! drawn twice — so there is no Terminal pane any more, and the path it stood
+//! at redirects here (see `App.tsx`).
+//!
+//! **A tree down the side and a group of tabs beside it**, which is the shape
+//! of the whole pane. The tree is [`./Tree`]: a root per Worktree the
+//! Conversation has, one folder read when it is expanded. The group is what is
+//! in this file, and what it holds so far is terminals — a file pressed in the
+//! tree opens in a tab of this group, which is the task after this one.
 //!
 //! Opened by the code icon on the Timeline's header — see `Timeline.tsx` —
 //! which is a details pane like every other, at a path of its own so it survives
@@ -21,14 +24,14 @@
 //! terminal belongs to the Conversation rather than to any moment on it, the way
 //! sharing does.
 //!
-//! **The Screen's own viewer, filling the pane.** What is drawn is
-//! [`./Attached`], the same xterm over the same socket to the same server-held
-//! virtual terminal a session's Screen is watched through — what runs on this
-//! one is a shell rather than an agent, and that is the whole of the difference.
-//! The pane gives it every inch it has: the reading measure every other details
-//! pane pads its content to comes off, the way the composer takes it off, and
-//! the pane ends where the window does, so the terminal is sized to the pane
-//! rather than scrolling it.
+//! **The Screen's own viewer, filling the group.** What is drawn in a terminal
+//! tab is [`./Attached`], the same xterm over the same socket to the same
+//! server-held virtual terminal a session's Screen is watched through — what
+//! runs on this one is a shell rather than an agent, and that is the whole of
+//! the difference. The pane gives the pair every inch it has: the reading
+//! measure every other details pane pads its content to comes off, the way the
+//! composer takes it off, and the pane ends where the window does, so the tree
+//! and the terminal are sized to the pane rather than scrolling it.
 //!
 //! **Several of them, one per tab.** The bar in the pane's header holds a tab
 //! per terminal, in the order they were opened, and a plus at the end opens
@@ -146,6 +149,7 @@ import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { Attached } from "./Attached";
 import { PaneHead } from "./PaneHead";
+import { Tree } from "./Tree";
 import styles from "./Code.module.css";
 import shell from "../Panes.module.css";
 
@@ -579,56 +583,72 @@ export function Code(props: {
         </PaneHead>
       </PaneSticky>
 
-      <Switch fallback={<Empty>Reading this conversation's terminals…</Empty>}>
-        <Match when={terminals.isError}>
-          <ErrorLine>
-            Could not read this conversation's terminals:{" "}
-            {terminals.error?.message}
-          </ErrorLine>
-        </Match>
-        <Match when={tabs().length > 0}>
-          <For each={tabs()}>
-            {(tab) =>
-              tab > 0 ? (
-                <Attached
-                  at={terminalSocket(props.conversation.id, tab)}
-                  class={shell.paneWide}
-                  showing={showing() === tab}
-                  scrollback={SCROLLBACK}
-                  over={over()[tab]}
-                  titled={(title) =>
-                    setTitles((was) => ({ ...was, [tab]: title }))
-                  }
-                  ended={() => ended(tab)}
-                  say={{
-                    waiting: "Starting a shell in this conversation's worktree…",
-                    lost: "The connection to this terminal was lost.",
-                  }}
-                />
-              ) : (
-                // A tab the server never opened a shell for has no grid to
-                // stand under the sentence, and nothing to attach to: the
-                // refusal is the whole of it.
-                <Show when={showing() === tab}>
-                  <ErrorLine>{over()[tab]}</ErrorLine>
-                </Show>
-              )
-            }
-          </For>
-        </Match>
+      {/* The tree and the group of tabs, side by side, which is the whole of
+          the pane under its header. Both names are the frame's: `paneScreen`
+          is what says this is the thing the pane sizes to its own height, and
+          `paneWide` is what takes the reading measure off the pane — a tree and
+          a terminal are neither of them prose, and every column they are given
+          is a column they use. */}
+      <div class={`${styles.body} ${shell.paneScreen} ${shell.paneWide}`}>
+        <Tree conversation={props.conversation.id} />
 
-        {/* And the pane with nothing in it, which is where a Conversation with
-            no shells running lands and where the last of them leaves it. Drawn
-            where a tab's content goes rather than over the whole pane: the tree
-            stands beside this, and a pane-wide notice would be a sentence over
-            that too. */}
-        <Match when={read()}>
-          <div class={styles.nothing}>
-            <Empty>{NOTHING_OPEN}</Empty>
-            <QuietButton onClick={() => void open()}>New terminal</QuietButton>
-          </div>
-        </Match>
-      </Switch>
+        <div class={styles.group}>
+          <Switch
+            fallback={<Empty>Reading this conversation's terminals…</Empty>}
+          >
+            <Match when={terminals.isError}>
+              <ErrorLine>
+                Could not read this conversation's terminals:{" "}
+                {terminals.error?.message}
+              </ErrorLine>
+            </Match>
+            <Match when={tabs().length > 0}>
+              <For each={tabs()}>
+                {(tab) =>
+                  tab > 0 ? (
+                    <Attached
+                      at={terminalSocket(props.conversation.id, tab)}
+                      showing={showing() === tab}
+                      scrollback={SCROLLBACK}
+                      over={over()[tab]}
+                      titled={(title) =>
+                        setTitles((was) => ({ ...was, [tab]: title }))
+                      }
+                      ended={() => ended(tab)}
+                      say={{
+                        waiting:
+                          "Starting a shell in this conversation's worktree…",
+                        lost: "The connection to this terminal was lost.",
+                      }}
+                    />
+                  ) : (
+                    // A tab the server never opened a shell for has no grid to
+                    // stand under the sentence, and nothing to attach to: the
+                    // refusal is the whole of it.
+                    <Show when={showing() === tab}>
+                      <ErrorLine>{over()[tab]}</ErrorLine>
+                    </Show>
+                  )
+                }
+              </For>
+            </Match>
+
+            {/* And the group with nothing in it, which is where a Conversation
+                with no shells running lands and where the last of them leaves
+                it. Drawn where a tab's content goes rather than over the whole
+                pane: the tree stands beside this, and a pane-wide notice would
+                be a sentence over that too. */}
+            <Match when={read()}>
+              <div class={styles.nothing}>
+                <Empty>{NOTHING_OPEN}</Empty>
+                <QuietButton onClick={() => void open()}>
+                  New terminal
+                </QuietButton>
+              </div>
+            </Match>
+          </Switch>
+        </div>
+      </div>
 
       {/* And the card a × on a busy tab puts up, which the press that made it
           is waiting on. Outside the Switch above because it is drawn over the

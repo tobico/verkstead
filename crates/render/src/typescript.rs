@@ -22,14 +22,14 @@ use crate::{
     BriefSaved, Capture, CommitPane, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
     CompanionModeChoice, CompanionModeChosen, CompanionRemoved, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
-    ConversationUnarchived, ConversationView, Created, Creation, DirectoryListing, GrillingStarted,
-    InstallPress, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder,
-    NewPullRequestAdoption, OnboardingView, OpenPullRequestRepo, PrefillView, ProfileChoice,
-    ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
-    PushKey, Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
-    RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane,
-    RoleChoice, Screen, ServeEdit, ServePress, SetReading, SettingsEdit, SettingsSaved,
-    SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
+    ConversationUnarchived, ConversationView, Created, Creation, DirectoryListing, FileRootsView,
+    FolderListing, GrillingStarted, InstallPress, Locked, NewAdoption, NewCompanion,
+    NewConversation, NewOrder, NewPullRequestAdoption, OnboardingView, OpenPullRequestRepo,
+    PrefillView, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
+    ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RemoteBanner, RemoteView,
+    RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved,
+    Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress, SetReading, SettingsEdit,
+    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
     ShowingArchived, Shown, Started, SteerOpened, SteerSubmission, Submitted, Subscribed,
     Subscription, TakenUp, TerminalClosed, TerminalOpened, TerminalsView, TranscriptView,
     Unsubscribe, UpdateNotice, Watching,
@@ -226,6 +226,14 @@ fn the_viewers_types_are_written_from_these() {
     TerminalsView::export_all(&config).unwrap();
     TerminalOpened::export_all(&config).unwrap();
     TerminalClosed::export_all(&config).unwrap();
+
+    // And the other half of Code: the Worktrees its tree stands on, and one
+    // folder of one of them. The roots are what bounds the files API — the
+    // Conversation's own checkout and each companion's, a read-only one marked
+    // — and a folder is read when it is expanded and never walked (ADR 0019,
+    // *The tree*). The listing writes its entries with it.
+    FileRootsView::export_all(&config).unwrap();
+    FolderListing::export_all(&config).unwrap();
 
     // And what a session committed: the summary drawn out, and the diff, both of
     // which are this payload's alone — the Timeline's own card is the subject

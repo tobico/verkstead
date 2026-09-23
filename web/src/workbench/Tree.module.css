@@ -1,0 +1,133 @@
+/* The file tree down the side of Code — see `Tree.tsx`.
+
+   A column of its own beside the tabs, in the quieter fill VS Code's explorer
+   has: what is read here is a list of names, and what is read beside it is the
+   file or the shell somebody opened out of it. The rows are dense, because a
+   tree is scanned rather than read, and a worktree is deep. */
+.tree {
+  flex: none;
+  width: 16rem;
+  min-height: 0;
+  padding: 0.5rem 0;
+  overflow: auto;
+  /* A tree scrolled to its end stops there rather than handing the rest of the
+     gesture out to the pane behind it — what the grid beside it says about the
+     same gesture. */
+  overscroll-behavior: contain;
+  background: var(--code-wash);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+/* And where the pane stacks rather than splits, the tree is the width of it and
+   a few rows tall: a column of names over a terminal, rather than a column of
+   names beside a terminal that would then be five rems wide. What stacks them
+   is the pane's own, in `Code.module.css`. */
+@media (max-width: 40rem) {
+  .tree {
+    width: auto;
+    max-height: 12rem;
+  }
+}
+
+/* One level of it. The list markers go, the indent goes with them, and what
+   stands a row in from the one above is padding on the row itself: a nested
+   `ul` that indented would indent the row's whole strip, and the strip is what
+   lights up under the pointer. */
+.rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  margin: 0;
+}
+
+/* A folder: the caret, and what it is called. A button, because pressing it
+   reads that folder off the disk.
+
+   Full width, so the lit strip runs the width of the tree the way a file
+   manager's does, and left-aligned inside it. */
+.folder,
+.file {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.2rem 0.5rem;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  text-align: left;
+  background: none;
+  border: 0;
+
+  /* A long press on a row is how text is selected. A row is a thing to press
+     rather than to copy out of here, which is what the tabs above it say about
+     the same gesture. */
+  user-select: none;
+}
+
+.folder {
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .folder:hover {
+    color: var(--ink);
+    background: var(--card);
+  }
+}
+
+/* The caret, a shade quieter than the name beside it and sized to the row: what
+   it says is which way this folder is, which is worth a glance rather than a
+   read. Its own width so that the names line up whichever way it points. */
+.caret {
+  flex: none;
+  width: 0.7em;
+  font-size: 0.8em;
+  opacity: 0.75;
+}
+
+/* And the name. A path segment can be anything, and a tree a pane wide is
+   sixteen rems: cut off at the row rather than wrapping, which would make one
+   row two and lose the line the eye is running down. */
+.name {
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* A root says the repository it is a checkout of, which is what the human knows
+   it by — and a root is the one row of the tree that is not a path segment, so
+   it is drawn as the heading it is. */
+.repo {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+/* And the word on a companion nothing can be written in. Quiet, because it is a
+   fact about the root rather than a warning: what it changes is what a file
+   opened out of here will do, and that is the next task's. */
+.readOnly {
+  flex: none;
+  font-size: 0.75em;
+  color: var(--ink-soft);
+  opacity: 0.8;
+}
+
+/* What a folder says when it came back holding nothing: the sentence, where its
+   rows would have been. Indented to the row that asked, so it reads as that
+   folder's answer rather than as the tree's. */
+.why {
+  margin: 0;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
