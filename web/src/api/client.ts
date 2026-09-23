@@ -72,7 +72,9 @@ import type {
   ShowingArchived,
   Started,
   SteerCancelled,
+  SteerForm,
   SteerOpened,
+  SteerSaved,
   SteerSubmission,
   Submitted,
   Subscribed,
@@ -956,6 +958,17 @@ export function stopConversation(id: number): Promise<ConversationStopped> {
 /// is is the whole of it.
 export function steerConversation(id: number): Promise<SteerOpened> {
   return post<SteerOpened>(`/api/ui/conversations/${id}/steer`, {});
+}
+
+/// Keep the form as it stands, so the item can be left and come back to.
+///
+/// The whole form rather than the field that moved: a row holding the target of
+/// one keystroke beside the instruction of another would be a form that was
+/// never on anybody's screen. Posted on a pause in the typing and on the way
+/// out of a field, the way a drafting brief's saves are — see
+/// `src/workbench/settling.ts`, which is the pause both of them keep.
+export function saveSteer(id: number, form: SteerForm): Promise<SteerSaved> {
+  return post<SteerSaved>(`/api/ui/conversations/${id}/steer/save`, form);
 }
 
 /// Cancel it: the pending steer goes, and the conversation is left exactly as

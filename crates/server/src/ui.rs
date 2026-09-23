@@ -42,9 +42,9 @@ use verkstead_render::{
     RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
     ServeEdit, ServePress, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
     ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
-    ShowingArchived, Standing, SteerCancelled, SteerOpened, SteerSubmission, Submitted, Subscribed,
-    Subscription, TakenUp, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet,
-    Unsubscribe, UpdateNotice, Verified,
+    ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened, SteerSaved, SteerSubmission,
+    Submitted, Subscribed, Subscription, TakenUp, TerminalOpened, TimelineEvent, TokenEdit,
+    TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -379,15 +379,19 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // not.
         .route("/api/ui/conversations/{id}/stop", post(stop))
         .route("/api/ui/conversations/{id}/force-stop", post(force_stop))
-        // And the three presses that steer it, which are the row beside those
-        // in the same menu and the two the item that row opens offers. The
-        // press is an act of its own rather than the first half of the submit:
-        // it stops the drive so that nothing launches while the human composes,
+        // And the four presses that steer it, which are the row beside those in
+        // the same menu and the three the item that row opens make. The press
+        // is an act of its own rather than the first half of the submit: it
+        // stops the drive so that nothing launches while the human composes,
         // writes the pending steer the form is drawn on, and answers with what
         // it found running — see [`crate::steering`]. Cancel takes that pending
         // steer away and leaves the Conversation stopped; the submit carries
-        // what the form settled, which is the only body of the five.
+        // what the form settled; and the save between them carries the form as
+        // it stands, written onto the pending steer as it is typed so that the
+        // human can leave the item, the Conversation or the device and find it
+        // as they left it.
         .route("/api/ui/conversations/{id}/steer", post(steer))
+        .route("/api/ui/conversations/{id}/steer/save", post(steer_save))
         .route(
             "/api/ui/conversations/{id}/steer/cancel",
             post(steer_cancel),
@@ -1752,11 +1756,12 @@ pub(crate) async fn conversation_view(
         Ok(pending) => pending.map(|pending| PendingSteerView {
             at: pending.at,
             // Said in the form's own vocabulary rather than the record's, the
-            // item being what the form has come to — see
-            // [`crate::steering::steered`]. A target nothing can be steered
-            // into reads as none picked, which is what a form left on one would
-            // have to be.
-            target: pending.form.target.and_then(crate::steering::steered),
+            // row being what the form has come to — see
+            // [`crate::steering::filled`]. The whole of it, because the pane
+            // this Conversation's view opens is prefilled from it: a human who
+            // left the form half written finds it as they left it, on whichever
+            // device they pick up.
+            form: crate::steering::filled(pending.form),
         }),
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading the pending steer of a Conversation failed");
@@ -3521,6 +3526,31 @@ async fn steer(State(state): State<AppState>, Path(id): Path<String>) -> HttpRes
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "stopping a Conversation to steer it failed");
             unavailable("the conversation could not be stopped to steer it")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/steer/save` — keep the form as it stands.
+///
+/// The whole form as the body rather than the field that moved, which is what
+/// keeps the row a thing somebody could have been looking at — see
+/// [`crate::steering::save`]. Posted on a pause in the typing and on the way
+/// out of a field, the way a drafting Brief's saves are, so that the item can
+/// be left and come back to from anywhere.
+async fn steer_save(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(form): Json<SteerForm>,
+) -> HttpResponse {
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(SteerSaved::NoSuchConversation).into_response();
+    };
+
+    match crate::steering::save(&state, id, &form).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "saving a pending steer failed");
+            unavailable("the steer could not be saved")
         }
     }
 }

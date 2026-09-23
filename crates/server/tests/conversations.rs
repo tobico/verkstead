@@ -27,7 +27,8 @@ use verkstead_render::{
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationUnarchived,
     ConversationView, GrillingStarted, Lifecycle, Merging, PickedView, PinnedEvent, ProfileChosen,
     ProfileSaved, Registered, RepoEntry, RepoSwitched, Resolved, RoadmapPane, ShowingArchived,
-    Standing, Started, SteerCancelled, SteerCompanionRefusal, SteerOpened, TakenUp, TimelineEvent,
+    Standing, Started, SteerCancelled, SteerCompanionRefusal, SteerOpened, SteerSaved, TakenUp,
+    TimelineEvent,
 };
 use verkstead_server::{open_database, router_keeping, store};
 
@@ -1376,6 +1377,15 @@ async fn steer(app: &Router, id: i64) -> SteerOpened {
     .await
 }
 
+/// Keep the form as it stands, which is what the pane posts as it is typed.
+///
+/// The whole form as the body rather than the field that moved: a row holding
+/// the target of one keystroke beside the instruction of another would be a
+/// form that was never on anybody's screen.
+async fn save_steer(app: &Router, id: i64, form: &serde_json::Value) -> SteerSaved {
+    post(app, &format!("/api/ui/conversations/{id}/steer/save"), form).await
+}
+
 /// And cancel it, which takes the pending steer away and leaves the
 /// Conversation stopped. No body either, for the same reason.
 async fn cancel_steer(app: &Router, id: i64) -> SteerCancelled {
@@ -2587,8 +2597,9 @@ async fn pressing_steer_stops_the_drive_and_opens_a_pending_steer() {
 
     assert!(!pending.at.is_empty(), "it says when the press was made");
     assert_eq!(
-        pending.target, None,
-        "and nothing is picked: every form opens on nothing picked",
+        pending.form,
+        verkstead_render::SteerForm::default(),
+        "and the form is empty: nothing picked, nothing written, nothing ticked",
     );
 }
 
@@ -2722,6 +2733,152 @@ async fn submitting_takes_the_pending_steer_away_with_the_record() {
         steered(&view).last(),
         Some(&("moved", Lifecycle::Done)),
         "and the pair the steer leaves is on the record",
+    );
+}
+
+/// The form is written onto the pending steer and read back off the
+/// Conversation, whole: the pane is prefilled from it, so a human who left the
+/// item half written finds it as they left it on whatever device they pick up.
+///
+/// Every field, because a save carries every field. What is asked here is that
+/// none of them is dropped on the way through — the target's two vocabularies,
+/// the ticks, the Pairing's two halves and both halves of the companion
+/// section.
+#[tokio::test]
+async fn the_form_is_saved_onto_the_pending_steer_and_read_back() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    // A second repository, so that the companion rows name something other than
+    // the Conversation's own: the save writes what it is told, and which repos a
+    // steer could actually take is the submit's to refuse.
+    let askance = repository(elsewhere.path().join("askance"));
+    let registered: Registered = post(
+        &app,
+        "/api/ui/repos",
+        &serde_json::json!({ "path": askance }),
+    )
+    .await;
+    assert!(matches!(registered, Registered::Added(_)));
+
+    let alongside_id = get::<Vec<RepoEntry>>(&app, "/api/ui/repos")
+        .await
+        .into_iter()
+        .find(|entry| entry.name == "askance")
+        .expect("both are registered")
+        .id;
+
+    let running = profile(&app, elsewhere.path(), "sonnet").await;
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
+    );
+
+    let form = serde_json::json!({
+        "target": "Implementing",
+        "brief": "# Retries\n",
+        "digest": true,
+        "instruction": "Rebase this onto main.",
+        "follow_up": "Does it count the 429s it sends?",
+        "pairing": { "profile_id": running, "model": "claude-opus-5" },
+        "interrupt": true,
+        "added": [{
+            "repo_id": alongside_id,
+            "mode": "ReadWrite",
+            "base_ref": "trunk",
+            "branch": "alongside",
+        }],
+        "upgraded": [{ "repo_id": repo_id, "branch": "opened" }],
+    });
+
+    assert_eq!(save_steer(&app, id, &form).await, SteerSaved::Saved);
+
+    let pending = opened(&app, id)
+        .await
+        .pending_steer
+        .expect("the form is still being written");
+
+    assert_eq!(
+        serde_json::to_value(&pending.form).unwrap(),
+        form,
+        "the form comes back off the Conversation as it was saved",
+    );
+
+    // And a second save is the whole form again rather than an edit of the row:
+    // what is unticked has to leave, and there is no second call to notice it
+    // went.
+    let emptied = serde_json::json!({
+        "target": serde_json::Value::Null,
+        "brief": serde_json::Value::Null,
+        "digest": false,
+        "instruction": serde_json::Value::Null,
+        "follow_up": serde_json::Value::Null,
+        "pairing": serde_json::Value::Null,
+        "interrupt": false,
+        "added": [],
+        "upgraded": [],
+    });
+
+    assert_eq!(save_steer(&app, id, &emptied).await, SteerSaved::Saved);
+
+    let pending = opened(&app, id).await.pending_steer.unwrap();
+
+    assert_eq!(
+        serde_json::to_value(&pending.form).unwrap(),
+        emptied,
+        "a form emptied is a form with nothing on it, rows and all",
+    );
+    assert!(
+        !pending.at.is_empty(),
+        "and when the press was made is not the form's to move",
+    );
+}
+
+/// A save with nothing to save into is refused by name, and the field stops for
+/// good.
+///
+/// Two refusals rather than one, because what the human should go and look at
+/// differs: a Conversation that is gone, and a pending steer somebody submitted
+/// or cancelled from another device — which is much the commoner of the two, and
+/// is the one thing that can happen to a form sitting open for an afternoon.
+#[tokio::test]
+async fn a_save_with_no_pending_steer_behind_it_is_refused_by_name() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let form = serde_json::json!({ "target": "Done" });
+
+    assert_eq!(
+        save_steer(&app, id, &form).await,
+        SteerSaved::NoPendingSteer,
+        "nobody has pressed Steer, so there is no form to save",
+    );
+    assert_eq!(
+        save_steer(&app, 404, &form).await,
+        SteerSaved::NoSuchConversation,
+    );
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
+    );
+    assert_eq!(save_steer(&app, id, &form).await, SteerSaved::Saved);
+
+    // And the cancel takes the row away, which is what a second device doing it
+    // looks like from here: the next save has nothing to land on.
+    assert_eq!(cancel_steer(&app, id).await, SteerCancelled::Cancelled);
+    assert_eq!(
+        save_steer(&app, id, &form).await,
+        SteerSaved::NoPendingSteer,
     );
 }
 

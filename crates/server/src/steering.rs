@@ -24,6 +24,17 @@
 //! writes no second row: it says where the form is, and the page goes there.
 //! See [`store::open_pending_steer`], which answers which of the two happened.
 //!
+//! **The form keeps itself on that row as it is typed**, which is what makes
+//! the item something to come back to: a steer that takes an afternoon is
+//! written the way anything long is written — coming and going, on whichever
+//! device is to hand. [`save`] is the whole form in one act, the draft Brief's
+//! shape down to the pause the pane keeps before it posts, and it is refused by
+//! name where there is nothing left to save into: a submit or a cancel from
+//! another device landing mid-edit is the commonest thing that happens to a
+//! form sitting open. What the Conversation's view hands back is that same form
+//! — see [`filled`] — so the pane is prefilled from the row rather than opened
+//! empty.
+//!
 //! **What ends that session is the submit rather than the press.** One Worktree
 //! holds one agent, so the session a steer starts takes the Worktree from
 //! whatever is still in it — see the runner's `launch_in_turn`, which waits for
@@ -114,8 +125,9 @@
 use std::path::{Path, PathBuf};
 
 use verkstead_render::{
-    CompanionMode, ConversationSteered, SteerCancelled, SteerCompanionRefusal, SteerOpened,
-    SteerSubmission, SteerTarget,
+    CompanionAddition, CompanionMode, CompanionUpgrade, ConversationSteered, ProfileChoice,
+    SteerCancelled, SteerCompanionRefusal, SteerForm, SteerOpened, SteerSaved, SteerSubmission,
+    SteerTarget,
 };
 use verkstead_schema::{Direction, Nudge};
 
@@ -176,6 +188,120 @@ pub(crate) async fn click(state: &AppState, conversation_id: i64) -> anyhow::Res
     );
 
     Ok(SteerOpened::Opened { working, already })
+}
+
+/// Save the form onto the pending steer: what the pane posts as it is typed.
+///
+/// **The whole form in one act**, which is what keeps the row a thing somebody
+/// could have been looking at: the pane sends what is on the screen rather than
+/// the field that moved, so the row is never the target of one keystroke beside
+/// the instruction of another. See [`store::save_pending_steer`], which writes
+/// the companion rows the same way, and the pane in `web/src/workbench/Steer.tsx`,
+/// which puts every field through one keeper for the same reason.
+///
+/// **Both refusals are permanent, and that is what the pane needs of them.** A
+/// Conversation that is gone does not come back and a pending steer that was
+/// submitted or cancelled is not reopened, so a field told either of them stops
+/// saving and says so rather than asking again on every pause. Which is also
+/// why they are two rather than one: what the human should go and look at
+/// differs, and a steer somebody decided from their phone is much the commoner.
+///
+/// Nothing is logged. A save is a pause in somebody's typing rather than an act
+/// on the Conversation, and a line per sentence would bury the ones that are.
+pub(crate) async fn save(
+    state: &AppState,
+    conversation_id: i64,
+    form: &SteerForm,
+) -> anyhow::Result<SteerSaved> {
+    if store::load_conversation(&state.pool, conversation_id)
+        .await?
+        .is_none()
+    {
+        return Ok(SteerSaved::NoSuchConversation);
+    }
+
+    if !store::save_pending_steer(&state.pool, conversation_id, &held(form)).await? {
+        return Ok(SteerSaved::NoPendingSteer);
+    }
+
+    Ok(SteerSaved::Saved)
+}
+
+/// The form as the record keeps it, out of the form as the wire carries it.
+///
+/// The two vocabularies held to each other, which is what every pair here needs
+/// between them — see [`target`] for the states and [`mode`] for how far into a
+/// companion the work reaches.
+fn held(form: &SteerForm) -> store::PendingForm {
+    store::PendingForm {
+        target: form.target.map(target),
+        brief: form.brief.clone(),
+        digest: form.digest,
+        instruction: form.instruction.clone(),
+        follow_up: form.follow_up.clone(),
+        pairing: form.pairing.as_ref().map(|picked| store::PendingPairing {
+            profile_id: picked.profile_id,
+            model: picked.model.clone(),
+        }),
+        interrupt: form.interrupt,
+        added: form
+            .added
+            .iter()
+            .map(|addition| store::PendingAddition {
+                repo_id: addition.repo_id,
+                mode: mode(addition.mode),
+                base_ref: addition.base_ref.clone(),
+                branch: addition.branch.clone(),
+            })
+            .collect(),
+        upgraded: form
+            .upgraded
+            .iter()
+            .map(|upgrade| store::PendingUpgrade {
+                repo_id: upgrade.repo_id,
+                branch: upgrade.branch.clone(),
+            })
+            .collect(),
+    }
+}
+
+/// And the same read the other way, for the Conversation's own view: the form
+/// the pane is prefilled from.
+///
+/// A target nothing can be steered into reads as none picked — no form could
+/// have been left on one, [`steered`] being what wrote the row in the first
+/// place — which is what a form nobody has answered yet holds anyway.
+pub(crate) fn filled(form: store::PendingForm) -> SteerForm {
+    SteerForm {
+        target: form.target.and_then(steered),
+        brief: form.brief,
+        digest: form.digest,
+        instruction: form.instruction,
+        follow_up: form.follow_up,
+        pairing: form.pairing.map(|picked| ProfileChoice {
+            profile_id: picked.profile_id,
+            model: picked.model,
+        }),
+        interrupt: form.interrupt,
+        added: form
+            .added
+            .into_iter()
+            .map(|addition| CompanionAddition {
+                repo_id: addition.repo_id,
+                mode: reaching(addition.mode),
+                base_ref: addition.base_ref,
+                branch: addition.branch,
+            })
+            .collect(),
+        upgraded: form
+            .upgraded
+            .into_iter()
+            .map(|upgrade| CompanionUpgrade {
+                repo_id: upgrade.repo_id,
+                branch: upgrade.branch,
+            })
+            .collect(),
+    }
 }
 
 /// Cancel the pending steer: take the form away and leave the Conversation
@@ -1177,6 +1303,15 @@ fn mode(mode: CompanionMode) -> store::CompanionMode {
     match mode {
         CompanionMode::ReadOnly => store::CompanionMode::ReadOnly,
         CompanionMode::ReadWrite => store::CompanionMode::ReadWrite,
+    }
+}
+
+/// And the same rule read the other way, for the row a pending steer hands back
+/// to be prefilled from — see [`filled`].
+fn reaching(mode: store::CompanionMode) -> CompanionMode {
+    match mode {
+        store::CompanionMode::ReadOnly => CompanionMode::ReadOnly,
+        store::CompanionMode::ReadWrite => CompanionMode::ReadWrite,
     }
 }
 

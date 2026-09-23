@@ -846,21 +846,110 @@ pub struct ConversationView {
     pub pending_steer: Option<PendingSteerView>,
 }
 
-/// A pending steer as the page receives it: when the press was made, and where
-/// the form says the work is going.
+/// A pending steer as the page receives it: when the press was made, and the
+/// form as the last save left it.
 ///
-/// The two things the Timeline's own item is drawn from — it reads *Steer*
-/// until a target is picked and *Steering into X* after — with the rest of the
-/// form read by the pane the item opens.
+/// The Timeline's own item is drawn from the target inside it — it reads
+/// *Steer* until one is picked and *Steering into X* after — and the pane that
+/// item opens fills every one of its fields from the rest.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct PendingSteerView {
     /// When Steer was pressed, RFC 3339.
     pub at: String,
 
+    /// And the form, which is what the pane is prefilled from and what it saves
+    /// as it is typed.
+    ///
+    /// Empty on a form nobody has written in yet, which is what every press
+    /// opens: no target picked, nothing written and nothing ticked.
+    pub form: SteerForm,
+}
+
+/// The Steer form in the shape it is saved and read back in: every field the
+/// pane draws, with empty meaning what empty means on the pane.
+///
+/// **One value rather than a field at a time, and it travels both ways.** The
+/// pane is prefilled from it on the way in and saves the whole of it on the way
+/// out, so the row is never the target of one keystroke beside the instruction
+/// of another — a form that was never on anybody's screen.
+///
+/// **Not a [`SteerSubmission`]**, though it says nearly the same things. What a
+/// submit carries is what the form *decided*: one target, and only the payload
+/// that target takes. This is what the form holds while it is being written —
+/// a target nobody has picked yet, a brief kept across a change of mind about
+/// where the work goes, an instruction that is not being sent anywhere.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct SteerForm {
     /// Where the human has said the work goes, or `null` while they have not
-    /// said. Every form opens on nothing picked.
+    /// said — which is what the Timeline's item reads *Steer* for.
+    ///
+    /// The pane opens its picker on the first target it offers all the same:
+    /// a form the human has to answer twice is worse than one that starts
+    /// somewhere. What is here is what they *said*, and a submit sends what the
+    /// picker shows either way.
+    #[serde(default)]
     pub target: Option<SteerTarget>,
+
+    /// The new round's Brief, for a steer into Grilling.
+    #[serde(default)]
+    pub brief: Option<String>,
+
+    /// And whether the round it opens is primed with everything already
+    /// answered.
+    #[serde(default)]
+    pub digest: bool,
+
+    /// The hand-written work, for a steer into Implementing.
+    #[serde(default)]
+    pub instruction: Option<String>,
+
+    /// And the brief, for a steer into Follow-up.
+    #[serde(default)]
+    pub follow_up: Option<String>,
+
+    /// What the work would run under from here, which is what the submit would
+    /// send — the Conversation's own prefill included, rather than only a pick
+    /// made by hand.
+    ///
+    /// One rather than one per role, because a submit carries one: which role
+    /// it answers for is what [`Self::target`] says, and a form whose target
+    /// moves to a role of the other kind saves that role's instead.
+    #[serde(default)]
+    pub pairing: Option<ProfileChoice>,
+
+    /// And whether the session running now is to be ended where it stands.
+    #[serde(default)]
+    pub interrupt: bool,
+
+    /// The Repos the steer would put into the sandbox, one entry per row
+    /// ticked.
+    #[serde(default)]
+    pub added: Vec<CompanionAddition>,
+
+    /// And the companions already there it would open up, one per row ticked
+    /// up.
+    #[serde(default)]
+    pub upgraded: Vec<CompanionUpgrade>,
+}
+
+/// What became of saving one.
+///
+/// Both refusals are permanent, which is what the pane does with them: a field
+/// told there is nothing left to save into stops saving and says so, rather
+/// than asking again on every pause for as long as the human goes on writing.
+/// The commonest by far is a submit or a cancel from another device landing
+/// mid-edit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum SteerSaved {
+    Saved,
+    NoSuchConversation,
+
+    /// There is no pending steer beside that Conversation any more: it was
+    /// submitted or cancelled from somewhere else.
+    NoPendingSteer,
 }
 
 /// One published share, as the workbench draws it: the link, the gist behind it,

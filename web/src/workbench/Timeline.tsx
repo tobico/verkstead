@@ -1718,9 +1718,9 @@ function PendingSteer(props: {
       press={props.open}
     >
       <p class={styles.pendingSteerLine}>
-        {props.pending.target === null
+        {props.pending.form.target === null
           ? "Steer"
-          : `Steering into ${STATE[props.pending.target]}`}
+          : `Steering into ${STATE[props.pending.form.target]}`}
       </p>
       <p class={styles.pendingSteerNote}>
         The run has stopped while you decide.

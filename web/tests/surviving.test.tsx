@@ -62,6 +62,7 @@ import {
 } from "./bench";
 import { offered, opened, pick, picker, rows, showing } from "./pickers";
 import { json, serving, whenever } from "./serving";
+import { pending } from "./steering";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
 import building from "./fixtures/conversation-building.json" with { type: "json" };
 
@@ -346,7 +347,7 @@ describe("what a Nudge leaves standing", () => {
         `/api/ui/conversations/${BUILDING.id}`,
         json({
           ...BUILDING,
-          pending_steer: { at: "2026-09-23T09:14:00Z", target: null },
+          pending_steer: pending(),
         } satisfies ConversationView),
       ),
       whenever(

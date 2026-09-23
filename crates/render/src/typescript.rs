@@ -30,9 +30,9 @@ use crate::{
     RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane,
     RoleChoice, Screen, ServeEdit, ServePress, SetReading, SettingsEdit, SettingsSaved,
     SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
-    ShowingArchived, Shown, Started, SteerCancelled, SteerOpened, SteerSubmission, Submitted,
-    Subscribed, Subscription, TakenUp, TerminalOpened, TerminalsView, TranscriptView, Unsubscribe,
-    UpdateNotice, Watching,
+    ShowingArchived, Shown, Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved,
+    SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalOpened, TerminalsView,
+    TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -265,7 +265,7 @@ fn the_viewers_types_are_written_from_these() {
     // reason there was nothing to stop.
     ConversationStopped::export_all(&config).unwrap();
 
-    // And the three presses that steer it. The first takes no request shape —
+    // And the four presses that steer it. The first takes no request shape —
     // it stops the drive, writes the pending steer and reports what it found
     // running — and the last carries what the form settled; cancelling takes
     // none either, the pending steer being the whole of what it names. The
@@ -275,6 +275,12 @@ fn the_viewers_types_are_written_from_these() {
     SteerCancelled::export_all(&config).unwrap();
     SteerSubmission::export_all(&config).unwrap();
     ConversationSteered::export_all(&config).unwrap();
+
+    // And the save the form makes of itself as it is typed, which is the
+    // fourth: the whole form in one body, as the `ConversationView` above hands
+    // it back to be prefilled from.
+    SteerForm::export_all(&config).unwrap();
+    SteerSaved::export_all(&config).unwrap();
 
     // The Agent Profiles a session can be run under, the one shape saving and
     // rewriting one both take, and the choices a Conversation makes of them —

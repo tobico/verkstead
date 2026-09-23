@@ -26,6 +26,7 @@ import {
   roadmapOpened,
   type Opening,
 } from "../src/workbench/openings";
+import { pending } from "./steering";
 import draft from "./fixtures/conversation.json" with { type: "json" };
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 import roadmapped from "./fixtures/conversation-roadmap.json" with {
@@ -209,7 +210,7 @@ describe("where opening a conversation lands", () => {
   it("lands on the pending steer where one stands", () => {
     const steering: ConversationView = {
       ...GRILLING,
-      pending_steer: { at: "2026-09-23T09:14:00Z", target: null },
+      pending_steer: pending(),
     };
 
     expect(landing(steering)).toBe("steer");
@@ -221,7 +222,7 @@ describe("where opening a conversation lands", () => {
     const steering: ConversationView = {
       ...GRILLING,
       timeline: GRILLING.timeline.filter((event) => "Moved" in event),
-      pending_steer: { at: "2026-09-23T09:14:00Z", target: "Implementing" },
+      pending_steer: pending({ target: "Implementing" }),
     };
 
     expect(lastOpening(steering.timeline)).toBeNull();

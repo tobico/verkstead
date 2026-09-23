@@ -24,6 +24,22 @@
 //! whether a session is still running, what the branch has to carry on, which
 //! repos are alongside — is what is true now.
 //!
+//! **And it saves itself as it is typed**, which is what makes an afternoon
+//! something the form can survive: every field is kept on the pending steer, so
+//! the human can leave the item, the conversation or the device and find the
+//! form as they left it. The draft brief's shape, down to the pause it keeps —
+//! see [`settling`](./settling.ts) — and every field goes through the one
+//! keeper, the ticks and the companion rows included, because a save carries
+//! the whole form: a row holding the target of one keystroke beside the
+//! instruction of another would be a form that was never on anybody's screen.
+//!
+//! Each field follows the record until the first keystroke and itself after it,
+//! so a read of the conversation landing mid-sentence cannot take the sentence
+//! with it — and a second device sees what the first saved on its next read. A
+//! save the server refuses stops the form for good and is said under it: what a
+//! refusal means is that there is no pending steer left to save into, which is
+//! somebody submitting or cancelling this same form from another device.
+//!
 //! What the form is, therefore, is one question — where does this go? — with
 //! whatever that target needs under it. **Done** needs nothing: there
 //! is nothing to drive in done, so no pairing is picked and no payload is
@@ -76,7 +92,13 @@
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Show, createMemo, createSignal, type JSX } from "solid-js";
 
-import { cancelSteer, listProfiles, listRepos, steer } from "../api/client";
+import {
+  cancelSteer,
+  listProfiles,
+  listRepos,
+  saveSteer,
+  steer,
+} from "../api/client";
 import type {
   CompanionAddition,
   CompanionMode,
@@ -86,6 +108,8 @@ import type {
   ConversationView,
   RepoEntry,
   SteerCompanionRefusal,
+  SteerForm,
+  SteerSaved,
   SteerTarget,
 } from "../api/types";
 import { useReading } from "../freshness";
@@ -96,6 +120,7 @@ import { Listbox } from "../picking";
 import { Switch as Toggle } from "../Switch";
 import { chosen } from "./naming";
 import { PaneHead } from "./PaneHead";
+import { keeping, type Keeping } from "./settling";
 import { BasePicker, RULE } from "./Setup";
 import styles from "./Steer.module.css";
 
@@ -132,6 +157,23 @@ export const STEER_REFUSAL: Record<
   // nothing about but the id the page sent.
   NoSuchCompanionRepo:
     "One of the repos you picked to work alongside is not registered any more, so nothing was steered.",
+};
+
+/// And each way a save of the form is refused, both of which stop it for good.
+///
+/// Neither can come right by being asked again: a conversation that is gone
+/// does not come back, and a pending steer that was submitted or cancelled is
+/// not reopened. So the field says what happened and stops rather than asking
+/// on every pause for as long as the human goes on writing — and each says that
+/// what is on the screen is now the only copy of it, because it is.
+export const STEER_SAVE_REFUSAL: Record<
+  Exclude<SteerSaved, "Saved">,
+  string
+> = {
+  NoSuchConversation:
+    "This conversation is gone, so nothing more can be saved here. What you have written is only on this device now.",
+  NoPendingSteer:
+    "This steer was submitted or cancelled somewhere else, so there is nothing left to save into. What you have written is only on this device now.",
 };
 
 /// And each way one companion could not be put into the sandbox, which says the
@@ -300,6 +342,71 @@ type Upgrade = {
 /// branch mirrors the conversation's, which is what a setup row starts on.
 const MIRRORING: Upgrade = { branch: "" };
 
+/// The form a press opens on: nothing picked, nothing written, nothing ticked.
+///
+/// What the pane falls back to where the conversation carries no pending steer
+/// — which it does for the instant between a cancel or a submit landing and the
+/// pane letting go of the address.
+const UNANSWERED: SteerForm = {
+  target: null,
+  brief: null,
+  digest: false,
+  instruction: null,
+  follow_up: null,
+  pairing: null,
+  interrupt: false,
+  added: [],
+  upgraded: [],
+};
+
+/// The saved companion rows, back into the rows the section fills in.
+///
+/// Keyed by the Repo's id, which is what the section holds them by: the empty
+/// base is the rule, exactly as it is on the wire, and the empty branch is
+/// mirroring.
+function ticked(added: CompanionAddition[]): Record<number, Addition> {
+  return Object.fromEntries(
+    added.map((row) => [
+      row.repo_id,
+      { mode: row.mode, base: row.base_ref ?? RULE, branch: row.branch },
+    ]),
+  );
+}
+
+/// And the same for the rows ticked up, which carry one field apiece.
+function opened(upgraded: CompanionUpgrade[]): Record<number, Upgrade> {
+  return Object.fromEntries(
+    upgraded.map((row) => [row.repo_id, { branch: row.branch }]),
+  );
+}
+
+/// One form as one string, which is what says whether there is anything to
+/// save.
+///
+/// Written out field by field rather than handed to `JSON.stringify` whole,
+/// because one of the two being compared came off the wire and the other was
+/// built here: two objects that say the same thing in a different order are not
+/// the same string. Nothing and the empty string are the same thing on every
+/// field that has both — a textarea somebody emptied is a field with nothing in
+/// it, which is what the record holds for one nobody ever typed in.
+///
+/// The companion rows are in the id's order on both sides: the record reads
+/// them back ordered, and the section holds them by an id, which is the order a
+/// JavaScript object with numbers for keys is read in.
+function reading(form: SteerForm): string {
+  return JSON.stringify([
+    form.target,
+    form.brief ?? "",
+    form.digest,
+    form.instruction ?? "",
+    form.follow_up ?? "",
+    form.pairing && pairing.spelled(form.pairing),
+    form.interrupt,
+    form.added.map((row) => [row.repo_id, row.mode, row.base_ref, row.branch]),
+    form.upgraded.map((row) => [row.repo_id, row.branch]),
+  ]);
+}
+
 /// The repos this conversation works alongside, and the ones it could.
 ///
 /// **Sandbox setup rather than a property of one state**, which is why it is
@@ -330,6 +437,10 @@ function Companions(props: {
   upgraded: Record<number, Upgrade>;
   /// One of those ticked up, renamed, or put back — `null` leaves it read-only.
   open: (repo: number, upgrade: Upgrade | null) => void;
+  /// The one keeper the whole form saves itself through, so that a tick down
+  /// here goes out the way a keystroke up there does: a press saves at once and
+  /// a branch being typed keeps the pause. See [`keeping`](./settling.ts).
+  keeper: Keeping;
   disabled: boolean;
 }): JSX.Element {
   const repos = useReading(() => ({
@@ -368,6 +479,7 @@ function Companions(props: {
                 companion={companion}
                 upgrade={props.upgraded[companion.repo.id]}
                 open={(upgrade) => props.open(companion.repo.id, upgrade)}
+                keeper={props.keeper}
                 disabled={props.disabled}
               />
             )}
@@ -401,6 +513,7 @@ function Companions(props: {
                   repo={repo}
                   addition={props.added[repo.id]}
                   settle={(addition) => props.settle(repo.id, addition)}
+                  keeper={props.keeper}
                   disabled={props.disabled}
                 />
               )}
@@ -438,6 +551,7 @@ function Alongside(props: {
   /// has not been.
   upgrade: Upgrade | undefined;
   open: (upgrade: Upgrade | null) => void;
+  keeper: Keeping;
   disabled: boolean;
 }): JSX.Element {
   /// Whether the work may write in it once this steer lands: what the record
@@ -465,9 +579,10 @@ function Alongside(props: {
             type="checkbox"
             checked={props.upgrade !== undefined}
             disabled={props.disabled}
-            onChange={(event) =>
-              props.open(event.currentTarget.checked ? MIRRORING : null)
-            }
+            onChange={(event) => {
+              props.open(event.currentTarget.checked ? MIRRORING : null);
+              props.keeper.keep();
+            }}
           />
           Open it up
         </label>
@@ -486,9 +601,11 @@ function Alongside(props: {
                 type="text"
                 value={upgrade().branch || chosen(props.conversation)}
                 disabled={props.disabled}
-                onInput={(event) =>
-                  props.open({ branch: event.currentTarget.value })
-                }
+                onInput={(event) => {
+                  props.open({ branch: event.currentTarget.value });
+                  props.keeper.settle();
+                }}
+                onBlur={() => props.keeper.keep()}
               />
               <Note class={styles.fieldNote}>
                 Cleared, it follows this conversation's own branch. It is cut
@@ -515,6 +632,7 @@ function Adding(props: {
   /// What this row holds, or `undefined` where it has not been ticked.
   addition: Addition | undefined;
   settle: (addition: Addition | null) => void;
+  keeper: Keeping;
   disabled: boolean;
 }): JSX.Element {
   /// What is in the branch field: what has been typed, or the conversation's
@@ -530,9 +648,10 @@ function Adding(props: {
           type="checkbox"
           checked={props.addition !== undefined}
           disabled={props.disabled}
-          onChange={(event) =>
-            props.settle(event.currentTarget.checked ? PLAINEST : null)
-          }
+          onChange={(event) => {
+            props.settle(event.currentTarget.checked ? PLAINEST : null);
+            props.keeper.keep();
+          }}
         />
         {props.repo.name}
       </label>
@@ -544,7 +663,7 @@ function Adding(props: {
               label={<>Read-write</>}
               on={addition().mode === "ReadWrite"}
               disabled={props.disabled}
-              flip={(on) =>
+              flip={(on) => {
                 props.settle({
                   ...addition(),
                   mode: on ? "ReadWrite" : "ReadOnly",
@@ -552,8 +671,9 @@ function Adding(props: {
                   // read-only would be a name for a branch nobody will cut: a
                   // read-only checkout is detached and holds none.
                   branch: on ? addition().branch : "",
-                })
-              }
+                });
+                props.keeper.keep();
+              }}
             />
 
             <BasePicker
@@ -562,9 +682,10 @@ function Adding(props: {
               repo={props.repo}
               chosen={addition().base}
               disabled={props.disabled}
-              pick={(picked) =>
-                props.settle({ ...addition(), base: picked ?? RULE })
-              }
+              pick={(picked) => {
+                props.settle({ ...addition(), base: picked ?? RULE });
+                props.keeper.keep();
+              }}
             />
 
             {/* Only where there is a branch to name. A read-only companion is
@@ -580,12 +701,14 @@ function Adding(props: {
                   type="text"
                   value={branch()}
                   disabled={props.disabled}
-                  onInput={(event) =>
+                  onInput={(event) => {
                     props.settle({
                       ...addition(),
                       branch: event.currentTarget.value,
-                    })
-                  }
+                    });
+                    props.keeper.settle();
+                  }}
+                  onBlur={() => props.keeper.keep()}
                 />
                 <Note class={styles.fieldNote}>
                   Cleared, it follows this conversation's own branch.
@@ -643,25 +766,60 @@ export function Steer(props: {
     }),
   );
 
-  // Where it goes. Prefilled with the first target offered rather than left
-  // empty: a picker with nothing picked would be a form the human has to answer
-  // twice. The list is never empty — done is offered on every conversation there
-  // is — and the fallback is that same target said twice rather than a state
-  // this can be in.
-  const [target, setTarget] = createSignal<SteerTarget>(
-    offered()[0]?.target ?? "Done",
+  /// The form as the record holds it, which is what every field follows until
+  /// it is typed into — the prefill on the way in, and what a second device's
+  /// save arrives as on the next read.
+  ///
+  /// The unanswered form where the conversation carries no pending steer, which
+  /// is the instant between a cancel or a submit landing and the pane letting
+  /// go of the address.
+  const held = createMemo(
+    () => props.conversation.pending_steer?.form ?? UNANSWERED,
   );
+
+  /// And what the record has as far as this pane knows: what came down with the
+  /// conversation, until a save of its own puts something else there.
+  ///
+  /// Held rather than read off [`held`] alone, because a save is answered
+  /// before the read that follows it lands: a field that went on comparing
+  /// itself to the older reading would save the same sentence over and over
+  /// until it arrived.
+  const [kept, setKept] = createSignal<SteerForm | null>(null);
+  const recorded = () => kept() ?? held();
+
+  // Where it goes, once the human has said. Null until they do — the item at
+  // the end of the timeline reads *Steer* until a target is picked — and what
+  // the picker shows meanwhile is the first target offered rather than nothing:
+  // a picker with nothing picked would be a form the human has to answer twice.
+  const [target, setTarget] = createSignal<SteerTarget | null>(null);
+
+  /// What the picker is on: what has been picked here, what the record holds,
+  /// or the first target offered.
+  ///
+  /// The list is never empty — done is offered on every conversation there is —
+  /// and the fallback is that same target said twice rather than a state this
+  /// can be in. A target the record holds that is not offered any more falls
+  /// back with it: the form is drawn against the live conversation, so a
+  /// wrap-up saved while there was a pull request is not a wrap-up now there is
+  /// none.
+  const going = createMemo<SteerTarget>(() => {
+    const said = target() ?? held().target;
+
+    return said && offered().some((one) => one.target === said)
+      ? said
+      : (offered()[0]?.target ?? "Done");
+  });
 
   /// Whether the target picked is one work goes on in, which is what draws the
   /// pairing picker under it.
   const runs = createMemo(
-    () => offered().find((one) => one.target === target())?.runs ?? false,
+    () => offered().find((one) => one.target === going())?.runs ?? false,
   );
 
   /// And which role that picker settles — the one the target's sessions run
   /// under, and for wrapping up the review role beside it.
   const role = createMemo(
-    () => offered().find((one) => one.target === target())?.role,
+    () => offered().find((one) => one.target === going())?.role,
   );
 
   // The profile list is read here rather than passed in, so the picker is whole
@@ -690,20 +848,55 @@ export function Steer(props: {
   // with, and steering into a grilling is asking for an interview — so that row
   // is not one this picker offers, and the field opens empty for them to pick
   // who runs it.
-  const [grilling, setGrilling] = createSignal(
-    pairing.chosen(pairing.under(props.conversation.grilling_pairing)),
-  );
-  const [implementation, setImplementation] = createSignal(
-    pairing.chosen(props.conversation.implementation_pairing),
+  const [grilling, setGrilling] = createSignal<string | null>(null);
+  const [implementation, setImplementation] = createSignal<string | null>(null);
+
+  /// Which role the record's own pairing answers for, which is the role its
+  /// target runs under: the row holds one pairing because a submit sends one.
+  const answered = createMemo(
+    () => TARGETS.find((one) => one.target === held().target)?.role,
   );
 
   /// The one the target picked runs under, and nothing where nothing runs.
-  const picked = createMemo(() =>
-    role() === "grilling" ? grilling() : role() ? implementation() : "",
-  );
+  ///
+  /// What has been picked here, then the record's where its own target runs
+  /// under this same role, then what the conversation already runs the work
+  /// under. Which is also what the save carries: a form whose target moves to a
+  /// role of the other kind saves that role's pairing, because that is what its
+  /// submit would send.
+  const picked = createMemo(() => {
+    const settling = role();
 
-  const pick = (chosen: string) =>
-    role() === "grilling" ? setGrilling(chosen) : setImplementation(chosen);
+    if (!settling) {
+      return "";
+    }
+
+    const own = settling === "grilling" ? grilling() : implementation();
+
+    if (own !== null) {
+      return own;
+    }
+
+    const on = held().pairing;
+
+    if (on && answered() === settling) {
+      return pairing.spelled(on);
+    }
+
+    return settling === "grilling"
+      ? pairing.chosen(pairing.under(props.conversation.grilling_pairing))
+      : pairing.chosen(props.conversation.implementation_pairing);
+  });
+
+  const pick = (chosen: string) => {
+    if (role() === "grilling") {
+      setGrilling(chosen);
+    } else {
+      setImplementation(chosen);
+    }
+
+    keeper.keep();
+  };
 
   /// The new round's brief, for a steer into grilling.
   ///
@@ -712,7 +905,12 @@ export function Steer(props: {
   /// none does — a draft nobody has written into — because a grilling starts
   /// from a brief and there would otherwise be nothing to interview about.
   /// What is typed here lands as a brief of its own, frozen the moment it does.
-  const [brief, setBrief] = createSignal("");
+  ///
+  /// Null until the first keystroke, which is the rule every field here keeps:
+  /// it follows the record until then and follows itself after it, so a read of
+  /// the conversation landing mid-sentence cannot take the sentence with it.
+  const [brief, setBrief] = createSignal<string | null>(null);
+  const written = () => brief() ?? held().brief ?? "";
 
   /// Whether one is already written, which is what makes the field optional.
   const stands = createMemo(() => briefStands(props.conversation));
@@ -722,7 +920,8 @@ export function Steer(props: {
   /// Off to begin with, because the steer is usually a change of direction: a
   /// fresh brief primed with the whole of the last interview would be steering
   /// into the argument that has just been left behind.
-  const [digest, setDigest] = createSignal(false);
+  const [digest, setDigest] = createSignal<boolean | null>(null);
+  const priming = () => digest() ?? held().digest;
 
   /// The hand-written work, for a steer into implementing.
   ///
@@ -731,7 +930,8 @@ export function Steer(props: {
   /// out from the pinned backlog here: what stands includes the finish step a
   /// list of ticked tasks still has to run, which no reading of the entries
   /// could see.
-  const [instruction, setInstruction] = createSignal("");
+  const [instruction, setInstruction] = createSignal<string | null>(null);
+  const doing = () => instruction() ?? held().instruction ?? "";
 
   /// And the brief, for a steer into follow-up.
   ///
@@ -739,22 +939,23 @@ export function Steer(props: {
   /// branch on and an empty brief grills the one already written, and there is
   /// nothing a follow-up could fall back on — it is a thing the human wants
   /// rather than a step of the run.
-  const [followUp, setFollowUp] = createSignal("");
+  const [followUp, setFollowUp] = createSignal<string | null>(null);
+  const following = () => followUp() ?? held().follow_up ?? "";
 
   /// Whether the submit would be refused for want of one, which is what holds
   /// the button shut rather than a message after the press.
   const needsInstruction = createMemo(
     () =>
-      target() === "Implementing" &&
+      going() === "Implementing" &&
       !props.conversation.ready_to_continue &&
-      !instruction().trim(),
+      !doing().trim(),
   );
 
   /// And the same for the brief, which is the same rule on the other target: a
   /// round has to be about something, and where nothing is written down yet the
-  /// modal is the only place it can be said.
+  /// pane is the only place it can be said.
   const needsBrief = createMemo(
-    () => target() === "Grilling" && !stands() && !brief().trim(),
+    () => going() === "Grilling" && !stands() && !written().trim(),
   );
 
   /// The repos to put in the sandbox, by the id of each, as their rows are
@@ -764,11 +965,17 @@ export function Steer(props: {
   /// between them, exactly as the two payloads above are: what is sent follows
   /// the target, and a row emptied by a change of mind about where the work goes
   /// would be the form answering a question they had not been asked.
-  const [added, setAdded] = createSignal<Record<number, Addition>>({});
+  ///
+  /// One signal for the whole set rather than one per row, so the first tick is
+  /// what takes the section off the record: a row arriving from another device
+  /// while this one is being filled in would be the two of them editing one
+  /// list between them.
+  const [added, setAdded] = createSignal<Record<number, Addition> | null>(null);
+  const adding = createMemo(() => added() ?? ticked(held().added));
 
   const settle = (repo: number, addition: Addition | null) =>
-    setAdded((added) => {
-      const { [repo]: gone, ...rest } = added;
+    setAdded(() => {
+      const { [repo]: gone, ...rest } = adding();
 
       return addition ? { ...rest, [repo]: addition } : rest;
     });
@@ -777,7 +984,7 @@ export function Steer(props: {
   /// string on either field meaning what it means everywhere else — the base is
   /// the default-branch rule, and the branch is mirroring.
   const additions = createMemo<CompanionAddition[]>(() =>
-    Object.entries(added()).map(([repo, addition]) => ({
+    Object.entries(adding()).map(([repo, addition]) => ({
       repo_id: Number(repo),
       mode: addition.mode,
       base_ref: addition.base || null,
@@ -791,11 +998,14 @@ export function Steer(props: {
   /// what is sent follows the target, and a tick undone by a change of mind
   /// about where the work goes would be the form answering a question nobody
   /// asked.
-  const [upgraded, setUpgraded] = createSignal<Record<number, Upgrade>>({});
+  const [upgraded, setUpgraded] = createSignal<Record<number, Upgrade> | null>(
+    null,
+  );
+  const opening = createMemo(() => upgraded() ?? opened(held().upgraded));
 
   const open = (repo: number, upgrade: Upgrade | null) =>
-    setUpgraded((upgraded) => {
-      const { [repo]: gone, ...rest } = upgraded;
+    setUpgraded(() => {
+      const { [repo]: gone, ...rest } = opening();
 
       return upgrade ? { ...rest, [repo]: upgrade } : rest;
     });
@@ -805,7 +1015,7 @@ export function Steer(props: {
   /// carry read-only would be a row that could take back what a session was
   /// given.
   const upgrades = createMemo<CompanionUpgrade[]>(() =>
-    Object.entries(upgraded()).map(([repo, upgrade]) => ({
+    Object.entries(opening()).map(([repo, upgrade]) => ({
       repo_id: Number(repo),
       branch: upgrade.branch,
     })),
@@ -814,17 +1024,87 @@ export function Steer(props: {
   /// And the same again on the one payload that is required whatever the record
   /// holds.
   const needsFollowUp = createMemo(
-    () => target() === "FollowUp" && !followUp().trim(),
+    () => going() === "FollowUp" && !following().trim(),
   );
 
-  const [interrupt, setInterrupt] = createSignal(false);
-  const [refused, setRefused] = createSignal<ConversationSteered | null>(null);
+  const [interrupt, setInterrupt] = createSignal<boolean | null>(null);
+  const ending = () => interrupt() ?? held().interrupt;
 
+  /// The form as it stands, which is what a save carries: the whole of it, so
+  /// the row is never the target of one keystroke beside the instruction of
+  /// another.
+  ///
+  /// Everything the form holds rather than only what this target would submit:
+  /// the payloads and the companion rows are kept across a change of mind about
+  /// where the work goes, so the record keeps them too. The target is the one
+  /// exception, and it is what the human *said* rather than what the picker
+  /// shows — the item at the end of the timeline reads *Steer* until they say.
+  const form = createMemo<SteerForm>(() => ({
+    target: target() ?? held().target,
+    brief: written() || null,
+    digest: priming(),
+    instruction: doing() || null,
+    follow_up: following() || null,
+    pairing: picked() ? pairing.choice(picked()) : null,
+    interrupt: ending(),
+    added: additions(),
+    upgraded: upgrades(),
+  }));
+
+  /// What the server would not take, which stops the form saving for good: both
+  /// of them are permanent, and the commonest by far is a submit or a cancel
+  /// from another device landing mid-edit.
+  const [unkept, setUnkept] = createSignal<Exclude<SteerSaved, "Saved"> | null>(
+    null,
+  );
+
+  const saving = useMutation(() => ({
+    mutationFn: (form: SteerForm) => saveSteer(props.conversation.id, form),
+    onSuccess: (outcome: SteerSaved, sent: SteerForm) => {
+      if (outcome !== "Saved") {
+        // What is on the screen stands: it is the only copy of it there is, and
+        // the human is owed the chance to take it somewhere else.
+        setUnkept(outcome);
+        return;
+      }
+
+      const moved = sent.target !== held().target;
+
+      setUnkept(null);
+      setKept(sent);
+
+      // The item at the end of the timeline says where the steer is going, so
+      // the conversation is read again when that moves — and only then. A steer
+      // is a great deal of text, and a read of the whole record a sentence
+      // would be the pane asking for the timeline over and over to redraw one
+      // line that has not changed.
+      if (moved) {
+        void queries.invalidateQueries({ queryKey: ["conversation"] });
+      }
+    },
+    // Whatever became of it, the form may have been typed into while it was in
+    // flight — so the moment one save is done the next is considered.
+    onSettled: () => keeper.done(),
+  }));
+
+  /// The one keeper the whole form saves itself through: the pause after a
+  /// keystroke, one save in the air at a time, and what was typed meanwhile
+  /// sent on the back of the answer.
+  const keeper = keeping({
+    unsaved: () => reading(form()) !== reading(recorded()),
+    settled: () => unkept() !== null,
+    save: () => saving.mutate(form()),
+  });
+
+  const [refused, setRefused] = createSignal<ConversationSteered | null>(null);
   const submit = useMutation(() => ({
+    // The form's own state rather than the row's: a keystroke inside the pause
+    // has not been saved yet, and a press that asked the server to freeze what
+    // it had would lose it. What the pane shows is what goes.
     mutationFn: () =>
       steer(props.conversation.id, {
-        target: target(),
-        interrupt: interrupt(),
+        target: going(),
+        interrupt: ending(),
         // Sent only where the target runs something. A target nothing runs in
         // settles no pairing, and a null there would be the form arguing with
         // itself about what it had picked.
@@ -832,19 +1112,17 @@ export function Steer(props: {
         // And the payload of the one target that has one, for the same reason:
         // a brief under a wrap-up would be a document about nothing, and a
         // digest is what primes a grilling and nothing else.
-        brief: target() === "Grilling" && brief().trim() ? brief() : null,
-        digest: target() === "Grilling" && digest(),
+        brief: going() === "Grilling" && written().trim() ? written() : null,
+        digest: going() === "Grilling" && priming(),
         // And the sandbox the sessions to come run in, which every target work
         // goes on in carries: it is setup rather than a payload of one state.
         // Into done nothing runs, so there is nothing for a companion to be for.
         added: runs() ? additions() : [],
         upgraded: runs() ? upgrades() : [],
         instruction:
-          target() === "Implementing" && instruction().trim()
-            ? instruction()
-            : null,
+          going() === "Implementing" && doing().trim() ? doing() : null,
         follow_up:
-          target() === "FollowUp" && followUp().trim() ? followUp() : null,
+          going() === "FollowUp" && following().trim() ? following() : null,
       }),
     onSuccess: (outcome: ConversationSteered) => {
       // The page it was submitted from is out of date either way: the work has
@@ -922,8 +1200,11 @@ export function Steer(props: {
                     type="radio"
                     name="steer-target"
                     value={offered.target}
-                    checked={target() === offered.target}
-                    onChange={() => setTarget(offered.target)}
+                    checked={going() === offered.target}
+                    onChange={() => {
+                      setTarget(offered.target);
+                      keeper.keep();
+                    }}
                   />
                   {offered.label}
                 </label>
@@ -937,14 +1218,18 @@ export function Steer(props: {
             written. Both are optional and both default to the quietest thing
             they could mean: no brief is the round starting on the one already
             there, and no digest is the interview starting from the brief alone. */}
-        <Show when={target() === "Grilling"}>
+        <Show when={going() === "Grilling"}>
           <div class={styles.steerBrief}>
             <label for="steer-brief">A brief for the new round</label>
             <textarea
               id="steer-brief"
               rows="6"
-              value={brief()}
-              onInput={(event) => setBrief(event.currentTarget.value)}
+              value={written()}
+              onInput={(event) => {
+                setBrief(event.currentTarget.value);
+                keeper.settle();
+              }}
+              onBlur={() => keeper.keep()}
               disabled={submit.isPending}
               placeholder={
                 stands()
@@ -960,8 +1245,11 @@ export function Steer(props: {
             <label class={styles.steerDigest}>
               <input
                 type="checkbox"
-                checked={digest()}
-                onChange={(event) => setDigest(event.currentTarget.checked)}
+                checked={priming()}
+                onChange={(event) => {
+                  setDigest(event.currentTarget.checked);
+                  keeper.keep();
+                }}
               />
               Prime it with everything you have already answered
             </label>
@@ -976,14 +1264,18 @@ export function Steer(props: {
             what the branch holds, which is only something it can mean where
             there is something there — so where there is not, the field is what
             the target is, and the submit is held shut until it says something. */}
-        <Show when={target() === "Implementing"}>
+        <Show when={going() === "Implementing"}>
           <div>
             <label for="steer-instruction">What to do first</label>
             <textarea
               id="steer-instruction"
               rows="6"
-              value={instruction()}
-              onInput={(event) => setInstruction(event.currentTarget.value)}
+              value={doing()}
+              onInput={(event) => {
+                setInstruction(event.currentTarget.value);
+                keeper.settle();
+              }}
+              onBlur={() => keeper.keep()}
               disabled={submit.isPending}
               placeholder={
                 props.conversation.ready_to_continue
@@ -1003,14 +1295,18 @@ export function Steer(props: {
             empty: there is no follow-up to start without something to follow
             up on, so the field is the target and the submit is held shut until
             it says something. */}
-        <Show when={target() === "FollowUp"}>
+        <Show when={going() === "FollowUp"}>
           <div>
             <label for="steer-follow-up">What to follow up on</label>
             <textarea
               id="steer-follow-up"
               rows="6"
-              value={followUp()}
-              onInput={(event) => setFollowUp(event.currentTarget.value)}
+              value={following()}
+              onInput={(event) => {
+                setFollowUp(event.currentTarget.value);
+                keeper.settle();
+              }}
+              onBlur={() => keeper.keep()}
               disabled={submit.isPending}
               placeholder="Ask about this pull request, or say what you want done to it."
             />
@@ -1077,10 +1373,11 @@ export function Steer(props: {
         <Show when={runs()}>
           <Companions
             conversation={props.conversation}
-            added={added()}
+            added={adding()}
             settle={settle}
-            upgraded={upgraded()}
+            upgraded={opening()}
             open={open}
+            keeper={keeper}
             disabled={submit.isPending}
           />
         </Show>
@@ -1092,8 +1389,11 @@ export function Steer(props: {
             <label>
               <input
                 type="checkbox"
-                checked={interrupt()}
-                onChange={(event) => setInterrupt(event.currentTarget.checked)}
+                checked={ending()}
+                onChange={(event) => {
+                  setInterrupt(event.currentTarget.checked);
+                  keeper.keep();
+                }}
               />
               Interrupt current task
             </label>
@@ -1143,6 +1443,22 @@ export function Steer(props: {
               {steerRefusal(outcome())}
             </ErrorLine>
           )}
+        </Show>
+        {/* And a save the server would not take, which is a different thing
+            said in the same place: the form stays exactly as it is and stops
+            keeping itself, so the line has to say that what is on the screen is
+            the only copy of it now. */}
+        <Show when={unkept()}>
+          {(outcome) => (
+            <ErrorLine class={styles.failure}>
+              {STEER_SAVE_REFUSAL[outcome()]}
+            </ErrorLine>
+          )}
+        </Show>
+        <Show when={saving.isError}>
+          <ErrorLine class={styles.failure}>
+            The form could not be saved: {saving.error?.message}
+          </ErrorLine>
         </Show>
         {/* A server that could not answer at all, which is the one thing here
             that is an error rather than an outcome. */}
