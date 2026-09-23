@@ -122,7 +122,8 @@
 //! **And what is open outlives the pane.** The details pane draws one thing at
 //! a time and takes down whatever it is not showing, so opening an Event and
 //! coming back is a fresh mount of this file — which would be an empty pane
-//! over tabs somebody had opened and text they had typed and not saved. So
+//! over tabs somebody had opened and text they had typed and not saved, beside
+//! a tree back at its roots however far down they had walked. So
 //! none of that is held here: it is held above the frame's switch, per
 //! Conversation, and handed in (see [`./keeping`], and `Workbench.tsx` where it
 //! is kept). The device's storage that carries the same thing through a
@@ -470,7 +471,8 @@ export function Code(props: {
   void load().catch(() => {});
 
   /// Everything the pane holds, which is the keeping it was handed: the tabs,
-  /// what each file was read as, the buffers the human is typing into, the
+  /// what each file was read as, the buffers the human is typing into, which
+  /// folders of the tree beside them are open, the
   /// sentences over the tabs standing on a shell that never started, the names
   /// the shells have given themselves, which tab was turned to, what each
   /// save came to, which saves are in flight, and when each shell this pane
@@ -488,6 +490,8 @@ export function Code(props: {
     setReadings,
     buffers,
     setBuffers,
+    expanded,
+    setExpanded,
     over,
     setOver,
     titles,
@@ -1178,7 +1182,15 @@ export function Code(props: {
           a terminal are neither of them prose, and every column they are given
           is a column they use. */}
       <div class={`${styles.body} ${shell.paneScreen} ${shell.paneWide}`}>
-        <Tree conversation={props.conversation.id} open={openFile} />
+        {/* The tree's open folders come out of the same keeping the tabs do,
+            and for the same reason: a swap to an Event and back would
+            otherwise be the walk down to a file made over again. */}
+        <Tree
+          conversation={props.conversation.id}
+          open={openFile}
+          held={expanded}
+          setHeld={setExpanded}
+        />
 
         <div class={styles.group}>
           {/* The register not answering is a line *above* whatever is open

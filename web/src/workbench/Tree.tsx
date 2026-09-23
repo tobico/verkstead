@@ -21,6 +21,14 @@
 //! of the roadmap is the watcher that makes that unnecessary; until then this is
 //! what keeps the tree honest.
 //!
+//! **And which folders are open outlives the pane**, because the walk down to a
+//! file is work the human did. The details pane is taken down whenever
+//! something else is drawn in it, so what is open is held above the swap with
+//! the tabs and the unsaved text rather than in this file — see `keeping.ts`.
+//! A swap is not an expand, so what comes back is the listing that was last
+//! read rather than a fresh one; the collapse is still where the tree is made
+//! honest.
+//!
 //! **What git ignores is not in it**, and neither is `.git`. Both are the
 //! server's doing — git is asked rather than reimplemented — so what arrives
 //! here is already a listing with no `target/` in it.
@@ -37,7 +45,16 @@ import {
   faChevronDown,
   faChevronRight,
 } from "@fortawesome/free-solid-svg-icons";
-import { For, Match, Show, Switch, createSignal, type JSX } from "solid-js";
+import {
+  For,
+  Match,
+  Show,
+  Switch,
+  createSignal,
+  type Accessor,
+  type JSX,
+  type Setter,
+} from "solid-js";
 
 import { Icon } from "../Icon";
 import { listFileRoots, listFolder } from "../api/client";
@@ -95,6 +112,20 @@ export function Tree(props: {
   /// What a file pressed in it opens: the path, handed to the group of tabs
   /// beside the tree.
   open: (path: string) => void;
+
+  /// Which folders are open, and what each of them last read.
+  ///
+  /// A path is in here or it is not, and that is the whole of what open means:
+  /// collapsing one takes its entry away, so expanding it again is a fresh
+  /// reading rather than a look at what was drawn before.
+  ///
+  /// Held above the pane rather than here, with the tabs and the buffers and
+  /// for their reason: the details pane is taken down whenever something else
+  /// is drawn in it, and a tree that came back to its roots every time an
+  /// Event was opened would be the walk down to a file made again — see
+  /// `keeping.ts`.
+  held: Accessor<Record<string, FolderListing>>;
+  setHeld: Setter<Record<string, FolderListing>>;
 }): JSX.Element {
   /// The worktrees this conversation has.
   ///
@@ -109,15 +140,18 @@ export function Tree(props: {
     freshness: { reconcile: "path" },
   }));
 
-  /// Which folders are open, and what each of them last read.
-  ///
-  /// A path is in here or it is not, and that is the whole of what open means:
-  /// collapsing one takes its entry away, so expanding it again is a fresh
-  /// reading rather than a look at what was drawn before.
-  const [held, setHeld] = createSignal<Record<string, FolderListing>>({});
+  /// Which folders are open, and what each of them last read — see the prop,
+  /// which is where it is kept and why it is not kept here.
+  const held = props.held;
+  const setHeld = props.setHeld;
 
   /// And which are open with nothing read back yet, which is the moment between
   /// the press and the answer.
+  ///
+  /// This one *is* the tree's own, unlike the listings above: a read in flight
+  /// belongs to the mount that made it, and a pane taken down while one was
+  /// out has no caret left to spin. What lands afterwards lands in the keeping
+  /// all the same, so the folder is open when the pane comes back.
   const [reading, setReading] = createSignal<string[]>([]);
 
   /// Whether a folder is open, which is the caret and the rows under it.

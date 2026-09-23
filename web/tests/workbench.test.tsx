@@ -19658,6 +19658,82 @@ describe("a file opened out of the code pane's tree", () => {
       expect(askedFor(fetching, fileOf(TEXT.path))).toBe(1);
     });
 
+    /// And the tree comes back open where it was left, which is the other
+    /// thing the human did with this pane: the walk down to a file.
+    ///
+    /// Held above the swap with the tabs and for their reason. A tree back at
+    /// its roots after every Event would be that walk made again, and the
+    /// folder is not read a second time either — a swap is not an expand, and
+    /// what is drawn is the listing that was last read.
+    it("finds the tree's folders still open, and reads none of them again", async () => {
+      const { container, history, fetching } = await expanded(
+        OWN_ROOT,
+        codeFolder as FolderListing,
+      );
+
+      const opened = files(container).length;
+      expect(opened).toBeGreaterThan(0);
+      expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(1);
+
+      await away(container, history);
+
+      await waitFor(() => expect(files(container)).toHaveLength(opened));
+      expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(1);
+    });
+
+    /// And a folder shut before the swap stays shut while the one above it
+    /// stays open, the keeping being what is open rather than what was ever
+    /// opened.
+    it("keeps one folder open and the one collapsed under it shut", async () => {
+      const UNDER = `${OWN_ROOT.path}/crates`;
+
+      const { container, history } = await expanded(
+        OWN_ROOT,
+        codeFolder as FolderListing,
+        whenever(
+          folderOf(UNDER),
+          json({
+            Listed: {
+              path: UNDER,
+              entries: [{ folder: false, name: "server", path: `${UNDER}/server` }],
+            },
+          } satisfies FolderListing),
+        ),
+      );
+
+      /// The folder rows of the tree, by what each is called.
+      const folders = (): HTMLButtonElement[] => [
+        ...container.querySelectorAll<HTMLButtonElement>(
+          `.${shell.detailsPane} .${treePane.folder}`,
+        ),
+      ];
+
+      const under = (): HTMLButtonElement =>
+        folders().find((row) => row.textContent === "crates")!;
+
+      // Open the folder inside the root, then shut it again — so what is left
+      // is one folder open and one that was and is not.
+      fireEvent.click(under());
+      await waitFor(() => expect(under().getAttribute("aria-expanded")).toBe("true"));
+
+      fireEvent.click(under());
+      await waitFor(() =>
+        expect(under().getAttribute("aria-expanded")).toBe("false"),
+      );
+
+      await away(container, history);
+
+      // The root is still open — its rows are drawn — and the folder under it
+      // is still shut.
+      await waitFor(() => expect(under()).toBeTruthy());
+      expect(
+        folders()
+          .find((row) => row.textContent?.startsWith(OWN_ROOT.repo))!
+          .getAttribute("aria-expanded"),
+      ).toBe("true");
+      expect(under().getAttribute("aria-expanded")).toBe("false");
+    });
+
     /// A file closed before the swap stays closed, which is the other half of
     /// the same thing: what comes back is what was left rather than what was
     /// ever opened.

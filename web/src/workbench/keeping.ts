@@ -5,8 +5,9 @@
 //! signals are made again, and whatever was in them is gone. Which is right for
 //! every other pane — what those hold is a reading of the server, and a fresh
 //! read is a truer one — and wrong for this one, because most of what Code
-//! holds is the human's rather than the server's: the tabs they opened, and the
-//! text they have typed into one and not saved yet.
+//! holds is the human's rather than the server's: the tabs they opened, the
+//! text they have typed into one and not saved yet, and how far down the tree
+//! they walked to find it.
 //!
 //! So it is kept here, above the frame's switch, and the pane is handed
 //! whatever belongs to the Conversation it is being drawn for. Per
@@ -28,7 +29,7 @@
 
 import { createSignal, type Accessor, type Setter } from "solid-js";
 
-import type { FileReading } from "../api/types";
+import type { FileReading, FolderListing } from "../api/types";
 
 /// One tab of the group: a terminal by the number the server issued it, or a
 /// file by its path.
@@ -66,6 +67,17 @@ export interface Kept {
   /// starts as what was read and is what the human types into.
   buffers: Accessor<Record<string, string>>;
   setBuffers: Setter<Record<string, string>>;
+
+  /// Which folders of the tree are open, and what each of them last read.
+  ///
+  /// A path is in here or it is not, and that is the whole of what open means:
+  /// collapsing one takes its entry away, so expanding it again is a fresh
+  /// reading of the disk. Kept out here with the tabs because walking down to
+  /// a file is work the human did — a tree that came back to its roots every
+  /// time an Event was opened would be that walk made again, and the pane that
+  /// keeps the text they typed should keep how they got to it.
+  expanded: Accessor<Record<string, FolderListing>>;
+  setExpanded: Setter<Record<string, FolderListing>>;
 
   /// And what each tab that is standing rather than running says: the shell
   /// ended at once, or the refusal the server answered the open with.
@@ -143,6 +155,9 @@ function empty(): Kept {
   const [tabs, setTabs] = createSignal<Tab[]>([]);
   const [readings, setReadings] = createSignal<Record<string, FileReading>>({});
   const [buffers, setBuffers] = createSignal<Record<string, string>>({});
+  const [expanded, setExpanded] = createSignal<Record<string, FolderListing>>(
+    {},
+  );
   const [over, setOver] = createSignal<Record<number, string>>({});
   const [titles, setTitles] = createSignal<Record<number, string>>({});
   const [chosen, setChosen] = createSignal<string | undefined>();
@@ -157,6 +172,8 @@ function empty(): Kept {
     setReadings,
     buffers,
     setBuffers,
+    expanded,
+    setExpanded,
     over,
     setOver,
     titles,
