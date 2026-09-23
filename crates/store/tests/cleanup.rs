@@ -780,6 +780,36 @@ async fn written_straight_in(pool: &SqlitePool, id: i64, companion: i64, event: 
     .await
     .unwrap();
 
+    // And what a steer settled, hung off the same Event: a Conversation nobody
+    // steered has none of these, and the walk still has to empty them for one
+    // that was.
+    sqlx::query(
+        "INSERT INTO steers (event_id, conversation_id, digest, interrupt, profile_id, model)
+         VALUES (?, ?, 0, 0, NULL, NULL)",
+    )
+    .bind(event)
+    .bind(id)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO steer_additions (event_id, repo_id, mode, base_ref, branch)
+         VALUES (?, ?, 'read-only', NULL, '')",
+    )
+    .bind(event)
+    .bind(companion)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    sqlx::query("INSERT INTO steer_upgrades (event_id, repo_id, branch) VALUES (?, ?, '')")
+        .bind(event)
+        .bind(companion)
+        .execute(pool)
+        .await
+        .unwrap();
+
     sqlx::query("INSERT INTO stage_branches (conversation_id, stacks_on) VALUES (?, NULL)")
         .bind(id)
         .execute(pool)

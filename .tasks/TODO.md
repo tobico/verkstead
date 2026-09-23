@@ -23,5 +23,5 @@ frozen record.
 - [x] 01: The pending steer, out of the modal — [details](01-out-of-the-modal.md)
 - [x] 02: The form saves itself — [details](02-the-form-saves-itself.md)
 - [x] 03: What the rest of the workbench says about it — [details](03-around-a-pending-steer.md)
-- [ ] 04: The record is the whole form — [details](04-the-whole-form-on-the-record.md)
+- [x] 04: The record is the whole form — [details](04-the-whole-form-on-the-record.md)
 - [ ] 05: The vocabulary — [details](05-the-vocabulary.md)

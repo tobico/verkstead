@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use sqlx::SqlitePool;
 use verkstead_store::{
     Account, Closing, CompanionMode, Lifecycle, Pending, PendingAddition, PendingForm,
-    PendingPairing, PendingUpgrade, ProfileFacts, Steer, Steering, close_conversation,
+    PendingPairing, PendingUpgrade, ProfileFacts, Recorded, Steer, Steering, close_conversation,
     conversations, create_profile, discard_pending_steer, open_database, open_pending_steer,
     pending_steer, register_repo, save_brief, save_pending_steer, start_conversation,
     steer_conversation, timeline, waiting,
@@ -92,6 +92,7 @@ fn into(target: Lifecycle) -> Steer<'static> {
         opened: &[],
         checkouts: &[],
         said: None,
+        recorded: Recorded::default(),
     }
 }
 
@@ -208,7 +209,7 @@ async fn submitting_discards_it_with_the_record() {
     assert!(
         kinds.iter().any(|event| matches!(
             event.event,
-            verkstead_store::Event::Steer(Lifecycle::Implementing, None)
+            verkstead_store::Event::Steer(Lifecycle::Implementing, None, _)
         )),
         "the record it became is on the Timeline",
     );

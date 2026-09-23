@@ -322,3 +322,88 @@
     border-color: var(--accent-deep);
   }
 }
+
+/* And the same form once it has happened: the pane a Steer event opens, which
+   is the record drawn as the form the human filled. Read-only throughout — the
+   press is over — so what the form drew as controls this draws as lines, in the
+   form's own order and under the form's own words.
+
+   Its own block rather than the form's, because none of the form's spacing is
+   about it: there are no fields to separate, no buttons at the foot and nothing
+   that can be typed in. What is left is a column of short sections. */
+.steered {
+  padding: 1rem 0 0;
+}
+
+/* Where the work went, said in the sentence the timeline's own card says it in
+   — one moment read at two distances, and the words are the same at both. */
+.steeredInto {
+  margin: 0 0 1rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.steeredField + .steeredField,
+.steeredField + .steeredTick,
+.steeredTick + .steeredField,
+.steeredTick + .steeredTick {
+  margin-top: 1rem;
+}
+
+/* The name the field had when it was written in, which is the whole of why the
+   record reads as the form: the human filled in something called *What to do
+   first*, and this is that label said back to them. */
+.steeredLabel {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.steeredValue {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.steeredField .steeredNote {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* The ticks, drawn as the boxes they were and disabled: a record saying
+   *Digest: no* would be the same answer in a shape nobody was ever shown. */
+.steeredTick {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  font-weight: 600;
+}
+
+/* And the repos the steer asked for, a line apiece — the form's own *already
+   alongside* rows, which are something to read rather than a row of controls. */
+.steeredRepos {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.steeredRepo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.3rem 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.steeredRepo + .steeredRepo {
+  border-top: 1px solid var(--edge);
+}
+
+.steeredRepoName {
+  font-weight: 600;
+  color: var(--ink);
+}

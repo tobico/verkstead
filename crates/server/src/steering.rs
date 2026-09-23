@@ -527,6 +527,24 @@ pub(crate) async fn submit(
         opened: &opening,
         checkouts: &made.checkouts,
         said: said.as_deref(),
+        // And the rest of the form, for the record beside the Event. As the
+        // form *sent* it rather than as [`settling`] read it: what this is is
+        // what the human picked, and the pick that changed nothing about the
+        // Conversation is still the pick they made. The ticks the same way —
+        // the digest is what primes a grilling and means nothing under another
+        // target, and the record keeps what the box said rather than what the
+        // target made of it.
+        recorded: store::Recorded {
+            digest: submission.digest,
+            interrupt: submission.interrupt,
+            pairing: submission
+                .pairing
+                .as_ref()
+                .map(|choice| store::PickedPairing {
+                    profile_id: choice.profile_id,
+                    model: &choice.model,
+                }),
+        },
     };
 
     match store::steer_conversation(&state.pool, conversation_id, steer).await? {

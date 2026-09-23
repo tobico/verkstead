@@ -9428,7 +9428,10 @@ describe("a second round", () => {
     theSecondRound();
     const { container } = mount(`/conversations/${SECOND.id}`);
 
-    const boundary = await drawn(container, `.${timeline.timelineEvent} > .${timeline.steered}`);
+    const boundary = await drawn(
+      container,
+      `.${timeline.steeredWith} > .${timeline.steered}`,
+    );
     expect(boundary.textContent).toBe("You steered this into Grilling");
 
     // And it is drawn between the two briefs, which is where the rounds part.
@@ -9444,7 +9447,7 @@ describe("a second round", () => {
 
     // What the boundary looks like is the stylesheet's, and jsdom lays nothing
     // out.
-    expect(timelineCss).toContain(".timelineEvent > .steered,");
+    expect(timelineCss).toContain(".steeredWith > .steered {");
   });
 
   /// And the boundary on a timeline reopened before a steer was the way back
@@ -11667,6 +11670,7 @@ describe("steering a conversation", () => {
             at: "2026-08-24T11:00:00Z",
             target: "Done",
             html: null,
+            record: null,
           },
         },
         { Moved: { id: 9002, at: "2026-08-24T11:00:00Z", state: "Done" } },
@@ -11674,7 +11678,10 @@ describe("steering a conversation", () => {
     });
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
-    const steered = await drawn(container, `.${timeline.timelineEvent} > .${timeline.steered}`);
+    const steered = await drawn(
+      container,
+      `.${timeline.steeredWith} > .${timeline.steered}`,
+    );
 
     expect(steered.textContent).toBe("You steered this into Done");
 
@@ -11713,7 +11720,7 @@ describe("steering a conversation", () => {
 
     expect(
       container.querySelector(
-        `.${timeline.timelineEvent} > .${timeline.steered}`,
+        `.${timeline.steeredWith} > .${timeline.steered}`,
       ),
       "and not as a steer, which would say the branch was read again",
     ).toBeNull();
@@ -11742,6 +11749,7 @@ describe("steering a conversation", () => {
             at: "2026-08-24T11:00:00Z",
             target: "Implementing",
             html: "<p>Note the window the count is against.</p>",
+            record: null,
           },
         },
         { Moved: { id: 9004, at: "2026-08-24T11:00:00Z", state: "Implementing" } },
@@ -11758,9 +11766,176 @@ describe("steering a conversation", () => {
 
     fireEvent.click(card);
 
-    const pane = await drawn(container, `.${shell.detailsPane} .${documentPane.document}`);
+    const pane = await drawn(
+      container,
+      `.${shell.detailsPane} .${steerForm.steered}`,
+    );
 
+    expect(pane.textContent).toContain("What to do first");
     expect(pane.textContent).toContain("Note the window the count is against.");
+  });
+
+  /// And a steer that wrote nothing opens too, which is the whole of what the
+  /// pane being the *form* rather than the document changes: a steer into done
+  /// says nothing but the state, and where it went, what it picked and what it
+  /// ended are still four questions somebody answered.
+  it("opens a steer that carried no document", async () => {
+    theGrillingSteering({
+      state: "Done",
+      timeline: [
+        ...GRILLING.timeline,
+        {
+          Steer: {
+            id: 9201,
+            at: "2026-08-24T11:00:00Z",
+            target: "Done",
+            html: null,
+            record: {
+              digest: false,
+              interrupt: true,
+              pairing: "Nothing",
+              added: [],
+              upgraded: [],
+            },
+          },
+        },
+        { Moved: { id: 9202, at: "2026-08-24T11:00:00Z", state: "Done" } },
+      ],
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const card = await drawn(
+      container,
+      `.${timeline.timelineEvent} > .${timeline.steeredWith}`,
+    );
+
+    fireEvent.click(card);
+
+    const pane = await drawn(
+      container,
+      `.${shell.detailsPane} .${steerForm.steered}`,
+    );
+
+    expect(pane.textContent).toContain("You steered this into Done");
+
+    // Nothing runs in done, so nothing was picked to run it and the row is not
+    // drawn at all — which is not the same as a profile that has gone.
+    expect(pane.textContent).not.toContain("Run it under");
+
+    const ticks = [...pane.querySelectorAll<HTMLInputElement>("input")];
+
+    expect(ticks.map((tick) => tick.checked)).toEqual([true]);
+    expect(ticks.every((tick) => tick.disabled)).toBe(true);
+  });
+
+  /// The whole of the form, read back: the ticks, the account it settled and
+  /// the repos it asked for, under the labels the form asked for them under.
+  it("draws the form a steer was made with, frozen", async () => {
+    theGrillingSteering({
+      state: "Implementing",
+      timeline: [
+        ...GRILLING.timeline,
+        {
+          Steer: {
+            id: 9301,
+            at: "2026-08-24T11:00:00Z",
+            target: "Implementing",
+            html: "<p>Count against the window.</p>",
+            record: {
+              digest: false,
+              interrupt: false,
+              pairing: {
+                Under: { profile: PROFILES[0]!, model: "claude-fable-5" },
+              },
+              added: [
+                {
+                  repo: "askance",
+                  mode: "ReadWrite",
+                  base_ref: "main",
+                  branch: "rate-limiting",
+                },
+              ],
+              upgraded: [{ repo: "verkstead-docs", branch: "" }],
+            },
+          },
+        },
+        { Moved: { id: 9302, at: "2026-08-24T11:00:00Z", state: "Implementing" } },
+      ],
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(
+      await drawn(
+        container,
+        `.${timeline.timelineEvent} > .${timeline.steeredWith}`,
+      ),
+    );
+
+    const pane = await drawn(
+      container,
+      `.${shell.detailsPane} .${steerForm.steered}`,
+    );
+
+    expect(pane.textContent).toContain("Run it under");
+    expect(pane.textContent).toContain("Claude Code Fable 5 — fable");
+
+    const put = await drawn(pane, `ul[aria-label="Repos it put in"]`);
+
+    expect(put.textContent).toContain("askance");
+    expect(put.textContent).toContain("read-write");
+    expect(put.textContent).toContain("off main");
+    expect(put.textContent).toContain("as rate-limiting");
+
+    // The branch left empty is mirroring, which is said rather than drawn as a
+    // row with nothing after it.
+    const opened = await drawn(pane, `ul[aria-label="Repos it opened up"]`);
+
+    expect(opened.textContent).toContain("verkstead-docs");
+    expect(opened.textContent).toContain("as this conversation's own branch");
+  });
+
+  /// And an account the human has finished with since, which is the one thing
+  /// the record cannot name: the pick was theirs and the profile is gone, and
+  /// saying nothing was picked would be the pane rewriting their decision.
+  it("says so where the profile a steer picked has been removed", async () => {
+    theGrillingSteering({
+      state: "Implementing",
+      timeline: [
+        ...GRILLING.timeline,
+        {
+          Steer: {
+            id: 9401,
+            at: "2026-08-24T11:00:00Z",
+            target: "Implementing",
+            html: null,
+            record: {
+              digest: false,
+              interrupt: false,
+              pairing: "Removed",
+              added: [],
+              upgraded: [],
+            },
+          },
+        },
+        { Moved: { id: 9402, at: "2026-08-24T11:00:00Z", state: "Implementing" } },
+      ],
+    });
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    fireEvent.click(
+      await drawn(
+        container,
+        `.${timeline.timelineEvent} > .${timeline.steeredWith}`,
+      ),
+    );
+
+    const pane = await drawn(
+      container,
+      `.${shell.detailsPane} .${steerForm.steered}`,
+    );
+
+    expect(pane.textContent).toContain("Run it under");
+    expect(pane.textContent).toContain("A profile since removed");
   });
 });
 
@@ -16492,6 +16667,7 @@ describe("the documents on a timeline", () => {
             at: "2026-08-24T11:00:00Z",
             target: "Implementing",
             html: SHORT_INSTRUCTION,
+            record: null,
           },
         },
         { Moved: { id: 9006, at: "2026-08-24T11:00:00Z", state: "Implementing" } },
@@ -16507,7 +16683,7 @@ describe("the documents on a timeline", () => {
 
     fireEvent.click(card);
 
-    await drawn(details(), `.${documentPane.document}`);
+    await drawn(details(), `.${steerForm.steered}`);
   });
 
   /// The brief while it is still a draft is the same card as the frozen one: no

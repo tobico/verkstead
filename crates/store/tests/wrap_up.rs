@@ -11,8 +11,8 @@ use std::path::Path;
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Ask, Event, Finished, Lifecycle, Locking, Settlements, Steer, Steering, Submission, WAITED_ON,
-    WaitingOn, addressed_comments, ask, batch_over, finish_wrap_up, fix_attempts,
+    Ask, Event, Finished, Lifecycle, Locking, Recorded, Settlements, Steer, Steering, Submission,
+    WAITED_ON, WaitingOn, addressed_comments, ask, batch_over, finish_wrap_up, fix_attempts,
     forget_addressed_comments, forget_every_addressed_comment, forget_fix_attempts,
     implement_again, last_batch_proposal, last_proposal, load_conversation, load_response,
     lock_set, open_database, pick_direction, pull_requests, record_addressed_comments,
@@ -655,6 +655,7 @@ async fn a_second_round_forgets_what_the_round_before_it_settled() {
                 opened: &[],
                 checkouts: &[],
                 said: None,
+                recorded: Recorded::default(),
             },
         )
         .await

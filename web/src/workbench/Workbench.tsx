@@ -113,7 +113,7 @@ import { Output } from "./Output";
 import { PullRequest } from "./PullRequest";
 import { Roadmap } from "./Roadmap";
 import { Share } from "./Share";
-import { Steer } from "./Steer";
+import { Frozen, Steer } from "./Steer";
 import { Terminal } from "./Terminal";
 import { Timeline } from "./Timeline";
 import { pressed } from "./eager";
@@ -716,10 +716,11 @@ function DetailsPane(props: {
   /// Seven kinds have one: a session's output, whose full self is its
   /// Capture; a Question Set, whose full self is the document it was asked
   /// as; a commit, whose full self is its diff; the pull request, whose full
-  /// self is what is on it at GitHub right now; and the three documents — the
-  /// Brief, the handoff and the instruction a steer carried — whose full self
-  /// is the markdown their card shows three lines of. The kind travels with it,
-  /// because it is what decides which pane is drawn.
+  /// self is what is on it at GitHub right now; a steer, whose full self is the
+  /// form the human filled to make it; and the two documents — the Brief and
+  /// the handoff — whose full self is the markdown their card shows three lines
+  /// of. The kind travels with it, because it is what decides which pane is
+  /// drawn.
   ///
   /// A Brief still being drafted is here too, and nothing ever selects it: the
   /// card is a field with the setup under it rather than a card to press, which
@@ -763,11 +764,10 @@ function DetailsPane(props: {
         if ("Handoff" in entry) {
           return { handoff: entry.Handoff };
         }
-        // Only where it carries one. A steer into wrapping up or done says
-        // nothing but the state, so there is no document under it to open —
-        // which is why the Timeline draws one of those as a line rather than a
-        // card.
-        if ("Steer" in entry && entry.Steer.html !== null) {
+        // Every one of them, whatever it carried: what a steer's pane draws is
+        // the form the human filled rather than the document they wrote in it,
+        // so a steer into wrapping up or done has one too.
+        if ("Steer" in entry) {
           return { steer: entry.Steer };
         }
         if ("Notice" in entry) {
@@ -884,12 +884,11 @@ function DetailsPane(props: {
                     />
                   )}
                 </Match>
-                {/* And the three documents, each the whole of what its
-                    card showed three lines of. The handoff and the
-                    instruction are one pane — rendered markdown under the
-                    heading the card carries — and the Brief has two of its
-                    own, because a Brief is a document only once its round is
-                    past writing it.
+                {/* And the two documents, each the whole of what its card
+                    showed three lines of. The handoff is one pane — rendered
+                    markdown under the heading the card carries — and the Brief
+                    has two of its own, because a Brief is a document only once
+                    its round is past writing it.
 
                     While that round drafts, the pane is the composer: the
                     Brief as a field, the setup under it, and the press that
@@ -933,22 +932,16 @@ function DetailsPane(props: {
                     />
                   )}
                 </Match>
-                {/* What a steer sent a session off with, read the way every
-                    other document the human writes is read. Nothing opens a
-                    steer that carried none — and what it is called follows
-                    the target, an instruction being one session's whole job
-                    and a follow-up's brief being what a conversation was
-                    opened on. */}
+                {/* And a steer that happened, drawn as the form the human
+                    filled: where they sent it, what they wrote to send it
+                    there with, and everything else the record kept beside the
+                    event — read-only, the press being over. Every steer opens
+                    this, the one that wrote nothing included. */}
                 <Match when={steerIn(open())}>
                   {(steer) => (
-                    <Document
-                      heading={
-                        steer().target === "FollowUp"
-                          ? "Follow-up"
-                          : "Instruction"
-                      }
-                      html={steer().html ?? ""}
-                      empty="Nothing was asked for."
+                    <Frozen
+                      conversation={conversation()}
+                      steer={steer()}
                       back={props.back.go}
                     />
                   )}

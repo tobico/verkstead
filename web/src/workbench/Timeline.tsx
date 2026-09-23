@@ -1681,39 +1681,38 @@ function Moved(props: { from: Lifecycle; moved: MovedEvent }): JSX.Element {
 /// above this one and is already on the page, and what a steer adds is the
 /// deciding.
 ///
-/// **A card where it carries a document**, which is a steer into implementing
-/// that wrote an instruction, or one into follow-up, which always writes a
-/// brief: either is what a session was sent off to do, so it is a document like
-/// the brief and the handoff and is read the same way — clamped here, whole in
-/// the details pane. A steer that carried nothing written stays the line it
-/// always was, there being nothing to open.
+/// **A card rather than a line, and every one of them.** What a steer opens is
+/// the form the human filled — where it went, what they wrote under it, what
+/// they picked to run the work and which repos they asked for — so a steer into
+/// wrapping up or done has a pane behind it exactly as one into implementing
+/// does. See [`Frozen`](./Steer.tsx).
+///
+/// **The body is clamped where it carried one**, which is a steer into
+/// implementing that wrote an instruction, or one into follow-up, which always
+/// writes a brief: either is what a session was sent off to do, so it is a
+/// document like the brief and the handoff and is read the same way — three
+/// lines here, whole in the details pane.
 function Steered(props: {
   steer: SteerEvent;
   selected: boolean;
   open: () => void;
 }): JSX.Element {
-  const line = () => (
-    <p
-      class={styles.steered}
-      classList={{ [styles[props.steer.target.toLowerCase()]!]: true }}
-    >
-      You steered this into {STATE[props.steer.target]}
-    </p>
-  );
-
   return (
-    <Show when={props.steer.html} fallback={line()}>
-      {(html) => (
-        <Openable
-          kind={styles.steeredWith!}
-          selected={props.selected}
-          open={props.open}
-        >
-          {line()}
-          <Clamped class={styles.steerBody!} html={html()} />
-        </Openable>
-      )}
-    </Show>
+    <Openable
+      kind={styles.steeredWith!}
+      selected={props.selected}
+      open={props.open}
+    >
+      <p
+        class={styles.steered}
+        classList={{ [styles[props.steer.target.toLowerCase()]!]: true }}
+      >
+        You steered this into {STATE[props.steer.target]}
+      </p>
+      <Show when={props.steer.html}>
+        {(html) => <Clamped class={styles.steerBody!} html={html()} />}
+      </Show>
+    </Openable>
   );
 }
 

@@ -175,6 +175,13 @@
         "at": "2026-08-03T09:07:11.000Z",
         "html": null,
         "id": 38,
+        "record": {
+          "added": [],
+          "digest": false,
+          "interrupt": false,
+          "pairing": "Nothing",
+          "upgraded": []
+        },
         "target": "Grilling"
       }
     },

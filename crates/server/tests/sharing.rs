@@ -340,6 +340,7 @@ async fn everything(pool: &SqlitePool) -> i64 {
             opened: &[],
             checkouts: &[],
             said: None,
+            recorded: verkstead_store::Recorded::default(),
         },
     )
     .await

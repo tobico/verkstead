@@ -23,10 +23,10 @@ use std::path::Path;
 use sqlx::SqlitePool;
 use verkstead_schema::{Answer, Question, QuestionSet, Response};
 use verkstead_store::{
-    Ask, Ending, Lifecycle, PullRequest, Settlements, Steer, Steering, Submission, WAITED_ON,
-    WaitingOn, ask, ended_on, follow_up_over, load_conversation, load_response, lock_set,
-    nothing_else, open_database, record_another_pull_request, register_repo, settle_wrap_up,
-    start_conversation, steer_conversation, submit_response, wrap_up_settled,
+    Ask, Ending, Lifecycle, PullRequest, Recorded, Settlements, Steer, Steering, Submission,
+    WAITED_ON, WaitingOn, ask, ended_on, follow_up_over, load_conversation, load_response,
+    lock_set, nothing_else, open_database, record_another_pull_request, register_repo,
+    settle_wrap_up, start_conversation, steer_conversation, submit_response, wrap_up_settled,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -259,6 +259,7 @@ async fn following_up(pool: &SqlitePool, conversation: i64) {
                 opened: &[],
                 checkouts: &[],
                 said: None,
+                recorded: Recorded::default(),
             },
         )
         .await

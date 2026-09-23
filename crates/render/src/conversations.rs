@@ -1947,6 +1947,98 @@ pub struct SteerEvent {
     /// out as every piece of markdown on this wire is — and `None` for every
     /// steer that carried nothing written.
     pub html: Option<String>,
+
+    /// And the rest of the form that press filled: the ticks, the Pairing and
+    /// the companion rows it asked for.
+    ///
+    /// `null` is a steer recorded before any of this was written down, which
+    /// the pane draws with the fields it has — the target and the body — rather
+    /// than as a form whose every box was left empty. See
+    /// [`SteerRecordView`].
+    pub record: Option<SteerRecordView>,
+}
+
+/// Everything a steer settled that its own body cannot hold, as the pane draws
+/// it back.
+///
+/// The form frozen: what the human ticked, what they picked to run the work,
+/// and which repositories they asked for beside it. Read-only from the moment
+/// it lands — the press is over, and what this is, is the record of it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct SteerRecordView {
+    /// Whether the round a steer into Grilling opened was primed with
+    /// everything already answered.
+    pub digest: bool,
+
+    /// And whether the session running at the submit was ended where it stood.
+    pub interrupt: bool,
+
+    /// What the picker was on, which the steer settled as the Conversation's
+    /// own.
+    pub pairing: SteerPairingView,
+
+    /// The Repos the steer put into the sandbox, one entry per row ticked.
+    pub added: Vec<SteerAdditionView>,
+
+    /// And the companions already there it opened up, one per row ticked up.
+    pub upgraded: Vec<SteerUpgradeView>,
+}
+
+/// The Pairing a steer recorded, as it reads now.
+///
+/// Three states rather than a nullable Pairing, because the middle one is a
+/// fact about the record rather than an absence: a steer into Done picked
+/// nothing, and a steer whose account has been removed since picked something
+/// that is gone. A pane that drew them the same would say *nothing picked* over
+/// a choice the human made.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum SteerPairingView {
+    /// Nothing was picked: a steer into Done, where nothing runs and so nothing
+    /// is picked to run it.
+    Nothing,
+
+    /// One was picked and the Profile it named has been removed since, so there
+    /// is no account left to name it by.
+    Removed,
+
+    /// The Profile as it stands and the model picked beside it, which the page
+    /// reads the way its picker reads a row.
+    Under(PairingView),
+}
+
+/// One Repo a steer put into the sandbox, as the record keeps it.
+///
+/// [`CompanionAddition`] said the other way round: that is what a submit asks
+/// for, by the id the page picked it by, and this is what it came to, by the
+/// name a reader wants. A share carries these, so the path is not among them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct SteerAdditionView {
+    /// What the Repo is called.
+    pub repo: String,
+
+    pub mode: CompanionMode,
+
+    /// The branch of that repository's own its checkout came off, or `null` for
+    /// the rule: that repository's default branch as origin held it.
+    pub base_ref: Option<String>,
+
+    /// What a read-write one's branch was called, or empty for *mirroring* —
+    /// the Conversation's own branch name.
+    pub branch: String,
+}
+
+/// And one companion the steer opened up, which carries the one field an
+/// upgrade settles — see [`CompanionUpgrade`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct SteerUpgradeView {
+    pub repo: String,
+
+    /// What the branch cut in it was called, or empty for *mirroring*.
+    pub branch: String,
 }
 
 /// The **Resolve conflicts** press as the page receives it: when, and nothing
@@ -2894,17 +2986,22 @@ pub fn manual_task_event(id: i64, at: String, instruction: &str) -> TimelineEven
 ///
 /// Rendered the way the Brief is, and for the same reason: it is what the human
 /// asked for, written for somebody to read back.
+/// And the rest of the form beside it, where the record has it: what the pane
+/// this Event opens is drawn from, so a steer recorded before any of it was
+/// kept opens on the target and the body alone.
 pub fn steer_event(
     id: i64,
     at: String,
     target: Lifecycle,
     instruction: Option<&str>,
+    record: Option<SteerRecordView>,
 ) -> TimelineEvent {
     TimelineEvent::Steer(SteerEvent {
         id,
         at,
         target,
         html: instruction.map(crate::markdown::to_html),
+        record,
     })
 }
 

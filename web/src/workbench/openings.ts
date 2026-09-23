@@ -169,11 +169,15 @@ export function openingAt(pathname: string): Opening | null {
 /// known yet — the Timeline draws a card per kind and needs no such question,
 /// and picking the end of a record is nothing but it.
 ///
-/// Two of them answer for themselves rather than by their kind: a steer opens
-/// only where it carried a document, and the backlog only where there is still
-/// one to read. A move, a manual task and a steer into wrapping up have nothing
+/// One of them answers for itself rather than by its kind: the backlog opens
+/// only where there is still one to read. A move and a manual task have nothing
 /// to show at all, and each is drawn as a line rather than as a card for that
 /// reason.
+///
+/// A steer always opens, whatever it carried. What its pane draws is the form
+/// the human filled, frozen — where it went, what was written under it, what it
+/// runs under and which repos it asked for — so a steer into wrapping up or
+/// done has a pane of its own even though its body says nothing but the state.
 ///
 /// The Brief opens whatever its round has come to — the composer while that
 /// round is being drafted, and the read-only pane once the work has started
@@ -189,7 +193,7 @@ export function openingOf(event: TimelineEvent): Opening | null {
   }
 
   if ("Steer" in event) {
-    return event.Steer.html === null ? null : event.Steer.id;
+    return event.Steer.id;
   }
 
   if ("TaskList" in event) {

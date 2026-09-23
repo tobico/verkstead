@@ -549,7 +549,18 @@ pub enum Event {
     /// One line and no instruction is every steer written before there was one
     /// to write, and it reads back as the steer it was — ADR-0006's rule, and
     /// the reason the target goes above the document rather than under it.
-    Steer(Lifecycle, Option<String>),
+    ///
+    /// **And the rest of the form beside it**, which is the row in `steers`:
+    /// the digest tick, the interrupt tick, the Pairing picked and the
+    /// companion rows asked for. Everything the form settled that the two lines
+    /// of the body cannot hold, so the details pane draws the Event back as the
+    /// form the human filled — see [`super::SteerRecord`]. Boxed for the reason
+    /// a Question Set is: it is the largest thing any Event carries, and an
+    /// enum is as big as its widest arm.
+    ///
+    /// `None` is a steer recorded before this was written down, which draws
+    /// with the fields it has and is no error anywhere.
+    Steer(Lifecycle, Option<String>, Option<Box<super::SteerRecord>>),
 
     /// The human pressed **Resolve conflicts** on a finished Conversation's pull
     /// request, and this is where they did it.
@@ -668,8 +679,8 @@ impl Event {
             // The state it was steered into, as a move holds the state it moved
             // to — with the instruction under it where the human wrote one, on
             // lines of its own so that the word above it reads back whole.
-            Self::Steer(target, None) => Cow::Borrowed(target.stored()),
-            Self::Steer(target, Some(instruction)) => {
+            Self::Steer(target, None, _) => Cow::Borrowed(target.stored()),
+            Self::Steer(target, Some(instruction), _) => {
                 Cow::Owned(format!("{}\n{instruction}", target.stored()))
             }
             // Nothing either: where it goes is always Wrapping, so the move
@@ -705,6 +716,7 @@ impl Event {
         commit: Option<super::Commit>,
         pull_request: Option<super::PullRequest>,
         pause: Option<super::Pause>,
+        steer: Option<super::SteerRecord>,
     ) -> Result<Self> {
         Ok(match kind {
             "brief" => Self::Brief(body),
@@ -736,12 +748,23 @@ impl Event {
             // The state off the first line and the instruction under it, split
             // rather than parsed: an instruction is a document and may hold
             // anything, so the only thing read out of it is where it starts.
-            "steer" => match body.split_once('\n') {
-                Some((target, instruction)) => {
-                    Self::Steer(Lifecycle::read(target)?, Some(instruction.to_owned()))
+            //
+            // And the rest of the form beside it, which is asked for the way a
+            // session's pairing is rather than the way a Capture is: the row
+            // was not always written, so an Event without one is a steer from
+            // before that rather than a database somebody has been in by hand.
+            "steer" => {
+                let recorded = steer.map(Box::new);
+
+                match body.split_once('\n') {
+                    Some((target, instruction)) => Self::Steer(
+                        Lifecycle::read(target)?,
+                        Some(instruction.to_owned()),
+                        recorded,
+                    ),
+                    None => Self::Steer(Lifecycle::read(&body)?, None, recorded),
                 }
-                None => Self::Steer(Lifecycle::read(&body)?, None),
-            },
+            }
             "resolve-conflicts" => Self::ResolveConflicts,
             TASK_LIST => Self::TaskList,
             STAGE_LIST => Self::StageList,
@@ -2593,6 +2616,12 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
     // query that nearly always comes back with nothing.
     let mut pauses = super::pauses::on_timeline(pool, conversation_id).await?;
 
+    // And what each steer settled beside the target and body its Event carries
+    // — the ticks, the Pairing and the companion rows — for the arithmetic
+    // again. A Conversation nobody has steered answers with nothing, and one
+    // steered before this was written down answers with nothing for that steer.
+    let mut steers = super::steers::on_timeline(pool, conversation_id).await?;
+
     // And how each of the Sets above was asked, for the arithmetic again — see
     // [`super::deferrals::stored_on_timeline`]. Cheaper than any of them: one
     // indexed column, and most Conversations have no stored ask at all, which
@@ -2693,6 +2722,7 @@ pub async fn timeline(pool: &SqlitePool, conversation_id: i64) -> Result<Vec<Tim
                     commit,
                     pull_request,
                     pause,
+                    steers.remove(&id),
                 )?,
             })
         })
@@ -4192,11 +4222,16 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
         opened,
         checkouts,
         said,
+        recorded,
     } = steer;
 
     let mut tx = super::writing(pool, "steering a Conversation").await?;
 
-    let steer = Event::Steer(target, instruction.map(str::to_owned));
+    // No record beside it on the way in: what a row in `steers` holds is
+    // written a few lines down, out of the same press. The Event is built here
+    // for its kind and its body, which is the target and whatever was written
+    // under it.
+    let steer = Event::Steer(target, instruction.map(str::to_owned), None);
 
     // Selected from `conversations` rather than trusting the id, as every other
     // Event is written: a steer attributed to a Conversation that is not there
@@ -4212,12 +4247,16 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
     .bind(id)
     .execute(&mut *tx)
     .await
-    .with_context(|| format!("putting a steer on the Timeline of Conversation {id}"))?
-    .rows_affected();
+    .with_context(|| format!("putting a steer on the Timeline of Conversation {id}"))?;
 
-    if landed == 0 {
+    if landed.rows_affected() == 0 {
         return Ok(Steering::NoSuchConversation);
     }
+
+    // The Event the rest of the form hangs off, read off the insert that has
+    // just written it rather than looked up afterwards: two steers landing in
+    // the same millisecond are told apart by their ids and by nothing else.
+    let steered = landed.last_insert_rowid();
 
     // And what came into the sandbox with it, directly under the human's own
     // line. The Steer says a person moved this; this says which repositories
@@ -4312,6 +4351,15 @@ pub async fn steer_conversation(pool: &SqlitePool, id: i64, steer: Steer<'_>) ->
     super::companions::join(&mut tx, id, companions).await?;
     super::companions::open_up(&mut tx, id, opened).await?;
     super::companions::record_worktrees(&mut tx, id, checkouts).await?;
+
+    // And the rest of the form the human filled, beside the Steer Event it
+    // became: the digest and interrupt ticks, the Pairing the picker was on,
+    // and the same two lists of companion rows said as what was *asked for*
+    // rather than as what the sandbox now holds. In the steer's own transaction
+    // for the reason the Worktree above is — a Steer Event that said where the
+    // work went without saying what was picked to run it would be half an
+    // account of one press, and nothing could tell which half.
+    super::steers::record(&mut tx, steered, id, recorded, companions, opened).await?;
 
     // And how the work is built from here, for a Conversation that has never
     // said. `DO NOTHING` rather than an upsert, which is what makes the rule the
@@ -4508,6 +4556,16 @@ pub struct Steer<'a> {
     /// it. `None` is a steer that widened nothing, which is a steer with nothing
     /// to announce.
     pub said: Option<&'a str>,
+
+    /// And the rest of what the form settled, for the record beside the Event:
+    /// the digest tick, the interrupt tick and the Pairing the picker was on.
+    ///
+    /// The companion rows are not in it. They are [`Self::companions`] and
+    /// [`Self::opened`] said over again — a steer is refused whole where any
+    /// row of it could not be made, so what was asked for and what came in are
+    /// the same list — and a second copy on the submit would be two shapes to
+    /// keep true about one press. See [`super::SteerRecord`].
+    pub recorded: super::steers::Recorded<'a>,
 }
 
 /// A Pairing a steer settles: which of the roles, and both halves of the

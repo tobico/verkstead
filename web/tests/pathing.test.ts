@@ -145,12 +145,14 @@ describe("the end of a record", () => {
     expect(lastOpening(WRAPPING.timeline)).toBe(openingOf(opened));
   });
 
-  /// A steer that carried no document is a third: it says the state and nothing
-  /// else, which is why the Timeline draws one as a line rather than a card.
-  it("skips a steer that carried no document", () => {
+  /// A steer opens whatever it carried, which is what the pane being the form
+  /// rather than the document changes: a steer into grilling says nothing but
+  /// the state in its own body, and where it went, what it picked and what it
+  /// ended are still questions somebody answered.
+  it("opens a steer that carried no document", () => {
     const steer = SECOND_ROUND.timeline.find((event) => "Steer" in event)!;
     expect("Steer" in steer && steer.Steer.html).toBeNull();
-    expect(openingOf(steer)).toBeNull();
+    expect(openingOf(steer)).toBe("Steer" in steer && steer.Steer.id);
   });
 
   /// And the Brief while it is still being written, which opens the composer

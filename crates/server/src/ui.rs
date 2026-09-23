@@ -20,6 +20,8 @@
 //! that cannot be read at all — a 404, because that is a page the viewer draws
 //! differently.
 
+use std::collections::HashMap;
+
 use axum::Json;
 use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::StatusCode;
@@ -37,14 +39,15 @@ use verkstead_render::{
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, Creation, Cursor, GrillingStarted, IgnoreRule,
     IgnoredCommentsEdit, InstallPress, Lifecycle, Locked, Merging, MissedOut, NewAdoption,
-    NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption, Parked, PendingSteerView,
-    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView,
-    RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
-    ServeEdit, ServePress, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
-    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
-    ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened, SteerSaved, SteerSubmission,
-    Submitted, Subscribed, Subscription, TakenUp, TerminalOpened, TimelineEvent, TokenEdit,
-    TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption, PairingView, Parked,
+    PendingSteerView, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
+    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
+    RuleField, RuleRefused, ServeEdit, ServePress, SetReading, SetView, SettingsEdit,
+    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
+    ShowArchived, ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened,
+    SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp,
+    TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice,
+    Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -1769,6 +1772,24 @@ pub(crate) async fn conversation_view(
         }
     };
 
+    // And the accounts the steers on this Timeline were made under, read as
+    // rows before any of them is drawn: the pane a steer opens names its
+    // Pairing the way the picker does, which wants the Profile as it stands
+    // rather than the id the record holds. One hop off the runtime for the lot
+    // of them — see [`crate::profiles::keyed`] — because the draw below is not
+    // a place anything can be awaited from.
+    //
+    // A read that fails leaves the steers to draw without their Pairing rather
+    // than taking the Conversation down with it: everything else about the
+    // record is in hand, and a pane short one line is better than no pane.
+    let steer_pairings = match crate::profiles::keyed(steered(&timeline)).await {
+        Ok(pairings) => pairings,
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading what a steer picked failed");
+            HashMap::new()
+        }
+    };
+
     // One clock for the whole Timeline: every Set on it is aged against the same
     // moment, so two rows written a millisecond apart cannot come back reading as
     // if they were read at different times.
@@ -1975,12 +1996,22 @@ pub(crate) async fn conversation_view(
                     // Event that stands beside another: the move it wrote is
                     // right under it, and the pair is the whole record of a
                     // steer — who decided, and what became of it.
-                    store::Event::Steer(target, instruction) => verkstead_render::steer_event(
-                        event.id,
-                        event.at,
-                        lifecycle(target),
-                        instruction.as_deref(),
-                    ),
+                    store::Event::Steer(target, instruction, recorded) => {
+                        verkstead_render::steer_event(
+                            event.id,
+                            event.at,
+                            lifecycle(target),
+                            instruction.as_deref(),
+                            // And the rest of the form that press filled, where
+                            // the record has it: the pane this Event opens
+                            // draws it back as the form, read-only. A steer
+                            // recorded before any of it was kept has none, and
+                            // opens on the target and the body alone.
+                            recorded.map(|recorded| {
+                                steered_form(*recorded, steer_pairings.get(&event.id).cloned())
+                            }),
+                        )
+                    }
                     // And the other press that stands beside a move, which is
                     // its own kind for exactly that reason: a steer into
                     // Wrapping reads the branch again and this one deliberately
@@ -3956,10 +3987,7 @@ async fn companion(companion: store::Companion) -> Result<CompanionView, anyhow:
             path: companion.repo.path.to_string_lossy().into_owned(),
             default_branch: companion.repo.default_branch,
         },
-        mode: match companion.mode {
-            store::CompanionMode::ReadOnly => CompanionMode::ReadOnly,
-            store::CompanionMode::ReadWrite => CompanionMode::ReadWrite,
-        },
+        mode: companion_mode(companion.mode),
         base_ref: companion.base_ref,
         branch: companion.branch,
         worktree,
@@ -4004,6 +4032,93 @@ fn own_checks(repo: &Option<String>, checks: Option<CheckRollup>) -> Option<Chec
     match repo {
         None => checks,
         Some(_) => None,
+    }
+}
+
+/// How far into a companion the work reaches, said on the wire.
+///
+/// One word either side and no judgement between them, which is why this is a
+/// function at all: it is said of the companions a Conversation holds and of
+/// the ones a steer asked for, and two copies of it would be two places for the
+/// third mode to be forgotten.
+fn companion_mode(mode: store::CompanionMode) -> CompanionMode {
+    match mode {
+        store::CompanionMode::ReadOnly => CompanionMode::ReadOnly,
+        store::CompanionMode::ReadWrite => CompanionMode::ReadWrite,
+    }
+}
+
+/// Which Profile each steer on a Timeline picked, by the Event it was recorded
+/// on.
+///
+/// The one thing about a steer's record that is not the record's to answer: the
+/// pane names its Pairing the way the picker does, and what the picker reads is
+/// the account as it stands. Gathered before the Timeline is drawn because the
+/// draw is not somewhere anything can be awaited from — see
+/// [`crate::profiles::keyed`], which reads the lot of them in one hop.
+///
+/// A steer that picked nothing and one whose Profile has been removed are both
+/// absent here, and the two are told apart by the record rather than by this:
+/// what it says is *removed since*, which is [`store::RecordedPairing`]'s to
+/// say.
+fn steered(timeline: &[store::TimelineEvent]) -> Vec<(i64, store::Pairing)> {
+    timeline
+        .iter()
+        .filter_map(|event| match &event.event {
+            store::Event::Steer(_, _, Some(recorded)) => match &recorded.pairing {
+                store::RecordedPairing::Under(pairing) => Some((event.id, pairing.clone())),
+                store::RecordedPairing::Nothing | store::RecordedPairing::Removed => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+/// One steer's record as the pane that draws it takes it: the form the human
+/// filled, frozen.
+///
+/// The Pairing arrives beside the record rather than inside it, for the reason
+/// [`steered`] gives: reading a Profile as a row is a look at the filesystem,
+/// and the Timeline is drawn without awaiting anything. A record that says a
+/// Pairing was picked and has no row here is a Profile removed since, which is
+/// what the pane says in place of naming it.
+fn steered_form(
+    recorded: store::SteerRecord,
+    pairing: Option<PairingView>,
+) -> verkstead_render::SteerRecordView {
+    verkstead_render::SteerRecordView {
+        digest: recorded.digest,
+        interrupt: recorded.interrupt,
+        pairing: match recorded.pairing {
+            store::RecordedPairing::Nothing => SteerPairingView::Nothing,
+            // Picked and gone: the record named an account, and there is no row
+            // left to name it by. Which is where a failed read of the Profiles
+            // lands too, and it says the truthful half of that — the human
+            // picked something this page cannot name.
+            store::RecordedPairing::Removed => SteerPairingView::Removed,
+            store::RecordedPairing::Under(_) => match pairing {
+                Some(pairing) => SteerPairingView::Under(pairing),
+                None => SteerPairingView::Removed,
+            },
+        },
+        added: recorded
+            .added
+            .into_iter()
+            .map(|companion| verkstead_render::SteerAdditionView {
+                repo: companion.repo,
+                mode: companion_mode(companion.mode),
+                base_ref: companion.base_ref,
+                branch: companion.branch,
+            })
+            .collect(),
+        upgraded: recorded
+            .upgraded
+            .into_iter()
+            .map(|companion| verkstead_render::SteerUpgradeView {
+                repo: companion.repo,
+                branch: companion.branch,
+            })
+            .collect(),
     }
 }
 

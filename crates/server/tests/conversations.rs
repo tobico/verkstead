@@ -28,7 +28,7 @@ use verkstead_render::{
     ConversationUnarchived, ConversationView, GrillingStarted, Lifecycle, Merging, PickedView,
     PinnedEvent, ProfileChosen, ProfileSaved, Registered, RepoEntry, RepoSwitched, Resolved,
     Resumed, RoadmapPane, ShowingArchived, Standing, Started, SteerCancelled,
-    SteerCompanionRefusal, SteerOpened, SteerSaved, TakenUp, TimelineEvent,
+    SteerCompanionRefusal, SteerOpened, SteerPairingView, SteerSaved, TakenUp, TimelineEvent,
 };
 use verkstead_server::{open_database, router_keeping, store};
 
@@ -2776,6 +2776,78 @@ async fn submitting_takes_the_pending_steer_away_with_the_record() {
         Some(&("moved", Lifecycle::Done)),
         "and the pair the steer leaves is on the record",
     );
+}
+
+/// And what it became is the whole form: the ticks, the Pairing picked and the
+/// companion rows asked for, beside the target and body the Event has always
+/// carried.
+///
+/// Which is what makes the pane a steer opens the form read back rather than a
+/// sentence about it. Read off the Conversation's own view, because that is
+/// where the page reads it — the Profile as a row, named the way the picker
+/// names it, and each repository by name.
+#[tokio::test]
+async fn the_record_a_submit_leaves_is_the_whole_form() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let askance = second_repo(&app, elsewhere.path(), "askance").await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    let picked = profile(&app, elsewhere.path(), "steering").await;
+
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
+    );
+
+    let steered: ConversationSteered = post(
+        &app,
+        &format!("/api/ui/conversations/{id}/steer/submit"),
+        &serde_json::json!({
+            "target": "Grilling",
+            "interrupt": true,
+            "digest": true,
+            "pairing": { "profile_id": picked, "model": "claude-opus-5" },
+            "added": [alongside(askance, "ReadOnly")],
+            "upgraded": [],
+        }),
+    )
+    .await;
+
+    assert_eq!(steered, ConversationSteered::Steered);
+
+    let view = opened(&app, id).await;
+    let record = view
+        .timeline
+        .iter()
+        .find_map(|event| match event {
+            TimelineEvent::Steer(steer) => steer.record.clone(),
+            _ => None,
+        })
+        .expect("the Steer Event carries the form it was made with");
+
+    assert!(record.digest, "the tick that primes the round it opened");
+    assert!(record.interrupt);
+
+    let SteerPairingView::Under(paired) = record.pairing else {
+        panic!("the account the picker was on is on the record");
+    };
+
+    assert_eq!(paired.profile.id, picked);
+    assert_eq!(paired.model.as_deref(), Some("claude-opus-5"));
+
+    assert_eq!(record.added.len(), 1);
+    assert_eq!(record.added[0].repo, "askance");
+    assert_eq!(record.added[0].mode, CompanionMode::ReadOnly);
+    assert_eq!(
+        record.added[0].base_ref, None,
+        "the rule the row was left on: that repository's own default branch",
+    );
+
+    assert!(record.upgraded.is_empty(), "it opened nothing up");
 }
 
 /// Resume is the opposite decision, so a press that starts something takes the

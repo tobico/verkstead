@@ -88,6 +88,16 @@
 //! and the box is the only thing that would stop it. The box is drawn only where
 //! a session is running *now* — the item may have sat open for hours, and there
 //! is otherwise nothing to interrupt.
+//!
+//! **And the same form once it has happened**, which is [`Frozen`] at the foot
+//! of this file: the pane every Steer event opens. What a submit lands is the
+//! whole of what was filled in — the target and the body on the event itself,
+//! and the ticks, the pairing and the companion rows on the record beside it —
+//! so the record reads as the form the human filled rather than as a sentence
+//! somebody wrote about it. Here rather than in a file of its own because the
+//! two are one form read at two moments, and a label the pending half changed
+//! without the frozen half would be the record saying the human answered a
+//! question they were never asked.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { For, Show, createMemo, createSignal, type JSX } from "solid-js";
@@ -106,11 +116,17 @@ import type {
   CompanionView,
   ConversationSteered,
   ConversationView,
+  Lifecycle,
+  PairingView,
   RepoEntry,
   SteerCompanionRefusal,
+  SteerEvent,
   SteerForm,
+  SteerPairingView,
+  SteerRecordView,
   SteerSaved,
   SteerTarget,
+  TimelineEvent,
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine, Note } from "../notices";
@@ -121,6 +137,7 @@ import { Switch as Toggle } from "../Switch";
 import { chosen } from "./naming";
 import { PaneHead } from "./PaneHead";
 import { keeping, type Keeping } from "./settling";
+import { STATE } from "./states";
 import { BasePicker, RULE } from "./Setup";
 import styles from "./Steer.module.css";
 
@@ -1474,5 +1491,269 @@ export function Steer(props: {
         </Show>
       </form>
     </>
+  );
+}
+
+/// What a steer wrote under each target, as the form asked for it.
+///
+/// The form's own labels rather than a heading invented here, because that is
+/// what the record is being drawn as: the human filled in a field called *What
+/// to do first*, and reading it back under any other name would be the record
+/// answering a question they were never asked. Only the two targets that carry
+/// a body are here — the rest say nothing but the state.
+const WROTE: Partial<Record<Lifecycle, string>> = {
+  Implementing: "What to do first",
+  FollowUp: "What to follow up on",
+};
+
+/// Whether the steer at `at` on this record wrote the brief its round opened
+/// on.
+///
+/// Read off the timeline rather than off the steer's own row, because that is
+/// where the brief is: what a steer into grilling writes lands as a Brief event
+/// of its own, under the move — a round starts from a brief, and a steered
+/// round's is a second brief beside the first rather than an edit of it. So the
+/// frozen form says a brief was written and points at where it stands rather
+/// than drawing it twice.
+///
+/// What may come between the two is what the one transaction writes between
+/// them: the notice saying what came into the sandbox, and the move itself.
+/// Anything else means this steer wrote none and the brief further down belongs
+/// to something later.
+function wroteABrief(timeline: readonly TimelineEvent[], at: number): boolean {
+  for (const event of timeline.slice(at + 1)) {
+    if ("Brief" in event) {
+      return true;
+    }
+
+    if (!("Moved" in event) && !("Notice" in event)) {
+      return false;
+    }
+  }
+
+  return false;
+}
+
+/// A steer that happened: the form the human filled, frozen.
+///
+/// **The record is the whole form**, which is what this pane is for. The event
+/// carries where the work went and whatever was written to send it there; the
+/// row beside it carries the rest — the digest tick, the pairing picked, the
+/// interrupt tick and the companion rows asked for — so what the human reads
+/// back is the form they filled rather than a sentence somebody wrote about it.
+///
+/// **Read-only throughout, and in the form's own order**: where it went, what
+/// was written under it, what it runs under, which repos were asked for, and
+/// what became of the session that was running. Nothing here is a control —
+/// the press is over — so the ticks are drawn as ticks that cannot be moved and
+/// every field is a line.
+///
+/// **A steer recorded before any of that was kept draws the fields it has**,
+/// which is ADR-0006's rule: the record is read as it was written. Its pane is
+/// the target and the body, and the rest is not drawn as a row of empty boxes
+/// it never had.
+///
+/// **The share draws this same pane.** It carries no profiles to read, which is
+/// what the missing second half of every pairing reading here is: the account's
+/// name is always said, and saying it is never wrong — see
+/// [`../agents`](../agents.ts). One reading for one record, wherever it is
+/// read.
+export function Frozen(props: {
+  conversation: ConversationView;
+  steer: SteerEvent;
+  /// The way off this pane, which a narrow window walks out through — the same
+  /// way out every other details pane carries.
+  back: () => void;
+}): JSX.Element {
+  /// Where this steer stands on the record, which is what says whether the
+  /// brief under it is the one it wrote.
+  const at = createMemo(() =>
+    props.conversation.timeline.findIndex(
+      (event) => "Steer" in event && event.Steer.id === props.steer.id,
+    ),
+  );
+
+  /// Whether it opened a round on a brief of its own — a steer into grilling
+  /// that wrote one, which is the one field of the form that is not on the row
+  /// beside the event.
+  const opened = createMemo(
+    () =>
+      props.steer.target === "Grilling" &&
+      at() !== -1 &&
+      wroteABrief(props.conversation.timeline, at()),
+  );
+
+  return (
+    <>
+      <PaneSticky>
+        <PaneHead back={{ to: "Timeline", go: props.back }} title="Steer" />
+      </PaneSticky>
+
+      <div class={styles.steered}>
+        <p class={styles.steeredInto}>
+          You steered this into {STATE[props.steer.target]}
+        </p>
+
+        {/* What was written to steer it with, under the name the field had when
+            it was written in. The whole of it rather than the three lines the
+            card shows, this being the pane that card opens. */}
+        <Show when={props.steer.html}>
+          {(html) => (
+            <div class={styles.steeredField}>
+              <p class={styles.steeredLabel}>
+                {WROTE[props.steer.target] ?? "What was written"}
+              </p>
+              <div class="markdown" innerHTML={html()} />
+            </div>
+          )}
+        </Show>
+
+        {/* And the brief a steer into grilling wrote, said rather than drawn:
+            it is a brief event of its own directly under the move, so drawing
+            it here would be the same document on the pane twice. */}
+        <Show when={opened()}>
+          <div class={styles.steeredField}>
+            <p class={styles.steeredLabel}>A brief for the new round</p>
+            <Note class={styles.steeredNote}>
+              It landed on the timeline under the move, frozen where it landed.
+            </Note>
+          </div>
+        </Show>
+
+        {/* And the rest of the form, where the record kept it. A steer from
+            before it was kept has none of this, and is drawn as the two things
+            above and nothing after them. */}
+        <Show when={props.steer.record}>
+          {(record) => (
+            <Recorded target={props.steer.target} record={record()} />
+          )}
+        </Show>
+      </div>
+    </>
+  );
+}
+
+/// The Pairing a steer recorded, where there is one left to name.
+///
+/// Both of the other two answer `null` and the pane tells them apart for
+/// itself: nothing picked draws no row at all, and a profile removed since
+/// draws the row with the fact where the name would be.
+function ran(pairing: SteerPairingView): PairingView | null {
+  return typeof pairing === "object" ? pairing.Under : null;
+}
+
+/// The half of a frozen steer that comes off the row beside the event: the
+/// ticks, the pairing and the companion rows.
+///
+/// Its own component because it is the half that may not be there, and a record
+/// without it is not a record with the boxes unticked: what it means is a steer
+/// from before any of this was written down.
+function Recorded(props: {
+  target: Lifecycle;
+  record: SteerRecordView;
+}): JSX.Element {
+  return (
+    <>
+      {/* The digest under grilling alone, the tick meaning nothing anywhere
+          else — it is what primes an interview, and there is no interview
+          under another target. */}
+      <Show when={props.target === "Grilling"}>
+        <Ticked on={props.record.digest}>
+          Prime it with everything you have already answered
+        </Ticked>
+      </Show>
+
+      {/* What the work runs under from here, drawn only where the steer picked
+          something: a steer into done picks nothing, there being nothing to
+          run. */}
+      <Show when={props.record.pairing !== "Nothing"}>
+        <div class={styles.steeredField}>
+          <p class={styles.steeredLabel}>Run it under</p>
+          <p class={styles.steeredValue}>
+            {/* And where the account has been removed since, the fact rather
+                than a name: the human picked something, and what the record
+                can still say about it is that it is gone. */}
+            <Show
+              when={ran(props.record.pairing)}
+              fallback="A profile since removed"
+            >
+              {(picked) => pairing.label(picked(), undefined)}
+            </Show>
+          </p>
+        </div>
+      </Show>
+
+      {/* And the sandbox it asked for: the repos it put in and the ones it
+          opened up. Neither is drawn where the steer asked for none, which is
+          most steers. */}
+      <Show when={props.record.added.length}>
+        <div class={styles.steeredField}>
+          <p class={styles.steeredLabel}>Repos it put in</p>
+          <ul class={styles.steeredRepos} aria-label="Repos it put in">
+            <For each={props.record.added}>
+              {(repo) => (
+                <li class={styles.steeredRepo}>
+                  <span class={styles.steeredRepoName}>{repo.repo}</span>
+                  <span>
+                    {repo.mode === "ReadWrite" ? "read-write" : "read-only"}
+                  </span>
+                  {/* The empty base is the rule it was checked out under, which
+                      is that repository's default branch — and the record does
+                      not hold what that was called, so the rule is what is
+                      said. */}
+                  <span>off {repo.base_ref ?? "its default branch"}</span>
+                  {/* And only where there was a branch to name. A read-only
+                      companion is checked out detached and holds none. */}
+                  <Show when={repo.mode === "ReadWrite"}>
+                    <span>
+                      as {repo.branch || "this conversation's own branch"}
+                    </span>
+                  </Show>
+                </li>
+              )}
+            </For>
+          </ul>
+        </div>
+      </Show>
+
+      <Show when={props.record.upgraded.length}>
+        <div class={styles.steeredField}>
+          <p class={styles.steeredLabel}>Repos it opened up</p>
+          <ul class={styles.steeredRepos} aria-label="Repos it opened up">
+            <For each={props.record.upgraded}>
+              {(repo) => (
+                <li class={styles.steeredRepo}>
+                  <span class={styles.steeredRepoName}>{repo.repo}</span>
+                  <span>read-write</span>
+                  <span>
+                    as {repo.branch || "this conversation's own branch"}
+                  </span>
+                </li>
+              )}
+            </For>
+          </ul>
+        </div>
+      </Show>
+
+      {/* And what became of whatever was running, which is the one thing on the
+          form that was about the world rather than about the move. */}
+      <Ticked on={props.record.interrupt}>Interrupt current task</Ticked>
+    </>
+  );
+}
+
+/// One of the form's ticks, as the record has it: the box, and what it was
+/// against.
+///
+/// A disabled checkbox rather than a word, because that is what it was — the
+/// human read this line with a box in front of it and left it or ticked it, and
+/// a record drawn as *Digest: no* would be the same answer in a shape they
+/// never saw.
+function Ticked(props: { on: boolean; children: JSX.Element }): JSX.Element {
+  return (
+    <label class={styles.steeredTick}>
+      <input type="checkbox" checked={props.on} disabled />
+      {props.children}
+    </label>
   );
 }

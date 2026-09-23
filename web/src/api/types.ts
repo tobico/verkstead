@@ -4209,6 +4209,29 @@ export type Standing = { "Waiting": Liveness } | { "Answered": Answered } | { "L
 export type Started = { "Started": { id: number, } } | "NoSuchRepo";
 
 /**
+ * One Repo a steer put into the sandbox, as the record keeps it.
+ *
+ * [`CompanionAddition`] said the other way round: that is what a submit asks
+ * for, by the id the page picked it by, and this is what it came to, by the
+ * name a reader wants. A share carries these, so the path is not among them.
+ */
+export type SteerAdditionView = { 
+/**
+ * What the Repo is called.
+ */
+repo: string, mode: CompanionMode, 
+/**
+ * The branch of that repository's own its checkout came off, or `null` for
+ * the rule: that repository's default branch as origin held it.
+ */
+base_ref: string | null, 
+/**
+ * What a read-write one's branch was called, or empty for *mirroring* —
+ * the Conversation's own branch name.
+ */
+branch: string, };
+
+/**
  * What cancelling a pending steer came to.
  *
  * Cancel is a press now rather than a modal being dismissed: it takes the
@@ -4271,7 +4294,17 @@ target: Lifecycle,
  * out as every piece of markdown on this wire is — and `None` for every
  * steer that carried nothing written.
  */
-html: string | null, };
+html: string | null, 
+/**
+ * And the rest of the form that press filled: the ticks, the Pairing and
+ * the companion rows it asked for.
+ *
+ * `null` is a steer recorded before any of this was written down, which
+ * the pane draws with the fields it has — the target and the body — rather
+ * than as a form whose every box was left empty. See
+ * [`SteerRecordView`].
+ */
+record: SteerRecordView | null, };
 
 /**
  * The Steer form in the shape it is saved and read back in: every field the
@@ -4381,6 +4414,49 @@ working: boolean,
  * half-written steer is not one to start another beside.
  */
 already: boolean, } } | "NoSuchConversation";
+
+/**
+ * The Pairing a steer recorded, as it reads now.
+ *
+ * Three states rather than a nullable Pairing, because the middle one is a
+ * fact about the record rather than an absence: a steer into Done picked
+ * nothing, and a steer whose account has been removed since picked something
+ * that is gone. A pane that drew them the same would say *nothing picked* over
+ * a choice the human made.
+ */
+export type SteerPairingView = "Nothing" | "Removed" | { "Under": PairingView };
+
+/**
+ * Everything a steer settled that its own body cannot hold, as the pane draws
+ * it back.
+ *
+ * The form frozen: what the human ticked, what they picked to run the work,
+ * and which repositories they asked for beside it. Read-only from the moment
+ * it lands — the press is over, and what this is, is the record of it.
+ */
+export type SteerRecordView = { 
+/**
+ * Whether the round a steer into Grilling opened was primed with
+ * everything already answered.
+ */
+digest: boolean, 
+/**
+ * And whether the session running at the submit was ended where it stood.
+ */
+interrupt: boolean, 
+/**
+ * What the picker was on, which the steer settled as the Conversation's
+ * own.
+ */
+pairing: SteerPairingView, 
+/**
+ * The Repos the steer put into the sandbox, one entry per row ticked.
+ */
+added: Array<SteerAdditionView>, 
+/**
+ * And the companions already there it opened up, one per row ticked up.
+ */
+upgraded: Array<SteerUpgradeView>, };
 
 /**
  * What became of saving one.
@@ -4539,6 +4615,16 @@ upgraded: Array<CompanionUpgrade>, };
  * wrapping up and no following up of work nobody can see.
  */
 export type SteerTarget = "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Done";
+
+/**
+ * And one companion the steer opened up, which carries the one field an
+ * upgrade settles — see [`CompanionUpgrade`].
+ */
+export type SteerUpgradeView = { repo: string, 
+/**
+ * What the branch cut in it was called, or empty for *mirroring*.
+ */
+branch: string, };
 
 /**
  * Whether each of the wizard's three steps stands met, read at the moment the

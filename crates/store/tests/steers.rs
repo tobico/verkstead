@@ -35,11 +35,12 @@ use std::path::{Path, PathBuf};
 use sqlx::SqlitePool;
 use verkstead_schema::Direction;
 use verkstead_store::{
-    Account, Base, Directing, Edited, Event, Lifecycle, ProfileFacts, Role, Settling, Steer,
-    Steering, WaitingOn, create_profile, fix_attempts, load_conversation, open_database,
-    pick_direction, record_fix_attempt, register_repo, save_brief, settle_naming, settle_wrap_up,
-    start_conversation, start_grilling, start_unnamed_conversation, steer_conversation, timeline,
-    wrap_up_settled,
+    Account, Adding, Base, CompanionMode, Deleting, Directing, Edited, Event, Joining, Lifecycle,
+    Opening, PickedPairing, ProfileFacts, Recorded, RecordedPairing, Role, Settling, Steer,
+    SteerRecord, Steering, WaitingOn, add_companion, create_profile, delete_profile, fix_attempts,
+    load_conversation, open_database, pick_direction, record_fix_attempt, register_repo,
+    save_brief, settle_naming, settle_wrap_up, start_conversation, start_grilling,
+    start_unnamed_conversation, steer_conversation, timeline, wrap_up_settled,
 };
 
 /// The plainest steer there is: the move and nothing beside it.
@@ -61,6 +62,7 @@ fn into(target: Lifecycle) -> Steer<'static> {
         opened: &[],
         checkouts: &[],
         said: None,
+        recorded: Recorded::default(),
     }
 }
 
@@ -190,7 +192,7 @@ async fn ladder(pool: &SqlitePool, id: i64) -> Vec<(&'static str, Lifecycle)> {
         .unwrap()
         .into_iter()
         .filter_map(|event| match event.event {
-            Event::Steer(target, _) => Some(("steer", target)),
+            Event::Steer(target, ..) => Some(("steer", target)),
             Event::Moved(state) => Some(("moved", state)),
             _ => None,
         })
@@ -640,7 +642,7 @@ async fn instructions(pool: &SqlitePool, id: i64) -> Vec<Option<String>> {
         .unwrap()
         .into_iter()
         .filter_map(|event| match event.event {
-            Event::Steer(_, instruction) => Some(instruction),
+            Event::Steer(_, instruction, _) => Some(instruction),
             _ => None,
         })
         .collect()
@@ -944,4 +946,233 @@ async fn steering_work_that_has_already_run_leaves_its_branch_alone() {
         .unwrap();
 
     assert!(!naming(&pool, id).await);
+}
+
+/// The record beside the Steer Event: everything the form settled that its own
+/// body cannot hold.
+///
+/// `None` is the ordinary answer for a steer written before any of it was kept,
+/// and for a Timeline with no steer on it at all — which is why the helper
+/// hands back the last one rather than asserting there is one.
+async fn recorded(pool: &SqlitePool, id: i64) -> Option<SteerRecord> {
+    timeline(pool, id)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|event| match event.event {
+            Event::Steer(_, _, recorded) => Some(recorded.map(|record| *record)),
+            _ => None,
+        })
+        .next_back()
+        .expect("there is a steer on the Timeline")
+}
+
+/// A repository to work alongside, registered and handed back by id.
+async fn alongside(pool: &SqlitePool, name: &str) -> i64 {
+    register_repo(pool, &PathBuf::from(format!("/srv/{name}")), name, "main")
+        .await
+        .unwrap()
+        .expect("nothing is registered at that path yet")
+        .id
+}
+
+/// The whole form, frozen into the record the submit writes: the ticks, the
+/// Pairing the picker was on, and the companion rows the human asked for.
+///
+/// One transaction with the move, which is what the read back proves: the Steer
+/// Event and the row beside it are read as one thing, so a record that moved
+/// the work without saying what was picked to run it could not come back from
+/// here at all.
+#[tokio::test]
+async fn a_steer_records_the_whole_form_beside_its_event() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafting(&pool).await;
+    let askance = alongside(&pool, "askance").await;
+    let docs = alongside(&pool, "verkstead-docs").await;
+    let profile = profile(&pool, "opus", &["opus-5", "opus-4.8"]).await;
+
+    // One companion settled while it drafted, which is the set a steer may open
+    // up — the other is one it puts in.
+    assert_eq!(add_companion(&pool, id, docs).await.unwrap(), Adding::Added,);
+
+    start_grilling(
+        &pool,
+        id,
+        "c0ffee",
+        Path::new("/state/worktrees/rate-limiting"),
+        &[],
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        steer_conversation(
+            &pool,
+            id,
+            Steer {
+                pairings: &[Settling {
+                    role: Role::Implementation,
+                    profile_id: profile,
+                    model: "opus-4.8",
+                }],
+                companions: &[Joining {
+                    repo_id: askance,
+                    mode: CompanionMode::ReadWrite,
+                    base_ref: Some("main"),
+                    branch: "rate-limiting",
+                }],
+                opened: &[Opening {
+                    repo_id: docs,
+                    branch: "",
+                }],
+                recorded: Recorded {
+                    digest: true,
+                    interrupt: true,
+                    pairing: Some(PickedPairing {
+                        profile_id: profile,
+                        model: "opus-4.8",
+                    }),
+                },
+                ..into(Lifecycle::Implementing)
+            },
+        )
+        .await
+        .unwrap(),
+        Steering::Steered,
+    );
+
+    let record = recorded(&pool, id).await.expect("the form was recorded");
+
+    assert!(record.digest, "the tick the human left on");
+    assert!(record.interrupt);
+
+    let RecordedPairing::Under(paired) = record.pairing else {
+        panic!("the Pairing the picker was on is on the record");
+    };
+
+    assert_eq!(paired.profile.id, profile);
+    assert_eq!(
+        paired.model.as_deref(),
+        Some("opus-4.8"),
+        "both halves of it, as the picker offers them",
+    );
+
+    assert_eq!(record.added.len(), 1);
+    assert_eq!(record.added[0].repo, "askance");
+    assert_eq!(record.added[0].mode, CompanionMode::ReadWrite);
+    assert_eq!(record.added[0].base_ref.as_deref(), Some("main"));
+    assert_eq!(record.added[0].branch, "rate-limiting");
+
+    assert_eq!(record.upgraded.len(), 1);
+    assert_eq!(record.upgraded[0].repo, "verkstead-docs");
+    assert_eq!(
+        record.upgraded[0].branch, "",
+        "empty is mirroring, which is what the row was left on",
+    );
+}
+
+/// The ordinary steer settles nothing and asks for nothing, and its record says
+/// exactly that: no Pairing picked, and no companion row either way.
+///
+/// Which is not the same thing as a steer with no record — see below.
+#[tokio::test]
+async fn a_steer_that_picked_nothing_records_that_it_picked_nothing() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    steer_conversation(&pool, id, into(Lifecycle::Done))
+        .await
+        .unwrap();
+
+    let record = recorded(&pool, id).await.expect("the form was recorded");
+
+    assert!(!record.digest);
+    assert!(!record.interrupt);
+    assert_eq!(record.pairing, RecordedPairing::Nothing);
+    assert!(record.added.is_empty());
+    assert!(record.upgraded.is_empty());
+}
+
+/// A Profile the human has finished with since reads back as one that is gone
+/// rather than as a steer that picked nothing.
+///
+/// The pick was theirs and the account is removable — see `delete_profile`,
+/// which is why the record names it with no foreign key behind it — so what is
+/// left to say is that there was a pick and there is no account left to name.
+#[tokio::test]
+async fn a_steer_whose_profile_has_been_removed_still_says_one_was_picked() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+    let profile = profile(&pool, "opus", &["opus-5"]).await;
+
+    steer_conversation(
+        &pool,
+        id,
+        Steer {
+            pairings: &[Settling {
+                role: Role::Implementation,
+                profile_id: profile,
+                model: "opus-5",
+            }],
+            recorded: Recorded {
+                digest: false,
+                interrupt: false,
+                pairing: Some(PickedPairing {
+                    profile_id: profile,
+                    model: "opus-5",
+                }),
+            },
+            ..into(Lifecycle::Implementing)
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        delete_profile(&pool, profile).await.unwrap(),
+        Deleting::Deleted,
+        "an account is the human's to be finished with, whatever named it",
+    );
+
+    assert_eq!(
+        recorded(&pool, id)
+            .await
+            .expect("the form was recorded")
+            .pairing,
+        RecordedPairing::Removed,
+    );
+}
+
+/// And a steer written before any of this was kept reads back as the steer it
+/// was: the target and the body, and no record beside them.
+///
+/// ADR-0006's rule — the record is kept and read as it was written — said of
+/// the one thing this task adds. The row is taken away by hand, which is the
+/// only way to have a Timeline that old in a database this build made.
+#[tokio::test]
+async fn a_steer_from_before_the_record_was_kept_reads_back_without_one() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = grilling(&pool).await;
+
+    steer_conversation(&pool, id, into(Lifecycle::Done))
+        .await
+        .unwrap();
+
+    sqlx::query("DELETE FROM steers WHERE conversation_id = ?")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    assert_eq!(recorded(&pool, id).await, None);
+
+    assert_eq!(
+        ladder(&pool, id).await,
+        [
+            ("moved", Lifecycle::Grilling),
+            ("steer", Lifecycle::Done),
+            ("moved", Lifecycle::Done),
+        ],
+        "and the Event itself is untouched: what it always said, it says",
+    );
 }
