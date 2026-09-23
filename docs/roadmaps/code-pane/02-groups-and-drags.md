@@ -14,8 +14,9 @@ shortcuts move between tabs and open splits and terminals.
 
 - **[ADR-0019](../../adr/0019-the-code-pane.md), *Tabs and groups*** is the
   whole of the rulebook: splits any depth, the three ways to make one, the
-  empty group vanishing, one buffer under two views, no preview tabs, and the
-  layout kept in the device's storage per Conversation.
+  empty group vanishing — which is the whole of unsplitting, there being no
+  command for it — one buffer under two views, no preview tabs, and the layout
+  kept in the device's storage per Conversation.
 - **The layout is a tree**, split nodes with a direction and a share per child,
   groups at the leaves, and it is the one thing the pane draws from: what is
   showing, where the dividers are and which group is active are all read off

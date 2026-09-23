@@ -1262,16 +1262,17 @@ rename and delete on a row's menu and quick open over every name. Beside it
 tab bar styled after VS Code's: a kind icon and a × on every tab, a dot where a
 file is dirty. A group splits beside or below itself from a tab's menu, from
 the icon at the end of its bar, or by a tab dragged to its edge, any depth,
-with draggable dividers; a group whose last tab leaves is gone; the same file
-in two groups is one buffer seen twice. Saving is explicit: Ctrl+S, and a
-write over a file that has moved on disk since it was read is refused until
-the human chooses — a clean editor takes the disk's text on its own when the
-Worktree moves, a dirty one keeps theirs and offers **Reload** or **Keep
-mine**. The Worktree moving reaches the pane as a `files` Nudge from a watcher
-the server runs while a Code pane is attached. What is open — the groups, the
-tabs, the unsaved text — is the device's, kept per Conversation in the browser
-and back after a reload; so is the **maximise** toggle in the header, which
-hides the sidebar and the Timeline on a window wide enough to have drawn them.
+with draggable dividers; a group whose last tab leaves is gone, which is the
+whole of unsplitting; the same file in two groups is one buffer seen twice.
+Saving is explicit: Ctrl+S, and a write over a file that has moved on disk
+since it was read is refused until the human chooses — a clean editor takes
+the disk's text on its own when the Worktree moves, a dirty one keeps theirs
+and offers **Reload** or **Keep mine**. The Worktree moving reaches the pane
+as a `files` Nudge from a watcher the server runs while a Code pane is
+attached. What is open — the groups, the tabs, the unsaved text — is the
+device's, kept per Conversation in the browser and back after a reload; so is
+the **maximise** toggle in the header, which hides the sidebar and the
+Timeline on a window wide enough to have drawn them.
 **Reads and writes are the server's own, outside the Sandbox**, bounded by the
 roots: nothing under `.git`, nothing outside a Worktree, nothing written to a
 read-only Companion. Desktop-first — nothing is promised on a phone. **Not a

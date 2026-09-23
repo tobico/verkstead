@@ -123,6 +123,12 @@ The tab rules of ADR-0013 are amended.
   tab bar, or by dragging a tab to an edge of a group; a group whose last tab
   goes disappears and its neighbour takes the room. Tabs drag between groups,
   and files drag in from the tree.
+- **And unsplitting is that last tab leaving.** The Brief asked to split and to
+  unsplit, and this is the whole of the second: a group goes by having its tabs
+  closed or dragged into another, and the split it stood in collapses when the
+  last of them does. An unsplit command of its own was considered and left out
+  — it is a third way to reach what two gestures already reach, and unlike them
+  it would have to be found on a menu first.
 - **The same file opened twice is one buffer under two views**, dirty together
   and saved together. No preview tabs: every open is a real tab.
 - **What is open is the device's.** Groups, tabs, the active one and the dirty
