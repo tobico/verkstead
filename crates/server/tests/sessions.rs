@@ -748,7 +748,7 @@ impl Grilling {
         .await
     }
 
-    /// And submit the modal that opened: where the work goes, and whether to end
+    /// And submit the form that opened: where the work goes, and whether to end
     /// what is running where it stands.
     ///
     /// No Pairing, which is the human leaving the picker on what the
@@ -799,7 +799,7 @@ impl Grilling {
     /// called — empty being *mirroring*, the Conversation's own branch name.
     ///
     /// No mode on the row, because there is one direction: read-only is not
-    /// something the modal can ask for.
+    /// something the form can ask for.
     async fn steer_opening(
         &self,
         target: &str,
@@ -875,7 +875,7 @@ impl Grilling {
         .await
     }
 
-    /// The Agent Profile of that name, as the modal's picker reads the list.
+    /// The Agent Profile of that name, as the form's picker reads the list.
     async fn profile(&self, name: &str) -> i64 {
         let profiles: Vec<verkstead_render::ProfileEntry> =
             get(&self.app, "/api/ui/profiles").await;
@@ -3480,10 +3480,7 @@ async fn a_conversation_steered_out_of_closed_still_has_the_files_attached_to_it
         "closing gives the Worktree back and leaves the files exactly where they are",
     );
 
-    assert_eq!(
-        fixture.steer().await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture
             .steer_instructed("read the rates off the file")
@@ -14932,7 +14929,7 @@ async fn a_companion_a_steer_opened_up_is_one_the_next_session_writes_in() {
 
     let repo_id = askance.repo.id;
 
-    assert_eq!(fixture.steer().await, SteerOpened::Opened { working: true });
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture
             .steer_opening("Implementing", "write the other half", repo_id, "")
@@ -16917,7 +16914,7 @@ async fn force_stop_as_the_handoff_lands_starts_nothing_behind_the_halt() {
 }
 
 /// Steer clicked while a task is being worked, with **Interrupt current task**
-/// ticked on the modal it opened: the session is ended where it stands and the
+/// ticked on the form it opened: the session is ended where it stands and the
 /// Conversation is Done.
 ///
 /// The click is what stops the drive, and it stops it the way Stop does — the
@@ -16943,14 +16940,10 @@ async fn steering_into_done_with_interrupt_ends_the_session_where_it_stands() {
     assert_eq!(fixture.pick(set, "task-list").await, Submitted::Accepted);
 
     // The first task's session, waiting at a gate nothing opens: a step in
-    // flight, which is the case the checkbox is for.
+    // flight, which is the case the tick is for.
     let working = fixture.attachable(2).await;
 
-    assert_eq!(
-        fixture.steer().await,
-        SteerOpened::Opened { working: true },
-        "the click found a session running, which is what the checkbox is offered against",
-    );
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
 
     assert!(
         outputs(&fixture.view().await)
@@ -17041,7 +17034,7 @@ async fn steering_into_done_without_interrupt_sees_the_session_out() {
 
     let working = fixture.attachable(2).await;
 
-    assert_eq!(fixture.steer().await, SteerOpened::Opened { working: true });
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture.steer_into("Done", false).await,
         ConversationSteered::Steered,
@@ -17224,7 +17217,7 @@ case "$2" in
     mkdir -p .tasks
     printf '# Count the requests\n\nRoadmap stage: [01: Count the requests](docs/roadmaps/rate-limiting/01-counter.md)\n\n## Tasks\n\n- [ ] 01: count them — [details](01-count.md)\n' > .tasks/TODO.md
     printf '# 01. count them\n' > .tasks/01-count.md
-    sed -i 's|\[brief\](01-counter.md)|[brief](01-counter.md) *(in progress: `rate-limiting/01-counter`)*|' docs/roadmaps/rate-limiting/ROADMAP.md 2>/dev/null || true
+    sed -i 's|\[brief\](01-counter.md)|[brief](01-counter.md) *(in progress: `roadmaps/rate-limiting/01-counter`)*|' docs/roadmaps/rate-limiting/ROADMAP.md 2>/dev/null || true
     git add -A
     git commit --quiet -m 'chore: plan counter tasks'
     : > /tmp/verkstead/done
@@ -17469,7 +17462,7 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
     let stage = stage_of(&fixture).await;
 
     assert_eq!(
-        stage.branch, "rate-limiting/01-counter",
+        stage.branch, "roadmaps/rate-limiting/01-counter",
         "the branch is the stage brief's own name, under the roadmap it belongs to",
     );
     assert_eq!(
@@ -17545,7 +17538,7 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
 
     assert!(
         carried_on.contains("Stage 01")
-            && carried_on.contains("<code>rate-limiting/01-counter</code>"),
+            && carried_on.contains("<code>roadmaps/rate-limiting/01-counter</code>"),
         "the settled Conversation says which stage started and on what: {carried_on:?}",
     );
 
@@ -17626,7 +17619,7 @@ async fn a_settled_wrap_up_starts_the_next_stage_on_a_conversation_of_its_own() 
         .expect("the roadmap is on the stage's branch too");
 
     assert!(
-        index.contains("*(in progress: `rate-limiting/01-counter`)*"),
+        index.contains("*(in progress: `roadmaps/rate-limiting/01-counter`)*"),
         "the roadmap says which branch stage 01 is being worked on: {index:?}",
     );
 }
@@ -18161,7 +18154,7 @@ async fn a_settle_with_no_git_author_starts_no_stage_and_says_so() {
     assert!(
         !git(
             &fixture.repo(),
-            &["branch", "--list", "rate-limiting/01-counter"]
+            &["branch", "--list", "roadmaps/rate-limiting/01-counter"]
         )
         .contains("01-counter"),
         "and no branch was cut for it",
@@ -18191,6 +18184,128 @@ async fn a_settle_with_no_git_author_starts_no_stage_and_says_so() {
     assert!(
         titles.contains(&format!("{} is done", roadmap.branch)),
         "beside the Conversation that settled saying so: {titles:?}",
+    );
+}
+
+/// A stage already on a branch is a stage already under way, and the unattended
+/// start asks that under the name the scheme gives a stage now *and* under the
+/// one it gave before `roadmaps/` went in front of it.
+///
+/// Which is where a stage started last week still is: nothing renamed it, and
+/// the plan commit ticking its box rides on that branch until its pull request
+/// merges — so the branch is the only thing saying so, and a start that asked
+/// only about the new name would run the stage a second time on a branch named
+/// after neither Conversation. The notice names the branch that was found,
+/// because that is the one the human goes and looks at.
+#[tokio::test]
+async fn a_stage_taken_under_its_former_name_starts_nothing_and_says_so() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING, ""),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    // Stage 01 under the name it would have been cut at before the scheme
+    // changed, which is what somebody working it a week ago left behind.
+    git(&fixture.repo(), &["branch", "rate-limiting/01-counter"]);
+
+    staged(&fixture).await;
+
+    let said = said_on(&fixture, fixture.id, "started already").await;
+
+    assert!(
+        said.contains("Stage 01") && said.contains("<code>rate-limiting</code>"),
+        "the notice names the stage that would have started: {said:?}",
+    );
+    assert!(
+        said.contains("<code>rate-limiting/01-counter</code>"),
+        "and the branch it found, under the name it really has: {said:?}",
+    );
+    assert!(
+        !said.contains("<code>roadmaps/rate-limiting/01-counter</code>"),
+        "rather than the name the stage would have been cut at: {said:?}",
+    );
+    assert!(
+        said.contains("Nothing was started"),
+        "and that nothing was left behind: {said:?}",
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        1,
+        "no stage was started",
+    );
+    assert!(
+        !git(
+            &fixture.repo(),
+            &["branch", "--list", "roadmaps/rate-limiting/01-counter"]
+        )
+        .contains("01-counter"),
+        "and no branch was cut under the new name either",
+    );
+    assert!(
+        !planning.exists(),
+        "so no session was launched inside the next-stage fork either",
+    );
+}
+
+/// And a branch standing where a component of the stage's own branch path goes
+/// is one git will not make at all: it keeps a branch as a file under
+/// `refs/heads/`, so `refs/heads/roadmaps` being a file is `refs/heads/roadmaps/`
+/// never being a directory.
+///
+/// Halted before anything is made, like every other thing that stops a stage —
+/// and halted *by name*. Git's own complaint about it reaches the server log and
+/// nobody else, this runs where nobody is watching, and the branch stays there
+/// until somebody moves it, so a roadmap that stalled on one stalls for good.
+#[tokio::test]
+async fn a_branch_in_a_stages_way_starts_nothing_and_says_which_one() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING, ""),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    // Somebody's own branch, at the one name every stage branch of every roadmap
+    // in this repository has to pass through.
+    git(&fixture.repo(), &["branch", "roadmaps"]);
+
+    staged(&fixture).await;
+
+    let said = said_on(&fixture, fixture.id, "stands in the way").await;
+
+    assert!(
+        said.contains("Stage 01") && said.contains("<code>rate-limiting</code>"),
+        "the notice names the stage that would have started: {said:?}",
+    );
+    assert!(
+        said.contains("<code>roadmaps</code>")
+            && said.contains("<code>roadmaps/rate-limiting/01-counter</code>"),
+        "and the branch in the way, beside the one it is in the way of: {said:?}",
+    );
+    assert!(
+        said.contains("Nothing was started"),
+        "and that nothing was left behind: {said:?}",
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        1,
+        "no stage was started",
+    );
+    assert!(
+        !planning.exists(),
+        "so no session was launched inside the next-stage fork either",
     );
 }
 
@@ -18461,10 +18576,10 @@ async fn a_stage_whose_companion_cannot_be_delivered_starts_nothing() {
     .await;
 
     // Somebody else's branch, by the name this stage's companion branch would
-    // take: `rate-limiting/01-counter` is the first stage's own name, which is
-    // what the stage's branch and so its companion branch are called.
+    // take: `roadmaps/rate-limiting/01-counter` is the first stage's own name,
+    // which is what the stage's branch and so its companion branch are called.
     let companion = PathBuf::from(&alongside(&fixture.view().await, "askance").repo.path);
-    git(&companion, &["branch", "rate-limiting/01-counter"]);
+    git(&companion, &["branch", "roadmaps/rate-limiting/01-counter"]);
 
     staged_and_settled(&fixture).await;
 
@@ -18520,7 +18635,73 @@ async fn a_stage_whose_companion_cannot_be_delivered_starts_nothing() {
     assert!(
         !git(
             &fixture.repo(),
-            &["branch", "--list", "rate-limiting/01-counter"]
+            &["branch", "--list", "roadmaps/rate-limiting/01-counter"]
+        )
+        .trim()
+        .contains("counter"),
+        "and the stage's own branch was never cut, every question being asked \
+         before any of them is answered",
+    );
+    assert!(
+        !git(&companion, &["worktree", "list"]).contains("counter"),
+        "nor was anything checked out in the companion",
+    );
+}
+
+/// And a branch of the companion's standing where a component of that mirrored
+/// name's path goes, which halts the stage by both names.
+///
+/// The stage's branch is mirrored into a read-write companion whole, `roadmaps/`
+/// and all, so the collision the stage scheme leaves behind is the companion's
+/// to have as much as the Conversation's own repository's. Left to git it is
+/// *git would not make its checkout* and a line in the server log — which, on a
+/// roadmap running with nobody watching, is a stall nobody is told the reason
+/// for.
+#[tokio::test]
+async fn a_companion_with_a_branch_in_a_stages_way_halts_it_by_name() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_at_pace(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, "", ""),
+        &gh_about(GREEN, "", ""),
+        *BRISKLY,
+        &[("askance", CompanionMode::ReadWrite)],
+    )
+    .await;
+
+    // Somebody's own branch in the companion, at the one name every stage branch
+    // of every roadmap mirrored into it has to pass through.
+    let companion = PathBuf::from(&alongside(&fixture.view().await, "askance").repo.path);
+    git(&companion, &["branch", "roadmaps"]);
+
+    staged_and_settled(&fixture).await;
+
+    let said = said_by(&fixture).await;
+
+    assert!(
+        said.contains("<code>askance</code>") && said.contains("<code>roadmaps</code>"),
+        "the repository that stopped it and the branch that did: {said:?}",
+    );
+    assert!(
+        said.contains("stands in the way"),
+        "and what that branch is doing to the stage: {said:?}",
+    );
+    assert!(
+        said.contains("Nothing was started"),
+        "and that nothing was left behind: {said:?}",
+    );
+
+    assert!(
+        !planning.exists(),
+        "so no session was launched inside the next-stage fork either",
+    );
+    assert!(
+        !git(
+            &fixture.repo(),
+            &["branch", "--list", "roadmaps/rate-limiting/01-counter"]
         )
         .trim()
         .contains("counter"),
@@ -19237,7 +19418,7 @@ async fn adopting_a_roadmap_starts_its_next_stage_with_a_planning_session() {
     let view = fixture.view().await;
 
     assert_eq!(
-        view.branch, "rate-limiting/01-counter",
+        view.branch, "roadmaps/rate-limiting/01-counter",
         "the branch is the stage brief's own name, under the roadmap it belongs to",
     );
     assert_eq!(
@@ -19548,16 +19729,16 @@ async fn an_adopted_stage_that_settles_starts_the_stage_after_it() {
         .await;
 
     assert!(
-        until_written_saying(&planning, "planned=rate-limiting/01-counter")
+        until_written_saying(&planning, "planned=roadmaps/rate-limiting/01-counter")
             .await
-            .contains("planned=rate-limiting/01-counter"),
+            .contains("planned=roadmaps/rate-limiting/01-counter"),
         "the adopted stage is the one that was planned",
     );
 
     let next = stage_of(&fixture).await;
 
     assert_eq!(
-        next.branch, "rate-limiting/02-refusing",
+        next.branch, "roadmaps/rate-limiting/02-refusing",
         "the stage after the adopted one, on a branch of its own",
     );
     assert_eq!(
@@ -19609,13 +19790,14 @@ async fn an_adopted_stage_that_settles_starts_the_stage_after_it() {
         .await;
 
     assert!(
-        carried_on.contains("<code>rate-limiting/02-refusing</code>"),
+        carried_on.contains("<code>roadmaps/rate-limiting/02-refusing</code>"),
         "the adopted Conversation says which stage started and on what: {carried_on:?}",
     );
 
     // And the session it started is the same fork of next-stage the adopted stage
     // itself was planned by, this time with nobody at the workbench at all.
-    let planned = until_written_saying(&planning, "planned=rate-limiting/02-refusing").await;
+    let planned =
+        until_written_saying(&planning, "planned=roadmaps/rate-limiting/02-refusing").await;
 
     assert_eq!(
         planned.matches("planned=").count(),
@@ -19924,7 +20106,7 @@ async fn a_review_that_split_work_out_of_a_take_up_builds_it_and_wraps_up_again(
 ///
 /// Both halves turn on the pull request under the Conversation — the steer
 /// refuses without one by name — and a take-up's is recorded by the press
-/// itself. So the modal opens, the session runs on what they wrote, and the
+/// itself. So the form opens, the session runs on what they wrote, and the
 /// **Nothing else** they answer with lands the Conversation back in the wrap-up
 /// it came from, which settles to Done again.
 ///
@@ -19948,8 +20130,8 @@ async fn a_taken_up_conversation_is_steered_into_a_follow_up_and_back() {
 
     assert_eq!(
         fixture.steer().await,
-        SteerOpened::Opened { working: false },
-        "the modal opens on the pull request the take-up recorded",
+        SteerOpened::Opened,
+        "the form opens on the pull request the take-up recorded",
     );
     assert_eq!(
         fixture
@@ -22151,7 +22333,7 @@ async fn resuming_a_halted_wrap_up_watches_the_checks_again_from_no_attempts_spe
 ///
 /// And the target is offered because something stands. A branch with a backlog
 /// left in it is the whole of what a continue steer needs, which is what the
-/// modal draws the row by and what the submit is refused by where there is
+/// form draws the row by and what the submit is refused by where there is
 /// none.
 #[tokio::test]
 async fn steering_a_stalled_backlog_run_into_implementing_works_the_next_task() {
@@ -22202,16 +22384,13 @@ async fn steering_a_stalled_backlog_run_into_implementing_works_the_next_task() 
 
     assert!(
         view.ready_to_continue,
-        "the branch holds a backlog with work left in it, so the modal offers \
+        "the branch holds a backlog with work left in it, so the form offers \
          the target",
     );
 
     let before = outputs(&view).len();
 
-    assert_eq!(
-        fixture.steer().await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture.steer_into("Implementing", false).await,
         ConversationSteered::Steered,
@@ -22304,7 +22483,7 @@ esac
 /// would say there was nothing on the branch to carry on while the branch was
 /// holding it.
 ///
-/// So the modal offers carrying on, the submit is not refused, and what follows
+/// So the form offers carrying on, the submit is not refused, and what follows
 /// is the next task read off the directory the steer made.
 #[tokio::test]
 async fn steering_into_implementing_carries_on_a_backlog_whose_worktree_has_gone() {
@@ -22352,10 +22531,7 @@ async fn steering_into_implementing_carries_on_a_backlog_whose_worktree_has_gone
 
     let before = outputs(&view).len();
 
-    assert_eq!(
-        fixture.steer().await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture.steer_into("Implementing", false).await,
         ConversationSteered::Steered,
@@ -22438,7 +22614,7 @@ async fn steering_a_halted_wrap_up_into_wrapping_watches_the_checks_afresh() {
 
     assert_eq!(
         fixture.steer().await,
-        SteerOpened::Opened { working: false },
+        SteerOpened::Opened,
         "the run had already stopped, so the click found nothing to interrupt",
     );
     assert_eq!(
@@ -22526,7 +22702,7 @@ async fn steering_a_done_conversation_into_wrapping_reads_the_branch_afresh() {
 
     assert_eq!(
         fixture.steer().await,
-        SteerOpened::Opened { working: false },
+        SteerOpened::Opened,
         "everything had finished, so the click found nothing to interrupt",
     );
     assert_eq!(
@@ -22632,7 +22808,7 @@ async fn an_instruction_session_that_commits_wraps_the_pull_request_up_again() {
 
     assert_eq!(
         fixture.steer().await,
-        SteerOpened::Opened { working: false },
+        SteerOpened::Opened,
         "everything had finished, so the click found nothing to interrupt",
     );
     assert_eq!(
@@ -22755,7 +22931,7 @@ async fn an_instruction_session_wraps_up_a_pull_request_the_record_never_got() {
 
     assert_eq!(
         fixture.steer().await,
-        SteerOpened::Opened { working: false },
+        SteerOpened::Opened,
         "nothing is running: the run stopped where its ending failed",
     );
     assert_eq!(
@@ -23020,7 +23196,7 @@ async fn steering_into_follow_up_runs_the_skill_on_the_brief_and_is_never_swept(
 
     assert_eq!(
         fixture.steer().await,
-        SteerOpened::Opened { working: false },
+        SteerOpened::Opened,
         "everything had finished, so the click found nothing to interrupt",
     );
     assert_eq!(
@@ -23106,10 +23282,7 @@ async fn a_follow_up_session_that_is_gone_stops_the_conversation() {
         .until(|view| (view.state == Lifecycle::Done).then_some(()))
         .await;
 
-    assert_eq!(
-        fixture.steer().await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture
             .steer_following_up("Does it count the 429s it sends?\n")
@@ -23184,10 +23357,7 @@ async fn a_follow_up_session_that_finishes_on_the_mark_lands_in_the_wrap_up() {
         .until(|view| (view.state == Lifecycle::Done).then_some(()))
         .await;
 
-    assert_eq!(
-        fixture.steer().await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture
             .steer_following_up("Does it count the 429s it sends?\n")
@@ -23251,10 +23421,7 @@ async fn a_follow_up_ends_on_the_mark_and_lands_back_in_the_wrap_up() {
 
     let said = waiting_on_checks(&fixture.view().await).len();
 
-    assert_eq!(
-        fixture.steer().await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture
             .steer_following_up("Does it count the 429s it sends?\n")
@@ -23362,10 +23529,7 @@ async fn a_follow_up_that_pushed_nothing_goes_straight_back_to_done() {
 
     let landed = commits(&fixture.view().await).len();
 
-    assert_eq!(
-        fixture.steer().await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture
             .steer_following_up("Does it count the 429s it sends?\n")
@@ -23428,10 +23592,7 @@ async fn a_set_asked_after_the_mark_keeps_the_follow_up_open() {
         .until(|view| (view.state == Lifecycle::Done).then_some(()))
         .await;
 
-    assert_eq!(
-        fixture.steer().await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture
             .steer_following_up("Does it count the 429s it sends?\n")
@@ -23506,10 +23667,7 @@ async fn a_follow_up_signal_without_the_mark_is_refused_and_one_with_it_ends_the
         .until(|view| (view.state == Lifecycle::Done).then_some(()))
         .await;
 
-    assert_eq!(
-        fixture.steer().await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture
             .steer_following_up("Does it count the 429s it sends?\n")
@@ -23579,10 +23737,7 @@ async fn a_marked_follow_up_that_never_signals_is_not_ended_but_told_it_may_be_d
         .until(|view| (view.state == Lifecycle::Done).then_some(()))
         .await;
 
-    assert_eq!(
-        fixture.steer().await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture
             .steer_following_up("Does it count the 429s it sends?\n")
@@ -23655,10 +23810,7 @@ async fn a_gone_follow_up_session_takes_the_question_it_left_with_it() {
         .until(|view| (view.state == Lifecycle::Done).then_some(()))
         .await;
 
-    assert_eq!(
-        fixture.steer().await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture
             .steer_following_up("Does it count the 429s it sends?\n")
@@ -24562,10 +24714,7 @@ async fn a_follow_up_that_goes_idle_without_asking_is_told_to_put_it_to_the_huma
         .until(|view| (view.state == Lifecycle::Done).then_some(()))
         .await;
 
-    assert_eq!(
-        fixture.steer().await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture
             .steer_following_up("Does it count the 429s it sends?\n")
@@ -24661,10 +24810,7 @@ async fn a_follow_up_session_that_will_not_answer_is_put_to_the_human_and_left_r
     let phone = Device::new(&service, "phone");
     fixture.subscribe(&phone).await;
 
-    assert_eq!(
-        fixture.steer().await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture
             .steer_following_up("Does it count the 429s it sends?\n")
@@ -24795,10 +24941,7 @@ async fn a_rescue_answered_puts_the_count_back_to_nothing() {
 
     let before = notices(&fixture.view().await).len();
 
-    assert_eq!(
-        fixture.steer().await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture
             .steer_following_up("Does it count the 429s it sends?\n")
@@ -26557,10 +26700,7 @@ esac
 
     let before = outputs(&fixture.view().await).len();
 
-    assert_eq!(
-        fixture.steer().await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture
             .steer_instructed("Note the window the count is against.\n")
@@ -26923,10 +27063,7 @@ async fn resume_follows_the_work_up_again_on_the_brief_and_the_rounds_answered()
         .until(|view| (view.state == Lifecycle::Done).then_some(()))
         .await;
 
-    assert_eq!(
-        fixture.steer().await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture
             .steer_following_up("Does it count the 429s it sends?\n")
@@ -27009,10 +27146,7 @@ async fn a_restart_follows_the_work_up_again_rather_than_raising_anything() {
         .until(|view| (view.state == Lifecycle::Done).then_some(()))
         .await;
 
-    assert_eq!(
-        fixture.steer().await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture
             .steer_following_up("Does it count the 429s it sends?\n")
@@ -27143,10 +27277,7 @@ async fn an_instruction_session_over_a_backlog_hands_on_to_the_next_task() {
 
     let before = outputs(&view).len();
 
-    assert_eq!(
-        fixture.steer().await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture
             .steer_instructed("Note the window the count is against.\n")
@@ -27216,7 +27347,7 @@ async fn an_instruction_session_that_ends_badly_stops_the_conversation() {
         .until(|view| output(view).filter(|output| output.lines > 0).map(|o| o.id))
         .await;
 
-    assert_eq!(fixture.steer().await, SteerOpened::Opened { working: true });
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture.steer_instructed("Rebase this onto `main`.\n").await,
         ConversationSteered::Steered,
@@ -27283,7 +27414,7 @@ async fn steering_into_grilling_primes_the_digest_only_where_it_was_asked_for() 
 
     let before = outputs(&fixture.view().await).len();
 
-    assert_eq!(fixture.steer().await, SteerOpened::Opened { working: true });
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture
             .steer_grilling(Some("# Retries\n\nThe backoff is wrong.\n"), false)
@@ -27299,7 +27430,7 @@ async fn steering_into_grilling_primes_the_digest_only_where_it_was_asked_for() 
     );
     assert!(
         printed.contains("The backoff is wrong."),
-        "on the Brief the modal has just written: {printed:?}",
+        "on the Brief the form has just written: {printed:?}",
     );
     assert!(
         !printed.contains("The API has none."),
@@ -27324,7 +27455,7 @@ async fn steering_into_grilling_primes_the_digest_only_where_it_was_asked_for() 
 
     let before = outputs(&view).len();
 
-    assert_eq!(fixture.steer().await, SteerOpened::Opened { working: true });
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture.steer_grilling(None, true).await,
         ConversationSteered::Steered,
@@ -27380,10 +27511,7 @@ async fn steering_a_closed_conversation_checks_its_branch_out_again() {
         "closing forgets the Worktree and leaves the pull request on the record",
     );
 
-    assert_eq!(
-        fixture.steer().await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture.steer_into("Wrapping", false).await,
         ConversationSteered::Steered,
@@ -27415,7 +27543,7 @@ async fn steering_a_closed_conversation_checks_its_branch_out_again() {
     fixture.until(|view| (fixes(view) > 2).then_some(())).await;
 }
 
-/// The Pairing picked in the modal is recorded as the *Conversation's*, and it
+/// The Pairing picked on the form is recorded as the *Conversation's*, and it
 /// is what the sessions after the steer run under.
 ///
 /// Steering re-settles what runs the work rather than picking for one session,
@@ -27453,10 +27581,7 @@ async fn steering_records_the_pairing_it_was_submitted_with() {
         "the work is running under the other one, so this is a change to make",
     );
 
-    assert_eq!(
-        fixture.steer().await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
 
     // A pick judged the way the drafting pickers judge theirs: a Profile that
     // has gone and a model it does not list are both a list that was edited
@@ -27515,7 +27640,7 @@ async fn steering_records_the_pairing_it_was_submitted_with() {
     // alone would answer Steered to this and change nothing.
     let ran = fixes(&fixture.view().await);
 
-    assert!(matches!(fixture.steer().await, SteerOpened::Opened { .. }));
+    assert!(matches!(fixture.steer().await, SteerOpened::Opened));
     assert_eq!(
         fixture
             .steer_under("Wrapping", picked, "claude-grilling-4.8")
@@ -27582,10 +27707,7 @@ async fn steering_a_conversation_whose_worktree_has_gone_makes_it_again() {
     // before this knew to clear.
     std::fs::remove_dir_all(&worktree).unwrap();
 
-    assert_eq!(
-        fixture.steer().await,
-        SteerOpened::Opened { working: false }
-    );
+    assert_eq!(fixture.steer().await, SteerOpened::Opened);
     assert_eq!(
         fixture.steer_into("Wrapping", false).await,
         ConversationSteered::Steered,

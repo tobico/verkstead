@@ -1094,7 +1094,7 @@ async fn resolving_a_conflict_sends_a_done_conversation_back_to_wrapping_up() {
             .await
             .into_iter()
             .filter_map(|event| match event {
-                Event::Steer(target, _) => Some(format!("steered into {target:?}")),
+                Event::Steer(target, ..) => Some(format!("steered into {target:?}")),
                 Event::ResolveConflicts => Some("pressed resolve".to_owned()),
                 Event::Moved(state) => Some(format!("moved to {state:?}")),
                 _ => None,

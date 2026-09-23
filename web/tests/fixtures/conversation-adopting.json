@@ -2,7 +2,7 @@
   "adopting": {
     "roadmap": "mvp",
     "stage": {
-      "branch": "mvp/04-wrap-up",
+      "branch": "roadmaps/mvp/04-wrap-up",
       "brief_path": "docs/roadmaps/mvp/04-wrap-up.md",
       "label": "04",
       "title": "Wrap-up"
@@ -25,6 +25,7 @@
   "implementation_pairing": null,
   "naming": false,
   "parked": null,
+  "pending_steer": null,
   "pinned": [],
   "ready_to_continue": false,
   "ready_to_grill": false,

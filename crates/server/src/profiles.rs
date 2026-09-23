@@ -14,6 +14,7 @@
 //! will later be run under; the bind-mounting arrives with the stage that runs
 //! one.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -87,6 +88,32 @@ pub(crate) async fn pairing(pairing: Option<store::Pairing>) -> Result<Option<Pa
         .await?
         .pop()
         .map(|profile| PairingView { profile, model }))
+}
+
+/// And the same reading for a batch of Pairings that each belong to something,
+/// by whatever that something is keyed by.
+///
+/// One hop off the runtime for the lot of them, which is the whole of why this
+/// is not [`pairing`] in a loop: every Profile read looks at the filesystem, and
+/// a Timeline whose human has steered a dozen times would otherwise be a dozen
+/// hops. What it is for is the steers on a Timeline — see `crate::ui`, which
+/// reads them all before it draws any.
+pub(crate) async fn keyed(
+    pairings: Vec<(i64, store::Pairing)>,
+) -> Result<HashMap<i64, PairingView>> {
+    let (keys, profiles): (Vec<i64>, Vec<store::Profile>) = pairings
+        .iter()
+        .map(|(key, pairing)| (*key, pairing.profile.clone()))
+        .unzip();
+
+    let models = pairings.into_iter().map(|(_, pairing)| pairing.model);
+
+    Ok(keys
+        .into_iter()
+        .zip(entries(profiles).await?)
+        .zip(models)
+        .map(|((key, profile), model)| (key, PairingView { profile, model }))
+        .collect())
 }
 
 /// And the same reading for a whole choice, for the one role that can be picked

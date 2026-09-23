@@ -43,6 +43,7 @@ mod escalations;
 mod migrations;
 mod pairings;
 mod pauses;
+mod pending_steers;
 mod placements;
 mod profiles;
 mod pull_requests;
@@ -52,6 +53,7 @@ mod session_endings;
 mod session_names;
 mod session_pairings;
 mod shares;
+mod steers;
 mod stops;
 mod transcripts;
 mod unseen;
@@ -101,6 +103,10 @@ pub use endings::{ended_on, nothing_else};
 pub use escalations::{escalate, escalated, settle_escalation};
 pub use pairings::{RepoPairings, last_started_pairings, remembered_pairings};
 pub use pauses::Pause;
+pub use pending_steers::{
+    Pending, PendingAddition, PendingForm, PendingPairing, PendingSteer, PendingUpgrade,
+    discard_pending_steer, open_pending_steer, pending_steer, save_pending_steer,
+};
 pub use placements::place_conversations;
 pub use profiles::{
     Account, AgentType, Channel, Clash, Deleting, Pairing, Picked, Profile, ProfileFacts, Saving,
@@ -124,6 +130,9 @@ pub use session_endings::{Ended, end_session, session_ending};
 pub use session_names::session_id;
 pub use session_pairings::RanUnder;
 pub use shares::{Share, record_share, record_share_comment, share, share_commented};
+pub use steers::{
+    PickedPairing, Recorded, RecordedPairing, SteerAddition, SteerRecord, SteerUpgrade,
+};
 pub use stops::{
     Decision, Stopped, Stopping, ask_to_stop, asked_to_stop, clear_stop, forget_stop, stop,
     stop_as_asked, stopped,
@@ -744,6 +753,19 @@ async fn apply_schema(pool: &SqlitePool) -> Result<()> {
     // run the way everything else does — and the table stays because those
     // Events are the record of what happened and still have to read back.
     pauses::apply_schema(pool).await?;
+
+    // And the steer somebody has started and not yet decided, which is beside
+    // the Conversation rather than on its Timeline: it has not happened yet, so
+    // it is no part of the record — see [`pending_steers`]. After the
+    // Conversations and the Repos, both of which its rows point at.
+    pending_steers::apply_schema(pool).await?;
+
+    // And what each steer that was decided settled, which hangs off the Steer
+    // Event it became: the ticks, the Pairing and the companion rows the form
+    // asked for, beside the target and body the Event carries itself. After the
+    // Conversations and the Repos for the pending steer's reason, and after the
+    // Timelines, which is what its rows are keyed by.
+    steers::apply_schema(pool).await?;
 
     // And that driving has stopped, which is columns on the Conversation
     // itself: a stop is how things are rather than something that happened,

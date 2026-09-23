@@ -270,6 +270,77 @@ describe("a shared conversation", () => {
     ).toBe(true);
   });
 
+  /// And a steer opens as the form the human filled, frozen — the same pane the
+  /// workbench draws, because it is the same record. Every field of it
+  /// travelled with the event, the account's name included, so nothing here is
+  /// fetched and nothing is missing.
+  it("opens a steer as the whole of the form it was made with", async () => {
+    render(() =>
+      <Share
+        shared={holding([
+          {
+            Steer: {
+              id: 4001,
+              at: "2026-08-24T11:00:00Z",
+              target: "Implementing",
+              html: "<p>Count against the window.</p>",
+              record: {
+                digest: false,
+                interrupt: true,
+                pairing: {
+                  Under: {
+                    profile: {
+                      id: 1,
+                      broken: null,
+                      name: "work",
+                      account: {
+                        agent_type: "Claude",
+                        claude_dir: "/srv/accounts/work/.claude",
+                        config_file: "/srv/accounts/work/.claude.json",
+                      },
+                      models: ["claude-fable-5"],
+                      memory: true,
+                    },
+                    model: "claude-fable-5",
+                  },
+                },
+                added: [
+                  {
+                    repo: "askance",
+                    mode: "ReadOnly",
+                    base_ref: null,
+                    branch: "",
+                  },
+                ],
+                upgraded: [],
+              },
+            },
+          },
+        ])}
+      />
+    );
+
+    const details = await screen.findByLabelText("Details");
+
+    await waitFor(() =>
+      expect(details.querySelector("h1")?.textContent).toBe("Steer"),
+    );
+
+    expect(details.textContent).toContain("You steered this into Implementing");
+    expect(details.textContent).toContain("What to do first");
+    expect(details.textContent).toContain("Count against the window.");
+    expect(details.textContent).toContain("Claude Code Fable 5 — work");
+    expect(details.textContent).toContain("askance");
+    expect(details.textContent).toContain("Interrupt current task");
+
+    // Nothing on it can be moved: a record is read, and the ticks are what the
+    // human left rather than what the reader may set.
+    const ticks = [...details.querySelectorAll<HTMLInputElement>("input")];
+
+    expect(ticks.length).toBeGreaterThan(0);
+    expect(ticks.every((tick) => tick.disabled)).toBe(true);
+  });
+
   /// And the files that were handed over with it, on the Brief pane exactly as
   /// the workbench draws them: the names and the sizes, and nothing to press.
   ///

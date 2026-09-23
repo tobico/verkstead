@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ConversationView } from "../src/api/types";
 import {
+  landing,
   lastOpening,
   openingAt,
   openingOf,
@@ -25,6 +26,7 @@ import {
   roadmapOpened,
   type Opening,
 } from "../src/workbench/openings";
+import { pending } from "./steering";
 import draft from "./fixtures/conversation.json" with { type: "json" };
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 import roadmapped from "./fixtures/conversation-roadmap.json" with {
@@ -54,6 +56,7 @@ const PATHS: Array<[Opening, string]> = [
   ["backlog", "/conversations/3/backlog"],
   ["share", "/conversations/3/share"],
   ["code", "/conversations/3/code"],
+  ["steer", "/conversations/3/steer"],
   [opensRoadmap("mvp"), "/conversations/3/roadmaps/mvp"],
   [opensRoadmap("companion-repos"), "/conversations/3/roadmaps/companion-repos"],
 ];
@@ -117,6 +120,7 @@ describe("what a path says is open", () => {
     expect(openingAt("/conversations/3/backlog/nowhere")).toBeNull();
     expect(openingAt("/conversations/3/share/nowhere")).toBeNull();
     expect(openingAt("/conversations/3/code/1")).toBeNull();
+    expect(openingAt("/conversations/3/steer/1")).toBeNull();
     expect(openingAt("/conversations/3/events/1e3")).toBeNull();
     expect(openingAt("/conversations/3/roadmaps/mvp/1")).toBeNull();
   });
@@ -149,12 +153,14 @@ describe("the end of a record", () => {
     expect(lastOpening(WRAPPING.timeline)).toBe(openingOf(opened));
   });
 
-  /// A steer that carried no document is a third: it says the state and nothing
-  /// else, which is why the Timeline draws one as a line rather than a card.
-  it("skips a steer that carried no document", () => {
+  /// A steer opens whatever it carried, which is what the pane being the form
+  /// rather than the document changes: a steer into grilling says nothing but
+  /// the state in its own body, and where it went, what it picked and what it
+  /// ended are still questions somebody answered.
+  it("opens a steer that carried no document", () => {
     const steer = SECOND_ROUND.timeline.find((event) => "Steer" in event)!;
     expect("Steer" in steer && steer.Steer.html).toBeNull();
-    expect(openingOf(steer)).toBeNull();
+    expect(openingOf(steer)).toBe("Steer" in steer && steer.Steer.id);
   });
 
   /// And the Brief while it is still being written, which opens the composer
@@ -196,5 +202,40 @@ describe("the end of a record", () => {
       lastOpening(WRAPPING.timeline.filter((event) => "Moved" in event)),
     ).toBeNull();
     expect(lastOpening([])).toBeNull();
+  });
+});
+
+describe("where opening a conversation lands", () => {
+  /// The end of the record, where nobody is steering it: the last thing that
+  /// has a pane behind it, which is where the work got to.
+  it("lands on the end of the record where no steer is pending", () => {
+    expect(GRILLING.pending_steer).toBeNull();
+    expect(landing(GRILLING)).toBe(lastOpening(GRILLING.timeline));
+  });
+
+  /// And on the pending steer where there is one, because that is drawn after
+  /// the record: it is the one item on the pane that has not happened yet, so
+  /// the end of the pane is the form rather than the last event. Somebody who
+  /// left a steer half written and came back is shown what they were writing.
+  it("lands on the pending steer where one stands", () => {
+    const steering: ConversationView = {
+      ...GRILLING,
+      pending_steer: pending(),
+    };
+
+    expect(landing(steering)).toBe("steer");
+  });
+
+  /// Whatever is on the record under it, and even where none of it opens
+  /// anything: the form is the last item either way.
+  it("lands on it over a record with nothing openable on it", () => {
+    const steering: ConversationView = {
+      ...GRILLING,
+      timeline: GRILLING.timeline.filter((event) => "Moved" in event),
+      pending_steer: pending({ target: "Implementing" }),
+    };
+
+    expect(lastOpening(steering.timeline)).toBeNull();
+    expect(landing(steering)).toBe("steer");
   });
 });

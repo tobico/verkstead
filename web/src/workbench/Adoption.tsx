@@ -17,10 +17,11 @@
 //! next *there*: what this names is never what the notice happened to show, it
 //! is what the press would actually start.
 //!
-//! The branch is not offered here or on the composer beside it. A stage is worked on
-//! its own slug — `04-wrap-up.md` becomes `wrap-up` — so the name the server
-//! invented when the row was made is discarded at the press, and what the
-//! sidebar shows until then is that invented name.
+//! The branch is not offered here or on the composer beside it. A stage is
+//! worked on a name of the server's own making — `docs/roadmaps/mvp/04-wrap-up.md`
+//! becomes `roadmaps/mvp/04-wrap-up` — so the name invented when the row was
+//! made is discarded at the press, and what the sidebar shows until then is that
+//! invented name.
 
 import { useMutation, useQueryClient } from "@tanstack/solid-query";
 import { createSignal, type JSX, Show } from "solid-js";
@@ -28,7 +29,7 @@ import { createSignal, type JSX, Show } from "solid-js";
 import { adoptRoadmap } from "../api/client";
 import type { Adopted, ConversationView } from "../api/types";
 import { Empty, ErrorLine, Note } from "../notices";
-import { COMPANION_REFUSAL } from "./Timeline";
+import { companionRefusal } from "./Timeline";
 import styles from "./Adoption.module.css";
 
 /// Each way of being refused an adoption, in the words of what to go and do
@@ -38,10 +39,7 @@ import styles from "./Adoption.module.css";
 /// them separately for exactly this: a profile to choose, a box somebody
 /// ticked, a branch somebody is on and a worktree git would not make are four
 /// different jobs, and only the human can tell which they are looking at.
-export const ADOPT_REFUSAL: Record<
-  Exclude<Adopted, { Companion: unknown }>,
-  string
-> = {
+export const ADOPT_REFUSAL: Record<Extract<Adopted, string>, string> = {
   Adopted: "",
   NoSuchConversation: "This conversation is gone.",
   NotDrafting: "This conversation has already been started.",
@@ -75,11 +73,20 @@ export const ADOPT_REFUSAL: Record<
 /// A companion's refusal names the repository, because that is the whole of what
 /// makes it different from the same failing on the conversation's own: the thing
 /// to go and look at is one of several repos rather than the obvious one. The
-/// four lines are the grill start's own, because the four failings are — see
-/// `COMPANION_REFUSAL` in [`Timeline`](./Timeline.tsx).
+/// lines are the grill start's own, because the failings are — see
+/// `companionRefusal` in [`Timeline`](./Timeline.tsx).
+///
+/// And a branch in the way names the branch, for the same reason the other two
+/// carry what they carry: git will not make a branch under a path another branch
+/// is a file at, and which name that is is the whole of what there is to go and
+/// do about it.
 export function adoptRefusal(outcome: Adopted): string {
   if (typeof outcome === "object") {
-    return `${outcome.Companion.repo}: ${COMPANION_REFUSAL[outcome.Companion.why]}`;
+    if ("Companion" in outcome) {
+      return `${outcome.Companion.repo}: ${companionRefusal(outcome.Companion.why)}`;
+    }
+
+    return `A branch named ${outcome.BranchInTheWay.by} stands in the way of the stage's own branch, and Verkstead did not make it.`;
   }
 
   return ADOPT_REFUSAL[outcome];

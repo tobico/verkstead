@@ -524,7 +524,7 @@ export function Conversations(props: {
       {/* What a right-click on a card asks for. One for the whole list rather
           than one per row: it is drawn where the pointer was rather than where
           the card is, so there is nothing about it that belongs to a row — and
-          the steer it can open outlives the menu, which a row being dragged
+          the cards it can open outlive the menu, which a row being dragged
           about underneath it would not. */}
       <CardActions pointed={pointed()} close={() => setPointed(null)} />
 

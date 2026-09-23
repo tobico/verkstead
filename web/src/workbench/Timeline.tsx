@@ -41,6 +41,15 @@
 //! down to the end. The same following a running session's output is read with,
 //! and the same code (`../scrolling`).
 //!
+//! **And one item that is not an Event at all, at the very end: the steer being
+//! written.** Pressing Steer stops the drive and writes a pending steer beside
+//! the Conversation; this draws it as the last item on the pane and the form
+//! that settles it is that item's details pane — see `Steer.tsx`. It is drawn
+//! after everything on the record because it has not happened yet, so it has no
+//! place in the record and no id on it: it is selected by a word, as the
+//! backlog and the Share are, and it boards no Share at all. What it becomes is
+//! the Steer Event the submit writes, at which point the item goes.
+//!
 //! An Event that has a full self shows its summary here and is opened in the
 //! details pane, which is why this takes a way of selecting one — and so do the
 //! backlog and the roadmap, whose cards open the documents their entries name
@@ -92,6 +101,7 @@ import {
   Match,
   Show,
   Switch,
+  createEffect,
   createMemo,
   createSignal,
   onCleanup,
@@ -113,6 +123,7 @@ import type {
   ManualTaskEvent,
   MovedEvent,
   NoticeEvent,
+  PendingSteerView,
   PinnedEvent,
   ProfileEntry,
   PullRequestEvent,
@@ -202,14 +213,17 @@ const GRILL_REFUSAL: Record<
   WorktreeRefused: "Git would not make the worktree. The server log says why.",
 };
 
-/// And the same four failings over a companion repo, which say the same things
-/// about a different repository.
+/// And the same failings over a companion repo, which say the same things about
+/// a different repository.
 ///
 /// Exported because both presses that take a draft past drafting meet them:
 /// starting a grilling and adopting a stage each check the companions out, so
-/// each is refused by these four names — see `adoptRefusal` in
+/// each is refused by these same names — see `adoptRefusal` in
 /// [`Adoption`](./Adoption.tsx).
-export const COMPANION_REFUSAL: Record<CompanionRefusal, string> = {
+export const COMPANION_REFUSAL: Record<
+  Extract<CompanionRefusal, string>,
+  string
+> = {
   FetchFailed:
     "Git could not fetch from its remote, so nothing was started. The server log says why.",
   NoBaseCommit: "It has nothing to check out any more.",
@@ -218,6 +232,20 @@ export const COMPANION_REFUSAL: Record<CompanionRefusal, string> = {
   WorktreeRefused: "Git would not make its worktree. The server log says why.",
 };
 
+/// What to say about one companion repo's failing, whatever press met it.
+///
+/// One of them carries a name, because git will not make a branch under a path
+/// another branch is a file at and which name that is is the whole of what there
+/// is to go and do about it — the same reason the conversation's own refusal
+/// carries one, said of a repository that has to be named as well.
+export function companionRefusal(why: CompanionRefusal): string {
+  if (typeof why === "object") {
+    return `A branch named ${why.BranchInTheWay.by} stands in the way of the branch it would be given there, and Verkstead did not make it.`;
+  }
+
+  return COMPANION_REFUSAL[why];
+}
+
 /// What to say about a start that was refused.
 ///
 /// A companion's refusal names the repository, because that is the whole of
@@ -225,7 +253,7 @@ export const COMPANION_REFUSAL: Record<CompanionRefusal, string> = {
 /// thing to go and look at is one of several repos rather than the obvious one.
 export function grillRefusal(outcome: GrillingStarted): string {
   if (typeof outcome === "object") {
-    return `${outcome.Companion.repo}: ${COMPANION_REFUSAL[outcome.Companion.why]}`;
+    return `${outcome.Companion.repo}: ${companionRefusal(outcome.Companion.why)}`;
   }
 
   return GRILL_REFUSAL[outcome];
@@ -731,6 +759,58 @@ export function Timeline(props: {
             </Show>
           )}
         </For>
+
+        {/* And the steer being written, at the end of everything that has
+            happened — because it has not happened yet. It is no Timeline Event
+            and has no place in the record, so it is drawn after all of it,
+            whatever a seen-out session went on landing under the press that
+            opened it. See `pending_steer` on the Conversation.
+
+            Inside the same list, because it is an item of the pane and reads as
+            one: the eye follows a column of cards, and a form held somewhere
+            else would be a second place to look for the thing the press just
+            made. */}
+        <Show when={props.conversation.pending_steer}>
+          {(pending) => {
+            /// The item's own box, for the one thing this card asks of the
+            /// pane it sits in: to be looked at.
+            let item!: HTMLLIElement;
+
+            // Selecting it scrolls it into view, whether or not the human had
+            // scrolled up to read history — the record follows its own bottom
+            // only while nobody has taken the scroll off it, and this is the
+            // one card that is selected by a press somewhere else entirely.
+            // Pressing Steer from the actions menu, or arriving at a
+            // conversation with a form half written on it, has to land on the
+            // form rather than wherever the pane was left.
+            //
+            // `nearest`, so a card already on screen is not moved under
+            // somebody who pressed it: what this is for is the selection that
+            // happened out of view.
+            //
+            // Optionally, because jsdom has no scrolling of any kind — the
+            // suite that drives this markup stubs it where it is what the test
+            // is about.
+            createEffect(() => {
+              if (props.selected !== "steer") return;
+
+              item.scrollIntoView?.({ block: "nearest" });
+            });
+
+            return (
+              <li ref={item} class={styles.timelineEvent}>
+                <PendingSteer
+                  pending={pending()}
+                  selected={props.selected === "steer"}
+                  open={() => {
+                    props.select("steer");
+                    props.details();
+                  }}
+                />
+              </li>
+            );
+          }}
+        </Show>
       </ol>
     </>
   );
@@ -1618,39 +1698,80 @@ function Moved(props: { from: Lifecycle; moved: MovedEvent }): JSX.Element {
 /// above this one and is already on the page, and what a steer adds is the
 /// deciding.
 ///
-/// **A card where it carries a document**, which is a steer into implementing
-/// that wrote an instruction, or one into follow-up, which always writes a
-/// brief: either is what a session was sent off to do, so it is a document like
-/// the brief and the handoff and is read the same way — clamped here, whole in
-/// the details pane. A steer that carried nothing written stays the line it
-/// always was, there being nothing to open.
+/// **A card rather than a line, and every one of them.** What a steer opens is
+/// the form the human filled — where it went, what they wrote under it, what
+/// they picked to run the work and which repos they asked for — so a steer into
+/// wrapping up or done has a pane behind it exactly as one into implementing
+/// does. See [`Frozen`](./Steer.tsx).
+///
+/// **The body is clamped where it carried one**, which is a steer into
+/// implementing that wrote an instruction, or one into follow-up, which always
+/// writes a brief: either is what a session was sent off to do, so it is a
+/// document like the brief and the handoff and is read the same way — three
+/// lines here, whole in the details pane.
 function Steered(props: {
   steer: SteerEvent;
   selected: boolean;
   open: () => void;
 }): JSX.Element {
-  const line = () => (
-    <p
-      class={styles.steered}
-      classList={{ [styles[props.steer.target.toLowerCase()]!]: true }}
-    >
-      You steered this into {STATE[props.steer.target]}
-    </p>
-  );
-
   return (
-    <Show when={props.steer.html} fallback={line()}>
-      {(html) => (
-        <Openable
-          kind={styles.steeredWith!}
-          selected={props.selected}
-          open={props.open}
-        >
-          {line()}
-          <Clamped class={styles.steerBody!} html={html()} />
-        </Openable>
-      )}
-    </Show>
+    <Openable
+      kind={styles.steeredWith!}
+      selected={props.selected}
+      open={props.open}
+    >
+      <p
+        class={styles.steered}
+        classList={{ [styles[props.steer.target.toLowerCase()]!]: true }}
+      >
+        You steered this into {STATE[props.steer.target]}
+      </p>
+      <Show when={props.steer.html}>
+        {(html) => <Clamped class={styles.steerBody!} html={html()} />}
+      </Show>
+    </Openable>
+  );
+}
+
+/// The steer being written: the one item on this pane that has not happened
+/// yet.
+///
+/// A card at the end of everything that has, because that is what it is — the
+/// press that opened it stopped the drive and left a form beside the
+/// conversation, and the form is this card's details pane. It is no event and
+/// has no place in the record, which is why it is drawn after all of it and why
+/// a share carries no trace of it.
+///
+/// **In the accent**, which nothing else on the record takes: every other card
+/// is something that happened and this is something waiting on the human, said
+/// in the colour the sidebar's disc and the *blocked on you* badge are said in.
+///
+/// **It says where the steer is going as soon as the form has saved once.**
+/// *Steer* until then, and *Steering into X* after — so a human coming back to
+/// a conversation a day later reads what they had decided off the card rather
+/// than by opening it. What the form saves is the target its picker is on, so
+/// the first thing typed or ticked is what settles this, whether or not the
+/// human ever moved the radio.
+function PendingSteer(props: {
+  pending: PendingSteerView;
+  selected: boolean;
+  open: () => void;
+}): JSX.Element {
+  return (
+    <CardButton
+      class={styles.pendingSteer}
+      open={props.selected}
+      press={props.open}
+    >
+      <p class={styles.pendingSteerLine}>
+        {props.pending.form.target === null
+          ? "Steer"
+          : `Steering into ${STATE[props.pending.form.target]}`}
+      </p>
+      <p class={styles.pendingSteerNote}>
+        The run has stopped while you decide.
+      </p>
+    </CardButton>
   );
 }
 

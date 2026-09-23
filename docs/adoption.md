@@ -370,6 +370,20 @@ it, the Skills and the `verkstead` a session asks with read-only, the system
 read-only, `/tmp`, the network whole and unfiltered, and nothing else of the
 machine.
 
+**And `~/.local/bin` among what it reaches**, which is the one thing a Mac
+gives a session that your own `PATH` need not have named. That is where
+Anthropic's installer puts `claude`, and an app you started from the Dock has
+launchd's `PATH` — four system directories, and no line of your shell profile
+in it. So on a Mac that directory is on every session's `PATH` whether or not
+the server was started with it, read-only inside like every other install, and
+ahead of Apple's own `/usr/bin` along with Homebrew's two prefixes and
+`/usr/local/bin`: a session started from the Dock finds the same `git` as one
+started from a terminal. It is Apple's system directories those lead and
+nothing else you wrote — anything your own `PATH` puts in front of `/usr/bin`,
+a version manager's shims or a `~/bin` of your own, a session still finds
+first, in the order you wrote it. On Linux what your `PATH` names is still the
+whole of it.
+
 **`/tmp` is the one place a Mac session reaches more than a Linux one**, and
 the one thing on that list that is not the same on both. On Linux it is a
 filesystem of the session's own: it holds nothing of the machine's, and it goes
@@ -743,17 +757,52 @@ packages this distribution carries, the vendor installers run after it as you �
 Anthropic's for Claude Code and xAI's for Grok Build, landing in `~/.local/bin`
 and `~/.grok/bin`, which Verkstead then puts on every session's `PATH` for you —
 and a progress bar and a status line say how far it has got. **On a Mac it is
-Homebrew's instead**, and there is usually no dialog at all: every ticked row is
-a `brew install` of its own, run as you, Homebrew refusing to run as root. A Mac
-with no `brew` yet raises one thing and one only — the step that makes
-Homebrew's prefix and hands it to you, which is what Homebrew's installer would
-have asked for a password for — and Homebrew installs itself after it, as you.
+Homebrew's instead**, and there is usually no dialog at all: every ticked row
+Homebrew carries is a `brew install` of its own, run as you, Homebrew refusing
+to run as root. A Mac with no `brew` yet raises one thing and one only — the
+step that makes Homebrew's prefix and hands it to you, which is what Homebrew's
+installer would have asked for a password for — and Homebrew installs itself
+after it, as you. **Claude Code is the exception there**, and it is Anthropic's
+own installer on a Mac as it is everywhere else: Homebrew's `claude-code` cask
+was the row for as long as `~/.local/bin` was somewhere a Mac session could not
+look, and a Mac session's `PATH` now carries that directory whichever way
+Verkstead was started — so what a tick runs is the install that stays current,
+and a press with Claude alone ticked installs no Homebrew at all.
+**And an Intel Mac is not Homebrew's at all.** Homebrew has dropped those
+machines — its installer refuses one outright, and its formulae there get no
+bottles — so that Mac has a tab of its own with no `brew` on it, and a press
+raises nothing whatever is ticked. What installs is the vendors' own:
+Anthropic's for Claude Code, xAI's for Grok Build and OpenCode's own, each
+landing under your home and each put on every session's `PATH` for you. **And
+`gh` is GitHub's own release**, there being no Homebrew to `brew install gh`
+with and no installer script to run: the zip that release carries is unpacked
+into `~/.local/bin` as you, at whatever version `releases/latest` points at the
+moment you press Next — so it is today's `gh` rather than the one this build
+was made alongside. The rest is a sentence on the screen of instructions:
+`git` is Apple's command line tools, and `xcode-select --install` opens
+Apple's own dialog on that Mac's screen rather than a command Verkstead can
+run for you, while Codex is a binary to put in `~/.local/bin`, which every Mac
+session looks in.
+**And on either Mac, `git` counts only with Apple's command line tools.** Every
+Mac has a `/usr/bin/git`, and without the tools behind it that file is a stub
+whose whole behaviour is to open Apple's install dialog and exit — so a row
+that ticked on finding it ticked on every Mac ever made, and handed each
+session of the ones without the tools a `git` that fails. What the row asks is
+`xcode-select`, never the stub: running the stub is what opens the dialog, on a
+machine nobody is standing at, every ten seconds the wizard re-probes. A Mac
+without the tools reads as a Mac with no `git`, with what `xcode-select` said
+under the row, and both Mac tabs lead their `git` row with
+`xcode-select --install` — Apple silicon keeping `brew install git` beneath it,
+that being the `git` a developer's Mac usually runs. A `git` from Homebrew or
+from nix is nobody's stub and ticks on being there, the way one does on every
+other machine.
+
 Only what could not be installed here — a NixOS, a server with no way to raise
 a dialog, an installer that would not run, a Homebrew that could not be
-installed — reaches a screen of instructions afterwards, with this
-distro's own command and where the binary has to land; that screen holds Next,
-counting the rows detected, and it re-probes while you are away, so an
-`apt install bubblewrap` finishing in another window ticks the row within ten
+installed, an Intel Mac's `git` — reaches a screen of instructions afterwards,
+with this distro's own command and where the binary has to land; that screen
+holds Next, counting the rows detected, and it re-probes while you are away, so
+an `apt install bubblewrap` finishing in another window ticks the row within ten
 seconds. **Agent Profiles** offers the agent accounts already logged in under
 the server's home; each one you leave ticked is saved as a Profile with no name
 and every model this build knows for that agent — and there is a form under them

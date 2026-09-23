@@ -55,7 +55,7 @@ use std::process::{Command, Stdio};
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
 use verkstead_server::handoffs::Handoffs;
-use verkstead_server::platform::Platform;
+use verkstead_server::platform::{Environment, Platform, home_dir};
 use verkstead_server::sandbox::{
     Bind, Closing, Executable, Homes, Reachable, Rendering, Sandbox, SandboxConfig,
 };
@@ -2670,6 +2670,12 @@ async fn the_verkstead_a_session_asks_with_is_the_one_serving_it() {
 /// anything — which is what "neither is made to do without the other" comes to
 /// from inside. What holds the two lists to each other is a unit test beside
 /// the lists themselves.
+///
+/// **And the human's own `~/.local/bin` with them, ahead of Apple's `/usr/bin`
+/// however this server was started.** That is ADR-0016's *Macs* from inside the
+/// boundary: an app in the Dock has launchd's `PATH` and would otherwise find
+/// Apple's older copy of a tool the machine has a current one of, and no
+/// vendor-installed harness at all.
 #[tokio::test]
 #[cfg_attr(
     not(target_os = "macos"),
@@ -2701,6 +2707,33 @@ async fn a_session_runs_the_tools_this_mac_has_and_is_not_stopped_by_the_ones_it
             reported["path"],
         );
     }
+
+    // And where the human's own installs are, which is the third kind of Mac
+    // and the one no `PATH` names from the Dock — see ADR-0016's *Macs*. Ahead
+    // of Apple's own directory, so that a `claude` the vendor's installer left
+    // is the one a session finds and Homebrew's `git` beats `/usr/bin`'s.
+    let local = home_dir(Platform::HERE, &Environment::of_the_process())
+        .expect("a Mac names a home")
+        .join(".local/bin");
+
+    let ahead: Vec<&str> = reported["path"]
+        .split(':')
+        .take_while(|entry| *entry != "/usr/bin")
+        .collect();
+
+    assert!(
+        ahead.iter().any(|entry| Some(*entry) == local.to_str()),
+        "{} is where a Mac's own installs land, and a session reaches it \
+         before Apple's `/usr/bin`: {}",
+        local.display(),
+        reported["path"],
+    );
+    assert!(
+        ahead.contains(&"/opt/homebrew/bin"),
+        "as it does Homebrew's, which holds the current copy of half of what \
+         `/usr/bin` has an older one of: {}",
+        reported["path"],
+    );
 
     assert_eq!(
         reported["shell"], "/bin/sh",

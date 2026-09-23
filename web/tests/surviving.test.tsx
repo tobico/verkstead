@@ -45,7 +45,7 @@ import composer from "../src/workbench/Composer.module.css";
 import sidebar from "../src/workbench/Conversations.module.css";
 import setup from "../src/workbench/Setup.module.css";
 import marks from "../src/workbench/Mark.module.css";
-import steerModal from "../src/workbench/Steer.module.css";
+import steerForm from "../src/workbench/Steer.module.css";
 import { under } from "../src/pairing";
 import { Listbox, Picker } from "../src/picking";
 import {
@@ -62,6 +62,7 @@ import {
 } from "./bench";
 import { offered, opened, pick, picker, rows, showing } from "./pickers";
 import { json, serving, whenever } from "./serving";
+import { pending } from "./steering";
 import abandoned from "./fixtures/abandoned-roadmaps.json" with { type: "json" };
 import building from "./fixtures/conversation-building.json" with { type: "json" };
 
@@ -70,7 +71,7 @@ import building from "./fixtures/conversation-building.json" with { type: "json"
 vi.mock("../src/set/diagrams", () => ({ drawDiagrams: () => () => {} }));
 
 /// A conversation with a worktree and nothing running in it, which is where the
-/// steer modal — and the third profile picker — is opened over.
+/// steer form — and the third profile picker — is opened over.
 const BUILDING = building as ConversationView;
 
 /// The sidebar with a session talking on one of its rows, which is what puts a
@@ -333,19 +334,25 @@ describe("what a Nudge leaves standing", () => {
     survived(implementing, nodes(opened("Implementation"), '[role="option"]'));
   });
 
-  /// The third picker, and the one a Nudge is loudest around: it sits in the
-  /// steer modal under a half-typed instruction, while a session talks behind
+  /// The third picker, and the one a Nudge is loudest around: it sits on the
+  /// steer form under a half-typed instruction, while a session talks behind
   /// it.
   ///
-  /// Looked for on the document rather than in the container: a native
-  /// `dialog` opened with `showModal` is drawn in the top layer, which is not
-  /// inside the page's own tree.
-  it("keeps the steer modal's pairing options", async () => {
+  /// The form is a details pane now rather than a window over the page, so it
+  /// is looked for in the container like everything else — and the conversation
+  /// carries the pending steer it is drawn on, which is what the press writes.
+  it("keeps the steer form's pairing options", async () => {
     theWorkbench(
-      whenever(`/api/ui/conversations/${BUILDING.id}`, json(BUILDING)),
+      whenever(
+        `/api/ui/conversations/${BUILDING.id}`,
+        json({
+          ...BUILDING,
+          pending_steer: pending(),
+        } satisfies ConversationView),
+      ),
       whenever(
         `/api/ui/conversations/${BUILDING.id}/steer`,
-        json({ Opened: { working: false } } satisfies SteerOpened),
+        json("Opened" satisfies SteerOpened),
         "POST",
       ),
     );
@@ -356,9 +363,9 @@ describe("what a Nudge leaves standing", () => {
     );
     const dropped = await drawn(container, `.${actions.conversationActions} > .${menu.drop}`);
     fireEvent.click(await drawn(dropped, `.${actions.steer}`));
-    await drawn(document.body, `.${steerModal.steerConversation}`);
+    await drawn(container, `.${steerForm.steerConversation}`);
 
-    await drawn(document.body, "#steer-pairing");
+    await drawn(container, "#steer-pairing");
     const rows = nodes(opened("Run it under"), '[role="option"]');
 
     await nudged(client);

@@ -35,7 +35,12 @@ interface Field {
 
 /// What the field drives it with: the keystroke, the way out of the field, and
 /// the save coming back.
-interface Keeping {
+///
+/// Exported because a form whose fields are drawn by several components puts
+/// all of them through one of these — see the Steer pane, which hands it to the
+/// rows of its companion section so that a tick down there and a keystroke up
+/// here are the same one save.
+export interface Keeping {
   /// A keystroke: start the pause again, and save when it comes round.
   settle: () => void;
 

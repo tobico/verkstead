@@ -42,6 +42,7 @@ use verkstead_server::github::Gh;
 use verkstead_server::onboarding::Machine;
 use verkstead_server::platform::{Environment, Platform};
 use verkstead_server::remote::{Elevate, Raised};
+use verkstead_server::settings::Settings;
 use verkstead_server::{open_database, router_onboarding_elevating};
 
 /// What this machine calls itself, which is the one thing in the status line
@@ -99,27 +100,55 @@ fn served_on(
         pool,
         Platform::Linux,
         Some(os_release.to_owned()),
+        None,
         dialog,
     )
 }
 
-/// And a stated Mac, which says nothing about itself: there is no
-/// `/etc/os-release` on one, and the platform is the whole of the answer.
+/// And a stated Apple-silicon Mac, which says nothing about itself but which
+/// processor it has: there is no `/etc/os-release` on a Mac, and what is left
+/// of the answer is `hw.optional.arm64` — see `onboarding::mac`.
 fn served_mac(dir: &Path, pool: &SqlitePool, dialog: Option<Arc<Dialog>>) -> Router {
-    stood_up(dir, pool, Platform::MacOs, None, dialog)
+    stood_up(dir, pool, Platform::MacOs, None, ARM64, dialog)
 }
 
+/// And the other Mac, which is the same platform saying nothing at all: the
+/// OID is absent on an Intel Mac, and a machine that will not answer for its
+/// processor is the Mac Homebrew has dropped.
+fn served_intel_mac(dir: &Path, pool: &SqlitePool, dialog: Option<Arc<Dialog>>) -> Router {
+    stood_up(dir, pool, Platform::MacOs, None, None, dialog)
+}
+
+/// What an Apple-silicon Mac answers with, which is the whole of what makes it
+/// Homebrew's.
+const ARM64: Option<&str> = Some("1");
+
 /// A server over a machine stated whichever way, raising through `dialog`.
+///
+/// **A Mac searches one directory more than the others**, and that is the
+/// platform rather than the suite: a Mac session's `PATH` is composed with the
+/// home's own `.local/bin` at its head — see ADR-0016's *Macs* — which is where
+/// Anthropic's installer puts `claude`. Everywhere else the stubs' directory is
+/// the whole of it, the two vendor rows on a Linux being
+/// `tests/vendor_installers.rs`'s.
 fn stood_up(
     dir: &Path,
     pool: &SqlitePool,
     platform: Platform,
     os_release: Option<String>,
+    arm64: Option<&str>,
     dialog: Option<Arc<Dialog>>,
 ) -> Router {
+    let searches = match platform {
+        Platform::MacOs => {
+            std::env::join_paths([bin(dir), local_bin(dir), opencode_bin(dir)]).unwrap()
+        }
+        Platform::Linux | Platform::Windows => OsString::from(bin(dir).as_os_str()),
+    };
+
     let machine = Machine::stated(
         platform,
-        OsString::from(bin(dir).as_os_str()),
+        searches,
         OsString::from(bin(dir).as_os_str()),
         None,
         os_release,
@@ -129,7 +158,8 @@ fn stood_up(
             ..Environment::default()
         },
     )
-    .called(HOSTNAME.to_owned());
+    .called(HOSTNAME.to_owned())
+    .arm64(arm64.map(str::to_owned));
 
     router_onboarding_elevating(
         pool.clone(),
@@ -149,13 +179,33 @@ fn bin(dir: &Path) -> PathBuf {
     bin
 }
 
-/// And the home it was started under, which is nothing this suite puts anything
-/// in: what is asked about here is the `PATH`.
+/// And the home it was started under, which is where a vendor's own installer
+/// lands what it installs.
 fn home(dir: &Path) -> PathBuf {
     let home = dir.join("home");
     std::fs::create_dir_all(&home).unwrap();
 
     home
+}
+
+/// The directory under it Anthropic's installer really writes into, which is on
+/// the floor a Mac session's `PATH` is composed from — see ADR-0016's *Macs*,
+/// and `sandbox::composed`.
+///
+/// Named rather than made: what makes the row go present is the installer
+/// having made it and put a program in it.
+fn local_bin(dir: &Path) -> PathBuf {
+    home(dir).join(".local/bin")
+}
+
+/// And the one OpenCode's own installer writes into, which a Mac session
+/// reaches for the other reason: it is on no floor at all, and what puts it on
+/// a session's `PATH` is the `session_path` write the unit makes when it lands
+/// — see `tests/vendor_installers.rs`, where that write is followed through a
+/// machine composing its own `PATH`. Stated here, this machine's `PATH` being
+/// a word of the suite's that stands still.
+fn opencode_bin(dir: &Path) -> PathBuf {
+    home(dir).join(".opencode/bin")
 }
 
 /// A script at `path`, executable.
@@ -263,11 +313,7 @@ fn a_homebrew(dir: &Path) {
              shift\n\
              if [ \"$1\" = --cask ]; then shift; fi\n\
              for formula in \"$@\"; do\n\
-             case \"$formula\" in\n\
-             claude-code) name=claude;;\n\
-             *) name=$formula;;\n\
-             esac\n\
-             '{cp}' '{installed}' '{into}'/$name\n\
+             '{cp}' '{installed}' '{into}'/$formula\n\
              done\n",
             cp = found("cp").display(),
             installed = installed.display(),
@@ -285,7 +331,50 @@ fn found(program: &str) -> PathBuf {
 }
 
 /// A `curl` and a `bash` in that directory, where what the `curl` answers with
-/// is a script that fails.
+/// is Anthropic's installer doing what it does: a script that puts `claude` in
+/// the home's `.local/bin`.
+///
+/// **Stubbed the way `tests/vendor_installers.rs` stubs it**, and for that
+/// file's reason: the line a ticked Claude row runs is `curl -fsSL
+/// https://claude.ai/install.sh | bash`, and a suite that ran it would install
+/// a harness on whoever's box it happened to be on. A unit that runs as the
+/// user searches the machine's own `PATH`, so this is what the line finds
+/// instead — and the directory it writes into is the one the real installer
+/// uses, which a Mac session reaches because a Mac's floor carries it.
+///
+/// The two programs it needs are named in full: the `PATH` that unit is handed
+/// is this machine's, which holds the stubs and nothing else.
+fn an_installer(dir: &Path) {
+    program(&bin(dir).join("bash"), "#!/bin/sh\nexec /bin/sh \"$@\"\n");
+
+    let installed = dir.join("what-the-installer-lands");
+    program(&installed, "#!/bin/sh\nexit 0\n");
+
+    // Whose installer it is, is the address it was asked for: the one stub
+    // answers for Anthropic and for OpenCode, each with the program and the
+    // directory that vendor's own script really leaves behind. Which is the
+    // one thing a unit says about itself that this suite can check — a `curl`
+    // that answered the same script whatever it was asked would prove nothing
+    // about which line a ticked row runs.
+    program(
+        &bin(dir).join("curl"),
+        &format!(
+            "#!/bin/sh\n\
+             case \"$*\" in\n\
+             *opencode.ai*) into='{opencode}'; name=opencode ;;\n\
+             *) into='{into}'; name=claude ;;\n\
+             esac\n\
+             printf '%s\n' \"'{mkdir}' -p '$into'\" \"'{cp}' '{installed}' '$into/$name'\"\n",
+            opencode = opencode_bin(dir).display(),
+            into = local_bin(dir).display(),
+            mkdir = found("mkdir").display(),
+            cp = found("cp").display(),
+            installed = installed.display(),
+        ),
+    );
+}
+
+/// And the same pair where what the `curl` answers with is a script that fails.
 ///
 /// **Stubs rather than the vendor's own, and that is the whole point of them.**
 /// What a ticked Claude row runs is `curl -fsSL https://claude.ai/install.sh |
@@ -312,6 +401,124 @@ fn an_installer_that_fails(dir: &Path) {
 
 /// What that script says, which is the line the row it failed carries.
 const UNREACHABLE: &str = "The installer could not reach the network.";
+
+/// The version GitHub's releases answer with here, and the tag it is the tag
+/// of.
+///
+/// **A number of this suite's own, and nothing reads it off the box.** What is
+/// being asked about is that the version the line installs is the one the
+/// redirect named — see `onboarding::install`'s `GH_RELEASE` — so the stub
+/// below answers this tag and then refuses every download but this tag's, and a
+/// line that had a version written into it would be a run that failed here.
+const RELEASED: &str = "2.101.0";
+
+/// The programs Verkstead's own `gh` line reaches for, on the stated machine's
+/// `PATH`.
+///
+/// **The box's own rather than stubs, and put here rather than named in the
+/// line.** What a ticked `gh` row runs is Verkstead's line rather than a
+/// vendor's script, so it names its tools the way a Mac does — off the `PATH`
+/// it is handed — and a stated machine whose `PATH` is one directory of this
+/// suite's making has to hold them. They do what they do; the `curl` beside
+/// them is the stub, which is the whole of what is standing in for GitHub.
+fn the_tools_a_download_wants(dir: &Path) {
+    for tool in ["mktemp", "unzip", "mkdir", "cp", "chmod", "rm"] {
+        std::os::unix::fs::symlink(found(tool), bin(dir).join(tool))
+            .expect("the tools a download wants, on the machine's own `PATH`");
+    }
+}
+
+/// And a stub `curl` answering for GitHub's releases: the redirect with a tag,
+/// and that tag's `macOS_amd64` zip with a `gh` inside it.
+///
+/// **Stubbed for the reason every network here is**, and for one more: a suite
+/// that really asked GitHub would install whatever `gh` was released this
+/// morning, over a network a runner happens to have, and would be asking about
+/// GitHub rather than about the line. So the two calls the line makes are
+/// answered here — the redirect off [`RELEASED`], and the download off a zip
+/// this suite built, which is the release's own shape: a directory named for
+/// the version with the binary at `bin/gh` inside it.
+///
+/// **And the download is answered for one URL alone.** The version in it is the
+/// one the redirect just named, so a line that asked for any other — a version
+/// written into Verkstead, or a tag it never read — is a `curl` that fails and
+/// a row that stays absent.
+fn a_release(dir: &Path) {
+    program(&unpacked(dir).join("bin/gh"), "#!/bin/sh\nexit 0\n");
+
+    let zipped = dir.join("gh.zip");
+
+    let made = std::process::Command::new(found("zip"))
+        .arg("--quiet")
+        .arg("--recurse-paths")
+        .arg(&zipped)
+        .arg(unpacked(dir).file_name().expect("the release's directory"))
+        .current_dir(dir)
+        .status()
+        .expect("the suite's own `zip`");
+
+    assert!(
+        made.success(),
+        "the release this suite answers with: {made}"
+    );
+
+    program(
+        &bin(dir).join("curl"),
+        &format!(
+            "#!/bin/sh\n\
+             case \"$*\" in\n\
+             *releases/latest*)\n\
+             printf '%s' 'https://github.com/cli/cli/releases/tag/v{RELEASED}'\n\
+             exit 0\n\
+             ;;\n\
+             *'/download/v{RELEASED}/gh_{RELEASED}_macOS_amd64.zip') ;;\n\
+             *)\n\
+             printf '%s\n' 'curl was asked for a release GitHub never named' >&2\n\
+             exit 22\n\
+             ;;\n\
+             esac\n\
+             out=\n\
+             while [ $# -gt 0 ]; do\n\
+             if [ \"$1\" = -o ]; then out=$2; fi\n\
+             shift\n\
+             done\n\
+             '{cp}' '{zipped}' \"$out\"\n",
+            cp = found("cp").display(),
+            zipped = zipped.display(),
+        ),
+    );
+}
+
+/// What that zip holds, which is the shape GitHub's own release has: a
+/// directory named for the version, with the binary at `bin/gh` inside it.
+fn unpacked(dir: &Path) -> PathBuf {
+    let unpacked = dir.join(format!("gh_{RELEASED}_macOS_amd64/bin"));
+    std::fs::create_dir_all(&unpacked).unwrap();
+
+    unpacked
+        .parent()
+        .expect("the release's directory")
+        .to_owned()
+}
+
+/// And the same `curl` where the redirect answers and the download does not,
+/// which is the Mac that cannot reach GitHub.
+fn a_release_that_cannot_be_downloaded(dir: &Path) {
+    program(
+        &bin(dir).join("curl"),
+        &format!(
+            "#!/bin/sh\n\
+             case \"$*\" in\n\
+             *releases/latest*)\n\
+             printf '%s' 'https://github.com/cli/cli/releases/tag/v{RELEASED}'\n\
+             exit 0\n\
+             ;;\n\
+             esac\n\
+             printf '%s\n' '{UNREACHABLE}' >&2\n\
+             exit 7\n"
+        ),
+    );
+}
 
 /// The platform's password dialog, stubbed: what it was handed, what it does
 /// with it, and what it answers.
@@ -671,18 +878,22 @@ fn started(dialog: &Dialog) -> String {
     path.to_owned()
 }
 
-/// Ticking git and Claude Code on a Mac with Homebrew runs a `brew` line
-/// apiece, as the user, and the rows go present under the prefix.
+/// Ticking git and Claude Code on a Mac with Homebrew runs a `brew` line for
+/// the one Homebrew carries and Anthropic's own installer for the other, both
+/// as the user, and both rows go present.
 ///
-/// **Nothing is raised at all.** Every install on a Mac is Homebrew's, Homebrew
+/// **Nothing is raised at all.** Every package on a Mac is Homebrew's, Homebrew
 /// refuses to run as root, and the prefix it installs into is already this
 /// user's — so there is nothing here for a password dialog to be in front of,
 /// and a run that put one there would be asking for a privilege to do something
-/// that wants none.
+/// that wants none. Anthropic's installer wants none either: it writes under
+/// this user's home, which is the whole of why it is out of the dialog on every
+/// platform but the one whose dialog keeps the same user.
 #[tokio::test]
-async fn a_mac_installs_what_was_ticked_with_homebrew_and_raises_nothing() {
+async fn a_mac_installs_its_packages_with_homebrew_and_claude_with_anthropics() {
     let (dir, pool) = ready().await;
     a_homebrew(dir.path());
+    an_installer(dir.path());
 
     let dialog = Dialog::answered(dir.path(), Answer::Typed);
     let app = served_mac(dir.path(), &pool, Some(dialog.clone()));
@@ -712,23 +923,228 @@ async fn a_mac_installs_what_was_ticked_with_homebrew_and_raises_nothing() {
             row(&landed, ticked).state,
             DependencyState::Present {
                 at: Some(
-                    bin(dir.path())
-                        .join(match ticked {
-                            Dependency::Git => "git",
-                            _ => "claude",
-                        })
-                        .to_string_lossy()
-                        .into_owned(),
+                    match ticked {
+                        Dependency::Git => bin(dir.path()).join("git"),
+                        _ => local_bin(dir.path()).join("claude"),
+                    }
+                    .to_string_lossy()
+                    .into_owned(),
                 ),
                 target: None,
             },
-            "{ticked:?} is there, under the prefix `brew` installed into",
+            "{ticked:?} is there, where what installed it puts it",
         );
     }
 
     assert!(
         landed.steps.dependencies,
         "the step the wizard was held on is met by what the run installed",
+    );
+}
+
+/// And ticking Claude Code, OpenCode and git on an Intel Mac runs the two
+/// vendors' own installers as the user, raises nothing at all, and sends the
+/// row it has no command for to the hint screen with what to do about it.
+///
+/// **Which is the press that failed on the release.** This machine used to be
+/// the other Mac: every ticked row was Homebrew's, so the run began by making
+/// Homebrew's prefix behind the password dialog — `chmod /usr/local`, which no
+/// Mac since Catalina allows — and a human watching it got
+/// `Operation not permitted` and a hint screen telling them to run the
+/// installer Homebrew refuses this machine with. There is no dialog here at
+/// all now, and what the two units install is under this user's own home.
+#[tokio::test]
+async fn an_intel_mac_installs_with_the_vendors_own_and_raises_nothing() {
+    let (dir, pool) = ready().await;
+    an_installer(dir.path());
+
+    let dialog = Dialog::answered(dir.path(), Answer::Typed);
+    let app = served_intel_mac(dir.path(), &pool, Some(dialog.clone()));
+
+    let ticked = [Dependency::Claude, Dependency::OpenCode, Dependency::Git];
+
+    let pressed = install(&app, &ticked).await;
+    let run = pressed.run.expect("a press makes a run");
+
+    assert_eq!(
+        run.total, 3,
+        "every ticked row is a row of the run, the one nothing installs included: {run:?}",
+    );
+
+    let landed = over(&app).await;
+    let run = landed.run.clone().expect("the run it was started with");
+
+    assert_eq!(run.done, 3);
+    assert_eq!(run.status, "1 of 3 could not be installed");
+
+    assert!(
+        dialog.commands().is_empty(),
+        "an Intel Mac raises nothing: {:?}",
+        dialog.commands(),
+    );
+
+    // The two rows a vendor installs are present where that vendor's own
+    // installer puts them, both of them under this user's home.
+    for (installed, at) in [
+        (Dependency::Claude, local_bin(dir.path()).join("claude")),
+        (
+            Dependency::OpenCode,
+            opencode_bin(dir.path()).join("opencode"),
+        ),
+    ] {
+        assert_eq!(install_state(&landed, installed), &InstallState::Idle);
+        assert_eq!(
+            row(&landed, installed).state,
+            DependencyState::Present {
+                at: Some(at.to_string_lossy().into_owned()),
+                target: None,
+            },
+            "{installed:?} is there, where its vendor's installer puts it",
+        );
+    }
+
+    // And both directories are written down, so that the next start reads them
+    // back and the next session's `PATH` leads with them — which for
+    // `~/.opencode/bin` is the whole of how a session reaches it, it being on
+    // no floor.
+    assert_eq!(
+        Settings::in_data_dir(dir.path()).config().session_path(),
+        [
+            local_bin(dir.path()).to_string_lossy().into_owned(),
+            opencode_bin(dir.path()).to_string_lossy().into_owned(),
+        ],
+        "in the order the units ran",
+    );
+
+    // And the row nothing here installs is the hint screen's, in the words that
+    // say what it wants: Apple's own dialog, which is on that Mac's screen
+    // rather than a command Verkstead can run for anybody.
+    assert!(
+        !present(&landed, Dependency::Git),
+        "nothing was installed for it: {landed:?}",
+    );
+
+    let InstallState::Failed { why } = install_state(&landed, Dependency::Git) else {
+        panic!("the row carries why nothing was run for it: {landed:?}");
+    };
+
+    assert!(
+        why.contains("xcode-select --install"),
+        "which says what installs it: {why}",
+    );
+    assert!(
+        !why.contains("brew") && !why.contains("Homebrew"),
+        "and says nothing about a Homebrew this Mac cannot have: {why}",
+    );
+}
+
+/// And ticking `gh` on that Mac unpacks GitHub's own release into the home's
+/// `.local/bin`, raises nothing, and writes the directory down.
+///
+/// **The row the other tab installs with Homebrew**, which this one has none
+/// of: `brew install gh` on an Intel Mac compiles from source under a Homebrew
+/// whose installer refuses the machine, so what a tick runs here is the zip
+/// every release carries. The version is the redirect's — the stub answers the
+/// download for that version's URL and no other — so a `gh` in `~/.local/bin`
+/// at the end of it is the version GitHub named a moment earlier.
+#[tokio::test]
+async fn an_intel_mac_unpacks_gh_out_of_githubs_release() {
+    let (dir, pool) = ready().await;
+    the_tools_a_download_wants(dir.path());
+    a_release(dir.path());
+
+    let dialog = Dialog::answered(dir.path(), Answer::Typed);
+    let app = served_intel_mac(dir.path(), &pool, Some(dialog.clone()));
+
+    install(&app, &[Dependency::Gh]).await;
+    let landed = over(&app).await;
+
+    assert!(
+        dialog.commands().is_empty(),
+        "a download under this user's own home asks nobody for a password: {:?}",
+        dialog.commands(),
+    );
+
+    assert_eq!(install_state(&landed, Dependency::Gh), &InstallState::Idle);
+    assert_eq!(
+        row(&landed, Dependency::Gh).state,
+        DependencyState::Present {
+            at: Some(
+                local_bin(dir.path())
+                    .join("gh")
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+            target: None,
+        },
+        "the row is present at the next probe, where the release was unpacked",
+    );
+
+    // And the directory is written down, which is what puts it on the next
+    // session's `PATH` — a Mac's floor carries it already, and `session_path`
+    // is what every unit that lands somewhere writes.
+    assert_eq!(
+        Settings::in_data_dir(dir.path()).config().session_path(),
+        [local_bin(dir.path()).to_string_lossy().into_owned()],
+    );
+
+    // And nothing of the unpacking is left behind: the zip was opened somewhere
+    // temporary and what was copied out of it is the binary alone.
+    assert_eq!(
+        std::fs::read_dir(local_bin(dir.path()))
+            .expect("the directory the release landed in")
+            .count(),
+        1,
+        "the binary and nothing beside it",
+    );
+}
+
+/// A download that could not be made fails the `gh` row in curl's own line and
+/// leaves nothing in `~/.local/bin`.
+///
+/// **Which is the Mac that cannot reach GitHub**, and the row it leaves is the
+/// hint screen's: the first line of what `curl` said goes under it, and the tab
+/// beneath that carries the releases link for the human who will fetch the zip
+/// by hand — see `web/src/setup/instructions.ts`.
+///
+/// **And the directory is untouched**, the zip having been opened somewhere
+/// temporary rather than over a directory a session searches: a half-downloaded
+/// `gh` on the `PATH` would be a row that went present over a program that
+/// cannot run.
+#[tokio::test]
+async fn a_gh_download_that_failed_leaves_nothing_behind() {
+    let (dir, pool) = ready().await;
+    the_tools_a_download_wants(dir.path());
+    a_release_that_cannot_be_downloaded(dir.path());
+
+    let dialog = Dialog::answered(dir.path(), Answer::Typed);
+    let app = served_intel_mac(dir.path(), &pool, Some(dialog.clone()));
+
+    install(&app, &[Dependency::Gh]).await;
+    let landed = over(&app).await;
+
+    assert_eq!(
+        install_state(&landed, Dependency::Gh),
+        &InstallState::Failed {
+            why: UNREACHABLE.to_owned(),
+        },
+        "the row carries the first line curl printed",
+    );
+    assert!(
+        !present(&landed, Dependency::Gh),
+        "and nothing was installed: {landed:?}",
+    );
+
+    assert!(
+        !local_bin(dir.path()).join("gh").exists(),
+        "nothing is left in ~/.local/bin",
+    );
+    assert!(
+        Settings::in_data_dir(dir.path())
+            .config()
+            .session_path()
+            .is_empty(),
+        "and a directory nothing landed in is not written down",
     );
 }
 

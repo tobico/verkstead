@@ -1365,7 +1365,18 @@ pub(crate) async fn start_grilling(state: &AppState, id: i64) -> Result<Grilling
             // somebody typed, on a branch somebody's work is already on. That
             // one is theirs to think again about, and taking it over would be
             // Verkstead writing into work it did not start.
-            if worktrees::branch_exists(&repo, &branch) {
+            //
+            // [`worktrees::branch_taken`] rather than `branch_exists`, which is
+            // the reading [`crate::steering`] has always taken of the same
+            // question: git keeps a branch as a file under `refs/heads/`, so a
+            // name with refs beneath it is a name it will not give anybody —
+            // `roadmaps` is not free in a Repo holding `roadmaps/mvp/01-x`, and
+            // `show-ref --verify` on the name alone says it is. Asked the narrow
+            // way, the start goes on to a `git worktree add` git refuses, and
+            // all the human is told is that the worktree could not be made. See
+            // [`crate::stages::Stage::branch`], which is why every roadmap's
+            // stages now go under one such path.
+            if worktrees::branch_taken(&repo, &branch) {
                 return Err(GrillingStarted::BranchExists);
             }
 
@@ -1754,6 +1765,18 @@ fn plan(
         return Err(refused(CompanionRefusal::BranchExists));
     }
 
+    // And nothing of that repository's standing where a component of that name's
+    // own path goes, which is a branch git will not make rather than one
+    // somebody is already on — see [`crate::stages::in_the_way`]. Asked of a
+    // companion because a stage's branch is mirrored into one whole, `roadmaps/`
+    // and all, so the collision the stage scheme leaves behind is the
+    // companion's to have too.
+    if let Some(cut) = &cut
+        && let Some(by) = crate::stages::in_the_way(&repo, cut)
+    {
+        return Err(refused(CompanionRefusal::BranchInTheWay { by }));
+    }
+
     // Named for the Repo and what the checkout holds, as the Conversation's own
     // is: the branch where there is one, and otherwise the base it stands at —
     // a read-only companion holds no branch to be named for.
@@ -2048,6 +2071,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
                 Startable::InFlight => Err(Adopted::StageInFlight),
                 Startable::NoBrief => Err(Adopted::NoBrief),
                 Startable::BranchTaken => Err(Adopted::BranchExists),
+                Startable::BranchInTheWay { by } => Err(Adopted::BranchInTheWay { by }),
             }
         }
     })
@@ -2677,6 +2701,11 @@ fn taken(held: &store::AdoptedPullRequest) -> String {
 /// it left open, in [`asked`], and the news mark it was carrying, in [`read`].
 /// The record says Closed by then, which is the order the rest of this is in:
 /// what has happened is written down, and then whatever outlived it is shut.
+///
+/// A steer somebody had started and not decided is shut the same way and for
+/// the same reason — a form asking where the work goes next is about work that
+/// is over — but it goes inside [`store::close_conversation`] rather than
+/// after it: the row is the record's, and the close is the act that decides it.
 ///
 /// **And the open pages are told**, which they were not: the row that closes and
 /// archives announced the list and this one announced nothing, so a second

@@ -289,7 +289,7 @@ pub(crate) async fn apply_schema(pool: &SqlitePool) -> Result<()> {
 
 /// A companion joining a Conversation past drafting, as a steer puts it there.
 ///
-/// The four columns of a companion's row, borrowed straight off what the modal
+/// The four columns of a companion's row, borrowed straight off what the form
 /// submitted and living exactly as long as the call — [`super::Settling`]'s
 /// shape and for its reason.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -350,7 +350,7 @@ pub(crate) async fn join(
 /// A companion of a Conversation past drafting being opened up, as a steer
 /// opens one.
 ///
-/// The two columns an upgrade moves, borrowed off what the modal submitted and
+/// The two columns an upgrade moves, borrowed off what the form submitted and
 /// living exactly as long as the call — [`Joining`]'s shape and for its reason.
 /// The mode is not among them because there is only one to move to: what this
 /// writes is read-write, and read-only is not something a steer can ask for.

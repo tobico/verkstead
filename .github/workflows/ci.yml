@@ -172,7 +172,7 @@ jobs:
   # settles bubblewrap's. Nothing but a Mac can answer it, which is what this
   # job is for.
   #
-  # One suite rather than the workspace: everything else in it stands on
+  # Two targets rather than the workspace: everything else in it stands on
   # bubblewrap and a Linux kernel, and a Mac has neither. The rest of what this
   # stage's code says — the policy a description renders to, read as text — is
   # unit-tested in the Rust job above, which is where a mistake in it shows up
@@ -198,6 +198,28 @@ jobs:
       # this suite probes is a filesystem boundary rather than anything served.
       - name: The boundary suite
         run: cargo test -p verkstead-server --test sandbox_macos
+
+      # And the onboarding module's own unit tests, which is where the wizard's
+      # two questions for a real Mac are: whether `hw.optional.arm64` is a
+      # thing `sysctl` answers, and whether `-p` is an argument `xcode-select`
+      # takes. Both are `#[cfg_attr(not(target_os = "macos"), ignore)]`, so the
+      # Rust job above skips them and this is the only runner that can say
+      # anything about either.
+      #
+      # They are unit tests rather than a suite of their own, which is why this
+      # is a second step and not another `--test`: `--lib` with the module's
+      # own prefix runs them and the stated-machine tests around them, and no
+      # other part of a library whose Linux half wants a kernel this runner has
+      # not got. A stub that agreed with a wrong argument vector would pass
+      # every one of those stated tests and then hold the wizard on a Mac whose
+      # command line tools are installed, which is the whole of what these two
+      # are for.
+      #
+      # Quoted because the filter ends in a colon, and YAML reads a trailing
+      # one as the start of a mapping: unquoted, the file stops parsing and
+      # every job in it — not just this step — never runs at all.
+      - name: What the wizard asks a real Mac
+        run: 'cargo test -p verkstead-server --lib onboarding::'
 
   # And what the same workspace comes to on Windows, asked of Windows. The
   # session machinery is compiled there like everything else — what a Windows

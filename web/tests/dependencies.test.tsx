@@ -33,6 +33,7 @@ import type {
 } from "../src/api/types";
 import { Dependencies } from "../src/setup/Dependencies";
 import { SetupPage } from "../src/setup/SetupPage";
+import type { Instruction } from "../src/setup/instructions";
 import { DISTROS, GUIDES, instructionFor } from "../src/setup/instructions";
 import { SETUP_SCREEN, SETUP_STEP } from "../src/setup/steps";
 import { json, serving, whenever } from "./serving";
@@ -577,13 +578,87 @@ describe("the hint screen", () => {
     );
   });
 
-  it("opens the tab this machine says it is, and draws all eight", () => {
+  it("opens the tab this machine says it is, and draws all nine", () => {
     const { container } = hinting(ONE_FAILED);
 
     expect(showing(container)).toBe("Ubuntu");
     expect(tabs(container).map((tab) => tab.dataset.distro)).toEqual([
       ...DISTROS,
     ]);
+  });
+
+  /// The list of tabs is a plain array, and a `Distro` is a union of strings
+  /// that is gone by the time this runs: a machine left out of it has no tab
+  /// at all, and nothing in the viewer would say so. `GUIDES` is the half the
+  /// type checker holds exhaustive — a `Record<Distro, Guide>` — so the two
+  /// are read against each other here.
+  /// And the two Macs are drawn side by side. The strip scrolls on a phone, and
+  /// the human reading it is the one the detection went wrong about — so the
+  /// other Mac has to be the tab next door rather than the one past every
+  /// Linux.
+  it("draws the two Macs beside each other", () => {
+    const { container } = hinting(ONE_FAILED);
+    const drawn = tabs(container).map((tab) => tab.dataset.distro);
+
+    expect(drawn.indexOf("MacOsIntel")).toBe(drawn.indexOf("MacOs") + 1);
+  });
+
+  it("draws a tab for every machine the server can say it is", () => {
+    expect([...DISTROS].sort()).toEqual(Object.keys(GUIDES).sort());
+  });
+
+  /// An Intel Mac is not the other Mac: Homebrew's installer refuses it
+  /// outright, so the line every `brew` row on the other tab stands on is not
+  /// drawn here at all — and what is drawn instead is the one sentence saying
+  /// why two tabs read *macOS*.
+  it("opens the Intel Mac's own tab, with no Homebrew above it", () => {
+    // The run that failed, read off the other Mac: the same rows left over,
+    // and the machine underneath them saying which Mac it is.
+    const { container } = hinting({
+      ...ONE_FAILED,
+      platform: "MacOs",
+      distro: "MacOsIntel",
+    });
+
+    expect(showing(container)).toBe("MacOsIntel");
+    expect(container.querySelector("[data-before]")).toBeNull();
+
+    expect(container.textContent).toContain(
+      "Homebrew no longer supports Intel Macs",
+    );
+
+    // And the rows are what a Mac with no package manager can be told: Apple's
+    // own dialog for git, and a binary to unpack for the GitHub CLI.
+    expect(GUIDES.MacOsIntel.rows.Git.command).toBe("xcode-select --install");
+    expect(GUIDES.MacOsIntel.rows.Gh.command).toBeUndefined();
+    expect(GUIDES.MacOsIntel.rows.Gh.link).toBe(
+      "https://github.com/cli/cli/releases",
+    );
+    expect(GUIDES.MacOsIntel.rows.Gh.note).toContain("~/.local/bin");
+
+    // And nothing on the tab is Homebrew's, which is the whole of what it is.
+    for (const instruction of Object.values(GUIDES.MacOsIntel.rows)) {
+      expect(instruction.command ?? "").not.toContain("brew");
+      expect(instruction.alternative?.command ?? "").not.toContain("brew");
+    }
+
+    expect(GUIDES.MacOsIntel.before).toBeUndefined();
+  });
+
+  /// And the tab that is Homebrew's says nothing about Intel: the sentence is
+  /// the other one's, drawn where this one draws Homebrew's line.
+  it("says which Mac a tab is on the one that is not Homebrew's", () => {
+    const { container } = hinting(ONE_FAILED);
+
+    fireEvent.click(
+      tabs(container).find((tab) => tab.dataset.distro === "MacOs")!,
+    );
+
+    expect(container.textContent).not.toContain(
+      "Homebrew no longer supports Intel Macs",
+    );
+
+    expect(GUIDES.MacOs.about).toBeUndefined();
   });
 
   /// The detection is a guess off `/etc/os-release` — a derivative names its
@@ -600,10 +675,11 @@ describe("the hint screen", () => {
     expect(row(container, "Codex").textContent).toContain("npm install -g");
   });
 
-  /// Every command on the Mac's tab is a `brew install`, so a Mac that reached
-  /// this screen because Homebrew could not be installed needs the one line
-  /// that gets it — drawn once above the rows rather than under each of the
-  /// five that are one.
+  /// Most of the Mac tab's commands are a `brew install`, so a Mac that
+  /// reached this screen because Homebrew could not be installed needs the one
+  /// line that gets it — drawn once above the rows rather than under each of
+  /// the four that are one. It says the `brew` commands rather than all of
+  /// them: Claude Code and Grok Build are their vendors' own installers here.
   it("draws the Mac's Homebrew above the rows, and no other tab's", () => {
     const { container } = hinting(ONE_FAILED);
 
@@ -618,7 +694,8 @@ describe("the hint screen", () => {
     expect(before.textContent).toContain(
       "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh",
     );
-    expect(before.textContent).toContain("Every command below is Homebrew's");
+    expect(before.textContent).toContain("The brew commands below are Homebrew's");
+    expect(before.textContent).not.toContain("Every command below");
   });
 
   /// A PATH read at startup is a PATH that does not have the directory this
@@ -886,9 +963,14 @@ describe("what each machine is told to run", () => {
     Arch: "sudo pacman -S bubblewrap",
   };
 
-  /// And git, which every OS with a package manager has one for.
+  /// And git, which every OS with a package manager has one for — and which
+  /// both Macs lead with Apple's own dialog instead. Every Mac has a
+  /// /usr/bin/git, and without the command line tools behind it that file is a
+  /// stub that opens this dialog rather than running, so the line that gets a
+  /// Mac a working git is the one that installs them.
   const GIT: Partial<Record<Distro, string>> = {
-    MacOs: "brew install git",
+    MacOs: "xcode-select --install",
+    MacOsIntel: "xcode-select --install",
     Windows: "winget install --id Git.Git",
     NixOs: "environment.systemPackages = [ pkgs.git ];",
     Ubuntu: "sudo apt install git",
@@ -915,25 +997,59 @@ describe("what each machine is told to run", () => {
     expect(GUIDES.OtherLinux.rows.Git.note).toContain("git");
   });
 
+  /// And Homebrew's git is kept under Apple's dialog on the tab that has a
+  /// brew, rather than instead of it: it is the git a developer's Mac usually
+  /// runs, and it is a line to paste as much as the one above it is — so it is
+  /// an instruction of its own with a copy button beside it.
+  ///
+  /// The Intel tab keeps nothing under its, there being no brew on that
+  /// machine to install one with.
+  it("keeps Homebrew's git under Apple's dialog on the Mac that has a brew", () => {
+    expect(GUIDES.MacOs.rows.Git.alternative?.command).toBe("brew install git");
+    expect(GUIDES.MacOs.rows.Git.alternative?.note).toBeTruthy();
+
+    expect(GUIDES.MacOsIntel.rows.Git.alternative).toBeUndefined();
+
+    // And both of them say what the git already on the machine is, which is
+    // the whole of why the dialog leads.
+    for (const mac of ["MacOs", "MacOsIntel"] as const) {
+      expect(GUIDES[mac].rows.Git.note).toContain("/usr/bin");
+      expect(GUIDES[mac].rows.Git.note).toContain("command line tools");
+    }
+  });
+
   it("names an exact command for each harness the OS packages", () => {
     for (const distro of DISTROS) {
       for (const harness of ["Claude", "Codex", "OpenCode"] as const) {
+        // Except the one machine that packages nothing: an Intel Mac has no
+        // Homebrew, and Codex is the row there with neither a script of its
+        // own nor a package this Mac can use — so it is a link, the way Grok
+        // Build is on every tab.
+        if (distro === "MacOsIntel" && harness === "Codex") {
+          expect(GUIDES[distro].rows[harness].command).toBeUndefined();
+          expect(GUIDES[distro].rows[harness].link).toBeTruthy();
+          continue;
+        }
+
         expect(GUIDES[distro].rows[harness].command).toBeTruthy();
       }
     }
 
-    // The casks Homebrew keeps those two under, which a plain `brew install`
-    // would not find.
-    expect(GUIDES.MacOs.rows.Claude.command).toBe(
-      "brew install --cask claude-code",
-    );
+    // The cask Homebrew keeps Codex under, which a plain `brew install` would
+    // not find.
     expect(GUIDES.MacOs.rows.Codex.command).toBe("brew install --cask codex");
     expect(GUIDES.MacOs.rows.OpenCode.command).toBe("brew install opencode");
+
+    // And OpenCode's own installer on the Mac that has no Homebrew to install
+    // the formula with.
+    expect(GUIDES.MacOsIntel.rows.OpenCode.command).toBe(
+      "curl -fsSL https://opencode.ai/install | bash",
+    );
   });
 
   /// The `grok-cli` in nixpkgs is somebody else's agent and the one on npm is a
   /// proxy around claude-code: either would install a different program under
-  /// the name a session launches. So Grok Build is xAI's own page on all eight
+  /// the name a session launches. So Grok Build is xAI's own page on all nine
   /// tabs and a command on none of them.
   it("gives Grok Build the vendor's page on every one of them", () => {
     for (const distro of DISTROS) {
@@ -959,10 +1075,8 @@ describe("what each machine is told to run", () => {
   /// The whole of why this feature exists: a distribution's claude can be too
   /// old to connect — Ubuntu's under WSL was — so the install that stays
   /// current is what a row leads with, and the packaged one waits under it.
-  it("leads Claude Code with the native installer on every tab but the Mac's", () => {
+  it("leads Claude Code with the native installer on every tab", () => {
     for (const distro of DISTROS) {
-      if (distro === "MacOs") continue;
-
       const claude = GUIDES[distro].rows.Claude;
 
       expect(claude.command).toBe(
@@ -970,6 +1084,11 @@ describe("what each machine is told to run", () => {
           ? "irm https://claude.ai/install.ps1 | iex"
           : "curl -fsSL https://claude.ai/install.sh | bash",
       );
+
+      // Both Macs are a tab with nothing under the row and nothing to say
+      // about a PATH — the same instruction on either, `~/.local/bin` being on
+      // the floor of both. See the test below, which is that row's own.
+      if (distro === "MacOs" || distro === "MacOsIntel") continue;
 
       // And says the one thing the command cannot: which PATH has to name
       // where it landed, and that Verkstead reads that PATH once.
@@ -983,16 +1102,56 @@ describe("what each machine is told to run", () => {
     }
   });
 
-  /// Homebrew's prefix is on the floor under every Mac session's PATH and
-  /// ~/.local/bin is on none of it, because an app started from the Dock has
-  /// launchd's PATH rather than a shell's.
-  it("leads the Mac with Homebrew, and says what the Dock does", () => {
-    const claude = GUIDES.MacOs.rows.Claude;
+  /// And the Mac says nothing about a shell's PATH or a restart, because a Mac
+  /// session's PATH is composed with the home's own ~/.local/bin at its head
+  /// whichever way Verkstead was started — ADR-0016's *Macs*. Homebrew's
+  /// claude-code cask was that row for as long as the Dock's PATH could not
+  /// see that directory, and it is gone.
+  it("says nothing about a shell's PATH on either Mac's Claude row", () => {
+    for (const claude of [
+      GUIDES.MacOs.rows.Claude,
+      GUIDES.MacOsIntel.rows.Claude,
+    ]) {
+      expect(claude.command).toBe(
+        "curl -fsSL https://claude.ai/install.sh | bash",
+      );
+      expect(claude.alternative).toBeUndefined();
+      expect(claude.note).toContain("~/.local/bin");
+      expect(claude.note).toContain("every Mac session's PATH");
+      expect(claude.note).not.toContain("PATH of the shell");
+      expect(claude.note).not.toContain("started again");
+    }
+  });
 
-    expect(claude.command).toBe("brew install --cask claude-code");
-    expect(claude.alternative).toBeUndefined();
-    expect(claude.note).toContain("Dock");
-    expect(claude.note).toContain("launchd");
+  /// And the name Homebrew kept it under is nowhere on the Mac's tab at all:
+  /// a second install of the same program, and the one that goes stale. The
+  /// other tabs still say `@anthropic-ai/claude-code`, which is npm's package
+  /// and their row's alternative.
+  it("names Homebrew's claude-code cask on no tab", () => {
+    const said = (instruction: Instruction) => [
+      instruction.command,
+      instruction.note,
+      instruction.alternative?.command,
+      instruction.alternative?.note,
+    ];
+
+    for (const instruction of Object.values(GUIDES.MacOs.rows)) {
+      for (const line of said(instruction)) {
+        expect(line ?? "").not.toContain("claude-code");
+      }
+    }
+
+    for (const distro of DISTROS) {
+      for (const instruction of Object.values(GUIDES[distro].rows)) {
+        for (const line of said(instruction)) {
+          expect(line ?? "").not.toContain("--cask claude-code");
+        }
+      }
+
+      for (const line of said(GUIDES[distro].before ?? {})) {
+        expect(line ?? "").not.toContain("claude-code");
+      }
+    }
   });
 
   /// The Mac is the one tab whose every command wants the same thing first,

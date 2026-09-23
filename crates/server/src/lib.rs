@@ -195,8 +195,8 @@ mod stalls;
 /// The stand-in programs the tests run in place of the machine's own.
 #[cfg(test)]
 mod stand_ins;
-/// The human steering a Conversation: the click that stops the drive and opens
-/// the modal, and the submit that moves the work where they said.
+/// The human steering a Conversation: the press that stops the drive and opens
+/// the form, and the submit that moves the work where they said.
 mod steering;
 mod stopping;
 /// The human stopping a Conversation on purpose: Stop, which waits for the step
@@ -724,7 +724,7 @@ fn nothing_bound() -> sandbox::SandboxConfig {
 /// The seam the onboarding suite is stood up over, and a parameter for the
 /// reason [`router_reading_tailscale`]'s Tailscale is one: what the wizard
 /// answers is a fact about the machine underneath it, and a wizard that has to
-/// say something about three platforms, eight distributions and a `bwrap` that
+/// say something about three platforms, nine distributions and a `bwrap` that
 /// will not run cannot be asked about any of them on the one machine the suite
 /// happens to be on. See [`onboarding::Machine::stated`].
 ///

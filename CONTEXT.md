@@ -910,6 +910,15 @@ it, header and pins included — and the composer beside it takes the column as
 well as its own. A narrow window walks straight from the conversations to the
 composer and straight back out. A second Event of any kind puts the pane back,
 at the width this device left it.
+
+**And one item on it that is not an Event at all, at the very end: the steer
+being written.** A **Steer** pressed and not yet decided is a **pending steer**
+beside the Conversation, and this pane is where it is read — drawn after
+everything on the record, whatever lands under the press, because it is the one
+thing here that has not happened yet. It is selected by a word rather than by an
+Event id, having none, and the press that selects it scrolls it into view. It
+goes when the submit freezes it into the Steer Event or the cancel takes it
+away, and it boards no **Share**.
 _Avoid_: feed, log, history, activity stream
 
 **Event**:
@@ -953,6 +962,11 @@ whose pull request has been merged is wholly reachable from its base branch, and
 it keeps its whole Timeline. A sha the repository no longer holds at all keeps
 its Event too: a commit nothing can be said about is better drawn than silently
 taken off the record.
+**A pending steer is not one**, and it is the only thing a Timeline draws that
+is not: the form a **Steer** press opens is a decision being made rather than
+one that has been, so it is kept beside the Conversation rather than on the
+record, and drawn last because everything on the record has happened and it has
+not. *Item* is the word for it, which is why that word is not one for an Event.
 _Avoid_: item, record, message, step
 
 **Share**:
@@ -1750,15 +1764,28 @@ first moment, because the grilling that would have settled the work wrote the
 brief. Its branch stacks on the unmerged predecessor where the target
 repository records how, and comes off the default branch where it does not.
 
-**Its branch is named for where the stage lives**: the roadmap's own directory
-name, then the stage brief's filename — `docs/roadmaps/mvp/04-wrap-up.md` is
-worked on `mvp/04-wrap-up`. Under the roadmap rather than at the bare slug,
-because a repository is full of branches somebody named for whatever they were
-doing and one of them reading like a stage brief says nothing about that stage —
-and a name already taken is one Verkstead will not start on, in a run nobody is
-watching. Qualified this way the only thing it can collide with is another
-attempt at the same Stage of the same roadmap, which is the collision the
-refusal is for.
+**Its branch is named for where the stage lives**: `roadmaps/`, then the
+roadmap's own directory name, then the stage brief's filename —
+`docs/roadmaps/mvp/04-wrap-up.md` is worked on `roadmaps/mvp/04-wrap-up`. Under
+the roadmap rather than at the bare slug, because a repository is full of
+branches somebody named for whatever they were doing and one of them reading
+like a stage brief says nothing about that stage — and a name already taken is
+one Verkstead will not start on, in a run nobody is watching. Qualified this way
+the only thing it can collide with is another attempt at the same Stage of the
+same roadmap, which is the collision the refusal is for.
+
+**And under `roadmaps/` rather than straight under the roadmap**, because git
+keeps a branch as a file under `refs/heads/` and will not have a file and a
+directory at one name. A roadmap's own Conversation is usually called after the
+roadmap, `mvp`, and closing it keeps the branch — so `refs/heads/mvp` being a
+file was every Stage of that roadmap blocked, for good, with git's refusal in
+the server log and nothing for the human but *nothing was started*. A fixed
+component in front is a path no roadmap's name can reach. What is left of the
+collision is a branch called `roadmaps`, or one named `roadmaps/<roadmap>`, and
+the start refuses by name where it finds one. A Stage is read as taken under the
+former `mvp/04-wrap-up` shape too, permanently: one already worked is on a
+branch of that shape until somebody deletes it, and its tick may never have
+reached the default branch.
 
 Done when its box in `ROADMAP.md` is ticked, which is the roadmap's own score
 and is kept one Stage behind: the tick rides in the plan commit of the Stage
@@ -1934,6 +1961,10 @@ else, so a Stage with no `.tasks/` is a run that never began rather than one
 that is worked out — read off what its branch has written since it was made,
 which the backlog of the Stage it stacks on is no part of.
 
+**And it is the opposite decision to a steer half written.** A press that starts
+something discards the Conversation's **pending steer** before it goes, while a
+press refused by name leaves it standing, nothing having changed.
+
 **A press always has somewhere to go**, which is the whole point of recomputing
 rather than repeating: every state the pipeline can stop in has a next move, and
 work that stopped at its push has the plainest of them — the pull request is
@@ -1955,7 +1986,7 @@ _Avoid_: retry, remedy, restart (that is the server's), continue, unblock
 
 **Steer**:
 The human saying where the work goes, from wherever it has got to: a row in the
-Conversation's own menu beside **Stop**, and a modal over one question — where
+Conversation's own menu beside **Stop**, and a form over one question — where
 does this go? Targets are **Grilling**, **Implementing**, **Wrapping**,
 **Follow-up** and **Done** — the four states the work is done in, and Follow-up
 beside them because a steer is the only way into it at all; Draft and Closed are
@@ -1966,17 +1997,56 @@ than another move along it. So every refusal is about the target instead of the
 source: wrapping up and following up are offered only where the work is on a
 pull request, there being no wrap-up to steer into and nothing to follow up
 otherwise. Follow-up is the one target the source narrows as well, and by what
-the modal offers rather than by a refusal on arrival — from Done and from
+the form offers rather than by a refusal on arrival — from Done and from
 Wrapping alone, because work still being built has the ordinary ways of saying
 what to do next.
 
-**The click stops the drive**, before the modal opens. The ordinary Stop, so
-nothing new launches while the human composes and whatever is running is left
-exactly where it is. **Cancel leaves the Conversation stopped**, with **Resume**
-on offer: the click froze the world, and unfreezing is a press of its own rather
-than something a dismissed modal does behind the human's back.
+**The press writes a pending steer, and the form is where it is read.** A steer
+is often a great deal of text, and somewhere that blocks the workbench while it
+is written is the wrong place to write it: the human wants to read the
+**Timeline**, look at another Conversation, and finish the form when they are
+ready. So the press makes a **pending steer** beside the Conversation — one per
+Conversation, a slot for every field the form has, and no part of the record at
+all — the Timeline draws it as its last item, and the form is that item's
+details pane, opened at an address of its own beside the **Share Pane**'s and
+the **Terminal**'s. A second press makes no second one and stops nothing a
+second time: it selects the one there is. Landing on a Conversation that has one
+lands on it, and a reload draws it again, the pending steer being the server's
+rather than the device's.
 
-**What ends the session running is the submit rather than the click.** One
+**And the form saves itself as it is typed**, every field onto that row, the
+draft **Brief**'s shape down to the pause it keeps: the human leaves the item,
+the Conversation or the device and finds the form as they left it, and a second
+device sees it on its next read. A save with nothing left to save into — a
+submit or a cancel of this same form from another device — is refused by name
+and said under the form. And the form is drawn against the live Conversation
+rather than one frozen at the press: the item may sit open for an afternoon, so
+what it reads is what is true now, the **Interrupt current task** tick included.
+
+**And the press stops the drive**, which is the first thing it does. The
+ordinary Stop, so nothing new launches while the human composes and whatever is
+running is left exactly where it is: the world the form is written against is
+the world the submit lands in. **Cancel leaves the Conversation stopped**, with
+**Resume** on offer: the press froze the world, and unfreezing is a press of its
+own rather than something a dismissed form does behind the human's back. What
+Cancel posts is the pending steer's deletion and nothing else — a steer that
+decided nothing is no Event, and the stop's own Notice already says the human
+pressed.
+
+**A pending steer waits on the human.** It joins the one rule the sidebar disc
+and the status button's *Waiting on you* are both read from, beside an open
+Question Set and a stop nobody chose, so a Conversation carrying one reads
+*Waiting on you* rather than *Stopped*. It raises no notification, the press
+being the human's own.
+
+**Resume and Close discard it; the two stops leave it.** **Resume** is the
+opposite decision, so a press that starts something takes the pending steer with
+it, while a Resume refused by name leaves it, nothing having changed. **Close**
+takes it in the transaction that closes the Conversation, the way that shuts
+every open Question Set. **Stop** and **Force stop** are about the run rather
+than about the move, and leave it where it is.
+
+**What ends the session running is the submit rather than the press.** One
 Worktree holds one agent, so the session a steer starts takes the Worktree from
 whatever is still in it — at once, or once a session that cannot be displaced
 has finished, which is a review waiting on an Ask. Into **Done** nothing is
@@ -2032,21 +2102,28 @@ Event of its own — somebody decided this — carrying the instruction, or the
 brief a follow-up is opened on, as its body, and the machine's plain Moved line
 stands under it. A steer into Grilling lands that round's Brief under the move
 as well, frozen where it lands and beside the earlier round's rather than over
-it. The Pairing the modal settled is recorded as the **Conversation's** rather
-than one session's, because steering re-settles what runs the work — which is
-also why the pick is part of the form: a steered Draft has none fixed yet. It
-settles the role the target runs its sessions under, which is one apiece except
-for a wrap-up: that both builds and reviews, so the one pick reaches the Review
-Pairing as well — but only to **fill** one nothing was picked for, never to
-replace one that was. The picker is labelled for the state's own work and
-prefilled with what builds, so a human who changes nothing on it has said
-nothing about the review, and an account they chose on the composer to be a
-fresh set of eyes stays that.
+it. **And the Event is the whole form frozen**: the digest and interrupt ticks,
+the Pairing as it was picked and the companion rows asked for, all recorded
+beside the target and the body in the steer's own transaction, and drawn in the
+details pane as the form the human filled, read-only. So every Steer opens a
+pane, whether or not it carried a document, and the item the form was written in
+stays as the record of what was chosen — one recorded before all of it was kept
+draws the fields it has. The Pairing the form settled is recorded as the
+**Conversation's** rather than one session's, because steering re-settles what
+runs the work — which is also why the pick is part of the form: a steered Draft
+has none fixed yet. It settles the role the target runs its sessions under,
+which is one apiece except for a wrap-up: that both builds and reviews, so the
+one pick reaches the Review Pairing as well — but only to **fill** one nothing
+was picked for, never to replace one that was. The picker is labelled for the
+state's own work and prefilled with what builds, so a human who changes nothing
+on it has said nothing about the review, and an account they chose on the
+composer to be a fresh set of eyes stays that.
 
-**And the submit resumes in the same press.** The stop the click left is
-cleared, and what that state ought to be running starts — a fresh grilling, the
-instruction session or the next step off the branch, the wrap-up's watchers, the
-follow-up's own session. Into Done it is the move alone.
+**And the submit resumes in the same press.** The pending steer is taken away in
+the transaction that writes the record, the stop the press left is cleared, and
+what that state ought to be running starts — a fresh grilling, the instruction
+session or the next step off the branch, the wrap-up's watchers, the follow-up's
+own session. Into Done it is the move alone.
 _Avoid_: redirect, retarget, override, transition, take over, reopen and manual
 task (both retired: a steer into Grilling is what reopening a Done Conversation
 was, and a steer into Implementing with a hand-written instruction is what a

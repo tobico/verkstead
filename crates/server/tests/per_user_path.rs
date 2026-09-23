@@ -43,6 +43,13 @@
 //! policy — so that half reads the rules the description came to, the one thing
 //! about this platform a machine that is not a Mac can still be shown.
 //!
+//! **And they stand the machine up differently in one place.** On Linux the
+//! install is on the `PATH` the server was started with, because there that is
+//! the authority; on a Mac it is on no `PATH` at all, because an app in the
+//! Dock has launchd's and the floor is what carries the home's own
+//! `.local/bin` — see ADR-0016's *Macs*, and `sandbox::composed`, where each
+//! platform's composing is.
+//!
 //! Everything else about which directories are granted is a unit test beside
 //! the function that decides it, where a `PATH` and a home are values a test
 //! hands over: see `sandbox::per_user`.
@@ -245,12 +252,29 @@ async fn standing() -> Standing {
     // The machine's own `PATH` stays on the end of it: what the *server*
     // process runs — git, and the wrapper a session is rendered behind — is
     // found on this one, and only a session's is composed from it.
-    let path = format!(
-        "{}:{}:{}",
-        install.display(),
-        outside.display(),
-        std::env::var("PATH").unwrap_or_default(),
-    );
+    //
+    // **And the install itself is on it on Linux alone**, which is the one
+    // thing this fixture says differently on the two platforms. On Linux the
+    // human's own `PATH` is the authority and a directory it does not name is
+    // one nothing adds; a Mac app started from the Dock has launchd's `PATH`
+    // and no line of anybody's profile in it, so there the floor carries the
+    // home's own `.local/bin` and the entry is composed rather than read — see
+    // ADR-0016's *Macs*. Left off here, the Mac half below is asking the
+    // question that matters: a `claude` no `PATH` named is one a session still
+    // reaches.
+    let path = match cfg!(target_os = "macos") {
+        true => format!(
+            "{}:{}",
+            outside.display(),
+            std::env::var("PATH").unwrap_or_default(),
+        ),
+        false => format!(
+            "{}:{}:{}",
+            install.display(),
+            outside.display(),
+            std::env::var("PATH").unwrap_or_default(),
+        ),
+    };
 
     // Safe here for the reason the module says: exactly one test of this binary
     // runs on any machine, so there is no other thread in the process reading
@@ -667,6 +691,13 @@ async fn the_harness_under_the_servers_home_is_what_a_linux_session_runs() {
 
 /// And a Mac's policy, rendered for that same description, lets a session read
 /// and run what is in there and write nothing.
+///
+/// **With nothing of that install on the `PATH` the server was started with**,
+/// which is the Mac's own half of this and the case the app in the Dock is:
+/// launchd hands it four system directories, and what puts `~/.local/bin` in
+/// front of a session there is the floor rather than anything the human wrote —
+/// see ADR-0016's *Macs*. So the directory is granted on the floor's account,
+/// and the version its `claude` links into with it.
 #[tokio::test]
 #[cfg_attr(
     not(target_os = "macos"),
@@ -675,6 +706,15 @@ async fn the_harness_under_the_servers_home_is_what_a_linux_session_runs() {
 async fn the_harness_under_the_servers_home_is_read_and_run_by_a_macs_policy() {
     let standing = standing().await;
     let sandbox = standing.sandbox();
+
+    assert!(
+        !std::env::var("PATH")
+            .unwrap_or_default()
+            .split(':')
+            .any(|entry| Path::new(entry) == standing.install),
+        "the server was started with no entry for the install at all, which is \
+         what this half is asking about",
+    );
 
     let (rendering, _closing) = sandbox
         .command(&[SH, "-c", "true"])
@@ -687,7 +727,8 @@ async fn the_harness_under_the_servers_home_is_read_and_run_by_a_macs_policy() {
         policy.contains(&format!(
             "(allow file-read* file-map-executable process-exec* (subpath {install}))"
         )),
-        "the human's own install is what a session reads and runs:\n{policy}",
+        "the human's own install is what a session reads and runs, the Mac \
+         floor being the whole of how it got on the list:\n{policy}",
     );
     assert!(
         !policy.contains(&format!("(allow file-write* (subpath {install}))")),

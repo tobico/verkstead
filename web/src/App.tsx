@@ -127,7 +127,7 @@ function Verkstead(): JSX.Element {
       <Route path="/" component={Workbench} />
       {/* And each of that Conversation's details panes under it, so what is
           open survives a reload and can be linked to. Nested rather than
-          written out as five routes of their own, because the workbench is
+          written out as six routes of their own, because the workbench is
           one page across all of them: a route the router swaps for another
           takes its component down with it, and everything the middle pane was
           holding — a Brief half typed into above all — would go every time a
@@ -143,12 +143,13 @@ function Verkstead(): JSX.Element {
         <Route path="/backlog" />
         <Route path="/share" />
         <Route path="/code" />
+        <Route path="/steer" />
         <Route path="/roadmaps/:name" />
       </Route>
       {/* And where Code's pane stood while it was the Terminal pane, which is
           a redirect rather than a page: a link somebody kept and a browser
           that remembered the old path still land on the pane, under the same
-          Conversation. Outside the route above rather than a sixth leaf of
+          Conversation. Outside the route above rather than another leaf of
           it, because those leaves draw nothing — the page reads what is open
           off the URL — so a redirect written as one of them would never be
           rendered to do its redirecting. */}

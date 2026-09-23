@@ -154,6 +154,7 @@ export function mount(at = "/") {
             <Route path="/backlog" />
             <Route path="/share" />
             <Route path="/code" />
+            <Route path="/steer" />
             <Route path="/roadmaps/:name" />
           </Route>
           <Route path="/conversations/:id/terminal" component={Moved} />

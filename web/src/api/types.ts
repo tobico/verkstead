@@ -107,7 +107,11 @@ harness: boolean, };
  * watching says itself on a Timeline instead — see the server's `continuing`
  * module, which starts the same stage by the other route.
  */
-export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "NoGitAuthor" | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | "RoadmapComplete" | "NoBrief" | "StageInFlight" | "BranchExists" | "WorktreeRefused" | { "Companion": { 
+export type Adopted = "Adopted" | "NoSuchConversation" | "NotDrafting" | "NotAdopting" | "NoGrillingProfile" | "NoImplementationProfile" | "NoReviewProfile" | "ProfileBroken" | "NoGitAuthor" | "FetchFailed" | "NoBaseCommit" | "NoRoadmap" | "RoadmapComplete" | "NoBrief" | "StageInFlight" | "BranchExists" | { "BranchInTheWay": { 
+/**
+ * The branch that is in the way.
+ */
+by: string, } } | "WorktreeRefused" | { "Companion": { 
 /**
  * The Repo's registered name.
  */
@@ -1000,14 +1004,18 @@ export type CompanionModeChoice = { mode: CompanionMode, };
 export type CompanionModeChosen = "Chosen" | "NoSuchConversation" | "NotDrafting" | "NoSuchCompanion";
 
 /**
- * Which of a companion repo's four ways of not being checked out this was.
+ * Which of a companion repo's ways of not being checked out this was.
  *
- * The Conversation's own four, asked of a companion: everything git is asked
- * for one is what it is asked for the other, in the same order and for the same
- * reasons. Separate from [`GrillingStarted`] rather than four more variants of
- * it, so that the repository is named once instead of four times.
+ * The Conversation's own, asked of a companion: everything git is asked for one
+ * is what it is asked for the other, in the same order and for the same
+ * reasons. Separate from [`GrillingStarted`] rather than that many more
+ * variants of it, so that the repository is named once instead of once apiece.
  */
-export type CompanionRefusal = "FetchFailed" | "NoBaseCommit" | "BranchExists" | "WorktreeRefused";
+export type CompanionRefusal = "FetchFailed" | "NoBaseCommit" | "BranchExists" | { "BranchInTheWay": { 
+/**
+ * The branch of that repository standing in the companion's way.
+ */
+by: string, } } | "WorktreeRefused";
 
 /**
  * And of taking one away.
@@ -1449,10 +1457,10 @@ stop_asked: boolean,
  * branch holds a backlog with work left in it, or a roadmap it has
  * written.
  *
- * What decides whether the steer modal offers *carrying on* — the target
+ * What decides whether the steer form offers *carrying on* — the target
  * itself is offered on every Conversation there is, because an instruction
  * can always be written. Where this is false the instruction is the whole
- * of what that target can be, so the modal requires one.
+ * of what that target can be, so the form requires one.
  *
  * The server’s rule rather than something the page works out from the
  * fields around it: what stands is a reading of the Worktree as it is now,
@@ -1466,7 +1474,7 @@ stop_asked: boolean,
  * and what decides it in the end is the relaunch that reads the directory
  * the steer has just made.
  *
- * Checked again when the modal is submitted, as every refusal here is;
+ * Checked again when the form is submitted, as every refusal here is;
  * this says only that it was worth offering as of the moment it was read.
  */
 ready_to_continue: boolean, 
@@ -1714,7 +1722,23 @@ shared: ShareView | null,
  * was handed over and none of the files themselves — see
  * [`AttachmentView`].
  */
-attachments: Array<AttachmentView>, };
+attachments: Array<AttachmentView>, 
+/**
+ * The steer somebody has started on this Conversation and not yet decided,
+ * where there is one.
+ *
+ * `null` is the ordinary Conversation, which is nearly all of them. A
+ * pending steer is written by the press on **Steer** and goes at the
+ * submit or the cancel, so what it says while it stands is that there is a
+ * form to be finished: the workbench draws it as the last item on the
+ * Timeline and the form is that item's details pane.
+ *
+ * **Not a Timeline Event, which is why it is here rather than in the
+ * list.** It is the one thing on the pane that has not happened yet, so it
+ * has no place in the record and is drawn after everything that does — and
+ * a Share, which is the record, carries no trace of it.
+ */
+pending_steer: PendingSteerView | null, };
 
 /**
  * What became of a create.
@@ -1898,14 +1922,20 @@ export type DirectoryListing = { "Listed": {
 path: string | null, entries: Array<DirectoryEntry>, } } | "NotAbsolute" | "Missing" | "NotADirectory" | { "Unreadable": { why: string, } };
 
 /**
- * And which of the wizard's eight tabs this machine is.
+ * And which of the wizard's nine tabs this machine is.
  *
  * The five Linux distributions whose commands are written down, everything
- * else that is a Linux, and the two platforms whose answer is the platform's
- * own. Read off `/etc/os-release` — `ID` first and then `ID_LIKE`, so that a
- * derivative gets its parent's commands rather than the generic list.
+ * else that is a Linux, and the platforms whose answer is the platform's own —
+ * which is two machines on a Mac. Read off `/etc/os-release` — `ID` first and
+ * then `ID_LIKE`, so that a derivative gets its parent's commands rather than
+ * the generic list.
+ *
+ * **The order is the order the tabs are drawn in**, and the two Macs are
+ * beside each other: the strip scrolls on a phone, and the human reading it is
+ * the one whose detection went wrong — so the other Mac is the tab next door
+ * rather than the one past every Linux.
  */
-export type Distro = "MacOs" | "Windows" | "NixOs" | "Ubuntu" | "Fedora" | "Debian" | "Arch" | "OtherLinux";
+export type Distro = "MacOs" | "MacOsIntel" | "Windows" | "NixOs" | "Ubuntu" | "Fedora" | "Debian" | "Arch" | "OtherLinux";
 
 /**
  * What one entry is, which decides what the field drawing it does with the row.
@@ -2689,6 +2719,28 @@ export type PathsView = {
 binds: Array<BindEntry>, };
 
 /**
+ * A pending steer as the page receives it: when the press was made, and the
+ * form as the last save left it.
+ *
+ * The Timeline's own item is drawn from the target inside it — it reads
+ * *Steer* until the form has saved once and *Steering into X* after — and the
+ * pane that item opens fills every one of its fields from the rest.
+ */
+export type PendingSteerView = { 
+/**
+ * When Steer was pressed, RFC 3339.
+ */
+at: string, 
+/**
+ * And the form, which is what the pane is prefilled from and what it saves
+ * as it is typed.
+ *
+ * Empty on a form nobody has written in yet, which is what every press
+ * opens: no target picked, nothing written and nothing ticked.
+ */
+form: SteerForm, };
+
+/**
  * What a Conversation has settled about one of its roles, as the page shows
  * it: the Pairing its sessions run under, that the role runs none, or nothing
  * picked yet.
@@ -2722,10 +2774,11 @@ export type PinnedEvent = { "AgentOutput": AgentOutputEvent } | { "TaskList": Ta
 /**
  * The three platforms, as the viewer receives one.
  *
- * Its own type beside [`Distro`], which carries the same fact for two of its
- * eight values: the distro is which set of commands to draw, and this is which
+ * Its own type beside [`Distro`], which carries the same fact for three of its
+ * nine values: the distro is which set of commands to draw, and this is which
  * machine they are for — a sandbox row that ticks, one that is run, and one
- * that is nothing to install.
+ * that is nothing to install. Both Macs are this one platform, `sandbox-exec`
+ * being Apple's own on either.
  */
 export type Platform = "Linux" | "MacOs" | "Windows";
 
@@ -4363,6 +4416,45 @@ export type Standing = { "Waiting": Liveness } | { "Answered": Answered } | { "L
 export type Started = { "Started": { id: number, } } | "NoSuchRepo";
 
 /**
+ * One Repo a steer put into the sandbox, as the record keeps it.
+ *
+ * [`CompanionAddition`] said the other way round: that is what a submit asks
+ * for, by the id the page picked it by, and this is what it came to, by the
+ * name a reader wants. A share carries these, so the path is not among them.
+ */
+export type SteerAdditionView = { 
+/**
+ * What the Repo is called.
+ */
+repo: string, mode: CompanionMode, 
+/**
+ * The branch of that repository's own its checkout came off, or `null` for
+ * the rule: that repository's default branch as origin held it.
+ */
+base_ref: string | null, 
+/**
+ * What a read-write one's branch was called, or empty for *mirroring* —
+ * the Conversation's own branch name.
+ */
+branch: string, };
+
+/**
+ * What cancelling a pending steer came to.
+ *
+ * Cancel is a press now rather than a modal being dismissed: it takes the
+ * pending steer away and leaves the Conversation exactly as the first press
+ * left it — stopped, with Resume on offer. Nothing is posted to the Timeline,
+ * a steer that decided nothing being no Event, and the stop's own Notice
+ * already says the human pressed.
+ *
+ * Nothing to cancel is [`Cancelled`] all the same: a cancel landing behind a
+ * submit or another device's cancel has got what it asked for.
+ *
+ * [`Cancelled`]: SteerCancelled::Cancelled
+ */
+export type SteerCancelled = "Cancelled" | "NoSuchConversation";
+
+/**
  * Which of a companion's ways of not being delivered by a steer this was.
  *
  * [`CompanionRefusal`]'s four asked again at the other moment a companion is
@@ -4409,35 +4501,169 @@ target: Lifecycle,
  * out as every piece of markdown on this wire is — and `None` for every
  * steer that carried nothing written.
  */
-html: string | null, };
+html: string | null, 
+/**
+ * And the rest of the form that press filled: the ticks, the Pairing and
+ * the companion rows it asked for.
+ *
+ * `null` is a steer recorded before any of this was written down, which
+ * the pane draws with the fields it has — the target and the body — rather
+ * than as a form whose every box was left empty. See
+ * [`SteerRecordView`].
+ */
+record: SteerRecordView | null, };
 
 /**
- * What clicking Steer found, which is what the modal it opens is drawn from.
+ * The Steer form in the shape it is saved and read back in: every field the
+ * pane draws, with empty meaning what empty means on the pane.
  *
- * The click is a press of its own rather than the first half of the submit: it
- * stops the drive before the modal opens, so that nothing new is launched while
- * the human composes and the world the modal was drawn against is the world the
- * submit arrives in. Cancel leaves the Conversation stopped with Resume on
- * offer, which is accepted rather than a bug — the click is what freezes it.
+ * **One value rather than a field at a time, and it travels both ways.** The
+ * pane is prefilled from it on the way in and saves the whole of it on the way
+ * out, so the row is never the target of one keystroke beside the instruction
+ * of another — a form that was never on anybody's screen.
+ *
+ * **Not a [`SteerSubmission`]**, though it says nearly the same things. What a
+ * submit carries is what the form *decided*: one target, and only the payload
+ * that target takes. This is what the form holds while it is being written —
+ * a target nobody has picked yet, a brief kept across a change of mind about
+ * where the work goes, an instruction that is not being sent anywhere.
  */
-export type SteerOpened = { "Opened": { 
+export type SteerForm = { 
 /**
- * Whether a session is still running as the modal opens.
+ * Where the work goes: the target the pane's picker is on, as the last
+ * save left it.
  *
- * What **Interrupt current task** is offered for: the click leaves what
- * is running exactly where it is, and the checkbox is the only way to
- * end it where it stands. What ends it otherwise is the submit's own
- * launch — one Worktree holds one agent, so the session a steer starts
- * takes the Worktree from whatever is still in it — and into Done,
- * where nothing is launched, nothing ends it at all.
+ * What the picker *shows* rather than only what was pressed, because that
+ * is what a submit would send — the pane opens on the first target it
+ * offers, a form the human has to answer twice being worse than one that
+ * starts somewhere, and a radio that opens already checked is never
+ * pressed. The same rule [`Self::pairing`] is kept under.
  *
- * Where nothing is running there is nothing to interrupt, so the
- * checkbox is not drawn at all.
+ * `null` is a form nothing has been saved on yet, which is every one of
+ * them between the press and the first thing typed or ticked — and what
+ * the Timeline's item reads *Steer* for.
  */
-working: boolean, } } | "NoSuchConversation";
+target: SteerTarget | null, 
+/**
+ * The new round's Brief, for a steer into Grilling.
+ */
+brief: string | null, 
+/**
+ * And whether the round it opens is primed with everything already
+ * answered.
+ */
+digest: boolean, 
+/**
+ * The hand-written work, for a steer into Implementing.
+ */
+instruction: string | null, 
+/**
+ * And the brief, for a steer into Follow-up.
+ */
+follow_up: string | null, 
+/**
+ * What the work would run under from here, which is what the submit would
+ * send — the Conversation's own prefill included, rather than only a pick
+ * made by hand.
+ *
+ * One rather than one per role, because a submit carries one: which role
+ * it answers for is what [`Self::target`] says, and a form whose target
+ * moves to a role of the other kind saves that role's instead.
+ */
+pairing: ProfileChoice | null, 
+/**
+ * And whether the session running now is to be ended where it stands.
+ */
+interrupt: boolean, 
+/**
+ * The Repos the steer would put into the sandbox, one entry per row
+ * ticked.
+ */
+added: Array<CompanionAddition>, 
+/**
+ * And the companions already there it would open up, one per row ticked
+ * up.
+ */
+upgraded: Array<CompanionUpgrade>, };
 
 /**
- * What the human settled in the modal: where the Conversation goes, what runs
+ * What pressing Steer found, which is what the press does with the page next.
+ *
+ * The press is an act of its own rather than the first half of the submit: it
+ * stops the drive and writes the **pending steer** the form is drawn on, so
+ * that nothing new is launched while the human composes and the world the form
+ * was written against is the world the submit arrives in. Cancel leaves the
+ * Conversation stopped with Resume on offer, which is accepted rather than a
+ * bug — the press is what froze it.
+ *
+ * **Two words, because the press has two answers and no more.** A first press
+ * and a second are one outcome between them: what the page does with either is
+ * go to the item at the end of the Timeline, so which of them happened is the
+ * server's own business and is said in its log rather than here.
+ *
+ * Nor does this say what was running. The form's **Interrupt current task**
+ * tick follows the live Conversation's `working` — the item may sit open for
+ * hours and the session may have been seen out meanwhile — so what the press
+ * found is a fact that stops being true, and nothing draws it.
+ */
+export type SteerOpened = "Opened" | "NoSuchConversation";
+
+/**
+ * The Pairing a steer recorded, as it reads now.
+ *
+ * Three states rather than a nullable Pairing, because the middle one is a
+ * fact about the record rather than an absence: a steer into Done picked
+ * nothing, and a steer whose account has been removed since picked something
+ * that is gone. A pane that drew them the same would say *nothing picked* over
+ * a choice the human made.
+ */
+export type SteerPairingView = "Nothing" | "Removed" | { "Under": PairingView };
+
+/**
+ * Everything a steer settled that its own body cannot hold, as the pane draws
+ * it back.
+ *
+ * The form frozen: what the human ticked, what they picked to run the work,
+ * and which repositories they asked for beside it. Read-only from the moment
+ * it lands — the press is over, and what this is, is the record of it.
+ */
+export type SteerRecordView = { 
+/**
+ * Whether the round a steer into Grilling opened was primed with
+ * everything already answered.
+ */
+digest: boolean, 
+/**
+ * And whether the session running at the submit was ended where it stood.
+ */
+interrupt: boolean, 
+/**
+ * What the picker was on, which the steer settled as the Conversation's
+ * own.
+ */
+pairing: SteerPairingView, 
+/**
+ * The Repos the steer put into the sandbox, one entry per row ticked.
+ */
+added: Array<SteerAdditionView>, 
+/**
+ * And the companions already there it opened up, one per row ticked up.
+ */
+upgraded: Array<SteerUpgradeView>, };
+
+/**
+ * What became of saving one.
+ *
+ * Both refusals are permanent, which is what the pane does with them: a field
+ * told there is nothing left to save into stops saving and says so, rather
+ * than asking again on every pause for as long as the human goes on writing.
+ * The commonest by far is a submit or a cancel from another device landing
+ * mid-edit.
+ */
+export type SteerSaved = "Saved" | "NoSuchConversation" | "NoPendingSteer";
+
+/**
+ * What the human settled on the form: where the Conversation goes, what runs
  * the work there, and what to do about anything still running.
  */
 export type SteerSubmission = { 
@@ -4465,7 +4691,7 @@ interrupt: boolean,
  * Absent where the target runs nothing, and absent where the human left
  * the picker on what the Conversation already had: both are a submit that
  * changes no Pairing. A Conversation with none fixed yet — a steered draft
- * — is why the pick is part of the modal rather than an error path, and one
+ * — is why the pick is part of the form rather than an error path, and one
  * that arrives with neither this nor a Pairing of its own is refused by
  * name.
  */
@@ -4576,12 +4802,22 @@ upgraded: Array<CompanionUpgrade>, };
  * Draft and Closed are not among them and never will be: each has a way in of
  * its own, and a steer is for the states the work is *done in* — the four rungs
  * of the ladder, and Follow-up beside them, which has no other way in at all. A
- * target the modal offers is a target something can be set going in, which is
+ * target the form offers is a target something can be set going in, which is
  * why the two that turn on a pull request are drawn out where there is none: an
  * instruction is writable anywhere and Done needs nothing, but there is no
  * wrapping up and no following up of work nobody can see.
  */
 export type SteerTarget = "Grilling" | "Implementing" | "Wrapping" | "FollowUp" | "Done";
+
+/**
+ * And one companion the steer opened up, which carries the one field an
+ * upgrade settles — see [`CompanionUpgrade`].
+ */
+export type SteerUpgradeView = { repo: string, 
+/**
+ * What the branch cut in it was called, or empty for *mirroring*.
+ */
+branch: string, };
 
 /**
  * Whether each of the wizard's three steps stands met, read at the moment the

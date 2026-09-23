@@ -6,7 +6,7 @@
 //! URL is lost the moment the page is navigated away from and back, and a link
 //! to a pane is a link to nothing.
 //!
-//! Five shapes under a Conversation, because there are five kinds of thing the
+//! Six shapes under a Conversation, because there are six kinds of thing the
 //! pane draws:
 //!
 //! - `events/:id` — a Timeline Event with a full self.
@@ -17,6 +17,10 @@
 //! - `code` — Code: the Conversation's editor, which is one pane however many
 //!   files and shells are open in it (ADR 0019). The word the Terminal pane
 //!   stood at is gone, and the path it stood at redirects — see `App.tsx`.
+//! - `steer` — the steer being written, there being one pending steer per
+//!   Conversation. The one of the six that is not on the record at all: it has
+//!   not happened yet, which is why it is named by a word rather than by an
+//!   Event id and why the Timeline draws it after everything that has.
 //!
 //! The `events/` segment is what keeps the ids and the word-named panes apart.
 //! A bare `:event` segment would have read the same as `backlog` the moment
@@ -34,7 +38,7 @@
 //! is picking the end of a record, where the kind is whatever the last Event
 //! turned out to be.
 
-import type { TimelineEvent } from "../api/types";
+import type { ConversationView, TimelineEvent } from "../api/types";
 
 /// What the details pane is showing, as the card that opened it names itself.
 ///
@@ -51,6 +55,10 @@ import type { TimelineEvent } from "../api/types";
 /// have several files and shells open, and they are tabs of the one pane rather
 /// than panes of their own.
 ///
+/// And a word for the steer being written, which has a card and no Event: the
+/// pending steer is one per Conversation like the backlog, and it is not on the
+/// record at all — see [`landing`].
+///
 /// One channel for all of them, so that opening any closes the rest — a details
 /// pane shows one thing. A string rather than an object for the same reason:
 /// what is open is compared against what a card would open, and two of the same
@@ -60,6 +68,7 @@ export type Opening =
   | "backlog"
   | "share"
   | "code"
+  | "steer"
   | `roadmap:${string}`;
 
 /// What opens the named roadmap, by the directory name that is its identity.
@@ -87,7 +96,12 @@ export function pathTo(
 ): string {
   const under = pathOf(conversation);
 
-  if (opening === "backlog" || opening === "share" || opening === "code") {
+  if (
+    opening === "backlog" ||
+    opening === "share" ||
+    opening === "code" ||
+    opening === "steer"
+  ) {
     return `${under}/${opening}`;
   }
 
@@ -121,7 +135,10 @@ export function openingAt(pathname: string): Opening | null {
   }
 
   if (
-    (what === "backlog" || what === "share" || what === "code") &&
+    (what === "backlog" ||
+      what === "share" ||
+      what === "code" ||
+      what === "steer") &&
     which === undefined
   ) {
     return what;
@@ -153,11 +170,15 @@ export function openingAt(pathname: string): Opening | null {
 /// known yet — the Timeline draws a card per kind and needs no such question,
 /// and picking the end of a record is nothing but it.
 ///
-/// Two of them answer for themselves rather than by their kind: a steer opens
-/// only where it carried a document, and the backlog only where there is still
-/// one to read. A move, a manual task and a steer into wrapping up have nothing
+/// One of them answers for itself rather than by its kind: the backlog opens
+/// only where there is still one to read. A move and a manual task have nothing
 /// to show at all, and each is drawn as a line rather than as a card for that
 /// reason.
+///
+/// A steer always opens, whatever it carried. What its pane draws is the form
+/// the human filled, frozen — where it went, what was written under it, what it
+/// runs under and which repos it asked for — so a steer into wrapping up or
+/// done has a pane of its own even though its body says nothing but the state.
 ///
 /// The Brief opens whatever its round has come to — the composer while that
 /// round is being drafted, and the read-only pane once the work has started
@@ -173,7 +194,7 @@ export function openingOf(event: TimelineEvent): Opening | null {
   }
 
   if ("Steer" in event) {
-    return event.Steer.html === null ? null : event.Steer.id;
+    return event.Steer.id;
   }
 
   if ("TaskList" in event) {
@@ -217,4 +238,26 @@ export function lastOpening(timeline: readonly TimelineEvent[]): Opening | null 
   }
 
   return null;
+}
+
+/// Where opening a Conversation lands: the pending steer where one stands, and
+/// the end of the record otherwise.
+///
+/// The pending steer first because it is drawn last — it is the one item on the
+/// pane that has not happened yet, so the Timeline puts it after everything
+/// that has, and the end of the pane is the end of the pane however it got
+/// there. Somebody who left a steer half written and came back to the
+/// Conversation is shown the form they were writing.
+///
+/// Which is also what makes the press on **Steer** and a later arrival the same
+/// landing: the press navigates to the item, and every arrival afterwards finds
+/// it for itself.
+///
+/// A share never takes this road. It carries no pending steer — a share is the
+/// record, and this is not on it — so what a share lands on is [`lastOpening`]
+/// alone.
+export function landing(conversation: ConversationView): Opening | null {
+  return conversation.pending_steer === null
+    ? lastOpening(conversation.timeline)
+    : "steer";
 }

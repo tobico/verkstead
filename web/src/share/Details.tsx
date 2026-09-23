@@ -8,10 +8,10 @@
 //! share carries rather than against every kind a Timeline can hold.
 //!
 //! Which is a shorter list, and it is the record's rather than this file's: the
-//! kinds that do not board a share never reach here, so what is left is the two
-//! documents that arrive rendered — the Brief, and whatever a steer sent a
-//! session off with — and the two that a share carries payloads for, the
-//! Question Sets and the commits.
+//! kinds that do not board a share never reach here, so what is left is the
+//! Brief, which arrives rendered; the steers, each of which arrives as the
+//! whole of the form it was made with; and the two that a share carries
+//! payloads for, the Question Sets and the commits.
 //!
 //! The Question Sets are drawn from the sheets the bundle carries — the same
 //! [`Sheet`] the workbench opens one with, asked for its read-only shape: the
@@ -41,8 +41,8 @@ import { Empty } from "../notices";
 import { Sheet } from "../set/Sheet";
 import { Brief } from "../workbench/Brief";
 import { Opened } from "../workbench/Commit";
-import { Document } from "../workbench/Document";
 import { PaneHead } from "../workbench/PaneHead";
+import { Frozen } from "../workbench/Steer";
 import type { Opening } from "../workbench/openings";
 
 /// An Event a share opens, and which kind it turned out to be.
@@ -75,9 +75,9 @@ export function Details(props: {
         if ("Brief" in event) {
           return { brief: event.Brief };
         }
-        // Only where it carries a document. A steer into wrapping up says
-        // nothing but the state, and the record draws one of those as a line.
-        if ("Steer" in event && event.Steer.html !== null) {
+        // Every one of them, whatever it carried: what a steer opens is the
+        // form the human filled rather than the document they wrote in it.
+        if ("Steer" in event) {
           return { steer: event.Steer };
         }
         if ("QuestionSet" in event) {
@@ -104,18 +104,15 @@ export function Details(props: {
               />
             )}
           </Match>
-          {/* What a steer sent a session off with, read the way every other
-              document the human writes is read — and named after the target,
-              an instruction being one session's whole job and a follow-up's
-              brief being what a conversation was opened on. */}
+          {/* A steer, drawn as the form the human filled — the same pane the
+              workbench draws, because it is the same record. It fetches
+              nothing: every field of it travelled with the event, the
+              account's name included. */}
           <Match when={steerIn(open())}>
             {(steer) => (
-              <Document
-                heading={
-                  steer().target === "FollowUp" ? "Follow-up" : "Instruction"
-                }
-                html={steer().html ?? ""}
-                empty="Nothing was asked for."
+              <Frozen
+                conversation={props.conversation}
+                steer={steer()}
                 back={props.back}
               />
             )}
