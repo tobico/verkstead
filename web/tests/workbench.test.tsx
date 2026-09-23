@@ -18738,6 +18738,64 @@ describe("a file opened out of the code pane's tree", () => {
     expect(TEXT.version).toMatch(/^[0-9a-f]{64}$/);
   });
 
+  /// And the register not answering does not take the files with it.
+  ///
+  /// The two halves of this group belong to different places: a shell is the
+  /// server's, and a file is this page's own once it has been read and typed
+  /// into. So a terminals read that failed is a line above what is open rather
+  /// than a line where what is open would have been — a tab still in the bar
+  /// and nothing behind it would be somebody's unsaved text put out of reach
+  /// by the other half of the pane.
+  it("keeps an open file reachable when the terminals cannot be read", async () => {
+    const { container } = await expanded(
+      OWN_ROOT,
+      codeFolder as FolderListing,
+      whenever(fileOf(TEXT.path), json(codeFile)),
+      whenever(
+        TERMINALS_OF_IT,
+        json({ error: "this conversation's terminals could not be read" }, 503),
+      ),
+    );
+
+    press(container, "Cargo.toml");
+
+    // The line is drawn, and the file is open under it.
+    await waitFor(() =>
+      expect(said(container)).toContain(
+        "Could not read this conversation's terminals",
+      ),
+    );
+
+    await waitFor(() => expect(editor(container)?.value).toBe(TEXT.text));
+    expect(tabs(container)).toHaveLength(1);
+    expect(tabs(container)[0]!.textContent).toBe("Cargo.toml");
+  });
+
+  /// And with nothing open behind it, the pane still offers the way to open
+  /// something: a read that ended in that line is a look that is over, so the
+  /// hint settles rather than waiting for a list that is not coming.
+  it("still offers a new terminal when the terminals cannot be read", async () => {
+    const { container } = await expanded(
+      OWN_ROOT,
+      codeFolder as FolderListing,
+      whenever(
+        TERMINALS_OF_IT,
+        json({ error: "this conversation's terminals could not be read" }, 503),
+      ),
+    );
+
+    await waitFor(() =>
+      expect(
+        container.querySelector(`.${shell.detailsPane} .${codePane.nothing}`),
+      ).toBeTruthy(),
+    );
+
+    expect(
+      container.querySelector(`.${shell.detailsPane} .${codePane.nothing}`)
+        ?.textContent,
+    ).toContain("New terminal");
+  });
+
   /// A picture is drawn in its tab rather than opened in the editor: the bytes
   /// came with the reading, so there is nothing more to fetch.
   it("draws a picture as a picture", async () => {

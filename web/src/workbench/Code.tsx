@@ -1181,15 +1181,24 @@ export function Code(props: {
         <Tree conversation={props.conversation.id} open={openFile} />
 
         <div class={styles.group}>
+          {/* The register not answering is a line *above* whatever is open
+              rather than in place of it. The terminals are the server's and
+              this says so when it cannot be asked; the files beside them are
+              this page's own — read, typed into and not yet saved — and a tab
+              nobody can reach because a different half of the pane could not
+              be read would be the one failure that loses somebody's text. The
+              tabs are still in the bar either way, so drawing the error where
+              their content goes left them pressable and empty. */}
+          <Show when={terminals.isError}>
+            <ErrorLine>
+              Could not read this conversation's terminals:{" "}
+              {terminals.error?.message}
+            </ErrorLine>
+          </Show>
+
           <Switch
             fallback={<Empty>Reading this conversation's terminals…</Empty>}
           >
-            <Match when={terminals.isError}>
-              <ErrorLine>
-                Could not read this conversation's terminals:{" "}
-                {terminals.error?.message}
-              </ErrorLine>
-            </Match>
             <Match when={tabs().length > 0}>
               <For each={tabs()}>
                 {(tab) =>
@@ -1245,8 +1254,15 @@ export function Code(props: {
                 with no shells running lands and where the last of them leaves
                 it. Drawn where a tab's content goes rather than over the whole
                 pane: the tree stands beside this, and a pane-wide notice would
-                be a sentence over that too. */}
-            <Match when={read()}>
+                be a sentence over that too.
+
+                A list that would not read settles it as well as one that did.
+                The hint waits on somebody having looked, and a read that ended
+                in the line above is a look that is over — without this the
+                pane would sit on *Reading this conversation's terminals…*
+                under a sentence saying it could not, with no way to open one
+                and try again. */}
+            <Match when={read() || terminals.isError}>
               <div class={styles.nothing}>
                 <Empty>{NOTHING_OPEN}</Empty>
                 <QuietButton onClick={() => void open()}>
