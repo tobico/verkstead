@@ -23093,6 +23093,282 @@ describe("the code pane's groups", () => {
       expect(localStorage.getItem(UNSAVED)).toBeNull();
     });
   });
+
+  /// And the shortcuts, which are the four keystrokes a browser leaves to the
+  /// page: Ctrl+PageDown and Ctrl+PageUp between a group's tabs, Ctrl+\ to
+  /// split one beside itself, Ctrl+` for a shell in it.
+  ///
+  /// They hang on the document where Ctrl+S already hangs, for as long as Code
+  /// is mounted — so a press arrives whichever half of the pane the hands were
+  /// on, and what every one of them acts on is the **active** group rather than
+  /// whatever happens to have the focus. Ctrl+W and Ctrl+Tab are the browser's
+  /// own and are deliberately not taken, and neither is any key a terminal grid
+  /// already had.
+  describe("and the shortcuts", () => {
+    /// One of them, fired wherever the caret really is — on the body by
+    /// default, the listener being the document's.
+    ///
+    /// What comes back is whether the keystroke survived: `false` where
+    /// something took it and called `preventDefault`, which is what a browser
+    /// reads to decide whether to answer the shortcut itself.
+    function ctrl(key: string, on: Element = document.body): boolean {
+      return fireEvent.keyDown(on, { key, ctrlKey: true });
+    }
+
+    /// Which tab each group is showing, by the name on it — the one reading
+    /// that says where a walk along a bar has got to.
+    function shown(container: ParentNode): Array<string | undefined> {
+      return groups(container).map(
+        (group) =>
+          tabs(group).find((tab) => tab.getAttribute("aria-pressed") === "true")
+            ?.textContent ?? undefined,
+      );
+    }
+
+    /// The socket onto one of the conversation's terminals, by the number in
+    /// its path.
+    function attachedTo(number: number): Promise<Attached> {
+      return waitFor(() => {
+        const socket = Attached.opened.find((one) =>
+          one.url.endsWith(`${TERMINALS_OF_IT}/${number}/attach`),
+        );
+
+        if (!socket) {
+          throw new Error(`nothing has attached to terminal ${number}`);
+        }
+
+        return socket;
+      });
+    }
+
+    /// What a window has typed up its socket.
+    function typed(socket: Attached): unknown[] {
+      return socket.sent
+        .map((wrote) => JSON.parse(wrote) as Record<string, unknown>)
+        .filter((wrote) => "PutIn" in wrote)
+        .map((wrote) => wrote.PutIn);
+    }
+
+    /// The pane with three files open in the one group, which is a bar with
+    /// somewhere to walk.
+    async function three() {
+      const mounted = await opened();
+
+      for (const name of ["Cargo.toml", "README.md", ".gitignore"]) {
+        press(mounted.container, name);
+
+        await waitFor(() =>
+          expect(
+            tabs(mounted.container).map((tab) => tab.textContent),
+          ).toContain(name),
+        );
+      }
+
+      return mounted;
+    }
+
+    /// Ctrl+PageDown turns to the next tab of the active group and Ctrl+PageUp
+    /// to the one before it, and both wrap at the end they run off.
+    it("walks the active group's tabs, wrapping at each end", async () => {
+      const { container } = await three();
+
+      // The last file opened is the one showing, which is where the walk
+      // starts from.
+      expect(shown(container)).toEqual([".gitignore"]);
+
+      // Past the end of the bar, which comes back round to the first.
+      expect(ctrl("PageDown")).toBe(false);
+      await waitFor(() => expect(shown(container)).toEqual(["Cargo.toml"]));
+
+      ctrl("PageDown");
+      await waitFor(() => expect(shown(container)).toEqual(["README.md"]));
+
+      ctrl("PageUp");
+      await waitFor(() => expect(shown(container)).toEqual(["Cargo.toml"]));
+
+      // And back past the start, which comes round the other way.
+      expect(ctrl("PageUp")).toBe(false);
+      await waitFor(() => expect(shown(container)).toEqual([".gitignore"]));
+
+      // Nothing was opened or closed by any of it: a walk is which tab is
+      // showing and nothing else.
+      expect(holding(container)).toEqual([
+        ["Cargo.toml", "README.md", ".gitignore"],
+      ]);
+    });
+
+    /// And which group walks is the active one — the group last pressed into —
+    /// rather than the one the caret happens to be in.
+    it("walks the group last pressed into, not the one with the focus", async () => {
+      const { container } = await three();
+
+      // A second group, holding the tab the split was made from, and active
+      // because that is where the work was going — with a second file opened
+      // into it, so that it is a bar with somewhere of its own to walk.
+      await split(container, tabs(container)[2]!, "Split right");
+      await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+      press(container, "README.md");
+      await waitFor(() =>
+        expect(holding(container)).toEqual([
+          ["Cargo.toml", "README.md", ".gitignore"],
+          [".gitignore", "README.md"],
+        ]),
+      );
+
+      // A press back into the near half makes that one active again, on the
+      // tab it was pressed on.
+      fireEvent.click(tabs(groups(container)[0]!)[0]!);
+      await waitFor(() =>
+        expect(shown(container)).toEqual(["Cargo.toml", "README.md"]),
+      );
+
+      // Fired from inside the *other* group's editor, which is where a caret
+      // would be: the press arrives at the document either way, and what it
+      // walks is the active group.
+      ctrl("PageUp", editors(groups(container)[1]!)[0]!);
+
+      // The near half wrapped to its last tab, and the half the press was made
+      // in is showing exactly what it was.
+      await waitFor(() =>
+        expect(shown(container)).toEqual([".gitignore", "README.md"]),
+      );
+    });
+
+    /// Ctrl+\ splits the active group beside itself: the same split its bar's
+    /// icon and its tab's menu make, with what it was showing showing in both.
+    it("splits the active group to the right on Ctrl+\\", async () => {
+      const { container } = await opened();
+
+      press(container, "Cargo.toml");
+      await waitFor(() => expect(editors(container)).toHaveLength(1));
+
+      expect(ctrl("\\")).toBe(false);
+
+      await waitFor(() => expect(groups(container)).toHaveLength(2));
+      expect(holding(container)).toEqual([["Cargo.toml"], ["Cargo.toml"]]);
+      expect(groups(container).map(stood)).toEqual([
+        { left: "0%", top: "0%", width: "50%", height: "100%" },
+        { left: "50%", top: "0%", width: "50%", height: "100%" },
+      ]);
+
+      // The new group is where the work is going, so it is the active one —
+      // and the file is under two views of the one buffer.
+      expect(
+        groups(container).map((group) => group.getAttribute("aria-current")),
+      ).toEqual([null, "true"]);
+      expect(editors(container)).toHaveLength(2);
+
+      // And again, on the group that split made: the shortcut is the icon, so
+      // it nests the way the icon does.
+      ctrl("\\");
+
+      await waitFor(() => expect(groups(container)).toHaveLength(3));
+      expect(holding(container)).toEqual([
+        ["Cargo.toml"],
+        ["Cargo.toml"],
+        ["Cargo.toml"],
+      ]);
+    });
+
+    /// And Ctrl+` opens a shell in the active group, which is what **New
+    /// terminal** opens.
+    it("opens a terminal in the active group on Ctrl+`", async () => {
+      const { container, fetching } = await opened(
+        whenever(
+          TERMINALS_OF_IT,
+          json({ Opened: { number: 1 } } satisfies TerminalOpened),
+          "POST",
+        ),
+      );
+
+      press(container, "Cargo.toml");
+      await waitFor(() => expect(editors(container)).toHaveLength(1));
+
+      await split(container, tabs(container)[0]!, "Split right");
+      await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+      expect(ctrl("`")).toBe(false);
+
+      // In the group the split made, which is the active one — and showing,
+      // the way a terminal opened from the plus shows.
+      await waitFor(() =>
+        expect(holding(container)).toEqual([
+          ["Cargo.toml"],
+          ["Cargo.toml", "Terminal 1"],
+        ]),
+      );
+      expect(shown(container)).toEqual(["Cargo.toml", "Terminal 1"]);
+
+      // One shell asked for, which is one press of the key.
+      expect(
+        fetching.mock.calls.filter(
+          ([path, init]) =>
+            String(path) === TERMINALS_OF_IT && init?.method === "POST",
+        ),
+      ).toHaveLength(1);
+    });
+
+    /// And nothing here takes a key the grid already had. A terminal with the
+    /// focus in it is a shell being typed into: Ctrl+C interrupts, Ctrl+D ends
+    /// and Ctrl+L clears, and all three go up the socket as the bytes xterm
+    /// makes of them.
+    it("leaves a terminal's own keys to the shell", async () => {
+      withTerminals([1]);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+      const socket = await attachedTo(1);
+      socket.says(PAINTED);
+
+      const typing = await drawn<HTMLTextAreaElement>(
+        container,
+        `.${shell.detailsPane} .xterm-helper-textarea`,
+      );
+
+      fireEvent.keyDown(typing, {
+        key: "c",
+        keyCode: 67,
+        which: 67,
+        ctrlKey: true,
+      });
+      fireEvent.keyDown(typing, {
+        key: "d",
+        keyCode: 68,
+        which: 68,
+        ctrlKey: true,
+      });
+      fireEvent.keyDown(typing, {
+        key: "l",
+        keyCode: 76,
+        which: 76,
+        ctrlKey: true,
+      });
+
+      await waitFor(() =>
+        expect(typed(socket)).toEqual(["\x03", "\x04", "\x0c"]),
+      );
+
+      // And the pane did nothing of its own about any of them: one group, one
+      // tab, and the shell still the one showing.
+      expect(groups(container)).toHaveLength(1);
+      expect(holding(container)).toEqual([["Terminal 1"]]);
+    });
+
+    /// And the two the window keeps are left to it: a page that swallowed
+    /// either would be a pane fighting the browser around it.
+    it("leaves Ctrl+W and Ctrl+Tab to the browser", async () => {
+      const { container } = await three();
+
+      expect(ctrl("w")).toBe(true);
+      expect(ctrl("Tab")).toBe(true);
+
+      expect(groups(container)).toHaveLength(1);
+      expect(holding(container)).toEqual([
+        ["Cargo.toml", "README.md", ".gitignore"],
+      ]);
+      expect(shown(container)).toEqual([".gitignore"]);
+    });
+  });
 });
 
 /// The maximise toggle in Code's header: the press that hides the sidebar and

@@ -29,4 +29,4 @@ Roadmap stage: [02: Groups and drags](docs/roadmaps/code-pane/02-groups-and-drag
 - [x] 05: Dropping a tab on a group's content — [details](05-dropping-on-content.md)
 - [x] 06: Dragging a file in from the tree — [details](06-dragging-from-the-tree.md)
 - [x] 07: The device remembers — [details](07-the-device-remembers.md)
-- [ ] 08: The shortcuts — [details](08-the-shortcuts.md)
+- [x] 08: The shortcuts — [details](08-the-shortcuts.md)

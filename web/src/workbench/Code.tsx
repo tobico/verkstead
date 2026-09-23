@@ -110,6 +110,19 @@
 //! terminal asked for, the tab standing on a shell that would not start. A
 //! split's own new group is active, that being where the work was going.
 //!
+//! **And four keystrokes act on it, from wherever in the pane the hands are.**
+//! Ctrl+PageDown and Ctrl+PageUp turn the active group to the next tab and to
+//! the one before it, wrapping at each end; Ctrl+\ splits it beside itself, the
+//! split its bar's icon and its tab menu make; Ctrl+` opens a shell in it, the
+//! one **New terminal** opens. They hang on the document where Ctrl+S already
+//! hangs, for as long as Code is mounted, which is the whole of their reach —
+//! so a press arrives whichever half of the pane it was made in, and what it
+//! acts on is the active group rather than whatever has the focus. Ctrl+W and
+//! Ctrl+Tab are the browser's own and are deliberately not taken: a page that
+//! swallowed either would be a pane fighting the window around it. And none of
+//! them is a key a terminal grid already had — Ctrl+C interrupts, Ctrl+D ends,
+//! Ctrl+L clears, and all of those go up the socket untouched.
+//!
 //! **A file pressed in the tree opens as a tab of the active group.** What the
 //! server answers a read with says which of four kinds of thing it read — text,
 //! an image, a binary it will not send, or a file over the size cap — and the
@@ -2049,41 +2062,106 @@ export function Code(props: {
       // there is what says it is still running.
       .catch(() => setAsking(undefined));
 
-  /// Ctrl+S — Cmd+S on a Mac — which is the whole of how a file is saved.
+  /// Turn the active group to the tab after the one it is showing, or to the
+  /// one before it — Ctrl+PageDown and Ctrl+PageUp, which wrap at each end.
   ///
-  /// Saving is explicit, which is VS Code's default and the one the bar over a
-  /// refused save depends on: an autosave has no dirty state to hold the
-  /// human's text in while they decide what to do about a collision (ADR 0019,
-  /// *Versioned reads, and a stale write is refused*).
+  /// A group with nothing open has nowhere to go, and one with a single tab is
+  /// already where it is going: both fall out of the arithmetic rather than
+  /// being asked about.
+  const step = (by: number): void => {
+    const group = into();
+    const open = group.tabs();
+    const at = open.findIndex((one) => keyed(one) === showing(group));
+
+    if (at < 0) {
+      return;
+    }
+
+    group.setChosen(keyed(open[(at + by + open.length) % open.length]!));
+  };
+
+  /// Split a group beside itself, showing whatever it is showing — what the
+  /// icon at the end of its bar does, and what Ctrl+\ does.
   ///
-  /// On the document rather than on the editor. Monaco binds nothing to this
-  /// itself, so the press arrives here whether the caret is in a file, in a
-  /// terminal beside it or on the tree — and what it saves is the file showing
-  /// in the **active** group, which is the group the human last pressed into
-  /// and so the file they are looking at whichever of those their hands were
-  /// on. Refused by the browser first, its own Save Page being nothing anybody
-  /// meant.
+  /// Nothing at all where the group has nothing open: a split is this group
+  /// again, and there is no second view to be had of a tab that is not there.
+  const beside = (group: Group): void => {
+    const shown = group.tabs().find((one) => keyed(one) === showing(group));
+
+    if (shown !== undefined) {
+      divide(group, shown, "beside");
+    }
+  };
+
+  /// What this pane takes from the keyboard: Ctrl+S, and the four keystrokes a
+  /// browser leaves to the page.
+  ///
+  /// Ctrl+S — Cmd+S on a Mac — is the whole of how a file is saved. Saving is
+  /// explicit, which is VS Code's default and the one the bar over a refused
+  /// save depends on: an autosave has no dirty state to hold the human's text
+  /// in while they decide what to do about a collision (ADR 0019, *Versioned
+  /// reads, and a stale write is refused*). Taken from the browser first, its
+  /// own Save Page being nothing anybody meant.
+  ///
+  /// Ctrl+PageDown and Ctrl+PageUp walk the active group's tabs and wrap at
+  /// each end, Ctrl+\ splits it beside itself the way its bar's icon does, and
+  /// Ctrl+` opens a shell in it the way **New terminal** does. Ctrl+W and
+  /// Ctrl+Tab are the window's own and are deliberately not among them: a page
+  /// that swallowed either would be a pane fighting the browser around it.
+  ///
+  /// On the document rather than on the editor or on any one group. Monaco
+  /// binds nothing to Ctrl+S itself, and a terminal is a grid with the focus in
+  /// it — so a press arrives here whether the hands were in a file, in a shell
+  /// beside it or on the tree, and what each of these acts on is the **active**
+  /// group rather than whatever happens to have the focus. Which is also why
+  /// not one of them is a key the grid already had: Ctrl+C interrupts, Ctrl+D
+  /// ends and Ctrl+L clears, and every one of those goes up the socket
+  /// untouched.
   ///
   /// Only while this pane is mounted, which is the whole reach of the listener:
-  /// Code is the only thing in this workbench with a file in it to write.
+  /// Code is the only thing in this workbench with tabs to walk or a file in it
+  /// to write.
   const pressed = (event: KeyboardEvent): void => {
     if (!(event.ctrlKey || event.metaKey) || event.altKey) {
       return;
     }
 
-    if (event.key.toLowerCase() !== "s") {
-      return;
+    switch (event.key) {
+      case "s":
+      case "S": {
+        const group = into();
+        const open = group.tabs().find((one) => keyed(one) === showing(group));
+
+        // A group showing a shell has nothing to write, and the press is left
+        // where it would have gone without this pane.
+        if (open === undefined || !("file" in open)) {
+          return;
+        }
+
+        event.preventDefault();
+        void save(open.file);
+        return;
+      }
+
+      case "PageDown":
+      case "PageUp":
+        event.preventDefault();
+        step(event.key === "PageDown" ? 1 : -1);
+        return;
+
+      case "\\":
+        event.preventDefault();
+        beside(into());
+        return;
+
+      case "`":
+        event.preventDefault();
+        void open();
+        return;
+
+      default:
+        return;
     }
-
-    const group = into();
-    const open = group.tabs().find((one) => keyed(one) === showing(group));
-
-    if (open === undefined || !("file" in open)) {
-      return;
-    }
-
-    event.preventDefault();
-    void save(open.file);
   };
 
   document.addEventListener("keydown", pressed);
@@ -2421,15 +2499,7 @@ export function Code(props: {
                         // Nothing of this one is open either: it makes a group
                         // rather than opens a pane.
                         open={false}
-                        press={() => {
-                          const shown = group
-                            .tabs()
-                            .find((one) => keyed(one) === showing(group));
-
-                          if (shown !== undefined) {
-                            divide(group, shown, "beside");
-                          }
-                        }}
+                        press={() => beside(group)}
                       />
 
                       <IconButton
