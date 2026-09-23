@@ -34,20 +34,19 @@ use verkstead_render::{
     Adopted, AdoptedPullRequestView, AnswerAttached, AnswerAttachmentRemoved, Attached,
     AttachmentRemoved, Author, BaseBranchChoice, BranchRename, BriefEdit, BuildCacheView,
     CheckRollup, CleanupStepView, CleanupView, CommentedOn, CompanionAdded, CompanionBaseRecorded,
-    CompanionBranchRenamed, CompanionMode, CompanionModeChoice, CompanionModeChosen,
-    CompanionRemoved, CompanionView, CompileCaching, ConflictResolution, ConversationArchived,
-    ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
-    ConversationUnarchived, ConversationView, Creation, Cursor, GrillingStarted, IgnoreRule,
-    IgnoredCommentsEdit, InstallPress, Lifecycle, Locked, Merging, MissedOut, NewAdoption,
-    NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption, PairingView, Parked,
-    PendingSteerView, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
-    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
-    RuleField, RuleRefused, ServeEdit, ServePress, SetReading, SetView, SettingsEdit,
-    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
-    ShowArchived, ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened,
-    SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp,
-    TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice,
-    Verified,
+    CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
+    CompanionView, CompileCaching, ConflictResolution, ConversationArchived, ConversationClosed,
+    ConversationEntry, ConversationSteered, ConversationStopped, ConversationUnarchived,
+    ConversationView, Creation, Cursor, GrillingStarted, IgnoreRule, IgnoredCommentsEdit,
+    InstallPress, Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion,
+    NewConversation, NewOrder, NewPullRequestAdoption, PairingView, Parked, PendingSteerView,
+    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView,
+    RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
+    ServeEdit, ServePress, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
+    ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView,
+    SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalOpened,
+    TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -3987,7 +3986,7 @@ async fn companion(companion: store::Companion) -> Result<CompanionView, anyhow:
             path: companion.repo.path.to_string_lossy().into_owned(),
             default_branch: companion.repo.default_branch,
         },
-        mode: companion_mode(companion.mode),
+        mode: crate::steering::reaching(companion.mode),
         base_ref: companion.base_ref,
         branch: companion.branch,
         worktree,
@@ -4032,19 +4031,6 @@ fn own_checks(repo: &Option<String>, checks: Option<CheckRollup>) -> Option<Chec
     match repo {
         None => checks,
         Some(_) => None,
-    }
-}
-
-/// How far into a companion the work reaches, said on the wire.
-///
-/// One word either side and no judgement between them, which is why this is a
-/// function at all: it is said of the companions a Conversation holds and of
-/// the ones a steer asked for, and two copies of it would be two places for the
-/// third mode to be forgotten.
-fn companion_mode(mode: store::CompanionMode) -> CompanionMode {
-    match mode {
-        store::CompanionMode::ReadOnly => CompanionMode::ReadOnly,
-        store::CompanionMode::ReadWrite => CompanionMode::ReadWrite,
     }
 }
 
@@ -4106,7 +4092,7 @@ fn steered_form(
             .into_iter()
             .map(|companion| verkstead_render::SteerAdditionView {
                 repo: companion.repo,
-                mode: companion_mode(companion.mode),
+                mode: crate::steering::reaching(companion.mode),
                 base_ref: companion.base_ref,
                 branch: companion.branch,
             })

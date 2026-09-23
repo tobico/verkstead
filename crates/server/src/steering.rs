@@ -1331,9 +1331,14 @@ fn mode(mode: CompanionMode) -> store::CompanionMode {
     }
 }
 
-/// And the same rule read the other way, for the row a pending steer hands back
-/// to be prefilled from — see [`filled`].
-fn reaching(mode: store::CompanionMode) -> CompanionMode {
+/// And the same rule read the other way: the record's word, said on the wire.
+///
+/// Said for the row a pending steer hands back to be prefilled from — see
+/// [`filled`] — and for the companions a Conversation already holds and the
+/// ones a steer recorded, which is [`crate::ui`]'s two readers of it. One
+/// function for all three because a second copy would be a second place for the
+/// third mode to be forgotten.
+pub(crate) fn reaching(mode: store::CompanionMode) -> CompanionMode {
     match mode {
         store::CompanionMode::ReadOnly => CompanionMode::ReadOnly,
         store::CompanionMode::ReadWrite => CompanionMode::ReadWrite,
