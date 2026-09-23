@@ -29,7 +29,7 @@ import { createSignal, type JSX, Show } from "solid-js";
 import { adoptRoadmap } from "../api/client";
 import type { Adopted, ConversationView } from "../api/types";
 import { Empty, ErrorLine, Note } from "../notices";
-import { COMPANION_REFUSAL } from "./Timeline";
+import { companionRefusal } from "./Timeline";
 import styles from "./Adoption.module.css";
 
 /// Each way of being refused an adoption, in the words of what to go and do
@@ -73,8 +73,8 @@ export const ADOPT_REFUSAL: Record<Extract<Adopted, string>, string> = {
 /// A companion's refusal names the repository, because that is the whole of what
 /// makes it different from the same failing on the conversation's own: the thing
 /// to go and look at is one of several repos rather than the obvious one. The
-/// four lines are the grill start's own, because the four failings are — see
-/// `COMPANION_REFUSAL` in [`Timeline`](./Timeline.tsx).
+/// lines are the grill start's own, because the failings are — see
+/// `companionRefusal` in [`Timeline`](./Timeline.tsx).
 ///
 /// And a branch in the way names the branch, for the same reason the other two
 /// carry what they carry: git will not make a branch under a path another branch
@@ -83,7 +83,7 @@ export const ADOPT_REFUSAL: Record<Extract<Adopted, string>, string> = {
 export function adoptRefusal(outcome: Adopted): string {
   if (typeof outcome === "object") {
     if ("Companion" in outcome) {
-      return `${outcome.Companion.repo}: ${COMPANION_REFUSAL[outcome.Companion.why]}`;
+      return `${outcome.Companion.repo}: ${companionRefusal(outcome.Companion.why)}`;
     }
 
     return `A branch named ${outcome.BranchInTheWay.by} stands in the way of the stage's own branch, and Verkstead did not make it.`;

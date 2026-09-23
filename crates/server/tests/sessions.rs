@@ -18590,6 +18590,72 @@ async fn a_stage_whose_companion_cannot_be_delivered_starts_nothing() {
     );
 }
 
+/// And a branch of the companion's standing where a component of that mirrored
+/// name's path goes, which halts the stage by both names.
+///
+/// The stage's branch is mirrored into a read-write companion whole, `roadmaps/`
+/// and all, so the collision the stage scheme leaves behind is the companion's
+/// to have as much as the Conversation's own repository's. Left to git it is
+/// *git would not make its checkout* and a line in the server log — which, on a
+/// roadmap running with nobody watching, is a stall nobody is told the reason
+/// for.
+#[tokio::test]
+async fn a_companion_with_a_branch_in_a_stages_way_halts_it_by_name() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_at_pace(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, "", ""),
+        &gh_about(GREEN, "", ""),
+        *BRISKLY,
+        &[("askance", CompanionMode::ReadWrite)],
+    )
+    .await;
+
+    // Somebody's own branch in the companion, at the one name every stage branch
+    // of every roadmap mirrored into it has to pass through.
+    let companion = PathBuf::from(&alongside(&fixture.view().await, "askance").repo.path);
+    git(&companion, &["branch", "roadmaps"]);
+
+    staged_and_settled(&fixture).await;
+
+    let said = said_by(&fixture).await;
+
+    assert!(
+        said.contains("<code>askance</code>") && said.contains("<code>roadmaps</code>"),
+        "the repository that stopped it and the branch that did: {said:?}",
+    );
+    assert!(
+        said.contains("stands in the way"),
+        "and what that branch is doing to the stage: {said:?}",
+    );
+    assert!(
+        said.contains("Nothing was started"),
+        "and that nothing was left behind: {said:?}",
+    );
+
+    assert!(
+        !planning.exists(),
+        "so no session was launched inside the next-stage fork either",
+    );
+    assert!(
+        !git(
+            &fixture.repo(),
+            &["branch", "--list", "roadmaps/rate-limiting/01-counter"]
+        )
+        .trim()
+        .contains("counter"),
+        "and the stage's own branch was never cut, every question being asked \
+         before any of them is answered",
+    );
+    assert!(
+        !git(&companion, &["worktree", "list"]).contains("counter"),
+        "nor was anything checked out in the companion",
+    );
+}
+
 /// A roadmap with every stage checked starts nothing, and the Timeline says why
 /// — and the devices are told the roadmap is finished.
 ///

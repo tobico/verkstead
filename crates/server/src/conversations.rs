@@ -1765,6 +1765,18 @@ fn plan(
         return Err(refused(CompanionRefusal::BranchExists));
     }
 
+    // And nothing of that repository's standing where a component of that name's
+    // own path goes, which is a branch git will not make rather than one
+    // somebody is already on — see [`crate::stages::in_the_way`]. Asked of a
+    // companion because a stage's branch is mirrored into one whole, `roadmaps/`
+    // and all, so the collision the stage scheme leaves behind is the
+    // companion's to have too.
+    if let Some(cut) = &cut
+        && let Some(by) = crate::stages::in_the_way(&repo, cut)
+    {
+        return Err(refused(CompanionRefusal::BranchInTheWay { by }));
+    }
+
     // Named for the Repo and what the checkout holds, as the Conversation's own
     // is: the branch where there is one, and otherwise the base it stands at —
     // a read-only companion holds no branch to be named for.

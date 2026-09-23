@@ -202,14 +202,17 @@ const GRILL_REFUSAL: Record<
   WorktreeRefused: "Git would not make the worktree. The server log says why.",
 };
 
-/// And the same four failings over a companion repo, which say the same things
-/// about a different repository.
+/// And the same failings over a companion repo, which say the same things about
+/// a different repository.
 ///
 /// Exported because both presses that take a draft past drafting meet them:
 /// starting a grilling and adopting a stage each check the companions out, so
-/// each is refused by these four names — see `adoptRefusal` in
+/// each is refused by these same names — see `adoptRefusal` in
 /// [`Adoption`](./Adoption.tsx).
-export const COMPANION_REFUSAL: Record<CompanionRefusal, string> = {
+export const COMPANION_REFUSAL: Record<
+  Extract<CompanionRefusal, string>,
+  string
+> = {
   FetchFailed:
     "Git could not fetch from its remote, so nothing was started. The server log says why.",
   NoBaseCommit: "It has nothing to check out any more.",
@@ -218,6 +221,20 @@ export const COMPANION_REFUSAL: Record<CompanionRefusal, string> = {
   WorktreeRefused: "Git would not make its worktree. The server log says why.",
 };
 
+/// What to say about one companion repo's failing, whatever press met it.
+///
+/// One of them carries a name, because git will not make a branch under a path
+/// another branch is a file at and which name that is is the whole of what there
+/// is to go and do about it — the same reason the conversation's own refusal
+/// carries one, said of a repository that has to be named as well.
+export function companionRefusal(why: CompanionRefusal): string {
+  if (typeof why === "object") {
+    return `A branch named ${why.BranchInTheWay.by} stands in the way of the branch it would be given there, and Verkstead did not make it.`;
+  }
+
+  return COMPANION_REFUSAL[why];
+}
+
 /// What to say about a start that was refused.
 ///
 /// A companion's refusal names the repository, because that is the whole of
@@ -225,7 +242,7 @@ export const COMPANION_REFUSAL: Record<CompanionRefusal, string> = {
 /// thing to go and look at is one of several repos rather than the obvious one.
 export function grillRefusal(outcome: GrillingStarted): string {
   if (typeof outcome === "object") {
-    return `${outcome.Companion.repo}: ${COMPANION_REFUSAL[outcome.Companion.why]}`;
+    return `${outcome.Companion.repo}: ${companionRefusal(outcome.Companion.why)}`;
   }
 
   return GRILL_REFUSAL[outcome];

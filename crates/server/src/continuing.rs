@@ -894,12 +894,13 @@ enum Halted {
     Companion { repo: String, why: Why },
 }
 
-/// What git would not do for a companion, in the order it is asked: the three
+/// What git would not do for a companion, in the order it is asked: what
 /// [`beside`] asks before anything is made, and then the making itself.
 enum Why {
     FetchFailed,
     NoBaseCommit,
     BranchExists,
+    BranchInTheWay { by: String },
     WorktreeRefused,
 }
 
@@ -930,18 +931,30 @@ impl Halted {
 
 impl Why {
     /// The clause that goes after the repository's name.
-    fn said(&self) -> &'static str {
+    ///
+    /// A `String` rather than a `&'static str` for the one of them that names a
+    /// branch: which branch it is is the whole of what the human goes and does
+    /// something about, so it is said rather than left to the server log.
+    fn said(&self) -> String {
         match self {
             Self::FetchFailed => {
                 "git would not fetch from that repository's remote — so what its checkout would \
                  come off cannot be trusted to be what origin is holding, and the server log \
                  says why the fetch failed"
+                    .to_owned()
             }
-            Self::NoBaseCommit => "what its checkout comes off resolves to no commit there",
+            Self::NoBaseCommit => {
+                "what its checkout comes off resolves to no commit there".to_owned()
+            }
             Self::BranchExists => {
                 "the branch this stage would cut in it is already a branch of that repository"
+                    .to_owned()
             }
-            Self::WorktreeRefused => "git would not make its checkout",
+            Self::BranchInTheWay { by } => format!(
+                "`{by}` is already a branch of that repository, which stands in the way of the \
+                 branch this stage would cut in it"
+            ),
+            Self::WorktreeRefused => "git would not make its checkout".to_owned(),
         }
     }
 }
@@ -1035,6 +1048,19 @@ fn beside(
         && worktrees::branch_exists(&repo, cut)
     {
         return Err(halted(Why::BranchExists));
+    }
+
+    // And nothing of that repository's standing where a component of that name's
+    // own path goes, which is a branch git will not make rather than one
+    // somebody is already on — see [`crate::stages::in_the_way`]. The stage's
+    // branch is mirrored into a companion whole, `roadmaps/` and all, so the
+    // collision this scheme leaves behind is the companion's to have too — and
+    // left to git it halts the roadmap with nothing said but *git would not make
+    // its checkout*, which is what naming it here is for.
+    if let Some(cut) = &cut
+        && let Some(by) = crate::stages::in_the_way(&repo, cut)
+    {
+        return Err(halted(Why::BranchInTheWay { by }));
     }
 
     // Named for the Repo and what the checkout holds, as the stage's own is: the

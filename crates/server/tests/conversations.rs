@@ -2269,7 +2269,7 @@ async fn a_companion_that_cannot_be_delivered_refuses_the_start_by_name() {
             grill(&app, id).await,
             GrillingStarted::Companion {
                 repo: "askance".to_owned(),
-                why,
+                why: why.clone(),
             }
         );
 
@@ -2283,13 +2283,63 @@ async fn a_companion_that_cannot_be_delivered_refuses_the_start_by_name() {
     }
 }
 
+/// And a branch of that repository standing where a component of the companion's
+/// own branch path goes, which is refused by name — both names, the repository
+/// and the branch.
+///
+/// A stage's branch is mirrored into its read-write companions whole,
+/// `roadmaps/` and all, so the one collision that scheme leaves behind is the
+/// companion's to have too. Left to git it is *git would not make its checkout*
+/// and a line in the server log, which is the refusal this one exists to be
+/// instead.
+#[tokio::test]
+async fn a_companion_with_a_branch_in_the_way_refuses_the_start_by_both_names() {
+    for blocker in ["roadmaps", "roadmaps/mvp"] {
+        let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+        let companion = second_repo(&app, elsewhere.path(), "askance").await;
+        let id = ready(&app, elsewhere.path(), repo_id).await;
+
+        add_companion(&app, id, companion).await;
+        companion_mode(&app, id, companion, CompanionMode::ReadWrite).await;
+        assert_eq!(
+            companion_branch(&app, id, companion, "roadmaps/mvp/01-packaging").await,
+            CompanionBranchRenamed::Renamed
+        );
+
+        let askance = elsewhere.path().join("askance");
+        git(&askance, &["branch", blocker]);
+
+        assert_eq!(
+            grill(&app, id).await,
+            GrillingStarted::Companion {
+                repo: "askance".to_owned(),
+                why: CompanionRefusal::BranchInTheWay {
+                    by: blocker.to_owned(),
+                },
+            },
+        );
+
+        // And nothing made anywhere on the way to finding out, the same as every
+        // other question asked before the making.
+        let view = opened(&app, id).await;
+        assert_eq!(view.state, Lifecycle::Draft, "{blocker}");
+        assert_eq!(view.worktree, None, "{blocker}");
+        assert_eq!(view.companions[0].worktree, None, "{blocker}");
+        assert!(!has_branch(&repo, &view.branch), "{blocker}");
+        assert_eq!(worktrees(&repo).len(), 1, "only the repository itself");
+        assert_eq!(worktrees(&askance).len(), 1, "and only the companion");
+    }
+}
+
 /// A start refused over the *last* companion leaves nothing behind either — not
 /// the checkouts already made, and not the branches they were cut on.
 ///
 /// Which is the case asking every question first cannot cover: this one gets
-/// past the asking, because what git refuses is the making. `feature/x` is a
-/// name no branch answers to and git will still not take, `feature` being a ref
-/// in the way of the directory it would need.
+/// past the asking, because what git refuses is the making. `feature` is a name
+/// no branch answers to and git will still not take, `feature/x` being a ref
+/// beneath the file it would have to be — and it is the one half of that
+/// collision nothing asks about, the other being
+/// [`CompanionRefusal::BranchInTheWay`].
 #[tokio::test]
 async fn a_start_refused_over_a_companion_unmakes_the_checkouts_it_had_made() {
     let (elsewhere, dir, app, repo, repo_id) = workbench().await;
@@ -2305,9 +2355,9 @@ async fn a_start_refused_over_a_companion_unmakes_the_checkouts_it_had_made() {
     let askance = elsewhere.path().join("askance");
     let granit = elsewhere.path().join("granit");
 
-    git(&granit, &["branch", "feature"]);
+    git(&granit, &["branch", "feature/x"]);
     assert_eq!(
-        companion_branch(&app, id, last, "feature/x").await,
+        companion_branch(&app, id, last, "feature").await,
         CompanionBranchRenamed::Renamed
     );
 

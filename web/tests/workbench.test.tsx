@@ -6404,6 +6404,32 @@ describe("starting the work", () => {
     },
   );
 
+  /// And the companion refusal that carries a name says it, beside the
+  /// repository. A branch standing where the companion's own branch path goes is
+  /// one git will not make there, and which one it is is the whole of what there
+  /// is to go and rename — the other companion refusals name something the page
+  /// is already showing.
+  it("names both the companion and the branch standing in its way", async () => {
+    theWorkbench(
+      whenever(
+        `/api/ui/conversations/${OPEN.id}/grill`,
+        json({
+          Companion: { repo: "askance", why: { BranchInTheWay: { by: "roadmaps" } } },
+        } satisfies GrillingStarted),
+        "POST",
+      ),
+    );
+    const { container } = mount(`/conversations/${OPEN.id}`);
+
+    fireEvent.click(await drawn(container, `.${composer.startGrilling} .${composer.start}`));
+
+    await waitFor(() =>
+      screen.getByText(
+        "askance: A branch named roadmaps stands in the way of the branch it would be given there, and Verkstead did not make it.",
+      ),
+    );
+  });
+
   /// A conversation that has started has nothing to start, so there is nothing
   /// to draw — not a button that would be refused.
   it("offers nothing on a conversation that has already started", async () => {
