@@ -79,6 +79,15 @@
   }
 }
 
+/* The row in the hand, taken back while it is being carried out of the tree.
+   What says where it would land is the line along a bar, or the band over a
+   group's content, which the pane beside this draws — a row that looked
+   untouched while one of those travelled would be two answers to the one
+   gesture. The tab in a hand is drawn the same way, in `Code.module.css`. */
+.file.lifted {
+  opacity: 0.45;
+}
+
 /* The caret, a shade quieter than the name beside it and sized to the row: what
    it says is which way this folder is, which is worth a glance rather than a
    read. Its own width so that the names line up whichever way it points. */

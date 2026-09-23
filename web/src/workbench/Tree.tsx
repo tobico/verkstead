@@ -39,6 +39,19 @@
 //! is held, and where the active group is the one it opens in. The same file
 //! pressed twice turns to the tab it already has.
 //!
+//! **And a file dragged out of it opens where it is dropped.** The gesture is
+//! the one a tab is dragged with and it belongs to the pane beside this, which
+//! is where the bars and the zones a row can be dropped on are: what the tree
+//! does is hand the press over at the moment it begins, and draw the row it is
+//! holding as lifted while it is being carried. So a press that let go about
+//! where it landed is the press above, unchanged, and one that carried the row
+//! somewhere opens the file there instead — see `Code.tsx`.
+//!
+//! Only a file. A folder row hands nothing over, there being nothing for a drop
+//! to open, so a press on one is the expand it has always been. And nothing
+//! about a drag writes anything: the row is still where it is and the folder
+//! still open or closed, whatever the drag came to.
+//!
 //! No row menu, no quick open and no git status marks: those are stages 02 and
 //! 03 of the roadmap, and each of them wants this tree to be here first.
 
@@ -113,6 +126,20 @@ export function Tree(props: {
   /// What a file pressed in it opens: the path, handed to the groups of tabs
   /// beside the tree, where it opens in the active one.
   open: (path: string) => void;
+
+  /// And a press on a file row beginning, which the pane beside the tree takes
+  /// over: it may turn out to be a drag, and where such a drag is let go is a
+  /// group of that pane rather than anything here.
+  ///
+  /// Handed the event rather than the path alone, because what the pane does
+  /// with it is the pointer's own gesture — the capture, the grace, the hold
+  /// under a finger — which is the gesture a tab is dragged with.
+  pick: (event: PointerEvent, path: string) => void;
+
+  /// And which file it is carrying, where it is carrying one: the row is drawn
+  /// lifted from the moment it leaves until the hand lets go, the way the tab
+  /// in a hand is. Null every moment nobody is dragging one.
+  carried: Accessor<string | null>;
 
   /// Which folders are open, and what each of them last read.
   ///
@@ -215,6 +242,8 @@ export function Tree(props: {
                   held={held}
                   toggle={toggle}
                   open={props.open}
+                  pick={props.pick}
+                  carried={props.carried}
                 />
               )}
             </For>
@@ -267,6 +296,10 @@ function Row(props: {
   toggle: (path: string) => void;
   /// And open this file, which is the groups of tabs beside the tree.
   open: (path: string) => void;
+  /// And pick it up, which is the same pane taking the press over.
+  pick: (event: PointerEvent, path: string) => void;
+  /// And which file that pane is carrying, where it is carrying one.
+  carried: Accessor<string | null>;
 }): JSX.Element {
   /// The indent, in the one unit a tree has: a level.
   const inset = (): string => `${0.5 + props.depth * 0.75}rem`;
@@ -287,7 +320,13 @@ function Row(props: {
           <button
             type="button"
             class={styles.file}
+            classList={{ [styles.lifted!]: props.carried() === props.path }}
             style={{ "padding-left": fileInset() }}
+            // Which of three things this press is — one that opens the file,
+            // one that scrolls the tree, or a drag — is settled by what the
+            // hand does next, and by the pane beside the tree: the bars and
+            // the zones such a drag lands on are all over there.
+            onPointerDown={(event) => props.pick(event, props.path)}
             onClick={() => props.open(props.path)}
           >
             <span class={styles.name}>{props.name}</span>
@@ -331,6 +370,8 @@ function Row(props: {
                         held={props.held}
                         toggle={props.toggle}
                         open={props.open}
+                        pick={props.pick}
+                        carried={props.carried}
                       />
                     )}
                   </For>

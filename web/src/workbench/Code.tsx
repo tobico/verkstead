@@ -84,6 +84,17 @@
 //! the centre as the whole of the content, an edge as the band the new group
 //! would take — and one zone anywhere at a time, a pointer being in one place.
 //!
+//! **And a file row of the tree is picked up the same way**, onto those same
+//! two targets: the same grace before a press becomes a drag, the same hold to
+//! lift one under a finger, the same line along a bar and the same five zones
+//! of a group's content. What a drop does is open the file — in the group whose
+//! bar or centre it landed on, or in the new group an edge makes — so dragging
+//! one in is the press that opens a file pointed at a group rather than at the
+//! active one. A press that let go about where it landed is still that press,
+//! and a folder row is not a drag source, there being nothing to open. Nothing
+//! here writes anything: the tree is exactly as it was whatever the drag came
+//! to, dragging being a way to open a file rather than a move on disk.
+//!
 //! **And a view is drawn once and placed into the group holding it**, which is
 //! what lets a tab move without being made again. A terminal's tab carries a
 //! live socket and this window's own memory of what has scrolled past it, and a
@@ -1025,17 +1036,26 @@ export function Code(props: {
   const [carried, setCarried] = createSignal<Tab | null>(null);
   const [mark, setMark] = createSignal<Landing | null>(null);
 
-  /// The press in flight: which tab of which group it began on, where on the
-  /// screen it began, whether it is a finger, and whether the tab has lifted
-  /// under it yet. Null every moment nothing is pressed.
+  /// And which file the tree has had picked up out of it, where the hand is
+  /// carrying one of those instead.
+  ///
+  /// A path rather than a tab, because nothing has been opened yet: what is in
+  /// the hand is the row, and the tree draws it lifted the way a bar draws the
+  /// tab in one. One or the other of these two is set while a drag is on, and
+  /// neither of them the rest of the time.
+  const [taken, setTaken] = createSignal<string | null>(null);
+
+  /// The press in flight: what it began on — a tab of a group, or a file row of
+  /// the tree — where on the screen it began, whether it is a finger, and
+  /// whether what it holds has lifted under it yet. Null every moment nothing
+  /// is pressed.
   ///
   /// Not a signal, because nothing is drawn from it — what the lifted tab and
   /// the insertion point are drawn from are the two above, and the rest of this
   /// is bookkeeping between one pointer event and the next. The sidebar's cards
   /// are picked up exactly this way, in `Conversations.tsx`.
   let press: {
-    group: Group;
-    tab: Tab;
+    what: Carrying;
     pointer: number;
     x: number;
     y: number;
@@ -1049,20 +1069,29 @@ export function Code(props: {
   /// belongs to — so what removes them is made alongside them.
   let stop: (() => void) | null = null;
 
-  /// Whether the press that has just ended was a drag. The click arrives after
-  /// the pointer is up, and a tab carried into place should not be turned to as
-  /// well.
+  /// What the press that has just ended was carrying, where it was a drag at
+  /// all. The click arrives after the pointer is up, and a thing carried into
+  /// place should not be answered a second time: a tab turned to as well, or a
+  /// file opened as well in the group its row was dragged out of the tree past.
   ///
-  /// Read once and spent, so the drag it belongs to swallows the one click that
-  /// follows it and nothing after that: a keyboard press is a click with no
-  /// pointer behind it, and a flag left standing would leave the tab a drag
-  /// ended on deaf to Enter.
-  let carrying = false;
+  /// The thing itself rather than a flag, because what says a click belongs to
+  /// this drag is that it is a click on the very tab, or the very row, that was
+  /// carried: a flag would swallow whatever was pressed next instead. Spent by
+  /// that click, and cleared by the next press whatever it turns out to be, so
+  /// a drag that ended with no click behind it leaves nothing standing — a tab
+  /// then deaf to Enter, or a file row that would not open.
+  let carrying: Carrying | null = null;
 
-  /// The tab lifts: it is being moved from here until the hand lets go.
+  /// It lifts: the tab is being moved, or the file carried in, from here until
+  /// the hand lets go.
   const lift = (at: NonNullable<typeof press>): void => {
     at.lifted = true;
-    setCarried(at.tab);
+
+    if ("tab" in at.what) {
+      setCarried(at.what.tab);
+    } else {
+      setTaken(at.what.path);
+    }
 
     // The bar must not scroll out from under a tab being moved along it. A
     // `touch-action` on the tab would have said so before the finger landed and
@@ -1083,6 +1112,28 @@ export function Code(props: {
     // is the one thing that cannot say which hand made it.
     fromTouch = event.pointerType !== "mouse";
 
+    begin(event, { group, tab });
+  };
+
+  /// And a press begins on a file row of the tree, which is the same gesture
+  /// carrying a path rather than a view of one.
+  ///
+  /// Which of three things *this* one is — a press that opens the file, a
+  /// scroll of the tree, or a drag — is settled the same way, by what the hand
+  /// does next. Nothing sets [`fromTouch`] here: what that decides is whether a
+  /// `contextmenu` is a right-click, and the tree has no menu to drop.
+  ///
+  /// A folder row does not call this at all. There is nothing to open, so there
+  /// is nothing for a drop to do, and a press on one is the expand it has
+  /// always been.
+  const pick = (event: PointerEvent, path: string): void => {
+    begin(event, { path });
+  };
+
+  /// The gesture itself, whichever of the two began it — and from here down
+  /// everything is written of what is in the hand rather than of where it came
+  /// from, because a tab and a file row are dropped onto the same places.
+  const begin = (event: PointerEvent, what: Carrying): void => {
     // The primary button, a finger or a pen. A right-click is not a drag.
     if (event.button !== 0) {
       return;
@@ -1104,8 +1155,7 @@ export function Code(props: {
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
 
     const began: NonNullable<typeof press> = {
-      group,
-      tab,
+      what,
       pointer: event.pointerId,
       x: event.clientX,
       y: event.clientY,
@@ -1113,7 +1163,12 @@ export function Code(props: {
       lifted: false,
     };
     press = began;
-    carrying = false;
+
+    // A drag that ended with no click behind it — a release the browser took
+    // over, a tab that went with the group it emptied — has nothing left to
+    // swallow, and this is where that is settled: a press is the one moment
+    // that says the gesture before it is over.
+    carrying = null;
 
     // The rest of the gesture is watched at the window rather than at the tab,
     // which is what the dividers beside it do: a pointer that has outrun the
@@ -1142,9 +1197,10 @@ export function Code(props: {
     window.addEventListener("pointerup", ended);
     window.addEventListener("pointercancel", ended);
 
-    // A finger lifts a tab by holding still. No distance tells a drag from a
-    // scroll of the bar on a phone — both of them are the finger moving — so
-    // what tells the two apart is the time before it does.
+    // A finger lifts what it is holding by holding still. No distance tells a
+    // drag from a scroll of the bar — or of the tree — on a phone, both of them
+    // being the finger moving, so what tells the two apart is the time before
+    // it does.
     if (began.touch) {
       began.waiting = setTimeout(() => {
         if (press === began) {
@@ -1171,9 +1227,9 @@ export function Code(props: {
         return;
       }
 
-      // A finger that travels before its tab has lifted is scrolling the bar,
-      // so the press is over and the browser has it. Nothing has lifted, so
-      // ending it here moves nothing.
+      // A finger that travels before what it holds has lifted is scrolling the
+      // bar, or the tree, so the press is over and the browser has it. Nothing
+      // has lifted, so ending it here moves nothing.
       if (at.touch) {
         put();
         return;
@@ -1185,13 +1241,14 @@ export function Code(props: {
     setMark(landing(event.clientX, event.clientY));
   };
 
-  /// The drag is over: the tab goes where the mark stood.
+  /// The drag is over: what was in the hand goes where the mark stood — the tab
+  /// moved there, or the file opened there.
   ///
   /// Every ending comes through here — the release, a cancel, a press that
   /// turned out to be a scroll, and the next press finding this one standing —
-  /// so there is one place the listeners come off and one place the tab is put
-  /// down. A release away from every bar and every group is an ending like any
-  /// other, and moves nothing: what it was let go over is what says what a
+  /// so there is one place the listeners come off and one place the hand is
+  /// emptied. A release away from every bar and every group is an ending like
+  /// any other, and does nothing: what it was let go over is what says what a
   /// release does, and out there is nothing.
   const put = (): void => {
     const at = press;
@@ -1201,6 +1258,7 @@ export function Code(props: {
     stop = null;
     press = null;
     setCarried(null);
+    setTaken(null);
     setMark(null);
 
     if (at === null) {
@@ -1214,16 +1272,21 @@ export function Code(props: {
     }
 
     document.removeEventListener("touchmove", refuseScroll);
-    carrying = true;
+    carrying = at.what;
 
     if (where === null) {
       return;
     }
 
+    if (!("tab" in at.what)) {
+      bring(at.what.path, where);
+      return;
+    }
+
     if ("at" in where) {
-      move(at.group, at.tab, where.group, where.at);
+      move(at.what.group, at.what.tab, where.group, where.at);
     } else {
-      onto(at.group, at.tab, where.group, where.zone);
+      onto(at.what.group, at.what.tab, where.group, where.zone);
     }
   };
 
@@ -1364,6 +1427,61 @@ export function Code(props: {
     });
   };
 
+  /// A file row of the tree put down over a group, which opens the file there.
+  ///
+  /// The same two landings a tab has, answered the way the two above answer
+  /// them: a place along a bar or a centre opens it in that group, and each of
+  /// the four edges splits the group there and opens it alone in the new half.
+  /// A release away from every group never reaches here, so there is nothing
+  /// here that does nothing — which is what leaves the tree untouched by a drag
+  /// that came to nothing.
+  const bring = (path: string, where: Landing): void => {
+    if ("at" in where) {
+      show(path, where.group, where.at);
+
+      return;
+    }
+
+    if (where.zone === "centre") {
+      // At the end of the bar, there being no place along one in this gesture:
+      // what the hand pointed at was the group.
+      show(path, where.group, where.group.tabs().length);
+
+      return;
+    }
+
+    const tab: Tab = { file: path };
+    const made = fresh();
+    const way: Way =
+      where.zone === "left" || where.zone === "right" ? "beside" : "below";
+
+    // Whether anything is reading this file already, asked before the tab joins
+    // a group: a second view of a file somebody has typed into and not saved
+    // would otherwise read the disk over their text.
+    const anywhere = views(path) > 0;
+
+    batch(() => {
+      made.setTabs([tab]);
+      made.setChosen(keyed(tab));
+
+      setLayout((was) =>
+        split(
+          was,
+          where.group.id,
+          way,
+          made,
+          where.zone === "left" || where.zone === "above",
+        ),
+      );
+
+      setActive(made.id);
+    });
+
+    if (!anywhere) {
+      void reread(path);
+    }
+  };
+
   /// Where a pointer at this point would put a tab: a place along the bar it is
   /// over, a zone of the content it is over, or nothing at all where it is over
   /// neither.
@@ -1452,10 +1570,9 @@ export function Code(props: {
   /// the tab. One that carried it is not: the tab is where they put it, and
   /// turning to it as well would be answering one gesture twice.
   const turn = (group: Group, tab: Tab): void => {
-    const dragged = carrying;
-    carrying = false;
+    if (carrying !== null && "tab" in carrying && carrying.tab === tab) {
+      carrying = null;
 
-    if (dragged) {
       return;
     }
 
@@ -1838,7 +1955,31 @@ export function Code(props: {
   ///
   /// **Into the group last pressed into**, which is what active means: the
   /// press was made on the tree rather than in any group, and the group the
-  /// human was last working in is the one they meant.
+  /// human was last working in is the one they meant. A row *dragged* out of
+  /// the tree names a group of its own, which is [`bring`]; what both of them
+  /// do once they have one is [`show`] below.
+  const openFile = (path: string): void => {
+    // One that carried this row somewhere is not a press: the file is open
+    // where they put it, and opening it here as well would be answering one
+    // gesture twice.
+    if (carrying !== null && "path" in carrying && carrying.path === path) {
+      carrying = null;
+
+      return;
+    }
+
+    const group = into();
+
+    show(path, group, group.tabs().length);
+  };
+
+  /// And the opening itself, into a named group at a named place along its bar
+  /// — which is what a press does of the active group, and what a row dragged
+  /// out of the tree does of the group it was let go over.
+  ///
+  /// The group becomes the active one. A press has only said so already, that
+  /// group being the active one to begin with; a drop is the work going where
+  /// the hand pointed, which is what active means.
   ///
   /// **The same file opened twice is one buffer**, so a file already open in
   /// *this* group is a tab to turn to rather than a second tab beside the first
@@ -1850,18 +1991,21 @@ export function Code(props: {
   /// as being over, and the tree is a list of names. Made once per file rather
   /// than once per view — a second view of a file somebody has typed into and
   /// not saved would otherwise read the disk over their text.
-  const openFile = (path: string): void => {
+  const show = (path: string, group: Group, at: number): void => {
     const tab: Tab = { file: path };
-    const group = into();
     const anywhere = views(path) > 0;
 
-    group.setChosen(keyed(tab));
+    batch(() => {
+      group.setChosen(keyed(tab));
+      setActive(group.id);
 
-    if (group.tabs().some((one) => keyed(one) === keyed(tab))) {
-      return;
-    }
-
-    group.setTabs((was) => [...was, tab]);
+      // Already open in this group: a tab to turn to rather than a second tab
+      // beside the first, there being nothing a second view of a file in the
+      // one group could show that the first is not showing already.
+      if (!group.tabs().some((one) => keyed(one) === keyed(tab))) {
+        group.setTabs((was) => [...was.slice(0, at), tab, ...was.slice(at)]);
+      }
+    });
 
     if (!anywhere) {
       void reread(path);
@@ -2053,6 +2197,8 @@ export function Code(props: {
         <Tree
           conversation={props.conversation.id}
           open={openFile}
+          pick={pick}
+          carried={taken}
           held={expanded}
           setHeld={setExpanded}
         />
@@ -2881,6 +3027,16 @@ type Zone = "centre" | "left" | "right" | "above" | "below";
 /// one — a line between two tabs, or the band a zone would take. One at a time
 /// across the whole pane, a pointer being in one place.
 type Landing = { group: Group; at: number } | { group: Group; zone: Zone };
+
+/// And what a hand is carrying: a view out of the group it stands in, or a file
+/// out of the tree.
+///
+/// The one gesture picks up either — the same grace, the same hold, the same
+/// two landings — and what tells them apart is what a drop *does*: a view is
+/// moved into place, and a path is opened there. Which is why the press holds
+/// this rather than a tab: everything between the press and the release is the
+/// same for both.
+type Carrying = { group: Group; tab: Tab } | { path: string };
 
 /// Whether a point is in a box, which is the whole of what a drop target is
 /// asked.

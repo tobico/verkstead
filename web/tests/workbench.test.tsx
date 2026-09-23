@@ -21839,6 +21839,19 @@ describe("the code pane's groups", () => {
       );
     }
 
+    /// And the zone under the hand, where one is drawn: which group it is in,
+    /// and which of the five it is.
+    ///
+    /// One at most across the whole pane, a pointer being in one zone of one
+    /// group — and none at all every moment nobody is carrying anything.
+    function bands(container: ParentNode): string[] {
+      return groups(container).flatMap((group, at) =>
+        [...group.querySelectorAll<HTMLElement>(`.${codePane.zone}`)].map(
+          (band) => `${at} ${band.dataset.zone!}`,
+        ),
+      );
+    }
+
     /// The socket onto one of the conversation's terminals, by the number in
     /// its path: what is worth asserting is which shell a window is watching.
     function attachedTo(number: number): Promise<Attached> {
@@ -22197,19 +22210,6 @@ describe("the code pane's groups", () => {
     /// 0019's three ways to make a split, the other two being the tab's own
     /// menu and the icon at the end of a bar.
     describe("and dropped on a group's content", () => {
-      /// The zone under the hand, where one is drawn: which group it is in, and
-      /// which of the five it is.
-      ///
-      /// One at most across the whole pane, a pointer being in one zone of one
-      /// group — and none at all every moment nobody is carrying a tab.
-      function bands(container: ParentNode): string[] {
-        return groups(container).flatMap((group, at) =>
-          [...group.querySelectorAll<HTMLElement>(`.${codePane.zone}`)].map(
-            (band) => `${at} ${band.dataset.zone!}`,
-          ),
-        );
-      }
-
       /// A tab dropped on an edge splits the group there, with that tab alone
       /// in the new half and the rest of the group's tabs staying where they
       /// were — halves, which is where every split starts.
@@ -22416,6 +22416,309 @@ describe("the code pane's groups", () => {
           ["Cargo.toml"],
           ["Cargo.toml", "README.md"],
         ]);
+      });
+    });
+
+    /// And a file row of the tree, picked up by the same gesture and let go on
+    /// the same two targets: a place along a group's bar, or one of the five
+    /// zones of a group's content. What a drop does is open the file — in that
+    /// group, or in the new group an edge makes.
+    ///
+    /// Here rather than beside the tree's own tests because the targets are the
+    /// ones above and so is the geometry they are measured in: a drag from the
+    /// tree lands on a bar or on a group's content, and jsdom lays out neither.
+    describe("and a file dragged in from the tree", () => {
+      /// A file row of the tree, which is what such a drag takes hold of.
+      function fileRow(of: ParentNode, name: string): HTMLButtonElement {
+        const found = [
+          ...of.querySelectorAll<HTMLButtonElement>(
+            `.${shell.detailsPane} .${treePane.file}`,
+          ),
+        ].find((one) => one.textContent === name);
+
+        if (!found) {
+          throw new Error(`the tree has no file called ${name}`);
+        }
+
+        return found;
+      }
+
+      /// And a folder row, which is not a drag source: there is nothing to
+      /// open, so a press on one is the expand it has always been.
+      function folderRow(of: ParentNode, name: string): HTMLButtonElement {
+        const found = [
+          ...of.querySelectorAll<HTMLButtonElement>(
+            `.${shell.detailsPane} .${treePane.folder}`,
+          ),
+        ].find((one) => one.textContent?.startsWith(name));
+
+        if (!found) {
+          throw new Error(`the tree has no folder called ${name}`);
+        }
+
+        return found;
+      }
+
+      /// Every row the tree is drawing, in the order it drew them: what a drag
+      /// that came to nothing must have left exactly as it was.
+      function treeRows(of: ParentNode): string[] {
+        return [
+          ...of.querySelectorAll<HTMLElement>(
+            `.${shell.detailsPane} .${treePane.tree} .${treePane.name}`,
+          ),
+        ].map((row) => row.textContent ?? "");
+      }
+
+      /// A file dropped on a group's content centre opens in that group — the
+      /// group the hand pointed at rather than the active one, which is the
+      /// whole of what dragging one in adds to pressing it.
+      it("opens a file dropped on a group's centre in that group", async () => {
+        const { container } = await opened();
+
+        press(container, "Cargo.toml");
+        await waitFor(() => expect(editors(container)).toHaveLength(1));
+
+        await split(container, tabs(container)[0]!, "Split right");
+        await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+        // The split's own group is the active one, so a press would open in the
+        // far half. This is let go over the near one.
+        carry(fileRow(container, "README.md"), zone(0, "centre"));
+
+        await waitFor(() =>
+          expect(holding(container)).toEqual([
+            ["Cargo.toml", "README.md"],
+            ["Cargo.toml"],
+          ]),
+        );
+
+        // Two groups still — a centre asks for the group rather than a side of
+        // it — and the one it landed in is the active one, so the next file
+        // pressed in the tree opens there.
+        expect(groups(container)).toHaveLength(2);
+        expect(
+          groups(container).map((group) => group.getAttribute("aria-current")),
+        ).toEqual(["true", null]);
+
+        press(container, ".gitignore");
+
+        await waitFor(() =>
+          expect(holding(container)).toEqual([
+            ["Cargo.toml", "README.md", ".gitignore"],
+            ["Cargo.toml"],
+          ]),
+        );
+      });
+
+      /// And one dropped on a bar opens at the place the line stood, which is
+      /// the other way into a group that is already there.
+      ///
+      /// A file already open in the group it is dropped on is turned to rather
+      /// than opened twice: there is nothing a second view of a file in the one
+      /// group could show that the first is not showing already.
+      it("opens a file dropped on a bar at the place the line stood", async () => {
+        const { container } = await opened();
+
+        press(container, "Cargo.toml");
+        press(container, "README.md");
+
+        await waitFor(() =>
+          expect(holding(container)).toEqual([["Cargo.toml", "README.md"]]),
+        );
+
+        carry(fileRow(container, ".gitignore"), place(0, 1));
+
+        await waitFor(() =>
+          expect(holding(container)).toEqual([
+            ["Cargo.toml", ".gitignore", "README.md"],
+          ]),
+        );
+
+        // And the same row dropped where its file is already open turns to the
+        // tab it has rather than opening a second beside it.
+        carry(fileRow(container, "README.md"), place(0, 0));
+
+        expect(holding(container)).toEqual([
+          ["Cargo.toml", ".gitignore", "README.md"],
+        ]);
+        await waitFor(() =>
+          expect(
+            tabs(container).map((tab) => tab.getAttribute("aria-pressed")),
+          ).toEqual(["false", "false", "true"]),
+        );
+      });
+
+      /// A file dropped on a group's edge splits the group there and opens in
+      /// the new half, which is the third of ADR 0019's three ways to make a
+      /// split reached with a path instead of a tab.
+      it("splits at the edge a file is dropped on, and opens it there", async () => {
+        const { container, fetching } = await opened();
+
+        press(container, "Cargo.toml");
+        await waitFor(() => expect(editors(container)).toHaveLength(1));
+
+        carry(fileRow(container, "README.md"), zone(0, "right"));
+
+        await waitFor(() => expect(groups(container)).toHaveLength(2));
+        expect(holding(container)).toEqual([["Cargo.toml"], ["README.md"]]);
+        expect(groups(container).map(stood)).toEqual([
+          { left: "0%", top: "0%", width: "50%", height: "100%" },
+          { left: "50%", top: "0%", width: "50%", height: "100%" },
+        ]);
+
+        // The new group is where the work has just gone, so it is the active
+        // one — the split's own rule, reached the other way round.
+        expect(
+          groups(container).map((group) => group.getAttribute("aria-current")),
+        ).toEqual([null, "true"]);
+
+        // And a file already open somewhere else opens as a second view of the
+        // one buffer: one read for the file however many views there are, which
+        // is what keeps a second view off somebody's unsaved text.
+        carry(fileRow(container, "Cargo.toml"), zone(1, "below"));
+
+        await waitFor(() => expect(editors(container)).toHaveLength(3));
+        expect(groups(container)).toHaveLength(3);
+        expect(holding(container)).toEqual([
+          ["Cargo.toml"],
+          ["README.md"],
+          ["Cargo.toml"],
+        ]);
+        expect(askedFor(fetching, fileOf(pathOf("Cargo.toml")))).toBe(1);
+      });
+
+      /// A drop away from every bar and every group opens nothing, and leaves
+      /// the tree exactly as it was: the row still where it is, the folder still
+      /// open. Dragging is a way to open a file rather than a move on disk.
+      it("opens nothing where a file is let go away from every group", async () => {
+        const { container, fetching } = await opened();
+
+        const before = treeRows(container);
+
+        expect(holding(container)).toEqual([[]]);
+
+        const held = fileRow(container, "README.md");
+
+        fireEvent.pointerDown(held, {
+          button: 0,
+          pointerId: 1,
+          pointerType: "mouse",
+          clientX: 0,
+          clientY: 0,
+        });
+
+        // Over the one group there is, which is where the drop would land — and
+        // the row in the hand is taken back while it is carried, the way the
+        // tab in one is.
+        fireEvent.pointerMove(window, {
+          pointerId: 1,
+          clientX: zone(0, "centre").x,
+          clientY: zone(0, "centre").y,
+        });
+
+        await waitFor(() => expect(bands(container)).toEqual(["0 centre"]));
+        expect(held.classList).toContain(treePane.lifted!);
+
+        // And away from it there is nowhere to land, so there is nothing to
+        // draw and nothing to do about the release.
+        fireEvent.pointerMove(window, {
+          pointerId: 1,
+          clientX: 50,
+          clientY: 2000,
+        });
+
+        await waitFor(() => expect(bands(container)).toEqual([]));
+
+        fireEvent.pointerUp(window, {
+          pointerId: 1,
+          clientX: 50,
+          clientY: 2000,
+        });
+
+        expect(holding(container)).toEqual([[]]);
+        expect(askedFor(fetching, fileOf(pathOf("README.md")))).toBe(0);
+        expect(held.classList).not.toContain(treePane.lifted!);
+
+        // And the tree is the tree it was: nothing here writes anything.
+        expect(treeRows(container)).toEqual(before);
+      });
+
+      /// A press is still a press: one released about where it landed opens the
+      /// file the way it always did, and one that carried the row somewhere
+      /// does not also open it in the group it was dragged past.
+      it("opens a file on a press that did not move, and once on one that did", async () => {
+        const { container } = await opened();
+
+        press(container, "Cargo.toml");
+        await waitFor(() =>
+          expect(holding(container)).toEqual([["Cargo.toml"]]),
+        );
+
+        await split(container, tabs(container)[0]!, "Split right");
+        await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+        // A press that wobbles inside the grace and lets go is a press, and a
+        // press opens the file in the active group.
+        const held = fileRow(container, "README.md");
+
+        fireEvent.pointerDown(held, {
+          button: 0,
+          pointerId: 1,
+          pointerType: "mouse",
+          clientX: 20,
+          clientY: 20,
+        });
+        fireEvent.pointerMove(window, {
+          pointerId: 1,
+          clientX: 22,
+          clientY: 21,
+        });
+        fireEvent.pointerUp(window, { pointerId: 1, clientX: 22, clientY: 21 });
+        fireEvent.click(held);
+
+        await waitFor(() =>
+          expect(holding(container)).toEqual([
+            ["Cargo.toml"],
+            ["Cargo.toml", "README.md"],
+          ]),
+        );
+
+        // And one that carried the row into the near half opens it there and
+        // nowhere else: the click the release leaves behind is the same
+        // gesture, and answering it again would open the file twice.
+        carry(fileRow(container, ".gitignore"), zone(0, "centre"));
+        fireEvent.click(fileRow(container, ".gitignore"));
+
+        await waitFor(() =>
+          expect(holding(container)).toEqual([
+            ["Cargo.toml", ".gitignore"],
+            ["Cargo.toml", "README.md"],
+          ]),
+        );
+      });
+
+      /// And a folder row is not a drag source. There is nothing to open, so
+      /// there is nothing for a drop to do — and the press is the expand it has
+      /// always been.
+      it("does not drag a folder row, and still expands one", async () => {
+        const { container } = await opened();
+
+        const held = folderRow(container, OWN_ROOT.repo);
+
+        carry(held, zone(0, "centre"));
+
+        // Nothing was ever in the hand, so nothing was marked and nothing
+        // opened.
+        expect(bands(container)).toEqual([]);
+        expect(holding(container)).toEqual([[]]);
+
+        // And the press behind it shuts the folder, which is what a press on
+        // one has always done.
+        fireEvent.click(held);
+
+        await waitFor(() =>
+          expect(treeRows(container)).not.toContain("Cargo.toml"),
+        );
       });
     });
   });
