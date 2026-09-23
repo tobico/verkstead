@@ -14,15 +14,21 @@
 //! leaves the Conversation stopped; a submit discards it in the transaction that
 //! writes the Steer Event it became, so the record and the form it was filled in
 //! on are never both on the page.
+//!
+//! And two things the rest of the record says about one: a **close** takes it
+//! away in the transaction that closes the Conversation, the way it shuts every
+//! Question Set it finds open, and a standing one **waits on the human** — the
+//! one rule the sidebar's disc and the status word are both read from.
 
 use std::path::{Path, PathBuf};
 
 use sqlx::SqlitePool;
 use verkstead_store::{
-    Account, CompanionMode, Lifecycle, Pending, PendingAddition, PendingForm, PendingPairing,
-    PendingUpgrade, ProfileFacts, Steer, Steering, create_profile, discard_pending_steer,
-    open_database, open_pending_steer, pending_steer, register_repo, save_brief,
-    save_pending_steer, start_conversation, steer_conversation, timeline,
+    Account, Closing, CompanionMode, Lifecycle, Pending, PendingAddition, PendingForm,
+    PendingPairing, PendingUpgrade, ProfileFacts, Steer, Steering, close_conversation,
+    conversations, create_profile, discard_pending_steer, open_database, open_pending_steer,
+    pending_steer, register_repo, save_brief, save_pending_steer, start_conversation,
+    steer_conversation, timeline, waiting,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -298,4 +304,108 @@ async fn a_save_without_one_says_so() {
             .unwrap()
     );
     assert_eq!(pending_steer(&pool, id).await.unwrap(), None);
+}
+
+/// A pending steer waits on the human, which is the whole of what the marks
+/// around it are drawn from.
+///
+/// The press stopped the drive and nothing starts again until they submit or
+/// cancel, so the Conversation is theirs to finish — and the stop it made is
+/// their own press, which says nothing in the marks by itself. Without this a
+/// Conversation with a form half written on it would read as quiet from the
+/// sidebar, which is the one place somebody who left it yesterday will look.
+///
+/// Both readings of the one rule, because there are two and they have to agree:
+/// the sidebar's row and the Conversation's own page.
+#[tokio::test]
+async fn a_pending_steer_waits_on_the_human() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafting(&pool).await;
+
+    // Past drafting, because a Draft waits on the human in the ordinary sense
+    // and the sidebar says so by drawing it as a draft — see the store's
+    // `waits_on_the_human`.
+    assert_eq!(
+        steer_conversation(&pool, id, into(Lifecycle::Grilling))
+            .await
+            .unwrap(),
+        Steering::Steered
+    );
+
+    assert!(
+        !waiting(&pool, id).await.unwrap(),
+        "nothing is waiting on anybody before the press",
+    );
+
+    assert_eq!(
+        open_pending_steer(&pool, id).await.unwrap(),
+        Pending::Opened
+    );
+
+    assert!(
+        waiting(&pool, id).await.unwrap(),
+        "the form is theirs to finish, so the page says so",
+    );
+    assert_eq!(
+        conversations(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == id)
+            .map(|row| row.waiting),
+        Some(true),
+        "and the sidebar's row carries the disc, the two being one rule",
+    );
+
+    assert!(discard_pending_steer(&pool, id).await.unwrap());
+    assert!(
+        !waiting(&pool, id).await.unwrap(),
+        "and it goes with the form rather than outliving it",
+    );
+}
+
+/// Closing takes the pending steer with it, in the transaction that closes the
+/// Conversation.
+///
+/// Closing takes away every session there will ever be, so a form asking where
+/// the work goes next is a form about work that is over — the same reading that
+/// shuts every Question Set a close finds open.
+#[tokio::test]
+async fn closing_discards_it_with_the_conversation() {
+    let (_dir, pool) = fresh_pool().await;
+    let id = drafting(&pool).await;
+
+    assert_eq!(
+        open_pending_steer(&pool, id).await.unwrap(),
+        Pending::Opened
+    );
+    assert!(
+        save_pending_steer(
+            &pool,
+            id,
+            &PendingForm {
+                target: Some(Lifecycle::Implementing),
+                instruction: Some("Take the modal out".to_owned()),
+                ..PendingForm::default()
+            },
+        )
+        .await
+        .unwrap(),
+        "with something written in it, which is what a close has to be willing to take",
+    );
+
+    assert_eq!(
+        close_conversation(&pool, id).await.unwrap(),
+        Closing::Closed
+    );
+
+    assert_eq!(
+        pending_steer(&pool, id).await.unwrap(),
+        None,
+        "the form is gone with the work it was about",
+    );
+    assert!(
+        !waiting(&pool, id).await.unwrap(),
+        "so nothing is left waiting on anybody",
+    );
 }

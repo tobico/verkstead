@@ -11,11 +11,12 @@ use std::path::{Path, PathBuf};
 use sqlx::SqlitePool;
 use verkstead_schema::Direction;
 use verkstead_store::{
-    Account, AgentType, Chosen, Clash, Deleting, Event, Lifecycle, Pairing, Picked, Profile,
-    ProfileFacts, Saving, create_profile, delete_profile, load_conversation, load_profile,
-    open_database, profiles, register_repo, set_grilling_pairing, set_implementation_pairing,
-    set_review_pairing, skip_grilling, skip_review, start_building, start_capture,
-    start_conversation, start_grilling, timeline, update_profile,
+    Account, AgentType, Chosen, Clash, Deleting, Event, Lifecycle, Pairing, PendingForm,
+    PendingPairing, Picked, Profile, ProfileFacts, Saving, create_profile, delete_profile,
+    load_conversation, load_profile, open_database, open_pending_steer, profiles, register_repo,
+    save_pending_steer, set_grilling_pairing, set_implementation_pairing, set_review_pairing,
+    skip_grilling, skip_review, start_building, start_capture, start_conversation, start_grilling,
+    timeline, update_profile,
 };
 
 /// A pool over a fresh database, plus the directory keeping it alive.
@@ -1138,6 +1139,24 @@ async fn a_removal_leaves_no_row_anywhere_that_names_the_profile() {
     set_review_pairing(&pool, id, profile.id, Some(MODEL))
         .await
         .unwrap();
+
+    // And a steer somebody is part-way through writing, whose Pairing picker
+    // names the Profile: the row is beside the Conversation rather than on it,
+    // and a removal that missed it would be one SQLite refused.
+    open_pending_steer(&pool, id).await.unwrap();
+    save_pending_steer(
+        &pool,
+        id,
+        &PendingForm {
+            pairing: Some(PendingPairing {
+                profile_id: profile.id,
+                model: MODEL.to_owned(),
+            }),
+            ..PendingForm::default()
+        },
+    )
+    .await
+    .unwrap();
 
     // The Repo's memory of what it was last grilled with, which is the one
     // table naming a Profile that is not a Conversation's own column.

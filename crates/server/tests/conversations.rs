@@ -24,11 +24,11 @@ use verkstead_render::{
     Adopted, AgentType, BacklogPane, BaseRecorded, BranchRenamed, BriefSaved, CheckRollup,
     CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed, CompanionMode,
     CompanionModeChosen, CompanionRefusal, CompanionRemoved, ConversationArchived,
-    ConversationClosed, ConversationEntry, ConversationSteered, ConversationUnarchived,
-    ConversationView, GrillingStarted, Lifecycle, Merging, PickedView, PinnedEvent, ProfileChosen,
-    ProfileSaved, Registered, RepoEntry, RepoSwitched, Resolved, RoadmapPane, ShowingArchived,
-    Standing, Started, SteerCancelled, SteerCompanionRefusal, SteerOpened, SteerSaved, TakenUp,
-    TimelineEvent,
+    ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
+    ConversationUnarchived, ConversationView, GrillingStarted, Lifecycle, Merging, PickedView,
+    PinnedEvent, ProfileChosen, ProfileSaved, Registered, RepoEntry, RepoSwitched, Resolved,
+    Resumed, RoadmapPane, ShowingArchived, Standing, Started, SteerCancelled,
+    SteerCompanionRefusal, SteerOpened, SteerSaved, TakenUp, TimelineEvent,
 };
 use verkstead_server::{open_database, router_keeping, store};
 
@@ -1293,6 +1293,48 @@ async fn close(app: &Router, id: i64) -> ConversationClosed {
     post(
         app,
         &format!("/api/ui/conversations/{id}/close"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
+/// Press Resume, which recomputes what ought to be driving the Conversation and
+/// starts it. Nothing goes with it, as nothing goes with any of these presses.
+async fn resume(app: &Router, id: i64) -> Resumed {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/resume"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
+/// And the two stops beside it: the one that sees a session out, and the one
+/// that ends it where it stands.
+async fn stop(app: &Router, id: i64) -> ConversationStopped {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/stop"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
+async fn force_stop(app: &Router, id: i64) -> ConversationStopped {
+    post(
+        app,
+        &format!("/api/ui/conversations/{id}/force-stop"),
+        &serde_json::json!({}),
+    )
+    .await
+}
+
+/// And remove an Agent Profile, whoever had chosen it — which is how a
+/// Conversation comes to be one Resume refuses by name.
+async fn remove_profile(app: &Router, profile_id: i64) -> verkstead_render::ProfileDeleted {
+    post(
+        app,
+        &format!("/api/ui/profiles/{profile_id}/delete"),
         &serde_json::json!({}),
     )
     .await
@@ -2733,6 +2775,246 @@ async fn submitting_takes_the_pending_steer_away_with_the_record() {
         steered(&view).last(),
         Some(&("moved", Lifecycle::Done)),
         "and the pair the steer leaves is on the record",
+    );
+}
+
+/// Resume is the opposite decision, so a press that starts something takes the
+/// pending steer with it.
+///
+/// The form was written against a run that had stopped, and this is the run
+/// starting again: a form left standing under it would be written against a
+/// world that has gone, and the item drawn for it would go on saying the drive
+/// had stopped while a session worked in the Worktree. Somebody who wants both
+/// cancels the steer.
+#[tokio::test]
+async fn resuming_discards_the_pending_steer_it_starts_over() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
+    );
+    assert_eq!(resume(&app, id).await, Resumed::Resumed);
+
+    let view = opened(&app, id).await;
+
+    assert!(
+        view.pending_steer.is_none(),
+        "the form goes with the decision that replaced it",
+    );
+    assert!(
+        view.blocked_on.is_none(),
+        "and the stop the press made goes too, which is what Resume is",
+    );
+    assert!(
+        !view.waiting,
+        "so nothing about it is waiting on the human any more",
+    );
+    assert_eq!(
+        steered(&view),
+        [("moved", Lifecycle::Grilling)],
+        "and a steer nobody submitted is still no Event",
+    );
+}
+
+/// And a Resume refused by name leaves it exactly where it stands.
+///
+/// The press decided nothing, so neither did it decide anything about the form:
+/// a human who is told the account their work grills under has gone is being
+/// pointed back at the steer, and a steer thrown away on the way would be the
+/// workbench taking the answer with the question.
+#[tokio::test]
+async fn a_refused_resume_leaves_the_pending_steer() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = started(&app, repo_id).await;
+
+    let grilling = profile(&app, elsewhere.path(), "fable").await;
+    let implementation = profile(&app, elsewhere.path(), "opus").await;
+    let review = profile(&app, elsewhere.path(), "haiku").await;
+    choose(&app, id, "grilling", grilling).await;
+    choose(&app, id, "implementation", implementation).await;
+    choose(&app, id, "review", review).await;
+    assert_eq!(
+        write_brief(&app, id, "# Rate limiting\n\nThe API has none.\n").await,
+        BriefSaved::Saved
+    );
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
+    );
+    assert_eq!(
+        save_steer(
+            &app,
+            id,
+            &serde_json::json!({
+                "target": "Implementing",
+                "instruction": "Take the modal out",
+                "digest": false,
+                "interrupt": false,
+                "added": [],
+                "upgraded": [],
+            }),
+        )
+        .await,
+        SteerSaved::Saved,
+    );
+
+    // The account this Conversation grills under, taken away: the one thing
+    // that makes Resume refuse a Conversation there is otherwise nothing wrong
+    // with, and the refusal that sends the human back to the steer.
+    assert_eq!(
+        remove_profile(&app, grilling).await,
+        verkstead_render::ProfileDeleted::Removed,
+    );
+
+    assert_eq!(resume(&app, id).await, Resumed::NoGrillingPairing);
+
+    let view = opened(&app, id).await;
+    let pending = view
+        .pending_steer
+        .expect("the refusal left the form where it stands");
+
+    assert_eq!(
+        pending.form.instruction.as_deref(),
+        Some("Take the modal out"),
+        "down to what had been written into it",
+    );
+    assert!(
+        view.blocked_on.is_some(),
+        "and the Conversation is still stopped, nothing having changed",
+    );
+}
+
+/// Close takes the pending steer away in the act that closes the Conversation.
+///
+/// Closing takes away every session there will ever be, the way it shuts every
+/// Question Set it finds open: a form asking where the work goes next is a form
+/// about work that is over.
+#[tokio::test]
+async fn closing_takes_the_pending_steer_away() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
+    );
+    assert_eq!(close(&app, id).await, ConversationClosed::Closed);
+
+    let view = opened(&app, id).await;
+
+    assert_eq!(view.state, Lifecycle::Closed);
+    assert!(
+        view.pending_steer.is_none(),
+        "the form is gone with the work it was about",
+    );
+    assert!(!view.waiting, "so nothing is left waiting on anybody",);
+}
+
+/// And the two stops leave it exactly where it stands.
+///
+/// Both are about the run rather than about the move: the press that opened the
+/// form already stopped the drive, and neither of these decides anything about
+/// where the work is headed. A Stop that took the form with it would be a
+/// second press undoing the first one's work.
+#[tokio::test]
+async fn the_stops_leave_the_pending_steer_alone() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
+    );
+
+    // Already stopped by the press, which is what both of these answer here —
+    // and the point: neither press is a second decision about the form.
+    assert_eq!(stop(&app, id).await, ConversationStopped::AlreadyStopped);
+    assert!(
+        opened(&app, id).await.pending_steer.is_some(),
+        "Stop is about the run, so the form is left where it stands",
+    );
+
+    assert_eq!(
+        force_stop(&app, id).await,
+        ConversationStopped::AlreadyStopped
+    );
+    assert!(
+        opened(&app, id).await.pending_steer.is_some(),
+        "and so is Force stop",
+    );
+}
+
+/// A Conversation with a pending steer waits on the human, which is the one
+/// rule the sidebar's disc and the status button's word are both read from.
+///
+/// The press stopped the drive and nothing starts again until they submit or
+/// cancel, so the Conversation is theirs to finish. The stop it made is their
+/// own press and says nothing in the marks by itself — so without this a form
+/// left half written would read as quiet from the sidebar, which is the one
+/// place somebody who left it yesterday will look.
+#[tokio::test]
+async fn a_pending_steer_reads_as_waiting_on_the_human() {
+    let (elsewhere, _dir, app, _repo, repo_id) = workbench().await;
+    let id = ready(&app, elsewhere.path(), repo_id).await;
+    assert_eq!(grill(&app, id).await, GrillingStarted::Started);
+
+    let row = |rows: Vec<ConversationEntry>| {
+        rows.into_iter()
+            .find(|row| row.id == id)
+            .expect("the Conversation is on the sidebar's list")
+    };
+
+    assert!(
+        !row(sidebar(&app).await).waiting,
+        "nothing is waiting on anybody before the press",
+    );
+
+    assert_eq!(
+        steer(&app, id).await,
+        SteerOpened::Opened {
+            working: false,
+            already: false,
+        }
+    );
+
+    let view = opened(&app, id).await;
+
+    assert!(
+        view.waiting,
+        "the form is theirs to finish, so the page says so",
+    );
+    assert!(
+        view.stopped_by_hand,
+        "and the stop under it is their own press rather than a mark of its own",
+    );
+    assert!(
+        row(sidebar(&app).await).waiting,
+        "and the sidebar's row carries the disc, the two being one rule",
+    );
+
+    assert_eq!(cancel_steer(&app, id).await, SteerCancelled::Cancelled);
+    assert!(
+        !opened(&app, id).await.waiting,
+        "and it goes with the form rather than outliving it",
     );
 }
 

@@ -35,6 +35,19 @@
 //! — see [`filled`] — so the pane is prefilled from the row rather than opened
 //! empty.
 //!
+//! **What the rest of the workbench does about a pending steer.** **Resume** is
+//! the opposite decision, so a press that starts something takes the row with
+//! it and a refused one leaves it — see [`crate::resume`]. **Close** takes it
+//! in the transaction that closes the Conversation, the way it shuts every Set
+//! it finds open: a form asking where the work goes next is about work that is
+//! over. **Stop** and **Force stop** leave it alone, both being about the run
+//! rather than about the move — the run is already stopped, and neither press
+//! decides anything about where the work is headed. And a pending steer
+//! **waits on the human**: it joins the one rule the sidebar disc and the
+//! status button's *Waiting on you* are read from, beside an open Set and a
+//! stop nobody chose — see `store::waiting`. It raises no notification, the
+//! press being the human's own.
+//!
 //! **What ends that session is the submit rather than the press.** One Worktree
 //! holds one agent, so the session a steer starts takes the Worktree from
 //! whatever is still in it — see the runner's `launch_in_turn`, which waits for
@@ -158,9 +171,11 @@ use crate::store::{self, Conversation, Lifecycle, Role, Settling};
 /// is made either way and is the same stop: a Conversation that stopped at the
 /// first press has nothing left for the second to stop.
 ///
-/// What comes back beside it is whether a session is still running, which is
-/// the one thing the record cannot answer — a session is a process, and this is
-/// the register read.
+/// What comes back beside it is whether a session was still running as the
+/// press landed, which is the one thing the record cannot answer — a session is
+/// a process, and this is the register read. It is what the press found rather
+/// than what the form is drawn against: the item may sit open for hours, so the
+/// **Interrupt current task** tick follows the live Conversation instead.
 pub(crate) async fn click(state: &AppState, conversation_id: i64) -> anyhow::Result<SteerOpened> {
     // The press and the read in one: the insert selects from `conversations`,
     // so what says there is no Conversation to steer is the row not landing

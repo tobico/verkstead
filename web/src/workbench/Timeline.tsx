@@ -101,6 +101,7 @@ import {
   Match,
   Show,
   Switch,
+  createEffect,
   createMemo,
   createSignal,
   onCleanup,
@@ -753,18 +754,45 @@ export function Timeline(props: {
             else would be a second place to look for the thing the press just
             made. */}
         <Show when={props.conversation.pending_steer}>
-          {(pending) => (
-            <li class={styles.timelineEvent}>
-              <PendingSteer
-                pending={pending()}
-                selected={props.selected === "steer"}
-                open={() => {
-                  props.select("steer");
-                  props.details();
-                }}
-              />
-            </li>
-          )}
+          {(pending) => {
+            /// The item's own box, for the one thing this card asks of the
+            /// pane it sits in: to be looked at.
+            let item!: HTMLLIElement;
+
+            // Selecting it scrolls it into view, whether or not the human had
+            // scrolled up to read history — the record follows its own bottom
+            // only while nobody has taken the scroll off it, and this is the
+            // one card that is selected by a press somewhere else entirely.
+            // Pressing Steer from the actions menu, or arriving at a
+            // conversation with a form half written on it, has to land on the
+            // form rather than wherever the pane was left.
+            //
+            // `nearest`, so a card already on screen is not moved under
+            // somebody who pressed it: what this is for is the selection that
+            // happened out of view.
+            //
+            // Optionally, because jsdom has no scrolling of any kind — the
+            // suite that drives this markup stubs it where it is what the test
+            // is about.
+            createEffect(() => {
+              if (props.selected !== "steer") return;
+
+              item.scrollIntoView?.({ block: "nearest" });
+            });
+
+            return (
+              <li ref={item} class={styles.timelineEvent}>
+                <PendingSteer
+                  pending={pending()}
+                  selected={props.selected === "steer"}
+                  open={() => {
+                    props.select("steer");
+                    props.details();
+                  }}
+                />
+              </li>
+            );
+          }}
         </Show>
       </ol>
     </>

@@ -3600,16 +3600,19 @@ pub enum SteerOpened {
     /// The drive has stopped — or there was never anything driving it — and
     /// there is a pending steer to go to.
     Opened {
-        /// Whether a session is still running as the press lands.
+        /// Whether a session was still running as the press landed.
         ///
-        /// What the press has to say that the record cannot: a session is a
-        /// process, and the page asks the register through this. **Interrupt
-        /// current task** is what it is offered for — the press leaves what is
-        /// running exactly where it is, and the tick is the only way to end it
-        /// where it stands. What ends it otherwise is the submit's own launch —
-        /// one Worktree holds one agent, so the session a steer starts takes
-        /// the Worktree from whatever is still in it — and into Done, where
-        /// nothing is launched, nothing ends it at all.
+        /// What the press found, which is the one thing it can say that the
+        /// record cannot: a session is a process, and the register is what
+        /// knows. The press leaves it exactly where it was — the stop is the
+        /// ordinary one, and what ends a seen-out session otherwise is the
+        /// submit's own launch taking the Worktree over.
+        ///
+        /// **Not what the form's Interrupt tick is drawn from.** The item may
+        /// sit open for hours and the session may have been seen out
+        /// meanwhile, so the tick follows the live Conversation's own `working`
+        /// — see `web/src/workbench/Steer.tsx`. This is the moment of the
+        /// press, which is a different fact and stops being true.
         working: bool,
 
         /// Whether the press found a pending steer already standing.

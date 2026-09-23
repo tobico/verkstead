@@ -22,6 +22,12 @@
 //! decided there was nothing to do and said nothing is the whole of what this
 //! replaces.
 //!
+//! **And it is the opposite decision to Steer.** A press that starts something
+//! takes the pending steer beside the Conversation with it, because the form
+//! was written against a run that had stopped and this is the run starting
+//! again — see [`starting`]. A press that refuses leaves it exactly where it
+//! stands.
+//!
 //! **The checks happen here and the work happens after.** Everything that can
 //! refuse is asked before anything is spawned, because a refusal is the press's
 //! answer and the browser is holding the request open for it. What follows the
@@ -216,7 +222,7 @@ pub(crate) async fn resume(
                 return Ok(Resumed::NoGrillingPairing);
             }
 
-            clear(state, conversation_id).await?;
+            starting(state, conversation_id, resuming).await?;
 
             tokio::spawn(crate::grillings::again(
                 state.clone(),
@@ -318,7 +324,7 @@ pub(crate) async fn resume(
                 }
             }
 
-            clear(state, conversation_id).await?;
+            starting(state, conversation_id, resuming).await?;
 
             tokio::spawn(crate::runner::implementing_again(
                 state.clone(),
@@ -337,7 +343,7 @@ pub(crate) async fn resume(
         // that stopped again on its next poll without dispatching anything. See
         // [`crate::checks::afresh`].
         Lifecycle::Wrapping => {
-            clear(state, conversation_id).await?;
+            starting(state, conversation_id, resuming).await?;
 
             match resuming {
                 Resuming::Pressed => {
@@ -389,7 +395,7 @@ pub(crate) async fn resume(
                 return Ok(Resumed::NoFollowUpBrief);
             };
 
-            clear(state, conversation_id).await?;
+            starting(state, conversation_id, resuming).await?;
 
             tokio::spawn(crate::runner::following_up(
                 state.clone(),
@@ -649,6 +655,45 @@ async fn clear(state: &AppState, conversation_id: i64) -> anyhow::Result<()> {
     });
 
     Ok(())
+}
+
+/// The same, plus the pending steer — what a press that is about to start
+/// something does before it starts it.
+///
+/// **Resume is the opposite decision to Steer**, said out loud. Steer stops the
+/// drive so the human can compose against a world that will not move under
+/// them; Resume says carry on with what was already there. A form left standing
+/// under a run that has started again is a form written against a world that
+/// went — and the item drawn for it would go on saying the run had stopped
+/// while a session worked in the Worktree. So the press that starts something
+/// is the press that abandons it, and the human who wants both cancels the
+/// steer rather than being given a stale one back.
+///
+/// **Only where the press started something.** Every refusal leaves the row
+/// exactly where it stands — including the one refusal that still clears the
+/// stop, a Resume over a session already working, which starts nothing and so
+/// decides nothing about a half-written form. Which is why this is here rather
+/// than inside [`clear`]: the two paths part on exactly this.
+///
+/// **And only where a human pressed.** A server coming back up has read nothing
+/// and decided nothing — see [`Resuming`] — and a restart that threw away an
+/// afternoon's writing would be Verkstead deciding a steer on somebody's
+/// behalf. It ordinarily never meets one anyway: the press that opens a pending
+/// steer stops the Conversation as the human's own, and a restart leaves every
+/// stop somebody decided on alone.
+///
+/// Before [`clear`] rather than after it, so that the one Nudge it announces
+/// carries both: the badge going and the item going are one change to the page.
+async fn starting(
+    state: &AppState,
+    conversation_id: i64,
+    resuming: Resuming,
+) -> anyhow::Result<()> {
+    if resuming == Resuming::Pressed {
+        store::discard_pending_steer(&state.pool, conversation_id).await?;
+    }
+
+    clear(state, conversation_id).await
 }
 
 /// Whether Resume is worth offering: the Conversation is in a state something

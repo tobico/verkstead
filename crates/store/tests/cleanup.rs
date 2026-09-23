@@ -693,31 +693,6 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
     .await
     .unwrap();
 
-    // And a steer somebody started and left, which is a row beside the
-    // Conversation rather than on its Timeline — with a companion row of each
-    // kind on it, those being tables of their own.
-    open_pending_steer(pool, id).await.unwrap();
-    save_pending_steer(
-        pool,
-        id,
-        &PendingForm {
-            target: Some(Lifecycle::Implementing),
-            instruction: Some("take the modal out".to_owned()),
-            added: vec![PendingAddition {
-                repo_id: repo,
-                mode: CompanionMode::ReadOnly,
-                base_ref: None,
-                branch: String::new(),
-            }],
-            upgraded: vec![PendingUpgrade {
-                repo_id: companion,
-                branch: String::new(),
-            }],
-            ..PendingForm::default()
-        },
-    )
-    .await
-    .unwrap();
     place_conversations(pool, &[id]).await.unwrap();
     stamp_unseen(pool, id).await.unwrap();
 
@@ -744,6 +719,37 @@ async fn owning(pool: &SqlitePool, branch: &str) -> Worked {
     unarchive_conversation(pool, id).await.unwrap();
     printed(pool, id, "second-session", "and said a great deal more").await;
     archive_conversation(pool, id).await.unwrap();
+
+    // And a steer somebody started and left, which is a row beside the
+    // Conversation rather than on its Timeline — with a companion row of each
+    // kind on it, those being tables of their own.
+    //
+    // After the close rather than before it, because a close takes a pending
+    // steer away: the form is about where the work goes next, and closing is
+    // the end of the work. What this fixture is for is a row in every table,
+    // so the press that leaves one comes last.
+    open_pending_steer(pool, id).await.unwrap();
+    save_pending_steer(
+        pool,
+        id,
+        &PendingForm {
+            target: Some(Lifecycle::Implementing),
+            instruction: Some("take the modal out".to_owned()),
+            added: vec![PendingAddition {
+                repo_id: repo,
+                mode: CompanionMode::ReadOnly,
+                base_ref: None,
+                branch: String::new(),
+            }],
+            upgraded: vec![PendingUpgrade {
+                repo_id: companion,
+                branch: String::new(),
+            }],
+            ..PendingForm::default()
+        },
+    )
+    .await
+    .unwrap();
 
     written_straight_in(pool, id, companion, event).await;
 

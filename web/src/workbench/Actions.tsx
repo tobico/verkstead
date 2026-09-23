@@ -662,6 +662,13 @@ function actions(): {
   /// rather than pages, and Back leaves the conversation the way it does from
   /// any other pane.
   ///
+  /// **Unless the press was about some other conversation**, which is what the
+  /// sidebar's own menu is for: a right-click on a card that is not the one
+  /// being read, and a press that lands the human somewhere else entirely. That
+  /// is going somewhere rather than opening a pane, so it pushes — and Back is
+  /// the way back to what they were reading, which is what they will want the
+  /// moment the steer is written.
+  ///
   /// A second press finds the one there is, which is the same navigation: the
   /// row says *go to the steer*, and whether it had to make one is the
   /// server's business.
@@ -682,7 +689,9 @@ function actions(): {
       // the button the press came from, which is where a narrow window is
       // walking away from.
       shut();
-      navigate(pathTo(conversation.id, "steer"), { replace: true });
+      navigate(pathTo(conversation.id, "steer"), {
+        replace: String(conversation.id) === opened.id,
+      });
 
       // The conversation has stopped and is carrying a pending steer, whatever
       // the human goes on to decide, so the page is already out of date.

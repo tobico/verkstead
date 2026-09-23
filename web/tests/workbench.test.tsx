@@ -1887,6 +1887,56 @@ describe("what a right-click on a card offers", () => {
     ).toBe(0);
   });
 
+  /// And Steer from here lands on that card's pending steer — which is going
+  /// somewhere rather than opening a pane, so it pushes.
+  ///
+  /// Every other details pane replaces: they are places in a page, and Back
+  /// leaves the Conversation whole. This one is a press made from the list
+  /// about a Conversation the human is not reading, so it takes them somewhere
+  /// else entirely — and Back is the way home to whatever they were reading,
+  /// which is what they will want once the steer is written.
+  it("pushes to the pending steer of a card that is not the open one", async () => {
+    const steering = `/api/ui/conversations/${GRILLING.id}/steer`;
+    const fetching = theSidebarOver(
+      whenever(
+        `/api/ui/conversations/${GRILLING.id}`,
+        json({
+          ...GRILLING,
+          ready_to_stop: true,
+          working: true,
+          pending_steer: pending(),
+        }),
+      ),
+      whenever(
+        steering,
+        json({
+          Opened: { working: true, already: false },
+        } satisfies SteerOpened),
+        "POST",
+      ),
+    );
+    const { container, history } = mount(`/conversations/${OPEN.id}`);
+
+    // Where the open Conversation settled, which is what Back has to come back
+    // to: landing on one opens the end of its record.
+    await waitFor(() =>
+      expect(history.get()).toBe(`/conversations/${OPEN.id}/events/${BRIEF.id}`),
+    );
+
+    rightClick(await grillingCard(container));
+    fireEvent.click(await drawn(await opened(container), `.${actions.steer}`));
+
+    await waitFor(() => expect(sent(fetching, steering)).toEqual({}));
+    await waitFor(() =>
+      expect(history.get()).toBe(`/conversations/${GRILLING.id}/steer`),
+    );
+
+    history.back();
+    await waitFor(() =>
+      expect(history.get()).toBe(`/conversations/${OPEN.id}/events/${BRIEF.id}`),
+    );
+  });
+
   /// Which is the whole reason it is worth having: the list is where the human
   /// is when they want to end something that is not what they are reading.
   it("acts on the card that was pressed, not on the one that is open", async () => {
@@ -10762,8 +10812,8 @@ describe("steering a conversation", () => {
   });
 
   /// The checkbox is about the world rather than about the move, so it is drawn
-  /// against what the click found: with nothing running it would promise
-  /// something about a session that is not there.
+  /// against the conversation as it stands: with nothing running it would
+  /// promise something about a session that is not there.
   it("offers the interrupt only where a session is running", async () => {
     theGrillingSteering(
       { ready_to_stop: true, working: true },
@@ -10783,6 +10833,69 @@ describe("steering a conversation", () => {
 
     const pane = await openSteer(quiet.container);
     expect(pane.querySelector(`.${steerForm.steerInterrupt}`)).toBeNull();
+  });
+
+  /// And it follows the live conversation rather than what the press found.
+  ///
+  /// The two used to be the same answer because the press and the form were the
+  /// same moment. They are not any more: the item may sit open for hours, so a
+  /// session the press saw may have been seen out meanwhile, and one may have
+  /// been started since. Both ways round here, because either one alone passes
+  /// with the wrong source read.
+  it("draws the interrupt from the live conversation, not from the press", async () => {
+    // The press found a session running; nothing is running now.
+    theGrillingSteering(
+      { ready_to_stop: true, working: false },
+      whenever(STEERING, OVER_A_SESSION, "POST"),
+    );
+    const quiet = mount(`/conversations/${GRILLING.id}`);
+
+    const pane = await openSteer(quiet.container);
+    expect(pane.querySelector(`.${steerForm.steerInterrupt}`)).toBeNull();
+    quiet.unmount();
+
+    // And the other way about: the press found nothing, and something is
+    // running by the time the form is read.
+    theGrillingSteering(
+      { ready_to_stop: true, working: true },
+      whenever(STEERING, OVER_NOTHING, "POST"),
+    );
+    const { container } = mount(`/conversations/${GRILLING.id}`);
+
+    const over = await openSteer(container);
+    expect(over.querySelector(`.${steerForm.steerInterrupt}`)).toBeTruthy();
+  });
+
+  /// A press that selects the item scrolls it into view, whether or not the
+  /// human had scrolled up to read history.
+  ///
+  /// The record follows its own bottom only while nobody has taken the scroll
+  /// off it, and this is the one card selected by a press made somewhere else —
+  /// the actions menu, or the sidebar's. A card selected by a press is the one
+  /// thing they want to see.
+  it("scrolls the pending steer into view when a press selects it", async () => {
+    // jsdom does no scrolling of any kind, so what this can watch is the ask
+    // itself — and which element it was made of.
+    const into: Element[] = [];
+    Element.prototype.scrollIntoView = function (this: Element) {
+      into.push(this);
+    } as typeof Element.prototype.scrollIntoView;
+
+    try {
+      theGrillingSteering({}, whenever(STEERING, OVER_NOTHING, "POST"));
+      const { container } = mount(`/conversations/${GRILLING.id}/backlog`);
+
+      const item = await drawn(container, `.${timeline.pendingSteer}`);
+      const row = item.closest(`.${timeline.timelineEvent}`);
+
+      expect(into, "the item is drawn without being scrolled to").toEqual([]);
+
+      await openSteer(container);
+
+      await waitFor(() => expect(into).toContain(row));
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView;
+    }
   });
 
   /// What the submit carries: where the work goes, and whether to end what is

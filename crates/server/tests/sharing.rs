@@ -1588,3 +1588,46 @@ async fn a_conversation_that_is_not_there_is_a_miss() {
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
+
+/// A pending steer never boards.
+///
+/// The Steer form is an item on the Timeline while it is being written, but it
+/// is no Event and has no place in the record: it has not happened yet. What it
+/// says is where the work *might* be going, which is not a fact about the work
+/// that was done — and the item drawn for it opens a form a reader has no
+/// workbench to submit.
+#[tokio::test]
+async fn a_pending_steer_never_boards_a_share() {
+    let (_dir, pool, app) = app().await;
+    let id = everything(&pool).await;
+
+    store::open_pending_steer(&pool, id).await.unwrap();
+    store::save_pending_steer(
+        &pool,
+        id,
+        &store::PendingForm {
+            target: Some(store::Lifecycle::Implementing),
+            instruction: Some("Take the counter out of the process".to_owned()),
+            ..store::PendingForm::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let shared = share(&app, id).await;
+
+    assert!(
+        shared.conversation.pending_steer.is_none(),
+        "a share carries the record, and this is not on it",
+    );
+
+    // And nothing of what was written into it either, which a parsed record
+    // could not say: the form is somebody's half-made decision about work in
+    // flight, and a file that leaves the tailnet is the last place for one.
+    let payload = raw(&app, &format!("/api/ui/conversations/{id}/share.json")).await;
+
+    assert!(
+        !payload.contains("Take the counter out of the process"),
+        "the form's own words are nowhere in the payload",
+    );
+}

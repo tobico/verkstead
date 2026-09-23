@@ -1583,6 +1583,13 @@ async fn started(
 ///   stopped, and Resume is not offered — but a Conversation nothing will move
 ///   until the human does. A column on the row for the stop's reason; see
 ///   `escalations::escalate`.
+/// - A **pending steer**: a Steer form somebody opened and has not decided.
+///   The press stopped the drive and nothing starts again until they submit or
+///   cancel it, so the Conversation is theirs to finish. The stop it made is
+///   their own press and so says nothing by the rule above — this is what says
+///   it instead; see [`super::pending_steers::waited_on`]. The one source that
+///   raises no notification either, and for the same reason the press's own
+///   stop raises none: it is their news already.
 ///
 /// A grilling waiting on its closing proposal is the first of them and not a
 /// source of its own: the proposal rides a Question Set, and an unanswered Set
@@ -1614,11 +1621,13 @@ fn waits_on_the_human() -> String {
              )
              OR ({stopped})
              OR ({escalated})
+             OR ({steering})
          )",
         draft = Lifecycle::Draft.stored(),
         closed = Lifecycle::Closed.stored(),
         stopped = super::stops::waited_on(),
         escalated = super::escalations::waited_on(),
+        steering = super::pending_steers::waited_on(),
     )
 }
 
@@ -3652,6 +3661,10 @@ async fn start(
 /// server before this is called, for the reason the branch is created before
 /// [`start_grilling`] is: the record follows the work rather than promising it.
 ///
+/// A pending steer goes with it, the way the open Question Sets do: a form
+/// asking where the work goes next is about work that is over — see
+/// [`super::pending_steers`].
+///
 /// Closing one that is closed already records nothing and is not an error. The
 /// human asked for it to be closed, and it is.
 ///
@@ -3701,6 +3714,18 @@ pub async fn close_conversation(pool: &SqlitePool, id: i64) -> Result<Closing> {
     // the directories are gone by the time this runs, and the branches their
     // read-write companions were worked on stay where they are.
     super::companions::forget_worktrees(&mut tx, id).await?;
+
+    // And the steer somebody had started and not decided, in this transaction
+    // because the close is what decides it: closing takes away every session
+    // there will ever be, so a form asking where the work goes next is a form
+    // about work that is over. The same reading that shuts the Sets a close
+    // finds open — see the server's `conversations::close` — said here rather
+    // than a step later, the row being the record's rather than a question a
+    // session is holding.
+    //
+    // Nothing to discard is the ordinary case: most Conversations are closed
+    // with nobody part-way through steering them.
+    super::pending_steers::discard(&mut tx, id).await?;
 
     moved(&mut tx, id, Lifecycle::Closed).await?;
 

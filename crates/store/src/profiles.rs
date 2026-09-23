@@ -620,7 +620,8 @@ pub async fn update_profile(pool: &SqlitePool, id: i64, facts: &ProfileFacts) ->
 /// memory of what it was last grilled with goes the same way — `repo_pairings`
 /// names the Profile in a column that cannot be null — so the next Conversation
 /// started there arrives with that picker empty rather than prefilled with an
-/// account that is gone.
+/// account that is gone. And so does the picker of a steer somebody is part-way
+/// through writing, which is the same choice one press before it is settled.
 ///
 /// What is deliberately left alone is the record of what has already run:
 /// [`super::session_pairings`] keeps the Profile's *name* rather than its id, so
@@ -883,6 +884,19 @@ async fn forget_pairings(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, id: i64) 
         .execute(&mut **tx)
         .await
         .with_context(|| format!("forgetting that a Repo was last grilled under Profile {id}"))?;
+
+    // And the picker of a steer somebody is part-way through writing, which is
+    // a Pairing chosen and not yet settled — see [`super::pending_steers`].
+    // Both halves, by the rule above: a form holding the model of an account
+    // that has gone is half a choice, and the pane reads a row with one half in
+    // it as nothing picked anyway. The rest of the form is left exactly as it
+    // was — the Profile going is no reason to throw away an afternoon's
+    // writing, and picking another is a control the pane already has.
+    sqlx::query("UPDATE pending_steers SET profile_id = NULL, model = NULL WHERE profile_id = ?")
+        .bind(id)
+        .execute(&mut **tx)
+        .await
+        .with_context(|| format!("clearing Profile {id} off the steers being written under it"))?;
 
     Ok(())
 }

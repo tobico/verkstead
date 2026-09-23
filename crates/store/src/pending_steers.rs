@@ -483,3 +483,22 @@ pub(crate) async fn discard(
 
     Ok(gone > 0)
 }
+
+/// A pending steer said as SQL about a Conversation row aliased `c`, for the
+/// fold of what waits on the human — see [`super::conversations`], its one
+/// reader.
+///
+/// A form somebody opened and has not decided is a Conversation waiting on
+/// them, and it is the plainest of the sources: the press stopped the drive, so
+/// nothing is going to move until they submit or cancel. The stop it made is
+/// their own and says nothing in the marks — see [`super::Decision::waits_on_the_human`]
+/// — so without this a Conversation with a half-written steer on it would read
+/// as quiet from the sidebar, which is the one place somebody who left the form
+/// yesterday is going to look for it.
+///
+/// The row's existence and nothing about its contents. A form with nothing
+/// written in it is as much somebody's to finish as one with an afternoon in
+/// it: what waits on them is the decision rather than the typing.
+pub(crate) fn waited_on() -> &'static str {
+    "EXISTS (SELECT 1 FROM pending_steers p WHERE p.conversation_id = c.id)"
+}

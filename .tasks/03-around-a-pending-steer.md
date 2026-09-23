@@ -32,12 +32,12 @@ be done, and a test says so.
 
 ## Acceptance criteria
 
-- [ ] Resume deletes the pending steer and resumes; a refused Resume leaves it;
+- [x] Resume deletes the pending steer and resumes; a refused Resume leaves it;
       Close deletes it; Stop and Force stop leave it; the interrupt tick follows
       the live Conversation.
-- [ ] A Conversation with a pending steer reads *Waiting on you* on the status
+- [x] A Conversation with a pending steer reads *Waiting on you* on the status
       button and carries the sidebar disc, and nothing is pushed to a phone for
       it.
-- [ ] Steer from the sidebar menu on another Conversation lands on its pending
+- [x] Steer from the sidebar menu on another Conversation lands on its pending
       steer with the item scrolled into view; a share of a Conversation with a
       pending steer carries no trace of it.
