@@ -1,10 +1,18 @@
 import { cleanup, configure } from "@solidjs/testing-library";
-import { afterEach } from "vitest";
+import { afterEach, beforeEach } from "vitest";
 
 // The library cleans up after itself only when vitest's globals are on, and
 // they are not: an uncleaned render leaves the last test's DOM in the document
 // for the next one's queries to find two of everything.
 afterEach(cleanup);
+
+// And every test starts at a browser that has never been here. `localStorage`
+// is the one thing in this environment that outlives a render — the pane
+// widths, the compose page's draft, what Code had open — so a test that left
+// something in it would be the next one's starting state, and a page that
+// restores what it finds there would come up holding it. A test that is *about*
+// the storage puts what it means in it and reads it back inside itself.
+beforeEach(() => localStorage.clear());
 
 // How long a wait is given, which is a budget on the machine rather than on the
 // code — the same thing `testTimeout` in `vite.config.ts` is, and said here

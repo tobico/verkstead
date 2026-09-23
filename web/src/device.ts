@@ -71,13 +71,24 @@ export function read(key: string): string | null {
   }
 }
 
-/// Write `body` out, replacing whatever was under the key.
-export function write(key: string, body: string): void {
+/// Write `body` out, replacing whatever was under the key — and say whether it
+/// landed.
+///
+/// Nearly every caller drops the answer, storage being a convenience: a setting
+/// that could not be written is one the next visit does without. What reads it
+/// is a caller holding two things of unequal worth, which is Code — its layout
+/// is written apart from its unsaved text so that a storage too full for the
+/// text still comes back to the splits, and a text that would not fit is taken
+/// away rather than left behind to be restored over a file it no longer
+/// describes (see `workbench/remembering.ts`).
+export function write(key: string, body: string): boolean {
   try {
     localStorage.setItem(key, body);
+    return true;
   } catch {
     // Full, or refused: what was being written is gone, and the page carries on
     // regardless.
+    return false;
   }
 }
 

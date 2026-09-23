@@ -234,10 +234,17 @@
 //! a tree back at its roots however far down they had walked. So
 //! none of that is held here: it is held above the frame's switch, per
 //! Conversation, and handed in (see [`./keeping`], and `Workbench.tsx` where it
-//! is kept). The device's storage that carries the same thing through a
-//! *reload* is stage 02 of the roadmap; what stands here survives the swap, and
-//! a page left with text nobody has saved warns on the way out, the browser's
-//! own way.
+//! is kept).
+//!
+//! **And through a reload as well**, which is the device's storage rather than
+//! the page's: the layout, each group's tabs and the one it is showing, and the
+//! text of every buffer the disk has not got, written down per Conversation in
+//! the browser (see [`./remembering`]). What is *not* written down is what the
+//! disk said — so every restored file is read here on the way in and the human's
+//! text goes over the top of it, which is what makes a file that moved while the
+//! page was away dirty against what is really there. And a page left with text
+//! nobody has saved still warns on the way out, the browser's own way, because
+//! a browser that refuses storage is a browser that loses it.
 //!
 //! The terminals are the exception, and the register is why: a shell is the
 //! server's, so the list is read on every opening and the tabs are settled
@@ -647,6 +654,7 @@ export function Code(props: {
     buffers,
     hold,
     release,
+    recall,
     expanded,
     setExpanded,
     over,
@@ -1824,7 +1832,18 @@ export function Code(props: {
   /// to the text the collision was against would be shown a clean tab over a
   /// file that says something else. So the disk is asked, which is one request
   /// on a press somebody made on purpose.
-  const reread = (path: string, keeping = false): Promise<void> => {
+  ///
+  /// **And `restored` is the text this device was holding when the page went**,
+  /// where it was holding any: it goes into the buffer in place of what came
+  /// back, so the tab is dirty against the version the file reads at *now*. A
+  /// file the agent rewrote overnight comes back to the human's text over the
+  /// disk's own, which is what makes the comparison — and the save that names
+  /// that version — true of what is really there.
+  const reread = (
+    path: string,
+    keeping = false,
+    restored?: string,
+  ): Promise<void> => {
     // Whatever the last save said goes with the reading it was about: the bar
     // is a question about the disk, and this is the disk answering.
     unbar(path);
@@ -1840,8 +1859,10 @@ export function Code(props: {
         if (typeof reading !== "string" && "Text" in reading) {
           // The buffer, made out of what was read where the file has none yet
           // and written with it where it has — which is the whole of the
-          // difference between opening a file and **Reload**.
-          hold(path, reading.Text.text);
+          // difference between opening a file and **Reload**. Or out of the
+          // text the device came back holding, where this is the read that
+          // restored the tab.
+          hold(path, restored ?? reading.Text.text);
         } else {
           release(path);
         }
@@ -2067,6 +2088,37 @@ export function Code(props: {
 
   document.addEventListener("keydown", pressed);
   onCleanup(() => document.removeEventListener("keydown", pressed));
+
+  /// The files the device came back holding, read now.
+  ///
+  /// A reload restores the tabs and the layout they stand in, and nothing
+  /// behind them: what a file says is the disk's to answer, so every restored
+  /// tab is read here the way a file pressed in the tree is. The text the human
+  /// had typed and not saved goes over the top of what comes back, so it is
+  /// dirty against the version the file reads at *now* — which is what puts the
+  /// bar on a file the agent rewrote overnight, rather than a save going out
+  /// over a version that is no longer there (ADR 0019, *Versioned reads, and a
+  /// stale write is refused*).
+  ///
+  /// **A file with a reading already is left alone**, which is what tells a
+  /// reload from a swap: a pane swapped for an Event and back finds its
+  /// readings where it left them, and reading them again would be a fresh
+  /// version under text the human never saw.
+  ///
+  /// Once per mount, and there is nothing to do on nearly all of them: a pane
+  /// that opened on a Conversation this device has never had Code open in has
+  /// no tabs to restore.
+  onMount(() => {
+    const open = new Set(
+      viewed().flatMap((tab) => ("file" in tab ? [tab.file] : [])),
+    );
+
+    for (const path of open) {
+      if (readings()[path] === undefined) {
+        void reread(path, false, recall(path));
+      }
+    }
+  });
 
   /// The tabs the pane opens with, settled against the register.
   ///

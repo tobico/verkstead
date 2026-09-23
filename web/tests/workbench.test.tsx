@@ -22722,6 +22722,377 @@ describe("the code pane's groups", () => {
       });
     });
   });
+
+  /// And what the device remembers of all of it, which is what a reload comes
+  /// back to.
+  ///
+  /// The keeping above the pane carries the tabs through a swap; the browser's
+  /// own storage carries them through the page going away and coming back — the
+  /// layout, each group's tabs and the one it is showing, and the text nobody
+  /// has saved, per Conversation and never sent to the server (ADR 0019, *Tabs
+  /// and groups*).
+  describe("and the page reloaded", () => {
+    /// Where this conversation's layout and its unsaved text are kept, asked
+    /// for by the names a browser would find them under rather than through the
+    /// module that writes them — the way the widths are asked for in
+    /// `sizing.test.tsx`.
+    const LAYOUT = `verkstead.code.${GRILLING.id}`;
+    const UNSAVED = `verkstead.code-unsaved.${GRILLING.id}`;
+
+    /// What the fixture's own Cargo.toml says, which is what a file nobody has
+    /// typed into comes back as.
+    const ON_DISK = (codeFile as Extract<FileReading, { Text: unknown }>).Text;
+
+    /// And the file as the agent left it while the page was away: another text,
+    /// under another version.
+    const THEIRS: FileReading = {
+      Text: {
+        path: pathOf("Cargo.toml"),
+        text: '[workspace]\nmembers = ["crates/*"]\n',
+        version: "Cargo.toml-2",
+        writable: true,
+      },
+    };
+
+    /// The page gone and loaded again: the render taken down, which is the
+    /// keeping above the pane going with it, and a fresh one mounted over
+    /// whatever this browser is still holding.
+    async function reloaded(...answers: Parameters<typeof serving>) {
+      cleanup();
+
+      return opened(...answers);
+    }
+
+    /// Type into an editor, which is what makes a tab dirty. The last one drawn
+    /// by default, which is the view a file just opened is showing in.
+    async function types(
+      box: HTMLTextAreaElement,
+      text: string,
+    ): Promise<void> {
+      fireEvent.input(box, { target: { value: text } });
+      await waitFor(() => expect(box.value).toBe(text));
+    }
+
+    /// Ctrl+S, fired where the caret is — the pane listens on the document, so
+    /// what this asks is that the press reaches it from inside the editor.
+    function ctrlS(box: HTMLTextAreaElement): void {
+      fireEvent.keyDown(box, { key: "s", ctrlKey: true });
+    }
+
+    /// Every save that went out, as the bodies they were sent with — which is
+    /// where the version a write names itself as being over is read back from.
+    function saved(
+      fetching: ReturnType<typeof serving>,
+    ): Array<{ path: string; version: string; text: string }> {
+      return fetching.mock.calls
+        .filter(
+          ([path, init]) => String(path) === SAVING && init?.method === "POST",
+        )
+        .map(
+          ([, init]) =>
+            JSON.parse(String(init?.body)) as {
+              path: string;
+              version: string;
+              text: string;
+            },
+        );
+    }
+
+    // Every stub below is on the browser's own storage, and one left standing
+    // would be the next test's browser.
+    afterEach(() => vi.restoreAllMocks());
+
+    /// The whole of the first acceptance: the splits, the tabs, which of them
+    /// each group is showing, and the text nobody had saved.
+    it("comes back to the splits, the tabs and the unsaved text", async () => {
+      const first = await opened();
+
+      press(first.container, "Cargo.toml");
+      await waitFor(() => expect(tabs(first.container)).toHaveLength(1));
+
+      // Beside itself, and the second file opened into the group the split
+      // made — which is the active one, a split being where the work is going.
+      await split(first.container, tabs(first.container)[0]!, "Split right");
+      await waitFor(() => expect(groups(first.container)).toHaveLength(2));
+
+      press(first.container, "README.md");
+      await waitFor(() =>
+        expect(holding(first.container)).toEqual([
+          ["Cargo.toml"],
+          ["Cargo.toml", "README.md"],
+        ]),
+      );
+
+      await waitFor(() => expect(editors(first.container)).toHaveLength(3));
+      await types(editors(first.container).at(-1)!, "# verkstead\n\nnotes\n");
+      await waitFor(() => expect(dots(first.container)).toHaveLength(1));
+
+      // Which is on the device by now: the layout under one key and the text
+      // under another, so that a storage too full for the second still has the
+      // first.
+      expect(localStorage.getItem(LAYOUT)).toBeTruthy();
+      expect(
+        JSON.parse(localStorage.getItem(UNSAVED)!) as Record<string, string>,
+      ).toEqual({ [pathOf("README.md")]: "# verkstead\n\nnotes\n" });
+
+      const { container, fetching } = await reloaded();
+
+      // The two groups, side by side where they were left, holding what they
+      // were holding.
+      await waitFor(() => expect(groups(container)).toHaveLength(2));
+      expect(holding(container)).toEqual([
+        ["Cargo.toml"],
+        ["Cargo.toml", "README.md"],
+      ]);
+      expect(groups(container).map(stood)).toEqual([
+        { left: "0%", top: "0%", width: "50%", height: "100%" },
+        { left: "50%", top: "0%", width: "50%", height: "100%" },
+      ]);
+
+      // And the one each was showing is the one showing: the group that was
+      // split is still on the file it was split from, and the group it made is
+      // on the file opened into it.
+      await waitFor(() =>
+        expect(
+          tabs(container).map((tab) => tab.getAttribute("aria-pressed")),
+        ).toEqual(["true", "false", "true"]),
+      );
+
+      // The unsaved text is in the editor it was typed into, and the dot is on
+      // its tab: the file is dirty against what the disk says, which is what it
+      // was before the page went.
+      await waitFor(() =>
+        expect(editors(container).at(-1)?.value).toBe("# verkstead\n\nnotes\n"),
+      );
+      expect(dots(container)).toHaveLength(1);
+      expect(
+        tabs(container)[2]!.querySelector(`.${codePane.dot}`),
+      ).toBeTruthy();
+
+      // And the file the human had not touched is the disk's, read afresh: the
+      // readings are not what was stored, they are what the disk says now.
+      expect(editors(container)[0]!.value).toBe(ON_DISK.text);
+
+      // Once per file rather than once per view, two views of one file being
+      // one buffer.
+      expect(askedFor(fetching, fileOf(pathOf("Cargo.toml")))).toBe(1);
+      expect(askedFor(fetching, fileOf(pathOf("README.md")))).toBe(1);
+    });
+
+    /// And the terminals are settled against the register on the way back in,
+    /// which is what a reload has in common with a swap: a tab is this device's
+    /// and the shell under it is the server's.
+    it("drops a shell that ended while the page was away, and takes up one opened elsewhere", async () => {
+      let live = [1, 2];
+      const register = whenever(TERMINALS_OF_IT, () => json(idle(live))());
+
+      const first = await opened(register);
+
+      await waitFor(() =>
+        expect(holding(first.container)).toEqual([
+          ["Terminal 1", "Terminal 2"],
+        ]),
+      );
+
+      await split(first.container, tabs(first.container)[1]!, "Split right");
+      await waitFor(() =>
+        expect(holding(first.container)).toEqual([
+          ["Terminal 1", "Terminal 2"],
+          ["Terminal 2"],
+        ]),
+      );
+
+      // The first shell exits while the page is away, and another is opened on
+      // some other device.
+      live = [2, 3];
+
+      const { container } = await reloaded(register);
+
+      await waitFor(() =>
+        expect(holding(container)).toEqual([
+          ["Terminal 2"],
+          ["Terminal 2", "Terminal 3"],
+        ]),
+      );
+    });
+
+    /// A dirty file comes back dirty against the version it reads at *now*, so
+    /// a file the agent rewrote while the page was away is a collision to be
+    /// told about rather than a save going out over a version that is no longer
+    /// there.
+    it("comes back dirty against what the disk says now, and the bar on the save it refuses", async () => {
+      const first = await opened();
+
+      press(first.container, "Cargo.toml");
+      await waitFor(() => expect(editors(first.container)).toHaveLength(1));
+
+      await types(editors(first.container)[0]!, "[workspace]\nmembers = []\n");
+      await waitFor(() => expect(dots(first.container)).toHaveLength(1));
+
+      // The agent rewrites the file while the page is away, and the server
+      // refuses a write over anything but what it holds now.
+      const { container, fetching } = await reloaded(
+        whenever(fileOf(pathOf("Cargo.toml")), json(THEIRS)),
+        whenever(SAVING, json("Stale" satisfies FileWritten), "POST"),
+      );
+
+      // The human's text is back, over the agent's rather than over the text it
+      // was typed against — and the dot says the two are apart.
+      await waitFor(() =>
+        expect(editors(container)[0]?.value).toBe("[workspace]\nmembers = []\n"),
+      );
+      expect(dots(container)).toHaveLength(1);
+
+      ctrlS(editors(container)[0]!);
+
+      await waitFor(() => expect(saved(fetching)).toHaveLength(1));
+
+      // Over the version the file reads at now, which is the point: a save
+      // naming the version this device stored would be a write over a file
+      // nobody has read.
+      expect(saved(fetching)[0]!.version).toBe("Cargo.toml-2");
+
+      const bar = await drawn(
+        container,
+        `.${shell.detailsPane} .${codePane.moved}`,
+      );
+      expect(bar.textContent).toContain(MOVED);
+    });
+
+    /// And where the storage will not take the text, it still takes the layout:
+    /// two keys and two writes, so the splits and the tabs come back and the
+    /// text is what is lost.
+    it("restores the layout when the unsaved text will not fit", async () => {
+      const setting = Storage.prototype.setItem;
+
+      vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+        this: Storage,
+        key: string,
+        body: string,
+      ) {
+        if (key === UNSAVED) {
+          throw new DOMException("no room", "QuotaExceededError");
+        }
+
+        setting.call(this, key, body);
+      });
+
+      const first = await opened();
+
+      press(first.container, "Cargo.toml");
+      await waitFor(() => expect(editors(first.container)).toHaveLength(1));
+
+      await types(editors(first.container)[0]!, "[workspace]\nmembers = []\n");
+      await waitFor(() => expect(dots(first.container)).toHaveLength(1));
+
+      // The layout landed; the text did not, and what would not go is taken
+      // away rather than left to be restored over a file it no longer
+      // describes.
+      expect(localStorage.getItem(LAYOUT)).toBeTruthy();
+      expect(localStorage.getItem(UNSAVED)).toBeNull();
+
+      const { container } = await reloaded();
+
+      await waitFor(() => expect(holding(container)).toEqual([["Cargo.toml"]]));
+
+      // And the tab is the file as the disk has it: clean, and nothing unsaved
+      // to lose a second time.
+      await waitFor(() => expect(editors(container)[0]?.value).toBe(ON_DISK.text));
+      expect(dots(container)).toHaveLength(0);
+    });
+
+    /// And a browser that refuses storage altogether costs the layout and
+    /// nothing else: the pane opens, splits and types exactly as it did, and a
+    /// reload comes back to an empty one.
+    it("costs the layout and nothing else where the browser refuses storage", async () => {
+      const refused = () => {
+        throw new DOMException("storage is blocked", "SecurityError");
+      };
+
+      vi.spyOn(Storage.prototype, "getItem").mockImplementation(refused);
+      vi.spyOn(Storage.prototype, "setItem").mockImplementation(refused);
+      vi.spyOn(Storage.prototype, "removeItem").mockImplementation(refused);
+
+      const first = await opened();
+
+      press(first.container, "Cargo.toml");
+      await waitFor(() => expect(editors(first.container)).toHaveLength(1));
+
+      await split(first.container, tabs(first.container)[0]!, "Split right");
+      await waitFor(() =>
+        expect(holding(first.container)).toEqual([
+          ["Cargo.toml"],
+          ["Cargo.toml"],
+        ]),
+      );
+
+      await types(editors(first.container)[0]!, "[workspace]\nmembers = []\n");
+      await waitFor(() => expect(dots(first.container)).toHaveLength(2));
+
+      const { container } = await reloaded();
+
+      // Nothing was written, so there is nothing to come back to: one group,
+      // saying what an empty pane says.
+      await waitFor(() => expect(groups(container)).toHaveLength(1));
+      expect(holding(container)).toEqual([[]]);
+      expect(
+        container.querySelector(`.${shell.detailsPane} .${codePane.nothing}`)
+          ?.textContent,
+      ).toContain(NOTHING_OPEN);
+    });
+
+    /// And the text is held on the device until it is in a buffer, rather than
+    /// until the page has loaded: a reload is a moment where the files are
+    /// being read, Monaco is on its way and there is not a buffer among them,
+    /// and a page that wrote down what it was holding *then* would have emptied
+    /// the key while it was getting ready.
+    it("keeps the unsaved text while the read that restores it is in flight", async () => {
+      const first = await opened();
+
+      press(first.container, "Cargo.toml");
+      await waitFor(() => expect(editors(first.container)).toHaveLength(1));
+
+      await types(editors(first.container)[0]!, "[workspace]\nmembers = []\n");
+      await waitFor(() =>
+        expect(localStorage.getItem(UNSAVED)).toBe(
+          JSON.stringify({ [pathOf("Cargo.toml")]: "[workspace]\nmembers = []\n" }),
+        ),
+      );
+
+      // The read of it never answers, so nothing this page does can put the
+      // text back into a buffer.
+      const { container } = await reloaded(
+        whenever(fileOf(pathOf("Cargo.toml")), hangs()),
+      );
+
+      await waitFor(() => expect(holding(container)).toEqual([["Cargo.toml"]]));
+      expect(
+        container.querySelector(`.${shell.detailsPane} .${editorPane.editor}`),
+      ).toBeNull();
+
+      // And the text is still where it was: a second reload would come back to
+      // it, which is what makes a page that cannot read the disk cost nothing.
+      expect(localStorage.getItem(UNSAVED)).toBe(
+        JSON.stringify({ [pathOf("Cargo.toml")]: "[workspace]\nmembers = []\n" }),
+      );
+    });
+
+    /// A stored body that will not parse, or is not the shape of one of these,
+    /// is dropped on the way past — the way the compose page's own draft is. It
+    /// will be no more use on the next visit than it is on this one.
+    it("drops a stored layout it cannot read, and opens empty", async () => {
+      localStorage.setItem(LAYOUT, "{ this is not a layout");
+      localStorage.setItem(UNSAVED, "[]");
+
+      const { container } = await opened();
+
+      await waitFor(() => expect(groups(container)).toHaveLength(1));
+      expect(holding(container)).toEqual([[]]);
+
+      expect(localStorage.getItem(LAYOUT)).toBeNull();
+      expect(localStorage.getItem(UNSAVED)).toBeNull();
+    });
+  });
 });
 
 /// The maximise toggle in Code's header: the press that hides the sidebar and

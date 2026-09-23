@@ -30,12 +30,20 @@
 //! writes the text — the dot, Ctrl+S, **Reload** — goes through [`Buffer`]
 //! rather than through a string beside it.
 //!
-//! **In the page rather than on the device**, which is this stage's half of it.
-//! Stage 02 of the roadmap puts the same thing in the browser's storage so that
-//! a reload comes back to it as well (ADR 0019, *Tabs and groups*); what is
-//! here survives the swap and nothing further. What it does do about a reload
-//! is warn before one: a page holding text nobody has saved says so on the way
-//! out, the browser's own way — see [`unsaved`].
+//! **And on the device as well**, which is what carries it through a reload —
+//! see [`./remembering`]. What is here is what survives a swap; what is written
+//! down there is the layout, each group's tabs and the one it is showing, and
+//! the text of every buffer the disk has not got, per Conversation in the
+//! browser's own storage (ADR 0019, *Tabs and groups*). So a keeping is made
+//! out of whatever this device was last holding rather than empty, and goes on
+//! writing itself down as it moves.
+//!
+//! The readings are not written down with it. What a file says is the disk's to
+//! answer and a page coming back asks it afresh, the human's restored text
+//! going over the top of what comes back — see `Code.tsx`. A page holding text
+//! nobody has saved still warns before it goes, the browser's own way, because
+//! storage is a convenience the whole way down and a browser that refuses it
+//! would otherwise lose that text without a word — see [`unsaved`].
 //!
 //! The terminals are the exception inside the exception. A tab is kept, and the
 //! shell under it is not this page's to keep: the register is the server's, and
@@ -43,11 +51,18 @@
 //! So the pane reads the register on every opening and settles its tabs against
 //! it — see `Code.tsx`.
 
-import { createSignal, type Accessor, type Setter } from "solid-js";
+import {
+  createSignal,
+  getOwner,
+  runWithOwner,
+  type Accessor,
+  type Setter,
+} from "solid-js";
 
 import type { FileReading, FolderListing } from "../api/types";
 import { load, type Model } from "./editing";
 import { group as made, type Group, type Layout } from "./layout";
+import { recalled, remembered, remembering, revived } from "./remembering";
 
 /// One tab of a group: a terminal by the number the server issued it, or a
 /// file by its path.
@@ -153,6 +168,16 @@ export interface Kept {
   /// register: a model left in it is a file that could never be opened again.
   release: (path: string) => void;
 
+  /// The text this device was holding for a file when the page last went, where
+  /// it is still holding it.
+  ///
+  /// Asked by the read that happens *because* the tab came back, which is the
+  /// one read that puts the human's text over what the disk says now (see
+  /// `Code.tsx`). It goes when that text reaches a buffer, or when the file is
+  /// let go of — so a **Reload** pressed afterwards is the disk, and a read that
+  /// never landed leaves the text where the device can still be holding it.
+  recall: (path: string) => string | undefined;
+
   /// Which folders of the tree are open, and what each of them last read.
   ///
   /// A path is in here or it is not, and that is the whole of what open means:
@@ -210,6 +235,16 @@ export interface Keeping {
 export function keeping(): Keeping {
   const kept = new Map<number, Kept>();
 
+  /// Whose the effects that write a keeping down belong to: this page, rather
+  /// than whatever happened to be drawing when the keeping was first asked for.
+  ///
+  /// A keeping is made the first time a Conversation's Code is drawn, which is
+  /// inside the details pane — and that pane is taken down the moment somebody
+  /// opens an Event. An effect owned by it would go with it, so a device would
+  /// stop writing down anything that happened after the first swap. This owner
+  /// is the page's own, and lasts as long as the keeping does.
+  const page = getOwner();
+
   const of = (conversation: number): Kept => {
     const already = kept.get(conversation);
 
@@ -217,10 +252,12 @@ export function keeping(): Keeping {
       return already;
     }
 
-    const opened = empty();
-    kept.set(conversation, opened);
+    const make = (): Kept => opened(conversation);
+    const held = page === null ? make() : runWithOwner(page, make)!;
 
-    return opened;
+    kept.set(conversation, held);
+
+    return held;
   };
 
   const unsaved = (): boolean =>
@@ -231,21 +268,48 @@ export function keeping(): Keeping {
   return { of, unsaved };
 }
 
-/// One Conversation's, with nothing open in it yet.
-function empty(): Kept {
+/// One Conversation's, as this device last left it — and with nothing open in
+/// it where this device has never opened anything.
+///
+/// The layout, the tabs and the text come off the browser's storage, which is
+/// what makes a reload come back to the splits (see [`./remembering`]). What
+/// does not is the readings: the pane reads every restored file afresh and puts
+/// the human's text over the top of it, so a file that moved while the page was
+/// away is dirty against what is really there.
+function opened(conversation: number): Kept {
+  /// What this device was last holding, where it was holding anything: the tree
+  /// with its groups made again, and which of them was active.
+  const restored = remembered(conversation);
+  const came = restored === null ? null : revived(restored);
+
+  /// And the text it had typed into each file and not saved, by path.
+  ///
+  /// Each entry stands until there is a buffer to answer for that file — which
+  /// is what the read restoring the tab makes — or until the file is let go of,
+  /// and is what the device goes on holding in the meantime.
+  const recalling = recalled(conversation);
+
   /// What the next group is called. Counted up and never reused, so a group
   /// closed and another opened are two groups rather than one name meaning two
-  /// things.
-  let groups = 0;
+  /// things — and a restored layout takes up above the highest id in it, so a
+  /// group made after the reload answers to nothing that came back.
+  let groups = came?.last ?? 0;
 
   const group = (): Group => made((groups += 1));
 
-  // The pane starts undivided, which is one group with nothing in it: a split
-  // is something the human asks for, and the group it is asked of is this one.
-  const first = group();
+  // Where the pane starts: what came back, or — where nothing did — undivided,
+  // which is one group with nothing in it. A split is something the human asks
+  // for, and the group it is asked of is this one.
+  const began =
+    came ??
+    (() => {
+      const first = group();
 
-  const [layout, setLayout] = createSignal<Layout>({ group: first });
-  const [active, setActive] = createSignal(first.id);
+      return { layout: { group: first } as Layout, active: first.id };
+    })();
+
+  const [layout, setLayout] = createSignal<Layout>(began.layout);
+  const [active, setActive] = createSignal(began.active);
   const [readings, setReadings] = createSignal<Record<string, FileReading>>({});
   const [buffers, setBuffers] = createSignal<Record<string, Buffer>>({});
   const [expanded, setExpanded] = createSignal<Record<string, FolderListing>>(
@@ -307,6 +371,11 @@ function empty(): Kept {
   const release = (path: string): void => {
     wanted.delete(path);
 
+    // And a file let go of is one nothing is holding text for: what came off
+    // the device with it goes rather than waiting for a tab that is not coming
+    // back.
+    delete recalling[path];
+
     const buffer = buffers()[path];
 
     if (buffer === undefined) {
@@ -321,7 +390,12 @@ function empty(): Kept {
     });
   };
 
-  return {
+  /// What this device was holding for this file when the page went, where it is
+  /// still holding it: the read that restores a tab is the one read that wants
+  /// it, and every read after that is somebody asking for the disk.
+  const recall = (path: string): string | undefined => recalling[path];
+
+  const kept: Kept = {
     layout,
     setLayout,
     active,
@@ -332,6 +406,7 @@ function empty(): Kept {
     buffers,
     hold,
     release,
+    recall,
     expanded,
     setExpanded,
     over,
@@ -344,6 +419,41 @@ function empty(): Kept {
     askedAt: new Map<number, number>(),
     refuse: () => (refusals -= 1),
   };
+
+  // And from here it writes itself down as it moves, which is what a reload
+  // comes back to — the layout as the tree says it, and the text of every
+  // buffer the disk has not got. Asked of [`dirty`] rather than compared here,
+  // so that what the device keeps and what the dot on a tab means are the one
+  // idea.
+  //
+  // **Over whatever has no buffer to answer for it yet**, which is a page that
+  // has only just loaded: the files are being read, Monaco is on its way, and
+  // there is not a buffer among them. What came off the device is written back
+  // as it came until one of them arrives, so a second reload before any of that
+  // lands — or a read that never lands at all — comes back to the same text
+  // rather than to a key this page emptied while it was getting ready.
+  remembering(conversation, {
+    layout,
+    active,
+    unsaved: () => {
+      const live = kept.buffers();
+
+      return {
+        ...Object.fromEntries(
+          Object.entries(recalling).filter(
+            ([path]) => live[path] === undefined,
+          ),
+        ),
+        ...Object.fromEntries(
+          Object.keys(live)
+            .filter((path) => dirty(kept, path))
+            .map((path) => [path, live[path]!.text()]),
+        ),
+      };
+    },
+  });
+
+  return kept;
 }
 
 /// What the disk said about one open file, where what it said was text.
