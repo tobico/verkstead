@@ -313,7 +313,7 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // the path rather than in the verb, as closing a Set unanswered is: the
         // viewer speaks one method. Nothing here opens a second round on one
         // Verkstead has finished with: a steer into Grilling is that, and it
-        // goes through the modal below like every other steer.
+        // goes through the steer below like every other one.
         .route("/api/ui/conversations/{id}/grill", post(start_grilling))
         // And the press that adopts a roadmap's next stage, which is the
         // grilling start's sibling: what the human presses on an adopting
@@ -1587,7 +1587,7 @@ pub(crate) async fn conversation_view(
 
     // And whether a steer into Implementing would have anything to carry on: a
     // backlog with work left in it, or a roadmap the branch has written. What
-    // the modal draws the *carrying on* by, the target itself being offered
+    // the form draws the *carrying on* by, the target itself being offered
     // wherever an instruction can be written, which is everywhere. Off the
     // Worktree as it stands, which is where the pinned Events above are read
     // from and for the same reason — the repository owns those files. See

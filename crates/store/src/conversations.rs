@@ -986,7 +986,7 @@ pub enum Steering {
     NoSuchConversation,
 
     /// The Pairing picked names a Profile that is not there — removed between
-    /// the list the modal read and the pick it made from it. Nothing is moved:
+    /// the list the form read and the pick it made from it. Nothing is moved:
     /// the move and the Pairing are one act.
     NoSuchProfile,
 }
@@ -4572,7 +4572,7 @@ pub struct Steer<'a> {
 /// choice.
 ///
 /// The model borrowed rather than owned, this being read straight off what the
-/// modal submitted and living exactly as long as the call.
+/// form submitted and living exactly as long as the call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Settling<'a> {
     /// Which role's Pairing is being re-settled: the one the state steered into

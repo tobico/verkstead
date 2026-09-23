@@ -582,10 +582,10 @@ pub struct ConversationView {
     /// branch holds a backlog with work left in it, or a roadmap it has
     /// written.
     ///
-    /// What decides whether the steer modal offers *carrying on* — the target
+    /// What decides whether the steer form offers *carrying on* — the target
     /// itself is offered on every Conversation there is, because an instruction
     /// can always be written. Where this is false the instruction is the whole
-    /// of what that target can be, so the modal requires one.
+    /// of what that target can be, so the form requires one.
     ///
     /// The server’s rule rather than something the page works out from the
     /// fields around it: what stands is a reading of the Worktree as it is now,
@@ -599,7 +599,7 @@ pub struct ConversationView {
     /// and what decides it in the end is the relaunch that reads the directory
     /// the steer has just made.
     ///
-    /// Checked again when the modal is submitted, as every refusal here is;
+    /// Checked again when the form is submitted, as every refusal here is;
     /// this says only that it was worth offering as of the moment it was read.
     pub ready_to_continue: bool,
 
@@ -3744,7 +3744,7 @@ pub enum SteerCancelled {
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum SteerTarget {
     /// A new round: the work grilled again, from whatever brief the human writes
-    /// in the modal and against as much of the last interview as they ask for.
+    /// on the form and against as much of the last interview as they ask for.
     ///
     /// The target that recreates the most, because it is the one reachable from
     /// the states that hold the least. A Draft has neither branch nor Worktree
@@ -3755,13 +3755,13 @@ pub enum SteerTarget {
 
     /// The work built: either carrying on from what the branch already holds —
     /// the next task of the backlog, the roadmap it has written — or doing what
-    /// the human wrote in the modal.
+    /// the human wrote on the form.
     ///
     /// **The instruction is what makes this a target from anywhere.** Where
     /// something stands, writing nothing carries it on and what is next is the
     /// branch’s own answer, asked exactly as every other turn of the run asks
     /// it — see [`ConversationView::ready_to_continue`], which is the rule the
-    /// modal offers that by. Where nothing stands there is nothing to pick up,
+    /// form offers that by. Where nothing stands there is nothing to pick up,
     /// so an instruction is required and a submit without one is refused by
     /// name — see [`ConversationSteered::NoInstruction`].
     ///
@@ -3807,7 +3807,7 @@ pub enum SteerTarget {
 }
 
 impl SteerTarget {
-    /// Whether work goes on in this state, which is what the rest of the modal's
+    /// Whether work goes on in this state, which is what the rest of the form's
     /// shape follows from.
     ///
     /// A target something runs in needs a Pairing settled and a Worktree to run
@@ -3822,7 +3822,7 @@ impl SteerTarget {
     }
 }
 
-/// What the human settled in the modal: where the Conversation goes, what runs
+/// What the human settled on the form: where the Conversation goes, what runs
 /// the work there, and what to do about anything still running.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
@@ -3848,7 +3848,7 @@ pub struct SteerSubmission {
     /// Absent where the target runs nothing, and absent where the human left
     /// the picker on what the Conversation already had: both are a submit that
     /// changes no Pairing. A Conversation with none fixed yet — a steered draft
-    /// — is why the pick is part of the modal rather than an error path, and one
+    /// — is why the pick is part of the form rather than an error path, and one
     /// that arrives with neither this nor a Pairing of its own is refused by
     /// name.
     #[serde(default)]
@@ -4021,7 +4021,7 @@ pub enum ConversationSteered {
     /// A wrapping Conversation is defined by the one under it — the store writes
     /// the move and the pull-request row as one act — so there is no wrapping up
     /// to steer into here, and nothing for a follow-up to follow up either. The
-    /// modal does not offer either target on such a Conversation; this is the
+    /// form does not offer either target on such a Conversation; this is the
     /// same rule asked again on arrival, the way every named refusal here is.
     NoPullRequest,
 
@@ -4031,8 +4031,8 @@ pub enum ConversationSteered {
     ///
     /// One or the other, never neither. A steer into Implementing either picks
     /// up what stands or does what the human wrote, so a branch where nothing
-    /// stands and a modal where nothing was written is a session with no job.
-    /// The modal requires the instruction on such a Conversation rather than
+    /// stands and a form where nothing was written is a session with no job.
+    /// The form requires the instruction on such a Conversation rather than
     /// offering the submit and refusing it — see
     /// [`ConversationView::ready_to_continue`], which is what it draws that by
     /// — and this is the same rule asked again on arrival.
@@ -4059,12 +4059,12 @@ pub enum ConversationSteered {
     EmptyBrief,
 
     /// Nothing says which account and model the work runs under from here:
-    /// neither a Pairing picked in the modal nor one the Conversation already
+    /// neither a Pairing picked on the form nor one the Conversation already
     /// had.
     NoPairing,
 
     /// The Pairing picked names a Profile that is not there — it was removed
-    /// between the list the modal read and the pick it made from it.
+    /// between the list the form read and the pick it made from it.
     NoSuchProfile,
 
     /// Or a model that Profile does not list, for the same reason.
@@ -4083,8 +4083,8 @@ pub enum ConversationSteered {
     /// it again from the branch.
     WorktreeRefused,
 
-    /// One of the Repos the modal named is not on the registry — taken off it
-    /// between the list the modal read and the submit that named it.
+    /// One of the Repos the form named is not on the registry — taken off it
+    /// between the list the form read and the submit that named it.
     ///
     /// The one companion refusal with no repository in it, because there is no
     /// repository to name: a Repo that is not registered is a row Verkstead

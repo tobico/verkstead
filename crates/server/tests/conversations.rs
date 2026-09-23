@@ -3214,7 +3214,7 @@ async fn steering_into_done_moves_it_and_starts_nothing() {
 /// from every other move: a draft nothing has ever run in is somewhere to steer
 /// from as much as a run in flight.
 ///
-/// The click finds nothing to stop there and opens the modal anyway. Nothing was
+/// The click finds nothing to stop there and opens the form anyway. Nothing was
 /// driving a draft, so there is no drive to stop and nothing about that is a
 /// refusal.
 #[tokio::test]
@@ -3253,7 +3253,7 @@ async fn a_draft_is_somewhere_to_steer_from_too() {
 /// the moment it resolves to a commit — the same rule
 /// [`starting_a_grilling_makes_the_branch_and_the_worktree`] asks of the button.
 ///
-/// And the round it opens is opened with the brief they typed in the modal: a
+/// And the round it opens is opened with the brief they typed on the form: a
 /// second Brief beside the draft's own, frozen where it lands, because the round
 /// it belongs to has no Draft to leave.
 #[tokio::test]
@@ -3393,7 +3393,7 @@ async fn steering_into_grilling_with_no_brief_anywhere_is_refused_by_name() {
         "and nothing on the record says a steer happened",
     );
 
-    // The same steer with the round's Brief written in the modal, which is what
+    // The same steer with the round's Brief written on the form, which is what
     // that field is for on a Conversation holding none.
     assert_eq!(
         steer_grilling(&app, id, Some("# Retries\n\nThe backoff is wrong.\n")).await,
@@ -3418,7 +3418,7 @@ async fn steering_into_grilling_with_no_brief_anywhere_is_refused_by_name() {
 ///
 /// The steer is refused with nothing picked, because a Conversation with no
 /// account settled is one nothing could be started in — and that refusal is the
-/// modal asking for the account, so the same submit carrying one goes through
+/// form asking for the account, so the same submit carrying one goes through
 /// and the work runs under it. Nothing else about the Conversation moved: it is
 /// where it was, on the branch it was on, with the round it was in.
 #[tokio::test]
@@ -3452,7 +3452,7 @@ async fn a_conversation_whose_profile_was_removed_is_steered_back_onto_another()
     assert_eq!(
         steer_grilling(&app, id, None).await,
         ConversationSteered::NoPairing,
-        "a state a session runs in needs one, and the modal is where it is picked",
+        "a state a session runs in needs one, and the form is where it is picked",
     );
 
     let rescue = profile(&app, elsewhere.path(), "rescue").await;
@@ -3482,7 +3482,7 @@ async fn a_conversation_whose_profile_was_removed_is_steered_back_onto_another()
     assert_eq!(view.state, Lifecycle::Grilling);
 }
 
-/// The Pairing picked in the modal for a steer into Grilling is the *grilling*
+/// The Pairing picked on the form for a steer into Grilling is the *grilling*
 /// one, and it is recorded as the Conversation's own.
 ///
 /// Which role follows the target, an interview running under the one and
@@ -3716,7 +3716,7 @@ async fn steering_into_wrapping_fills_a_review_nobody_picked_an_account_for() {
 }
 
 /// And a Conversation whose human picked *No review* keeps that through a steer
-/// into Wrapping: the modal's one pick is what the sessions run under, and a
+/// into Wrapping: the form's one pick is what the sessions run under, and a
 /// role that runs none is not among them.
 ///
 /// It is also settled, so the steer is not refused for a Pairing that is missing
@@ -3789,7 +3789,7 @@ async fn steering_into_wrapping_leaves_a_conversation_with_no_review_unreviewed(
 ///
 /// What stands is a backlog with work left in it or a roadmap the branch has
 /// written, and a Conversation still being grilled has neither: the session
-/// that would write one is the session the click just stopped. So the modal
+/// that would write one is the session the click just stopped. So the form
 /// requires the instruction there — [`ConversationView::ready_to_continue`] is
 /// what it reads that off — and the submit says the same thing again, this
 /// being the press that could have been made against a page read a moment
@@ -3806,7 +3806,7 @@ async fn steering_into_implementing_with_nothing_to_do_is_refused_by_name() {
 
     assert!(
         !opened(&app, id).await.ready_to_continue,
-        "there is no backlog and no roadmap on the branch, so the modal has \
+        "there is no backlog and no roadmap on the branch, so the form has \
          nothing to offer carrying on",
     );
 
@@ -3930,7 +3930,7 @@ async fn steering_a_closed_conversation_into_grilling_gives_it_a_worktree_back()
 
     // And a round of its own, which is the whole of what a closed Conversation
     // is steered back in for: the Brief the first round was built from stays on
-    // the record, and the one written in the modal is frozen where it landed.
+    // the record, and the one written on the form is frozen where it landed.
     let briefs = briefs(&view);
     assert_eq!(
         briefs.len(),
@@ -4199,7 +4199,7 @@ async fn steering_into_follow_up_with_nothing_to_follow_up_is_refused_by_name() 
 ///
 /// A wrapping Conversation is defined by the pull request under it — the record
 /// writes the move and the pull-request row as one act — so there would be
-/// nothing to wrap up here. The modal does not offer the target on such a
+/// nothing to wrap up here. The form does not offer the target on such a
 /// Conversation; this is that same rule asked again on arrival, the way every
 /// named refusal here is.
 ///
@@ -5490,7 +5490,7 @@ async fn a_closed_conversation_carries_neither_waiting_mark() {
     let id = grilling(&app, elsewhere.path(), repo_id).await;
 
     // The click is the shortest way to a stop written down: it stops the drive
-    // and opens the modal, and nothing here submits one.
+    // and opens the form, and nothing here submits one.
     assert_eq!(steer(&app, id).await, SteerOpened::Opened);
     assert!(
         opened(&app, id).await.blocked_on.is_some(),
@@ -6998,10 +6998,10 @@ fn notices(view: &ConversationView) -> Vec<String> {
         .collect()
 }
 
-/// Submit the modal with a companion section filled in: where the work goes, and
+/// Submit the form with a companion section filled in: where the work goes, and
 /// which registered Repos go into the sandbox with it.
 ///
-/// The rows as the modal sends them — the Repo, how far in, the branch its
+/// The rows as the form sends them — the Repo, how far in, the branch its
 /// checkout comes off and what a read-write one's branch is called — because
 /// that is the whole of what a setup row settles and this is the one other
 /// moment it can be settled.
@@ -7018,7 +7018,7 @@ async fn steer_alongside(
 /// being opened up, and what the branch cut in each is called.
 ///
 /// No mode on those rows, because there is one direction: read-only is not
-/// something the modal can ask for, so a downgrade cannot be spelled at all.
+/// something the form can ask for, so a downgrade cannot be spelled at all.
 async fn steer_opening(
     app: &Router,
     id: i64,
@@ -7028,7 +7028,7 @@ async fn steer_opening(
     steer_companions(app, id, target, serde_json::json!([]), upgraded).await
 }
 
-/// Both halves at once, which is what the modal always sends.
+/// Both halves at once, which is what the form always sends.
 async fn steer_companions(
     app: &Router,
     id: i64,
@@ -7173,7 +7173,7 @@ async fn steering_puts_a_companion_in_and_checks_it_out() {
 /// submit carried.
 ///
 /// Nothing runs there, so there is no sandbox to set up and nothing a companion
-/// could be for — which is why the modal draws no section on that target. A
+/// could be for — which is why the form draws no section on that target. A
 /// submit carrying one anyway is a page sending a field it should not have
 /// drawn, and it is answered the way a brief beside a wrap-up is: ignored rather
 /// than obeyed.
@@ -7253,7 +7253,7 @@ async fn a_companion_a_steer_cannot_deliver_refuses_it_by_name() {
 
                 alongside(joining, "ReadOnly")
             }
-            // A base picked in the modal that the repository does not have.
+            // A base picked on the form that the repository does not have.
             SteerCompanionRefusal::NoBaseCommit => serde_json::json!({
                 "repo_id": joining,
                 "mode": "ReadOnly",

@@ -1449,10 +1449,10 @@ stop_asked: boolean,
  * branch holds a backlog with work left in it, or a roadmap it has
  * written.
  *
- * What decides whether the steer modal offers *carrying on* — the target
+ * What decides whether the steer form offers *carrying on* — the target
  * itself is offered on every Conversation there is, because an instruction
  * can always be written. Where this is false the instruction is the whole
- * of what that target can be, so the modal requires one.
+ * of what that target can be, so the form requires one.
  *
  * The server’s rule rather than something the page works out from the
  * fields around it: what stands is a reading of the Worktree as it is now,
@@ -1466,7 +1466,7 @@ stop_asked: boolean,
  * and what decides it in the end is the relaunch that reads the directory
  * the steer has just made.
  *
- * Checked again when the modal is submitted, as every refusal here is;
+ * Checked again when the form is submitted, as every refusal here is;
  * this says only that it was worth offering as of the moment it was read.
  */
 ready_to_continue: boolean, 
@@ -4456,7 +4456,7 @@ upgraded: Array<SteerUpgradeView>, };
 export type SteerSaved = "Saved" | "NoSuchConversation" | "NoPendingSteer";
 
 /**
- * What the human settled in the modal: where the Conversation goes, what runs
+ * What the human settled on the form: where the Conversation goes, what runs
  * the work there, and what to do about anything still running.
  */
 export type SteerSubmission = { 
@@ -4484,7 +4484,7 @@ interrupt: boolean,
  * Absent where the target runs nothing, and absent where the human left
  * the picker on what the Conversation already had: both are a submit that
  * changes no Pairing. A Conversation with none fixed yet — a steered draft
- * — is why the pick is part of the modal rather than an error path, and one
+ * — is why the pick is part of the form rather than an error path, and one
  * that arrives with neither this nor a Pairing of its own is refused by
  * name.
  */

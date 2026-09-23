@@ -748,7 +748,7 @@ impl Grilling {
         .await
     }
 
-    /// And submit the modal that opened: where the work goes, and whether to end
+    /// And submit the form that opened: where the work goes, and whether to end
     /// what is running where it stands.
     ///
     /// No Pairing, which is the human leaving the picker on what the
@@ -799,7 +799,7 @@ impl Grilling {
     /// called — empty being *mirroring*, the Conversation's own branch name.
     ///
     /// No mode on the row, because there is one direction: read-only is not
-    /// something the modal can ask for.
+    /// something the form can ask for.
     async fn steer_opening(
         &self,
         target: &str,
@@ -875,7 +875,7 @@ impl Grilling {
         .await
     }
 
-    /// The Agent Profile of that name, as the modal's picker reads the list.
+    /// The Agent Profile of that name, as the form's picker reads the list.
     async fn profile(&self, name: &str) -> i64 {
         let profiles: Vec<verkstead_render::ProfileEntry> =
             get(&self.app, "/api/ui/profiles").await;
@@ -16916,7 +16916,7 @@ async fn force_stop_as_the_handoff_lands_starts_nothing_behind_the_halt() {
 }
 
 /// Steer clicked while a task is being worked, with **Interrupt current task**
-/// ticked on the modal it opened: the session is ended where it stands and the
+/// ticked on the form it opened: the session is ended where it stands and the
 /// Conversation is Done.
 ///
 /// The click is what stops the drive, and it stops it the way Stop does — the
@@ -19919,7 +19919,7 @@ async fn a_review_that_split_work_out_of_a_take_up_builds_it_and_wraps_up_again(
 ///
 /// Both halves turn on the pull request under the Conversation — the steer
 /// refuses without one by name — and a take-up's is recorded by the press
-/// itself. So the modal opens, the session runs on what they wrote, and the
+/// itself. So the form opens, the session runs on what they wrote, and the
 /// **Nothing else** they answer with lands the Conversation back in the wrap-up
 /// it came from, which settles to Done again.
 ///
@@ -19944,7 +19944,7 @@ async fn a_taken_up_conversation_is_steered_into_a_follow_up_and_back() {
     assert_eq!(
         fixture.steer().await,
         SteerOpened::Opened,
-        "the modal opens on the pull request the take-up recorded",
+        "the form opens on the pull request the take-up recorded",
     );
     assert_eq!(
         fixture
@@ -22146,7 +22146,7 @@ async fn resuming_a_halted_wrap_up_watches_the_checks_again_from_no_attempts_spe
 ///
 /// And the target is offered because something stands. A branch with a backlog
 /// left in it is the whole of what a continue steer needs, which is what the
-/// modal draws the row by and what the submit is refused by where there is
+/// form draws the row by and what the submit is refused by where there is
 /// none.
 #[tokio::test]
 async fn steering_a_stalled_backlog_run_into_implementing_works_the_next_task() {
@@ -22197,7 +22197,7 @@ async fn steering_a_stalled_backlog_run_into_implementing_works_the_next_task() 
 
     assert!(
         view.ready_to_continue,
-        "the branch holds a backlog with work left in it, so the modal offers \
+        "the branch holds a backlog with work left in it, so the form offers \
          the target",
     );
 
@@ -22296,7 +22296,7 @@ esac
 /// would say there was nothing on the branch to carry on while the branch was
 /// holding it.
 ///
-/// So the modal offers carrying on, the submit is not refused, and what follows
+/// So the form offers carrying on, the submit is not refused, and what follows
 /// is the next task read off the directory the steer made.
 #[tokio::test]
 async fn steering_into_implementing_carries_on_a_backlog_whose_worktree_has_gone() {
@@ -27243,7 +27243,7 @@ async fn steering_into_grilling_primes_the_digest_only_where_it_was_asked_for() 
     );
     assert!(
         printed.contains("The backoff is wrong."),
-        "on the Brief the modal has just written: {printed:?}",
+        "on the Brief the form has just written: {printed:?}",
     );
     assert!(
         !printed.contains("The API has none."),
@@ -27356,7 +27356,7 @@ async fn steering_a_closed_conversation_checks_its_branch_out_again() {
     fixture.until(|view| (fixes(view) > 2).then_some(())).await;
 }
 
-/// The Pairing picked in the modal is recorded as the *Conversation's*, and it
+/// The Pairing picked on the form is recorded as the *Conversation's*, and it
 /// is what the sessions after the steer run under.
 ///
 /// Steering re-settles what runs the work rather than picking for one session,

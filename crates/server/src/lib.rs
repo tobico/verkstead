@@ -192,8 +192,8 @@ mod stalls;
 /// The stand-in programs the tests run in place of the machine's own.
 #[cfg(test)]
 mod stand_ins;
-/// The human steering a Conversation: the click that stops the drive and opens
-/// the modal, and the submit that moves the work where they said.
+/// The human steering a Conversation: the press that stops the drive and opens
+/// the form, and the submit that moves the work where they said.
 mod steering;
 mod stopping;
 /// The human stopping a Conversation on purpose: Stop, which waits for the step

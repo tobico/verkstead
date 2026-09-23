@@ -118,7 +118,7 @@
 
 /* The pairing is picked with the listbox the app draws rather than a `<select>`,
    so that every row carries its harness's mark: what it looks like is
-   `picking.module.css`, this modal being one of the five places that one control
+   `picking.module.css`, this form being one of the six places that one control
    stands. Nothing of it is left here — it is as wide as the field already. */
 
 .steerPairing .fieldNote {

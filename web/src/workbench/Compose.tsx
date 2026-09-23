@@ -1293,7 +1293,7 @@ function PullRows(props: {
 /// them, and the branch it is done on under that where there is one.
 ///
 /// Assembled here out of the same controls the saved row is assembled out of —
-/// see `Companion` in `Setup.tsx`, and the steer modal's own rows, which is the
+/// see `Companion` in `Setup.tsx`, and the steer form's own rows, which is the
 /// third place these three questions are asked. What is different is only where
 /// the answers go.
 function Beside(props: {

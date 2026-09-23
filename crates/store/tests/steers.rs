@@ -262,7 +262,7 @@ async fn every_state_is_somewhere_to_be_steered_from() {
     );
 }
 
-/// A Pairing picked in the modal is recorded as the Conversation's own — both
+/// A Pairing picked on the form is recorded as the Conversation's own — both
 /// halves of it — and it is recorded long past drafting, which is the whole of
 /// why a steer does not go through the drafting pickers' own call.
 #[tokio::test]
@@ -313,7 +313,7 @@ async fn a_steer_settles_the_pairing_the_human_picked() {
     );
 }
 
-/// A Profile that went between the list the modal read and the pick it made from
+/// A Profile that went between the list the form read and the pick it made from
 /// it takes the whole steer with it.
 ///
 /// The move and the Pairing are one act, so a pick that cannot be written is a
@@ -354,7 +354,7 @@ async fn a_steer_naming_a_profile_that_has_gone_moves_nothing() {
     );
 }
 
-/// A steer into Grilling opens a round, and what the human wrote in the modal is
+/// A steer into Grilling opens a round, and what the human wrote on the form is
 /// that round's Brief: a second Brief Event beside the first rather than an edit
 /// of it, frozen the moment it lands.
 ///
