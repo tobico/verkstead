@@ -86,12 +86,12 @@ const THE_AUTHOR: &str = "git_author:\n  name: Verkstead Test\n  email: test@ver
 
 /// How long to wait for something a session says.
 ///
-/// **Long enough for the first four of these at once**, which is the case it has
-/// to cover and is nothing like what one of them costs. libtest runs as many
-/// tests as the machine has cores, so the `windows-2025` runner starts four of
-/// these together — four workbenches, four pseudoconsoles and four Windows
-/// PowerShells coming up on four cores — and the four whose names sort first are
-/// the ones that pay for it.
+/// **Long enough for the first four of these at once**, which is one of the two
+/// cases it has to cover and is nothing like what one of them costs. libtest
+/// runs as many tests as the machine has cores, so the `windows-2025` runner
+/// starts four of these together — four workbenches, four pseudoconsoles and
+/// four Windows PowerShells coming up on four cores — and the four whose names
+/// sort first are the ones that pay for it.
 ///
 /// Measured on the job: that first four take three quarters of a minute to reach
 /// their first line, where a test behind them reaches its own in ten. So a minute
@@ -99,10 +99,21 @@ const THE_AUTHOR: &str = "git_author:\n  name: Verkstead Test\n  email: test@ver
 /// raised for is the run where exactly those four timed out together and all
 /// eight behind them passed.
 ///
-/// Three minutes, then — which is not a claim that anything should take three
+/// **And long enough for the first `rustc` behind a boundary**, which is the
+/// other and is minutes rather than seconds.
+/// [`a_rust_session_compiles_through_the_compile_server`] is the one test here
+/// whose session has a compile server up and a toolchain reached through a
+/// junction, and the first thing it writes it writes after running the first
+/// `rustc` that account has ever run out of `.rustup`. Measured on the job: 152,
+/// 173 and 262 seconds end to end — and twice, on a commit the job passed when
+/// it was run again, it gave up with the whole of a three-minute deadline spent
+/// on that first wait and nothing after it attempted.
+///
+/// Six minutes, then — which is not a claim that anything should take six
 /// minutes. What this deadline is for is a session that is never going to say
-/// anything at all, and nothing that is going to say something comes near it.
-const PATIENCE: Duration = Duration::from_secs(180);
+/// anything at all, and what raised it is that three minutes had stopped telling
+/// one of those from a session that was going to say something.
+const PATIENCE: Duration = Duration::from_secs(360);
 
 /// And how long a thing that was going to happen has had to happen in — which
 /// is what the one test here about something *not* happening waits out.
