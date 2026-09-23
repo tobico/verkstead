@@ -1,6 +1,6 @@
 //! Reading the Worktrees a Conversation has, for the Code pane: the roots its
-//! tree stands on, one folder of one of them at a time, and one file of one of
-//! those opened.
+//! tree stands on, one folder of one of them at a time, one file of one of
+//! those opened — and that file written back.
 //!
 //! **The server reads as itself, with no Sandbox in front of it**
 //! ([ADR 0019](../../../docs/adr/0019-the-code-pane.md), *The server reads and
@@ -37,13 +37,27 @@
 //! read as and what a write will name itself as being over (ADR 0019,
 //! *Versioned reads, and a stale write is refused*).
 //!
+//! **And a write names that version** — see [`write`]: the file on disk is
+//! hashed afresh, and one that has moved since the read is refused, which is
+//! what draws the *Reload* / *Keep mine* bar in front of the human — both
+//! halves of which come back here for a fresh read. A root that takes no writes
+//! refuses before the disk is touched at all.
+//!
+//! The write goes into the file that is already there rather than through a
+//! temporary file renamed over it, which is what keeps the checkout's own mode
+//! on it — and, on Windows, the entries a session was granted on the Worktree
+//! and inherited down to that file, so that what the server writes as the human
+//! is a file the session can still read (ADR 0019, *The server reads and writes
+//! the Worktree, outside the Sandbox*).
+//!
 //! **Nothing here refuses by status code**, the way registering a Repo refuses
 //! and the way a browse's listing does: each refusal is a sentence the tree
 //! draws where its rows would be — see [`verkstead_render::FolderListing`].
 //!
-//! **Not a record.** Nothing here writes to the store, puts anything on a
-//! Timeline or reaches a Share. It is a reading of the disk, made afresh every
-//! time the tree asks — which is what an expand is, until the watcher of stage
+//! **Not a record.** Nothing here writes to the *store*, puts anything on a
+//! Timeline or reaches a Share — a save is the human's own hand in their own
+//! checkout, and the record of it is the commit they make afterwards. It is a
+//! reading of the disk, made afresh every time the tree asks — which is what an expand is, until the watcher of stage
 //! 04 tells the page the disk has moved.
 
 use std::collections::HashSet;
@@ -52,7 +66,7 @@ use std::path::{Component, Path};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use sha2::{Digest, Sha256};
-use verkstead_render::{FileReading, FileRoot, FolderEntry, FolderListing};
+use verkstead_render::{FileReading, FileRoot, FileWritten, FolderEntry, FolderListing};
 
 use crate::repos::feeding;
 use crate::resolved::{Resolved, resolve};
@@ -235,6 +249,96 @@ pub(crate) fn read(roots: &[FileRoot], path: &Path) -> FileReading {
             writable: root.writable,
         },
         None => FileReading::Binary,
+    }
+}
+
+/// Put `text` at `path`, if the file there is still the one `over` was read
+/// from.
+///
+/// Blocking: a file is opened and hashed, and then written.
+///
+/// The order the checks come in is the order the sentences rank in, and it is
+/// the read's with one step of its own in it. The bound is settled first,
+/// because every other answer is about a path that has one; then whether the
+/// root takes writes at all, that being true of the root whatever is at the
+/// path; and the file itself only after both.
+///
+/// **The version is the last thing asked and the write follows it at once.**
+/// What is on the disk is hashed and compared against the version the read
+/// handed over, and a file that has moved is refused (ADR 0019, *Versioned
+/// reads, and a stale write is refused*). Between that hash and the write there
+/// is a window nothing can close — a filesystem has no compare-and-swap — and
+/// the window is microseconds against the minutes an editor is open, which is
+/// the collision this is built to catch.
+///
+/// **The bytes go into the file that is there** rather than into a new file
+/// renamed over it. A rename would give the Worktree a fresh inode with a fresh
+/// mode — and, on Windows, a fresh ACL inherited from the directory rather than
+/// the one the file already carries — where a write in place leaves everything
+/// about the file but its contents exactly as the checkout made it.
+pub(crate) fn write(roots: &[FileRoot], path: &Path, over: &str, text: &str) -> FileWritten {
+    let (root, real) = match bound(roots, path) {
+        Bound::Inside { root, real } => (root, real),
+        Bound::Outside => return FileWritten::Outside,
+        Bound::UnderGit => return FileWritten::UnderGit,
+        Bound::RootGone => return FileWritten::RootGone,
+        Bound::Missing => return FileWritten::Missing,
+    };
+
+    // The root's own flag rather than the file's mode, which is the same thing
+    // the read said when it opened the editor read-only: a companion checked
+    // out detached is there to be read, whatever its permissions happen to say.
+    if !root.writable {
+        return FileWritten::ReadOnly;
+    }
+
+    match std::fs::metadata(&real) {
+        Ok(about) if about.is_dir() => return FileWritten::NotAFile,
+        Ok(_) => {}
+        Err(error) => return unwritable(&error),
+    }
+
+    match versioned(&real) {
+        Ok(now) if now != over => return FileWritten::Stale,
+        Ok(_) => {}
+        Err(error) => return unwritable(&error),
+    }
+
+    match std::fs::write(&real, text) {
+        Ok(()) => FileWritten::Written {
+            version: version(text.as_bytes()),
+        },
+        Err(error) => unwritable(&error),
+    }
+}
+
+/// The version the file at `real` has right now.
+///
+/// Read in blocks rather than whole, which is the one place this parts company
+/// with [`read`] above: what is being hashed is whatever is on the disk, and a
+/// build that turned the file somebody has open into a gigabyte of log is a
+/// file to answer *stale* about rather than one to pull into memory first.
+fn versioned(real: &Path) -> std::io::Result<String> {
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(real)?;
+    let mut hashing = Sha256::new();
+    let mut block = [0u8; 64 * 1024];
+
+    loop {
+        match file.read(&mut block)? {
+            0 => break,
+            read => hashing.update(&block[..read]),
+        }
+    }
+
+    Ok(format!("{:x}", hashing.finalize()))
+}
+
+/// What the filesystem said of a write, worded as the sentence the bar draws.
+fn unwritable(error: &std::io::Error) -> FileWritten {
+    FileWritten::Unwritable {
+        why: format!("the server cannot write it: {error}"),
     }
 }
 
@@ -917,5 +1021,141 @@ mod tests {
             FileReading::Text { version, .. } => version,
             other => panic!("expected text, got {other:?}"),
         }
+    }
+
+    /// A save lands on disk, and answers with the version the file now has —
+    /// which is what the next save over it names.
+    #[test]
+    fn a_write_over_the_version_that_was_read_lands_on_disk() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+        let at = worktree.join("README.md");
+
+        let roots = [root(&worktree)];
+        let was = versioned(read(&roots, &at));
+        let wrote = write(&roots, &at, &was, "# rewritten\n");
+
+        let FileWritten::Written { version } = wrote else {
+            panic!("expected a write, got {wrote:?}");
+        };
+
+        assert_eq!(std::fs::read_to_string(&at).unwrap(), "# rewritten\n");
+
+        // The version answered back is the file's own: a read of it now says the
+        // same thing, which is what makes the next save a write over what is
+        // really there.
+        assert_eq!(version, versioned(read(&roots, &at)));
+    }
+
+    /// And a write over a version that has moved is refused — which is the
+    /// whole of what the Reload / Keep mine bar is drawn from.
+    #[test]
+    fn a_write_over_a_version_that_has_moved_is_refused() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+        let at = worktree.join("README.md");
+
+        let roots = [root(&worktree)];
+        let was = versioned(read(&roots, &at));
+
+        // The agent, writing the same file while the human had it open.
+        std::fs::write(&at, "# the agent got here first\n").unwrap();
+
+        assert_eq!(write(&roots, &at, &was, "# mine\n"), FileWritten::Stale);
+
+        // Nothing was written: the collision is the point, and the human's text
+        // is still theirs to decide about.
+        assert_eq!(
+            std::fs::read_to_string(&at).unwrap(),
+            "# the agent got here first\n"
+        );
+
+        // And a save over the version a fresh read hands over — which is what
+        // both halves of that bar make the next one — lands.
+        let now = versioned(read(&roots, &at));
+
+        assert!(matches!(
+            write(&roots, &at, &now, "# mine\n"),
+            FileWritten::Written { .. }
+        ));
+        assert_eq!(std::fs::read_to_string(&at).unwrap(), "# mine\n");
+    }
+
+    /// A read-only root takes no write at all, and says so before it touches
+    /// the disk: the root's own flag, which is the same thing that opened the
+    /// editor read-only.
+    #[test]
+    fn a_write_into_a_read_only_root_is_refused() {
+        let held = tempfile::tempdir().unwrap();
+        let companion = repository(&held.path().join("companion"));
+        let at = companion.join("README.md");
+
+        let roots = [FileRoot {
+            repo: "askance".to_owned(),
+            path: companion.display().to_string(),
+            own: false,
+            writable: false,
+        }];
+
+        let was = versioned(read(&roots, &at));
+
+        assert_eq!(write(&roots, &at, &was, "# mine\n"), FileWritten::ReadOnly);
+        assert_eq!(
+            std::fs::read_to_string(&at).unwrap(),
+            "# a repository\n",
+            "a read-only root is not written even over the version it was read at"
+        );
+    }
+
+    /// And a write is bounded the way a read is: the roots are the whole of
+    /// what this API may reach, whichever direction the bytes are going.
+    #[test]
+    fn a_write_is_bounded_the_way_a_read_is() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+        let elsewhere = held.path().join("elsewhere");
+        std::fs::create_dir(&elsewhere).unwrap();
+        std::fs::write(elsewhere.join("secrets"), "nothing of this conversation's\n").unwrap();
+
+        let roots = [root(&worktree)];
+
+        assert_eq!(
+            write(&roots, &elsewhere.join("secrets"), "", "mine\n"),
+            FileWritten::Outside
+        );
+        assert_eq!(
+            write(
+                &roots,
+                &worktree.join("../elsewhere/secrets"),
+                "",
+                "mine\n"
+            ),
+            FileWritten::Outside
+        );
+        assert_eq!(
+            write(&roots, &worktree.join(".git/config"), "", "mine\n"),
+            FileWritten::UnderGit
+        );
+        assert_eq!(
+            write(&roots, &worktree.join("never-written"), "", "mine\n"),
+            FileWritten::Missing
+        );
+        assert_eq!(
+            write(&roots, &worktree, "", "mine\n"),
+            FileWritten::NotAFile
+        );
+
+        // And the one outside it that was there a moment ago is still what it
+        // was: a refused write writes nothing anywhere.
+        assert_eq!(
+            std::fs::read_to_string(elsewhere.join("secrets")).unwrap(),
+            "nothing of this conversation's\n"
+        );
+
+        std::fs::remove_dir_all(&worktree).unwrap();
+        assert_eq!(
+            write(&roots, &worktree.join("README.md"), "", "mine\n"),
+            FileWritten::RootGone
+        );
     }
 }

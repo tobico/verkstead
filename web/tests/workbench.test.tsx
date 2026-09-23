@@ -37,6 +37,7 @@ import type {
   FileReading,
   FileRoot,
   FileRootsView,
+  FileWritten,
   FolderListing,
   GrillingStarted,
   Merging,
@@ -177,8 +178,10 @@ import {
   AT_ONCE as ENDED_WITHIN,
   ENDED_AT_ONCE,
   FILE_REFUSAL,
+  MOVED,
   NOTHING_OPEN,
   TERMINAL_REFUSAL,
+  WRITE_REFUSAL,
 } from "../src/workbench/Code";
 // And the tab bar over its several shells, which is the pane's own module.
 import codePane from "../src/workbench/Code.module.css";
@@ -330,6 +333,7 @@ import codeRoots from "./fixtures/code-roots.json" with { type: "json" };
 import codeFolder from "./fixtures/code-folder.json" with { type: "json" };
 import codeFile from "./fixtures/code-file.json" with { type: "json" };
 import codeImage from "./fixtures/code-image.json" with { type: "json" };
+import codeWritten from "./fixtures/code-written.json" with { type: "json" };
 import wrapping from "./fixtures/conversation-wrapping.json" with { type: "json" };
 import repoView from "./fixtures/repo.json" with { type: "json" };
 import told from "./fixtures/settings.json" with { type: "json" };
@@ -19037,6 +19041,470 @@ describe("a file opened out of the code pane's tree", () => {
     ]) {
       expect(monacoModule).toContain(worker);
     }
+  });
+
+  /// Saving, which is explicit and is Ctrl+S: the dot on the dirty tab, the
+  /// write over the version the read handed over, and what a write over a file
+  /// that has moved since is answered with (ADR 0019, *Versioned reads, and a
+  /// stale write is refused*).
+  describe("and saving it", () => {
+    /// Where a file of this conversation is written back, which is the path it
+    /// was read at posted to: it is the same file, and a read and a write of
+    /// one thing are what a GET and a POST on one route are for.
+    const SAVING = `/api/ui/conversations/${GRILLING.id}/files/file`;
+
+    /// What a save that landed comes back as, out of the fixture the endpoint
+    /// wrote: the version the file now has, which is a hash of what went onto
+    /// the disk and is what the tab's next save names.
+    const WRITTEN = codeWritten as Extract<FileWritten, { Written: unknown }>;
+
+    /// The same file as the agent left it: another text, under another version.
+    ///
+    /// What a second read of it answers with, which is what both presses on the
+    /// bar make — one keeps what comes back and the other throws it away.
+    const THEIRS = {
+      Text: {
+        path: TEXT.path,
+        version: "3f1a",
+        text: '[workspace]\nmembers = ["crates/*"]\n',
+        writable: true,
+      },
+    } satisfies FileReading;
+
+    /// What the server answers each save with, in order — the last repeated,
+    /// the way `serving` repeats its own last answer.
+    ///
+    /// A sequence rather than one answer, because the bar is about the *second*
+    /// save: the first is refused for a file that moved, and what Keep mine is
+    /// for is the one after it landing.
+    function saves(...outcomes: FileWritten[]): Answer {
+      let taken = 0;
+
+      return whenever(
+        SAVING,
+        () => json(outcomes[Math.min(taken++, outcomes.length - 1)])(),
+        "POST",
+      );
+    }
+
+    /// And what each read of that file answers with, in the same shape and for
+    /// the same reason: Reload is a second reading of a file that has moved
+    /// since the first.
+    function reads(...kinds: FileReading[]): Answer {
+      let taken = 0;
+
+      return whenever(fileOf(TEXT.path), () =>
+        json(kinds[Math.min(taken++, kinds.length - 1)])(),
+      );
+    }
+
+    /// Every save that went out, as the bodies they were sent with — which is
+    /// where the version a write names itself as being over is read back from.
+    function saved(
+      fetching: ReturnType<typeof serving>,
+    ): Array<{ path: string; version: string; text: string }> {
+      return fetching.mock.calls
+        .filter(
+          ([path, init]) => String(path) === SAVING && init?.method === "POST",
+        )
+        .map(
+          ([, init]) =>
+            JSON.parse(String(init?.body)) as {
+              path: string;
+              version: string;
+              text: string;
+            },
+        );
+    }
+
+    /// The dot on a tab holding text that is not on the disk. Read off the tab
+    /// rather than off the pane, a pane with several files open being one where
+    /// which tab wears it is the whole point.
+    function dots(container: ParentNode): Element[] {
+      return [
+        ...container.querySelectorAll(
+          `.${shell.detailsPane} .${codePane.tab} .${codePane.dot}`,
+        ),
+      ];
+    }
+
+    /// The bar a refused stale save puts up.
+    function bar(container: ParentNode): HTMLElement | null {
+      return container.querySelector<HTMLElement>(
+        `.${shell.detailsPane} .${codePane.moved}`,
+      );
+    }
+
+    function barred(container: ParentNode): Promise<HTMLElement> {
+      return waitFor(() => {
+        const up = bar(container);
+
+        if (!up) {
+          throw new Error("nothing is up about a refused save");
+        }
+
+        return up;
+      });
+    }
+
+    /// And one of its two presses, by what it says — which is how a human finds
+    /// one.
+    async function offers(
+      container: ParentNode,
+      named: string,
+    ): Promise<HTMLButtonElement> {
+      const found = [
+        ...(await barred(container)).querySelectorAll<HTMLButtonElement>(
+          "button",
+        ),
+      ].find((one) => one.textContent === named);
+
+      if (!found) {
+        throw new Error(`the bar has no ${named}`);
+      }
+
+      return found;
+    }
+
+    /// The card a × on a tab holding unsaved text puts up, or nothing where
+    /// nothing is being asked about. On the body, a `dialog` being drawn in the
+    /// top layer.
+    function card(): HTMLDialogElement | null {
+      return document.body.querySelector<HTMLDialogElement>(
+        `dialog.${codePane.confirming}`,
+      );
+    }
+
+    function carded(): Promise<HTMLDialogElement> {
+      return waitFor(() => {
+        const up = card();
+
+        if (!up) {
+          throw new Error("nothing is being asked about");
+        }
+
+        return up;
+      });
+    }
+
+    /// Ctrl+S, fired where the caret really is. The pane listens on the
+    /// document — Monaco binds nothing to this itself — so what is asked here
+    /// is that the press reaches it from inside the editor.
+    function ctrlS(container: ParentNode): void {
+      fireEvent.keyDown(editor(container) ?? document.body, {
+        key: "s",
+        ctrlKey: true,
+      });
+    }
+
+    /// The workbench with one file of the conversation's own worktree open in a
+    /// tab, and whatever the reads and the saves are to be answered with.
+    async function opened(...answers: Parameters<typeof serving>) {
+      const mounted = await expanded(
+        OWN_ROOT,
+        codeFolder as FolderListing,
+        reads(codeFile as FileReading),
+        ...answers,
+      );
+
+      press(mounted.container, "Cargo.toml");
+      await waitFor(() =>
+        expect(editor(mounted.container)?.value).toBe(TEXT.text),
+      );
+
+      return mounted;
+    }
+
+    /// Let a read that is in flight land.
+    ///
+    /// The one wait in here that is on the turn rather than on the page, and
+    /// **Keep mine** is why: it takes the disk's version and keeps the human's
+    /// text, so the bar goes at the press and nothing else about the tab moves
+    /// — there is no mark for a test to wait on, and the thing that changed is
+    /// the version the *next* save will name.
+    function lands(): Promise<void> {
+      return new Promise((done) => setTimeout(done, 0));
+    }
+
+    /// Type into the editor, which is what makes a tab dirty.
+    async function types(container: ParentNode, text: string): Promise<void> {
+      fireEvent.input(editor(container)!, { target: { value: text } });
+      await waitFor(() => expect(editor(container)?.value).toBe(text));
+    }
+
+    /// A tab with text in it that is not on the disk wears a dot; Ctrl+S writes
+    /// it; and the dot goes when the write lands.
+    it("marks a dirty tab, and Ctrl+S writes it to disk", async () => {
+      const { container, fetching } = await opened(
+        saves(WRITTEN),
+      );
+
+      // Nothing typed, nothing to say: a file as the disk has it is a tab like
+      // any other.
+      expect(dots(container)).toHaveLength(0);
+
+      await types(container, "[workspace]\nmembers = []\n");
+
+      await waitFor(() => expect(dots(container)).toHaveLength(1));
+
+      // And it is said in words as well as drawn, so that a tab read aloud says
+      // which of them is holding something unsaved.
+      expect(dots(container)[0]!.getAttribute("aria-label")).toBe("unsaved");
+
+      ctrlS(container);
+
+      await waitFor(() => expect(saved(fetching)).toHaveLength(1));
+
+      // What went up is the file, the version the read handed over, and the
+      // text as it stands — which is the whole of what a save is.
+      expect(saved(fetching)[0]).toEqual({
+        path: TEXT.path,
+        version: TEXT.version,
+        text: "[workspace]\nmembers = []\n",
+      });
+
+      await waitFor(() => expect(dots(container)).toHaveLength(0));
+      expect(bar(container)).toBeNull();
+
+      // And what came back is a version of what was written, which the endpoint
+      // itself wrote this fixture to say: a hash of the bytes, the way the read
+      // above carries one.
+      expect(WRITTEN.Written.version).toMatch(/^[0-9a-f]{64}$/);
+      expect(WRITTEN.Written.version).not.toBe(TEXT.version);
+    });
+
+    /// And the version the save answered with is what the next one is over: the
+    /// tab knows what it has just written, rather than reading the file again
+    /// to find out.
+    it("saves the next time over the version the last save answered with", async () => {
+      const { container, fetching } = await opened(
+        saves(WRITTEN),
+      );
+
+      await types(container, "one\n");
+      ctrlS(container);
+      await waitFor(() => expect(saved(fetching)).toHaveLength(1));
+      await waitFor(() => expect(dots(container)).toHaveLength(0));
+
+      await types(container, "two\n");
+      ctrlS(container);
+
+      await waitFor(() => expect(saved(fetching)).toHaveLength(2));
+      expect(saved(fetching)[1]).toEqual({
+        path: TEXT.path,
+        version: WRITTEN.Written.version,
+        text: "two\n",
+      });
+
+      // And the file was never read again: a save answers with the version, so
+      // there is nothing to go back for.
+      expect(askedFor(fetching, fileOf(TEXT.path))).toBe(1);
+    });
+
+    /// A Ctrl+S on a file with nothing to save writes nothing. The press is a
+    /// reflex rather than a request, and a write that changed nothing would
+    /// still move the file under every watcher there is.
+    it("writes nothing where there is nothing to write", async () => {
+      const { container, fetching } = await opened(
+        saves(WRITTEN),
+      );
+
+      ctrlS(container);
+      await waitFor(() => expect(editor(container)?.value).toBe(TEXT.text));
+
+      expect(saved(fetching)).toHaveLength(0);
+
+      // And typed into and typed back is the same thing: dirty is the buffer
+      // against what the disk said rather than a flag somebody set.
+      await types(container, "changed\n");
+      await types(container, TEXT.text);
+
+      expect(dots(container)).toHaveLength(0);
+      ctrlS(container);
+      expect(saved(fetching)).toHaveLength(0);
+    });
+
+    /// A save over a file the agent has changed since is refused, and the bar
+    /// is what the pane draws over it — with nothing written and the human's
+    /// text where it was.
+    it("puts the Reload / Keep mine bar up over a refused stale save", async () => {
+      const { container, fetching } = await opened(
+        saves("Stale"),
+      );
+
+      await types(container, "mine\n");
+      ctrlS(container);
+
+      const up = await barred(container);
+
+      expect(up.textContent).toContain(MOVED);
+      expect(await offers(container, "Reload")).toBeTruthy();
+      expect(await offers(container, "Keep mine")).toBeTruthy();
+
+      // Nothing was lost and nothing is clean: the text is still the human's,
+      // and the dot is still on the tab.
+      expect(editor(container)!.value).toBe("mine\n");
+      expect(dots(container)).toHaveLength(1);
+      expect(saved(fetching)).toHaveLength(1);
+    });
+
+    /// **Keep mine** keeps the text and takes the disk's version, so that the
+    /// next save is a write over what is really there — and lands.
+    ///
+    /// The version comes off a fresh read rather than off the refusal, which is
+    /// why the press is a request: what the disk holds is what the tab has to
+    /// measure the editor against, and the refusal never said.
+    it("saves over the version the disk now has once Keep mine is pressed", async () => {
+      const { container, fetching } = await opened(
+        reads(codeFile as FileReading, THEIRS),
+        saves("Stale", WRITTEN),
+      );
+
+      await types(container, "mine\n");
+      ctrlS(container);
+
+      fireEvent.click(await offers(container, "Keep mine"));
+
+      // The bar goes, the text stays, and the tab is still dirty — there is
+      // still something here that is not on the disk.
+      await waitFor(() => expect(bar(container)).toBeNull());
+      await waitFor(() => expect(askedFor(fetching, fileOf(TEXT.path))).toBe(2));
+      await lands();
+
+      expect(editor(container)!.value).toBe("mine\n");
+      expect(dots(container)).toHaveLength(1);
+
+      ctrlS(container);
+
+      // And the save after it names the version that read handed over, which is
+      // what makes it land.
+      await waitFor(() => expect(saved(fetching)).toHaveLength(2));
+      expect(saved(fetching)[1]).toEqual({
+        path: TEXT.path,
+        version: "3f1a",
+        text: "mine\n",
+      });
+
+      await waitFor(() => expect(dots(container)).toHaveLength(0));
+    });
+
+    /// And **Reload** takes the disk's text, which is the same read with the
+    /// other thing done to it: the agent's text, the version that goes with it,
+    /// and a tab that is clean over both.
+    it("takes the disk's text once Reload is pressed", async () => {
+      const { container, fetching } = await opened(
+        reads(codeFile as FileReading, THEIRS),
+        saves("Stale"),
+      );
+
+      await types(container, "mine\n");
+      ctrlS(container);
+      await barred(container);
+
+      fireEvent.click(await offers(container, "Reload"));
+
+      await waitFor(() =>
+        expect(editor(container)?.value).toBe(THEIRS.Text.text),
+      );
+
+      // The file was read again, which is the whole of what either press is:
+      // the refusal carried nothing to work from, and what is drawn is what
+      // the disk answered with.
+      expect(askedFor(fetching, fileOf(TEXT.path))).toBe(2);
+      expect(bar(container)).toBeNull();
+      expect(dots(container)).toHaveLength(0);
+
+      // And nothing was written by either press: the bar is about which text
+      // the next save is of.
+      expect(saved(fetching)).toHaveLength(1);
+    });
+
+    /// A save into a read-only root is refused with its own sentence, which is
+    /// the one refusal a write has that a read does not.
+    it("says so where the root takes no writes", async () => {
+      const { container } = await opened(saves("ReadOnly"));
+
+      await types(container, "mine\n");
+      ctrlS(container);
+
+      await waitFor(() => expect(said(container)).toBe(WRITE_REFUSAL.ReadOnly));
+
+      // A sentence rather than the bar: there is nothing to choose between, and
+      // the text is still the human's.
+      expect(bar(container)).toBeNull();
+      expect(dots(container)).toHaveLength(1);
+    });
+
+    /// And each of those lines is its own sentence rather than one "could not
+    /// be saved", for the reason every list of refusals in this pane has one
+    /// apiece: only the human can tell which of them they are looking at.
+    it("words every reason a save was refused as the thing it is", () => {
+      expect(new Set(Object.values(WRITE_REFUSAL)).size).toBe(
+        Object.keys(WRITE_REFUSAL).length,
+      );
+
+      expect(WRITE_REFUSAL.ReadOnly).toContain("only reads");
+      expect(WRITE_REFUSAL.RootGone).toContain("no longer on disk");
+      expect(WRITE_REFUSAL.Missing).toContain("no longer there");
+    });
+
+    /// And closing a tab with unsaved text in it asks first, which is the other
+    /// half of the rule a busy shell's confirm is the first of.
+    it("asks before a × throws unsaved text away", async () => {
+      const { container } = await opened();
+
+      await types(container, "mine\n");
+
+      fireEvent.click(crosses(container)[1]!);
+
+      const up = await carded();
+
+      // Which file it is, so that a pane with several open says which of them
+      // is about to lose its text.
+      expect(up.textContent).toContain("Cargo.toml");
+
+      // And nothing has happened: the tab is where it was, with its text in it.
+      expect(tabs(container)).toHaveLength(2);
+
+      // The way out of it keeps both.
+      fireEvent.click(
+        up.querySelector<HTMLButtonElement>(
+          `.${codePane.confirmingOut} button.${codePane.secondary}`,
+        )!,
+      );
+
+      await waitFor(() => expect(card()).toBeNull());
+      expect(tabs(container)).toHaveLength(2);
+      expect(editor(container)!.value).toBe("mine\n");
+    });
+
+    /// And the press inside it closes the tab, text and all.
+    it("closes the tab once the card is answered", async () => {
+      const { container } = await opened();
+
+      await types(container, "mine\n");
+      fireEvent.click(crosses(container)[1]!);
+
+      fireEvent.click(
+        (await carded()).querySelector<HTMLButtonElement>(
+          `.${codePane.confirmingOut} button:not(.${codePane.secondary})`,
+        )!,
+      );
+
+      await waitFor(() => expect(tabs(container)).toHaveLength(1));
+      expect(editor(container)).toBeNull();
+    });
+
+    /// A tab with nothing unsaved in it asks nothing at all, which is what
+    /// keeps the confirm worth having.
+    it("asks nothing where there is nothing to lose", async () => {
+      const { container } = await opened();
+
+      fireEvent.click(crosses(container)[1]!);
+
+      await waitFor(() => expect(tabs(container)).toHaveLength(1));
+      expect(card()).toBeNull();
+    });
   });
 });
 

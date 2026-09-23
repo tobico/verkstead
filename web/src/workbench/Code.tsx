@@ -35,8 +35,27 @@
 //! starting because Code was opened rather than because a file was pressed.
 //!
 //! The buffer is what the human's text is in and the reading is what the disk
-//! said — two things rather than one, because the save of the next task is a
+//! said — two things rather than one, because the whole of saving is a
 //! comparison between them over the version the read carried.
+//!
+//! **Saving is explicit**, which is Ctrl+S: a dot on a tab whose buffer has
+//! come apart from its reading, a write that names the version that reading
+//! carried, and a confirm on closing a tab still wearing the dot. VS Code's
+//! own default, and the one the bar below depends on — an autosave has no
+//! dirty state to hold the human's text in while they decide (ADR 0019,
+//! *Versioned reads, and a stale write is refused*).
+//!
+//! **And a write over a file the agent has changed since is refused**, which
+//! is the point of the version rather than a limit of it: last writer wins
+//! would be an agent's edit silently overwritten by a human who never saw it.
+//! What the refusal draws is the bar in [`Moved`] — **Reload**, which takes the
+//! disk's text and the version with it, and **Keep mine**, which keeps the
+//! human's text over the version the disk now has so that their next save
+//! lands. Both are the same read of the file, differing only in what becomes of
+//! the text in the editor, and neither writes anything: the bar is about which
+//! text the *next* save is of. Stage 04 of the roadmap puts the same bar up the
+//! moment the disk moves rather than at the next save; here it is drawn by the
+//! refusal.
 //!
 //! **And the same file opened twice is one buffer.** There is one group in this
 //! stage, so that means one tab: pressing a file already open turns to its tab
@@ -176,10 +195,12 @@ import {
   openTerminal,
   readFile,
   terminalSocket,
+  writeFile,
 } from "../api/client";
 import type {
   ConversationView,
   FileReading,
+  FileWritten,
   TerminalOpened,
 } from "../api/types";
 import { useReading } from "../freshness";
@@ -288,6 +309,40 @@ export const FILE_REFUSAL: Record<Extract<FileReading, string>, string> = {
   NotAFile: "That is a folder rather than a file.",
 };
 
+/// Each way a save can be refused, in the words of what it is.
+///
+/// [`FILE_REFUSAL`]'s siblings, said about a write — the bound is one bound,
+/// and a file is written no more widely than it is read — with the one that is
+/// a write's alone at the head of them: a root that takes no writes. Each its
+/// own sentence for the reason every list in this pane has one apiece.
+///
+/// `Stale` is excluded rather than left out, and by the type: a save refused
+/// for a file that has moved is the bar below, which is a question rather than
+/// a sentence — see [`Moved`]. So a refusal added to the wire later has to be
+/// worded here, and that one has to go on not being.
+export const WRITE_REFUSAL: Record<
+  Exclude<Extract<FileWritten, string>, "Stale">,
+  string
+> = {
+  ReadOnly:
+    "This conversation only reads that worktree, so nothing in it can be saved.",
+  Outside: "That is not in any of this conversation's worktrees.",
+  UnderGit: "Code does not write inside a repository's .git.",
+  RootGone: "This worktree is no longer on disk, so there is nowhere to save.",
+  Missing: "That file is no longer there, so there was nothing to save over.",
+  NotAFile: "That is a folder rather than a file.",
+};
+
+/// And what the bar over a refused stale save says.
+///
+/// The collision itself, in the words of what happened rather than of what went
+/// wrong: the agent writes the same Worktree, and a file it rewrote while
+/// somebody had it open is the ordinary way of things rather than a fault. What
+/// the two presses under it do is named in them (ADR 0019, *Versioned reads,
+/// and a stale write is refused*).
+export const MOVED =
+  "This file changed on disk while you were editing it, so nothing was saved.";
+
 /// One tab of the group: a terminal by the number the server issued it, or a
 /// file by its path.
 ///
@@ -383,8 +438,9 @@ export function Code(props: {
   ///
   /// Held apart from the reading rather than written back over it, because the
   /// two are different things: the reading is what the disk said at the version
-  /// it said it at, and this is what would be written over it. The save of the
-  /// task after this one is the comparison between them.
+  /// it said it at, and this is what would be written over it. Which is what
+  /// makes [`dirty`] a comparison rather than a flag, and a save a write of
+  /// this over that version.
   const [buffers, setBuffers] = createSignal<Record<string, string>>({});
 
   /// And what each tab that is standing rather than running says: the shell
@@ -408,6 +464,23 @@ export function Code(props: {
   /// that being the one word that names either kind.
   const [chosen, setChosen] = createSignal<string | undefined>();
 
+  /// And what each open file's save last came to, where it came to anything to
+  /// draw: the bar over a refused stale write, or the line saying a save was
+  /// refused outright.
+  ///
+  /// Nothing for a file nobody has saved, and nothing again the moment one
+  /// lands: what is here is about the *last* press rather than about the file,
+  /// so a save that worked takes its own bar down.
+  const [bars, setBars] = createSignal<Record<string, Bar>>({});
+
+  /// Which files a save is in flight for, so that a second Ctrl+S while the
+  /// first is still being answered is not a second write of the same text.
+  ///
+  /// A plain set rather than a signal: nothing is drawn about it — a save is a
+  /// write of a few kilobytes to a local disk — and what it guards is the
+  /// request rather than the page.
+  const saving = new Set<string>();
+
   /// And which one they are being asked about, where a close was refused for a
   /// shell somebody is working in.
   ///
@@ -415,6 +488,14 @@ export function Code(props: {
   /// pane with several shells in it is a card that has to say which of them is
   /// about to end. Nothing while there is nothing to ask.
   const [asking, setAsking] = createSignal<number | undefined>();
+
+  /// And which file they are being asked about, where a × was pressed on a tab
+  /// holding text nobody has saved.
+  ///
+  /// The path rather than a flag, for the reason the number beside it is one: a
+  /// pane with several files open is a card that has to say which of them is
+  /// about to lose its text.
+  const [leaving, setLeaving] = createSignal<string | undefined>();
 
   /// Whether the list has been read, which is what says the pane knows how many
   /// terminals there are. Before it, a pane with no tabs is one that has not
@@ -593,10 +674,21 @@ export function Code(props: {
   /// buffer with it. Opening it again is a fresh reading of the disk, which is
   /// what expanding a folder in the tree beside it is too — nothing yet tells
   /// this page that the disk moved.
+  ///
+  /// **Unless there is text in it nobody has saved**, which is the other half
+  /// of the rule a busy shell's confirm is the first of (ADR 0019, *Tabs and
+  /// groups*): the press asks first, and only the press inside the card throws
+  /// the text away. Asked of this page rather than of the server, unlike the
+  /// shell's — what is unsaved is the buffer here, and the server has never
+  /// heard of it.
   const close = (tab: Tab): void => {
     if ("file" in tab) {
-      forget(tab.file);
-      setTabs((was) => was.filter((one) => keyed(one) !== keyed(tab)));
+      if (dirty(tab.file)) {
+        setLeaving(tab.file);
+        return;
+      }
+
+      drop(tab.file);
       return;
     }
 
@@ -617,8 +709,19 @@ export function Code(props: {
     void end(number, false);
   };
 
+  /// A file's tab, gone: the tab off the bar and everything behind it forgotten.
+  ///
+  /// Apart from [`close`] because it is the far side of the card as well as the
+  /// near side of a clean press — what the card's own button makes is this,
+  /// with the human having said so.
+  const drop = (path: string): void => {
+    forget(path);
+    setTabs((was) => was.filter((one) => keyed(one) !== keyed({ file: path })));
+  };
+
   /// What a file's tab leaves behind when it goes: nothing.
   const forget = (path: string): void => {
+    saving.delete(path);
     setReadings((was) => {
       const rest = { ...was };
       delete rest[path];
@@ -629,6 +732,179 @@ export function Code(props: {
       delete rest[path];
       return rest;
     });
+    unbar(path);
+  };
+
+  /// What the disk said about one open file, where what it said was text.
+  ///
+  /// The reading rather than the buffer: this is what was read and the version
+  /// it was read at, which is what a save is a write over — and what the human's
+  /// text is compared against to know whether there is anything to save at all.
+  const disk = (
+    path: string,
+  ): Extract<FileReading, { Text: unknown }>["Text"] | undefined => {
+    const read = readings()[path];
+
+    return read !== undefined && typeof read !== "string" && "Text" in read
+      ? read.Text
+      : undefined;
+  };
+
+  /// Whether a file has text in it that is not on the disk.
+  ///
+  /// The buffer against the reading, which is the whole of what dirty means
+  /// here: the reading is what the disk said at the version it said it at, and
+  /// the buffer is what would be written over it. So a file typed into and
+  /// typed back is clean again, which is what VS Code's own dot says too.
+  ///
+  /// A file with no buffer yet is not dirty: the read is in flight, or what
+  /// came back was not text at all, and neither is a tab with something in it
+  /// to lose.
+  const dirty = (path: string): boolean => {
+    const read = disk(path);
+    const held = buffers()[path];
+
+    return read !== undefined && held !== undefined && held !== read.text;
+  };
+
+  /// Read a file, and put what came back where the tab draws it from.
+  ///
+  /// The one way this pane ever learns what is on the disk, and all three ways
+  /// into a tab come through it: opening one, **Reload**, and **Keep mine**.
+  /// The last two are this same read and differ in one thing — what becomes of
+  /// the text in the editor — which is what `keeping` says.
+  ///
+  /// **Keep mine reads too**, rather than taking a version off the refusal and
+  /// leaving the reading where it was. What a reading is *for* here is the
+  /// comparison [`dirty`] makes, and a reading whose text the disk no longer
+  /// holds would make that comparison a lie: a human who typed their way back
+  /// to the text the collision was against would be shown a clean tab over a
+  /// file that says something else. So the disk is asked, which is one request
+  /// on a press somebody made on purpose.
+  const reread = (path: string, keeping = false): Promise<void> => {
+    // Whatever the last save said goes with the reading it was about: the bar
+    // is a question about the disk, and this is the disk answering.
+    unbar(path);
+
+    return readFile(props.conversation.id, path)
+      .then((reading) => {
+        setReadings((was) => ({ ...was, [path]: reading }));
+
+        if (keeping) {
+          return;
+        }
+
+        setBuffers((was) => {
+          const rest = { ...was };
+
+          if (typeof reading !== "string" && "Text" in reading) {
+            rest[path] = reading.Text.text;
+          } else {
+            delete rest[path];
+          }
+
+          return rest;
+        });
+      })
+      // A request that never landed is a file that says why there is nothing in
+      // its tab, the way a file the server refused does: the sentence is the
+      // server's where there is one, and this is the sentence there is instead.
+      .catch((error: Error) => {
+        setReadings((was) => ({
+          ...was,
+          [path]: { Unreadable: { why: error.message } },
+        }));
+      });
+  };
+
+  /// Take a file's bar down, which every reading and every save that lands
+  /// does: what is in there is about the last press rather than about the file.
+  const unbar = (path: string): void => {
+    setBars((was) => {
+      const rest = { ...was };
+      delete rest[path];
+      return rest;
+    });
+  };
+
+  /// Save one, which is what Ctrl+S does.
+  ///
+  /// The write names the version the read handed over, and the server refuses
+  /// it where the file has moved since (ADR 0019, *Versioned reads, and a stale
+  /// write is refused*). What comes back is one of three things: the file
+  /// written, with the version it now has — the reading is moved onto that text
+  /// and that version, which is what takes the dot off the tab; the file moved,
+  /// which puts the bar up; or a refusal, which is a line.
+  ///
+  /// A file with nothing to save is not written at all. Ctrl+S on a clean
+  /// editor is a reflex rather than a request, and a write that changed nothing
+  /// would still move the file's timestamp under every watcher there is.
+  const save = (path: string): Promise<void> => {
+    const read = disk(path);
+    const text = buffers()[path];
+
+    if (read === undefined || text === undefined || saving.has(path)) {
+      return Promise.resolve();
+    }
+
+    if (text === read.text) {
+      return Promise.resolve();
+    }
+
+    saving.add(path);
+
+    return writeFile(props.conversation.id, path, read.version, text)
+      .then((written) => {
+        if (typeof written !== "string" && "Written" in written) {
+          // Onto what was just put there, at the version it now has: the tab is
+          // clean, and the next save is a write over this.
+          settle(path, written.Written.version, text);
+          return;
+        }
+
+        setBars((was) => ({
+          ...was,
+          [path]:
+            written === "Stale"
+              ? "moved"
+              : {
+                  why:
+                    typeof written === "string"
+                      ? WRITE_REFUSAL[written]
+                      : written.Unwritable.why,
+                },
+        }));
+      })
+      // A request that never landed is a save that did not happen, and the tab
+      // says so where it would have said any other refusal: the text is still
+      // the human's, and the dot is still on the tab.
+      .catch((error: Error) => {
+        setBars((was) => ({ ...was, [path]: { why: error.message } }));
+      })
+      .finally(() => saving.delete(path));
+  };
+
+  /// Move a file's reading onto the text that has just been written to it, at
+  /// the version the write answered with.
+  ///
+  /// What a save that landed does, and the only thing in this pane that changes
+  /// a reading without reading: this side knows what is on the disk because it
+  /// is what it just sent, which is why [`FileWritten`]'s `Written` carries a
+  /// version alone where its `Stale` carries nothing at all.
+  ///
+  /// And it is what takes the dot off the tab, [`dirty`] being the comparison
+  /// between this text and the buffer.
+  const settle = (path: string, version: string, text: string): void => {
+    setReadings((was) => {
+      const read = was[path];
+
+      if (read === undefined || typeof read === "string" || !("Text" in read)) {
+        return was;
+      }
+
+      return { ...was, [path]: { Text: { ...read.Text, version, text } } };
+    });
+    unbar(path);
   };
 
   /// Open a file and show it, which is what a press in the tree does.
@@ -655,23 +931,7 @@ export function Code(props: {
 
     setTabs((was) => [...was, tab]);
 
-    void readFile(props.conversation.id, path)
-      .then((reading) => {
-        setReadings((was) => ({ ...was, [path]: reading }));
-
-        if (typeof reading !== "string" && "Text" in reading) {
-          setBuffers((was) => ({ ...was, [path]: reading.Text.text }));
-        }
-      })
-      // A request that never landed is a file that says why there is nothing in
-      // its tab, the way a file the server refused does: the sentence is the
-      // server's where there is one, and this is the sentence there is instead.
-      .catch((error: Error) =>
-        setReadings((was) => ({
-          ...was,
-          [path]: { Unreadable: { why: error.message } },
-        })),
-      );
+    void reread(path);
   };
 
   /// The close itself, made once with nobody asked and again with the answer.
@@ -689,6 +949,44 @@ export function Code(props: {
       // nothing is drawn about one: the shell is the server's, and a tab still
       // there is what says it is still running.
       .catch(() => setAsking(undefined));
+
+  /// Ctrl+S — Cmd+S on a Mac — which is the whole of how a file is saved.
+  ///
+  /// Saving is explicit, which is VS Code's default and the one the bar over a
+  /// refused save depends on: an autosave has no dirty state to hold the
+  /// human's text in while they decide what to do about a collision (ADR 0019,
+  /// *Versioned reads, and a stale write is refused*).
+  ///
+  /// On the document rather than on the editor. Monaco binds nothing to this
+  /// itself, so the press arrives here whether the caret is in a file, in a
+  /// terminal beside it or on the tree — and what it saves is the file
+  /// *showing*, which is the file the human is looking at whichever of those
+  /// their hands were on. Refused by the browser first, its own Save Page being
+  /// nothing anybody meant.
+  ///
+  /// Only while this pane is mounted, which is the whole reach of the listener:
+  /// Code is the only thing in this workbench with a file in it to write.
+  const pressed = (event: KeyboardEvent): void => {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey) {
+      return;
+    }
+
+    if (event.key.toLowerCase() !== "s") {
+      return;
+    }
+
+    const open = tabs().find((one) => keyed(one) === showing());
+
+    if (open === undefined || !("file" in open)) {
+      return;
+    }
+
+    event.preventDefault();
+    void save(open.file);
+  };
+
+  document.addEventListener("keydown", pressed);
+  onCleanup(() => document.removeEventListener("keydown", pressed));
 
   /// The tabs the pane loads with: one for each terminal the server is already
   /// holding.
@@ -759,6 +1057,23 @@ export function Code(props: {
                         class={styles.kind}
                       />
                       <span class={styles.name}>{called(tab)}</span>
+
+                      {/* And the dot that says there is text in it nobody has
+                          saved — VS Code's own mark, beside the name rather
+                          than in place of the × it draws it in place of: there
+                          is no hover on a phone, and a × a finger cannot find
+                          is a tab a finger cannot close.
+
+                          Empty, and read aloud off its label: what it says
+                          belongs to the tab's own name, which is what a screen
+                          reader reads when it reaches the button. */}
+                      <Show when={"file" in tab && dirty(tab.file)}>
+                        <span
+                          class={styles.dot}
+                          role="img"
+                          aria-label="unsaved"
+                        />
+                      </Show>
                     </button>
 
                     {/* And the way to end it. Called by the tab it would close:
@@ -826,9 +1141,12 @@ export function Code(props: {
                         reading={readings()[tab.file]}
                         text={buffers()[tab.file]}
                         name={named(tab.file)}
+                        bar={bars()[tab.file]}
                         typed={(text) =>
                           setBuffers((was) => ({ ...was, [tab.file]: text }))
                         }
+                        reload={() => void reread(tab.file)}
+                        keep={() => void reread(tab.file, true)}
                       />
                     </Show>
                   ) : tab.terminal > 0 ? (
@@ -895,7 +1213,78 @@ export function Code(props: {
           }
         }}
       />
+
+      {/* And the one a × on a file with unsaved text in it puts up, which is
+          the same question about the other kind of tab. */}
+      <Unsaved
+        asked={leaving() === undefined ? null : named(leaving()!)}
+        keep={() => setLeaving(undefined)}
+        close={() => {
+          const path = leaving();
+
+          setLeaving(undefined);
+
+          if (path !== undefined) {
+            drop(path);
+          }
+        }}
+      />
     </>
+  );
+}
+
+/// What a × on a tab holding text nobody has saved is answered with, before the
+/// text is thrown away: which file it is, what is about to happen to it, and the
+/// two ways out.
+///
+/// [`Busy`]'s card asked about a file instead of a shell — the same modal, the
+/// same pair of presses, the same shape — because it is the same question, and
+/// the two halves of one rule: a press that would end something somebody is in
+/// the middle of, put back to them before it is made (ADR 0019, *Tabs and
+/// groups*).
+///
+/// What is different is where the answer comes from. A busy shell is the
+/// server's reading, so that card goes up on a request coming back; unsaved
+/// text is this page's own, so this one goes up at the press.
+function Unsaved(props: {
+  /// The file's name, or `null` while nothing is being asked about.
+  asked: string | null;
+  /// The way back, which Escape and a press on the backdrop come to as well:
+  /// every way out of this card but the one button keeps the tab and its text.
+  keep: () => void;
+  /// And the press it asked about, made — which closes the tab and loses what
+  /// was typed into it.
+  close: () => void;
+}): JSX.Element {
+  const id = createUniqueId();
+
+  return (
+    <Modal
+      class={styles.confirming!}
+      open={props.asked !== null}
+      close={props.keep}
+      labelledBy={id}
+    >
+      <p id={id} class={styles.confirmingTitle}>
+        Close this file without saving it?
+      </p>
+      <p class={styles.confirmingWhy}>
+        {props.asked} has changes that are not on disk. Closing the tab throws
+        them away.
+      </p>
+      <div class={styles.confirmingOut}>
+        <button
+          type="button"
+          class={`${styles.secondary!} secondary`}
+          onClick={() => props.keep()}
+        >
+          Keep editing
+        </button>
+        <button type="button" onClick={() => props.close()}>
+          Close {props.asked}
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -979,8 +1368,15 @@ function Opened(props: {
   /// What the file is called, which is what an editor and a picture alike are
   /// read aloud as.
   name: string;
+  /// What the last save came to, where it came to anything to draw.
+  bar: Bar | undefined;
   /// And what typing into it does.
   typed: (text: string) => void;
+  /// **Reload**: take what is on the disk now, text and version together.
+  reload: () => void;
+  /// And **Keep mine**: read the disk for its version, and keep the text that
+  /// is here over it, so that the next save lands.
+  keep: () => void;
 }): JSX.Element {
   /// The refusal this came back as, where it came back as one — the server's
   /// own sentence for the unreadable, which is the only one of them that says
@@ -1015,36 +1411,105 @@ function Opened(props: {
       : null;
   };
 
+  /// Whether the last save was refused for a file that has moved, which is
+  /// what the bar with the two presses on it is drawn from.
+  const moved = (): boolean => props.bar === "moved";
+
+  /// And the line over one refused outright, which is the other thing a bar
+  /// can be: a sentence rather than a question, there being nothing to choose
+  /// between.
+  const refused = (): string | null =>
+    props.bar !== undefined && props.bar !== "moved" ? props.bar.why : null;
+
   return (
-    <Switch fallback={<Empty>Opening this file…</Empty>}>
-      <Match when={why()}>{(said) => <ErrorLine>{said()}</ErrorLine>}</Match>
-      <Match when={text()}>
-        {(read) => (
-          // Monaco, coloured by the path it was read at — and a file in a
-          // read-only root is an editor that takes no typing, the root's own
-          // flag rather than the file's mode, which is what saves a human
-          // finding out by typing.
-          <Editor
-            path={read().path}
-            name={props.name}
-            text={props.text ?? read().text}
-            writable={read().writable}
-            typed={props.typed}
-          />
-        )}
-      </Match>
-      <Match when={image()}>
-        {(drawn) => (
-          // The bytes came with the reading rather than through a second
-          // request, so the picture is drawn out of what is already here.
-          <div class={styles.picture}>
-            <img
-              src={`data:${drawn().media_type};base64,${drawn().base64}`}
-              alt={props.name}
+    <>
+      {/* Above whatever the tab is holding, because it is about the file rather
+          than about the editor: a file that turned into something there is no
+          editor for between the read and the save still has a save to say
+          something about. */}
+      <Show when={moved()}>
+        <Moved reload={props.reload} keep={props.keep} />
+      </Show>
+      <Show when={refused()}>{(said) => <ErrorLine>{said()}</ErrorLine>}</Show>
+
+      <Switch fallback={<Empty>Opening this file…</Empty>}>
+        <Match when={why()}>{(said) => <ErrorLine>{said()}</ErrorLine>}</Match>
+        <Match when={text()}>
+          {(read) => (
+            // Monaco, coloured by the path it was read at — and a file in a
+            // read-only root is an editor that takes no typing, the root's own
+            // flag rather than the file's mode, which is what saves a human
+            // finding out by typing.
+            <Editor
+              path={read().path}
+              name={props.name}
+              text={props.text ?? read().text}
+              writable={read().writable}
+              typed={props.typed}
             />
-          </div>
-        )}
-      </Match>
-    </Switch>
+          )}
+        </Match>
+        <Match when={image()}>
+          {(drawn) => (
+            // The bytes came with the reading rather than through a second
+            // request, so the picture is drawn out of what is already here.
+            <div class={styles.picture}>
+              <img
+                src={`data:${drawn().media_type};base64,${drawn().base64}`}
+                alt={props.name}
+              />
+            </div>
+          )}
+        </Match>
+      </Switch>
+    </>
   );
 }
+
+/// The bar a save refused for a file that has moved puts up: what happened, and
+/// the two things to do about it.
+///
+/// **The human chooses**, which is the whole of why the write was refused
+/// rather than made (ADR 0019, *Versioned reads, and a stale write is
+/// refused*). *Reload* takes what is on the disk now — the agent's text, and
+/// the version that goes with it — and the tab is clean over it. *Keep mine*
+/// keeps what is in the editor and takes the disk's version alone, so that the
+/// next Ctrl+S is a write over what is really there and lands.
+///
+/// Both of them read the file, and that is the whole of what is under either:
+/// one press keeps what comes back and the other throws it away, which is why
+/// neither needs a version off the refusal to work from.
+///
+/// Neither of them writes anything: what is on the disk is on the disk until
+/// somebody saves over it, and this bar is about which text the next save will
+/// be of.
+///
+/// Drawn in the tab rather than as a card over the page, unlike the two
+/// confirms above: nothing is waiting on it — the editor below takes typing
+/// while it stands — and a file whose save was refused is a thing to come back
+/// to rather than a question to get out of the way. Stage 04 of the roadmap
+/// puts this same bar up the moment the disk moves, rather than at the next
+/// save; here it is drawn by the refusal.
+export function Moved(props: {
+  reload: () => void;
+  keep: () => void;
+}): JSX.Element {
+  return (
+    <div class={styles.moved} role="status">
+      <p class={styles.movedWhy}>{MOVED}</p>
+      <div class={styles.movedOut}>
+        <QuietButton onClick={() => props.reload()}>Reload</QuietButton>
+        <QuietButton onClick={() => props.keep()}>Keep mine</QuietButton>
+      </div>
+    </div>
+  );
+}
+
+/// What a file's last save came to, where it came to anything the tab draws.
+///
+/// The file moved, which is a question to put to the human, or a sentence
+/// saying the save was refused outright. Two shapes rather than one with a kind
+/// beside it, for the reason [`Tab`] is two: they are drawn by different things
+/// and nothing here ever asks which one it is holding without then using the
+/// answer.
+export type Bar = "moved" | { why: string };

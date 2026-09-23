@@ -36,7 +36,8 @@ use verkstead_render::{
     CompanionRemoved, CompanionView, CompileCaching, ConflictResolution, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, Creation, Cursor, FileReading, FileRootsView,
-    FolderListing, GrillingStarted, IgnoreRule, IgnoredCommentsEdit, InstallPress, Lifecycle,
+    FileWrite, FileWritten, FolderListing, GrillingStarted, IgnoreRule, IgnoredCommentsEdit,
+    InstallPress, Lifecycle,
     Locked, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder,
     NewPullRequestAdoption, Parked, ProfileChoice, ProfileEdit, ProfileEntry, PushKey,
     Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed,
@@ -236,10 +237,18 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         .route("/api/ui/conversations/{id}/files/roots", get(file_roots))
         .route("/api/ui/conversations/{id}/files/folder", get(folder))
         // And one file of one of those folders, opened: what it holds, what
-        // kind of thing that turned out to be, and the version a write will
-        // name itself as being over — see [`file`]. Asked for by path like the
+        // kind of thing that turned out to be, and the version a write names
+        // itself as being over — see [`file`]. Asked for by path like the
         // folder beside it, and bounded by the same roots.
-        .route("/api/ui/conversations/{id}/files/file", get(file))
+        //
+        // The save is the same path posted to, because it is the same file: a
+        // read and a write of one thing, which is what a `GET` and a `POST` on
+        // one route are for. What goes up is the path, that version and the
+        // text — see [`write_file`].
+        .route(
+            "/api/ui/conversations/{id}/files/file",
+            get(file).post(write_file),
+        )
         // And one commit — its summary and its diff — fetched the same way and
         // for the same reason; see [`commit_pane`].
         .route(
@@ -3018,6 +3027,61 @@ async fn file(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "reading a file of a Worktree failed");
             unavailable("the file could not be read")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/files/file` — one of them written back.
+///
+/// The path, the version the read handed over and the text, in the body: a save
+/// is a write of *this text, if the file is still the one I read*, and the
+/// version is what makes the second half of that sentence true (ADR 0019,
+/// *Versioned reads, and a stale write is refused*).
+///
+/// Refused in the body like the read beside it, and with one refusal of its own:
+/// a write over a version that has moved answers with the version the disk has
+/// now, which is what draws the *Reload* / *Keep mine* bar in front of the
+/// human. A read-only root refuses before the disk is touched.
+///
+/// **Not a record**, for the reason nothing else in `files` is: a save is the
+/// human's own hand in their own checkout, and what records it is the commit
+/// they make afterwards.
+async fn write_file(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(asking): Json<FileWrite>,
+) -> HttpResponse {
+    // An id that names no Conversation names no roots, so nothing is under one
+    // of them — the read's answer, read as permissively.
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(FileWritten::Outside).into_response();
+    };
+
+    let conversation = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return Json(FileWritten::Outside).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
+            return unavailable("this conversation's worktrees could not be read");
+        }
+    };
+
+    // Off the runtime: a file is hashed and then written.
+    let written = tokio::task::spawn_blocking(move || {
+        crate::files::write(
+            &crate::files::roots(&conversation),
+            std::path::Path::new(&asking.path),
+            &asking.version,
+            &asking.text,
+        )
+    })
+    .await;
+
+    match written {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "writing a file of a Worktree failed");
+            unavailable("the file could not be written")
         }
     }
 }

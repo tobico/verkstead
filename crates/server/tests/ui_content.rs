@@ -31,7 +31,7 @@ use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::{Answered, SetReading, SetView, Standing};
+use verkstead_render::{Answered, FileReading, SetReading, SetView, Standing};
 use verkstead_schema::{
     Answer, Liveness, Question, QuestionOption, QuestionSet, RepoDiff, Response, SetCreated,
     Subquestion,
@@ -3282,6 +3282,49 @@ async fn the_viewers_own_tests_are_fed_from_here() {
             &code_root,
             "/var/lib/verkstead",
         ),
+    );
+
+    // And what Ctrl+S in that tab is answered with: the version the file now
+    // has, which the tab saves over next.
+    //
+    // Made by really writing the checkout, over the version the read above
+    // really handed back, because the version is the whole subject: it is a
+    // hash of what went onto the disk, and a hand-written one would be a number
+    // nothing on either side could have arrived at. Last of the Code fixtures
+    // for that reason — it moves the file the two before it were read from.
+    //
+    // No fixture for a refused save. Every one of those is a word, and what the
+    // viewer makes of each is a sentence or the Reload / Keep mine bar — which
+    // is a test about the wording and the presses rather than a payload to pin.
+    let saving = code_root.join("worktrees/verkstead-code-pane/Cargo.toml");
+    let version = match serde_json::from_str::<FileReading>(
+        &get(
+            &code_app,
+            &format!(
+                "/api/ui/conversations/{coding}/files/file?path={}",
+                saving.display()
+            ),
+        )
+        .await,
+    )
+    .unwrap()
+    {
+        FileReading::Text { version, .. } => version,
+        other => panic!("expected text, got {other:?}"),
+    };
+
+    write(
+        "code-written.json",
+        &post(
+            &code_app,
+            &format!("/api/ui/conversations/{coding}/files/file"),
+            &serde_json::json!({
+                "path": saving.to_str().unwrap(),
+                "version": version,
+                "text": "[workspace]\nmembers = [\"crates/*\"]\n",
+            }),
+        )
+        .await,
     );
 
     // And what the Remote access section reads: what this machine's Tailscale

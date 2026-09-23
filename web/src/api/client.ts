@@ -38,6 +38,8 @@ import type {
   DirectoryListing,
   FileReading,
   FileRootsView,
+  FileWrite,
+  FileWritten,
   FolderListing,
   GrillingStarted,
   OnboardingView,
@@ -602,6 +604,40 @@ export function readFile(id: number, path: string): Promise<FileReading> {
   const asking = new URLSearchParams({ path });
 
   return get<FileReading>(`/api/ui/conversations/${id}/files/file?${asking}`);
+}
+
+/// And that file written back, over the version the read handed over.
+///
+/// The same path the read is at, posted to rather than got: it is the same
+/// file, and a read and a write of one thing are what a GET and a POST on one
+/// route are for.
+///
+/// **The version is the whole of it.** A write over a file the agent has
+/// changed since is refused rather than landing, which is what the pane draws
+/// its Reload / Keep mine bar from (ADR 0019, *Versioned reads, and a stale
+/// write is refused*). Last writer wins is what this is not: an agent's edit
+/// silently overwritten by a human who never saw it is exactly what the version
+/// exists to surface.
+///
+/// A write that landed answers with the version it made, so the tab need not
+/// read the file again to save over it. A refused one answers with nothing to
+/// go on, and the presses under the bar read the file: what the viewer knows
+/// after a write that landed is what it just sent, and after one that did not
+/// it knows nothing at all.
+///
+/// Refused in the body like the read beside it, a root that takes no writes
+/// among them, because each of those is a different sentence for the human.
+export function writeFile(
+  id: number,
+  path: string,
+  version: string,
+  text: string,
+): Promise<FileWritten> {
+  return post<FileWritten>(`/api/ui/conversations/${id}/files/file`, {
+    path,
+    version,
+    text,
+  } satisfies FileWrite);
 }
 
 /// One commit, rendered: what it said about itself, and its diff.

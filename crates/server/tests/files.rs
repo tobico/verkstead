@@ -1,6 +1,6 @@
 //! The files API the Code pane's tree stands on, asked of a real router over a
-//! real Conversation: which roots there are, and what one folder of one of them
-//! holds.
+//! real Conversation: which roots there are, what one folder of one of them
+//! holds, what one file of one of those is — and that file saved back.
 //!
 //! What is worth proving out here rather than in the module's own tests is
 //! everything that takes a *Conversation* to say. The roots are read off the
@@ -27,7 +27,9 @@ use http_body_util::BodyExt;
 use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
-use verkstead_render::{FileReading, FileRootsView, FolderEntry, FolderListing};
+use verkstead_render::{
+    FileReading, FileRootsView, FileWrite, FileWritten, FolderEntry, FolderListing,
+};
 use verkstead_server::{open_database, router, store};
 
 /// A router over a fresh database, and the directory holding both it and every
@@ -531,5 +533,167 @@ async fn a_file_outside_this_conversations_roots_is_refused() {
     assert_eq!(
         file(&app, conversation, &worktree).await,
         FileReading::NotAFile
+    );
+}
+
+/// One of them written back, the way Ctrl+S in a tab writes it: the path, the
+/// version the read handed over, and the text.
+async fn save(app: &Router, conversation: i64, at: &Path, over: &str, text: &str) -> FileWritten {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/ui/conversations/{conversation}/files/file"
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&FileWrite {
+                        path: at.display().to_string(),
+                        version: over.to_owned(),
+                        text: text.to_owned(),
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body = String::from_utf8(bytes.to_vec()).unwrap();
+
+    assert_eq!(status, StatusCode::OK, "the save failed: {body}");
+
+    serde_json::from_str(&body).unwrap_or_else(|error| panic!("the save answered {body}: {error}"))
+}
+
+/// The version a reading carries, or a panic saying what came back instead.
+fn versioned(reading: FileReading) -> String {
+    match reading {
+        FileReading::Text { version, .. } => version,
+        other => panic!("expected text, got {other:?}"),
+    }
+}
+
+/// A save lands on the disk of the Worktree it was read out of, and answers
+/// with the version that file now has — which is what the next save names.
+#[tokio::test]
+async fn a_save_over_the_version_that_was_read_lands_in_the_worktree() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling_alongside(&pool, dir.path(), &[]).await;
+
+    let at = worktree.join("README.md");
+    let was = versioned(file(&app, conversation, &at).await);
+
+    let saved = save(&app, conversation, &at, &was, "# saved from the tab\n").await;
+
+    let FileWritten::Written { version } = saved else {
+        panic!("expected a write, got {saved:?}");
+    };
+
+    assert_eq!(
+        std::fs::read_to_string(&at).unwrap(),
+        "# saved from the tab\n"
+    );
+    assert_eq!(version, versioned(file(&app, conversation, &at).await));
+}
+
+/// And a save over a file the agent has changed since is refused — which is
+/// what the Reload / Keep mine bar is drawn from, both halves of which come
+/// back for a fresh read before the save that lands.
+#[tokio::test]
+async fn a_save_over_a_file_that_has_moved_is_refused() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling_alongside(&pool, dir.path(), &[]).await;
+
+    let at = worktree.join("README.md");
+    let was = versioned(file(&app, conversation, &at).await);
+
+    // The agent, writing the same file while the human had it open — which on
+    // this Conversation is a session in the Sandbox and here is the same write.
+    std::fs::write(&at, "# the agent got here first\n").unwrap();
+
+    assert_eq!(
+        save(&app, conversation, &at, &was, "# mine\n").await,
+        FileWritten::Stale
+    );
+
+    // Nothing was written: the collision is the point.
+    assert_eq!(
+        std::fs::read_to_string(&at).unwrap(),
+        "# the agent got here first\n"
+    );
+
+    // And *Keep mine* is a fresh read followed by a save over the version it
+    // hands over, which lands.
+    let now = versioned(file(&app, conversation, &at).await);
+
+    assert!(matches!(
+        save(&app, conversation, &at, &now, "# mine\n").await,
+        FileWritten::Written { .. }
+    ));
+    assert_eq!(std::fs::read_to_string(&at).unwrap(), "# mine\n");
+}
+
+/// A save into a read-only companion is refused with its own sentence: the
+/// root's own flag, which is the same thing that opened its editor read-only.
+#[tokio::test]
+async fn a_save_into_a_read_only_companion_is_refused() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, companions) = grilling_alongside(
+        &pool,
+        dir.path(),
+        &[("askance", store::CompanionMode::ReadOnly)],
+    )
+    .await;
+
+    let at = companions[0].join("README.md");
+    let was = versioned(file(&app, conversation, &at).await);
+
+    assert_eq!(
+        save(&app, conversation, &at, &was, "# mine\n").await,
+        FileWritten::ReadOnly
+    );
+    assert_ne!(std::fs::read_to_string(&at).unwrap(), "# mine\n");
+
+    // And the Conversation's own Worktree takes the same save, which is the
+    // other half of the sentence.
+    let own = worktree.join("README.md");
+    let over = versioned(file(&app, conversation, &own).await);
+
+    assert!(matches!(
+        save(&app, conversation, &own, &over, "# mine\n").await,
+        FileWritten::Written { .. }
+    ));
+}
+
+/// And a save is bounded by the roots the way a read is: this Conversation's
+/// checkouts and nothing else on the machine, whichever way the bytes go.
+#[tokio::test]
+async fn a_save_outside_this_conversations_roots_is_refused() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling_alongside(&pool, dir.path(), &[]).await;
+
+    // The Repo the Worktree was cut from: a directory of the human's that this
+    // Conversation is not working in.
+    let elsewhere = dir.path().join("verkstead/README.md");
+    let before = std::fs::read_to_string(&elsewhere).unwrap();
+
+    assert_eq!(
+        save(&app, conversation, &elsewhere, "", "# mine\n").await,
+        FileWritten::Outside
+    );
+    assert_eq!(std::fs::read_to_string(&elsewhere).unwrap(), before);
+
+    assert_eq!(
+        save(&app, conversation, &worktree.join(".git/config"), "", "").await,
+        FileWritten::UnderGit
+    );
+    assert_eq!(
+        save(&app, conversation, &worktree.join("never-written"), "", "").await,
+        FileWritten::Missing
     );
 }

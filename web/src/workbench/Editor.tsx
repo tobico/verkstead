@@ -3,8 +3,12 @@
 //! One of these per open file, made when the tab is drawn and disposed when it
 //! goes. What it is handed is the text and what it hands back is the typing:
 //! the buffer lives above the pane in `Code.tsx`, because a tab turned away
-//! from and back to has to find its text where it was, and the save of the next
-//! task is a comparison between that buffer and what the disk said.
+//! from and back to has to find its text where it was, and a save is a
+//! comparison between that buffer and what the disk said.
+//!
+//! **Nothing here saves.** Ctrl+S is the pane's, on the document, and what it
+//! writes is the buffer above rather than anything read back out of this — so
+//! an editor knows only what it was given and what has been typed into it.
 //!
 //! **The language is the path's**, which is the whole of how a file is
 //! coloured: the buffer is made at `Uri.file(<the path>)`, and the package
@@ -149,8 +153,8 @@ export function Editor(props: {
           automaticLayout: true,
         });
 
-        // Every keystroke back into the buffer above, which is where the dirty
-        // mark and the save of the next task read it from.
+        // Every keystroke back into the buffer above, which is where the dot on
+        // the tab and the save under Ctrl+S both read it from.
         editing.onDidChangeModelContent(() => {
           if (editing) {
             props.typed(editing.getValue());
@@ -182,8 +186,9 @@ export function Editor(props: {
   // Only where they have: writing what the editor already holds back into it
   // would cost the cursor and the undo stack on every keystroke, the typing
   // above being what feeds this. What moves them apart is the buffer being set
-  // from somewhere other than this editor — a Reload after a refused save,
-  // which is the next task's.
+  // from somewhere other than this editor, which is **Reload** on the bar a
+  // refused stale save puts up: the disk's text, into an editor still holding
+  // the human's.
   createEffect(() => {
     const text = props.text;
 

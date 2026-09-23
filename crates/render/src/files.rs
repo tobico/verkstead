@@ -23,6 +23,14 @@
 //! bytes turned out to be — text, an image, a binary the server will not send,
 //! or a file over the size cap — see [`FileReading`].
 //!
+//! **And a write names the version it is over** — see [`FileWrite`] and
+//! [`FileWritten`]. A write over a file that has moved since is refused, which
+//! is what the bar in front of the human is drawn from: *Reload* takes the
+//! disk's text, and *Keep mine* keeps theirs over the version the disk now has
+//! so that the next save lands. Last writer wins was decided against — an
+//! agent's edit silently overwritten by a human who never saw it is exactly
+//! what the version exists to surface.
+//!
 //! Every refusal is a named outcome rather than a status code, as registering
 //! a Repo refuses and as that dropdown's listing does — because each of them is
 //! a different sentence for the human and none of them is a failure to retry: a
@@ -167,11 +175,10 @@ pub struct FolderEntry {
 /// viewer's guess, because the bytes are the server's and the whole point of
 /// the last two is that they never cross the wire.
 ///
-/// **And a read carries a version**, which is a hash of the bytes it read: the
-/// write of the next task names the version it is over, and a write over a file
-/// the agent has changed since is refused (*Versioned reads, and a stale write
-/// is refused*). On the text alone, that being the only kind anything writes
-/// back.
+/// **And a read carries a version**, which is a hash of the bytes it read: a
+/// [`FileWrite`] names the version it is over, and a write over a file the
+/// agent has changed since is refused (*Versioned reads, and a stale write is
+/// refused*). On the text alone, that being the only kind anything writes back.
 ///
 /// The refusals are [`FolderListing`]'s, said about a file: each of them is a
 /// different sentence for the human and none of them is a status code.
@@ -265,4 +272,89 @@ pub enum FileReading {
     /// It is a file the server cannot read, and this is why — permissions, or a
     /// file that went between the request and the reading.
     Unreadable { why: String },
+}
+
+/// A file as the human has it, written back over the version it was read at.
+///
+/// The path, so that a write is bounded by exactly the roots a read is; the
+/// version, which is what the read handed over and what the disk is measured
+/// against; and the text itself. Three fields and no flag: there is one kind of
+/// write, and it is *this text, if the file is still the one I read*
+/// ([ADR 0019](../../../docs/adr/0019-the-code-pane.md), *Versioned reads, and
+/// a stale write is refused*).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct FileWrite {
+    pub path: String,
+
+    /// The version the read carried, which is what this write is over.
+    ///
+    /// Not optional and never blank: a write that named no version would be
+    /// last-writer-wins by the back door, and the collision is the point.
+    pub version: String,
+
+    /// And what to put there.
+    pub text: String,
+}
+
+/// What became of writing it.
+///
+/// **A write over a version that has moved is refused**, which is what draws
+/// the bar in front of the human: *Reload* takes the disk's text, and *Keep
+/// mine* keeps theirs over the version the disk now has so that their next save
+/// lands. Both of them read the file afresh through the endpoint beside this
+/// one, and they differ only in what becomes of the text in the editor.
+///
+/// So this refusal is a bare word where [`FileWritten::Written`] carries a
+/// version, and the asymmetry is the point: after a write that landed the
+/// viewer knows what is on the disk, because it is what it just sent. After one
+/// that was refused it does not, and a version handed over without the text it
+/// belongs to would be half an answer — enough for the next save to land, and
+/// not enough for the viewer to say whether the editor still differs from the
+/// disk at all.
+///
+/// The rest are [`FileReading`]'s refusals said about a write, plus the one
+/// that is a write's alone: a root that takes none. Each is a sentence for the
+/// human rather than a status code, the way every other refusal in this module
+/// is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum FileWritten {
+    /// It is on disk, and this is the version it now has.
+    ///
+    /// Answered back rather than left to be read again, because the tab has to
+    /// know it: the next save is a write over this, and a tab that had to
+    /// re-read the file to find out would be a read after every save.
+    Written { version: String },
+
+    /// The file has moved since it was read, so nothing was written.
+    Stale,
+
+    /// The root it is in takes no writes: a read-only companion, checked out
+    /// detached and there to be read.
+    ///
+    /// The root's own flag rather than the file's mode, which is the same thing
+    /// [`FileReading::Text::writable`] says — so an editor that took no typing
+    /// is an editor whose save was never going to land either.
+    ReadOnly,
+
+    /// It is under none of this Conversation's Worktrees.
+    Outside,
+
+    /// It is inside a repository's git directory, which Code does not touch.
+    UnderGit,
+
+    /// The Worktree it is in is no longer on disk.
+    RootGone,
+
+    /// The root is there and the file is not: deleted, renamed, or committed
+    /// away by a checkout in a terminal beside the tab.
+    Missing,
+
+    /// Something is at it and it is not a file.
+    NotAFile,
+
+    /// The server could not write it, and this is why — permissions, a full
+    /// disk, or a file that went between the reading and the writing.
+    Unwritable { why: String },
 }

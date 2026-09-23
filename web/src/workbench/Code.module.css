@@ -282,3 +282,57 @@
   max-height: 100%;
   object-fit: contain;
 }
+
+/* The dot on a tab holding text nobody has saved — VS Code's own mark, in the
+   quiet ink the name beside it is drawn in.
+
+   Beside the name rather than in place of the ×, which is where VS Code puts
+   it: that trade works because a pointer hovering turns the dot back into a ×,
+   and there is no hover on a phone. Drawn by this element rather than written
+   as a character, so the tab's own text is the file's name and nothing else. */
+.dot {
+  flex: none;
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-right: 0.1rem;
+  background: currentcolor;
+  border-radius: 50%;
+}
+
+/* And the bar over a save refused because the file moved under it: what
+   happened, and the two presses that settle which text the next save is of —
+   see `Moved` in `Code.tsx`.
+
+   In the tab above whatever it is holding, rather than over the page like the
+   two confirm cards: nothing waits on it, the editor under it goes on taking
+   typing, and a file whose save was refused is something to come back to. The
+   attention colour rather than the error one — an agent writing the same file
+   is the ordinary way of things here, and the thing to do about it is on the
+   row. */
+.moved {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.9rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+  padding: 0.6rem 0.8rem;
+  background: var(--code-wash);
+  border: 1px solid var(--edge);
+  border-radius: 0.6rem;
+}
+
+.movedWhy {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+
+/* The two of them together at the end of the row, so that the sentence reads
+   before the presses do. */
+.movedOut {
+  display: flex;
+  flex: none;
+  gap: 0.5rem;
+}

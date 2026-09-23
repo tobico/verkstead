@@ -1928,11 +1928,10 @@ export type EntryKind = "Directory" | "File" | "Repository";
  * viewer's guess, because the bytes are the server's and the whole point of
  * the last two is that they never cross the wire.
  *
- * **And a read carries a version**, which is a hash of the bytes it read: the
- * write of the next task names the version it is over, and a write over a file
- * the agent has changed since is refused (*Versioned reads, and a stale write
- * is refused*). On the text alone, that being the only kind anything writes
- * back.
+ * **And a read carries a version**, which is a hash of the bytes it read: a
+ * [`FileWrite`] names the version it is over, and a write over a file the
+ * agent has changed since is refused (*Versioned reads, and a stale write is
+ * refused*). On the text alone, that being the only kind anything writes back.
  *
  * The refusals are [`FolderListing`]'s, said about a file: each of them is a
  * different sentence for the human and none of them is a status code.
@@ -2025,6 +2024,53 @@ writable: boolean, };
  * is a tree with nothing in it rather than anything to report.
  */
 export type FileRootsView = { roots: Array<FileRoot>, };
+
+/**
+ * A file as the human has it, written back over the version it was read at.
+ *
+ * The path, so that a write is bounded by exactly the roots a read is; the
+ * version, which is what the read handed over and what the disk is measured
+ * against; and the text itself. Three fields and no flag: there is one kind of
+ * write, and it is *this text, if the file is still the one I read*
+ * ([ADR 0019](../../../docs/adr/0019-the-code-pane.md), *Versioned reads, and
+ * a stale write is refused*).
+ */
+export type FileWrite = { path: string, 
+/**
+ * The version the read carried, which is what this write is over.
+ *
+ * Not optional and never blank: a write that named no version would be
+ * last-writer-wins by the back door, and the collision is the point.
+ */
+version: string, 
+/**
+ * And what to put there.
+ */
+text: string, };
+
+/**
+ * What became of writing it.
+ *
+ * **A write over a version that has moved is refused**, which is what draws
+ * the bar in front of the human: *Reload* takes the disk's text, and *Keep
+ * mine* keeps theirs over the version the disk now has so that their next save
+ * lands. Both of them read the file afresh through the endpoint beside this
+ * one, and they differ only in what becomes of the text in the editor.
+ *
+ * So this refusal is a bare word where [`FileWritten::Written`] carries a
+ * version, and the asymmetry is the point: after a write that landed the
+ * viewer knows what is on the disk, because it is what it just sent. After one
+ * that was refused it does not, and a version handed over without the text it
+ * belongs to would be half an answer — enough for the next save to land, and
+ * not enough for the viewer to say whether the editor still differs from the
+ * disk at all.
+ *
+ * The rest are [`FileReading`]'s refusals said about a write, plus the one
+ * that is a write's alone: a root that takes none. Each is a sentence for the
+ * human rather than a status code, the way every other refusal in this module
+ * is.
+ */
+export type FileWritten = { "Written": { version: string, } } | "Stale" | "ReadOnly" | "Outside" | "UnderGit" | "RootGone" | "Missing" | "NotAFile" | { "Unwritable": { why: string, } };
 
 /**
  * One thing in a folder.

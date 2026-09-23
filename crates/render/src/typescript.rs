@@ -23,7 +23,8 @@ use crate::{
     CompanionModeChoice, CompanionModeChosen, CompanionRemoved, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, Created, Creation, DirectoryListing, FileReading,
-    FileRootsView, FolderListing, GrillingStarted, InstallPress, Locked, NewAdoption, NewCompanion,
+    FileRootsView, FileWrite, FileWritten, FolderListing, GrillingStarted, InstallPress, Locked,
+    NewAdoption, NewCompanion,
     NewConversation, NewOrder, NewPullRequestAdoption, OnboardingView, OpenPullRequestRepo,
     PrefillView, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
     ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RemoteBanner, RemoteView,
@@ -240,6 +241,13 @@ fn the_viewers_types_are_written_from_these() {
     // the same refusals said about a file (ADR 0019, *Versioned reads, and a
     // stale write is refused*).
     FileReading::export_all(&config).unwrap();
+
+    // And one written back: the text over the version the read handed over, and
+    // what became of it. A write over a version that has moved is refused with
+    // the version the disk has now, which is what draws the Reload / Keep mine
+    // bar in front of the human.
+    FileWrite::export_all(&config).unwrap();
+    FileWritten::export_all(&config).unwrap();
 
     // And what a session committed: the summary drawn out, and the diff, both of
     // which are this payload's alone — the Timeline's own card is the subject
