@@ -60,7 +60,7 @@
 //! the way it prints anything else, and xterm reads it out of the escape —
 //! which is the one thing a window learns about what is running on it. There is
 //! nowhere on a grid for a title, so it is handed to whoever drew this window
-//! instead: a Terminal's tabs are named by it, and a Screen has no name to draw
+//! instead: a Terminal's tab is named by it, and a Screen has no name to draw
 //! and asks for none.
 //!
 //! **A grid with nothing on it yet says so.** An empty black rectangle is
@@ -68,12 +68,12 @@
 //! repaint has landed the pane says it is waiting for one — which is the
 //! difference between one that is slow to arrive and one that is not coming.
 //!
-//! **Several of these may stand over one pane**, which is what a Conversation's
-//! Terminal does with its tabs: every one of them keeps its socket and its grid,
-//! and only the one showing is drawn. Which is why `showing` is handed in rather
-//! than read off this element — the window showing is the only one that measures
-//! the pane, and two of them measuring one pane would be the oscillation the
-//! de-dupe below guards against, with a hidden window's nothing always winning.
+//! **Several of these may stand over one pane**, which is what Code does with
+//! its tabs: every one of them keeps its socket and its grid, and only the one
+//! showing is drawn. Which is why `showing` is handed in rather than read off
+//! this element — the window showing is the only one that measures the pane,
+//! and two of them measuring one pane would be the oscillation the de-dupe
+//! below guards against, with a hidden window's nothing always winning.
 //!
 //! **What is above the grid is the caller's.** The server holds the grid alone,
 //! so a repaint is where a window starts and there is nothing to fetch a
@@ -191,7 +191,7 @@ export function Attached(props: {
   /// This says what happened rather than doing anything about it, because what
   /// follows from it is the caller's. A shell that ran for an hour and one that
   /// never started are the same closed socket, and only the pane knows which it
-  /// asked for and when — see `Terminal.tsx`, where the five seconds are.
+  /// asked for and when — see `Code.tsx`, where the five seconds are.
   ended?: () => void;
 }): JSX.Element {
   /// Where the terminal is mounted, the terminal itself, and the addon that

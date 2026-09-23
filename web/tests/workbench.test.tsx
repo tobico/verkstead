@@ -164,17 +164,17 @@ import prPane from "../src/workbench/PullRequest.module.css";
 // Sharing the Conversation, which is a details pane of its own: the published
 // share it draws, and the presses that came out of the actions menu.
 import sharePane from "../src/workbench/Share.module.css";
-// And a terminal of the human's own inside the conversation's sandbox, which
-// is the other details pane nothing on the record opens.
+// And Code, which holds the terminals of the human's own inside the
+// conversation's sandbox — the other details pane nothing on the record opens.
 import {
   // Aliased: `AT_ONCE` above this is the force-stop endpoint, which is a
   // different sense of the words and was here first.
   AT_ONCE as ENDED_WITHIN,
   ENDED_AT_ONCE,
   TERMINAL_REFUSAL,
-} from "../src/workbench/Terminal";
+} from "../src/workbench/Code";
 // And the tab bar over its several shells, which is the pane's own module.
-import terminalPane from "../src/workbench/Terminal.module.css";
+import codePane from "../src/workbench/Code.module.css";
 // The mark a pull request's checks are said in, both ways: the hashed names to
 // query the card by, and the words the icon is read aloud in. The three shapes
 // themselves come straight from Font Awesome, so that a test naming one and the
@@ -197,7 +197,7 @@ import conflictMark from "../src/workbench/Merging.module.css";
 // rules that give it one are what jsdom cannot lay out.
 import attachedPane from "../src/workbench/Attached.module.css";
 import attachedCss from "../src/workbench/Attached.module.css?raw";
-import terminalCss from "../src/workbench/Terminal.module.css?raw";
+import codeCss from "../src/workbench/Code.module.css?raw";
 // What a Conversation is called where nobody has named its branch, which the
 // sidebar and the pane header are both drawn with.
 import { AUTOMATIC, DRAFT, titled } from "../src/workbench/naming";
@@ -16749,12 +16749,12 @@ const TERMINALS_OF_IT = `/api/ui/conversations/${GRILLING.id}/terminals`;
 /// And where the first of them is watched.
 const TERMINAL_ATTACH = `${TERMINALS_OF_IT}/1/attach`;
 
-/// The terminal icon on the Timeline's header, which is the whole of the way
-/// into the pane: no card opens it, a terminal belonging to the conversation
-/// rather than to any moment on its record.
-function terminalIcon(container: ParentNode): HTMLButtonElement | null {
+/// The code icon on the Timeline's header, which is the whole of the way into
+/// the pane: no card opens it, Code belonging to the conversation rather than
+/// to any moment on its record.
+function codeIcon(container: ParentNode): HTMLButtonElement | null {
   return container.querySelector<HTMLButtonElement>(
-    `.${shell.middlePane} .${button.iconButton}[aria-label^="Terminal"]`,
+    `.${shell.middlePane} .${button.iconButton}[aria-label^="Code"]`,
   );
 }
 
@@ -16774,7 +16774,7 @@ function withTerminals(
   );
 }
 
-describe("the way into the terminal pane", () => {
+describe("the way into the code pane", () => {
   /// Drawn as Share beside it is, and for the same reason: another thing
   /// standing in a pane that is selected and opened into the pane beside it.
   it("stands on the timeline's header as an icon button", async () => {
@@ -16783,10 +16783,10 @@ describe("the way into the terminal pane", () => {
 
     const icon = await drawn(
       container,
-      `.${shell.middlePane} .${button.iconButton}[aria-label="Terminal"]`,
+      `.${shell.middlePane} .${button.iconButton}[aria-label="Code"]`,
     );
 
-    expect(icon.getAttribute("aria-label")).toBe("Terminal");
+    expect(icon.getAttribute("aria-label")).toBe("Code");
     expect(icon.querySelector("svg")).toBeTruthy();
     expect((icon as HTMLButtonElement).disabled).toBe(false);
   });
@@ -16799,21 +16799,21 @@ describe("the way into the terminal pane", () => {
 
     const icon = await drawn(
       container,
-      `.${shell.middlePane} .${button.iconButton}[aria-label="Terminal"]`,
+      `.${shell.middlePane} .${button.iconButton}[aria-label="Code"]`,
     );
     expect(icon.getAttribute("aria-pressed")).toBe("false");
 
     fireEvent.click(icon);
 
     await waitFor(() =>
-      expect(terminalIcon(container)!.getAttribute("aria-pressed")).toBe("true"),
+      expect(codeIcon(container)!.getAttribute("aria-pressed")).toBe("true"),
     );
-    expect(terminalIcon(container)!.className).toContain(button.open);
+    expect(codeIcon(container)!.className).toContain(button.open);
   });
 
-  /// A conversation with no worktree has nowhere to open a shell, so the icon
-  /// is off — and says why, because a shape that has gone grey says nothing
-  /// when it is read aloud.
+  /// A conversation with no worktree has nothing to edit and nowhere to open a
+  /// shell, so the icon is off — and says why, because a shape that has gone
+  /// grey says nothing when it is read aloud.
   it("is disabled, saying why, where there is no worktree", async () => {
     withTerminals([], whenever(
       `/api/ui/conversations/${GRILLING.id}`,
@@ -16823,12 +16823,12 @@ describe("the way into the terminal pane", () => {
 
     const icon = await drawn<HTMLButtonElement>(
       container,
-      `.${shell.middlePane} .${button.iconButton}[aria-label^="Terminal"]`,
+      `.${shell.middlePane} .${button.iconButton}[aria-label^="Code"]`,
     );
 
     expect(icon.disabled).toBe(true);
     expect(icon.getAttribute("aria-label")).toBe(
-      "Terminal — there is no worktree yet",
+      "Code — there is no worktree yet",
     );
   });
 
@@ -16836,20 +16836,52 @@ describe("the way into the terminal pane", () => {
   /// the URL, so a cold load of this path opens on it.
   it("stands at a path of its own", async () => {
     withTerminals([1]);
-    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
     await drawn(container, `.${shell.detailsPane} .${attachedPane.screen}`);
-    expect(terminalIcon(container)!.getAttribute("aria-pressed")).toBe("true");
+    expect(codeIcon(container)!.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  /// And the pane says what it is, in the same word the icon that opened it is
+  /// read aloud in: the header of a details pane is what somebody who walked
+  /// into it on a phone has to go on.
+  it("heads the pane with the word the icon is read in", async () => {
+    withTerminals([1]);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+    const head = await drawn(
+      container,
+      `.${shell.detailsPane} .${paneHead.head} h1`,
+    );
+    expect(head.textContent).toBe("Code");
+  });
+
+  /// And the path it stood at while it was the Terminal pane lands on it, so a
+  /// link somebody kept and a browser that remembered the old one still reach
+  /// the pane — see `Moved` in `src/App.tsx`. A redirect rather than a second
+  /// path: what is open is in the URL, and two URLs for one pane would be two
+  /// accounts of what is open.
+  it("lands the path the terminal pane stood at on it", async () => {
+    withTerminals([1]);
+    const { container, history } = mount(
+      `/conversations/${GRILLING.id}/terminal`,
+    );
+
+    await waitFor(() =>
+      expect(history.get()).toBe(`/conversations/${GRILLING.id}/code`),
+    );
+    await drawn(container, `.${shell.detailsPane} .${attachedPane.screen}`);
+    expect(codeIcon(container)!.getAttribute("aria-pressed")).toBe("true");
   });
 });
 
-describe("a conversation's terminal", () => {
+describe("a conversation's terminal in the code pane", () => {
   /// The server holds the shell, so the pane is the way back to it rather than
   /// where it lives: a reload attaches to what is already running instead of
   /// starting a second shell beside it.
   it("attaches to the terminal that is already live", async () => {
     const fetching = withTerminals([1]);
-    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
     const socket = await attached();
 
@@ -16887,7 +16919,7 @@ describe("a conversation's terminal", () => {
         "POST",
       ),
     );
-    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
     const socket = await attached();
     expect(socket.url.endsWith(TERMINAL_ATTACH)).toBe(true);
@@ -16924,7 +16956,7 @@ describe("a conversation's terminal", () => {
     );
 
     const { container, history } = mount(
-      `/conversations/${GRILLING.id}/terminal`,
+      `/conversations/${GRILLING.id}/code`,
     );
 
     (await attached()).says(PAINTED);
@@ -16947,7 +16979,7 @@ describe("a conversation's terminal", () => {
 
     // And back into it, which reads the register again and comes back to the
     // shell that is already running rather than opening a second beside it.
-    history.set({ value: `/conversations/${GRILLING.id}/terminal` });
+    history.set({ value: `/conversations/${GRILLING.id}/code` });
 
     await waitFor(() =>
       expect(
@@ -16974,7 +17006,7 @@ describe("a conversation's terminal", () => {
   /// keys — see "sends what the mouse did up the same socket".
   it("keeps what scrolled past, so the wheel reads it back", async () => {
     withTerminals([1]);
-    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
     const socket = await attached();
     socket.says(PAINTED);
@@ -17013,7 +17045,7 @@ describe("a conversation's terminal", () => {
   /// ends where the window does rather than scrolling on down the page.
   it("fills the pane, with no reading measure and nothing to scroll", async () => {
     withTerminals([1]);
-    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
     const socket = await attached();
     socket.says(PAINTED);
@@ -17049,7 +17081,7 @@ describe("a conversation's terminal", () => {
         "POST",
       ),
     );
-    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
     const said = await drawn(
       container,
@@ -17080,7 +17112,7 @@ describe("a conversation's terminal", () => {
   });
 });
 
-describe("the terminal pane's tabs", () => {
+describe("the code pane's tabs", () => {
   /// The socket onto one of a conversation's terminals, found by the number in
   /// its path rather than by the order they opened: what is worth asserting is
   /// which shell a window is watching.
@@ -17102,7 +17134,7 @@ describe("the terminal pane's tabs", () => {
   function tabs(container: ParentNode): HTMLButtonElement[] {
     return [
       ...container.querySelectorAll<HTMLButtonElement>(
-        `.${shell.detailsPane} .${terminalPane.tab}`,
+        `.${shell.detailsPane} .${codePane.tab}`,
       ),
     ];
   }
@@ -17129,7 +17161,7 @@ describe("the terminal pane's tabs", () => {
   /// reused. A reload comes back to all of them rather than to the first.
   it("draws a tab for every terminal that is live, in the order opened", async () => {
     withTerminals([1, 2, 3]);
-    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
     await waitFor(() => expect(tabs(container)).toHaveLength(3));
 
@@ -17170,7 +17202,7 @@ describe("the terminal pane's tabs", () => {
         "POST",
       ),
     );
-    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
     const first = await attachedTo(1);
     first.says(PAINTED);
@@ -17210,7 +17242,7 @@ describe("the terminal pane's tabs", () => {
   /// hidden one measures nothing at all, so its nothing would win.
   it("says a size for the tab showing and none for the hidden ones", async () => {
     withTerminals([1, 2]);
-    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
     const first = await attachedTo(1);
     const second = await attachedTo(2);
@@ -17259,7 +17291,7 @@ describe("the terminal pane's tabs", () => {
         "POST",
       ),
     );
-    const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+    const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
     const first = await attachedTo(1);
     first.says(PAINTED);
@@ -17363,7 +17395,7 @@ describe("the terminal pane's tabs", () => {
         [1],
         whenever(TERMINALS_OF_IT, opens(2), "POST"),
       );
-      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
       const first = await attachedTo(1);
       first.says(PAINTED);
@@ -17389,7 +17421,7 @@ describe("the terminal pane's tabs", () => {
     /// nothing opens, because the pane is not empty.
     it("leaves the other tabs standing where it was one of several", async () => {
       const fetching = withTerminals([1, 2, 3]);
-      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
       const second = await attachedTo(2);
       await waitFor(() => expect(tabs(container)).toHaveLength(3));
@@ -17415,7 +17447,7 @@ describe("the terminal pane's tabs", () => {
         [],
         whenever(TERMINALS_OF_IT, opens(1, 2), "POST"),
       );
-      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
       const first = await attachedTo(1);
       first.says(PAINTED);
@@ -17443,7 +17475,7 @@ describe("the terminal pane's tabs", () => {
         [],
         whenever(TERMINALS_OF_IT, opens(1, 2), "POST"),
       );
-      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
       const first = await attachedTo(1);
       first.says(PAINTED);
@@ -17537,7 +17569,7 @@ describe("the terminal pane's tabs", () => {
         [],
         whenever(TERMINALS_OF_IT, json("Refused" satisfies TerminalOpened), "POST"),
       );
-      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
       await waitFor(() =>
         expect(standing(container)).toBe(TERMINAL_REFUSAL.Refused),
@@ -17569,7 +17601,7 @@ describe("the terminal pane's tabs", () => {
     /// one menu component the app has.
     function menu(container: ParentNode): HTMLElement | null {
       return container.querySelector<HTMLElement>(
-        `.${terminalPane.tabActions} > .${dropdown.drop}`,
+        `.${codePane.tabActions} > .${dropdown.drop}`,
       );
     }
 
@@ -17577,7 +17609,7 @@ describe("the terminal pane's tabs", () => {
     function opened(container: ParentNode): Promise<HTMLElement> {
       return drawn(
         container,
-        `.${terminalPane.tabActions} > .${dropdown.drop}`,
+        `.${codePane.tabActions} > .${dropdown.drop}`,
       );
     }
 
@@ -17613,7 +17645,7 @@ describe("the terminal pane's tabs", () => {
         closes(1),
         whenever(TERMINALS_OF_IT, opens(3), "POST"),
       );
-      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
       const first = await attachedTo(1);
       await waitFor(() => expect(tabs(container)).toHaveLength(2));
@@ -17660,7 +17692,7 @@ describe("the terminal pane's tabs", () => {
     /// to be dragged.
     it("opens the same menu on a long press", async () => {
       withTerminals([1], closes(1));
-      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
       await waitFor(() => expect(tabs(container)).toHaveLength(1));
 
@@ -17693,7 +17725,7 @@ describe("the terminal pane's tabs", () => {
         closes(1),
         whenever(TERMINALS_OF_IT, opens(1, 2), "POST"),
       );
-      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
       const first = await attachedTo(1);
       first.says(PAINTED);
@@ -17730,7 +17762,7 @@ describe("the terminal pane's tabs", () => {
           "POST",
         ),
       );
-      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
       await waitFor(() =>
         expect(standing(container)).toBe(TERMINAL_REFUSAL.Refused),
@@ -17761,7 +17793,7 @@ describe("the terminal pane's tabs", () => {
     /// which is the number.
     it("calls a tab what its shell calls itself", async () => {
       withTerminals([1]);
-      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
       const socket = await attachedTo(1);
 
@@ -17789,7 +17821,7 @@ describe("the terminal pane's tabs", () => {
     /// nothing about it can reach another tab.
     it("names only the tab whose shell said it", async () => {
       withTerminals([1, 2]);
-      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
       const first = await attachedTo(1);
       const second = await attachedTo(2);
@@ -17811,7 +17843,7 @@ describe("the terminal pane's tabs", () => {
     /// numbered the shell and no more — until the shell next draws a prompt.
     it("reads the number again after a reload", async () => {
       withTerminals([1]);
-      const before = mount(`/conversations/${GRILLING.id}/terminal`);
+      const before = mount(`/conversations/${GRILLING.id}/code`);
 
       const first = await attachedTo(1);
       first.says(PAINTED);
@@ -17825,7 +17857,7 @@ describe("the terminal pane's tabs", () => {
       // back to a grid and to nothing that says what it is called.
       before.unmount();
 
-      const { container } = mount(`/conversations/${GRILLING.id}/terminal`);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
 
       const again = await waitFor(() => {
         const opened = Attached.opened.filter((one) =>
@@ -17856,8 +17888,8 @@ describe("the terminal pane's tabs", () => {
     /// However long a name is, the strip is a strip: a title the length of a
     /// path is cut off rather than allowed to push every other tab out of it.
     it("cuts a long name off rather than widening the strip", () => {
-      expect(terminalCss).toContain("max-width: 12rem;");
-      expect(terminalCss).toContain("text-overflow: ellipsis;");
+      expect(codeCss).toContain("max-width: 12rem;");
+      expect(codeCss).toContain("text-overflow: ellipsis;");
     });
   });
 });

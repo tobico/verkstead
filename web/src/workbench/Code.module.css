@@ -1,4 +1,5 @@
-/* A Conversation's own terminals, one per tab — see `Terminal.tsx`.
+/* Code's tab bar, holding a Conversation's own terminals one per tab — see
+   `Code.tsx`.
 
    The bar is the Output pane's Transcript/Screen switch again: a group of
    pressed-or-not buttons in a bordered strip, standing in the pane's header

@@ -1,6 +1,6 @@
 //! The application: everything under the API routes the agents use.
 
-import { Navigate, Route, Router } from "@solidjs/router";
+import { Navigate, Route, Router, useParams } from "@solidjs/router";
 import { QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { Show, onCleanup, onMount, type JSX } from "solid-js";
 
@@ -15,6 +15,7 @@ import { SetupPage } from "./setup/SetupPage";
 import { SETUP } from "./setup/steps";
 import { ComposePage } from "./workbench/Compose";
 import { forget } from "./workbench/eager";
+import { pathTo } from "./workbench/openings";
 import { Workbench } from "./workbench/Workbench";
 
 /// One client for the whole app, made once rather than per render: it is where
@@ -141,9 +142,17 @@ function Verkstead(): JSX.Element {
         <Route path="/events/:event" />
         <Route path="/backlog" />
         <Route path="/share" />
-        <Route path="/terminal" />
+        <Route path="/code" />
         <Route path="/roadmaps/:name" />
       </Route>
+      {/* And where Code's pane stood while it was the Terminal pane, which is
+          a redirect rather than a page: a link somebody kept and a browser
+          that remembered the old path still land on the pane, under the same
+          Conversation. Outside the route above rather than a sixth leaf of
+          it, because those leaves draw nothing — the page reads what is open
+          off the URL — so a redirect written as one of them would never be
+          rendered to do its redirecting. */}
+      <Route path="/conversations/:id/terminal" component={Moved} />
       {/* And the composer before there is anything for it to be about: the
           same page, working what the device is holding rather than a record.
           A page of its own rather than a pane of the workbench, because there
@@ -200,6 +209,27 @@ export function Shell(props: { children?: JSX.Element }): JSX.Element {
       <Toasts />
     </>
   );
+}
+
+/// Where the Terminal pane stood, sending whoever asked for it on to Code
+/// under the same Conversation — see `Code.tsx`.
+///
+/// A replace rather than a push, the way the wizard's catch-all is: the old
+/// path is a page nobody should be able to walk back into, and a push would
+/// put one entry of it between the pane and wherever the human came from.
+///
+/// The one path of the workbench's that is a redirect rather than nothing. A
+/// pane that moved within the settings is no such page instead, because those
+/// are sections that were folded into one another; this one is the same pane
+/// under a new name, still holding the shells the old path opened.
+///
+/// Exported for the reason [`Shell`] is: a test mounting the workbench mounts
+/// the route table the app really has, and a redirect written a second time in
+/// the bench would be a test of a redirect the app does not ship.
+export function Moved(): JSX.Element {
+  const params = useParams();
+
+  return <Navigate href={pathTo(params.id!, "code")} />;
 }
 
 function NoSuchPage(): JSX.Element {

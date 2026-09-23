@@ -1,12 +1,21 @@
-//! A Conversation's own terminals, opened: shells of the human's inside its
-//! Sandbox, with its Worktree as the working directory.
+//! **Code**: the Conversation's editor, which so far is its terminals.
 //!
-//! For the moment the agent's work is done and somebody wants to try it, make a
-//! small change or work with git — without leaving the workbench, and without
-//! the run noticing
+//! Shells of the human's inside its Sandbox, with its Worktree as the working
+//! directory — for the moment the agent's work is done and somebody wants to
+//! try it, make a small change or work with git, without leaving the workbench
+//! and without the run noticing
 //! ([ADR 0013](../../../docs/adr/0013-conversation-terminals.md)).
 //!
-//! Opened by the terminal icon on the Timeline's header — see `Timeline.tsx` —
+//! **The pane the Terminal pane became**
+//! ([ADR 0019](../../../docs/adr/0019-the-code-pane.md)). What it grows into is
+//! a file tree over every Worktree the Conversation has, with a group of tabs
+//! beside it holding files and terminals alike; what is here is that group's
+//! terminals, under the new name and the new path and otherwise untouched. Two
+//! panes, one holding shells and one holding shells and files, would be the
+//! same thing drawn twice — so there is no Terminal pane any more, and the path
+//! it stood at redirects here (see `App.tsx`).
+//!
+//! Opened by the code icon on the Timeline's header — see `Timeline.tsx` —
 //! which is a details pane like every other, at a path of its own so it survives
 //! a reload and can be linked to. The second pane nothing on the record opens: a
 //! terminal belongs to the Conversation rather than to any moment on it, the way
@@ -103,7 +112,7 @@ import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import { Attached } from "./Attached";
 import { PaneHead } from "./PaneHead";
-import styles from "./Terminal.module.css";
+import styles from "./Code.module.css";
 import shell from "../Panes.module.css";
 
 /// Each way of being refused a terminal, in the words of what to go and do
@@ -165,7 +174,7 @@ export const AT_ONCE = 5_000;
 export const ENDED_AT_ONCE =
   "The shell ended as soon as it started. Press plus to open another.";
 
-export function Terminal(props: {
+export function Code(props: {
   conversation: ConversationView;
   back: () => void;
 }): JSX.Element {
@@ -456,7 +465,7 @@ export function Terminal(props: {
   return (
     <>
       <PaneSticky>
-        <PaneHead back={{ to: "Timeline", go: props.back }} title="Terminal">
+        <PaneHead back={{ to: "Timeline", go: props.back }} title="Code">
           {/* The tabs beside the title, where a pane's own controls go, and the
               way to another at the end of them. Buttons that say which they are
               rather than tabs: they are all always there, `aria-pressed` is the

@@ -53,7 +53,7 @@ const PATHS: Array<[Opening, string]> = [
   [7, "/conversations/3/events/7"],
   ["backlog", "/conversations/3/backlog"],
   ["share", "/conversations/3/share"],
-  ["terminal", "/conversations/3/terminal"],
+  ["code", "/conversations/3/code"],
   [opensRoadmap("mvp"), "/conversations/3/roadmaps/mvp"],
   [opensRoadmap("companion-repos"), "/conversations/3/roadmaps/companion-repos"],
 ];
@@ -116,9 +116,17 @@ describe("what a path says is open", () => {
     expect(openingAt("/conversations/3/events")).toBeNull();
     expect(openingAt("/conversations/3/backlog/nowhere")).toBeNull();
     expect(openingAt("/conversations/3/share/nowhere")).toBeNull();
-    expect(openingAt("/conversations/3/terminal/1")).toBeNull();
+    expect(openingAt("/conversations/3/code/1")).toBeNull();
     expect(openingAt("/conversations/3/events/1e3")).toBeNull();
     expect(openingAt("/conversations/3/roadmaps/mvp/1")).toBeNull();
+  });
+
+  /// And the word the Terminal pane stood at names no pane at all: Code took
+  /// it over, and what answers `/terminal` is the redirect in the route table
+  /// rather than anything here — see `Moved` in `src/App.tsx`, and the test
+  /// over it in `workbench.test.tsx`.
+  it("says nothing is open at the word the terminal pane stood at", () => {
+    expect(openingAt("/conversations/3/terminal")).toBeNull();
   });
 });
 

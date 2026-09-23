@@ -19,7 +19,7 @@ Roadmap stage: [01: The Code pane](docs/roadmaps/code-pane/01-code-pane.md)
 
 ## Tasks
 
-- [ ] 01: Code replaces the Terminal pane — [details](01-code-replaces-the-terminal-pane.md)
+- [x] 01: Code replaces the Terminal pane — [details](01-code-replaces-the-terminal-pane.md)
 - [ ] 02: The tab bar — [details](02-the-tab-bar.md)
 - [ ] 03: Busy shells — [details](03-busy-shells.md)
 - [ ] 04: Roots and folders — [details](04-roots-and-folders.md)

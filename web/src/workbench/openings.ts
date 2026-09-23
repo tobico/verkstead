@@ -14,8 +14,9 @@
 //! - `roadmaps/:name` — a roadmap, by the directory name that is its identity.
 //! - `share` — sharing the Conversation, there being one of that per
 //!   Conversation as well.
-//! - `terminal` — the Conversation's own terminals, which is one pane however
-//!   many shells are open in it (ADR 0013).
+//! - `code` — Code: the Conversation's editor, which is one pane however many
+//!   files and shells are open in it (ADR 0019). The word the Terminal pane
+//!   stood at is gone, and the path it stood at redirects — see `App.tsx`.
 //!
 //! The `events/` segment is what keeps the ids and the word-named panes apart.
 //! A bare `:event` segment would have read the same as `backlog` the moment
@@ -44,11 +45,11 @@ import type { TimelineEvent } from "../api/types";
 /// one per conversation; a roadmap carries its own name after it, a worktree
 /// being allowed any number of those.
 ///
-/// And a word for the two panes no card opens at all: the Share, and the
-/// Conversation's own Terminal. Each is opened by an icon on the Timeline's
-/// header, and there is one of each per Conversation the way there is one
-/// backlog of it — a Conversation may have several shells open, and they are
-/// tabs of the one pane rather than panes of their own.
+/// And a word for the two panes no card opens at all: the Share, and Code.
+/// Each is opened by an icon on the Timeline's header, and there is one of each
+/// per Conversation the way there is one backlog of it — a Conversation may
+/// have several files and shells open, and they are tabs of the one pane rather
+/// than panes of their own.
 ///
 /// One channel for all of them, so that opening any closes the rest — a details
 /// pane shows one thing. A string rather than an object for the same reason:
@@ -58,7 +59,7 @@ export type Opening =
   | number
   | "backlog"
   | "share"
-  | "terminal"
+  | "code"
   | `roadmap:${string}`;
 
 /// What opens the named roadmap, by the directory name that is its identity.
@@ -86,7 +87,7 @@ export function pathTo(
 ): string {
   const under = pathOf(conversation);
 
-  if (opening === "backlog" || opening === "share" || opening === "terminal") {
+  if (opening === "backlog" || opening === "share" || opening === "code") {
     return `${under}/${opening}`;
   }
 
@@ -120,7 +121,7 @@ export function openingAt(pathname: string): Opening | null {
   }
 
   if (
-    (what === "backlog" || what === "share" || what === "terminal") &&
+    (what === "backlog" || what === "share" || what === "code") &&
     which === undefined
   ) {
     return what;
