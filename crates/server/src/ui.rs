@@ -3543,10 +3543,10 @@ async fn force_stop(State(state): State<AppState>, Path(id): Path<String>) -> Ht
 /// pending steer.
 ///
 /// The press rather than the move. What comes back says there is a pending
-/// steer to go to, whether the press found one already standing, and whether a
-/// session is still running — which is what the **Interrupt current task** tick
-/// is offered against. Cancelling from here leaves the Conversation stopped
-/// with Resume on offer, which is what the press is for.
+/// steer to go to, and nothing else: a first press and a second are the same
+/// navigation, and what was running is the live Conversation's to say — the
+/// item may sit open for hours. Cancelling from here leaves the Conversation
+/// stopped with Resume on offer, which is what the press is for.
 async fn steer(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
     let Ok(id) = id.parse::<i64>() else {
         return Json(SteerOpened::NoSuchConversation).into_response();

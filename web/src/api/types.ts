@@ -2517,8 +2517,8 @@ binds: Array<BindEntry>, };
  * form as the last save left it.
  *
  * The Timeline's own item is drawn from the target inside it — it reads
- * *Steer* until one is picked and *Steering into X* after — and the pane that
- * item opens fills every one of its fields from the rest.
+ * *Steer* until the form has saved once and *Steering into X* after — and the
+ * pane that item opens fills every one of its fields from the rest.
  */
 export type PendingSteerView = { 
 /**
@@ -4323,13 +4323,18 @@ record: SteerRecordView | null, };
  */
 export type SteerForm = { 
 /**
- * Where the human has said the work goes, or `null` while they have not
- * said — which is what the Timeline's item reads *Steer* for.
+ * Where the work goes: the target the pane's picker is on, as the last
+ * save left it.
  *
- * The pane opens its picker on the first target it offers all the same:
- * a form the human has to answer twice is worse than one that starts
- * somewhere. What is here is what they *said*, and a submit sends what the
- * picker shows either way.
+ * What the picker *shows* rather than only what was pressed, because that
+ * is what a submit would send — the pane opens on the first target it
+ * offers, a form the human has to answer twice being worse than one that
+ * starts somewhere, and a radio that opens already checked is never
+ * pressed. The same rule [`Self::pairing`] is kept under.
+ *
+ * `null` is a form nothing has been saved on yet, which is every one of
+ * them between the press and the first thing typed or ticked — and what
+ * the Timeline's item reads *Steer* for.
  */
 target: SteerTarget | null, 
 /**
@@ -4384,36 +4389,17 @@ upgraded: Array<CompanionUpgrade>, };
  * Conversation stopped with Resume on offer, which is accepted rather than a
  * bug — the press is what froze it.
  *
- * One outcome for both presses, because what the page does with either is the
- * same: the item is drawn at the end of the Timeline and the page goes to it.
- * Which of them happened is [`Opened::already`]'s to say.
- */
-export type SteerOpened = { "Opened": { 
-/**
- * Whether a session was still running as the press landed.
+ * **Two words, because the press has two answers and no more.** A first press
+ * and a second are one outcome between them: what the page does with either is
+ * go to the item at the end of the Timeline, so which of them happened is the
+ * server's own business and is said in its log rather than here.
  *
- * What the press found, which is the one thing it can say that the
- * record cannot: a session is a process, and the register is what
- * knows. The press leaves it exactly where it was — the stop is the
- * ordinary one, and what ends a seen-out session otherwise is the
- * submit's own launch taking the Worktree over.
- *
- * **Not what the form's Interrupt tick is drawn from.** The item may
- * sit open for hours and the session may have been seen out
- * meanwhile, so the tick follows the live Conversation's own `working`
- * — see `web/src/workbench/Steer.tsx`. This is the moment of the
- * press, which is a different fact and stops being true.
+ * Nor does this say what was running. The form's **Interrupt current task**
+ * tick follows the live Conversation's `working` — the item may sit open for
+ * hours and the session may have been seen out meanwhile — so what the press
+ * found is a fact that stops being true, and nothing draws it.
  */
-working: boolean, 
-/**
- * Whether the press found a pending steer already standing.
- *
- * `true` is the second press: nothing was written and nothing was
- * stopped a second time, and what the page does is go to the form
- * somebody is part-way through. A Conversation already carrying a
- * half-written steer is not one to start another beside.
- */
-already: boolean, } } | "NoSuchConversation";
+export type SteerOpened = "Opened" | "NoSuchConversation";
 
 /**
  * The Pairing a steer recorded, as it reads now.

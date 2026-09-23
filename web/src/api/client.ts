@@ -942,8 +942,8 @@ export function stopConversation(id: number): Promise<ConversationStopped> {
   return post<ConversationStopped>(`/api/ui/conversations/${id}/stop`, {});
 }
 
-/// Press steer: stop the drive, open the pending steer the form is written on,
-/// and find out what was running when it stopped.
+/// Press steer: stop the drive and open the pending steer the form is written
+/// on.
 ///
 /// The press rather than the move, and an act of its own for that reason.
 /// Nothing new is launched while the human composes, so the world the form is
@@ -951,8 +951,8 @@ export function stopConversation(id: number): Promise<ConversationStopped> {
 /// the conversation stopped with resume on offer, which is what the press
 /// bought.
 ///
-/// A second press writes nothing: what comes back says the form was already
-/// there, and the page goes to it either way.
+/// A second press writes nothing and answers the same word: the page goes to
+/// the form there is either way, so which press it was is nothing to say here.
 ///
 /// Nothing is sent, as nothing is sent with either stop: which conversation it
 /// is is the whole of it.

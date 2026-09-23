@@ -3693,38 +3693,21 @@ pub enum Resolved {
 /// Conversation stopped with Resume on offer, which is accepted rather than a
 /// bug — the press is what froze it.
 ///
-/// One outcome for both presses, because what the page does with either is the
-/// same: the item is drawn at the end of the Timeline and the page goes to it.
-/// Which of them happened is [`Opened::already`]'s to say.
+/// **Two words, because the press has two answers and no more.** A first press
+/// and a second are one outcome between them: what the page does with either is
+/// go to the item at the end of the Timeline, so which of them happened is the
+/// server's own business and is said in its log rather than here.
+///
+/// Nor does this say what was running. The form's **Interrupt current task**
+/// tick follows the live Conversation's `working` — the item may sit open for
+/// hours and the session may have been seen out meanwhile — so what the press
+/// found is a fact that stops being true, and nothing draws it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub enum SteerOpened {
     /// The drive has stopped — or there was never anything driving it — and
     /// there is a pending steer to go to.
-    Opened {
-        /// Whether a session was still running as the press landed.
-        ///
-        /// What the press found, which is the one thing it can say that the
-        /// record cannot: a session is a process, and the register is what
-        /// knows. The press leaves it exactly where it was — the stop is the
-        /// ordinary one, and what ends a seen-out session otherwise is the
-        /// submit's own launch taking the Worktree over.
-        ///
-        /// **Not what the form's Interrupt tick is drawn from.** The item may
-        /// sit open for hours and the session may have been seen out
-        /// meanwhile, so the tick follows the live Conversation's own `working`
-        /// — see `web/src/workbench/Steer.tsx`. This is the moment of the
-        /// press, which is a different fact and stops being true.
-        working: bool,
-
-        /// Whether the press found a pending steer already standing.
-        ///
-        /// `true` is the second press: nothing was written and nothing was
-        /// stopped a second time, and what the page does is go to the form
-        /// somebody is part-way through. A Conversation already carrying a
-        /// half-written steer is not one to start another beside.
-        already: bool,
-    },
+    Opened,
 
     NoSuchConversation,
 }

@@ -149,8 +149,8 @@ use crate::grillings::Digest;
 use crate::profiles::Unlisted;
 use crate::store::{self, Conversation, Lifecycle, Role, Settling};
 
-/// Press Steer: stop the drive, open the pending steer the form is written on,
-/// and say what was running when it stopped.
+/// Press Steer: stop the drive and open the pending steer the form is written
+/// on.
 ///
 /// The ordinary Stop, through the ordinary press — see [`crate::stops::stop`],
 /// which writes the stop where nothing is running and records the request to
@@ -166,16 +166,15 @@ use crate::store::{self, Conversation, Lifecycle, Role, Settling};
 ///
 /// **A second press writes nothing and stops nothing a second time.** A
 /// Conversation already carrying one is one somebody is part-way through
-/// steering, so the press says where that form is and the page goes to it —
-/// `already` is what says which of the two presses this was. The stop above it
-/// is made either way and is the same stop: a Conversation that stopped at the
-/// first press has nothing left for the second to stop.
+/// steering, so the press says where that form is and the page goes to it. The
+/// stop above it is made either way and is the same stop: a Conversation that
+/// stopped at the first press has nothing left for the second to stop.
 ///
-/// What comes back beside it is whether a session was still running as the
-/// press landed, which is the one thing the record cannot answer — a session is
-/// a process, and this is the register read. It is what the press found rather
-/// than what the form is drawn against: the item may sit open for hours, so the
-/// **Interrupt current task** tick follows the live Conversation instead.
+/// Which of the two presses it was is nothing the page asks — either way it
+/// goes to the item at the end of the Timeline — so it is said in the log and
+/// nowhere else. And what was running is not said at all: the item may sit open
+/// for hours, so the **Interrupt current task** tick follows the live
+/// Conversation rather than the moment of the press.
 pub(crate) async fn click(state: &AppState, conversation_id: i64) -> anyhow::Result<SteerOpened> {
     // The press and the read in one: the insert selects from `conversations`,
     // so what says there is no Conversation to steer is the row not landing
@@ -188,21 +187,14 @@ pub(crate) async fn click(state: &AppState, conversation_id: i64) -> anyhow::Res
 
     let stopped = crate::stops::stop(state, conversation_id).await?;
 
-    // Asked after the stop rather than before it. A Stop pressed with nothing
-    // running writes its stop where it stands and leaves nothing to see out, so
-    // the tick is offered against what is running *now* — which is what the
-    // submit a moment later will find.
-    let working = state.sessions.working().contains(&conversation_id);
-
     tracing::info!(
         conversation_id,
         ?stopped,
-        working,
         already,
         "the human is steering a Conversation, so the drive has stopped while they compose",
     );
 
-    Ok(SteerOpened::Opened { working, already })
+    Ok(SteerOpened::Opened)
 }
 
 /// Save the form onto the pending steer: what the pane posts as it is typed.

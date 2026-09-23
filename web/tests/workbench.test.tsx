@@ -1907,13 +1907,7 @@ describe("what a right-click on a card offers", () => {
           pending_steer: pending(),
         }),
       ),
-      whenever(
-        steering,
-        json({
-          Opened: { working: true, already: false },
-        } satisfies SteerOpened),
-        "POST",
-      ),
+      whenever(steering, json("Opened" satisfies SteerOpened), "POST"),
     );
     const { container, history } = mount(`/conversations/${OPEN.id}`);
 
@@ -10170,21 +10164,13 @@ const STEER_SUBMIT = `/api/ui/conversations/${GRILLING.id}/steer/submit`;
 /// about. The cases that *are* about the save say so for themselves.
 const KEPT = whenever(STEER_SAVE, json("Saved" satisfies SteerSaved), "POST");
 
-/// What the press answers with when it found a session still running, and when
-/// it found none — which is what the **Interrupt current task** tick is drawn
-/// against.
-const OVER_A_SESSION = json({
-  Opened: { working: true, already: false },
-} satisfies SteerOpened);
-const OVER_NOTHING = json({
-  Opened: { working: false, already: false },
-} satisfies SteerOpened);
-
-/// And what a second press answers with: the form was already there, and the
-/// page goes to it rather than making another.
-const ALREADY = json({
-  Opened: { working: false, already: true },
-} satisfies SteerOpened);
+/// What the press answers with, whatever it found: there is a pending steer to
+/// go to, and the page goes to it.
+///
+/// One word, and a second press is the same one. What a session is doing is the
+/// conversation's own to say — the **Interrupt current task** tick is drawn
+/// from `working` on it, the item being something that may sit open for hours.
+const PRESSED = json("Opened" satisfies SteerOpened);
 
 /// The pending steer the press writes, as the conversation carries it back: a
 /// form nobody has written in yet, which is what every press opens.
@@ -10244,7 +10230,7 @@ describe("steering a conversation", () => {
   it("stops the drive on the press, and opens the pending steer", async () => {
     const fetching = theGrillingSteering(
       { ready_to_stop: true, working: true },
-      whenever(STEERING, OVER_A_SESSION, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
     );
     const { container, history } = mount(`/conversations/${GRILLING.id}`);
 
@@ -10267,7 +10253,7 @@ describe("steering a conversation", () => {
   /// happened: it has not happened yet, so it is no event and has no place in
   /// the record. Pressing the card opens the same form the press landed on.
   it("draws the pending steer as the last item on the timeline", async () => {
-    theGrillingSteering({}, whenever(STEERING, OVER_NOTHING, "POST"));
+    theGrillingSteering({}, whenever(STEERING, PRESSED, "POST"));
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
     const item = await drawn(container, `.${timeline.pendingSteer}`);
@@ -10319,7 +10305,7 @@ describe("steering a conversation", () => {
   it("selects the pending steer a second press finds", async () => {
     const fetching = theGrillingSteering(
       {},
-      whenever(STEERING, ALREADY, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
     );
     const { container, history } = mount(`/conversations/${GRILLING.id}/backlog`);
 
@@ -10354,7 +10340,7 @@ describe("steering a conversation", () => {
   it("offers wrapping up only where the work is on a pull request", async () => {
     theGrillingSteering(
       { ready_to_stop: true, working: true },
-      whenever(STEERING, OVER_A_SESSION, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
     );
     const { container, unmount } = mount(`/conversations/${GRILLING.id}`);
 
@@ -10368,7 +10354,7 @@ describe("steering a conversation", () => {
 
     theGrillingSteering(
       { ready_to_stop: true, working: true, pinned: WRAPPING.pinned },
-      whenever(STEERING, OVER_A_SESSION, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
     );
     const wrapped = mount(`/conversations/${GRILLING.id}`);
 
@@ -10391,7 +10377,7 @@ describe("steering a conversation", () => {
   it("offers following up only from done or wrapping up on a pull request", async () => {
     theGrillingSteering(
       { ready_to_stop: true, working: true, pinned: WRAPPING.pinned },
-      whenever(STEERING, OVER_A_SESSION, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
     );
     const { container, unmount } = mount(`/conversations/${GRILLING.id}`);
 
@@ -10410,7 +10396,7 @@ describe("steering a conversation", () => {
         state: "Done",
         pinned: WRAPPING.pinned,
       },
-      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
     );
     const finished = mount(`/conversations/${GRILLING.id}`);
 
@@ -10437,7 +10423,7 @@ describe("steering a conversation", () => {
         ready_to_continue: true,
         pinned: WRAPPING.pinned,
       },
-      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
       whenever(
         STEER_SUBMIT,
         json("Steered" satisfies ConversationSteered),
@@ -10502,7 +10488,7 @@ describe("steering a conversation", () => {
   it("requires the instruction where nothing stands to be carried on", async () => {
     theGrillingSteering(
       { ready_to_stop: true, working: true },
-      whenever(STEERING, OVER_A_SESSION, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
     );
     const { container, unmount } = mount(`/conversations/${GRILLING.id}`);
 
@@ -10532,7 +10518,7 @@ describe("steering a conversation", () => {
     // field is still there, and the submit was never held shut.
     theGrillingSteering(
       { ready_to_stop: true, working: true, ready_to_continue: true },
-      whenever(STEERING, OVER_A_SESSION, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
     );
     const standing = mount(`/conversations/${GRILLING.id}`);
 
@@ -10573,7 +10559,7 @@ describe("steering a conversation", () => {
             : event,
         ),
       },
-      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
     );
     const { container, unmount } = mount(`/conversations/${GRILLING.id}`);
 
@@ -10602,7 +10588,7 @@ describe("steering a conversation", () => {
     // the field is still drawn, and the submit was never held shut.
     theGrillingSteering(
       { ready_to_stop: true, working: false },
-      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
     );
     const standing = mount(`/conversations/${GRILLING.id}`);
 
@@ -10626,7 +10612,7 @@ describe("steering a conversation", () => {
   it("draws the instruction only under implementing", async () => {
     const fetching = theGrillingSteering(
       { ready_to_stop: true, working: false, ready_to_continue: true },
-      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
       whenever(
         STEER_SUBMIT,
         json("Steered" satisfies ConversationSteered),
@@ -10678,7 +10664,7 @@ describe("steering a conversation", () => {
   it("prefills the pairing of the role steered into", async () => {
     const fetching = theGrillingSteering(
       { ready_to_stop: true, working: false, pinned: WRAPPING.pinned },
-      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
       whenever(
         STEER_SUBMIT,
         json("Steered" satisfies ConversationSteered),
@@ -10742,7 +10728,7 @@ describe("steering a conversation", () => {
   it("marks the harness on every row of its own picker", async () => {
     theGrillingSteering(
       { ready_to_stop: true, working: false, pinned: WRAPPING.pinned },
-      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
@@ -10762,7 +10748,7 @@ describe("steering a conversation", () => {
   it("sends the new round's brief and what it is primed with", async () => {
     const fetching = theGrillingSteering(
       { ready_to_stop: true, working: false },
-      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
       whenever(
         STEER_SUBMIT,
         json("Steered" satisfies ConversationSteered),
@@ -10802,7 +10788,7 @@ describe("steering a conversation", () => {
   it("draws the brief only under grilling", async () => {
     theGrillingSteering(
       { ready_to_stop: true, working: false, pinned: WRAPPING.pinned },
-      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
@@ -10820,7 +10806,7 @@ describe("steering a conversation", () => {
   it("offers the interrupt only where a session is running", async () => {
     theGrillingSteering(
       { ready_to_stop: true, working: true },
-      whenever(STEERING, OVER_A_SESSION, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
     );
     const { container, unmount } = mount(`/conversations/${GRILLING.id}`);
 
@@ -10830,7 +10816,7 @@ describe("steering a conversation", () => {
 
     theGrillingSteering(
       { ready_to_stop: true, working: false },
-      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
     );
     const quiet = mount(`/conversations/${GRILLING.id}`);
 
@@ -10849,7 +10835,7 @@ describe("steering a conversation", () => {
     // The press found a session running; nothing is running now.
     theGrillingSteering(
       { ready_to_stop: true, working: false },
-      whenever(STEERING, OVER_A_SESSION, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
     );
     const quiet = mount(`/conversations/${GRILLING.id}`);
 
@@ -10861,7 +10847,7 @@ describe("steering a conversation", () => {
     // running by the time the form is read.
     theGrillingSteering(
       { ready_to_stop: true, working: true },
-      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
@@ -10885,7 +10871,7 @@ describe("steering a conversation", () => {
     } as typeof Element.prototype.scrollIntoView;
 
     try {
-      theGrillingSteering({}, whenever(STEERING, OVER_NOTHING, "POST"));
+      theGrillingSteering({}, whenever(STEERING, PRESSED, "POST"));
       const { container } = mount(`/conversations/${GRILLING.id}/backlog`);
 
       const item = await drawn(container, `.${timeline.pendingSteer}`);
@@ -10916,7 +10902,7 @@ describe("steering a conversation", () => {
           pending_steer: standing ? PENDING : null,
         })(),
       ),
-      whenever(STEERING, OVER_A_SESSION, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
       KEPT,
       whenever(
         STEER_SUBMIT,
@@ -10986,7 +10972,7 @@ describe("steering a conversation", () => {
           pending_steer: standing ? PENDING : null,
         })(),
       ),
-      whenever(STEERING, OVER_A_SESSION, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
       KEPT,
       whenever(
         STEER_CANCEL,
@@ -11025,7 +11011,7 @@ describe("steering a conversation", () => {
   it("says in words when the move was refused", async () => {
     theGrillingSteering(
       { ready_to_stop: true, working: false },
-      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
       whenever(
         STEER_SUBMIT,
         json("NoSuchConversation" satisfies ConversationSteered),
@@ -11137,7 +11123,7 @@ describe("steering a conversation", () => {
   it("saves a press at once", async () => {
     const fetching = theGrillingSteering(
       { ready_to_continue: true },
-      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
@@ -11239,7 +11225,7 @@ describe("steering a conversation", () => {
         ready_to_continue: true,
         pinned: WRAPPING.pinned,
       },
-      whenever(STEERING, OVER_A_SESSION, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
       whenever(
         `/api/ui/repos/${alongside.id}/branches`,
         json(COMPANION_BRANCHES),
@@ -11343,7 +11329,7 @@ describe("steering a conversation", () => {
           },
         ],
       },
-      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 
@@ -11431,7 +11417,7 @@ describe("steering a conversation", () => {
   it("stops saving and says so when there is nothing left to save into", async () => {
     const fetching = theGrillingSteering(
       { ready_to_continue: true },
-      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
       whenever(
         STEER_SAVE,
         json("NoPendingSteer" satisfies SteerSaved),
@@ -11472,7 +11458,7 @@ describe("steering a conversation", () => {
   it("submits what is in the form, not what the row was last saved with", async () => {
     const fetching = theGrillingSteering(
       { ready_to_continue: true },
-      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
       whenever(
         STEER_SUBMIT,
         json("Steered" satisfies ConversationSteered),
@@ -11510,7 +11496,7 @@ describe("steering a conversation", () => {
   it("offers the repos to work alongside on every target work goes on in", async () => {
     theGrillingSteering(
       { ready_to_stop: true, working: false, ready_to_continue: true },
-      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
       whenever(`/api/ui/repos/${REPOS[0]!.id}/branches`, json(COMPANION_BRANCHES)),
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
@@ -11546,7 +11532,7 @@ describe("steering a conversation", () => {
     const alongside = REPOS[0]!;
     const fetching = theGrillingSteering(
       { ready_to_stop: true, working: false, ready_to_continue: true },
-      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
       whenever(`/api/ui/repos/${alongside.id}/branches`, json(COMPANION_BRANCHES)),
       whenever(
         STEER_SUBMIT,
@@ -11638,7 +11624,7 @@ describe("steering a conversation", () => {
         ready_to_continue: true,
         companions: [reading],
       },
-      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
       whenever(
         STEER_SUBMIT,
         json("Steered" satisfies ConversationSteered),
@@ -11702,7 +11688,7 @@ describe("steering a conversation", () => {
           },
         ],
       },
-      whenever(STEERING, OVER_NOTHING, "POST"),
+      whenever(STEERING, PRESSED, "POST"),
     );
     const { container } = mount(`/conversations/${GRILLING.id}`);
 

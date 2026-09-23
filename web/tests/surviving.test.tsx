@@ -352,7 +352,7 @@ describe("what a Nudge leaves standing", () => {
       ),
       whenever(
         `/api/ui/conversations/${BUILDING.id}/steer`,
-        json({ Opened: { working: false, already: false } } satisfies SteerOpened),
+        json("Opened" satisfies SteerOpened),
         "POST",
       ),
     );
