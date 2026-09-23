@@ -57,6 +57,7 @@ import type {
   Submitted,
   TakenUp,
   TaskListEvent,
+  TerminalClosed,
   TerminalOpened,
   TerminalsView,
   TimelineEvent,
@@ -265,6 +266,7 @@ import {
   showing,
 } from "./pickers";
 import {
+  type Answer,
   askedFor,
   hangs,
   json,
@@ -16759,6 +16761,17 @@ function codeIcon(container: ParentNode): HTMLButtonElement | null {
   );
 }
 
+/// The terminals a conversation is holding, as the list endpoint answers them:
+/// the numbers, each with nothing running in it.
+///
+/// Idle is the shape nearly every test here wants — what a busy one does is its
+/// own describe below — and the flag is the server's own reading, so a test
+/// that had to write one out per terminal would be writing the server's
+/// judgement rather than the pane's behaviour.
+function idle(live: number[]): TerminalsView {
+  return { live: live.map((number) => ({ number, busy: false })) };
+}
+
 /// The workbench with a conversation holding one live terminal, the socket
 /// stubbed, and whatever else the test wants answered.
 function withTerminals(
@@ -16770,7 +16783,7 @@ function withTerminals(
 
   return theGrillingStanding(
     {},
-    whenever(TERMINALS_OF_IT, json({ live } satisfies TerminalsView)),
+    whenever(TERMINALS_OF_IT, json(idle(live))),
     ...answers,
   );
 }
@@ -16973,7 +16986,7 @@ describe("a conversation's terminal in the code pane", () => {
       [],
       // Answered afresh on every ask rather than fixed at mount, which is the
       // whole of what this is about.
-      whenever(TERMINALS_OF_IT, () => json({ live } satisfies TerminalsView)()),
+      whenever(TERMINALS_OF_IT, () => json(idle(live))()),
       whenever(
         TERMINALS_OF_IT,
         json({ Opened: { number: 1 } } satisfies TerminalOpened),
@@ -17758,24 +17771,59 @@ describe("the code pane's tabs", () => {
   /// Closing a tab, which is the × at its end: the one thing a tab offers that
   /// pressing it does not already do, and what VS Code's own bar has there.
   describe("and closing one", () => {
-    /// What the server answers a close with: nothing at all, which is what a
-    /// terminal ending has to say for itself.
+    /// What the server answers a close with, for a shell nobody is working in:
+    /// the terminal has ended.
     function closes(number: number) {
       return whenever(
         `${TERMINALS_OF_IT}/${number}`,
-        () => Promise.resolve(new Response(null, { status: 204 })),
+        json("Closed" satisfies TerminalClosed),
         "DELETE",
       );
     }
 
-    /// How many closes went out for one terminal.
+    /// And for one somebody is: the press is answered *busy* and nothing
+    /// happens, until it comes back saying the human was asked.
+    ///
+    /// Two answers under two keys, which is the shape of the thing: the second
+    /// press is a different request — the first with `?asked=true` on it — and
+    /// a stand-in that answered both the same way would be one where the card
+    /// changed nothing.
+    function busy(number: number): Answer[] {
+      return [
+        whenever(
+          `${TERMINALS_OF_IT}/${number}`,
+          json("Busy" satisfies TerminalClosed),
+          "DELETE",
+        ),
+        whenever(
+          `${TERMINALS_OF_IT}/${number}?asked=true`,
+          json("Closed" satisfies TerminalClosed),
+          "DELETE",
+        ),
+      ];
+    }
+
+    /// How many closes went out for one terminal, asked or not.
     function closed(
       fetching: ReturnType<typeof serving>,
       number: number,
     ): number {
       return fetching.mock.calls.filter(
         ([path, init]) =>
-          String(path) === `${TERMINALS_OF_IT}/${number}` &&
+          String(path).startsWith(`${TERMINALS_OF_IT}/${number}`) &&
+          init?.method === "DELETE",
+      ).length;
+    }
+
+    /// And how many of them said the human had been asked, which is what the
+    /// card's own press puts on the wire.
+    function confirmed(
+      fetching: ReturnType<typeof serving>,
+      number: number,
+    ): number {
+      return fetching.mock.calls.filter(
+        ([path, init]) =>
+          String(path) === `${TERMINALS_OF_IT}/${number}?asked=true` &&
           init?.method === "DELETE",
       ).length;
     }
@@ -17911,6 +17959,134 @@ describe("the code pane's tabs", () => {
       await waitFor(() => expect(tabs(container)).toHaveLength(0));
       expect(nothing(container)?.textContent).toContain(NOTHING_OPEN);
       expect(asked(fetching)).toBe(1);
+    });
+
+    /// The card the server's *busy* puts up, or nothing where nothing is being
+    /// asked about. On the body rather than in the container, a `dialog` being
+    /// drawn in the top layer.
+    function card(): HTMLDialogElement | null {
+      return document.body.querySelector<HTMLDialogElement>(
+        `dialog.${codePane.confirming}`,
+      );
+    }
+
+    /// The same, waited for: the card is a request away rather than a signal
+    /// away, the server being the one that says a shell is busy.
+    function carded(): Promise<HTMLDialogElement> {
+      return waitFor(() => {
+        const up = card();
+        if (!up) throw new Error("nothing is being asked about");
+        return up;
+      });
+    }
+
+    /// The press in it that makes the close, and the one that leaves the shell
+    /// alone — told apart the way every confirm pair in the app is, by which of
+    /// them is the secondary.
+    async function confirms(): Promise<HTMLButtonElement> {
+      return (await carded()).querySelector<HTMLButtonElement>(
+        `.${codePane.confirmingOut} button:not(.${codePane.secondary})`,
+      )!;
+    }
+
+    async function keeps(): Promise<HTMLButtonElement> {
+      return (await carded()).querySelector<HTMLButtonElement>(
+        `.${codePane.confirmingOut} button.${codePane.secondary}`,
+      )!;
+    }
+
+    /// A × on a tab whose shell has something running in it asks first, and
+    /// nothing has happened when it does: the press went out, the server
+    /// answered *busy*, and the shell is still running behind the card.
+    ///
+    /// Asked of the server at the press rather than read off the list the pane
+    /// loaded with, which is the whole point of the second request: a build
+    /// started after the pane opened is a build.
+    it("asks before it ends a shell somebody is working in", async () => {
+      const fetching = withTerminals([1], ...busy(1));
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+      const first = await attachedTo(1);
+      await waitFor(() => expect(tabs(container)).toHaveLength(1));
+
+      fireEvent.click(crosses(container)[0]!);
+
+      const up = await carded();
+
+      // Which shell it is about, so that a pane with several says which of them
+      // is on its way out.
+      expect(up.textContent).toContain("Terminal 1");
+
+      // One press out, and it was not the one that ends anything: nothing has
+      // happened yet, and the tab is where it was.
+      expect(closed(fetching, 1)).toBe(1);
+      expect(confirmed(fetching, 1)).toBe(0);
+      expect(tabs(container)).toHaveLength(1);
+      expect(first.closed).toBe(false);
+    });
+
+    /// And the way out of it leaves the shell exactly as it was, which is what
+    /// makes the card worth drawing.
+    it("leaves the shell running where the card is answered the other way", async () => {
+      const fetching = withTerminals([1], ...busy(1));
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+      await attachedTo(1);
+      await waitFor(() => expect(tabs(container)).toHaveLength(1));
+
+      fireEvent.click(crosses(container)[0]!);
+      fireEvent.click(await keeps());
+
+      await waitFor(() => expect(card()).toBeNull());
+
+      expect(confirmed(fetching, 1)).toBe(0);
+      expect(tabs(container)).toHaveLength(1);
+    });
+
+    /// And answering it the other way makes the press, saying it was asked —
+    /// after which the shell ends whatever is running in it, and the tab goes
+    /// the way every ended shell's tab goes.
+    it("ends the shell once the card is answered", async () => {
+      const fetching = withTerminals([1], ...busy(1));
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+      const first = await attachedTo(1);
+      await waitFor(() => expect(tabs(container)).toHaveLength(1));
+
+      fireEvent.click(crosses(container)[0]!);
+      fireEvent.click(await confirms());
+
+      await waitFor(() => expect(confirmed(fetching, 1)).toBe(1));
+      await waitFor(() => expect(card()).toBeNull());
+
+      // Still there until its socket closes, which is the one thing a tab is
+      // ever told about a terminal ending.
+      expect(tabs(container)).toHaveLength(1);
+
+      first.ends();
+
+      await waitFor(() => expect(tabs(container)).toHaveLength(0));
+      expect(nothing(container)?.textContent).toContain(NOTHING_OPEN);
+    });
+
+    /// And an idle shell asks nothing at all: the server answers the first
+    /// press with the terminal ended, and there is no card to answer.
+    it("asks nothing where nobody is working in it", async () => {
+      const fetching = withTerminals([1], closes(1));
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+      const first = await attachedTo(1);
+      await waitFor(() => expect(tabs(container)).toHaveLength(1));
+
+      fireEvent.click(crosses(container)[0]!);
+
+      await waitFor(() => expect(closed(fetching, 1)).toBe(1));
+
+      first.ends();
+
+      await waitFor(() => expect(tabs(container)).toHaveLength(0));
+      expect(card()).toBeNull();
+      expect(confirmed(fetching, 1)).toBe(0);
     });
   });
 

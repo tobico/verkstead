@@ -457,6 +457,25 @@ impl Terminal {
             exited,
         })
     }
+
+    /// Which process group is in the foreground of this terminal — which on
+    /// this platform is nothing anyone can say.
+    ///
+    /// A pseudoconsole has no foreground process group to read: there are no
+    /// process groups of the Unix kind here, the console is attached to by
+    /// whatever the session started rather than arbitrated between them, and
+    /// nothing in the API says which of them a keystroke is going to. So the
+    /// answer is *I cannot tell*, and the one caller reads that as busy — see
+    /// [`crate::terminals::busy`], where a platform that cannot tell confirms
+    /// every close rather than ending a shell somebody was working in.
+    ///
+    /// A method taking `&self` with nothing to read off it, because the seam is
+    /// a method on both arms — see [`crate::terminal`], where the two arms and
+    /// what they agree on are.
+    pub fn foreground(&self) -> Option<u32> {
+        None
+    }
+
     /// Make the window `columns` by `rows`, and tell whatever is running on it.
     ///
     /// The console host's own notification rather than anything of Verkstead's:

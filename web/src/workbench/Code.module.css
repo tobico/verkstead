@@ -163,3 +163,57 @@
   padding: 3rem 0;
   text-align: center;
 }
+
+/* And the card a × on a busy tab puts up before it ends anything: the question,
+   the sentence saying what is running in there, and the two ways out of it.
+
+   The Actions menu's confirm card again, and deliberately the same shape —
+   `Actions.module.css` says the whole of why it is built this way, and this is
+   the same question asked about a shell instead of a run. Drawn over the page
+   through the same `Modal`, so what is here is the four things inside the card
+   it draws. */
+.confirming .confirmingTitle {
+  margin-top: 0;
+  font-weight: 600;
+}
+
+.confirming .confirmingWhy {
+  margin: 0.75rem 0 0;
+  color: var(--ink-soft);
+}
+
+.confirming .confirmingOut {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+/* The shape both of them take, which is this row's own — said over
+   `.secondary`, which is the paint rather than the shape. */
+.confirming .confirmingOut button {
+  flex: 1 1 9rem;
+  padding: 0.7rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+/* And the press that does the thing, filled in the accent. The way back beside
+   it is a secondary press like every other in the app — `.secondary` in
+   `styles/base.css` paints it — and it is stood out of the way with `:where`,
+   which weighs nothing: a bare `:not` would carry its class into this
+   selector's weight. */
+.confirming .confirmingOut button:not(:where(.secondary)) {
+  color: var(--paper);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+@media (hover: hover) {
+  .confirming .confirmingOut button:not(:where(.secondary)):hover {
+    background: var(--accent-deep);
+    border-color: var(--accent-deep);
+  }
+}

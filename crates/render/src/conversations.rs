@@ -2177,16 +2177,38 @@ pub struct Size {
 /// The terminals a Conversation has running, as the pane that draws them reads
 /// them back.
 ///
-/// The numbers alone. A terminal is a shell in a Sandbox and nothing else — no
-/// record, no Event, nothing in a Share (ADR 0013) — so there is nothing about
-/// one to send but which of the Conversation's it is: what is *on* each of them
-/// arrives down a socket of its own.
-///
 /// Oldest first, which is the order they were opened in.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
 pub struct TerminalsView {
-    pub live: Vec<i64>,
+    pub live: Vec<TerminalView>,
+}
+
+/// One of them: which of the Conversation's it is, and whether somebody is
+/// working in it.
+///
+/// Nearly nothing, and that is the shape of the thing. A terminal is a shell in
+/// a Sandbox and nothing else — no record, no Event, nothing in a Share
+/// (ADR 0013) — so what is *on* one arrives down a socket of its own, and what
+/// is here is the number the socket is found by and the one judgement only the
+/// server can make about it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct TerminalView {
+    /// The number this server issued it, which is what its socket and its close
+    /// are addressed by and what a tab comes back to after a reload.
+    pub number: i64,
+
+    /// Whether something other than the shell is in the foreground of it: a
+    /// build, an editor, anything somebody would rather not have killed under
+    /// them (ADR 0019, *Tabs and groups*).
+    ///
+    /// The server's own judgement, read off the pseudo-terminal it holds rather
+    /// than asked of the shell — and read by *name*, the shell's own pid never
+    /// reaching this side. A platform that cannot tell says busy, so that the
+    /// one it cannot tell on confirms every close rather than ending a shell
+    /// somebody was in.
+    pub busy: bool,
 }
 
 /// And what became of asking for another one.
@@ -2221,6 +2243,31 @@ pub enum TerminalOpened {
     /// the shell inside it would not run. The reason is in the server's log —
     /// this is the one refusal with nothing for the human to correct.
     Refused,
+}
+
+/// And what became of closing one.
+///
+/// Two answers rather than a status, because one of them is a question put
+/// back to the human: a × on a tab whose shell has something running in it is
+/// answered with *it is busy* and nothing done, and the press that comes back
+/// after they have said yes carries the word that says so (ADR 0019, *Tabs and
+/// groups*).
+///
+/// The reading is the server's own and is taken at the moment of the press,
+/// which is what the second half of a two-part close buys: the list a pane
+/// loaded with says what was running when it loaded, and a shell somebody
+/// started a build in since is busy all the same.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum TerminalClosed {
+    /// The shell has been ended and the terminal is off the register — which is
+    /// also the answer to closing one that had already ended, a second press
+    /// being a close that has already happened rather than news.
+    Closed,
+
+    /// Something other than the shell is in the foreground of it, so nothing
+    /// was done. Ask, and press again saying it was asked.
+    Busy,
 }
 
 /// A move as an Event. Nothing to render — see [`MovedEvent`] — but built here

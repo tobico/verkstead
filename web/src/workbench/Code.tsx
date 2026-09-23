@@ -77,6 +77,18 @@
 //! that shell, and the tab then goes the way every ended shell's tab goes: its
 //! socket closes, and the tab closes with it.
 //!
+//! **And the confirm is the server's answer rather than this side's reading.**
+//! Whether somebody is working in a shell is something only the server can see
+//! — it holds the pseudo-terminal, and what is in front of one is read off that
+//! — so the press goes out, and a shell with something other than itself in the
+//! foreground comes back *busy* with nothing done. That is what puts the card
+//! up; the press inside it goes out again saying the human was asked, and ends
+//! the shell whatever is running. Which is why the list's own flag is not what
+//! is consulted: it says what was running when the pane loaded, and a build
+//! started since is a build. Where the server cannot tell — a pseudoconsole on
+//! Windows has no foreground process group — it says busy, so every close there
+//! asks.
+//!
 //! **And the pane opens empty.** It opens no shell of its own accord: the live
 //! ones come back as tabs, and where there are none it draws a hint and a **New
 //! terminal** button where a tab's content goes. The Terminal pane never stood
@@ -113,12 +125,14 @@ import {
   createEffect,
   createMemo,
   createSignal,
+  createUniqueId,
   onCleanup,
   type JSX,
 } from "solid-js";
 
 import { Icon } from "../Icon";
 import { IconButton } from "../IconButton";
+import { Modal } from "../Modal";
 import { PaneSticky } from "../Panes";
 import { QuietButton } from "../QuietButton";
 import {
@@ -270,6 +284,14 @@ export function Code(props: {
   /// Which tab the human turned to, where they have turned to one.
   const [chosen, setChosen] = createSignal<number | undefined>();
 
+  /// And which one they are being asked about, where a close was refused for a
+  /// shell somebody is working in.
+  ///
+  /// The tab's number rather than a flag, because the card names the tab: a
+  /// pane with several shells in it is a card that has to say which of them is
+  /// about to end. Nothing while there is nothing to ask.
+  const [asking, setAsking] = createSignal<number | undefined>();
+
   /// Whether the list has been read, which is what says the pane knows how many
   /// terminals there are. Before it, a pane with no tabs is one that has not
   /// looked yet rather than a Conversation with no shells — so the hint waits on
@@ -415,6 +437,16 @@ export function Code(props: {
   /// place the five seconds would read a tab closed straight after it opened as
   /// a shell that could not start.
   ///
+  /// **Unless somebody is working in it**, which the server is the one to say:
+  /// a shell whose foreground is something other than itself answers the press
+  /// with *busy* and goes on running, and the card below is what asks. The
+  /// press that comes back from the card says it was asked, and ends the shell
+  /// whatever is in front of it (ADR 0019).
+  ///
+  /// Asked of the server at the press rather than read off the list the pane
+  /// loaded with, which is why this is a request rather than a look at what is
+  /// already here: a build started since the pane opened is a build.
+  ///
   /// A tab that is only standing there to say why has no shell to end and no
   /// socket to hear it on, so it simply goes. Nothing is drawn about a request
   /// that failed: the shell is the server's, and a tab still there is what says
@@ -432,8 +464,24 @@ export function Code(props: {
 
     askedAt.delete(tab);
 
-    void closeTerminal(props.conversation.id, tab);
+    void end(tab, false);
   };
+
+  /// The close itself, made once with nobody asked and again with the answer.
+  ///
+  /// A `Busy` back is the one thing to draw: the shell is still running, and
+  /// the card goes up over the tab it was pressed on. Everything else is a
+  /// terminal that has ended, and the tab goes when its socket closes like any
+  /// other.
+  const end = (tab: number, asked: boolean): Promise<void> =>
+    closeTerminal(props.conversation.id, tab, asked)
+      .then((outcome) => {
+        setAsking(outcome === "Busy" ? tab : undefined);
+      })
+      // A request that never landed leaves the tab where it is, for the reason
+      // nothing is drawn about one: the shell is the server's, and a tab still
+      // there is what says it is still running.
+      .catch(() => setAsking(undefined));
 
   /// The tabs the pane loads with: one for each terminal the server is already
   /// holding.
@@ -442,6 +490,10 @@ export function Code(props: {
   /// moment the pane opened, and everything that happens to it after that
   /// happens here — a second seeding would put back a tab whose shell has since
   /// ended.
+  ///
+  /// The numbers alone out of what the list says: the flag beside each is what
+  /// was running when the pane loaded, and what a close acts on is the reading
+  /// the server takes at the press.
   let seeded: number | undefined;
 
   createEffect(() => {
@@ -452,7 +504,7 @@ export function Code(props: {
     }
 
     seeded = props.conversation.id;
-    setTabs(live);
+    setTabs(live.map((terminal) => terminal.number));
     setRead(true);
   });
 
@@ -577,6 +629,83 @@ export function Code(props: {
           </div>
         </Match>
       </Switch>
+
+      {/* And the card a × on a busy tab puts up, which the press that made it
+          is waiting on. Outside the Switch above because it is drawn over the
+          page rather than in the pane: what is behind it is whichever of those
+          arms the pane is in. */}
+      <Busy
+        asked={asking() === undefined ? null : called(asking()!)}
+        keep={() => setAsking(undefined)}
+        close={() => {
+          const tab = asking();
+
+          setAsking(undefined);
+
+          if (tab !== undefined) {
+            void end(tab, true);
+          }
+        }}
+      />
     </>
+  );
+}
+
+/// What a × on a tab whose shell has something running in it is answered with,
+/// before anything at all has happened: which shell it is, what is true of it,
+/// and the two ways out.
+///
+/// The Actions menu's own confirm card, asked about a shell instead of a run —
+/// the same modal, the same pair of presses, the same shape — because it is the
+/// same question: a press that would end something somebody is in the middle
+/// of, put back to them before it is made (ADR 0019, *Tabs and groups*).
+///
+/// The tab's name in the confirming press for the reason the menu's carries the
+/// pressed row's: a pane with four shells in it is a card that has to say which
+/// of them this was.
+function Busy(props: {
+  /// The tab's name, or `null` while nothing is being asked about.
+  asked: string | null;
+  /// The way back, which Escape and a press on the backdrop come to as well:
+  /// every way out of this card but the one button leaves the shell running.
+  keep: () => void;
+  /// And the press it asked about, made — which ends the shell whatever is in
+  /// front of it.
+  close: () => void;
+}): JSX.Element {
+  // Generated rather than written, the way every other card in the app names
+  // itself: more than one pane stands on a page at once.
+  const id = createUniqueId();
+
+  return (
+    <Modal
+      class={styles.confirming!}
+      open={props.asked !== null}
+      close={props.keep}
+      labelledBy={id}
+    >
+      <p id={id} class={styles.confirmingTitle}>
+        Close this terminal while something is running?
+      </p>
+      <p class={styles.confirmingWhy}>
+        Something other than the shell is running in {props.asked}. Closing the
+        tab ends the shell, and whatever it is running goes with it.
+      </p>
+      <div class={styles.confirmingOut}>
+        {/* Both classes, as every other confirm pair in the app carries them:
+            the global one is the paint, and the module's is what the row above
+            stands the filled press out of. */}
+        <button
+          type="button"
+          class={`${styles.secondary!} secondary`}
+          onClick={() => props.keep()}
+        >
+          Keep it running
+        </button>
+        <button type="button" onClick={() => props.close()}>
+          Close {props.asked}
+        </button>
+      </div>
+    </Modal>
   );
 }

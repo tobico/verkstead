@@ -58,8 +58,8 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tower::ServiceExt;
 use verkstead_render::{
     AgentOutputEvent, BriefSaved, Capture, ConversationStopped, ConversationView, GrillingStarted,
-    ProfileSaved, Registered, Shown, Size, Started, TerminalOpened, TerminalsView, TimelineEvent,
-    Watching,
+    ProfileSaved, Registered, Shown, Size, Started, TerminalClosed, TerminalOpened, TerminalView,
+    TerminalsView, TimelineEvent, Watching,
 };
 use verkstead_server::attachments::Attachments;
 use verkstead_server::build_cache::BuildCache;
@@ -1221,6 +1221,23 @@ async fn post<T: DeserializeOwned>(app: &Router, path: &str, body: &serde_json::
     read(&body)
 }
 
+/// And the one thing in the API that is asked for by taking it away: closing a
+/// Conversation's terminal, which answers with what became of the close.
+async fn delete<T: DeserializeOwned>(app: &Router, path: &str) -> T {
+    let (status, body) = fetch(
+        app,
+        Request::builder()
+            .method("DELETE")
+            .uri(path)
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK, "DELETE {path} failed: {body}");
+    read(&body)
+}
+
 async fn fetch(app: &Router, request: Request<Body>) -> (StatusCode, String) {
     let response = app.clone().oneshot(request).await.unwrap();
     let status = response.status();
@@ -1883,14 +1900,17 @@ async fn a_terminal_runs_powershell_in_the_conversations_worktree() {
     let number = fixture.terminal().await;
 
     // And it is on the list of live ones, which is what the pane asks for when
-    // it loads and what a reload comes back to.
+    // it loads and what a reload comes back to — reading busy, because this
+    // platform cannot tell: a pseudoconsole has no foreground process group,
+    // and *cannot tell* is read as busy so that a close asks before it ends a
+    // shell somebody may be working in (ADR 0019, *Tabs and groups*).
     let live: TerminalsView = get(
         &fixture.app,
         &format!("/api/ui/conversations/{}/terminals", fixture.id),
     )
     .await;
 
-    assert_eq!(live.live, vec![number]);
+    assert_eq!(live.live, vec![TerminalView { number, busy: true }]);
 
     let mut watcher = Watcher::terminal(at, fixture.id, number).await;
 
@@ -1946,6 +1966,53 @@ async fn a_terminal_runs_powershell_in_the_conversations_worktree() {
         .await;
 
     until_there(&worktree.join("stood-here.txt")).await;
+
+    // And so every close here asks first: the flag reads busy because this
+    // platform cannot tell, and a close that has not been asked about is
+    // refused with the shell left exactly as it was.
+    assert_eq!(
+        delete::<TerminalClosed>(
+            &fixture.app,
+            &format!("/api/ui/conversations/{}/terminals/{number}", fixture.id),
+        )
+        .await,
+        TerminalClosed::Busy,
+    );
+
+    assert_eq!(
+        terminals_of(&fixture).await,
+        vec![TerminalView { number, busy: true }],
+        "a close that was refused should have left the terminal on the register",
+    );
+
+    // Until the press comes back from the card, which ends it.
+    assert_eq!(
+        delete::<TerminalClosed>(
+            &fixture.app,
+            &format!(
+                "/api/ui/conversations/{}/terminals/{number}?asked=true",
+                fixture.id
+            ),
+        )
+        .await,
+        TerminalClosed::Closed,
+    );
+
+    assert!(
+        terminals_of(&fixture).await.is_empty(),
+        "and the press that was asked about should have ended it",
+    );
+}
+
+/// The terminals a Conversation is holding, as the pane reads them back.
+async fn terminals_of(fixture: &Grilling) -> Vec<TerminalView> {
+    let view: TerminalsView = get(
+        &fixture.app,
+        &format!("/api/ui/conversations/{}/terminals", fixture.id),
+    )
+    .await;
+
+    view.live
 }
 
 /// A compile server comes up on this platform, and it comes up **as the session

@@ -77,6 +77,7 @@ import type {
   Subscribed,
   Subscription,
   TakenUp,
+  TerminalClosed,
   TerminalOpened,
   TerminalsView,
   TranscriptView,
@@ -503,9 +504,10 @@ function socketAt(path: string): string {
 /// sandbox, in the same machinery a session's Screen is watched through
 /// (ADR 0013).
 ///
-/// The numbers alone, which is the whole of what there is to say about one from
-/// out here — a terminal is memory on the server rather than a record, so what
-/// is *on* each of them arrives down the socket below.
+/// A number and whether anything is running in it, which is the whole of what
+/// there is to say about one from out here — a terminal is memory on the server
+/// rather than a record, so what is *on* each of them arrives down the socket
+/// below.
 export function listTerminals(id: number): Promise<TerminalsView> {
   return get<TerminalsView>(`/api/ui/conversations/${id}/terminals`);
 }
@@ -526,20 +528,33 @@ export function terminalSocket(id: number, number: number): string {
   return socketAt(`/api/ui/conversations/${id}/terminals/${number}/attach`);
 }
 
-/// And closing one, which is the **Close** row on its tab's menu: the shell is
-/// hung up and then killed where it lingers, and the terminal comes off the
-/// server's register.
+/// And closing one, which is the × at the end of its tab: the shell is hung up
+/// and then killed where it lingers, and the terminal comes off the server's
+/// register.
 ///
 /// Taking the thing away rather than posting about it — the one delete in the
 /// app, because a terminal is something the server is holding rather than a
-/// record it keeps. Nothing to read back: what the tab hears is its own socket
-/// closing, which is what it hears from a shell that exited by itself.
-export async function closeTerminal(id: number, number: number): Promise<void> {
-  await refused(
-    await fetch(`/api/ui/conversations/${id}/terminals/${number}`, {
-      method: "DELETE",
-      headers: { accept: "application/json" },
-    }),
+/// record it keeps.
+///
+/// **Two-part where somebody is working in it.** The server answers `Busy` and
+/// leaves the shell running when its foreground is something other than the
+/// shell itself, which is what the pane asks the human about; `asked` is that
+/// answer coming back, and the close it carries is made whatever is running
+/// (ADR 0019). Read rather than ignored for that reason: the answer is the
+/// question.
+export async function closeTerminal(
+  id: number,
+  number: number,
+  asked = false,
+): Promise<TerminalClosed> {
+  return taken<TerminalClosed>(
+    await fetch(
+      `/api/ui/conversations/${id}/terminals/${number}${asked ? "?asked=true" : ""}`,
+      {
+        method: "DELETE",
+        headers: { accept: "application/json" },
+      },
+    ),
   );
 }
 

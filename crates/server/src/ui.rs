@@ -2804,12 +2804,13 @@ async fn commit_pane(
 }
 
 /// `GET /api/ui/conversations/{id}/terminals` — which of the Conversation's
-/// terminals are live.
+/// terminals are live, and whether anybody is working in each.
 ///
-/// Their numbers and nothing else: a terminal is a shell in a Sandbox rather
-/// than a record, so there is nothing about one to hand over but which of the
-/// Conversation's it is — see [`crate::terminals`]. What is *on* each of them
-/// arrives down its own socket.
+/// A number and a flag: a terminal is a shell in a Sandbox rather than a
+/// record, so there is nothing about one to hand over but which of the
+/// Conversation's it is and the one judgement only this side can make about it
+/// — see [`crate::terminals`], and [`crate::terminals::busy`] for the flag.
+/// What is *on* each of them arrives down its own socket.
 ///
 /// A Conversation this server has never opened one for has none, which is the
 /// same empty answer as one whose shells have all exited: the register is memory
