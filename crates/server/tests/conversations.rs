@@ -6216,7 +6216,7 @@ async fn adopting_a_roadmap_starts_a_draft_naming_it_and_its_next_stage() {
     assert_eq!(stage.title, "Implementation");
     assert_eq!(stage.brief_path, "docs/roadmaps/mvp/03-implementation.md");
     assert_eq!(
-        stage.branch, "mvp/03-implementation",
+        stage.branch, "roadmaps/mvp/03-implementation",
         "the stage's own name, which the press names the branch by",
     );
 
@@ -7390,7 +7390,7 @@ async fn adopting_starts_the_stage_on_its_own_branch_off_the_base_commit() {
 
     // The stage's own name, rather than the one the server invented for the
     // row: its brief under the roadmap it belongs to.
-    assert_eq!(view.branch, "mvp/03-implementation");
+    assert_eq!(view.branch, "roadmaps/mvp/03-implementation");
     assert_eq!(view.state, Lifecycle::Implementing);
     assert_eq!(
         moves(&view),
@@ -7405,7 +7405,11 @@ async fn adopting_starts_the_stage_on_its_own_branch_off_the_base_commit() {
     // The branch is in the Repo's own git directory, standing on that commit
     // and nothing else — adoption never stacks.
     assert_eq!(
-        git(&repo, &["rev-parse", "refs/heads/mvp/03-implementation"]).trim(),
+        git(
+            &repo,
+            &["rev-parse", "refs/heads/roadmaps/mvp/03-implementation"]
+        )
+        .trim(),
         tip,
     );
 
@@ -7459,7 +7463,7 @@ async fn adopting_checks_out_the_companions_it_was_configured_with() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.branch, "mvp/03-implementation");
+    assert_eq!(view.branch, "roadmaps/mvp/03-implementation");
     assert_eq!(view.state, Lifecycle::Implementing);
     assert_eq!(companions(&app, id).await, ["askance", "granit"]);
 
@@ -7486,9 +7490,9 @@ async fn adopting_checks_out_the_companions_it_was_configured_with() {
 
     assert_eq!(
         git(&worked, &["symbolic-ref", "--short", "HEAD"]).trim(),
-        "mvp/03-implementation",
+        "roadmaps/mvp/03-implementation",
     );
-    assert!(has_branch(&granit, "mvp/03-implementation"));
+    assert!(has_branch(&granit, "roadmaps/mvp/03-implementation"));
 
     // Both under the data directory, and both registered with git — which is
     // what makes them worktrees rather than copies.
@@ -7528,7 +7532,7 @@ async fn a_companion_adoption_cannot_deliver_refuses_the_press_by_name() {
     // Somebody else's branch, by the name the companion's would take: the
     // stage's own name, which is what mirroring comes to here.
     let askance = elsewhere.path().join("askance");
-    git(&askance, &["branch", "mvp/03-implementation"]);
+    git(&askance, &["branch", "roadmaps/mvp/03-implementation"]);
 
     assert_eq!(
         press_adopt(&app, id).await,
@@ -7546,7 +7550,7 @@ async fn a_companion_adoption_cannot_deliver_refuses_the_press_by_name() {
     assert_eq!(view.state, Lifecycle::Draft);
     assert!(view.worktree.is_none());
     assert!(companion(&view, "askance").worktree.is_none());
-    assert!(!has_branch(&repo, "mvp/03-implementation"));
+    assert!(!has_branch(&repo, "roadmaps/mvp/03-implementation"));
     assert_eq!(
         worktrees(&askance).len(),
         1,
@@ -7654,7 +7658,7 @@ async fn adopting_with_no_git_author_is_refused_by_name() {
 
     assert_eq!(view.state, Lifecycle::Draft);
     assert_eq!(view.worktree, None);
-    assert!(!has_branch(&repo, "mvp/03-implementation"));
+    assert!(!has_branch(&repo, "roadmaps/mvp/03-implementation"));
     assert_eq!(
         worktrees(&repo).len(),
         1,
@@ -7749,7 +7753,8 @@ async fn an_adopted_stage_carries_its_brief_and_says_what_it_adopted() {
         "and which brief it was adopted from: {said:?}",
     );
     assert!(
-        said.contains("<code>mvp/03-implementation</code>") && said.contains("<code>main</code>"),
+        said.contains("<code>roadmaps/mvp/03-implementation</code>")
+            && said.contains("<code>main</code>"),
         "and where its branch came off: {said:?}",
     );
 }
@@ -7782,7 +7787,7 @@ async fn the_stage_adopted_is_the_one_the_base_commit_has_open() {
 
     let view = opened(&app, id).await;
 
-    assert_eq!(view.branch, "mvp/03-implementation");
+    assert_eq!(view.branch, "roadmaps/mvp/03-implementation");
     assert_eq!(view.base_commit.as_deref(), Some(before.as_str()));
 }
 
@@ -7828,9 +7833,12 @@ async fn nothing_adopted(app: &Router, id: i64, repo: &Path) {
         "only the repository itself is checked out anywhere",
     );
     assert!(
-        git(repo, &["branch", "--list", "mvp/03-implementation"])
-            .trim()
-            .is_empty(),
+        git(
+            repo,
+            &["branch", "--list", "roadmaps/mvp/03-implementation"]
+        )
+        .trim()
+        .is_empty(),
         "and the stage's own branch was never made",
     );
     assert_eq!(
@@ -8090,7 +8098,7 @@ async fn adopting_is_refused_when_the_stages_own_branch_is_taken() {
     );
 
     let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
-    git(&repo, &["branch", "mvp/03-implementation"]);
+    git(&repo, &["branch", "roadmaps/mvp/03-implementation"]);
 
     assert_eq!(press_adopt(&app, id).await, Adopted::BranchExists);
 
@@ -8099,10 +8107,67 @@ async fn adopting_is_refused_when_the_stages_own_branch_is_taken() {
     assert_eq!(view.worktree, None);
     assert_eq!(worktrees(&repo).len(), 1, "only the repository itself");
     assert_eq!(
-        git(&repo, &["rev-parse", "refs/heads/mvp/03-implementation"]).trim(),
+        git(
+            &repo,
+            &["rev-parse", "refs/heads/roadmaps/mvp/03-implementation"]
+        )
+        .trim(),
         git(&repo, &["rev-parse", "HEAD"]).trim(),
         "and the branch that was there is where it was",
     );
+}
+
+/// And under the name a stage was given before `roadmaps/` went in front of the
+/// scheme, which is where a stage started a week ago still is. Its plan commit
+/// ticking the box rides on that branch until its pull request merges, so the
+/// branch is the only thing saying the stage is under way — and adopting it a
+/// second time would be two Conversations on one stage.
+#[tokio::test]
+async fn adopting_is_refused_when_the_stage_is_taken_under_its_former_name() {
+    let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+    roadmap(
+        &repo,
+        OPEN_AT_THREE,
+        &["03-implementation.md", "04-wrap-up.md"],
+    );
+
+    let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+    git(&repo, &["branch", "mvp/03-implementation"]);
+
+    assert_eq!(press_adopt(&app, id).await, Adopted::BranchExists);
+    nothing_adopted(&app, id, &repo).await;
+}
+
+/// A branch standing where a component of the stage's own branch path goes is
+/// one git will not make at all: it keeps a branch as a file under
+/// `refs/heads/`, so `refs/heads/roadmaps` being a file is `refs/heads/roadmaps/`
+/// never being a directory.
+///
+/// The one refusal that carries a name, because it is the one the page cannot
+/// work out for itself: everything else it refuses for is the roadmap, the brief
+/// or the stage it is already showing, and this is a branch somewhere else in
+/// the repository that the human has to go and move.
+#[tokio::test]
+async fn adopting_is_refused_by_name_when_a_branch_stands_in_the_stages_way() {
+    for blocker in ["roadmaps", "roadmaps/mvp"] {
+        let (elsewhere, _dir, app, repo, repo_id) = workbench().await;
+        roadmap(
+            &repo,
+            OPEN_AT_THREE,
+            &["03-implementation.md", "04-wrap-up.md"],
+        );
+
+        let id = ready_to_adopt(&app, elsewhere.path(), repo_id, "mvp").await;
+        git(&repo, &["branch", blocker]);
+
+        assert_eq!(
+            press_adopt(&app, id).await,
+            Adopted::BranchInTheWay {
+                by: blocker.to_owned(),
+            },
+        );
+        nothing_adopted(&app, id, &repo).await;
+    }
 }
 
 /// A roadmap the base commit knows nothing about is not a roadmap that
@@ -8130,7 +8195,7 @@ async fn adopting_is_refused_when_no_such_roadmap_is_at_the_base() {
 async fn the_cheap_refusals_are_answered_before_the_ones_git_is_paid_for() {
     let (_elsewhere, _dir, app, repo, repo_id) = workbench().await;
     roadmap(&repo, ALL_DONE, &["03-implementation.md"]);
-    git(&repo, &["branch", "mvp/03-implementation"]);
+    git(&repo, &["branch", "roadmaps/mvp/03-implementation"]);
 
     let id = adopting(&app, repo_id, "mvp").await;
 

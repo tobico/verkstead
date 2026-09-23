@@ -346,14 +346,52 @@ async fn start(
     // has started already. Refused rather than worked around: the alternative is
     // a second Conversation quietly doing a stage that is already under way, on a
     // branch named after neither of them.
-    if taken(&repo, &branch).await {
+    //
+    // Either name, because a stage started before the scheme changed is on the
+    // former one — and its plan commit ticking the box rides on that branch
+    // until the pull request merges, so the branch is the only thing saying the
+    // stage is under way. The notice names whichever was found, that being the
+    // one the human would go and look at.
+    let already = match taken(&repo, &branch).await {
+        true => Some(branch.clone()),
+        false => {
+            let former = stage.former_branch();
+
+            taken(&repo, &former).await.then_some(former)
+        }
+    };
+
+    if let Some(found) = already {
         return say(
             state,
             settled,
             &format!(
-                "Stage {} of the `{}` roadmap is next, and `{branch}` is already a branch of \
+                "Stage {} of the `{}` roadmap is next, and `{found}` is already a branch of \
                  this repository — so it looks to have been started already. Nothing was \
                  started.",
+                stage.label, stage.roadmap,
+            ),
+        )
+        .await;
+    }
+
+    // And a branch standing where a component of the stage's own branch path
+    // goes is one git will not make at all — see [`crate::stages::in_the_way`].
+    // Named rather than left to git, whose refusal reaches the server log and
+    // nobody else: this runs where nobody is watching, and a roadmap that stops
+    // for a reason nobody is told is a roadmap nobody restarts.
+    //
+    // Here with the taken check and before the fetch, for its reason: it asks
+    // nothing of any remote, and a halt that costs nothing is a halt that
+    // happens before anything has been made.
+    if let Some(by) = blocking(&repo, &branch).await {
+        return say(
+            state,
+            settled,
+            &format!(
+                "Stage {} of the `{}` roadmap is next, and `{by}` is already a branch of this \
+                 repository, which stands in the way of `{branch}`. Nothing was started, and \
+                 nothing will start until that branch is renamed or gone.",
                 stage.label, stage.roadmap,
             ),
         )
@@ -1277,6 +1315,31 @@ async fn gave_up(state: &AppState, id: i64) {
     if let Err(error) = store::close_conversation(&state.pool, id).await {
         tracing::error!(error = ?error, conversation_id = id, "stopping a half-made stage failed");
     }
+}
+
+/// Which branch of `repo` stands in the way of one called `branch`, where any
+/// does — [`crate::stages::in_the_way`], off the runtime's threads.
+///
+/// A git read that failed has already read as *something is there* inside, for
+/// the reason [`taken`] reads one that way. A *join* that failed is the other
+/// thing, and it comes back as nothing in the way — unlike [`taken`], and
+/// deliberately: the only thing this decides is whether a halt says a name or
+/// says nothing, and the name is the whole of its value. Nothing is taken over
+/// by being wrong here, because git refuses the worktree at the branch that is
+/// really in the way and the stage halts there instead, with the vaguer notice
+/// this one exists to improve on. Naming a branch that was never in the way
+/// would send the human to rename something that is not the problem.
+async fn blocking(repo: &Path, branch: &str) -> Option<String> {
+    let repo = repo.to_owned();
+    let named = branch.to_owned();
+
+    tokio::task::spawn_blocking(move || crate::stages::in_the_way(&repo, &named))
+        .await
+        .unwrap_or_else(|error| {
+            tracing::error!(error = ?error, "asking what stood in a stage branch's way failed");
+
+            None
+        })
 }
 
 /// Whether `repo` already has a branch by that name.

@@ -4009,7 +4009,25 @@ pub enum Adopted {
     /// The stage's own slug branch is already there. Verkstead did not make it
     /// for this, so it will not take it over — and a branch git would not answer
     /// about counts as one that is there.
+    ///
+    /// Either under the name a stage is given now or under the one the scheme
+    /// gave it before, a stage started under the former shape being just as
+    /// started as one started under this shape.
     BranchExists,
+
+    /// A branch of the repository stands where a component of the stage's own
+    /// branch path would go — `roadmaps`, or `roadmaps/<roadmap>` — and git
+    /// keeps a branch as a file, so it will not make the stage's branch while
+    /// that one is there.
+    ///
+    /// The one refusal that names something for the human to rename, which is
+    /// why it carries a name at all: git's own complaint about it goes to the
+    /// server log, and the roadmap stalls for good until somebody moves the
+    /// branch out of the way.
+    BranchInTheWay {
+        /// The branch that is in the way.
+        by: String,
+    },
 
     /// Git would not make the worktree. The reason is in the server's log — this
     /// is the one refusal with nothing for the human to correct.

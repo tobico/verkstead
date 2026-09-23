@@ -2048,6 +2048,7 @@ pub(crate) async fn adopt(state: &AppState, id: i64) -> Result<Adopted> {
                 Startable::InFlight => Err(Adopted::StageInFlight),
                 Startable::NoBrief => Err(Adopted::NoBrief),
                 Startable::BranchTaken => Err(Adopted::BranchExists),
+                Startable::BranchInTheWay { by } => Err(Adopted::BranchInTheWay { by }),
             }
         }
     })

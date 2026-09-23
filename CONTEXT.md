@@ -1718,15 +1718,28 @@ first moment, because the grilling that would have settled the work wrote the
 brief. Its branch stacks on the unmerged predecessor where the target
 repository records how, and comes off the default branch where it does not.
 
-**Its branch is named for where the stage lives**: the roadmap's own directory
-name, then the stage brief's filename — `docs/roadmaps/mvp/04-wrap-up.md` is
-worked on `mvp/04-wrap-up`. Under the roadmap rather than at the bare slug,
-because a repository is full of branches somebody named for whatever they were
-doing and one of them reading like a stage brief says nothing about that stage —
-and a name already taken is one Verkstead will not start on, in a run nobody is
-watching. Qualified this way the only thing it can collide with is another
-attempt at the same Stage of the same roadmap, which is the collision the
-refusal is for.
+**Its branch is named for where the stage lives**: `roadmaps/`, then the
+roadmap's own directory name, then the stage brief's filename —
+`docs/roadmaps/mvp/04-wrap-up.md` is worked on `roadmaps/mvp/04-wrap-up`. Under
+the roadmap rather than at the bare slug, because a repository is full of
+branches somebody named for whatever they were doing and one of them reading
+like a stage brief says nothing about that stage — and a name already taken is
+one Verkstead will not start on, in a run nobody is watching. Qualified this way
+the only thing it can collide with is another attempt at the same Stage of the
+same roadmap, which is the collision the refusal is for.
+
+**And under `roadmaps/` rather than straight under the roadmap**, because git
+keeps a branch as a file under `refs/heads/` and will not have a file and a
+directory at one name. A roadmap's own Conversation is usually called after the
+roadmap, `mvp`, and closing it keeps the branch — so `refs/heads/mvp` being a
+file was every Stage of that roadmap blocked, for good, with git's refusal in
+the server log and nothing for the human but *nothing was started*. A fixed
+component in front is a path no roadmap's name can reach. What is left of the
+collision is a branch called `roadmaps`, or one named `roadmaps/<roadmap>`, and
+the start refuses by name where it finds one. A Stage is read as taken under the
+former `mvp/04-wrap-up` shape too, permanently: one already worked is on a
+branch of that shape until somebody deletes it, and its tick may never have
+reached the default branch.
 
 Done when its box in `ROADMAP.md` is ticked, which is the roadmap's own score
 and is kept one Stage behind: the tick rides in the plan commit of the Stage
