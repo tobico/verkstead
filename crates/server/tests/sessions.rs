@@ -18196,6 +18196,73 @@ async fn a_settle_with_no_git_author_starts_no_stage_and_says_so() {
     );
 }
 
+/// A stage already on a branch is a stage already under way, and the unattended
+/// start asks that under the name the scheme gives a stage now *and* under the
+/// one it gave before `roadmaps/` went in front of it.
+///
+/// Which is where a stage started last week still is: nothing renamed it, and
+/// the plan commit ticking its box rides on that branch until its pull request
+/// merges — so the branch is the only thing saying so, and a start that asked
+/// only about the new name would run the stage a second time on a branch named
+/// after neither Conversation. The notice names the branch that was found,
+/// because that is the one the human goes and looks at.
+#[tokio::test]
+async fn a_stage_taken_under_its_former_name_starts_nothing_and_says_so() {
+    let spill = tempfile::tempdir().unwrap();
+    let planning = spill.path().join("stage-prompts");
+    let worked = spill.path().join("task-prompts");
+
+    let fixture = grilling_spilling(
+        spill,
+        &a_roadmap_then_wraps_up(&planning, &worked, TWO_STAGES, RECORDS_STACKING, ""),
+        &gh_about(GREEN, "", ""),
+    )
+    .await;
+
+    // Stage 01 under the name it would have been cut at before the scheme
+    // changed, which is what somebody working it a week ago left behind.
+    git(&fixture.repo(), &["branch", "rate-limiting/01-counter"]);
+
+    staged(&fixture).await;
+
+    let said = said_on(&fixture, fixture.id, "started already").await;
+
+    assert!(
+        said.contains("Stage 01") && said.contains("<code>rate-limiting</code>"),
+        "the notice names the stage that would have started: {said:?}",
+    );
+    assert!(
+        said.contains("<code>rate-limiting/01-counter</code>"),
+        "and the branch it found, under the name it really has: {said:?}",
+    );
+    assert!(
+        !said.contains("<code>roadmaps/rate-limiting/01-counter</code>"),
+        "rather than the name the stage would have been cut at: {said:?}",
+    );
+    assert!(
+        said.contains("Nothing was started"),
+        "and that nothing was left behind: {said:?}",
+    );
+
+    assert_eq!(
+        conversations(&fixture.app).await.len(),
+        1,
+        "no stage was started",
+    );
+    assert!(
+        !git(
+            &fixture.repo(),
+            &["branch", "--list", "roadmaps/rate-limiting/01-counter"]
+        )
+        .contains("01-counter"),
+        "and no branch was cut under the new name either",
+    );
+    assert!(
+        !planning.exists(),
+        "so no session was launched inside the next-stage fork either",
+    );
+}
+
 /// And a branch standing where a component of the stage's own branch path goes
 /// is one git will not make at all: it keeps a branch as a file under
 /// `refs/heads/`, so `refs/heads/roadmaps` being a file is `refs/heads/roadmaps/`
