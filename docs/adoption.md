@@ -800,10 +800,9 @@ other machine.
 Only what could not be installed here — a NixOS, a server with no way to raise
 a dialog, an installer that would not run, a Homebrew that could not be
 installed, an Intel Mac's `git` — reaches a screen of instructions afterwards,
-with this
-distro's own command and where the binary has to land; that screen holds Next,
-counting the rows detected, and it re-probes while you are away, so an
-`apt install bubblewrap` finishing in another window ticks the row within ten
+with this distro's own command and where the binary has to land; that screen
+holds Next, counting the rows detected, and it re-probes while you are away, so
+an `apt install bubblewrap` finishing in another window ticks the row within ten
 seconds. **Agent Profiles** offers the agent accounts already logged in under
 the server's home; each one you leave ticked is saved as a Profile with no name
 and every model this build knows for that agent — and there is a form under them

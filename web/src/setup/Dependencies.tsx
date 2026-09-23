@@ -48,7 +48,7 @@
 //! to be told, so [`RESTART`] is under the list on every tab.
 //!
 //! **Which instruction is a tab rather than a fact.** The detected OS opens and
-//! the other seven are a press away — see
+//! the other eight are a press away — see
 //! [`./instructions.ts`](./instructions.ts) — because the detection comes off
 //! `/etc/os-release` and a derivative names its parent. Nothing about the rows
 //! changes with the tab: the tab is which machine the commands are *for*, and
