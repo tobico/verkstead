@@ -53,6 +53,35 @@
 //! tree shrinks a level. The last group is the exception and stays, empty: a
 //! pane with nothing open is one group saying so.
 //!
+//! **And a tab is picked up and put down with the pointer**, the way a card in
+//! the sidebar is and for the same reasons: the pointer captured at the press,
+//! the rest of the gesture watched at the window so that a hand which has
+//! outrun the tab is still dragging it, a grace distance before a press becomes
+//! a drag, a hold rather than a distance to lift one under a finger, and every
+//! way a gesture can end putting the tab down (see `Conversations.tsx`). What
+//! the attachments' own drop does is not this — that is the browser's
+//! `DataTransfer`, for files coming from outside the page.
+//!
+//! **Where it lands is a place along a tab bar**, its own or any other group's,
+//! marked with a line while the hand is over it so that what will happen is
+//! drawn before the hand lets go. Dropping reorders the tab in its own bar, or
+//! takes it out of one group and into another at that place and makes that
+//! group the active one; a drag that comes back to where it started changes
+//! nothing, and one let go of away from every bar changes nothing either. A
+//! group whose last tab has just been dragged out of it disappears, which is
+//! the rule its last tab being closed already follows. Dropping on a group's
+//! *content* is the next task of this stage.
+//!
+//! **And a view is drawn once and placed into the group holding it**, which is
+//! what lets a tab move without being made again. A terminal's tab carries a
+//! live socket and this window's own memory of what has scrolled past it, and a
+//! file's carries a caret and an undo stack: a move that drew the tab afresh in
+//! its new group would close the socket, throw the scrollback away and reattach
+//! to a repaint. So a tab *is* the view — one group holds it, one box is drawn
+//! for it, and a drag moves both — and the pane puts that box in whichever
+//! group's content it belongs to, the way it places the groups themselves
+//! rather than nesting them.
+//!
 //! **The active group is the one last pressed into**, wherever in it the press
 //! landed, and it is where an opening goes: a file pressed in the tree, a
 //! terminal asked for, the tab standing on a shell that would not start. A
@@ -268,6 +297,7 @@ import {
   Match,
   Show,
   Switch,
+  batch,
   createEffect,
   createMemo,
   createSignal,
@@ -473,6 +503,21 @@ export function keyed(tab: Tab): string {
   return "terminal" in tab ? `terminal ${tab.terminal}` : `file ${tab.file}`;
 }
 
+/// And the same thing open again, as a second view of it.
+///
+/// A tab object is one **view**: the thing that stands in exactly one group, has
+/// exactly one box drawn for it, and travels through the tree when somebody
+/// drags it. What it is a view *of* is [`keyed`] — a path, or a number — which
+/// is what two views of one file have in common and what makes them one buffer.
+///
+/// So a split, which puts what a group is showing in both halves, makes a
+/// second tab rather than putting the one tab in two groups: two views of the
+/// one file or the one shell, which is what ADR 0019 asks for, and two things
+/// the pane can tell apart when one of them is dragged somewhere.
+export function copied(tab: Tab): Tab {
+  return "file" in tab ? { file: tab.file } : { terminal: tab.terminal };
+}
+
 /// And what a file's tab is called: its name.
 ///
 /// Rather than its path — a tab is a few rems wide, a path in a checkout is a
@@ -657,6 +702,22 @@ export function Code(props: {
   /// tree, so `For` below reconciles these by identity and nothing is taken
   /// down and made again for a press in the group beside it.
   const groups = createMemo(() => groupsOf(layout()));
+
+  /// And every view there is, which is every tab of every group: one box is
+  /// drawn per entry here, wherever the group holding it stands.
+  ///
+  /// A tab *is* a view — see [`copied`] — so this is a flat list of the things
+  /// the pane draws content for, and a tab dragged from one group to another is
+  /// the same entry with a different group around it rather than one leaving
+  /// this list and another joining it.
+  const viewed = createMemo(() => groups().flatMap((one) => one.tabs()));
+
+  /// Where each group's views are put: the box inside it that its content goes
+  /// in, by the group's id.
+  ///
+  /// Written by the groups as they are drawn and read by the views as they are
+  /// placed, which is the one thing the two halves say to each other.
+  const [slots, setSlots] = createSignal<Record<number, HTMLElement>>({});
 
   /// The layer every group is drawn in, which is the ground their percentages
   /// are measured against — and, once it has been measured, what turns the
@@ -934,12 +995,386 @@ export function Code(props: {
   const divide = (group: Group, tab: Tab, way: Way): void => {
     const made = fresh();
 
-    made.setTabs([tab]);
+    // A second view of the same thing rather than the same tab in two groups —
+    // see [`copied`]: a tab is what one group holds and what a drag carries,
+    // and one object in two bars would be one box the pane could not place.
+    made.setTabs([copied(tab)]);
     made.setChosen(keyed(tab));
 
     setLayout((was) => split(was, group.id, way, made));
     setActive(made.id);
   };
+
+  /// Which tab the hand is carrying, and where along which bar it would land if
+  /// it let go now.
+  ///
+  /// The tab is what the bar draws as lifted, and the place is where it draws
+  /// the line. Both null every moment nobody is dragging one, which is nearly
+  /// all of them.
+  const [carried, setCarried] = createSignal<Tab | null>(null);
+  const [mark, setMark] = createSignal<{ group: Group; at: number } | null>(
+    null,
+  );
+
+  /// The press in flight: which tab of which group it began on, where on the
+  /// screen it began, whether it is a finger, and whether the tab has lifted
+  /// under it yet. Null every moment nothing is pressed.
+  ///
+  /// Not a signal, because nothing is drawn from it — what the lifted tab and
+  /// the insertion point are drawn from are the two above, and the rest of this
+  /// is bookkeeping between one pointer event and the next. The sidebar's cards
+  /// are picked up exactly this way, in `Conversations.tsx`.
+  let press: {
+    group: Group;
+    tab: Tab;
+    pointer: number;
+    x: number;
+    y: number;
+    touch: boolean;
+    lifted: boolean;
+    waiting?: ReturnType<typeof setTimeout>;
+  } | null = null;
+
+  /// What takes a drag's listeners back off the window, or null while nothing
+  /// is pressed. They are made per press — each closes over the press it
+  /// belongs to — so what removes them is made alongside them.
+  let stop: (() => void) | null = null;
+
+  /// Whether the press that has just ended was a drag. The click arrives after
+  /// the pointer is up, and a tab carried into place should not be turned to as
+  /// well.
+  ///
+  /// Read once and spent, so the drag it belongs to swallows the one click that
+  /// follows it and nothing after that: a keyboard press is a click with no
+  /// pointer behind it, and a flag left standing would leave the tab a drag
+  /// ended on deaf to Enter.
+  let carrying = false;
+
+  /// The tab lifts: it is being moved from here until the hand lets go.
+  const lift = (at: NonNullable<typeof press>): void => {
+    at.lifted = true;
+    setCarried(at.tab);
+
+    // The bar must not scroll out from under a tab being moved along it. A
+    // `touch-action` on the tab would have said so before the finger landed and
+    // taken the swipe that scrolls the bar with it, so the scroll is refused
+    // here instead: from the lift until the hand lets go, and never while a
+    // finger is merely passing through.
+    if (at.touch) {
+      document.addEventListener("touchmove", refuseScroll, { passive: false });
+    }
+  };
+
+  /// A press begins on a tab. Which of the three things it is — a press that
+  /// turns to the tab, a scroll of the bar, or a drag — is settled by what the
+  /// hand does next, which is how a card in the sidebar is picked up.
+  const grab = (event: PointerEvent, group: Group, tab: Tab): void => {
+    // Which hand this is, before anything is decided about the press: the menu
+    // a right-click drops is the mouse's alone, and the `contextmenu` behind it
+    // is the one thing that cannot say which hand made it.
+    fromTouch = event.pointerType !== "mouse";
+
+    // The primary button, a finger or a pen. A right-click is not a drag.
+    if (event.button !== 0) {
+      return;
+    }
+
+    // A press whose ending never reached us is over the moment another begins.
+    // Nothing should get this far with one still in flight — every way a drag
+    // can end is listened for below — and one left standing would be a bar held
+    // by a hand that is no longer on it.
+    put();
+
+    // The tab takes the pointer for as long as the browser will leave it there,
+    // so nothing it is carried over lights up under a hand that is already
+    // holding something. For as long as it will leave it and no longer: the bar
+    // moving this very tab is what the drag is for, and an element that moves
+    // in the DOM has the pointer taken back off it. So the capture is a
+    // courtesy — what the drag runs on is the window, which hears the pointer
+    // whoever is holding it.
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+
+    const began: NonNullable<typeof press> = {
+      group,
+      tab,
+      pointer: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      touch: event.pointerType !== "mouse",
+      lifted: false,
+    };
+    press = began;
+    carrying = false;
+
+    // The rest of the gesture is watched at the window rather than at the tab,
+    // which is what the dividers beside it do: a pointer that has outrun the
+    // tab is still dragging it, and a release out beyond the pane — or beyond
+    // the window — is still the release. A cancel is an ending too, being what
+    // the browser says when it has taken the gesture over. Both of them put the
+    // tab down, so there is no way for a drag to end that leaves one held.
+    const moving = (at: PointerEvent) => {
+      if (at.pointerId === began.pointer) {
+        haul(at);
+      }
+    };
+    const ended = (at: PointerEvent) => {
+      if (at.pointerId === began.pointer) {
+        put();
+      }
+    };
+
+    stop = () => {
+      window.removeEventListener("pointermove", moving);
+      window.removeEventListener("pointerup", ended);
+      window.removeEventListener("pointercancel", ended);
+    };
+
+    window.addEventListener("pointermove", moving);
+    window.addEventListener("pointerup", ended);
+    window.addEventListener("pointercancel", ended);
+
+    // A finger lifts a tab by holding still. No distance tells a drag from a
+    // scroll of the bar on a phone — both of them are the finger moving — so
+    // what tells the two apart is the time before it does.
+    if (began.touch) {
+      began.waiting = setTimeout(() => {
+        if (press === began) {
+          lift(began);
+        }
+      }, LIFT);
+    }
+  };
+
+  /// The hand moved: past the grace it is a drag, and a drag marks where the
+  /// tab would land.
+  const haul = (event: PointerEvent): void => {
+    const at = press;
+
+    if (at === null) {
+      return;
+    }
+
+    if (!at.lifted) {
+      // Inside the grace the hand has said nothing yet: this is the wobble
+      // between pressing a tab and letting go of it, and a tab that started
+      // moving here is a tab that could not be pressed at all.
+      if (Math.hypot(event.clientX - at.x, event.clientY - at.y) <= GRACE) {
+        return;
+      }
+
+      // A finger that travels before its tab has lifted is scrolling the bar,
+      // so the press is over and the browser has it. Nothing has lifted, so
+      // ending it here moves nothing.
+      if (at.touch) {
+        put();
+        return;
+      }
+
+      lift(at);
+    }
+
+    setMark(insertion(event.clientX, event.clientY));
+  };
+
+  /// The drag is over: the tab goes where the line stood.
+  ///
+  /// Every ending comes through here — the release, a cancel, a press that
+  /// turned out to be a scroll, and the next press finding this one standing —
+  /// so there is one place the listeners come off and one place the tab is put
+  /// down. A release away from every bar is an ending like any other, and moves
+  /// nothing: the bars are the whole of what this task drops onto.
+  const put = (): void => {
+    const at = press;
+    const where = mark();
+
+    stop?.();
+    stop = null;
+    press = null;
+    setCarried(null);
+    setMark(null);
+
+    if (at === null) {
+      return;
+    }
+
+    clearTimeout(at.waiting);
+
+    if (!at.lifted) {
+      return;
+    }
+
+    document.removeEventListener("touchmove", refuseScroll);
+    carrying = true;
+
+    if (where !== null) {
+      move(at.group, at.tab, where.group, where.at);
+    }
+  };
+
+  /// A tab put down at a place along a bar: its own, which is a reorder, or
+  /// another group's, which takes it out of one and into the other.
+  ///
+  /// The group it lands in becomes the active one — it is where the work has
+  /// just gone — and a group whose last tab has left disappears, which is the
+  /// rule every other way of emptying one already follows.
+  ///
+  /// **And a tab put down where the same thing is already open is the two views
+  /// becoming one**: the tab that was carried goes, and the group turns to the
+  /// one it already had. Two tabs of one file in a bar would be two of
+  /// everything that bar says about it — two dots, two marks of which is
+  /// showing — over the one buffer, and there is nothing a second view of a
+  /// file in the same group could show that the first is not showing already.
+  ///
+  /// In one go, because the tab is out of every group between the two writes:
+  /// the pane draws a box per view and reads the views off the groups, so a
+  /// moment with the tab in neither is that box taken down and made again —
+  /// which is the socket and the scrollback this whole arrangement is here to
+  /// keep.
+  const move = (from: Group, tab: Tab, to: Group, at: number): void => {
+    const stood = from.tabs().indexOf(tab);
+
+    if (stood < 0) {
+      return;
+    }
+
+    if (from === to) {
+      // The place was read off the bar as it stands, with the tab still in it,
+      // so a tab let go of beyond its own place has one fewer tab in front of
+      // it once it is taken out. Which is also what makes a drag that came back
+      // to where it started come to nothing at all.
+      const landing = at > stood ? at - 1 : at;
+
+      if (landing === stood) {
+        return;
+      }
+
+      from.setTabs((was) => {
+        const put = [...was];
+
+        put.splice(stood, 1);
+        put.splice(landing, 0, tab);
+
+        return put;
+      });
+
+      return;
+    }
+
+    batch(() => {
+      const already = to.tabs().some((one) => keyed(one) === keyed(tab));
+
+      from.setTabs((was) => was.filter((one) => one !== tab));
+
+      if (!already) {
+        to.setTabs((was) => [...was.slice(0, at), tab, ...was.slice(at)]);
+      }
+
+      to.setChosen(keyed(tab));
+
+      if (from.tabs().length === 0) {
+        shut(from);
+      }
+
+      setActive(to.id);
+    });
+  };
+
+  /// Where a pointer at this point would put a tab: the group whose bar it is
+  /// over and the place along that bar, or nothing at all where it is over no
+  /// bar at all.
+  ///
+  /// Asked of the bars as they are drawn rather than worked out from the tree,
+  /// for the reason the sidebar asks its own rows where they are: how wide a tab
+  /// stands is a name's length and a browser's font, and a drag that guessed
+  /// would mark a place the hand is not pointing at.
+  const insertion = (
+    x: number,
+    y: number,
+  ): { group: Group; at: number } | null => {
+    for (const box of layer.querySelectorAll<HTMLElement>(`.${styles.group}`)) {
+      const bar = box.querySelector<HTMLElement>(`.${styles.tabs}`);
+
+      if (bar === null) {
+        continue;
+      }
+
+      const over = bar.getBoundingClientRect();
+
+      if (x < over.left || x > over.right || y < over.top || y > over.bottom) {
+        continue;
+      }
+
+      const group = groups().find(
+        (one) => one.id === Number(box.dataset.group),
+      );
+
+      if (group === undefined) {
+        return null;
+      }
+
+      // The first tab the point falls in front of — a tab's own middle being
+      // where one place along the bar becomes the next — and the end of the bar
+      // where it falls past every one of them.
+      const frames = [
+        ...bar.querySelectorAll<HTMLElement>(`.${styles.tabFrame}`),
+      ];
+      const at = frames.findIndex((frame) => {
+        const its = frame.getBoundingClientRect();
+
+        return x < its.left + its.width / 2;
+      });
+
+      return { group, at: at < 0 ? frames.length : at };
+    }
+
+    return null;
+  };
+
+  /// Where the line goes on a tab, where it goes on this one at all: in front
+  /// of it, or after it where it is the last on its bar and the tab in the hand
+  /// would land past every one of them.
+  ///
+  /// On the tabs rather than between them, there being no between: a bar is a
+  /// row of tabs that abut, and what says where one would land is a mark on the
+  /// one it would land beside.
+  const lined = (group: Group, at: number): "before" | "after" | undefined => {
+    const where = mark();
+
+    if (where === null || where.group !== group) {
+      return undefined;
+    }
+
+    if (where.at === at) {
+      return "before";
+    }
+
+    return where.at === group.tabs().length && at === where.at - 1
+      ? "after"
+      : undefined;
+  };
+
+  /// A press that let go about where it landed is a press, and a press turns to
+  /// the tab. One that carried it is not: the tab is where they put it, and
+  /// turning to it as well would be answering one gesture twice.
+  const turn = (group: Group, tab: Tab): void => {
+    const dragged = carrying;
+    carrying = false;
+
+    if (dragged) {
+      return;
+    }
+
+    setActive(group.id);
+    group.setChosen(keyed(tab));
+  };
+
+  // A pane that goes away mid-drag takes the whole drag with it: the listeners
+  // it hung on the window, and its refusal of the scroll. Nothing else would
+  // ever take those off again — what would have is a drop that is never coming.
+  onCleanup(() => {
+    stop?.();
+    document.removeEventListener("touchmove", refuseScroll);
+  });
 
   /// What a tab is called. What its shell last called itself, where it has
   /// called itself anything at all: a title of nothing but spaces is a shell
@@ -1560,6 +1995,11 @@ export function Code(props: {
                 <div
                   class={styles.group}
                   style={stood(group.id)}
+                  // Which group this box is, read by a drag asking which bar
+                  // the pointer is over — a question about the page as it is
+                  // drawn rather than about the tree behind it, the way the
+                  // sidebar's rows carry the id a drag reads off them.
+                  data-group={group.id}
                   // Which group a file pressed in the tree will open in, said
                   // where it can be read as well as seen — and said only where
                   // there is more than one of them, a lone group being not the
@@ -1593,29 +2033,38 @@ export function Code(props: {
                       aria-label="What is open in this group"
                     >
                       <For each={group.tabs()}>
-                        {(tab) => (
+                        {(tab, at) => (
                           // Two buttons rather than one: the tab is pressed to
                           // show what it holds and the × is pressed to close
                           // it, and a button inside a button is not a thing a
                           // browser draws. The frame around them is the tab as
                           // the eye reads it, and is what takes the fill of the
                           // one showing.
-                          <div class={styles.tabFrame}>
+                          <div
+                            class={styles.tabFrame}
+                            // Where the tab in the hand would land if it were
+                            // let go of now: the line VS Code draws between two
+                            // tabs, drawn on the tab it would go beside rather
+                            // than standing between two of them — a line with a
+                            // width of its own would move the bar under the
+                            // very hand it is answering.
+                            data-mark={lined(group, at())}
+                            classList={{ [styles.lifted!]: carried() === tab }}
+                          >
                             <button
                               type="button"
                               class={styles.tab}
                               aria-pressed={showing(group) === keyed(tab)}
-                              // Which hand is making the gesture, for the menu
-                              // below: a long press is how a tab will be picked
-                              // up, so the menu is the mouse's alone.
-                              onPointerDown={(event) => {
-                                fromTouch = event.pointerType !== "mouse";
-                              }}
+                              // The press, which is a press that turns to the
+                              // tab, a scroll of the bar or a drag — settled by
+                              // what the hand does next, and watched at the
+                              // window from here (ADR 0019, *Tabs and groups*).
+                              // Which hand it is is read here too, for the menu
+                              // below: a long press is how a tab is picked up,
+                              // so the menu is the mouse's alone.
+                              onPointerDown={(event) => grab(event, group, tab)}
                               onContextMenu={(event) => ask(event, group, tab)}
-                              onClick={() => {
-                                setActive(group.id);
-                                group.setChosen(keyed(tab));
-                              }}
+                              onClick={() => turn(group, tab)}
                             >
                               {/* What kind of thing the tab holds, which is the
                                   one thing an icon at that end says: a shell,
@@ -1706,85 +2155,26 @@ export function Code(props: {
                     </div>
                   </Show>
 
-                  <Switch
-                    fallback={
-                      <Empty>Reading this conversation's terminals…</Empty>
-                    }
-                  >
-                    <Match when={group.tabs().length > 0}>
-                      <For each={group.tabs()}>
-                        {(tab) =>
-                          "file" in tab ? (
-                            // A file's tab is drawn whether or not it is the
-                            // one showing, and hidden when it is not — the way
-                            // a terminal's is, and for the near reason: a grid
-                            // taken down is a shell nobody could come back to,
-                            // and an editor taken down is a caret and an undo
-                            // stack nobody can come back to. The text itself
-                            // was never at risk, the buffer being above this
-                            // pane; what the hiding keeps is where the human
-                            // was in it.
-                            //
-                            // One of these per *view*: the same file in two
-                            // groups is two of these over the one buffer, which
-                            // is what makes them type together.
-                            <Opened
-                              showing={showing(group) === keyed(tab)}
-                              reading={readings()[tab.file]}
-                              buffer={buffers()[tab.file]}
-                              name={named(tab.file)}
-                              bar={bars()[tab.file]}
-                              reload={() => void reread(tab.file)}
-                              keep={() => void reread(tab.file, true)}
-                            />
-                          ) : tab.terminal > 0 ? (
-                            <Attached
-                              at={terminalSocket(
-                                props.conversation.id,
-                                tab.terminal,
-                              )}
-                              showing={showing(group) === keyed(tab)}
-                              scrollback={SCROLLBACK}
-                              over={over()[tab.terminal]}
-                              titled={(title) =>
-                                setTitles((was) => ({
-                                  ...was,
-                                  [tab.terminal]: title,
-                                }))
-                              }
-                              ended={() => ended(tab.terminal)}
-                              say={{
-                                waiting:
-                                  "Starting a shell in this conversation's worktree…",
-                                lost: "The connection to this terminal was lost.",
-                              }}
-                            />
-                          ) : (
-                            // A tab the server never opened a shell for has no
-                            // grid to stand under the sentence, and nothing to
-                            // attach to: the refusal is the whole of it.
-                            <Show when={showing(group) === keyed(tab)}>
-                              <ErrorLine>{over()[tab.terminal]}</ErrorLine>
-                            </Show>
-                          )
-                        }
-                      </For>
-                    </Match>
+                  {/* And the group with nothing in it, which is where a
+                      Conversation with no shells running lands and where the
+                      last of them leaves it. Drawn where a tab's content goes
+                      rather than over the whole pane: the tree stands beside
+                      this, and a pane-wide notice would be a sentence over that
+                      too.
 
-                    {/* And the group with nothing in it, which is where a
-                        Conversation with no shells running lands and where the
-                        last of them leaves it. Drawn where a tab's content goes
-                        rather than over the whole pane: the tree stands beside
-                        this, and a pane-wide notice would be a sentence over
-                        that too.
-
-                        A list that would not read settles it as well as one
-                        that did. The hint waits on somebody having looked, and
-                        a read that ended in the line above is a look that is
-                        over — without this the pane would sit on *Reading this
-                        conversation's terminals…* under a sentence saying it
-                        could not, with no way to open one and try again. */}
-                    <Match when={read() || terminals.isError}>
+                      A list that would not read settles it as well as one that
+                      did. The hint waits on somebody having looked, and a read
+                      that ended in the line above is a look that is over —
+                      without this the pane would sit on *Reading this
+                      conversation's terminals…* under a sentence saying it
+                      could not, with no way to open one and try again. */}
+                  <Show when={group.tabs().length === 0}>
+                    <Show
+                      when={read() || terminals.isError}
+                      fallback={
+                        <Empty>Reading this conversation's terminals…</Empty>
+                      }
+                    >
                       <div class={styles.nothing}>
                         <Empty>{NOTHING_OPEN}</Empty>
                         <QuietButton
@@ -1796,10 +2186,141 @@ export function Code(props: {
                           New terminal
                         </QuietButton>
                       </div>
-                    </Match>
-                  </Switch>
+                    </Show>
+                  </Show>
+
+                  {/* And where what this group has open is drawn: a slot rather
+                      than the views themselves, because a view is drawn once for
+                      the whole pane and *put* into whichever group holds it —
+                      see the `For` below the groups. One box per group and one
+                      for the life of the group, so that a tab arriving in it has
+                      somewhere to be put.
+
+                      Nothing of this page's is ever drawn inside it, which is
+                      what the empty state above is doing out here: a box whose
+                      children a framework is keeping is a box it empties when
+                      those children go, and it would take the views placed in it
+                      along with them. */}
+                  <div
+                    class={styles.content}
+                    ref={(box) => {
+                      setSlots((was) => ({ ...was, [group.id]: box }));
+                      onCleanup(() =>
+                        setSlots((was) => {
+                          const rest = { ...was };
+
+                          delete rest[group.id];
+
+                          return rest;
+                        }),
+                      );
+                    }}
+                  />
                 </div>
               )}
+            </For>
+
+            {/* And every view there is, drawn once for the whole pane and put
+                into the slot of whichever group holds its tab.
+
+                Which is what lets a tab be dragged from one group to another
+                without being made again: a terminal's box carries a live socket
+                and the window's own memory of what has scrolled past it, and a
+                file's carries a caret and an undo stack, and a view drawn
+                inside the group holding it would lose every one of those the
+                moment the tab moved. So the box is made once, against the tab
+                that is the view — see [`copied`] — and moved between groups the
+                way the groups themselves are placed rather than nested.
+
+                Nothing is drawn where this stands, the box going into a group
+                rather than here; and it goes back out again when the tab
+                closes, which is what takes the socket down. */}
+            <For each={viewed()}>
+              {(tab) => {
+                /// Which group is holding it, which is the whole of where the
+                /// box goes and of whether it is the one showing.
+                const whose = createMemo(() =>
+                  groups().find((one) => one.tabs().includes(tab)),
+                );
+                const shown = (): boolean => {
+                  const group = whose();
+
+                  return group !== undefined && showing(group) === keyed(tab);
+                };
+
+                const box = (
+                  <div class={styles.view}>
+                    {"file" in tab ? (
+                      // A file's tab is drawn whether or not it is the one
+                      // showing, and hidden when it is not — the way a
+                      // terminal's is, and for the near reason: a grid taken
+                      // down is a shell nobody could come back to, and an
+                      // editor taken down is a caret and an undo stack nobody
+                      // can come back to. The text itself was never at risk,
+                      // the buffer being above this pane; what the hiding keeps
+                      // is where the human was in it.
+                      //
+                      // One of these per *view*: the same file in two groups is
+                      // two of these over the one buffer, which is what makes
+                      // them type together.
+                      <Opened
+                        showing={shown()}
+                        reading={readings()[tab.file]}
+                        buffer={buffers()[tab.file]}
+                        name={named(tab.file)}
+                        bar={bars()[tab.file]}
+                        reload={() => void reread(tab.file)}
+                        keep={() => void reread(tab.file, true)}
+                      />
+                    ) : tab.terminal > 0 ? (
+                      <Attached
+                        at={terminalSocket(props.conversation.id, tab.terminal)}
+                        showing={shown()}
+                        scrollback={SCROLLBACK}
+                        over={over()[tab.terminal]}
+                        titled={(title) =>
+                          setTitles((was) => ({
+                            ...was,
+                            [tab.terminal]: title,
+                          }))
+                        }
+                        ended={() => ended(tab.terminal)}
+                        say={{
+                          waiting:
+                            "Starting a shell in this conversation's worktree…",
+                          lost: "The connection to this terminal was lost.",
+                        }}
+                      />
+                    ) : (
+                      // A tab the server never opened a shell for has no grid
+                      // to stand under the sentence, and nothing to attach to:
+                      // the refusal is the whole of it.
+                      <Show when={shown()}>
+                        <ErrorLine>{over()[tab.terminal]}</ErrorLine>
+                      </Show>
+                    )}
+                  </div>
+                ) as HTMLElement;
+
+                // Put where its group is, and moved when that changes — which
+                // is a box moving rather than anything being made or taken
+                // down. A group with no slot yet is a group in the middle of
+                // being drawn, and the next run of this puts the box in it.
+                createEffect(() => {
+                  const slot = slots()[whose()?.id ?? -1];
+
+                  if (slot !== undefined && box.parentNode !== slot) {
+                    slot.append(box);
+                  }
+                });
+
+                onCleanup(() => box.remove());
+
+                // And nothing where the list itself stands: the box belongs to
+                // a group rather than to here, and this is only where it was
+                // made.
+                return undefined;
+              }}
             </For>
 
             {/* And a divider on every border there is — one per split, drawn
@@ -2202,3 +2723,26 @@ export function Moved(props: {
     </div>
   );
 }
+
+/// How far a pointer may travel and still have been a press, in pixels.
+///
+/// A press is not a steady thing — a mouse moves a pixel or two between going
+/// down and coming up — so a tab that began moving at the first move would be a
+/// tab that could not be pressed at all. The sidebar's cards are held off by
+/// the same distance, in `Conversations.tsx`.
+const GRACE = 5;
+
+/// And how long a finger holds a tab still before it lifts, in milliseconds.
+///
+/// Long enough that a swipe along a bar of tabs is never taken for it, short
+/// enough that holding one is not waiting for it — the sidebar's again, and a
+/// gesture the human meets in two places should ask the same of them in both.
+const LIFT = 400;
+
+/// What a tab being dragged does to the scroll under it: refuses it. Hung on
+/// the document at the lift and taken off at the drop, so a finger scrolls a
+/// bar of tabs every other moment of the day.
+///
+/// A function of its own rather than one made per drag, because removing a
+/// listener means handing back the very same function.
+const refuseScroll = (event: Event): void => event.preventDefault();

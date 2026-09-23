@@ -55,6 +55,14 @@ import { group as made, type Group, type Layout } from "./layout";
 /// Two shapes rather than one with a kind beside it, because the two are named
 /// by different things and nothing ever has to ask a tab what it is without
 /// then using the answer.
+///
+/// **And one of these objects is one view.** It stands in exactly one group,
+/// the pane draws exactly one box for it, and that box travels with it when it
+/// is dragged into another group — which is what keeps a terminal's socket and
+/// an editor's caret through the move. So the same file open in two groups is
+/// two of these rather than one in both, and what says they are two views of
+/// the one thing is what is *in* them: a path, or a number. See `copied` in
+/// `Code.tsx`, which is what a split makes the second one with.
 export type Tab = { terminal: number } | { file: string };
 
 /// What a file's last save came to, where it came to anything the tab draws.

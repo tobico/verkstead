@@ -70,6 +70,29 @@
   overflow: hidden;
 }
 
+/* Where a group's views go, and the one thing in it that grows: the tab
+   showing, and every other tab of the group drawn and hidden beside it.
+
+   A slot rather than the views themselves, because a view is drawn once for
+   the whole pane and placed into whichever group holds it — see `Code.tsx`.
+   What that keeps is the socket under a terminal's tab and the caret under a
+   file's when the tab is dragged into another group: what moves is this box's
+   contents rather than anything being made again. */
+.content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* And one view inside it, which is nothing to the layout: what it wraps is
+   already what the column holds — an editor that fills the room, a grid that
+   fills it, a line that does not — and a box of its own between the two would
+   be a second thing to teach how tall it is. */
+.view {
+  display: contents;
+}
+
 /* And which of them a file pressed in the tree will open in, said in the one
    word that says it — the active group is read off `aria-current` the way the
    tab showing is read off `aria-pressed`. The bar's own border in the accent
@@ -194,6 +217,7 @@
    VS Code's separator, which is what tells abutting tabs apart when neither is
    the one showing. */
 .tabFrame {
+  position: relative;
   display: flex;
   flex: none;
   align-items: center;
@@ -202,6 +226,39 @@
 
 .tabFrame:first-child {
   border-left: 0;
+}
+
+/* The tab in the hand, taken back while it is being carried. What says where it
+   is going is the line below; a tab that looked untouched while that line
+   travelled along the bar would be two answers to the one gesture. */
+.tabFrame.lifted {
+  opacity: 0.45;
+}
+
+/* And that line: where the tab in the hand would land if it were let go now.
+
+   Drawn on the tab it would land beside — in front of that one, or after the
+   last of them where it would land past every one — rather than as something
+   standing between two tabs: a line with a width of its own would move the bar
+   under the very hand it is answering.
+
+   In the accent, which is what this pane paints *the page has heard you* in:
+   the active group's bar takes the same colour. */
+.tabFrame[data-mark="before"]::before,
+.tabFrame[data-mark="after"]::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  width: 2px;
+  background: var(--accent);
+}
+
+.tabFrame[data-mark="before"]::before {
+  left: -1px;
+}
+
+.tabFrame[data-mark="after"]::after {
+  right: -1px;
 }
 
 /* And the one showing, in the paper the pane's content is drawn on: VS Code's

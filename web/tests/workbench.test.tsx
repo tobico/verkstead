@@ -21646,6 +21646,513 @@ describe("the code pane's groups", () => {
       );
     });
   });
+
+  /// And a tab picked up and put down with the pointer, which is how it is
+  /// moved along its own bar and into another group's.
+  ///
+  /// The gesture is the sidebar card's — the pointer captured at the press, the
+  /// rest of it watched at the window, a grace before a press becomes a drag —
+  /// and that half is asked about where it is written, over there. What is
+  /// worth asking here is what a bar of tabs makes of it: where a drop lands,
+  /// what a group left empty does, and what becomes of the socket under a
+  /// terminal that has just moved.
+  ///
+  /// jsdom lays nothing out, so the bars and the tabs on them are stood in for
+  /// the way the layer is for the dividers above: every group's bar is a row of
+  /// its own down the page, and every tab on it is a hundred pixels wide in the
+  /// order it is drawn. Which is the whole of what a drag asks the page —
+  /// which bar the pointer is over, and which side of a tab's middle it fell.
+  describe("and a tab dragged along a bar and into another", () => {
+    /// How tall a bar is pretending to be, and how wide a tab on it, in the
+    /// pixels a drag is reported in.
+    const BAR = 100;
+    const TAB = 100;
+
+    /// And how wide the bar itself is: wider than the tabs on it, there being
+    /// room past the last of them to let a tab go.
+    const WIDE = 400;
+
+    /// What everything that is not a bar or a tab still answers with.
+    const measured = Element.prototype.getBoundingClientRect;
+
+    /// Where a bar stands: a row of its own down the layer, in the order the
+    /// groups are drawn in it.
+    function rowOf(bar: Element): number {
+      const box = bar.closest(`.${codePane.group}`)!;
+      const layer = box.closest(`.${codePane.stack}`)!;
+
+      return [...layer.querySelectorAll(`.${codePane.group}`)].indexOf(box);
+    }
+
+    function boxed(left: number, top: number, wide: number, tall: number) {
+      return {
+        left,
+        top,
+        right: left + wide,
+        bottom: top + tall,
+        width: wide,
+        height: tall,
+        x: left,
+        y: top,
+        toJSON: () => ({}),
+      } as DOMRect;
+    }
+
+    beforeEach(() => {
+      // Worked out at the moment it is asked for rather than fixed here,
+      // because the bars move under the hand: a tab that was second and is now
+      // first has to answer for where it is now.
+      Element.prototype.getBoundingClientRect = function (this: Element) {
+        const bar = this.closest(`.${codePane.tabs}`);
+
+        if (bar === null) {
+          return measured.call(this);
+        }
+
+        const top = rowOf(bar) * BAR;
+
+        if (this === bar) {
+          return boxed(0, top, WIDE, BAR);
+        }
+
+        const at = [
+          ...bar.querySelectorAll(`.${codePane.tabFrame}`),
+        ].indexOf(this);
+
+        return at < 0 ? measured.call(this) : boxed(at * TAB, top, TAB, BAR);
+      };
+    });
+
+    afterEach(() => {
+      Element.prototype.getBoundingClientRect = measured;
+    });
+
+    /// A point on the bar of the group drawn Nth, in front of the tab standing
+    /// at this place along it — the near side of that tab's middle, which is
+    /// where one place along a bar becomes the next. Past the last of them
+    /// where there is no tab there, which is the end of the bar.
+    function place(row: number, at: number): { x: number; y: number } {
+      return { x: at * TAB + 10, y: row * BAR + BAR / 2 };
+    }
+
+    /// The tab of this name, which is what a drag takes hold of.
+    function tabbed(of: ParentNode, name: string): HTMLButtonElement {
+      const found = tabs(of).find((one) => one.textContent === name);
+
+      if (!found) {
+        throw new Error(`there is no tab called ${name}`);
+      }
+
+      return found;
+    }
+
+    /// Pick one up and carry it over these points with the mouse, letting go at
+    /// the last of them: the press where the tab stands, a move apiece, and the
+    /// release. Past the grace on the way out, since a press that never travels
+    /// is a press.
+    function carry(
+      tab: HTMLElement,
+      ...over: { x: number; y: number }[]
+    ): void {
+      const from = (
+        tab.closest(`.${codePane.tabFrame}`) ?? tab
+      ).getBoundingClientRect();
+
+      fireEvent.pointerDown(tab, {
+        button: 0,
+        pointerId: 1,
+        pointerType: "mouse",
+        clientX: from.left + from.width / 2,
+        clientY: from.top + from.height / 2,
+      });
+
+      for (const point of over) {
+        fireEvent.pointerMove(window, {
+          pointerId: 1,
+          clientX: point.x,
+          clientY: point.y,
+        });
+      }
+
+      const last = over.at(-1)!;
+
+      fireEvent.pointerUp(window, {
+        pointerId: 1,
+        clientX: last.x,
+        clientY: last.y,
+      });
+    }
+
+    /// Where the line saying a tab would land is: the group whose bar it is on,
+    /// the tab it is drawn on and which side of that tab. One at most, there
+    /// being one pointer — and none at all every moment nobody is dragging.
+    ///
+    /// Drawn on the tab it would land beside rather than as a thing standing
+    /// between two of them, so this is read off the tabs.
+    function lines(container: ParentNode): string[] {
+      return groups(container).flatMap((group, at) =>
+        [
+          ...group.querySelectorAll<HTMLElement>(
+            `.${codePane.tabFrame}[data-mark]`,
+          ),
+        ].map(
+          (frame) =>
+            `${at} ${frame.dataset.mark!} ${frame.querySelector(`.${codePane.tab}`)?.textContent}`,
+        ),
+      );
+    }
+
+    /// The socket onto one of the conversation's terminals, by the number in
+    /// its path: what is worth asserting is which shell a window is watching.
+    function attachedTo(number: number): Promise<Attached> {
+      return waitFor(() => {
+        const socket = Attached.opened.find((one) =>
+          one.url.endsWith(`${TERMINALS_OF_IT}/${number}/attach`),
+        );
+
+        if (!socket) {
+          throw new Error(`nothing has attached to terminal ${number}`);
+        }
+
+        return socket;
+      });
+    }
+
+    /// What a window has typed up its socket.
+    function typed(socket: Attached): unknown[] {
+      return socket.sent
+        .map((wrote) => JSON.parse(wrote) as Record<string, unknown>)
+        .filter((wrote) => "PutIn" in wrote)
+        .map((wrote) => wrote.PutIn);
+    }
+
+    /// The pane with three files open in the one group, which is a bar with
+    /// something to reorder on it.
+    async function three() {
+      const mounted = await opened();
+
+      for (const name of ["Cargo.toml", "README.md", ".gitignore"]) {
+        press(mounted.container, name);
+
+        await waitFor(() =>
+          expect(
+            tabs(mounted.container).map((tab) => tab.textContent),
+          ).toContain(name),
+        );
+      }
+
+      return mounted;
+    }
+
+    /// A tab dragged along its own bar lands where the line stood — and one
+    /// that went out and came back to where it was picked up changes nothing,
+    /// there being nothing it asked for.
+    it("lands a tab along its own bar where the line stood", async () => {
+      const { container } = await three();
+
+      expect(holding(container)).toEqual([
+        ["Cargo.toml", "README.md", ".gitignore"],
+      ]);
+
+      // The first of them, carried past the last.
+      carry(tabbed(container, "Cargo.toml"), place(0, 3));
+
+      await waitFor(() =>
+        expect(holding(container)).toEqual([
+          ["README.md", ".gitignore", "Cargo.toml"],
+        ]),
+      );
+
+      // And out to the end of the bar and back to where it started, which is
+      // a gesture that asked for nothing.
+      carry(tabbed(container, "README.md"), place(0, 3), place(0, 0));
+
+      expect(holding(container)).toEqual([
+        ["README.md", ".gitignore", "Cargo.toml"],
+      ]);
+    });
+
+    /// And the line is drawn while the hand is over a bar, so that where the
+    /// tab will go is on the page before it goes there. A release away from
+    /// every bar is an ending like any other and moves nothing: the bars are
+    /// the whole of what this drops onto.
+    it("draws the line where it would land, and moves nothing away from a bar", async () => {
+      const { container } = await three();
+
+      const held = tabbed(container, "Cargo.toml");
+      const frame = held.closest(`.${codePane.tabFrame}`)!;
+
+      fireEvent.pointerDown(held, {
+        button: 0,
+        pointerId: 1,
+        pointerType: "mouse",
+        clientX: 50,
+        clientY: 50,
+      });
+
+      expect(lines(container)).toEqual([]);
+
+      fireEvent.pointerMove(window, {
+        pointerId: 1,
+        clientX: place(0, 2).x,
+        clientY: place(0, 2).y,
+      });
+
+      // One line, on the bar the hand is over and in front of the tab it would
+      // land before — and the tab in the hand taken back while it is carried.
+      await waitFor(() =>
+        expect(lines(container)).toEqual(["0 before .gitignore"]),
+      );
+      expect(frame.classList).toContain(codePane.lifted!);
+
+      // Away from every bar there is nowhere to land, so there is nothing to
+      // draw and nothing to do about the release.
+      fireEvent.pointerMove(window, { pointerId: 1, clientX: 50, clientY: 900 });
+
+      await waitFor(() => expect(lines(container)).toEqual([]));
+
+      fireEvent.pointerUp(window, {
+        pointerId: 1,
+        clientX: 50,
+        clientY: 900,
+      });
+
+      expect(holding(container)).toEqual([
+        ["Cargo.toml", "README.md", ".gitignore"],
+      ]);
+      expect(frame.classList).not.toContain(codePane.lifted!);
+    });
+
+    /// A tab dragged onto another group's bar leaves its own group, lands where
+    /// the line stood, and makes the group it landed in the active one — which
+    /// is where the work has just gone, and so where the next file pressed in
+    /// the tree opens.
+    it("takes a tab into another group's bar, and makes that group active", async () => {
+      const { container } = await opened();
+
+      press(container, "Cargo.toml");
+      await waitFor(() => expect(editors(container)).toHaveLength(1));
+
+      await split(container, tabs(container)[0]!, "Split right");
+      await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+      // The split's own group is the active one, so this opens there.
+      press(container, "README.md");
+      await waitFor(() =>
+        expect(holding(container)).toEqual([
+          ["Cargo.toml"],
+          ["Cargo.toml", "README.md"],
+        ]),
+      );
+
+      carry(tabbed(groups(container)[1]!, "README.md"), place(0, 0));
+
+      await waitFor(() =>
+        expect(holding(container)).toEqual([
+          ["README.md", "Cargo.toml"],
+          ["Cargo.toml"],
+        ]),
+      );
+
+      // The group it landed in is the active one, said where it can be read as
+      // well as seen — and the next file opens in it.
+      expect(
+        groups(container).map((group) => group.getAttribute("aria-current")),
+      ).toEqual(["true", null]);
+
+      press(container, ".gitignore");
+
+      await waitFor(() =>
+        expect(holding(container)).toEqual([
+          ["README.md", "Cargo.toml", ".gitignore"],
+          ["Cargo.toml"],
+        ]),
+      );
+    });
+
+    /// And a terminal moved keeps the shell under it. The tab carries a live
+    /// socket and this window's own memory of what has scrolled past it, so a
+    /// move that drew the tab afresh in its new group would close the socket,
+    /// throw the scrollback away and reattach to a repaint — which is why a
+    /// view is drawn once and *placed* into the group holding it.
+    it("keeps a moved terminal's socket, its scrollback and its typing", async () => {
+      withTerminals([1, 2]);
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+      await waitFor(() => expect(tabs(container)).toHaveLength(2));
+
+      const socket = await attachedTo(2);
+
+      socket.says(PAINTED);
+      socket.says({ Printed: "cargo build\r\n" });
+
+      // A second group beside it, made from the tab that is showing — which is
+      // a second view of terminal 1, and so a third socket.
+      await split(container, tabs(container)[0]!, "Split right");
+
+      await waitFor(() => expect(groups(container)).toHaveLength(2));
+      await waitFor(() => expect(Attached.opened).toHaveLength(3));
+
+      // The one grid on the page: a terminal has none until its first repaint,
+      // and terminal 2's is the only socket that has been painted.
+      const grid = await drawn(groups(container)[0]!, ".xterm-rows");
+
+      await waitFor(() => expect(grid.textContent).toContain("cargo build"));
+
+      carry(tabbed(groups(container)[0]!, "Terminal 2"), place(1, 1));
+
+      await waitFor(() =>
+        expect(holding(container)).toEqual([
+          ["Terminal 1"],
+          ["Terminal 1", "Terminal 2"],
+        ]),
+      );
+
+      // No fourth socket, and the third one still open: the box the grid is in
+      // was moved rather than made again.
+      expect(Attached.opened).toHaveLength(3);
+      expect(socket.closed).toBe(false);
+
+      // The very grid that was in the group it came from, in the group it
+      // landed in, still holding what scrolled past it.
+      expect(groups(container)[1]!.contains(grid)).toBe(true);
+      expect(grid.textContent).toContain("cargo build");
+
+      // And still taking typing, up the socket it has had all along.
+      fireEvent.keyDown(
+        await drawn<HTMLTextAreaElement>(
+          groups(container)[1]!,
+          ".xterm-helper-textarea",
+        ),
+        { key: "Enter", keyCode: 13, which: 13 },
+      );
+
+      await waitFor(() => expect(typed(socket)).toEqual(["\r"]));
+    });
+
+    /// And a group whose last tab is dragged out of it disappears, its
+    /// neighbour taking the room — the rule its last tab being *closed* already
+    /// follows, and the whole of unsplitting (ADR 0019, *Tabs and groups*).
+    it("collapses a group whose last tab is dragged out of it", async () => {
+      const { container } = await opened();
+
+      press(container, "Cargo.toml");
+      await waitFor(() => expect(editors(container)).toHaveLength(1));
+
+      await split(container, tabs(container)[0]!, "Split right");
+      await waitFor(() => expect(groups(container)).toHaveLength(2));
+
+      // The far group's Cargo.toml closed and a file of its own opened in it,
+      // so that what is dragged out of it is the only thing in it.
+      press(container, "README.md");
+      await waitFor(() =>
+        expect(holding(container)).toEqual([
+          ["Cargo.toml"],
+          ["Cargo.toml", "README.md"],
+        ]),
+      );
+      await waitFor(() => expect(editors(container)).toHaveLength(3));
+
+      fireEvent.click(crosses(groups(container)[1]!)[0]!);
+      await waitFor(() =>
+        expect(holding(container)).toEqual([["Cargo.toml"], ["README.md"]]),
+      );
+
+      carry(tabbed(groups(container)[1]!, "README.md"), place(0, 1));
+
+      await waitFor(() => expect(groups(container)).toHaveLength(1));
+      expect(holding(container)).toEqual([["Cargo.toml", "README.md"]]);
+      expect(stood(groups(container)[0]!)).toEqual({
+        left: "0%",
+        top: "0%",
+        width: "100%",
+        height: "100%",
+      });
+
+      // Both of them still open over the buffers they were always over: a group
+      // that went is a way of standing rather than anything that was in it.
+      expect(editors(container)).toHaveLength(2);
+    });
+
+    /// And a finger picks one up by holding it still. No distance tells a drag
+    /// from a swipe along the bar on a phone — both of them are the finger
+    /// moving — so what tells the two apart is the time before it does, which is
+    /// what the tab's own × freed the long press for (ADR 0019, *Tabs and
+    /// groups*).
+    it("lifts a tab under a finger that holds still, and leaves a swipe alone", async () => {
+      const { container } = await three();
+
+      const finger = (
+        kind: "pointerDown" | "pointerMove" | "pointerUp",
+        on: HTMLElement | Window,
+        at: { x: number; y: number },
+      ): void =>
+        void fireEvent[kind](on, {
+          button: 0,
+          pointerId: 1,
+          pointerType: "touch",
+          clientX: at.x,
+          clientY: at.y,
+        });
+
+      // A finger that travels before its tab has lifted is scrolling the bar,
+      // which is a gesture this leaves entirely alone.
+      finger("pointerDown", tabbed(container, "Cargo.toml"), place(0, 0));
+      finger("pointerMove", window, place(0, 3));
+      finger("pointerUp", window, place(0, 3));
+
+      expect(lines(container)).toEqual([]);
+      expect(holding(container)).toEqual([
+        ["Cargo.toml", "README.md", ".gitignore"],
+      ]);
+
+      // And one that holds still lifts it, and carries it from there.
+      finger("pointerDown", tabbed(container, "Cargo.toml"), place(0, 0));
+
+      // Longer than a tab takes to lift — see `LIFT` in `Code.tsx`.
+      await new Promise((done) => setTimeout(done, 450));
+
+      finger("pointerMove", window, place(0, 3));
+
+      // Past the last of them, which is the line after that one.
+      await waitFor(() =>
+        expect(lines(container)).toEqual(["0 after .gitignore"]),
+      );
+
+      finger("pointerUp", window, place(0, 3));
+
+      await waitFor(() =>
+        expect(holding(container)).toEqual([
+          ["README.md", ".gitignore", "Cargo.toml"],
+        ]),
+      );
+    });
+
+    /// And a tab put down where the same file is already open is the two views
+    /// becoming one: the one that was carried goes, and the group turns to the
+    /// one it already had. Two tabs of one file in a bar would be two of
+    /// everything that bar says about it — two dots, two marks of which is
+    /// showing — over the one buffer.
+    it("makes one view of two when a tab lands where its file is open", async () => {
+      const { container } = await opened();
+
+      press(container, "Cargo.toml");
+      await waitFor(() => expect(editors(container)).toHaveLength(1));
+
+      await split(container, tabs(container)[0]!, "Split right");
+      await waitFor(() => expect(editors(container)).toHaveLength(2));
+
+      carry(tabbed(groups(container)[1]!, "Cargo.toml"), place(0, 1));
+
+      await waitFor(() => expect(groups(container)).toHaveLength(1));
+      expect(holding(container)).toEqual([["Cargo.toml"]]);
+
+      // One view left, over the buffer that was always under both — which is
+      // still there, this having closed a view rather than the file.
+      expect(editors(container)).toHaveLength(1);
+      expect(theEditor().model.disposed).toBe(false);
+    });
+  });
 });
 
 /// The maximise toggle in Code's header: the press that hides the sidebar and
