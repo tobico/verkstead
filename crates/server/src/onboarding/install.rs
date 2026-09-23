@@ -215,14 +215,23 @@ const MAKE_THE_ACCOUNT: &str = "session-account create --data-dir";
 /// puts Homebrew's own two units in front of them.
 const BREW: &str = "brew";
 
-/// Where Homebrew installs, worked out by the machine the line runs on.
+/// Where Homebrew installs, which on the one Mac that reaches this is Apple
+/// silicon's prefix and no other.
 ///
-/// **Which prefix it is, is that machine's own word.** `/opt/homebrew` is Apple
-/// silicon's and `/usr/local` is Intel's, and nothing on this side of the dialog
-/// knows which Mac it is talking to: a server built for one architecture may be
-/// the one running under Rosetta on the other. So the line asks `uname` where it
-/// lands, which is what Homebrew's own installer does.
-const WHERE: &str = "prefix=/usr/local; [ \"$(uname -m)\" = arm64 ] && prefix=/opt/homebrew";
+/// **Said rather than worked out, the machine having already answered.** The
+/// line used to ask `uname -m` and fall back to Intel's `/usr/local`, from when
+/// one Mac tab covered both. [`plan`] sends an Intel Mac to [`intel`] now, so
+/// [`homebrew`] is reached for `Distro::MacOs` alone — the Mac
+/// `hw.optional.arm64` said was Apple's, see `onboarding::mac` — and
+/// `/opt/homebrew` is the only prefix this arm can rightly make.
+///
+/// **And `uname -m` was the wrong question to be left asking.** It answers for
+/// the slice the process is rather than for the Mac under it, and a shell a
+/// translated process starts is translated too — so a Verkstead under Rosetta
+/// drew Homebrew's tab correctly off `sysctl` and then raised a `chmod ug=rwx
+/// /usr/local`, which is the `Operation not permitted` this branch is here
+/// about. See ADR-0016's *Macs*.
+const PREFIX: &str = "/opt/homebrew";
 
 /// And Homebrew's own installer, run as the user over the prefix the step in
 /// front of it made.
@@ -1270,8 +1279,8 @@ fn getting(machine: &Machine, ticked: &[Dependency]) -> Getting {
     Getting::First(vec![
         Unit {
             line: format!(
-                "{WHERE}; mkdir -p \"$prefix\" && chmod ug=rwx \"$prefix\" && \
-                 chgrp admin \"$prefix\" && chown {} \"$prefix\"",
+                "mkdir -p {PREFIX} && chmod ug=rwx {PREFIX} && \
+                 chgrp admin {PREFIX} && chown {} {PREFIX}",
                 quoted(user),
             ),
             covers: Vec::new(),
@@ -2379,10 +2388,20 @@ mod tests {
         assert!(prefix.covers.is_empty(), "a prefix is nobody's row");
         assert_eq!(
             prefix.line,
-            "prefix=/usr/local; [ \"$(uname -m)\" = arm64 ] && prefix=/opt/homebrew; \
-             mkdir -p \"$prefix\" && chmod ug=rwx \"$prefix\" && chgrp admin \"$prefix\" && \
-             chown 'ada' \"$prefix\"",
-            "both prefixes, told apart by the machine it runs on, and handed to the user",
+            "mkdir -p /opt/homebrew && chmod ug=rwx /opt/homebrew && \
+             chgrp admin /opt/homebrew && chown 'ada' /opt/homebrew",
+            "Apple silicon's prefix, which is the only Mac this arm is reached \
+             for, made and handed to the user",
+        );
+
+        // And the machine is never asked which slice it is: `uname -m` answers
+        // for the process rather than for the Mac, so under Rosetta it named
+        // the one prefix whose `chmod` fails — see [`PREFIX`].
+        assert!(
+            !prefix.line.contains("uname") && !prefix.line.contains("/usr/local"),
+            "nothing here asks the process what it is, and nothing names Intel's \
+             prefix: {}",
+            prefix.line,
         );
 
         assert_eq!(

@@ -226,7 +226,11 @@ installers as the user, each landing under the home and written to
 user; `git` and Codex go to the hint screen — `xcode-select --install` opens
 Apple's own dialog, and Codex has neither a script nor a package a Mac without
 Homebrew can use, so its row links to its releases and says where the binary
-lands. Apple silicon keeps Homebrew for everything but Claude.
+lands. Apple silicon keeps Homebrew for everything but Claude, and its prefix
+step names `/opt/homebrew` outright rather than asking `uname -m` for it: that
+arm is reached for no other Mac, and `uname` answers for the slice the process
+is — a shell a translated process starts is translated too, so under Rosetta it
+named Intel's `/usr/local` and raised the `chmod` that fails.
 
 **git on a Mac counts only with the command line tools.** Every Mac has
 `/usr/bin/git`, and without the tools it is a stub that opens Apple's install
