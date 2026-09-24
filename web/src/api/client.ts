@@ -39,6 +39,8 @@ import type {
   FileMade,
   FileMaking,
   FileReading,
+  FileRenamed,
+  FileRenaming,
   FileRootsView,
   FileWrite,
   FileWritten,
@@ -672,6 +674,31 @@ export function makeFolder(id: number, path: string): Promise<FileMade> {
   return post<FileMade>(`/api/ui/conversations/${id}/files/folder/new`, {
     path,
   } satisfies FileMaking);
+}
+
+/// And one of them renamed: whatever is at a path, given a new name in the
+/// folder it is already in.
+///
+/// **A name rather than a path**, which is the whole of why a rename cannot
+/// cross two roots: two roots are two repositories, and a file taken out of one
+/// checkout and put in another is not something this pane has a way to ask for
+/// (ADR 0019, *The tree*). The field is drawn over the row, what is typed there
+/// is a name, and the server joins it onto the folder the row is already in.
+///
+/// What comes back is where it now is, which is what every open tab of that path
+/// follows — a folder renamed carrying everything under it.
+///
+/// Refused in the body like everything else here, with one refusal of its own
+/// beyond the making's: a root, which is a Worktree rather than anything in one.
+export function renamePath(
+  id: number,
+  path: string,
+  name: string,
+): Promise<FileRenamed> {
+  return post<FileRenamed>(`/api/ui/conversations/${id}/files/rename`, {
+    path,
+    name,
+  } satisfies FileRenaming);
 }
 
 /// One commit, rendered: what it said about itself, and its diff.

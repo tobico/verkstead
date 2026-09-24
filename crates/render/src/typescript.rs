@@ -23,14 +23,14 @@ use crate::{
     CompanionModeChoice, CompanionModeChosen, CompanionRemoved, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, Created, Creation, DirectoryListing, FileMade,
-    FileMaking, FileReading, FileRootsView, FileWrite, FileWritten, FolderListing, GrillingStarted,
-    InstallPress, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder,
-    NewPullRequestAdoption, OnboardingView, OpenPullRequestRepo, PrefillView, ProfileChoice,
-    ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
-    PushKey, Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
-    RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane,
-    RoleChoice, Screen, ServeEdit, ServePress, SetReading, SettingsEdit, SettingsSaved,
-    SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
+    FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileWrite, FileWritten,
+    FolderListing, GrillingStarted, InstallPress, Locked, NewAdoption, NewCompanion,
+    NewConversation, NewOrder, NewPullRequestAdoption, OnboardingView, OpenPullRequestRepo,
+    PrefillView, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry,
+    ProfileSaved, PullRequestDetails, PushKey, Registered, Registration, RemoteBanner, RemoteView,
+    RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved,
+    Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress, SetReading, SettingsEdit,
+    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
     ShowingArchived, Shown, Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved,
     SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalClosed, TerminalOpened,
     TerminalsView, TranscriptView, Unsubscribe, UpdateNotice, Watching,
@@ -255,6 +255,14 @@ fn the_viewers_types_are_written_from_these() {
     // making's alone — a name already taken.
     FileMaking::export_all(&config).unwrap();
     FileMade::export_all(&config).unwrap();
+
+    // And one renamed out of that same menu: the path it is at and the name it
+    // is to have — a name rather than a path, which is what keeps the move
+    // inside the root it started in. The making's refusals said about something
+    // that is there, with the one that is a rename's alone — a root, which is a
+    // Worktree rather than anything in one.
+    FileRenaming::export_all(&config).unwrap();
+    FileRenamed::export_all(&config).unwrap();
 
     // And what a session committed: the summary drawn out, and the diff, both of
     // which are this payload's alone — the Timeline's own card is the subject

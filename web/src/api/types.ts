@@ -2044,6 +2044,49 @@ media_type: string,
 base64: string, } } | "Binary" | "TooLarge" | "Outside" | "UnderGit" | "RootGone" | "Missing" | "NotAFile" | { "Unreadable": { why: string, } };
 
 /**
+ * What became of renaming it.
+ *
+ * [`FileMade`]'s answers said about a move rather than a making — a name
+ * already taken, a root that takes no writes, a path outside every root, a path
+ * under `.git`, a Worktree that has gone, a path that has — with the one that
+ * is a rename's alone: a root itself, which is a Worktree rather than anything
+ * in one and has no name here to change. What the human knows a root by is the
+ * Repo it is a checkout of, and that is the registry's business rather than the
+ * tree's.
+ *
+ * Each of them is a sentence drawn beside the field the name was typed into
+ * rather than a status code, the way every other answer of this API is.
+ */
+export type FileRenamed = { "Renamed": { path: string, } } | "Taken" | "IsRoot" | "ReadOnly" | "Outside" | "UnderGit" | "RootGone" | "Missing" | { "Unwritable": { why: string, } };
+
+/**
+ * Something in a root, renamed: what it is now, and what it is to be called.
+ *
+ * **A name rather than a path**, which is the whole of why a rename cannot
+ * cross two roots ([ADR 0019](../../../docs/adr/0019-the-code-pane.md), *The
+ * tree*). Two roots are two repositories, and a file taken out of one checkout
+ * and put in another is not something the pane has any way to ask for: the
+ * field is drawn over the row, it holds a name, and what the server does with
+ * it is join it onto the folder the row is already in.
+ *
+ * So this is [`FileMaking`] split in two. The making carries one path because
+ * what it names is not there yet and the name is the last segment of it; this
+ * carries the path of something that *is* there and the name it is to have,
+ * and a `name` with a separator in it is a path rather than a name — see
+ * [`FileRenamed::Outside`].
+ */
+export type FileRenaming = { 
+/**
+ * What is being renamed, as the tree has it.
+ */
+path: string, 
+/**
+ * And what it is to be called: one segment, which is what was typed into
+ * the field drawn over the row.
+ */
+name: string, };
+
+/**
  * One of them: which repository it is a checkout of, where it is, and what may
  * be done in it.
  */

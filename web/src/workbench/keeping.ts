@@ -168,6 +168,18 @@ export interface Kept {
   /// register: a model left in it is a file that could never be opened again.
   release: (path: string) => void;
 
+  /// Move what this device is holding for a file onto another path.
+  ///
+  /// What a rename does to a tab whose read has not landed yet: the buffer is
+  /// re-made at the new path by the pane, and the text the device came back
+  /// holding is what that read will put into it — so a rename in the seconds
+  /// after a reload would otherwise leave that text waiting under a path
+  /// nothing is going to ask about again.
+  ///
+  /// Nothing at all for a file this device is holding no text for, which is
+  /// nearly every one of them.
+  carry: (from: string, to: string) => void;
+
   /// The text this device was holding for a file when the page last went, where
   /// it is still holding it.
   ///
@@ -395,6 +407,19 @@ function opened(conversation: number): Kept {
   /// it, and every read after that is somebody asking for the disk.
   const recall = (path: string): string | undefined => recalling[path];
 
+  /// And the same text moved onto another path, which is what a rename does to
+  /// a tab whose read has not landed yet.
+  const carry = (from: string, to: string): void => {
+    const held = recalling[from];
+
+    if (held === undefined) {
+      return;
+    }
+
+    delete recalling[from];
+    recalling[to] = held;
+  };
+
   const kept: Kept = {
     layout,
     setLayout,
@@ -407,6 +432,7 @@ function opened(conversation: number): Kept {
     hold,
     release,
     recall,
+    carry,
     expanded,
     setExpanded,
     over,

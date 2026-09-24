@@ -64,8 +64,8 @@ pub use conversations::{
     steer_event, task_list, task_list_event, task_list_reached, unreadable_set_event,
 };
 pub use files::{
-    FileMade, FileMaking, FileReading, FileRoot, FileRootsView, FileWrite, FileWritten,
-    FolderEntry, FolderListing,
+    FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRoot, FileRootsView,
+    FileWrite, FileWritten, FolderEntry, FolderListing,
 };
 pub use onboarding::{
     AccountView, Dependency, DependencyState, DependencyView, Distro, InstallPress, InstallState,

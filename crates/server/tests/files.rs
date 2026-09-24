@@ -1,6 +1,7 @@
 //! The files API the Code pane's tree stands on, asked of a real router over a
 //! real Conversation: which roots there are, what one folder of one of them
-//! holds, what one file of one of those is — and that file saved back.
+//! holds, what one file of one of those is — that file saved back, and one of
+//! them renamed.
 //!
 //! What is worth proving out here rather than in the module's own tests is
 //! everything that takes a *Conversation* to say. The roots are read off the
@@ -28,8 +29,8 @@ use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    FileMade, FileMaking, FileReading, FileRootsView, FileWrite, FileWritten, FolderEntry,
-    FolderListing,
+    FileMade, FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileWrite,
+    FileWritten, FolderEntry, FolderListing,
 };
 use verkstead_server::{open_database, router, store};
 
@@ -922,4 +923,240 @@ async fn a_making_outside_this_conversations_roots_is_refused() {
     };
     assert_eq!(none, FileMade::Outside);
     assert!(!worktree.join("mine.rs").exists());
+}
+
+/// One renamed out of that same menu: whatever is at a path, given a new name in
+/// the folder it is already in.
+async fn rename(app: &Router, conversation: i64, at: &Path, name: &str) -> FileRenamed {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/ui/conversations/{conversation}/files/rename"))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&FileRenaming {
+                        path: at.display().to_string(),
+                        name: name.to_owned(),
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body = String::from_utf8(bytes.to_vec()).unwrap();
+
+    assert_eq!(status, StatusCode::OK, "the rename failed: {body}");
+
+    serde_json::from_str(&body)
+        .unwrap_or_else(|error| panic!("the rename answered {body}: {error}"))
+}
+
+/// A file renamed moves where it stands, keeping what is in it, and is the row
+/// the folder draws the next time the tree reads it — which is the whole of what
+/// the menu's third row does. A folder renamed carries everything under it.
+#[tokio::test]
+async fn a_rename_moves_it_within_the_folder_it_is_in() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling_alongside(&pool, dir.path(), &[]).await;
+
+    std::fs::create_dir_all(worktree.join("src/inner")).unwrap();
+    std::fs::write(worktree.join("src/inner/deep.rs"), "deep\n").unwrap();
+
+    assert_eq!(
+        rename(
+            &app,
+            conversation,
+            &worktree.join("src/inner/deep.rs"),
+            "shallow.rs"
+        )
+        .await,
+        FileRenamed::Renamed {
+            path: worktree
+                .join("src/inner")
+                .join("shallow.rs")
+                .display()
+                .to_string()
+        }
+    );
+    assert_eq!(
+        std::fs::read_to_string(worktree.join("src/inner/shallow.rs")).unwrap(),
+        "deep\n"
+    );
+    assert_eq!(
+        names(folder(&app, conversation, &worktree.join("src/inner")).await),
+        ["shallow.rs"]
+    );
+
+    // And a folder, which moves with everything under it — the tabs of every
+    // file inside one follow it, which is what the pane does with this answer.
+    assert_eq!(
+        rename(&app, conversation, &worktree.join("src"), "crates").await,
+        FileRenamed::Renamed {
+            path: worktree.join("crates").display().to_string()
+        }
+    );
+    assert_eq!(
+        std::fs::read_to_string(worktree.join("crates/inner/shallow.rs")).unwrap(),
+        "deep\n"
+    );
+    assert!(!worktree.join("src").exists());
+}
+
+/// A root cannot be renamed, whichever root it is: it is a Worktree rather than
+/// something in one, and what the human knows it by is the Repo it is a checkout
+/// of. The tree offers no Rename row on one, so this is the endpoint refusing on
+/// its own account.
+#[tokio::test]
+async fn a_root_is_refused_and_a_read_only_one_renames_nothing() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, companions) = grilling_alongside(
+        &pool,
+        dir.path(),
+        &[
+            ("askance", store::CompanionMode::ReadWrite),
+            ("verkstead-site", store::CompanionMode::ReadOnly),
+        ],
+    )
+    .await;
+
+    assert_eq!(
+        rename(&app, conversation, &worktree, "elsewhere").await,
+        FileRenamed::IsRoot
+    );
+    assert_eq!(
+        rename(&app, conversation, &companions[1], "elsewhere").await,
+        FileRenamed::IsRoot
+    );
+    assert!(worktree.is_dir());
+
+    // The read-write companion renames like the Conversation's own: what is
+    // refused is the mode rather than being a companion.
+    assert_eq!(
+        rename(
+            &app,
+            conversation,
+            &companions[0].join("README.md"),
+            "NOTES.md"
+        )
+        .await,
+        FileRenamed::Renamed {
+            path: companions[0].join("NOTES.md").display().to_string()
+        }
+    );
+
+    assert_eq!(
+        rename(
+            &app,
+            conversation,
+            &companions[1].join("README.md"),
+            "NOTES.md"
+        )
+        .await,
+        FileRenamed::ReadOnly
+    );
+    assert!(companions[1].join("README.md").exists());
+    assert!(!companions[1].join("NOTES.md").exists());
+}
+
+/// And a rename is bounded by exactly the roots a read is, with the *name*
+/// bounded beside the path: two roots are two repositories, and the one thing
+/// that could carry a row from one into another is a name that is really a path.
+#[tokio::test]
+async fn a_rename_outside_this_conversations_roots_is_refused() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling_alongside(&pool, dir.path(), &[]).await;
+
+    // Another Conversation's Worktree, which is a real checkout this server
+    // reads and is under none of *these* roots.
+    let (_, elsewhere, _) = grilling_alongside(&pool, &dir.path().join("second"), &[]).await;
+
+    assert_eq!(
+        rename(&app, conversation, &elsewhere.join("README.md"), "NOTES.md").await,
+        FileRenamed::Outside
+    );
+    assert_eq!(
+        rename(
+            &app,
+            conversation,
+            &worktree.join("../README.md"),
+            "NOTES.md"
+        )
+        .await,
+        FileRenamed::Outside
+    );
+
+    // A name that names somewhere else — which is the only shape a request to
+    // cross two roots could have, and is not a name.
+    assert_eq!(
+        rename(
+            &app,
+            conversation,
+            &worktree.join("README.md"),
+            &elsewhere.join("README.md").display().to_string()
+        )
+        .await,
+        FileRenamed::Outside
+    );
+    assert_eq!(
+        rename(
+            &app,
+            conversation,
+            &worktree.join("README.md"),
+            "../taken.md"
+        )
+        .await,
+        FileRenamed::Outside
+    );
+
+    assert_eq!(
+        rename(&app, conversation, &worktree.join(".git/config"), "conf").await,
+        FileRenamed::UnderGit
+    );
+    assert_eq!(
+        rename(
+            &app,
+            conversation,
+            &worktree.join("nowhere.md"),
+            "somewhere.md"
+        )
+        .await,
+        FileRenamed::Missing
+    );
+    assert_eq!(
+        std::fs::read_to_string(elsewhere.join("README.md")).unwrap(),
+        "# a repository\n"
+    );
+
+    // And a Conversation nothing knows about has no roots, so nothing is under
+    // one of them — the read's answer, and the same thing is true of it.
+    let none: FileRenamed = {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/ui/conversations/404/files/rename")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&FileRenaming {
+                            path: worktree.join("README.md").display().to_string(),
+                            name: "NOTES.md".to_owned(),
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap()
+    };
+    assert_eq!(none, FileRenamed::Outside);
+    assert!(worktree.join("README.md").exists());
 }

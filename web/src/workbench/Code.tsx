@@ -175,6 +175,18 @@
 //! — two tabs, one buffer, and two views of the one text. Typing in either
 //! shows in the other, the dot is on both tabs and one save clears both.
 //!
+//! **And every open tab follows its file when the tree renames one.** The tab
+//! is retitled, its reading is re-keyed onto the new path and its buffer is
+//! re-made there — a Monaco model is registered at the file's own address and
+//! the package cannot rename one, so the model is disposed and made again with
+//! the same text in it. What carries over is the text and whether it is dirty;
+//! what goes is the undo stack, which is Monaco's limit rather than a choice.
+//! The next Ctrl+S writes to the new path. A folder renamed carries everything
+//! under it — every open tab whose path was inside it, and every folder of the
+//! tree expanded beneath it — and the same file open in two groups is one
+//! buffer under both, so both tabs follow together. See [`renamed`], which is
+//! where every place the path was written down is moved.
+//!
 //! Opened by the code icon on the Timeline's header — see `Timeline.tsx` —
 //! which is a details pane like every other, at a path of its own so it survives
 //! a reload and can be linked to. The second pane nothing on the record opens: a
@@ -368,6 +380,7 @@ import type {
   ConversationView,
   FileReading,
   FileWritten,
+  FolderListing,
   TerminalOpened,
 } from "../api/types";
 import { useReading } from "../freshness";
@@ -570,6 +583,75 @@ export function named(path: string): string {
   return path.split(/[/\\]/).filter(Boolean).pop() ?? path;
 }
 
+/// A record of things named by path, with the paths a rename reached moved onto
+/// where they now are.
+///
+/// Written once because the pane keeps several of them — what each open file was
+/// read as, what its last save came to, which folders of the tree are open — and
+/// a rename moves the key in every one of them the same way. What is under the
+/// key is left as it was unless `inside` is given, which is for the two that name
+/// their own path a second time within themselves.
+function rekeyed<T>(
+  was: Record<string, T>,
+  moved: (path: string) => string | null,
+  inside?: (held: T, at: string) => T,
+): Record<string, T> {
+  return Object.fromEntries(
+    Object.entries(was).map(([path, held]) => {
+      const at = moved(path);
+
+      return at === null
+        ? [path, held]
+        : [at, inside === undefined ? held : inside(held, at)];
+    }),
+  );
+}
+
+/// One reading with the path it names moved onto where the file now is.
+///
+/// A reading that went on naming where the file *was* would be the one thing
+/// left in the pane still saying so — the text, the version and the bytes are
+/// all about the file wherever it has got to. The refusals name nothing, being
+/// words.
+function atPath(reading: FileReading, at: string): FileReading {
+  if (typeof reading === "string") {
+    return reading;
+  }
+
+  if ("Text" in reading) {
+    return { Text: { ...reading.Text, path: at } };
+  }
+
+  return "Image" in reading ? { Image: { ...reading.Image, path: at } } : reading;
+}
+
+/// And one folder listing with every path in it moved: the folder it lists, and
+/// each row it holds.
+///
+/// The rows are what a press in the tree opens, so a listing still naming the
+/// old paths after its folder moved would be a column of rows that are not
+/// there.
+function listed(
+  listing: FolderListing,
+  moved: (path: string) => string | null,
+): FolderListing {
+  if (typeof listing === "string" || !("Listed" in listing)) {
+    return listing;
+  }
+
+  const { path, entries } = listing.Listed;
+
+  return {
+    Listed: {
+      path: moved(path) ?? path,
+      entries: entries.map((entry) => ({
+        ...entry,
+        path: moved(entry.path) ?? entry.path,
+      })),
+    },
+  };
+}
+
 export function Code(props: {
   conversation: ConversationView;
   back: () => void;
@@ -668,6 +750,7 @@ export function Code(props: {
     hold,
     release,
     recall,
+    carry,
     expanded,
     setExpanded,
     over,
@@ -1828,6 +1911,116 @@ export function Code(props: {
     unbar(path);
   };
 
+  /// Every open tab follows its file, which is what a rename in the tree leaves
+  /// this pane to do.
+  ///
+  /// **The path is written down in more places than the tab.** What each group
+  /// is showing and what it has open; what each of those was read as; the bar a
+  /// refused save left standing; which of them a save is in flight for; which
+  /// folders of the tree are open, and the rows each of them last read; the text
+  /// this device is holding for a file nobody has saved; and the buffer itself.
+  /// Every one of them is keyed by path, and a rename moves the key.
+  ///
+  /// **A folder carries everything under it**, which is why what is moved is a
+  /// prefix rather than one string: a folder renamed is every open tab whose
+  /// path was inside it and every folder of the tree expanded beneath it, all
+  /// moved in the one press (ADR 0019, *The tree*). A file is the same rule with
+  /// nothing under it.
+  ///
+  /// **And the buffer is re-made rather than moved.** A Monaco model is
+  /// registered at the file's own address and the package cannot rename one, so
+  /// the model is disposed and made again with the same text in it. What carries
+  /// over is the text and — because the reading moved with it — whether the tab
+  /// is dirty; what goes is the undo stack, which is Monaco's limit rather than a
+  /// choice. The same file open in two groups is one buffer under both, so both
+  /// tabs follow together.
+  const renamed = (from: string, to: string): void => {
+    // What the rename reached: the path itself, and anything under it where it
+    // was a folder. Spelled with either separator, because a path here is
+    // spelled the way the root it came from is and a Worktree on Windows uses a
+    // `\` — see `FolderEntry::path`, which is where the join is made.
+    const moved = (path: string): string | null => {
+      if (path === from) {
+        return to;
+      }
+
+      const next = path.slice(from.length, from.length + 1);
+
+      return path.startsWith(from) && (next === "/" || next === "\\")
+        ? to + path.slice(from.length)
+        : null;
+    };
+
+    // Taken before anything moves: the tabs are about to be re-keyed, and what
+    // each buffer is re-made from is the text it is holding now.
+    const held = buffers();
+    const carried = [
+      ...new Set(viewed().flatMap((tab) => ("file" in tab ? [tab.file] : []))),
+    ].flatMap((path) => {
+      const next = moved(path);
+
+      return next === null ? [] : [[path, next] as const];
+    });
+
+    batch(() => {
+      // The tabs of every group, and which of them each group is showing. The
+      // tab it was turned to is found before the move and named again after it,
+      // rather than its key being taken apart: what a tab is known by is
+      // [`keyed`]'s business.
+      for (const group of groups()) {
+        const was = group.tabs();
+        const now = was.map((tab) =>
+          "file" in tab ? { file: moved(tab.file) ?? tab.file } : tab,
+        );
+        const at = was.findIndex((tab) => keyed(tab) === group.chosen());
+
+        group.setTabs(now);
+
+        if (at >= 0) {
+          group.setChosen(keyed(now[at]!));
+        }
+      }
+
+      // What each was read as, with the path inside the reading moved too: a
+      // reading that went on naming where the file *was* would be the one thing
+      // here still saying so.
+      setReadings((was) => rekeyed(was, moved, atPath));
+      setBars((was) => rekeyed(was, moved));
+
+      for (const path of [...saving]) {
+        const next = moved(path);
+
+        if (next !== null) {
+          saving.delete(path);
+          saving.add(next);
+        }
+      }
+
+      // And the folders of the tree that are open, listings and all — the rows
+      // one holds name their own paths, and a row still naming the old one is a
+      // press that would open a file that is not there.
+      setExpanded((was) =>
+        rekeyed(was, moved, (listing) => listed(listing, moved)),
+      );
+    });
+
+    for (const [path, next] of carried) {
+      // What this device is holding for it goes first, `release` being what
+      // throws that away: a rename in the seconds after a reload is a tab whose
+      // read has not landed, and the text it is going to put in the buffer is
+      // still on the device.
+      carry(path, next);
+
+      const buffer = held[path];
+
+      release(path);
+
+      if (buffer !== undefined) {
+        hold(next, buffer.text());
+      }
+    }
+  };
+
   /// What the disk said about one open file, and whether there is text in it
   /// that the disk has not got.
   ///
@@ -2336,6 +2529,7 @@ export function Code(props: {
           open={openFile}
           pick={pick}
           carried={taken}
+          renamed={renamed}
           held={expanded}
           setHeld={setExpanded}
         />

@@ -37,17 +37,18 @@ use verkstead_render::{
     CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
     CompanionView, CompileCaching, ConflictResolution, ConversationArchived, ConversationClosed,
     ConversationEntry, ConversationSteered, ConversationStopped, ConversationUnarchived,
-    ConversationView, Creation, Cursor, FileMade, FileMaking, FileReading, FileRootsView,
-    FileWrite, FileWritten, FolderListing, GrillingStarted, IgnoreRule, IgnoredCommentsEdit,
-    InstallPress, Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion,
-    NewConversation, NewOrder, NewPullRequestAdoption, PairingView, Parked, PendingSteerView,
-    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView,
-    RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
-    ServeEdit, ServePress, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
-    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
-    ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView,
-    SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalOpened,
-    TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
+    ConversationView, Creation, Cursor, FileMade, FileMaking, FileReading, FileRenamed,
+    FileRenaming, FileRootsView, FileWrite, FileWritten, FolderListing, GrillingStarted,
+    IgnoreRule, IgnoredCommentsEdit, InstallPress, Lifecycle, Locked, Merging, MissedOut,
+    NewAdoption, NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption, PairingView,
+    Parked, PendingSteerView, ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration,
+    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice,
+    RuleField, RuleRefused, ServeEdit, ServePress, SetReading, SetView, SettingsEdit,
+    SettingsSaved, SettingsView, ShareCommented, SharePublished, SharedCommit, SharedConversation,
+    ShowArchived, ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened,
+    SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp,
+    TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice,
+    Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -275,6 +276,15 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             "/api/ui/conversations/{id}/files/folder/new",
             post(new_folder),
         )
+        // And the one that moves a row rather than making one: whatever is at a
+        // path, given a new name in the folder it is already in — see
+        // [`rename_path`]. One route for both kinds, unlike the two above,
+        // because a rename is one thing to do and what is at the path is the
+        // filesystem's business rather than the request's.
+        //
+        // A name rather than a path in the body, which is what keeps the move
+        // inside the root it started in: two roots are two repositories.
+        .route("/api/ui/conversations/{id}/files/rename", post(rename_path))
         // And one commit — its summary and its diff — fetched the same way and
         // for the same reason; see [`commit_pane`].
         .route(
@@ -3257,6 +3267,62 @@ async fn made(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "making a file in a Worktree failed");
             unavailable("it could not be made")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/files/rename` — whatever is at a path, given
+/// a new name in the folder it is already in.
+///
+/// The path and a *name* in the body, and the name is the whole of the bound:
+/// two roots are two repositories, and a rename that crossed them would be a
+/// file taken out of one checkout and put in another (ADR 0019, *The tree*). So
+/// the viewer has no way to ask for one — the field is drawn over the row, and
+/// what is typed into it is joined onto the folder that row is already in.
+///
+/// Refused in the body like everything else here, with one refusal of its own
+/// beyond the making's: a root, which is a Worktree rather than anything in one
+/// and has no name here to change. What comes back is where it now is, which is
+/// what every open tab of that path follows.
+///
+/// **Not a record**, for the reason nothing else in `files` is: it is the
+/// human's own hand in their own checkout, and what records it is the commit
+/// they make afterwards.
+async fn rename_path(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(asking): Json<FileRenaming>,
+) -> HttpResponse {
+    // An id that names no Conversation names no roots, so nothing is under one
+    // of them — the read's answer, read as permissively.
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(FileRenamed::Outside).into_response();
+    };
+
+    let conversation = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return Json(FileRenamed::Outside).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
+            return unavailable("this conversation's worktrees could not be read");
+        }
+    };
+
+    // Off the runtime: a path is resolved and one entry is moved.
+    let outcome = tokio::task::spawn_blocking(move || {
+        crate::files::rename(
+            &crate::files::roots(&conversation),
+            std::path::Path::new(&asking.path),
+            &asking.name,
+        )
+    })
+    .await;
+
+    match outcome {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "renaming a file of a Worktree failed");
+            unavailable("it could not be renamed")
         }
     }
 }

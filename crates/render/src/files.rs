@@ -1,6 +1,6 @@
 //! The files half of Code: the roots its tree stands on, one folder of one of
 //! them at a time, one file of one of those opened — and a file or a folder
-//! made in one of them.
+//! made in one of them, or renamed.
 //!
 //! **A root is a Worktree** — the Conversation's own first, then each
 //! companion's in the order the Conversation carries them
@@ -36,6 +36,13 @@
 //! an empty file or a folder, under a folder of a root, named in full. One
 //! refusal of its own, a name that is already taken, and every other one is the
 //! write's said about a path that is not there yet.
+//!
+//! **And renames one** — see [`FileRenaming`] and [`FileRenamed`]: a path in a
+//! root, and the name it is to have. A *name* rather than a path, which is what
+//! keeps a rename inside the root it started in — two roots are two
+//! repositories, and a file taken out of one checkout and put in another is not
+//! a thing a tree gets to do. One refusal of its own beyond the making's: a root
+//! itself, which is a Worktree rather than something in one.
 //!
 //! Every refusal is a named outcome rather than a status code, as registering
 //! a Repo refuses and as that dropdown's listing does — because each of them is
@@ -449,5 +456,107 @@ pub enum FileMade {
 
     /// The server could not make it, and this is why — permissions, a full
     /// disk, or a folder that went between the check and the making.
+    Unwritable { why: String },
+}
+
+/// Something in a root, renamed: what it is now, and what it is to be called.
+///
+/// **A name rather than a path**, which is the whole of why a rename cannot
+/// cross two roots ([ADR 0019](../../../docs/adr/0019-the-code-pane.md), *The
+/// tree*). Two roots are two repositories, and a file taken out of one checkout
+/// and put in another is not something the pane has any way to ask for: the
+/// field is drawn over the row, it holds a name, and what the server does with
+/// it is join it onto the folder the row is already in.
+///
+/// So this is [`FileMaking`] split in two. The making carries one path because
+/// what it names is not there yet and the name is the last segment of it; this
+/// carries the path of something that *is* there and the name it is to have,
+/// and a `name` with a separator in it is a path rather than a name — see
+/// [`FileRenamed::Outside`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct FileRenaming {
+    /// What is being renamed, as the tree has it.
+    pub path: String,
+
+    /// And what it is to be called: one segment, which is what was typed into
+    /// the field drawn over the row.
+    pub name: String,
+}
+
+/// What became of renaming it.
+///
+/// [`FileMade`]'s answers said about a move rather than a making — a name
+/// already taken, a root that takes no writes, a path outside every root, a path
+/// under `.git`, a Worktree that has gone, a path that has — with the one that
+/// is a rename's alone: a root itself, which is a Worktree rather than anything
+/// in one and has no name here to change. What the human knows a root by is the
+/// Repo it is a checkout of, and that is the registry's business rather than the
+/// tree's.
+///
+/// Each of them is a sentence drawn beside the field the name was typed into
+/// rather than a status code, the way every other answer of this API is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum FileRenamed {
+    /// It has moved, and this is where — the folder it was already in with the
+    /// new name joined on.
+    ///
+    /// Answered back rather than assumed, for [`FileMade::Made`]'s reason: what
+    /// the tree holds is spelled the way the root it came from is, and a viewer
+    /// that joined with a `/` on a machine whose paths use a `\` would be
+    /// handing the tab a second name for the one file.
+    ///
+    /// **And it is what every open tab follows.** A tab at the old path is
+    /// retitled and re-keyed onto this one, and a folder renamed carries
+    /// everything under it — see `Code.tsx`, where that is done.
+    Renamed { path: String },
+
+    /// Something of that name is already in the folder, and nothing moved.
+    ///
+    /// Whatever it is, for [`FileMade::Taken`]'s reason: what the human does
+    /// about it is type another name in every case.
+    ///
+    /// Not what the thing being renamed is: a name that differs from the one it
+    /// has only in its case is a rename this allows, a filesystem that does not
+    /// tell two cases apart being the one place where a thing is standing in its
+    /// own way.
+    Taken,
+
+    /// It is a root, which is a Worktree rather than something in one.
+    ///
+    /// The refusal that is a rename's alone. The tree offers no Rename row on a
+    /// root, so this is the endpoint refusing on its own account — and a root
+    /// renamed would be a Worktree moved out from under the session working in
+    /// it, which is not something a file tree gets to do.
+    IsRoot,
+
+    /// The root it is in takes no writes: a read-only companion, checked out
+    /// detached and there to be read.
+    ReadOnly,
+
+    /// It is under none of this Conversation's Worktrees.
+    ///
+    /// Which is what a name that is not a name comes to as well: a `name` with a
+    /// separator in it, or one spelled `..`, is a path out of the folder the row
+    /// is in rather than something to call the row — and the one thing this
+    /// endpoint will not do is move anything between two roots.
+    Outside,
+
+    /// It is inside a repository's git directory, which Code does not touch —
+    /// asked of what it is now and of what it would be called both, a name
+    /// spelled `.git` being the one way past the first.
+    UnderGit,
+
+    /// The Worktree it is in is no longer on disk.
+    RootGone,
+
+    /// The root is there and this is not: deleted, renamed, or committed away by
+    /// a checkout in a terminal beside the tree.
+    Missing,
+
+    /// The server could not move it, and this is why — permissions, a folder
+    /// that is not empty where one is being moved over, or a path that went
+    /// between the check and the move.
     Unwritable { why: String },
 }

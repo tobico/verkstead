@@ -1,6 +1,7 @@
 //! Reading the Worktrees a Conversation has, for the Code pane: the roots its
 //! tree stands on, one folder of one of them at a time, one file of one of
-//! those opened — and that file written back, or a new one made beside it.
+//! those opened — and that file written back, a new one made beside it, or one
+//! of them renamed.
 //!
 //! **The server reads as itself, with no Sandbox in front of it**
 //! ([ADR 0019](../../../docs/adr/0019-the-code-pane.md), *The server reads and
@@ -57,6 +58,14 @@
 //! `create_new` rather than a look followed by a write, so that nothing the
 //! agent writes in the window between them is overwritten.
 //!
+//! **And renames one** — see [`rename`]: a path in a root and the name it is to
+//! have, which is a *name* rather than a path and is the whole of why a rename
+//! cannot cross two roots. A root itself is refused, being a Worktree rather
+//! than anything in one. The check for a name already taken is a look rather
+//! than the making's atomic create, there being no portable rename that refuses
+//! to overwrite — which is the one window in this module, and is said where it
+//! is.
+//!
 //! **Nothing here refuses by status code**, the way registering a Repo refuses
 //! and the way a browse's listing does: each refusal is a sentence the tree
 //! draws where its rows would be — see [`verkstead_render::FolderListing`].
@@ -73,7 +82,9 @@ use std::path::{Component, Path};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use sha2::{Digest, Sha256};
-use verkstead_render::{FileMade, FileReading, FileRoot, FileWritten, FolderEntry, FolderListing};
+use verkstead_render::{
+    FileMade, FileReading, FileRenamed, FileRoot, FileWritten, FolderEntry, FolderListing,
+};
 
 use crate::repos::feeding;
 use crate::resolved::{Resolved, resolve};
@@ -430,6 +441,130 @@ pub(crate) fn make(roots: &[FileRoot], path: &Path, making: Making) -> FileMade 
         Err(error) => FileMade::Unwritable {
             why: format!("the server cannot make it: {error}"),
         },
+    }
+}
+
+/// Give whatever is at `path` the name `name`, in the folder it is already in.
+///
+/// Blocking: a path is resolved, the name beside it is looked at, and one entry
+/// is moved.
+///
+/// **A name rather than a path, which is the whole of the bound on a rename.**
+/// Two roots are two repositories, and a file taken out of one checkout and put
+/// into another is not something a tree gets to ask for — so what arrives is one
+/// segment, joined onto the folder the row is already in, and a `name` with a
+/// separator in it is a path rather than a name (ADR 0019, *The tree*). Which is
+/// also why there is no move here at all: a rename is this, and dragging a row
+/// onto another folder is not a gesture the tree has.
+///
+/// The order the checks come in is [`make`]'s, with the one that is a rename's
+/// alone in among them: the name is a name; the path is bounded, because every
+/// other answer is about a path that has one; it is not a root, a root being a
+/// Worktree rather than anything in one; the root takes writes at all; and the
+/// disk is touched only after all four.
+///
+/// **And the look for a name already taken is a look**, which is where this
+/// parts company with [`make`] and says so. A `create_new` is the filesystem's
+/// own atomic refusal, and there is no portable rename that refuses to overwrite
+/// — so what is here is a look followed by a move, and the window between them
+/// is one nothing in std can close. Against a human's hand on a field it is
+/// microseconds, and what it risks is an agent writing that exact name inside
+/// them.
+///
+/// The one thing standing there that is not in the way is the path being renamed
+/// itself, which is what a name differing only in its case is on a filesystem
+/// that does not tell two cases apart: `README.md` to `readme.md` is a rename to
+/// allow rather than a name already taken.
+pub(crate) fn rename(roots: &[FileRoot], path: &Path, name: &str) -> FileRenamed {
+    // One plain segment and nothing else. A name with a separator in it, a `..`
+    // or a `.` is a path somebody spelled into a field that asks for a name —
+    // and a path is the one thing a rename is not asked by, so it is outside
+    // whatever it would have named.
+    let named = Path::new(name);
+
+    if named.components().count() != 1 || !named.components().all(|part| plain(&part)) {
+        return FileRenamed::Outside;
+    }
+
+    // And the folder it is already in, which is where the new name is joined on.
+    // A path with no parent names no row — [`make`]'s first refusal, for its
+    // reason.
+    let Some(folder) = path.parent() else {
+        return FileRenamed::Outside;
+    };
+
+    let (root, real) = match bound(roots, path) {
+        Bound::Inside { root, real } => (root, real),
+        Bound::Outside => return FileRenamed::Outside,
+        Bound::UnderGit => return FileRenamed::UnderGit,
+        Bound::RootGone => return FileRenamed::RootGone,
+        Bound::Missing => return FileRenamed::Missing,
+    };
+
+    // A root is a Worktree rather than something in one, and what the human
+    // knows it by is the Repo it is a checkout of. Asked as it was spelled and
+    // again resolved, which is the bound's own two measurements: the tree never
+    // spells a root any way but the roots listing's, and a symlink standing
+    // where one is would otherwise be a way to rename the checkout.
+    let at_the_root = Path::new(&root.path);
+
+    if at_the_root == path || matches!(resolve(at_the_root), Resolved::At(it) if it == real) {
+        return FileRenamed::IsRoot;
+    }
+
+    // The root's own flag rather than the file's mode — [`write`]'s reading and
+    // [`make`]'s, for their reason.
+    if !root.writable {
+        return FileRenamed::ReadOnly;
+    }
+
+    // The path is inside the root and outside its `.git`, and the name is one
+    // segment — which leaves exactly one way for the new path to be under a git
+    // directory the old one was not: to be called `.git` itself.
+    if name == GIT {
+        return FileRenamed::UnderGit;
+    }
+
+    // Beside the path as the filesystem really has it, rather than beside the
+    // path as it was spelled: what a move touches is the real directory, which
+    // is the one the bound above measured against the real root.
+    let Some(beside) = real.parent() else {
+        return FileRenamed::Outside;
+    };
+
+    let onto = beside.join(name);
+
+    if standing(&onto, &real) {
+        return FileRenamed::Taken;
+    }
+
+    match std::fs::rename(&real, &onto) {
+        // Spelled as the folder that was asked for with the new name joined on,
+        // rather than off the resolved parent and rather than echoing anything:
+        // [`FileMade::Made`]'s rule and the same join, so that the path a tab
+        // follows its file to is character for character the path the next
+        // listing of that folder draws the row under.
+        Ok(()) => FileRenamed::Renamed {
+            path: folder.join(name).display().to_string(),
+        },
+        Err(error) => FileRenamed::Unwritable {
+            why: format!("the server cannot rename it: {error}"),
+        },
+    }
+}
+
+/// Whether something is at `onto` that is not `real` itself.
+///
+/// The look a rename does for a name already taken. Of the entry rather than of
+/// what it points at, so that a link standing at the new name is something in
+/// the way whatever is at the end of it — and then resolved, because the one
+/// thing at the new name that is *not* in the way is the path being renamed,
+/// which is what a rename that only changes a name's case is on a filesystem
+/// that does not tell two cases apart.
+fn standing(onto: &Path, real: &Path) -> bool {
+    match std::fs::symlink_metadata(onto) {
+        Err(_) => false,
+        Ok(there) => there.is_symlink() || !matches!(resolve(onto), Resolved::At(it) if it == real),
     }
 }
 
@@ -1523,6 +1658,265 @@ mod tests {
         assert_eq!(
             make(&roots, &worktree.join("mine.rs"), Making::File),
             FileMade::RootGone
+        );
+    }
+
+    /// A rename moves the thing where it stands, keeping what is in it — and
+    /// answers with the folder joined to the new name, which is the path every
+    /// open tab of it follows to.
+    #[test]
+    fn a_rename_moves_it_within_the_folder_it_is_in() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+        std::fs::create_dir(worktree.join("src")).unwrap();
+        std::fs::write(worktree.join("src/lib.rs"), "fn main() {}\n").unwrap();
+
+        let roots = [root(&worktree)];
+        let at = worktree.join("src/lib.rs");
+
+        assert_eq!(
+            rename(&roots, &at, "main.rs"),
+            FileRenamed::Renamed {
+                path: worktree.join("src").join("main.rs").display().to_string()
+            }
+        );
+
+        assert!(!at.exists());
+        assert_eq!(
+            std::fs::read_to_string(worktree.join("src/main.rs")).unwrap(),
+            "fn main() {}\n",
+            "what was in it is what is in it"
+        );
+
+        // And it is the row the folder draws the moment it is read again, there
+        // being no watcher to say so until stage 04.
+        assert_eq!(names(folder(&roots, &worktree.join("src"))), ["main.rs"]);
+    }
+
+    /// A folder renames with everything under it, which is what a tab inside one
+    /// follows: the whole subtree moves in the one call the filesystem makes.
+    #[test]
+    fn a_folder_renames_with_what_is_under_it() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+        std::fs::create_dir_all(worktree.join("src/inner")).unwrap();
+        std::fs::write(worktree.join("src/inner/deep.rs"), "deep\n").unwrap();
+
+        let roots = [root(&worktree)];
+
+        assert_eq!(
+            rename(&roots, &worktree.join("src"), "crates"),
+            FileRenamed::Renamed {
+                path: worktree.join("crates").display().to_string()
+            }
+        );
+
+        assert_eq!(
+            std::fs::read_to_string(worktree.join("crates/inner/deep.rs")).unwrap(),
+            "deep\n"
+        );
+        assert!(!worktree.join("src").exists());
+    }
+
+    /// And the path it answers with is the folder as it was spelled joined to the
+    /// name, rather than the resolved parent — [`make`]'s rule, and what lets the
+    /// tab and the row of the next listing be the one file.
+    #[test]
+    fn a_rename_answers_with_the_folder_joined_to_the_new_name() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+        std::fs::create_dir(worktree.join("src")).unwrap();
+        std::fs::write(worktree.join("src/lib.rs"), "").unwrap();
+
+        // Asked for with a separator that is not this platform's own, which is
+        // what the viewer sends on Windows.
+        let asked = format!("{}/src/lib.rs", worktree.display());
+
+        assert_eq!(
+            rename(&[root(&worktree)], Path::new(&asked), "main.rs"),
+            FileRenamed::Renamed {
+                path: worktree.join("src").join("main.rs").display().to_string()
+            }
+        );
+    }
+
+    /// A name already in the folder is refused with nothing moved, whichever kind
+    /// of thing is standing there.
+    #[test]
+    fn a_name_already_taken_refuses_a_rename_and_nothing_moves() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+        std::fs::create_dir(worktree.join("src")).unwrap();
+        std::fs::write(worktree.join("notes.md"), "notes\n").unwrap();
+
+        let roots = [root(&worktree)];
+
+        assert_eq!(
+            rename(&roots, &worktree.join("notes.md"), "README.md"),
+            FileRenamed::Taken
+        );
+        assert_eq!(
+            std::fs::read_to_string(worktree.join("README.md")).unwrap(),
+            "# a repository\n",
+            "the file that was there is the file that is there"
+        );
+        assert_eq!(
+            std::fs::read_to_string(worktree.join("notes.md")).unwrap(),
+            "notes\n",
+            "and the one being renamed did not move"
+        );
+
+        // And across the two kinds: a folder where a file stands, and a file
+        // where a folder does, are one refusal and one thing to do about it.
+        assert_eq!(
+            rename(&roots, &worktree.join("src"), "README.md"),
+            FileRenamed::Taken
+        );
+        assert_eq!(
+            rename(&roots, &worktree.join("notes.md"), "src"),
+            FileRenamed::Taken
+        );
+    }
+
+    /// And a link standing at the new name is something in the way whatever it
+    /// points at — including the very file being renamed, which is the one thing
+    /// at that name that a rename would otherwise be allowed to destroy.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_at_the_new_name_is_in_the_way() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+        std::fs::write(worktree.join("notes.md"), "notes\n").unwrap();
+        std::os::unix::fs::symlink("notes.md", worktree.join("alias.md")).unwrap();
+
+        assert_eq!(
+            rename(&[root(&worktree)], &worktree.join("notes.md"), "alias.md"),
+            FileRenamed::Taken
+        );
+        assert!(worktree.join("notes.md").exists());
+    }
+
+    /// A root is a Worktree rather than something in one, so it has no name here
+    /// to change — the one refusal that is a rename's alone, answered whether the
+    /// root takes writes or not.
+    #[test]
+    fn a_root_itself_cannot_be_renamed() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+
+        assert_eq!(
+            rename(&[root(&worktree)], &worktree, "elsewhere"),
+            FileRenamed::IsRoot
+        );
+        assert!(worktree.is_dir());
+
+        // And a read-only root is the same answer: what it is comes before what
+        // may be done in it, a Worktree being no more renameable for being
+        // writable.
+        let companion = repository(&held.path().join("companion"));
+        let roots = [FileRoot {
+            repo: "askance".to_owned(),
+            path: companion.display().to_string(),
+            own: false,
+            writable: false,
+        }];
+
+        assert_eq!(rename(&roots, &companion, "elsewhere"), FileRenamed::IsRoot);
+    }
+
+    /// A read-only root renames nothing in it, before the disk is touched at all
+    /// — the root's own flag, which is what the tree read when it left the row
+    /// off the menu.
+    #[test]
+    fn a_read_only_root_renames_nothing() {
+        let held = tempfile::tempdir().unwrap();
+        let companion = repository(&held.path().join("companion"));
+
+        let roots = [FileRoot {
+            repo: "askance".to_owned(),
+            path: companion.display().to_string(),
+            own: false,
+            writable: false,
+        }];
+
+        assert_eq!(
+            rename(&roots, &companion.join("README.md"), "NOTES.md"),
+            FileRenamed::ReadOnly
+        );
+        assert!(companion.join("README.md").exists());
+        assert!(!companion.join("NOTES.md").exists());
+    }
+
+    /// And a rename is bounded the way a write is, with the name itself bounded
+    /// beside the path: a name with a separator in it is a path somebody spelled
+    /// into a field that asks for a name, and a path is the one thing that could
+    /// carry a row out of the root it is in.
+    #[test]
+    fn a_rename_is_bounded_the_way_a_write_is() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+        let elsewhere = repository(&held.path().join("elsewhere"));
+        std::fs::create_dir(worktree.join("src")).unwrap();
+
+        let roots = [root(&worktree)];
+
+        assert_eq!(
+            rename(&roots, &elsewhere.join("README.md"), "NOTES.md"),
+            FileRenamed::Outside
+        );
+        assert_eq!(
+            rename(&roots, &worktree.join("../elsewhere/README.md"), "NOTES.md"),
+            FileRenamed::Outside
+        );
+
+        // A name that is a path, which is the whole of what keeps a rename inside
+        // its root: two roots are two repositories, and neither a climb, a
+        // separator nor an absolute path is a name.
+        for name in ["../escaped.md", "src/nested.md", "..", ".", ""] {
+            assert_eq!(
+                rename(&roots, &worktree.join("README.md"), name),
+                FileRenamed::Outside,
+                "{name} is a path rather than a name"
+            );
+        }
+        assert_eq!(
+            rename(
+                &roots,
+                &worktree.join("README.md"),
+                &elsewhere.display().to_string()
+            ),
+            FileRenamed::Outside
+        );
+
+        // A repository's insides, which Code does not touch — asked of the path
+        // and of the new name both, a name spelled `.git` being the one way past
+        // the first.
+        assert_eq!(
+            rename(&roots, &worktree.join(".git/config"), "conf"),
+            FileRenamed::UnderGit
+        );
+        assert_eq!(
+            rename(&roots, &worktree.join("README.md"), ".git"),
+            FileRenamed::UnderGit
+        );
+
+        // The path is not there, which is not the same thing as the Worktree
+        // having gone.
+        assert_eq!(
+            rename(&roots, &worktree.join("nowhere.md"), "somewhere.md"),
+            FileRenamed::Missing
+        );
+
+        assert_eq!(
+            std::fs::read_to_string(worktree.join("README.md")).unwrap(),
+            "# a repository\n"
+        );
+        assert!(!elsewhere.join("NOTES.md").exists());
+
+        std::fs::remove_dir_all(&worktree).unwrap();
+        assert_eq!(
+            rename(&roots, &worktree.join("README.md"), "NOTES.md"),
+            FileRenamed::RootGone
         );
     }
 }

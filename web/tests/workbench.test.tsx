@@ -42,6 +42,7 @@ import type {
   ConversationView,
   FileMade,
   FileReading,
+  FileRenamed,
   FileRoot,
   FileRootsView,
   FileWritten,
@@ -211,7 +212,9 @@ import {
   FOLDER_REFUSAL,
   MADE_REFUSAL,
   NO_ROOTS,
+  RENAMED_REFUSAL,
   madeRefusal,
+  renamedRefusal,
 } from "../src/workbench/Tree";
 import treePane from "../src/workbench/Tree.module.css";
 // The mark a pull request's checks are said in, both ways: the hashed names to
@@ -19603,6 +19606,11 @@ describe("what a right-click on a row of the code pane's tree offers", () => {
   const NEW_FILE = `/api/ui/conversations/${GRILLING.id}/files/file/new`;
   const NEW_FOLDER = `/api/ui/conversations/${GRILLING.id}/files/folder/new`;
 
+  /// And where one of them is renamed, which is one route for both kinds: a
+  /// rename is one thing to do, and what is at the path is the filesystem's
+  /// business rather than the request's.
+  const RENAMING = `/api/ui/conversations/${GRILLING.id}/files/rename`;
+
   /// The folder rows of the tree, roots among them: both are folders, and a root
   /// is the one of them that is not a path segment.
   function folders(container: ParentNode): HTMLButtonElement[] {
@@ -19712,8 +19720,10 @@ describe("what a right-click on a row of the code pane's tree offers", () => {
     return { ...mounted, fetching };
   }
 
-  /// A folder row offers both, and nothing is dropped until one is right-clicked.
-  it("offers New file and New folder on a folder row", async () => {
+  /// A root offers the two things that can be made in it and no Rename: a root is
+  /// a worktree rather than anything in one. Nothing is dropped until a row is
+  /// right-clicked.
+  it("offers New file and New folder on a root, and no Rename", async () => {
     const { container } = await expanded(
       whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
     );
@@ -19727,30 +19737,28 @@ describe("what a right-click on a row of the code pane's tree offers", () => {
     await waitFor(() => expect(drop(container)).toBeTruthy());
     expect(offered(container)).toEqual(["New file", "New folder"]);
 
-    // A folder under the root is the same menu: a root is a folder row, and so
-    // is everything that expands under it.
+    // A folder under the root makes the same two and renames besides: it is a
+    // folder row like the root, and unlike the root it is something in a
+    // worktree.
     fireEvent.click(drop(container)!.parentElement!.querySelector("div")!);
     await waitFor(() => expect(drop(container)).toBeNull());
 
     rightClick(row(container, "crates"));
     await waitFor(() =>
-      expect(offered(container)).toEqual(["New file", "New folder"]),
+      expect(offered(container)).toEqual(["New file", "New folder", "Rename"]),
     );
   });
 
-  /// And a file row offers neither, so nothing comes down over one at all: a card
-  /// with no rows in it is worse than the browser's own menu. Rename and delete
-  /// are the two tasks after this one.
-  it("offers neither on a file row, and drops nothing", async () => {
+  /// And a file row offers Rename alone: there is nowhere in a file to make
+  /// anything. Delete is the task after this one.
+  it("offers Rename alone on a file row", async () => {
     const { container } = await expanded(
       whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
     );
 
-    // The browser's own menu is left where it was, there being nothing to put in
-    // its place.
-    expect(rightClick(row(container, "Cargo.toml", files))).toBe(false);
+    expect(rightClick(row(container, "Cargo.toml", files))).toBe(true);
 
-    expect(drop(container)).toBeNull();
+    await waitFor(() => expect(offered(container)).toEqual(["Rename"]));
     expect(field(container)).toBeNull();
   });
 
@@ -20008,6 +20016,327 @@ describe("what a right-click on a row of the code pane's tree offers", () => {
       fetching.mock.calls.filter(([path]) => String(path) === NEW_FILE),
     ).toHaveLength(0);
     expect(field(container)).toBeTruthy();
+  });
+
+  /// Rename: the field is drawn over the row it is about, holding the name it
+  /// has now, and Enter moves it — after which the folder is read again and the
+  /// tree draws the row under its new name.
+  it("renames a row from a name typed over it", async () => {
+    const at = `${OWN_ROOT.path}/Cargo.toml`;
+    const to = `${OWN_ROOT.path}/Makefile.toml`;
+
+    // What the folder holds afterwards, which is the reading it is asked for
+    // again: there is no watcher until stage 04, so a rename re-reads.
+    let held = codeFolder as FolderListing;
+
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), () => json(held)()),
+      whenever(
+        RENAMING,
+        json({ Renamed: { path: to } } satisfies FileRenamed),
+        "POST",
+      ),
+    );
+
+    rightClick(row(container, "Cargo.toml", files));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.rename}`),
+    );
+
+    // The field stands where the row does, holding the name it has now and with
+    // the keyboard in it: a rename is typed over rather than backspaced out.
+    const typing = await drawn<HTMLInputElement>(
+      container,
+      `.${treePane.field}`,
+    );
+    expect(typing.value).toBe("Cargo.toml");
+    await waitFor(() => expect(document.activeElement).toBe(typing));
+
+    // And the row it is over is not drawn beside it: the field *is* the row.
+    expect(named(container)).not.toContain("Cargo.toml");
+
+    held = {
+      Listed: {
+        path: OWN_ROOT.path,
+        entries: (
+          codeFolder as Extract<FolderListing, { Listed: unknown }>
+        ).Listed.entries.map((entry) =>
+          entry.name === "Cargo.toml"
+            ? { name: "Makefile.toml", path: to, folder: false }
+            : entry,
+        ),
+      },
+    };
+
+    fireEvent.input(typing, { target: { value: "Makefile.toml" } });
+    fireEvent.keyDown(typing, { key: "Enter" });
+
+    // A name and not a path, which is the whole of why a rename cannot cross
+    // two roots: the server joins it back onto the folder the row is in.
+    await waitFor(() =>
+      expect(sent(fetching, RENAMING)).toEqual({
+        path: at,
+        name: "Makefile.toml",
+      }),
+    );
+
+    await waitFor(() => expect(named(container)).toContain("Makefile.toml"));
+    expect(field(container)).toBeNull();
+    expect(named(container)).not.toContain("Cargo.toml");
+    expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(2);
+  });
+
+  /// A folder renamed carries what is under it: the folders of the tree open
+  /// beneath it, and the tab of every file open out of one of them. The tree
+  /// redraws under the new name, the folder above it being read again.
+  it("carries the open folders and the tabs under a renamed folder", async () => {
+    const crates = `${OWN_ROOT.path}/crates`;
+    const inside = `${crates}/server`;
+    const deep = `${inside}/server.rs`;
+    const moved = `${OWN_ROOT.path}/packages`;
+
+    // What the root holds afterwards, which is the reading it is asked for
+    // again: the folder above the renamed row is what a rename re-reads.
+    let held = codeFolder as FolderListing;
+
+    const { container } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), () => json(held)()),
+      whenever(
+        folderOf(crates),
+        json({
+          Listed: {
+            path: crates,
+            entries: [{ name: "server", path: inside, folder: true }],
+          },
+        } satisfies FolderListing),
+      ),
+      whenever(
+        folderOf(inside),
+        json({
+          Listed: {
+            path: inside,
+            entries: [{ name: "server.rs", path: deep, folder: false }],
+          },
+        } satisfies FolderListing),
+      ),
+      whenever(
+        fileOf(deep),
+        json({
+          Text: {
+            path: deep,
+            version: "0".repeat(64),
+            text: "fn main() {}\n",
+            writable: true,
+          },
+        } satisfies FileReading),
+      ),
+      whenever(
+        RENAMING,
+        json({ Renamed: { path: moved } } satisfies FileRenamed),
+        "POST",
+      ),
+    );
+
+    // Two folders down, with a file open out of the bottom one: the walk a
+    // rename has to carry.
+    fireEvent.click(row(container, "crates"));
+    await waitFor(() => expect(named(container)).toContain("server"));
+
+    fireEvent.click(row(container, "server"));
+    await waitFor(() => expect(named(container)).toContain("server.rs"));
+
+    fireEvent.click(row(container, "server.rs", files));
+    await waitFor(() => expect(tabs(container)).toHaveLength(1));
+
+    held = {
+      Listed: {
+        path: OWN_ROOT.path,
+        entries: (
+          codeFolder as Extract<FolderListing, { Listed: unknown }>
+        ).Listed.entries.map((entry) =>
+          entry.name === "crates"
+            ? { name: "packages", path: moved, folder: true }
+            : entry,
+        ),
+      },
+    };
+
+    rightClick(row(container, "crates"));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.rename}`),
+    );
+
+    fireEvent.input(await drawn(container, `.${treePane.field}`), {
+      target: { value: "packages" },
+    });
+    fireEvent.keyDown(field(container)!, { key: "Enter" });
+
+    // The tree redraws under the new name, and both folders that were open
+    // beneath it are open still: what each of them last read moved with them.
+    await waitFor(() => expect(named(container)).toContain("packages"));
+    expect(named(container)).not.toContain("crates");
+    expect(named(container)).toContain("server");
+    expect(named(container)).toContain("server.rs");
+
+    // And the tab of the file two levels down is still there, under the same
+    // name: a tab inside a renamed folder follows it.
+    expect(tabs(container)).toHaveLength(1);
+    expect(tabs(container)[0]!.textContent).toBe("server.rs");
+
+    // Which is a row of the tree at its new path — pressing it turns to the tab
+    // it already has rather than opening a second one.
+    fireEvent.click(row(container, "server.rs", files));
+    await waitFor(() => expect(tabs(container)).toHaveLength(1));
+  });
+
+  /// A root offers no Rename row at all, so the one path this field can never
+  /// name is the one that would move a worktree.
+  it("offers no Rename on a root", async () => {
+    const { container } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+    );
+
+    rightClick(row(container, OWN_ROOT.repo));
+
+    await waitFor(() => expect(drop(container)).toBeTruthy());
+    expect(offered(container)).not.toContain("Rename");
+  });
+
+  /// And what goes up is a name rather than a path, so there is no shape a
+  /// request to name a row in another root could have: whatever is typed is
+  /// sent as the name it is, and where it goes is the folder the row is already
+  /// in.
+  it("sends what was typed as a name, never as a path", async () => {
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+      whenever(
+        RENAMING,
+        json("Outside" satisfies FileRenamed),
+        "POST",
+      ),
+    );
+
+    rightClick(row(container, "Cargo.toml", files));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.rename}`),
+    );
+
+    const elsewhere = `${COMPANION_ROOT.path}/Cargo.toml`;
+    fireEvent.input(await drawn(container, `.${treePane.field}`), {
+      target: { value: elsewhere },
+    });
+    fireEvent.keyDown(field(container)!, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(sent(fetching, RENAMING)).toEqual({
+        path: `${OWN_ROOT.path}/Cargo.toml`,
+        name: elsewhere,
+      }),
+    );
+
+    // And the server's word for it is the sentence beside the field, with what
+    // was typed still in it.
+    await waitFor(() =>
+      expect(refused(container)).toBe(RENAMED_REFUSAL.Outside),
+    );
+    expect(field(container)!.value).toBe(elsewhere);
+  });
+
+  /// A name already taken is refused with the server's own sentence beside the
+  /// field, nothing moves in the tree, and the field keeps what was typed.
+  it("draws the sentence a refused rename came back with, moving nothing", async () => {
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+      whenever(RENAMING, json("Taken" satisfies FileRenamed), "POST"),
+    );
+
+    rightClick(row(container, "Cargo.toml", files));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.rename}`),
+    );
+
+    fireEvent.input(await drawn(container, `.${treePane.field}`), {
+      target: { value: "README.md" },
+    });
+    fireEvent.keyDown(field(container)!, { key: "Enter" });
+
+    await waitFor(() => expect(refused(container)).toBe(RENAMED_REFUSAL.Taken));
+
+    expect(field(container)!.value).toBe("README.md");
+    expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(1);
+    expect(named(container)).not.toContain("Cargo.toml");
+  });
+
+  /// And the name it already has is nothing to ask for: the field goes, and the
+  /// server is never troubled with a move that is not one.
+  it("asks for nothing when Enter is pressed over an untouched name", async () => {
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+    );
+
+    rightClick(row(container, "Cargo.toml", files));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.rename}`),
+    );
+
+    fireEvent.keyDown(await drawn(container, `.${treePane.field}`), {
+      key: "Enter",
+    });
+
+    await waitFor(() => expect(field(container)).toBeNull());
+    expect(
+      fetching.mock.calls.filter(([path]) => String(path) === RENAMING),
+    ).toHaveLength(0);
+
+    // And the row is back where it was, with the name it had.
+    expect(named(container)).toContain("Cargo.toml");
+  });
+
+  /// Escape over a rename leaves the tree exactly as it was: the field goes, the
+  /// row comes back, and nothing was asked for.
+  it("leaves the row as it was when Escape is pressed while renaming", async () => {
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+    );
+
+    const was = named(container);
+
+    rightClick(row(container, "Cargo.toml", files));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.rename}`),
+    );
+
+    fireEvent.input(await drawn(container, `.${treePane.field}`), {
+      target: { value: "half-typed" },
+    });
+    fireEvent.keyDown(field(container)!, { key: "Escape" });
+
+    await waitFor(() => expect(field(container)).toBeNull());
+    expect(named(container)).toEqual(was);
+    expect(
+      fetching.mock.calls.filter(([path]) => String(path) === RENAMING),
+    ).toHaveLength(0);
+  });
+
+  /// And each refusal of a rename is its own sentence rather than one "could not
+  /// be renamed", because only the human can tell which of them they are looking
+  /// at.
+  it("words every refusal of a rename as the thing it is", () => {
+    expect(new Set(Object.values(RENAMED_REFUSAL)).size).toBe(
+      Object.keys(RENAMED_REFUSAL).length,
+    );
+
+    expect(RENAMED_REFUSAL.Taken).toContain("already");
+    expect(RENAMED_REFUSAL.IsRoot).toContain("worktree");
+    expect(RENAMED_REFUSAL.Outside).toContain("name");
+    expect(RENAMED_REFUSAL.UnderGit).toContain(".git");
+
+    // And the one the server words itself, being the only one this side could
+    // not have worked out.
+    expect(renamedRefusal({ Unwritable: { why: "it is read-only" } })).toBe(
+      "it is read-only",
+    );
+    expect(renamedRefusal({ Renamed: { path: "/anywhere" } })).toBeNull();
   });
 });
 
@@ -21057,6 +21386,134 @@ describe("a file opened out of the code pane's tree", () => {
 
       await waitFor(() => expect(tabs(container)).toHaveLength(1));
       expect(card()).toBeNull();
+    });
+
+    /// And what a rename in the tree does to the tab standing over that file,
+    /// which is most of what a rename is: an open tab follows its file (ADR
+    /// 0019, *The tree*).
+    describe("and the file renamed out of the tree while it is open", () => {
+      /// Where a row of the tree is renamed: the path it is at and the name it
+      /// is to have, which is what keeps the move inside the root it is in.
+      const RENAMING = `/api/ui/conversations/${GRILLING.id}/files/rename`;
+
+      /// Where the fixture's file lands, which is the same folder under another
+      /// name.
+      const MOVED = TEXT.path.replace(/Cargo\.toml$/, "Makefile.toml");
+
+      /// The tree's rows, by what they say — which is what says the tree
+      /// redrew under the new name.
+      function rows(container: ParentNode): string[] {
+        return [
+          ...container.querySelectorAll<HTMLElement>(
+            `.${shell.detailsPane} .${treePane.tree} .${treePane.name}`,
+          ),
+        ].map((one) => one.textContent ?? "");
+      }
+
+      /// Rename the row called `was` to `now`, which is the menu, the field and
+      /// Enter.
+      async function renames(
+        container: ParentNode,
+        was: string,
+        now: string,
+        among = treePane.file,
+      ): Promise<void> {
+        const found = [
+          ...container.querySelectorAll<HTMLButtonElement>(
+            `.${shell.detailsPane} .${among}`,
+          ),
+        ].find((one) => one.textContent?.startsWith(was));
+
+        if (!found) {
+          throw new Error(`no row called ${was}; the tree has ${rows(container).join(", ")}`);
+        }
+
+        fireEvent.contextMenu(found, { clientX: 20, clientY: 40 });
+
+        const rename = await waitFor(() => {
+          const one = container.querySelector<HTMLButtonElement>(
+            `.${shell.detailsPane} .${treePane.rename}`,
+          );
+
+          if (!one) {
+            throw new Error("the menu has no Rename");
+          }
+
+          return one;
+        });
+
+        fireEvent.click(rename);
+
+        const typing = await waitFor(() => {
+          const one = container.querySelector<HTMLInputElement>(
+            `.${shell.detailsPane} .${treePane.field}`,
+          );
+
+          if (!one) {
+            throw new Error("nothing is being named");
+          }
+
+          return one;
+        });
+
+        fireEvent.input(typing, { target: { value: now } });
+        fireEvent.keyDown(typing, { key: "Enter" });
+      }
+
+      /// What the rename endpoint answers with: the path it moved to.
+      function moves(to: string): Answer {
+        return whenever(
+          RENAMING,
+          json({ Renamed: { path: to } } satisfies FileRenamed),
+          "POST",
+        );
+      }
+
+      /// The tab is retitled, the text nobody saved is still in it and still
+      /// dirty, and the next Ctrl+S writes to the new path over the version the
+      /// rename left behind.
+      it("retitles the tab, keeps its unsaved text, and saves to the new path", async () => {
+        const { container, fetching } = await opened(
+          saves(WRITTEN),
+          moves(MOVED),
+        );
+
+        await types(container, "mine\n");
+        expect(dots(container)).toHaveLength(1);
+
+        await renames(container, "Cargo.toml", "Makefile.toml");
+
+        // The tab says the new name, and the tree redrew under it — the folder
+        // is read again, there being no watcher until stage 04.
+        await waitFor(() =>
+          expect(
+            tabs(container).map((one) => one.textContent),
+          ).toContain("Makefile.toml"),
+        );
+        expect(
+          tabs(container).map((one) => one.textContent),
+        ).not.toContain("Cargo.toml");
+
+        // The text is still there and the tab is still dirty: what carried over
+        // is the text and the reading both, so the comparison between them is
+        // the one it was.
+        expect(editor(container)!.value).toBe("mine\n");
+        expect(dots(container)).toHaveLength(1);
+
+        // And the next Ctrl+S is a write to the new path, over the version the
+        // read of the old one handed over — which is the version the file still
+        // has, a rename having moved it rather than rewritten it.
+        ctrlS(container);
+
+        await waitFor(() => expect(saved(fetching)).toHaveLength(1));
+        expect(saved(fetching)[0]).toEqual({
+          path: MOVED,
+          version: TEXT.version,
+          text: "mine\n",
+        });
+
+        await waitFor(() => expect(dots(container)).toHaveLength(0));
+      });
     });
   });
 
