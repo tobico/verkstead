@@ -49,6 +49,7 @@ import type {
   FileRootsView,
   FileStatusView,
   FileWritten,
+  FolderEntry,
   FolderListing,
   GrillingStarted,
   Merging,
@@ -23067,11 +23068,12 @@ describe("a file opened out of the code pane's tree", () => {
     /// And the tree comes back open where it was left, which is the other
     /// thing the human did with this pane: the walk down to a file.
     ///
-    /// Held above the swap with the tabs and for their reason. A tree back at
-    /// its roots after every Event would be that walk made again, and the
-    /// folder is not read a second time either — a swap is not an expand, and
-    /// what is drawn is the listing that was last read.
-    it("finds the tree's folders still open, and reads none of them again", async () => {
+    /// Held above the swap with the tabs and for their reason — a tree back at
+    /// its roots after every Event would be that walk made again. What is drawn
+    /// the instant it comes back is the listing that was last read, a swap being
+    /// no expand; the read is beside that rather than in front of it, and what it
+    /// is for is the test after this one.
+    it("finds the tree's folders still open, and reads each again", async () => {
       const { container, history, fetching } = await expanded(
         OWN_ROOT,
         codeFolder as FolderListing,
@@ -23084,7 +23086,57 @@ describe("a file opened out of the code pane's tree", () => {
       await away(container, history);
 
       await waitFor(() => expect(files(container)).toHaveLength(opened));
-      expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(1);
+
+      // One read of the folder that was open and none of anything else: the
+      // folders shut cost nothing, which is the whole reason the tree reads one
+      // folder at a time.
+      await waitFor(() =>
+        expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(2),
+      );
+    });
+
+    /// And what moved while the pane was away is in the tree it comes back to.
+    ///
+    /// A tree that was not drawn was subscribed to nothing, and the pane was
+    /// not attached either — so the watcher had stopped, and an agent writing
+    /// while an Event was up raised a Nudge for nobody. Nothing afterwards would
+    /// put it right until the next thing to move in the worktree, so the mount
+    /// itself reads every folder that is open, as though a Nudge had arrived.
+    it("takes what moved while the pane was away into the tree", async () => {
+      let holding = codeFolder as FolderListing;
+
+      const { container, history } = await expanded(
+        OWN_ROOT,
+        holding,
+        whenever(folderOf(OWN_ROOT.path), () => json(holding)()),
+      );
+
+      const drawn = (): (string | null)[] =>
+        files(container).map((row) => row.textContent);
+
+      expect(drawn()).not.toContain("rustfmt.toml");
+
+      // The agent writing a file while the Event was being read, which reached
+      // nobody: no pane was attached, so nothing was running the watcher behind
+      // the Nudge.
+      holding = {
+        Listed: {
+          path: OWN_ROOT.path,
+          entries: [
+            ...(codeFolder as { Listed: { entries: FolderEntry[] } }).Listed
+              .entries,
+            {
+              name: "rustfmt.toml",
+              path: `${OWN_ROOT.path}/rustfmt.toml`,
+              folder: false,
+            },
+          ],
+        },
+      };
+
+      await away(container, history);
+
+      await waitFor(() => expect(drawn()).toContain("rustfmt.toml"));
     });
 
     /// And a folder shut before the swap stays shut while the one above it

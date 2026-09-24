@@ -37,8 +37,11 @@
 //! something else is drawn in it, so what is open is held above the swap with
 //! the tabs and the unsaved text rather than in this file — see `keeping.ts`.
 //! A swap is not an expand, so what comes back is the listing that was last
-//! read — and a pane that was down was subscribed to nothing, so the first
-//! Nudge after it is drawn again is what puts it right.
+//! read — and a tree that was not drawn was subscribed to nothing, the pane
+//! with it, so whatever moved while an Event was up reached nobody. Which is
+//! why every open folder is read again the moment the tree is drawn, as though
+//! a Nudge had arrived: it is the one moment the listings are known to be as
+//! old as the swap was long.
 //!
 //! **What git ignores is not in it**, and neither is `.git`. Both are the
 //! server's doing — git is asked rather than reimplemented — so what arrives
@@ -172,6 +175,7 @@ import {
   createSignal,
   createUniqueId,
   onCleanup,
+  onMount,
   type Accessor,
   type JSX,
   type Setter,
@@ -816,6 +820,24 @@ export function Tree(props: {
   createEffect(() => {
     onCleanup(whenFilesMove(props.conversation, follow));
   });
+
+  // And once the moment it is drawn, because a tree that was not drawn was
+  // subscribed to nothing — and neither was the pane, so the watcher behind the
+  // Nudge had stopped as well.
+  //
+  // The details pane is one place and every pane of the workbench is drawn in
+  // it, so a swap to an Event and back is this tree taken down and built again
+  // over listings it kept: the walk down to a file survives, and what was
+  // written under it while the Event was up reached nobody. Nothing would put it
+  // right either, until the next thing to move in the worktree — so a commit
+  // read on the Timeline and a press of Back would leave the rows the commit
+  // wrote out of the tree, with the marks beside them already cleared, those
+  // being a query and read again on the mount.
+  //
+  // Nothing on a first open: there is nothing held to read, a tree starting
+  // with every folder shut. Untracked, so that reading the listings is not a
+  // reason to read them again.
+  onMount(() => follow());
 
   /// A right-click on a row asks what can be done with it.
   ///
