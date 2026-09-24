@@ -625,6 +625,13 @@ export function listFolder(id: number, path: string): Promise<FolderListing> {
 /// version, which is a hash of the bytes and is what a write names itself as
 /// being over (ADR 0019).
 ///
+/// **And what the tabs follow the disk with.** The pane reads every open file
+/// again on a `files` Nudge and compares that version: where it matches — which
+/// is nearly every file on nearly every Nudge — the tab is left exactly as it
+/// is, and where it differs a clean buffer takes the new text and a dirty one
+/// raises the bar (ADR 0019, *Following the disk*). One of these per open file
+/// and none for anything else.
+///
 /// Refused in the body like the folder beside it: a path outside every root, a
 /// path under `.git`, a worktree that has gone and a file that has are each
 /// their own sentence rather than a status to retry.

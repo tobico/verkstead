@@ -62,8 +62,13 @@ const following = new Set<{ conversation: number; look: () => void }>();
 /// the walk down to a file (see `workbench/keeping.ts`). So the pane takes out
 /// a subscription of its own while it is drawn, rather than the tree being
 /// rewritten as queries — and what it does with the news is its own business:
-/// re-read the folders it has expanded, and the versions of the files it has
-/// open as the editors learn to follow them.
+/// re-read the folders it has expanded, and the files it has open, where a
+/// version that has moved is a clean editor taking the new text and a dirty one
+/// raising its bar.
+///
+/// Two subscribers on the one pane rather than one, the tree's and the tabs':
+/// what each does with the news is its own, and neither is the other's to know
+/// about.
 ///
 /// **And the widest reaction reaches it too.** A page that cannot say what it
 /// missed reads back everything it is showing (see [`lookAgain`]), and a tree is
@@ -287,9 +292,10 @@ function standsFor(moved: Nudge): readonly QueryKey[] | null {
     // The tree's roots, which is every read of this kind a query key can name
     // — a root that appeared or went, in a reading that costs a row apiece and
     // disturbs nothing that is open. What is *inside* them is not a query at
-    // all: the folders the tree has expanded are held above the pane with the
-    // tabs, and what re-reads those is the pane's own subscription beside this
-    // table — see [`whenFilesMove`], which this kind tells as well.
+    // all: the folders the tree has expanded and what each open file was read
+    // as are held above the pane together, and what re-reads those is the
+    // pane's own subscription beside this table — see [`whenFilesMove`], which
+    // this kind tells as well.
     //
     // Nothing above the pane is here on purpose. A file written in a Worktree
     // moves no record at all: there is no Event for it, no Timeline row and

@@ -22320,6 +22320,334 @@ describe("a file opened out of the code pane's tree", () => {
         expect(editor(container)!.readOnly).toBe(true);
       });
     });
+
+    /// And the disk moving under the tab without anybody pressing anything,
+    /// which is what the watcher is for: a `files` Nudge says this
+    /// conversation's worktrees moved, and every open file is read again (ADR
+    /// 0019, *Following the disk*).
+    ///
+    /// The bar above is most of what this is about — it is drawn the moment the
+    /// disk moves rather than at the next Ctrl+S — which is why these sit
+    /// inside the saving tests rather than beside them.
+    describe("and the disk moving under it", () => {
+      /// The page listening on the Nudge stream, which the bench does not wire:
+      /// `mount` renders the workbench under a client of its own rather than
+      /// `App`, and the stream is held at the app's root — see `App.tsx`.
+      let stop: (() => void) | undefined;
+
+      afterEach(() => {
+        stop?.();
+        stop = undefined;
+      });
+
+      /// The watcher saying those worktrees moved, which carries a conversation
+      /// and nothing else (ADR-0009): what moved is not in it, and the page
+      /// reads again to find out.
+      function moved(): void {
+        stream().nudges({
+          kind: "files",
+          conversation: GRILLING.id,
+        } satisfies Nudge);
+      }
+
+      /// The same file as the agent left it, with the bytes it already had:
+      /// another reading of the file that has not moved, which is what a build
+      /// that rewrote it with what was in it answers with.
+      const AGAIN = codeFile as FileReading;
+
+      /// And the file as the pane itself has just written it — the text that
+      /// went up, at the version the write answered with.
+      const OURS = {
+        Text: {
+          path: TEXT.path,
+          version: WRITTEN.Written.version,
+          text: "mine\n",
+          writable: true,
+        },
+      } satisfies FileReading;
+
+      /// The line a tab whose file has gone draws over its text.
+      function gone(container: ParentNode): string | null | undefined {
+        return container.querySelector(`.${shell.detailsPane} .${codePane.gone}`)
+          ?.textContent;
+      }
+
+      /// The pane with the file open and the page listening, which is where
+      /// every test below starts: a Nudge is read back against what is open,
+      /// and a pane with nothing open has nothing to read.
+      async function watching(...answers: Parameters<typeof serving>) {
+        streaming();
+
+        const mounted = await opened(...answers);
+
+        stop = listenForNudges(mounted.client);
+        stream().opens();
+
+        return mounted;
+      }
+
+      /// An agent's edit to a file nobody has typed into arrives without a
+      /// keypress: the buffer takes the disk's text, and there is nothing to
+      /// ask about.
+      it("takes the disk's text into a clean tab, and draws no bar", async () => {
+        const { container, fetching } = await watching(reads(codeFile, THEIRS));
+
+        const before = editor(container);
+
+        moved();
+
+        await waitFor(() =>
+          expect(editor(container)?.value).toBe(THEIRS.Text.text),
+        );
+
+        // Nothing was asked of the human and nothing is outstanding: the tab is
+        // clean over the text that is really there.
+        expect(bar(container)).toBeNull();
+        expect(dots(container)).toHaveLength(0);
+        expect(askedFor(fetching, fileOf(TEXT.path))).toBe(2);
+
+        // And it is the same editor over the same buffer rather than a tab
+        // drawn again, which is what keeps the caret and the undo stack.
+        expect(editor(container)).toBe(before);
+      });
+
+      /// And what went into that buffer is the part that moved rather than the
+      /// file, which is the whole of how a caret survives an edit nobody asked
+      /// for — see `written` in `src/workbench/keeping.ts`.
+      it("writes the part of the buffer that moved, not the whole of it", async () => {
+        const { container } = await watching(reads(codeFile, THEIRS));
+
+        moved();
+
+        await waitFor(() =>
+          expect(editor(container)?.value).toBe(THEIRS.Text.text),
+        );
+
+        // One edit, over the end of what was there: the line the agent added,
+        // written after the line the human is looking at rather than over it.
+        expect(theEditor().model.written).toHaveLength(1);
+
+        const put = theEditor().model.written[0]!;
+
+        expect(put.text).toBe('members = ["crates/*"]\n');
+        expect(put.range).toEqual({
+          startLineNumber: 2,
+          startColumn: 1,
+          endLineNumber: 2,
+          endColumn: 1,
+        });
+      });
+
+      /// A file rewritten with the bytes it already had is not a change at all:
+      /// the version is a hash of those bytes, so the tab is left exactly as it
+      /// is.
+      it("leaves a tab alone where the file reads at the version it had", async () => {
+        const { container, fetching } = await watching(reads(AGAIN));
+
+        const before = editor(container);
+
+        moved();
+
+        // The file was read — a Nudge says the worktrees moved and nothing
+        // about where — and what came back said what the tab is standing on.
+        await waitFor(() =>
+          expect(askedFor(fetching, fileOf(TEXT.path))).toBe(2),
+        );
+
+        expect(editor(container)).toBe(before);
+        expect(editor(container)!.value).toBe(TEXT.text);
+        expect(theEditor().model.written).toHaveLength(0);
+        expect(bar(container)).toBeNull();
+        expect(dots(container)).toHaveLength(0);
+      });
+
+      /// And a Nudge that arrives with no file open reads nothing at all: what
+      /// is re-read is what is open, and a pane holding terminals alone holds
+      /// nothing about the disk.
+      it("reads nothing where the pane has no file open", async () => {
+        streaming();
+
+        const mounted = await expanded(
+          OWN_ROOT,
+          codeFolder as FolderListing,
+          reads(codeFile as FileReading),
+        );
+
+        stop = listenForNudges(mounted.client);
+        stream().opens();
+
+        moved();
+
+        // The Nudge landed — the tree beside the tabs read the folder it has
+        // open again — and not one file was asked for: there is no tab over
+        // one.
+        await waitFor(() =>
+          expect(askedFor(mounted.fetching, folderOf(OWN_ROOT.path))).toBe(2),
+        );
+
+        expect(askedFor(mounted.fetching, fileOf(TEXT.path))).toBe(0);
+      });
+
+      /// The same edit under text nobody has saved raises the bar at once,
+      /// rather than at the next Ctrl+S — and the human's text is where they
+      /// left it.
+      it("raises the bar the moment the disk moves under unsaved text", async () => {
+        const { container, fetching } = await watching(
+          reads(codeFile, THEIRS),
+          saves(WRITTEN),
+        );
+
+        await types(container, "mine\n");
+
+        moved();
+
+        const up = await barred(container);
+
+        expect(up.textContent).toContain(MOVED);
+        expect(editor(container)!.value).toBe("mine\n");
+        expect(dots(container)).toHaveLength(1);
+
+        // And nothing was written to get here: the bar is the watcher's news
+        // rather than a save that was refused.
+        expect(saved(fetching)).toHaveLength(0);
+      });
+
+      /// **Reload** under that bar is the press it always was: the disk's text,
+      /// and the version that goes with it.
+      it("takes the disk's text when Reload is pressed under it", async () => {
+        const { container } = await watching(reads(codeFile, THEIRS));
+
+        await types(container, "mine\n");
+        moved();
+        await barred(container);
+
+        fireEvent.click(await offers(container, "Reload"));
+
+        await waitFor(() =>
+          expect(editor(container)?.value).toBe(THEIRS.Text.text),
+        );
+        expect(bar(container)).toBeNull();
+        expect(dots(container)).toHaveLength(0);
+      });
+
+      /// And **Keep mine** keeps theirs, over the version the disk now has, so
+      /// that the save after it lands.
+      it("keeps the human's text when Keep mine is pressed under it", async () => {
+        const { container, fetching } = await watching(
+          reads(codeFile, THEIRS),
+          saves(WRITTEN),
+        );
+
+        await types(container, "mine\n");
+        moved();
+        await barred(container);
+
+        fireEvent.click(await offers(container, "Keep mine"));
+
+        await waitFor(() => expect(bar(container)).toBeNull());
+        await lands();
+
+        expect(editor(container)!.value).toBe("mine\n");
+        expect(dots(container)).toHaveLength(1);
+
+        ctrlS(container);
+
+        await waitFor(() => expect(saved(fetching)).toHaveLength(1));
+        expect(saved(fetching)[0]).toEqual({
+          path: TEXT.path,
+          version: THEIRS.Text.version,
+          text: "mine\n",
+        });
+      });
+
+      /// A file that has gone keeps its tab, with the text as it was in it —
+      /// the way one deleted out of the tree does, and whether or not the
+      /// human has typed into it. There is nothing to choose between, so there
+      /// is no bar.
+      it("keeps the tab of a file that has gone, text and all", async () => {
+        const { container } = await watching(reads(codeFile, "Missing"));
+
+        await types(container, "mine\n");
+
+        moved();
+
+        await waitFor(() => expect(gone(container)).toBe(GONE));
+
+        expect(editor(container)!.value).toBe("mine\n");
+        expect(editor(container)!.readOnly).toBe(true);
+        expect(bar(container)).toBeNull();
+      });
+
+      /// And the pane's own save is not the disk moving under it: the write
+      /// answers with the version it made, so the Nudge it raises finds the
+      /// file reading at the version the tab is already standing on.
+      it("raises no bar over the file the pane has just written", async () => {
+        const { container, fetching } = await watching(
+          reads(codeFile, OURS),
+          saves(WRITTEN),
+        );
+
+        await types(container, "mine\n");
+        ctrlS(container);
+
+        await waitFor(() => expect(saved(fetching)).toHaveLength(1));
+        await waitFor(() => expect(dots(container)).toHaveLength(0));
+        await lands();
+
+        // The write moved the worktree, so the watcher says so.
+        moved();
+
+        await waitFor(() =>
+          expect(askedFor(fetching, fileOf(TEXT.path))).toBe(2),
+        );
+        await lands();
+
+        // And what that read found is the version the write answered with,
+        // which is what the tab is already standing on: nothing to draw, and
+        // the human's text where it was.
+        expect(bar(container)).toBeNull();
+        expect(dots(container)).toHaveLength(0);
+        expect(editor(container)!.value).toBe("mine\n");
+      });
+
+      /// And a file with a save still in flight is not read at all: the write
+      /// is about to answer with the version it made, and a read that crossed
+      /// it would be this pane finding its own text on the disk and putting a
+      /// bar up over the human's typing.
+      it("reads nothing about a file it is in the middle of writing", async () => {
+        /// A save the test lets land when it chooses, which is the one thing a
+        /// fixed answer cannot be: the whole of this is what happens *while* a
+        /// write is out.
+        let land = (): void => {};
+        const writing = new Promise<void>((done) => {
+          land = done;
+        });
+
+        const { container, fetching } = await watching(
+          reads(codeFile, OURS),
+          whenever(SAVING, () => writing.then(json(WRITTEN)), "POST"),
+        );
+
+        await types(container, "mine\n");
+        ctrlS(container);
+
+        await waitFor(() => expect(saved(fetching)).toHaveLength(1));
+
+        // The write has landed on the disk and its answer has not come back
+        // yet, which is exactly when the watcher says the worktree moved.
+        moved();
+        await lands();
+
+        expect(askedFor(fetching, fileOf(TEXT.path))).toBe(1);
+        expect(bar(container)).toBeNull();
+
+        land();
+
+        await waitFor(() => expect(dots(container)).toHaveLength(0));
+        expect(bar(container)).toBeNull();
+        expect(editor(container)!.value).toBe("mine\n");
+      });
+    });
   });
 
   /// And what happens to all of it when the pane is swapped for another and

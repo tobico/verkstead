@@ -112,14 +112,21 @@ export interface Buffer {
   /// warning on the way out of the page all compare against the reading.
   text: Accessor<string>;
 
-  /// And text put in from somewhere that is not an editor, which is **Reload**:
-  /// the disk's text, into a buffer still holding the human's. Every view of
-  /// the file shows it, there being one buffer under them.
+  /// And text put in from somewhere that is not an editor: **Reload**, and the
+  /// disk moving under a tab nobody has typed into. The disk's text, into a
+  /// buffer the human may still be reading — every view of the file shows it,
+  /// there being one buffer under them.
   ///
   /// Only where the two have come apart. Writing a model what it already says
   /// would cost the caret and the undo stack of every view of it, and **Reload**
   /// on a file the agent moved back to what it was is a press that should come
   /// to nothing.
+  ///
+  /// **And only the part of it that moved** — see [`written`]. An agent's edit
+  /// arrives under somebody who is reading the file and nobody asked for it
+  /// (ADR 0019, *Following the disk*), so what is written is the lines that
+  /// differ rather than the file: the caret stays where it was, the undo stack
+  /// stands, and a scrolled view does not jump to the top.
   put: (text: string) => void;
 }
 
@@ -370,11 +377,7 @@ function opened(conversation: number): Kept {
         // dot. Disposed with the model, Monaco's listeners being the model's.
         model.onDidChangeContent(() => setHeld(model.getValue()));
 
-        const put = (next: string): void => {
-          if (model.getValue() !== next) {
-            model.setValue(next);
-          }
-        };
+        const put = (next: string): void => written(model, next);
 
         setBuffers((was) => ({ ...was, [path]: { model, text: held, put } }));
       })
@@ -483,6 +486,75 @@ function opened(conversation: number): Kept {
   });
 
   return kept;
+}
+
+/// Put text into a model from outside any editor, writing only the part of it
+/// that moved.
+///
+/// What [`Buffer::put`] is, and the whole of how an edit nobody asked for
+/// arrives gently. `setValue` would be the obvious call and is the wrong one:
+/// Monaco treats it as the buffer being replaced, so every view of the file
+/// loses its undo stack and has its caret put back at the first character —
+/// which is fine for a file being opened and not for the agent rewriting a
+/// function at the foot of a file somebody is reading at the top of.
+///
+/// So what goes in is one edit over the middle: the head the two texts share
+/// and the tail they share are left exactly as they are, and what is between
+/// them is replaced. A caret before the change does not move at all, one after
+/// it travels with the text, and the undo stack takes it as an edit like any
+/// other — so Ctrl+Z after a reload is what it was before it, one step back.
+///
+/// Nothing at all where the two say the same thing, which is what makes
+/// **Reload** on a file the agent moved back to what it was a press that comes
+/// to nothing.
+function written(model: Model, next: string): void {
+  const was = model.getValue();
+
+  if (was === next) {
+    return;
+  }
+
+  /// How much of the front the two share, in characters.
+  let head = 0;
+  const shortest = Math.min(was.length, next.length);
+
+  while (head < shortest && was[head] === next[head]) {
+    head += 1;
+  }
+
+  /// And how much of the back, counted no further than the head: the two halves
+  /// of one text must not overlap, or the edit would be over a range that runs
+  /// backwards.
+  let tail = 0;
+
+  while (
+    tail < shortest - head &&
+    was[was.length - 1 - tail] === next[next.length - 1 - tail]
+  ) {
+    tail += 1;
+  }
+
+  const from = model.getPositionAt(head);
+  const to = model.getPositionAt(was.length - tail);
+
+  model.pushEditOperations(
+    // Nothing about where the carets were, and nothing about where they are to
+    // go: this is not a press, so what each view's own caret does is whatever
+    // the edit under it does to it.
+    null,
+    [
+      {
+        range: {
+          startLineNumber: from.lineNumber,
+          startColumn: from.column,
+          endLineNumber: to.lineNumber,
+          endColumn: to.column,
+        },
+        text: next.slice(head, next.length - tail),
+      },
+    ],
+    () => null,
+  );
 }
 
 /// What the disk said about one open file, where what it said was text.

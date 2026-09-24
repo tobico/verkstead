@@ -67,8 +67,36 @@ export type Model = {
   disposed: boolean;
   getValue(): string;
   setValue(text: string): void;
+  /// Every edit written into it from outside an editor, oldest first.
+  ///
+  /// What a test asks to know *how* the pane wrote a buffer rather than only
+  /// what the text became: an edit over the part that moved is a caret and an
+  /// undo stack that survive, and one over the whole file is neither.
+  readonly written: Array<{ range: Range; text: string }>;
+  /// Where in the text an offset falls, in Monaco's own one-based line and
+  /// column — which is how a range is spelled to [`pushEditOperations`].
+  getPositionAt(offset: number): Position;
+  /// And one edit over a range of it, which is how the pane writes a buffer
+  /// from outside an editor: only the part that moved goes in, so the caret and
+  /// the undo stack of every view survive it. See `written` in `keeping.ts`.
+  pushEditOperations(
+    before: null,
+    edits: Array<{ range: Range; text: string }>,
+    computing: () => null,
+  ): null;
   onDidChangeContent(said: () => void): { dispose(): void };
   dispose(): void;
+};
+
+/// A place in a buffer, as Monaco counts one: both from one.
+export type Position = { lineNumber: number; column: number };
+
+/// And a stretch between two of them, which is what an edit is over.
+export type Range = {
+  startLineNumber: number;
+  startColumn: number;
+  endLineNumber: number;
+  endColumn: number;
 };
 
 /// One editor the pane has opened.
@@ -130,19 +158,62 @@ const monaco = {
       let held = text;
       const watching = new Set<() => void>();
 
+      /// Put text in and tell whoever is listening, which is what every write
+      /// of this buffer comes down to.
+      const write = (next: string): void => {
+        held = next;
+
+        for (const said of [...watching]) {
+          said();
+        }
+      };
+
+      /// How far into the text a line and a column is, both counted from one
+      /// the way Monaco counts them.
+      const offsetOf = (line: number, column: number): number => {
+        const lines = held.split("\n");
+        let at = 0;
+
+        for (let before = 0; before < line - 1 && before < lines.length; before += 1) {
+          at += lines[before]!.length + 1;
+        }
+
+        return at + column - 1;
+      };
+
       const model: Model = {
         path: at.path,
         get text() {
           return held;
         },
         disposed: false,
+        written: [],
         getValue: () => held,
-        setValue: (next: string) => {
-          held = next;
+        setValue: write,
+        getPositionAt: (offset: number) => {
+          const before = held.slice(0, offset).split("\n");
 
-          for (const said of [...watching]) {
-            said();
+          return {
+            lineNumber: before.length,
+            column: before[before.length - 1]!.length + 1,
+          };
+        },
+        // Applied in order, which is one edit in every call the pane makes: it
+        // writes the stretch between what the two texts share at either end.
+        pushEditOperations: (_before, edits) => {
+          model.written.push(...edits);
+
+          for (const edit of edits) {
+            const from = offsetOf(
+              edit.range.startLineNumber,
+              edit.range.startColumn,
+            );
+            const to = offsetOf(edit.range.endLineNumber, edit.range.endColumn);
+
+            write(held.slice(0, from) + edit.text + held.slice(to));
           }
+
+          return null;
         },
         onDidChangeContent: (said: () => void) => {
           watching.add(said);

@@ -174,9 +174,26 @@
 //! human's text over the version the disk now has so that their next save
 //! lands. Both are the same read of the file, differing only in what becomes of
 //! the text in the editor, and neither writes anything: the bar is about which
-//! text the *next* save is of. Stage 04 of the roadmap puts the same bar up the
-//! moment the disk moves rather than at the next save; here it is drawn by the
-//! refusal.
+//! text the *next* save is of.
+//!
+//! **And the tabs follow the disk**, which is where that bar is usually drawn
+//! from: the watcher says this Conversation's Worktrees moved, and every open
+//! file is read again (ADR 0019, *Following the disk*). The version is what
+//! tells a real change from a touch — where it matches, nothing happens at all,
+//! which is nearly every file on nearly every Nudge. Where it differs, a clean
+//! buffer takes the new text silently with its caret kept as near as it can be,
+//! and a dirty one keeps the human's text and raises the bar the moment the
+//! disk moves rather than at the next Ctrl+S. A file that has gone keeps its
+//! tab with its text in it, the way one deleted out of the tree does. See
+//! [`again`], and the subscription beside it — the pane's own rather than a row
+//! of the table in `nudge.ts`, the readings being held above this pane with the
+//! tabs.
+//!
+//! **The pane's own save is not the disk moving under it.** A write that landed
+//! answers with the version it made, so the Nudge that write raises finds the
+//! file reading at the version the tab is already standing on — and a file with
+//! a save still in flight is not read at all, so the answer cannot arrive before
+//! the write's does.
 //!
 //! **And the same file opened twice is one buffer.** Pressing a file already
 //! open in the active group turns to its tab rather than opening a second
@@ -436,6 +453,10 @@ import {
 } from "../device";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
+// The seam beside the nudge table: what the tabs and the tree follow the disk
+// by, the readings under them being held above this pane rather than in a
+// query — see `whenFilesMove`, which is where the reasoning is.
+import { whenFilesMove } from "../nudge";
 import { Attached } from "./Attached";
 import { Editor } from "./Editor";
 import { load } from "./editing";
@@ -592,13 +613,17 @@ export const WRITE_REFUSAL: Record<
   NotAFile: "That is a folder rather than a file.",
 };
 
-/// And what the bar over a refused stale save says.
+/// And what the bar over a file that moved under unsaved text says.
 ///
 /// The collision itself, in the words of what happened rather than of what went
 /// wrong: the agent writes the same Worktree, and a file it rewrote while
 /// somebody had it open is the ordinary way of things rather than a fault. What
 /// the two presses under it do is named in them (ADR 0019, *Versioned reads,
 /// and a stale write is refused*).
+///
+/// One sentence for both ways it is raised — the watcher saying the file moved,
+/// and a save refused for the same reason — because they are the one fact:
+/// the disk has something else in it, and what is in the editor is not on it.
 export const MOVED =
   "This file changed on disk while you were editing it, so nothing was saved.";
 
@@ -690,6 +715,42 @@ function atPath(reading: FileReading, at: string): FileReading {
   }
 
   return "Image" in reading ? { Image: { ...reading.Image, path: at } } : reading;
+}
+
+/// The version a reading carries, where it is text and so carries one.
+///
+/// A hash of the bytes that were read, which is what a write names itself as
+/// being over — and what tells a file that really moved from one that was
+/// written with what it already held (ADR 0019, *Following the disk*).
+function versioned(reading: FileReading): string | undefined {
+  return typeof reading !== "string" && "Text" in reading
+    ? reading.Text.version
+    : undefined;
+}
+
+/// And whether a file read again came back saying what the tab is already
+/// standing on.
+///
+/// Asked of every open file on every `files` Nudge, and true of nearly all of
+/// them: a Nudge says the Worktrees moved and nothing about where, so a build
+/// filling a folder is a read apiece that comes back to this and leaves every
+/// tab exactly as it is.
+///
+/// **The version is the whole of it wherever there is one.** It is a hash of
+/// the bytes, so a file rewritten with what it already held reads the same and a
+/// timestamp moved is not a change at all — which is the difference between a
+/// tab that takes new text and one that does nothing, and between a bar raised
+/// over the human's typing and no bar. Where neither side has one — a picture,
+/// a file that has gone, a refusal — it is what the two *say*, the way the tree
+/// compares its listings: both are the one endpoint's own JSON, written in the
+/// one order.
+function same(was: FileReading, now: FileReading): boolean {
+  const before = versioned(was);
+  const after = versioned(now);
+
+  return before === undefined && after === undefined
+    ? JSON.stringify(was) === JSON.stringify(now)
+    : before === after;
 }
 
 /// And one folder listing with every path in it moved: the folder it lists, and
@@ -2243,31 +2304,12 @@ export function Code(props: {
 
     return readFile(props.conversation.id, path)
       .then((reading) => {
-        setReadings((was) => ({ ...was, [path]: reading }));
-
         if (keeping) {
+          setReadings((was) => ({ ...was, [path]: reading }));
           return;
         }
 
-        if (typeof reading !== "string" && "Text" in reading) {
-          // The buffer, made out of what was read where the file has none yet
-          // and written with it where it has — which is the whole of the
-          // difference between opening a file and **Reload**. Or out of the
-          // text the device came back holding, where this is the read that
-          // restored the tab.
-          hold(path, restored ?? reading.Text.text);
-        } else if (reading === "Missing") {
-          // A file that is gone keeps whatever text there is, which is the whole
-          // of what its tab is for: what this device came back holding goes into
-          // the buffer, and a buffer that is already here is left exactly as it
-          // is. Letting go here would be the one read that threw the last copy
-          // of somebody's text away.
-          if (restored !== undefined) {
-            hold(path, restored);
-          }
-        } else {
-          release(path);
-        }
+        landed(path, reading, restored);
       })
       // A request that never landed is a file that says why there is nothing in
       // its tab, the way a file the server refused does: the sentence is the
@@ -2280,6 +2322,39 @@ export function Code(props: {
       });
   };
 
+  /// What a read that came back comes to: the reading where the tab draws it
+  /// from, and its text where the buffer is.
+  ///
+  /// Apart from [`reread`] because the read is not always the one just made —
+  /// the disk moving under the pane is a read of its own, and what it does with
+  /// what comes back is this same thing (see [`again`]).
+  const landed = (
+    path: string,
+    reading: FileReading,
+    restored?: string,
+  ): void => {
+    setReadings((was) => ({ ...was, [path]: reading }));
+
+    if (typeof reading !== "string" && "Text" in reading) {
+      // The buffer, made out of what was read where the file has none yet and
+      // written with it where it has — which is the whole of the difference
+      // between opening a file and **Reload**. Or out of the text the device
+      // came back holding, where this is the read that restored the tab.
+      hold(path, restored ?? reading.Text.text);
+    } else if (reading === "Missing") {
+      // A file that is gone keeps whatever text there is, which is the whole
+      // of what its tab is for: what this device came back holding goes into
+      // the buffer, and a buffer that is already here is left exactly as it
+      // is. Letting go here would be the one read that threw the last copy
+      // of somebody's text away.
+      if (restored !== undefined) {
+        hold(path, restored);
+      }
+    } else {
+      release(path);
+    }
+  };
+
   /// Take a file's bar down, which every reading and every save that lands
   /// does: what is in there is about the last press rather than about the file.
   const unbar = (path: string): void => {
@@ -2289,6 +2364,98 @@ export function Code(props: {
       return rest;
     });
   };
+
+  /// And read one again because the disk moved, rather than because somebody
+  /// asked for it.
+  ///
+  /// The same one request the tree makes of its folders, and what is done with
+  /// the answer is the buffer's own (ADR 0019, *Following the disk*):
+  ///
+  /// - **A file reading at the version it already did is left alone entirely**,
+  ///   which is nearly every file on nearly every Nudge — a build rewrote
+  ///   another folder, a timestamp moved, the file was written with the bytes it
+  ///   already held. Nothing is set, so nothing is drawn again.
+  /// - **A clean buffer takes the new text silently**, keeping its caret as near
+  ///   as it can — see `written` in `keeping.ts`, which writes the part that
+  ///   moved rather than the file. Every view of it shows it, there being one
+  ///   buffer under them, and there is no bar: nothing was asked and nothing was
+  ///   lost.
+  /// - **A dirty one keeps the human's text and raises the bar**, which is the
+  ///   same **Reload** / **Keep mine** the refused save raises — drawn now the
+  ///   moment the disk moves rather than at the next Ctrl+S. The reading is left
+  ///   where it is with it, so a save made under the bar is still a write over
+  ///   the version this tab was read at and is still refused.
+  /// - **And a file that has gone keeps its tab** whether or not it is dirty,
+  ///   the way one deleted out of the tree does: the text in it is the only copy
+  ///   there is, and a bar asking which text the next save is of would be a
+  ///   question about a file there is nothing to save to.
+  ///
+  /// **A save in flight is not read at all.** The write is about to answer with
+  /// the version it made — and the Nudge that write itself raises is the disk
+  /// moving under nobody. A read that crossed it would be this pane finding its
+  /// own text on the disk and putting a bar up over the human's typing.
+  ///
+  /// And a tab that moved while the read was out is left where it is: it was
+  /// closed, renamed, reloaded by a press, or saved, and what came back is about
+  /// a file the pane is no longer standing on. A request that never landed is no
+  /// news either — a connection that dropped under a tab nobody touched is not a
+  /// reason to draw a sentence over somebody's text.
+  const again = (path: string): Promise<void> => {
+    const was = readings()[path];
+
+    if (was === undefined || saving.has(path)) {
+      return Promise.resolve();
+    }
+
+    return readFile(props.conversation.id, path)
+      .then((reading) => {
+        if (readings()[path] !== was || saving.has(path) || same(was, reading)) {
+          return;
+        }
+
+        if (reading !== "Missing" && dirty(path)) {
+          // Where one is already up, left standing rather than raised again:
+          // the bar is the same question, and putting it back would redraw it
+          // under the hand that is about to press it.
+          setBars((had) =>
+            had[path] === "moved" ? had : { ...had, [path]: "moved" },
+          );
+
+          return;
+        }
+
+        // And whatever the last save left standing goes with the reading it was
+        // about, the way a read somebody pressed for takes it down: the bar is
+        // a question about the disk, and this is the disk answering.
+        unbar(path);
+        landed(path, reading);
+      })
+      .catch(() => {});
+  };
+
+  /// The whole of what a `files` Nudge comes to in the tabs: every file the
+  /// pane has open, read again.
+  ///
+  /// One read per open file and none for anything else — the tree beside it
+  /// re-reads the folders it has expanded, which is its own subscription (see
+  /// `Tree.tsx`). A pane with nothing open reads nothing at all, which is what
+  /// a Nudge about a Worktree nobody has a tab in costs.
+  const follow = (): void => {
+    for (const path of Object.keys(readings())) {
+      void again(path);
+    }
+  };
+
+  // And what brings that news: the watcher the socket above runs, saying this
+  // Conversation's Worktrees moved (ADR 0019, *Following the disk*).
+  //
+  // A subscription of the pane's own rather than a row of the table in
+  // `nudge.ts`, for the tree's reason: that table invalidates queries, and the
+  // readings are held above this pane with the tabs and the text nobody has
+  // saved. Let go of with the pane, so one that is not drawn reads nothing.
+  createEffect(() => {
+    onCleanup(whenFilesMove(props.conversation.id, follow));
+  });
 
   /// Save one, which is what Ctrl+S does.
   ///
@@ -3627,8 +3794,8 @@ function Opened(props: {
   );
 }
 
-/// The bar a save refused for a file that has moved puts up: what happened, and
-/// the two things to do about it.
+/// The bar a file that moved under unsaved text puts up: what happened, and the
+/// two things to do about it.
 ///
 /// **The human chooses**, which is the whole of why the write was refused
 /// rather than made (ADR 0019, *Versioned reads, and a stale write is
@@ -3647,10 +3814,14 @@ function Opened(props: {
 ///
 /// Drawn in the tab rather than as a card over the page, unlike the two
 /// confirms above: nothing is waiting on it — the editor below takes typing
-/// while it stands — and a file whose save was refused is a thing to come back
-/// to rather than a question to get out of the way. Stage 04 of the roadmap
-/// puts this same bar up the moment the disk moves, rather than at the next
-/// save; here it is drawn by the refusal.
+/// while it stands — and a file that moved under somebody's typing is a thing to
+/// come back to rather than a question to get out of the way.
+///
+/// **Raised the moment the disk moves**, which is what the watcher is for: the
+/// pane reads every open file on a `files` Nudge, and a dirty one whose version
+/// has changed is this (ADR 0019, *Following the disk*). A refused save raises
+/// the same bar — which is the Nudge that never arrived, and the one moment the
+/// collision cannot be missed.
 export function Moved(props: {
   reload: () => void;
   keep: () => void;
