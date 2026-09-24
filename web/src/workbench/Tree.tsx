@@ -53,13 +53,20 @@
 //! still open or closed, whatever the drag came to.
 //!
 //! **And a row drops a menu, which is where a file or a folder is made.** The
-//! one `ContextMenu` the app has, opened by a right-click, with which row it is
-//! about held here rather than by a menu per row — which is exactly how the tab
-//! bar beside the tree opens its own. **The mouse's alone**: a long press on a
-//! file row is how it is picked up and dragged into a group, so the gesture is
-//! spoken for, and the sidebar's cards answer the same problem the same way.
-//! Code is desktop-first and ADR 0019 promises nothing on a phone, so a touch
-//! screen gets no row menu rather than a second gesture invented for one.
+//! one `ContextMenu` the app has, with which row it is about held here rather
+//! than by a menu per row — which is exactly how the tab bar beside the tree
+//! opens its own.
+//!
+//! **Opened by a right-click, and by a long press on a folder row.** A phone
+//! has no right-click and fires the same `contextmenu` from a long press, so
+//! which hands reach one of these is the caller's answer — and the answer here
+//! is different for the two kinds of row. A long press on a **file** row is
+//! already how it is picked up and carried into a group, and that gesture is
+//! spoken for, the way a card in the sidebar's is; nothing is picked up off a
+//! **folder** row, so its long press is free and drops the menu. Which leaves a
+//! touch screen everything a folder row offers — both makings, and the rename
+//! and delete of the folder itself — and only a file row's own two out of
+//! reach.
 //!
 //! **New file and New folder, on a folder row and on a root**, and on neither in
 //! a read-only root — the root's own flag, which the roots listing already
@@ -476,12 +483,15 @@ export function Tree(props: {
 
   /// Whether the gesture that is opening a menu began under a finger.
   ///
-  /// A phone has no right-click and fires `contextmenu` from a long press, which
-  /// is the gesture a file row is dragged into a group with. So the menu is the
-  /// mouse's alone, and what tells the two apart is the pointer that started the
-  /// press rather than the event itself, which carries nothing about the hand
-  /// that made it — the sidebar's cards and the tab bar say the same thing the
-  /// same way.
+  /// A phone has no right-click and fires `contextmenu` from a long press, and
+  /// on a **file** row that press is already spoken for: it is how the row is
+  /// picked up and dragged into a group. So a file row's menu is the mouse's
+  /// alone — and a **folder** row's is not, nothing being picked up off one, so
+  /// a long press there drops it the way a right-click does.
+  ///
+  /// What tells the two hands apart is the pointer that began the press rather
+  /// than the event itself, which carries nothing about the hand that made it —
+  /// the sidebar's cards and the tab bar say the same thing the same way.
   let fromTouch = false;
 
   /// The one field the tree has open, where it has one.
@@ -584,14 +594,16 @@ export function Tree(props: {
   /// browser's own. Every other row has something — a folder makes, and
   /// everything but a root renames.
   ///
-  /// A mouse's gesture and only a mouse's, for the reason [`fromTouch`] is kept.
+  /// Both hands on a folder row and the mouse's alone on a file row, for the
+  /// reason [`fromTouch`] is kept: a long press on a file row is how it is
+  /// carried into a group, and there is nothing to carry off a folder.
   const ask = (
     event: MouseEvent,
     path: string,
     folder: boolean,
     within?: string,
   ): void => {
-    if (fromTouch || !rooted(path)?.writable) {
+    if ((fromTouch && !folder) || !rooted(path)?.writable) {
       return;
     }
 

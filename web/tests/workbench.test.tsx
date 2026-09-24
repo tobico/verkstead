@@ -19862,15 +19862,15 @@ describe("what a right-click on a row of the code pane's tree offers", () => {
     expect(drop(container)).toBeNull();
   });
 
-  /// The menu is the mouse's alone: a phone has no right-click and fires the same
-  /// event from a long press, which is the gesture a file row is dragged into a
-  /// group with (ADR 0019, *Tabs and groups*).
-  it("drops nothing where the press began under a finger", async () => {
+  /// A file row's menu is the mouse's alone: a phone has no right-click and
+  /// fires the same event from a long press, which is the gesture that file row
+  /// is dragged into a group with (ADR 0019, *Tabs and groups*).
+  it("drops nothing where a file row's press began under a finger", async () => {
     const { container } = await expanded(
       whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
     );
 
-    const pressed = row(container, OWN_ROOT.repo);
+    const pressed = row(container, "Cargo.toml", files);
     fireEvent.pointerDown(pressed, { pointerType: "touch", button: 0 });
 
     expect(rightClick(pressed)).toBe(false);
@@ -19881,6 +19881,41 @@ describe("what a right-click on a row of the code pane's tree offers", () => {
     fireEvent.pointerDown(pressed, { pointerType: "mouse", button: 0 });
     expect(rightClick(pressed)).toBe(true);
     await waitFor(() => expect(drop(container)).toBeTruthy());
+  });
+
+  /// And a folder row's is not: nothing is picked up off one, so the long press
+  /// is free and drops the menu the way a right-click does — which is the whole
+  /// of what a touch screen reaches here.
+  it("drops a folder row's menu under a finger, makings and all", async () => {
+    const { container } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+    );
+
+    // The root, which is a folder row with nothing above it.
+    const root = row(container, OWN_ROOT.repo);
+    fireEvent.pointerDown(root, { pointerType: "touch", button: 0 });
+
+    expect(rightClick(root)).toBe(true);
+    await waitFor(() => expect(drop(container)).toBeTruthy());
+    expect(offered(container)).toEqual(["New file", "New folder"]);
+
+    fireEvent.click(drop(container)!.parentElement!.querySelector("div")!);
+    await waitFor(() => expect(drop(container)).toBeNull());
+
+    // And a folder inside it, which is the same press over a row that renames
+    // and deletes as well.
+    const inside = row(container, "crates");
+    fireEvent.pointerDown(inside, { pointerType: "touch", button: 0 });
+
+    expect(rightClick(inside)).toBe(true);
+    await waitFor(() =>
+      expect(offered(container)).toEqual([
+        "New file",
+        "New folder",
+        "Rename",
+        "Delete",
+      ]),
+    );
   });
 
   /// New file: the row expands, a field appears under it, and what is typed there
