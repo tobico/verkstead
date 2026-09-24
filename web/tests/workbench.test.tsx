@@ -40,6 +40,7 @@ import type {
   ConversationStopped,
   ConversationUnarchived,
   ConversationView,
+  FileMade,
   FileReading,
   FileRoot,
   FileRootsView,
@@ -206,7 +207,12 @@ import { DARK, LIGHT, NO_EDITOR } from "../src/workbench/Editor";
 import editorPane from "../src/workbench/Editor.module.css";
 import monacoModule from "../src/workbench/monaco.ts?raw";
 // And the tree down its side, over every worktree the conversation has.
-import { FOLDER_REFUSAL, NO_ROOTS } from "../src/workbench/Tree";
+import {
+  FOLDER_REFUSAL,
+  MADE_REFUSAL,
+  NO_ROOTS,
+  madeRefusal,
+} from "../src/workbench/Tree";
 import treePane from "../src/workbench/Tree.module.css";
 // The mark a pull request's checks are said in, both ways: the hashed names to
 // query the card by, and the words the icon is read aloud in. The three shapes
@@ -19586,6 +19592,422 @@ describe("the code pane's file tree", () => {
         "true",
       ),
     );
+  });
+});
+
+/// What a right-click on a row of that tree drops, and the first two things on
+/// it: a new file and a new folder, each named in a field on a row of its own
+/// (ADR 0019, *The tree*).
+describe("what a right-click on a row of the code pane's tree offers", () => {
+  /// Where a file and a folder are made under a folder of one of the roots.
+  const NEW_FILE = `/api/ui/conversations/${GRILLING.id}/files/file/new`;
+  const NEW_FOLDER = `/api/ui/conversations/${GRILLING.id}/files/folder/new`;
+
+  /// The folder rows of the tree, roots among them: both are folders, and a root
+  /// is the one of them that is not a path segment.
+  function folders(container: ParentNode): HTMLButtonElement[] {
+    return [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        `.${shell.detailsPane} .${treePane.folder}`,
+      ),
+    ];
+  }
+
+  /// And the file rows, which offer neither of the two.
+  function files(container: ParentNode): HTMLButtonElement[] {
+    return [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        `.${shell.detailsPane} .${treePane.file}`,
+      ),
+    ];
+  }
+
+  /// What the tree is drawing, in the order it drew it — which is what says the
+  /// new row landed where it belongs.
+  function named(container: ParentNode): string[] {
+    return [
+      ...container.querySelectorAll<HTMLElement>(
+        `.${shell.detailsPane} .${treePane.tree} .${treePane.name}`,
+      ),
+    ].map((row) => row.textContent ?? "");
+  }
+
+  /// One row, found by what it is called — which is how a human finds one, and
+  /// is not the position it happens to be drawn at.
+  function row(
+    container: ParentNode,
+    name: string,
+    among = folders,
+  ): HTMLButtonElement {
+    const found = among(container).find((one) =>
+      one.textContent?.startsWith(name),
+    );
+
+    if (!found) {
+      throw new Error(
+        `no row called ${name}; the tree has ${named(container).join(", ")}`,
+      );
+    }
+
+    return found;
+  }
+
+  /// Right-click a row, and say whether the browser's own menu was taken off the
+  /// press.
+  function rightClick(on: HTMLElement, x = 120, y = 200): boolean {
+    return !fireEvent.contextMenu(on, { clientX: x, clientY: y });
+  }
+
+  /// What it drops, or nothing where nothing was right-clicked.
+  function drop(container: ParentNode): HTMLElement | null {
+    return container.querySelector<HTMLElement>(
+      `.${shell.detailsPane} .${treePane.rowActions} > .${dropdown.drop}`,
+    );
+  }
+
+  /// And what its rows read as.
+  function offered(container: ParentNode): string[] {
+    return [...(drop(container)?.querySelectorAll("button") ?? [])].map(
+      (one) => one.textContent ?? "",
+    );
+  }
+
+  /// The field a name is typed into, by the label a screen reader finds it by.
+  function field(container: ParentNode): HTMLInputElement | null {
+    return container.querySelector<HTMLInputElement>(
+      `.${shell.detailsPane} .${treePane.field}`,
+    );
+  }
+
+  /// And the sentence a refusal drew beside it.
+  function refused(container: ParentNode): string | null {
+    return (
+      container.querySelector<HTMLElement>(
+        `.${shell.detailsPane} .${treePane.refused}`,
+      )?.textContent ?? null
+    );
+  }
+
+  /// The tabs of the group, which is where a new file opens.
+  function tabs(container: ParentNode): HTMLButtonElement[] {
+    return [
+      ...container.querySelectorAll<HTMLButtonElement>(
+        `.${shell.detailsPane} .${codePane.tab}`,
+      ),
+    ];
+  }
+
+  /// The workbench with the conversation's own root expanded, which is what a
+  /// row's menu is opened over: nothing is read until a row is pressed.
+  async function expanded(...answers: Parameters<typeof serving>) {
+    const fetching = withTerminals([], ...answers);
+    const mounted = mount(`/conversations/${GRILLING.id}/code`);
+
+    await waitFor(() => expect(folders(mounted.container)).toHaveLength(2));
+    fireEvent.click(row(mounted.container, OWN_ROOT.repo));
+    await waitFor(() =>
+      expect(named(mounted.container)).toContain("Cargo.toml"),
+    );
+
+    return { ...mounted, fetching };
+  }
+
+  /// A folder row offers both, and nothing is dropped until one is right-clicked.
+  it("offers New file and New folder on a folder row", async () => {
+    const { container } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+    );
+
+    expect(drop(container)).toBeNull();
+
+    // And the browser's own menu is taken off the press: what the hand is asking
+    // for is this card.
+    expect(rightClick(row(container, OWN_ROOT.repo))).toBe(true);
+
+    await waitFor(() => expect(drop(container)).toBeTruthy());
+    expect(offered(container)).toEqual(["New file", "New folder"]);
+
+    // A folder under the root is the same menu: a root is a folder row, and so
+    // is everything that expands under it.
+    fireEvent.click(drop(container)!.parentElement!.querySelector("div")!);
+    await waitFor(() => expect(drop(container)).toBeNull());
+
+    rightClick(row(container, "crates"));
+    await waitFor(() =>
+      expect(offered(container)).toEqual(["New file", "New folder"]),
+    );
+  });
+
+  /// And a file row offers neither, so nothing comes down over one at all: a card
+  /// with no rows in it is worse than the browser's own menu. Rename and delete
+  /// are the two tasks after this one.
+  it("offers neither on a file row, and drops nothing", async () => {
+    const { container } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+    );
+
+    // The browser's own menu is left where it was, there being nothing to put in
+    // its place.
+    expect(rightClick(row(container, "Cargo.toml", files))).toBe(false);
+
+    expect(drop(container)).toBeNull();
+    expect(field(container)).toBeNull();
+  });
+
+  /// A read-only root offers neither anywhere under it — the root's own flag,
+  /// which the roots listing already carries, so the rows are not drawn rather
+  /// than drawn to be refused.
+  it("offers neither anywhere under a read-only root", async () => {
+    const inside = `${COMPANION_ROOT.path}/src`;
+    const { container } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+      whenever(
+        folderOf(COMPANION_ROOT.path),
+        json({
+          Listed: {
+            path: COMPANION_ROOT.path,
+            entries: [{ name: "src", path: inside, folder: true }],
+          },
+        } satisfies FolderListing),
+      ),
+    );
+
+    expect(rightClick(row(container, COMPANION_ROOT.repo))).toBe(false);
+    expect(drop(container)).toBeNull();
+
+    // And a folder inside it, which is the same root read one level down.
+    fireEvent.click(row(container, COMPANION_ROOT.repo));
+    await waitFor(() => expect(named(container)).toContain("src"));
+
+    expect(rightClick(row(container, "src"))).toBe(false);
+    expect(drop(container)).toBeNull();
+  });
+
+  /// The menu is the mouse's alone: a phone has no right-click and fires the same
+  /// event from a long press, which is the gesture a file row is dragged into a
+  /// group with (ADR 0019, *Tabs and groups*).
+  it("drops nothing where the press began under a finger", async () => {
+    const { container } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+    );
+
+    const pressed = row(container, OWN_ROOT.repo);
+    fireEvent.pointerDown(pressed, { pointerType: "touch", button: 0 });
+
+    expect(rightClick(pressed)).toBe(false);
+    expect(drop(container)).toBeNull();
+
+    // And a mouse on the same row still drops it: what is read is the hand, not
+    // the row.
+    fireEvent.pointerDown(pressed, { pointerType: "mouse", button: 0 });
+    expect(rightClick(pressed)).toBe(true);
+    await waitFor(() => expect(drop(container)).toBeTruthy());
+  });
+
+  /// New file: the row expands, a field appears under it, and what is typed there
+  /// and entered is made — after which the folder is read again and the file opens
+  /// as a tab in the active group.
+  it("makes a file from a name typed into the row, and opens it", async () => {
+    const at = `${OWN_ROOT.path}/notes.md`;
+
+    // What the folder holds afterwards, which is the reading it is asked for
+    // again: there is no watcher until stage 04, so a making re-reads.
+    let held = codeFolder as FolderListing;
+
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), () => json(held)()),
+      whenever(
+        NEW_FILE,
+        json({ Made: { path: at } } satisfies FileMade),
+        "POST",
+      ),
+      whenever(
+        fileOf(at),
+        json({
+          Text: { path: at, version: "0".repeat(64), text: "", writable: true },
+        } satisfies FileReading),
+      ),
+    );
+
+    rightClick(row(container, OWN_ROOT.repo));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.newFile}`),
+    );
+
+    // The menu goes, and a row carrying nothing but a field stands in its place —
+    // with the keyboard already in it, a row that waited to be pressed being two
+    // presses for one gesture.
+    await waitFor(() => expect(field(container)).toBeTruthy());
+    expect(drop(container)).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(field(container)));
+
+    held = {
+      Listed: {
+        path: OWN_ROOT.path,
+        entries: [
+          ...(codeFolder as Extract<FolderListing, { Listed: unknown }>).Listed
+            .entries,
+          { name: "notes.md", path: at, folder: false },
+        ],
+      },
+    };
+
+    fireEvent.input(field(container)!, { target: { value: "notes.md" } });
+    fireEvent.keyDown(field(container)!, { key: "Enter" });
+
+    // The path is the folder the row was pressed on with the name joined onto it,
+    // which is how every other path the tree holds is built.
+    await waitFor(() => expect(sent(fetching, NEW_FILE)).toEqual({ path: at }));
+
+    // The field goes, the folder is read again, and the row is in it.
+    await waitFor(() => expect(named(container)).toContain("notes.md"));
+    expect(field(container)).toBeNull();
+    expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(2);
+
+    // And it opens as a tab in the active group, the way a file pressed in the
+    // tree does.
+    await waitFor(() => expect(tabs(container)).toHaveLength(1));
+    expect(tabs(container)[0]!.textContent).toBe("notes.md");
+  });
+
+  /// A new folder is made the same way and opens nothing: there is nothing in it
+  /// to open.
+  it("makes a folder from a name typed into the row, and opens nothing", async () => {
+    const at = `${OWN_ROOT.path}/docs`;
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+      whenever(
+        NEW_FOLDER,
+        json({ Made: { path: at } } satisfies FileMade),
+        "POST",
+      ),
+    );
+
+    rightClick(row(container, OWN_ROOT.repo));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.newFolder}`),
+    );
+
+    fireEvent.input(await drawn(container, `.${treePane.field}`), {
+      target: { value: "docs" },
+    });
+    fireEvent.keyDown(field(container)!, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(sent(fetching, NEW_FOLDER)).toEqual({ path: at }),
+    );
+    await waitFor(() => expect(field(container)).toBeNull());
+
+    // Nothing was read and nothing opened: a folder is a row to expand.
+    expect(askedFor(fetching, fileOf(at))).toBe(0);
+    expect(tabs(container)).toHaveLength(0);
+  });
+
+  /// A name already taken is refused with the server's own sentence beside the
+  /// field, and the field keeps what was typed: a correction rather than a
+  /// retype.
+  it("draws the sentence a refused name came back with, keeping what was typed", async () => {
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+      whenever(NEW_FILE, json("Taken" satisfies FileMade), "POST"),
+    );
+
+    rightClick(row(container, OWN_ROOT.repo));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.newFile}`),
+    );
+
+    fireEvent.input(await drawn(container, `.${treePane.field}`), {
+      target: { value: "Cargo.toml" },
+    });
+    fireEvent.keyDown(field(container)!, { key: "Enter" });
+
+    await waitFor(() => expect(refused(container)).toBe(MADE_REFUSAL.Taken));
+
+    // The row is still there with what was typed in it, and nothing was drawn as
+    // having landed: the folder was not read again and no tab opened.
+    expect(field(container)!.value).toBe("Cargo.toml");
+    expect(askedFor(fetching, folderOf(OWN_ROOT.path))).toBe(1);
+    expect(tabs(container)).toHaveLength(0);
+  });
+
+  /// And each refusal is its own sentence rather than one "could not be made",
+  /// because only the human can tell which of them they are looking at.
+  it("words every refusal of a making as the thing it is", () => {
+    expect(new Set(Object.values(MADE_REFUSAL)).size).toBe(
+      Object.keys(MADE_REFUSAL).length,
+    );
+
+    expect(MADE_REFUSAL.Taken).toContain("already");
+    expect(MADE_REFUSAL.ReadOnly).toContain("worktree");
+    expect(MADE_REFUSAL.Outside).toContain("worktrees");
+    expect(MADE_REFUSAL.UnderGit).toContain(".git");
+
+    // And the one the server words itself, being the only one this side could not
+    // have worked out.
+    expect(madeRefusal({ Unwritable: { why: "no room on the disk" } })).toBe(
+      "no room on the disk",
+    );
+    expect(madeRefusal({ Made: { path: "/anywhere" } })).toBeNull();
+  });
+
+  /// Escape leaves the tree exactly as it was: the row goes, nothing is asked
+  /// for, and what was typed goes with it.
+  it("leaves the tree as it was when Escape is pressed while naming", async () => {
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+    );
+
+    const was = named(container);
+
+    rightClick(row(container, OWN_ROOT.repo));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.newFile}`),
+    );
+
+    fireEvent.input(await drawn(container, `.${treePane.field}`), {
+      target: { value: "half-typed" },
+    });
+    fireEvent.keyDown(field(container)!, { key: "Escape" });
+
+    await waitFor(() => expect(field(container)).toBeNull());
+    expect(named(container)).toEqual(was);
+    expect(
+      fetching.mock.calls.filter(([path]) => String(path) === NEW_FILE),
+    ).toHaveLength(0);
+
+    // And nothing is left behind: the next field opens empty rather than holding
+    // what was abandoned.
+    rightClick(row(container, OWN_ROOT.repo));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.newFile}`),
+    );
+
+    expect(
+      (await drawn<HTMLInputElement>(container, `.${treePane.field}`)).value,
+    ).toBe("");
+  });
+
+  /// And Enter over an empty field is a press that waits: there is nothing for
+  /// the server to refuse that the field has not already said by being empty.
+  it("asks for nothing when Enter is pressed with nothing typed", async () => {
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+    );
+
+    rightClick(row(container, OWN_ROOT.repo));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.newFile}`),
+    );
+
+    fireEvent.keyDown(await drawn(container, `.${treePane.field}`), {
+      key: "Enter",
+    });
+
+    expect(
+      fetching.mock.calls.filter(([path]) => String(path) === NEW_FILE),
+    ).toHaveLength(0);
+    expect(field(container)).toBeTruthy();
   });
 });
 

@@ -1,5 +1,6 @@
 //! The files half of Code: the roots its tree stands on, one folder of one of
-//! them at a time, and one file of one of those opened.
+//! them at a time, one file of one of those opened — and a file or a folder
+//! made in one of them.
 //!
 //! **A root is a Worktree** — the Conversation's own first, then each
 //! companion's in the order the Conversation carries them
@@ -30,6 +31,11 @@
 //! so that the next save lands. Last writer wins was decided against — an
 //! agent's edit silently overwritten by a human who never saw it is exactly
 //! what the version exists to surface.
+//!
+//! **And a row of the tree makes one** — see [`FileMaking`] and [`FileMade`]:
+//! an empty file or a folder, under a folder of a root, named in full. One
+//! refusal of its own, a name that is already taken, and every other one is the
+//! write's said about a path that is not there yet.
 //!
 //! Every refusal is a named outcome rather than a status code, as registering
 //! a Repo refuses and as that dropdown's listing does — because each of them is
@@ -356,5 +362,92 @@ pub enum FileWritten {
 
     /// The server could not write it, and this is why — permissions, a full
     /// disk, or a file that went between the reading and the writing.
+    Unwritable { why: String },
+}
+
+/// A file or a folder to be made, named in full.
+///
+/// One field, because a path is the one thing the tree has to say: a row of it
+/// holds the folder it was listed from, and what a human types into the field
+/// under that row is a name joined onto it — which is exactly how
+/// [`FolderEntry::path`] is built, and is why every other endpoint here is
+/// asked by path as well.
+///
+/// What is at the end of that path is what is made, and the folder above it is
+/// the one it is made in: so a Worktree that has gone, a folder that has gone
+/// and a root that takes no writes are all answers about the path's *parent*,
+/// and [`FileMade::Taken`] is the one about its last segment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct FileMaking {
+    pub path: String,
+}
+
+/// What became of making one.
+///
+/// **A new file is empty and a new folder holds nothing** — there is no
+/// template and no content in the request, because what is being made is a row
+/// in the tree. A file made this way opens as a tab the human then types into
+/// and saves through [`FileWrite`], which is where content has always come
+/// from.
+///
+/// The refusals are [`FileWritten`]'s said about a path that is not there yet,
+/// with one of their own: a name that is already taken. Each of them is a
+/// sentence drawn beside the field the name was typed into rather than a status
+/// code, the way every other answer of this API is
+/// ([ADR 0019](../../../docs/adr/0019-the-code-pane.md), *The tree*).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum FileMade {
+    /// It is on disk, and this is where — the path as it was asked for, which
+    /// is what the tab a new file opens in is opened at.
+    ///
+    /// Answered back rather than assumed, for [`FolderEntry::path`]'s reason:
+    /// what the tree holds is spelled the way the root it came from is, and a
+    /// path the viewer built for itself out of a resolved one would read as
+    /// somewhere else on a machine whose temporary directory is a symlink.
+    Made { path: String },
+
+    /// Something of that name is already in the folder, and nothing was
+    /// written.
+    ///
+    /// Whatever it is: a file where a folder was asked for, a folder where a
+    /// file was, or a link to either. What the human has to do about it is the
+    /// same in every case — type another name — and a refusal that told them
+    /// which kind of thing is in the way would be telling them about a row the
+    /// tree is already drawing.
+    Taken,
+
+    /// The root it would be in takes no writes: a read-only companion, checked
+    /// out detached and there to be read.
+    ///
+    /// The root's own flag rather than the folder's mode — [`FileWritten::ReadOnly`]'s
+    /// rule, for its reason. The tree draws neither row under such a root, so
+    /// this is the endpoint refusing on its own account rather than anything a
+    /// press can reach.
+    ReadOnly,
+
+    /// It is under none of this Conversation's Worktrees.
+    ///
+    /// Which is what a path that climbs comes to as well: the name typed into
+    /// the field is joined onto a folder of the tree, and a `..` in it is a
+    /// path spelled out of a root rather than a name.
+    Outside,
+
+    /// It is inside a repository's git directory, which Code does not touch.
+    UnderGit,
+
+    /// The Worktree it would be in is no longer on disk.
+    RootGone,
+
+    /// The folder it would go in is not there: deleted, renamed, or committed
+    /// away by a checkout in a terminal beside the tree.
+    Missing,
+
+    /// Something is at the folder it would go in and it is not a folder.
+    NotAFolder,
+
+    /// The server could not make it, and this is why — permissions, a full
+    /// disk, or a folder that went between the check and the making.
     Unwritable { why: String },
 }

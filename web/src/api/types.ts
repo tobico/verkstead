@@ -1947,6 +1947,39 @@ export type Distro = "MacOs" | "MacOsIntel" | "Windows" | "NixOs" | "Ubuntu" | "
 export type EntryKind = "Directory" | "File" | "Repository";
 
 /**
+ * What became of making one.
+ *
+ * **A new file is empty and a new folder holds nothing** — there is no
+ * template and no content in the request, because what is being made is a row
+ * in the tree. A file made this way opens as a tab the human then types into
+ * and saves through [`FileWrite`], which is where content has always come
+ * from.
+ *
+ * The refusals are [`FileWritten`]'s said about a path that is not there yet,
+ * with one of their own: a name that is already taken. Each of them is a
+ * sentence drawn beside the field the name was typed into rather than a status
+ * code, the way every other answer of this API is
+ * ([ADR 0019](../../../docs/adr/0019-the-code-pane.md), *The tree*).
+ */
+export type FileMade = { "Made": { path: string, } } | "Taken" | "ReadOnly" | "Outside" | "UnderGit" | "RootGone" | "Missing" | "NotAFolder" | { "Unwritable": { why: string, } };
+
+/**
+ * A file or a folder to be made, named in full.
+ *
+ * One field, because a path is the one thing the tree has to say: a row of it
+ * holds the folder it was listed from, and what a human types into the field
+ * under that row is a name joined onto it — which is exactly how
+ * [`FolderEntry::path`] is built, and is why every other endpoint here is
+ * asked by path as well.
+ *
+ * What is at the end of that path is what is made, and the folder above it is
+ * the one it is made in: so a Worktree that has gone, a folder that has gone
+ * and a root that takes no writes are all answers about the path's *parent*,
+ * and [`FileMade::Taken`] is the one about its last segment.
+ */
+export type FileMaking = { path: string, };
+
+/**
  * What one file of one of those roots is, read — or the named reason it is
  * not drawn.
  *

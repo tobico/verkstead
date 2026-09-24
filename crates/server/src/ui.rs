@@ -37,17 +37,17 @@ use verkstead_render::{
     CompanionBranchRenamed, CompanionModeChoice, CompanionModeChosen, CompanionRemoved,
     CompanionView, CompileCaching, ConflictResolution, ConversationArchived, ConversationClosed,
     ConversationEntry, ConversationSteered, ConversationStopped, ConversationUnarchived,
-    ConversationView, Creation, Cursor, FileReading, FileRootsView, FileWrite, FileWritten,
-    FolderListing, GrillingStarted, IgnoreRule, IgnoredCommentsEdit, InstallPress, Lifecycle,
-    Locked, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder,
-    NewPullRequestAdoption, PairingView, Parked, PendingSteerView, ProfileChoice, ProfileEdit,
-    ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
-    RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress,
-    SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
-    SharedCommit, SharedConversation, ShowArchived, ShowingArchived, Standing, SteerCancelled,
-    SteerForm, SteerOpened, SteerPairingView, SteerSaved, SteerSubmission, Submitted, Subscribed,
-    Subscription, TakenUp, TerminalOpened, TimelineEvent, TokenEdit, TokenSaved, UnreadableSet,
-    Unsubscribe, UpdateNotice, Verified,
+    ConversationView, Creation, Cursor, FileMade, FileMaking, FileReading, FileRootsView,
+    FileWrite, FileWritten, FolderListing, GrillingStarted, IgnoreRule, IgnoredCommentsEdit,
+    InstallPress, Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion,
+    NewConversation, NewOrder, NewPullRequestAdoption, PairingView, Parked, PendingSteerView,
+    ProfileChoice, ProfileEdit, ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView,
+    RepoChoice, RepoEntry, RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused,
+    ServeEdit, ServePress, SetReading, SetView, SettingsEdit, SettingsSaved, SettingsView,
+    ShareCommented, SharePublished, SharedCommit, SharedConversation, ShowArchived,
+    ShowingArchived, Standing, SteerCancelled, SteerForm, SteerOpened, SteerPairingView,
+    SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalOpened,
+    TimelineEvent, TokenEdit, TokenSaved, UnreadableSet, Unsubscribe, UpdateNotice, Verified,
 };
 use verkstead_schema::{ApiError, Nudge, Response};
 
@@ -261,6 +261,19 @@ pub(crate) fn routes() -> axum::Router<AppState> {
             get(file)
                 .post(write_file)
                 .layer(DefaultBodyLimit::max(crate::files::MAX_WRITE_BYTES)),
+        )
+        // And the two a row's own menu makes: an empty file, and a folder — see
+        // [`new_file`] and [`new_folder`]. One route each rather than one
+        // carrying a flag, because a file and a folder are two different things
+        // to make and a body saying which would be a kind of thing in a field;
+        // `repos/new` is the shape, under the thing being made.
+        //
+        // No body limit of their own: what goes up is a path, which is what the
+        // router's own default is already the right size for.
+        .route("/api/ui/conversations/{id}/files/file/new", post(new_file))
+        .route(
+            "/api/ui/conversations/{id}/files/folder/new",
+            post(new_folder),
         )
         // And one commit — its summary and its diff — fetched the same way and
         // for the same reason; see [`commit_pane`].
@@ -3166,6 +3179,84 @@ async fn write_file(
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "writing a file of a Worktree failed");
             unavailable("the file could not be written")
+        }
+    }
+}
+
+/// `POST /api/ui/conversations/{id}/files/file/new` — an empty file made under a
+/// folder of one of those roots.
+///
+/// The path in the body and nothing else: what is being made is a row of the
+/// tree, so what the request says is where the row goes (ADR 0019, *The tree*).
+/// The file is empty, and the text that goes into it afterwards is a save
+/// through the endpoint above.
+///
+/// Refused in the body like everything else here, and with one refusal of its
+/// own: a name already taken. A read-only root refuses on its own account, the
+/// tree having drawn neither row under one — see
+/// [`verkstead_render::FileMade`].
+async fn new_file(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(asking): Json<FileMaking>,
+) -> HttpResponse {
+    made(&state, id, asking, crate::files::Making::File).await
+}
+
+/// `POST /api/ui/conversations/{id}/files/folder/new` — and a folder made there.
+///
+/// [`new_file`]'s request and [`new_file`]'s refusals, about the other kind of
+/// row: one `create_dir` rather than a file, and nothing opens afterwards, there
+/// being nothing in a new folder to open.
+async fn new_folder(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(asking): Json<FileMaking>,
+) -> HttpResponse {
+    made(&state, id, asking, crate::files::Making::Folder).await
+}
+
+/// The making itself, whichever of the two was asked for.
+///
+/// Written once for both, because everything a request does with the record is
+/// the same: the roots are this Conversation's checkouts, and the kind of thing
+/// being made is the last argument of one call.
+async fn made(
+    state: &AppState,
+    id: String,
+    asking: FileMaking,
+    making: crate::files::Making,
+) -> HttpResponse {
+    // An id that names no Conversation names no roots, so nothing is under one
+    // of them — the read's answer, read as permissively.
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(FileMade::Outside).into_response();
+    };
+
+    let conversation = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return Json(FileMade::Outside).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
+            return unavailable("this conversation's worktrees could not be read");
+        }
+    };
+
+    // Off the runtime: a directory is resolved and an entry is made in it.
+    let outcome = tokio::task::spawn_blocking(move || {
+        crate::files::make(
+            &crate::files::roots(&conversation),
+            std::path::Path::new(&asking.path),
+            making,
+        )
+    })
+    .await;
+
+    match outcome {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "making a file in a Worktree failed");
+            unavailable("it could not be made")
         }
     }
 }

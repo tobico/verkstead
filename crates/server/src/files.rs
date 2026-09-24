@@ -1,6 +1,6 @@
 //! Reading the Worktrees a Conversation has, for the Code pane: the roots its
 //! tree stands on, one folder of one of them at a time, one file of one of
-//! those opened — and that file written back.
+//! those opened — and that file written back, or a new one made beside it.
 //!
 //! **The server reads as itself, with no Sandbox in front of it**
 //! ([ADR 0019](../../../docs/adr/0019-the-code-pane.md), *The server reads and
@@ -50,6 +50,13 @@
 //! is a file the session can still read (ADR 0019, *The server reads and writes
 //! the Worktree, outside the Sandbox*).
 //!
+//! **And a row of the tree makes one** — see [`make`]: an empty file or a
+//! folder, named in full under a folder of a root, which is the first thing here
+//! asked about a path that is not there yet. What is bounded is the folder above
+//! it, and the making itself is the check for a name already taken — one
+//! `create_new` rather than a look followed by a write, so that nothing the
+//! agent writes in the window between them is overwritten.
+//!
 //! **Nothing here refuses by status code**, the way registering a Repo refuses
 //! and the way a browse's listing does: each refusal is a sentence the tree
 //! draws where its rows would be — see [`verkstead_render::FolderListing`].
@@ -66,7 +73,7 @@ use std::path::{Component, Path};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use sha2::{Digest, Sha256};
-use verkstead_render::{FileReading, FileRoot, FileWritten, FolderEntry, FolderListing};
+use verkstead_render::{FileMade, FileReading, FileRoot, FileWritten, FolderEntry, FolderListing};
 
 use crate::repos::feeding;
 use crate::resolved::{Resolved, resolve};
@@ -309,6 +316,120 @@ pub(crate) fn write(roots: &[FileRoot], path: &Path, over: &str, text: &str) -> 
             version: version(text.as_bytes()),
         },
         Err(error) => unwritable(&error),
+    }
+}
+
+/// Which of the two things a row's menu makes.
+///
+/// One function for both, because everything in front of the making is the
+/// same: the path is bounded, the root is asked whether it takes writes, the
+/// folder above it is asked whether it is a folder, and only the last call
+/// differs. Two functions would be that paragraph written twice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Making {
+    /// An empty file, which opens as a tab the human types into.
+    File,
+
+    /// A folder, which opens nothing: there is nothing in it to open.
+    Folder,
+}
+
+/// Make an empty file or a folder at `path`.
+///
+/// Blocking: a directory is resolved and one entry is created in it.
+///
+/// **The path is not there yet, which is what parts this from every other
+/// function here.** [`bound`] resolves what it is handed and answers
+/// [`Bound::Missing`] for a path with nothing at it, so what is bounded here is
+/// the *folder* the new row goes in — and the name is the last segment of what
+/// was asked for, which the bound above it has already refused a `..` or a `.`
+/// in. So the four refusals a read has are all answers about the parent, and a
+/// path whose own last segment is `.git` is caught by asking the whole path
+/// about it.
+///
+/// The order the checks come in is [`write`]'s: the bound first, because every
+/// other answer is about a path that has one; then whether the root takes writes
+/// at all; then the folder itself.
+///
+/// **And the making is the check for a name already taken.** `create_new` on a
+/// file and `create_dir` on a folder both refuse what is already there, in one
+/// call the filesystem makes atomically — where a look followed by a create
+/// would be a window for the agent to write the same name into, and a human
+/// told the name was free while their file went over somebody's work.
+///
+/// **What comes back is the folder joined to the name**, rather than the path as
+/// it arrived: the viewer joins with a `/` wherever it runs, and a Worktree on
+/// Windows is spelled with a `\`, so an echo would hand the tab a second name for
+/// the file the next listing of that folder draws — and two names for one file is
+/// two buffers. [`FolderEntry::path`] is the same join for the same reason.
+pub(crate) fn make(roots: &[FileRoot], path: &Path, making: Making) -> FileMade {
+    // A path that names nothing to make — a root of the filesystem, or one
+    // ending in a separator — is under no root in the only sense that matters
+    // here: there is no name at the end of it for a row to be drawn from.
+    let (Some(name), Some(folder)) = (path.file_name(), path.parent()) else {
+        return FileMade::Outside;
+    };
+
+    let (root, real) = match bound(roots, folder) {
+        Bound::Inside { root, real } => (root, real),
+        Bound::Outside => return FileMade::Outside,
+        Bound::UnderGit => return FileMade::UnderGit,
+        Bound::RootGone => return FileMade::RootGone,
+        Bound::Missing => return FileMade::Missing,
+    };
+
+    // The folder is inside the root and outside its `.git`, and the name is one
+    // segment — which leaves exactly one way for the new path to be under a git
+    // directory the folder is not: to be called `.git` itself.
+    if inside_git(Path::new(&root.path), path) {
+        return FileMade::UnderGit;
+    }
+
+    // The root's own flag rather than the folder's mode, which is what the tree
+    // drew when it left both rows off a read-only root — see
+    // [`FileWritten::ReadOnly`], the same reading.
+    if !root.writable {
+        return FileMade::ReadOnly;
+    }
+
+    if !real.is_dir() {
+        return FileMade::NotAFolder;
+    }
+
+    let at = real.join(name);
+
+    let made = match making {
+        // `create_new`, which is the O_EXCL the name check is: what is already
+        // there is left exactly as it is, whatever kind of thing it is.
+        Making::File => std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&at)
+            .map(drop),
+
+        // And `create_dir` rather than `create_dir_all`, which is the same
+        // refusal: all the parents are there or the folder above is not a
+        // folder, and a name with a separator in it is a request to make two
+        // rows out of one field.
+        Making::Folder => std::fs::create_dir(&at),
+    };
+
+    match made {
+        // Spelled as the folder that was asked for with the name joined on,
+        // rather than off `at` — which is the *resolved* parent — and rather than
+        // echoing what arrived. [`FolderEntry::path`]'s rule and the same join,
+        // so that the path the tab opens at is character for character the path
+        // the next listing of that folder draws the row under: a viewer that
+        // spelled the join with a `/` on a machine whose paths use `\` would
+        // otherwise be handed two names for one file, and two names for one file
+        // is two buffers.
+        Ok(()) => FileMade::Made {
+            path: folder.join(name).display().to_string(),
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => FileMade::Taken,
+        Err(error) => FileMade::Unwritable {
+            why: format!("the server cannot make it: {error}"),
+        },
     }
 }
 
@@ -1206,6 +1327,202 @@ mod tests {
         assert_eq!(
             write(&roots, &worktree.join("README.md"), "", "mine\n"),
             FileWritten::RootGone
+        );
+    }
+
+    /// Where a new file lands, and what it holds: nothing. What goes into it is
+    /// a save through the tab it opens in, which is where content has always
+    /// come from.
+    #[test]
+    fn a_new_file_is_made_empty_where_it_was_asked_for() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+        std::fs::create_dir(worktree.join("src")).unwrap();
+
+        let at = worktree.join("src/lib.rs");
+
+        assert_eq!(
+            make(&[root(&worktree)], &at, Making::File),
+            FileMade::Made {
+                path: at.display().to_string()
+            }
+        );
+        assert_eq!(std::fs::read_to_string(&at).unwrap(), "");
+
+        // And it is a row of the folder the moment it is read again, there being
+        // no watcher to say so until stage 04 — spelled the way the row under it
+        // is, which is what lets the tab and the row be the one file.
+        let listing = folder(&[root(&worktree)], &worktree.join("src"));
+        assert_eq!(names(listing.clone()), ["lib.rs"]);
+        assert_eq!(
+            listed(listing).first().map(|row| row.path.clone()),
+            Some(at.display().to_string())
+        );
+    }
+
+    /// And the path it answers with is the folder joined to the name rather than
+    /// the path as it arrived, which is what a viewer joining with a `/` on a
+    /// machine whose paths use a `\` depends on.
+    #[test]
+    fn a_making_answers_with_the_folder_joined_to_the_name() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+        std::fs::create_dir(worktree.join("src")).unwrap();
+
+        // Asked for with a separator that is not this platform's own, which is
+        // what the viewer sends on Windows.
+        let asked = format!("{}/src/lib.rs", worktree.display());
+
+        assert_eq!(
+            make(&[root(&worktree)], Path::new(&asked), Making::File),
+            FileMade::Made {
+                path: worktree.join("src").join("lib.rs").display().to_string()
+            }
+        );
+    }
+
+    /// And a new folder is a folder, holding nothing and opening nothing.
+    #[test]
+    fn a_new_folder_is_made_where_it_was_asked_for() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+
+        let at = worktree.join("crates");
+
+        assert_eq!(
+            make(&[root(&worktree)], &at, Making::Folder),
+            FileMade::Made {
+                path: at.display().to_string()
+            }
+        );
+        assert!(at.is_dir());
+        assert!(listed(folder(&[root(&worktree)], &at)).is_empty());
+    }
+
+    /// A name already taken is refused and what is there is left exactly as it
+    /// was — whichever kind of thing it is, and whichever kind was asked for.
+    #[test]
+    fn a_name_already_taken_is_refused_and_nothing_is_overwritten() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+        std::fs::create_dir(worktree.join("src")).unwrap();
+
+        let roots = [root(&worktree)];
+
+        assert_eq!(
+            make(&roots, &worktree.join("README.md"), Making::File),
+            FileMade::Taken
+        );
+        assert_eq!(
+            std::fs::read_to_string(worktree.join("README.md")).unwrap(),
+            "# a repository\n",
+            "the file that was there is the file that is there"
+        );
+
+        assert_eq!(
+            make(&roots, &worktree.join("src"), Making::Folder),
+            FileMade::Taken
+        );
+
+        // And across the two kinds both ways: a file where a folder stands, and
+        // a folder where a file does, are one refusal and one thing to do about
+        // it.
+        assert_eq!(
+            make(&roots, &worktree.join("src"), Making::File),
+            FileMade::Taken
+        );
+        assert_eq!(
+            make(&roots, &worktree.join("README.md"), Making::Folder),
+            FileMade::Taken
+        );
+    }
+
+    /// A read-only root takes neither, before the disk is touched at all — the
+    /// root's own flag rather than the folder's mode, which is what the tree
+    /// drew when it left both rows off.
+    #[test]
+    fn a_read_only_root_takes_neither() {
+        let held = tempfile::tempdir().unwrap();
+        let companion = repository(&held.path().join("companion"));
+
+        let roots = [FileRoot {
+            repo: "askance".to_owned(),
+            path: companion.display().to_string(),
+            own: false,
+            writable: false,
+        }];
+
+        assert_eq!(
+            make(&roots, &companion.join("mine.rs"), Making::File),
+            FileMade::ReadOnly
+        );
+        assert_eq!(
+            make(&roots, &companion.join("mine"), Making::Folder),
+            FileMade::ReadOnly
+        );
+
+        assert!(!companion.join("mine.rs").exists());
+        assert!(!companion.join("mine").exists());
+    }
+
+    /// And a making is bounded the way a read and a write are: the roots are the
+    /// whole of what this API may reach, and the folder the new row goes in is
+    /// what is measured against them.
+    #[test]
+    fn a_making_is_bounded_the_way_a_write_is() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+        let elsewhere = held.path().join("elsewhere");
+        std::fs::create_dir(&elsewhere).unwrap();
+
+        let roots = [root(&worktree)];
+
+        assert_eq!(
+            make(&roots, &elsewhere.join("mine.rs"), Making::File),
+            FileMade::Outside
+        );
+        assert_eq!(
+            make(&roots, &worktree.join("../elsewhere/mine.rs"), Making::File),
+            FileMade::Outside
+        );
+
+        // A repository's insides, which Code does not touch — asked of the
+        // folder above the new row and of the row's own name both, a `.git` at
+        // the end of a path being the one way past the first check.
+        assert_eq!(
+            make(&roots, &worktree.join(".git/config"), Making::File),
+            FileMade::UnderGit
+        );
+        assert_eq!(
+            make(&roots, &worktree.join(".git"), Making::Folder),
+            FileMade::UnderGit
+        );
+
+        // The folder it would go in is not there, which is not the same thing as
+        // the Worktree having gone.
+        assert_eq!(
+            make(&roots, &worktree.join("nowhere/mine.rs"), Making::File),
+            FileMade::Missing
+        );
+
+        // And something at that folder that is not a folder.
+        assert_eq!(
+            make(&roots, &worktree.join("README.md/mine.rs"), Making::File),
+            FileMade::NotAFolder
+        );
+
+        // And a path with no name at the end of it, which names nothing to make.
+        assert_eq!(
+            make(&roots, Path::new("/"), Making::File),
+            FileMade::Outside
+        );
+
+        assert!(!elsewhere.join("mine.rs").exists());
+
+        std::fs::remove_dir_all(&worktree).unwrap();
+        assert_eq!(
+            make(&roots, &worktree.join("mine.rs"), Making::File),
+            FileMade::RootGone
         );
     }
 }

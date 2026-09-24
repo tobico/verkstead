@@ -36,6 +36,8 @@ import type {
   Created,
   Dependency,
   DirectoryListing,
+  FileMade,
+  FileMaking,
   FileReading,
   FileRootsView,
   FileWrite,
@@ -641,6 +643,35 @@ export function writeFile(
     version,
     text,
   } satisfies FileWrite);
+}
+
+/// And an empty file made under a folder of one of those roots, which is what a
+/// name typed into a row's own field asks for.
+///
+/// The path in full and nothing else: what is being made is a row of the tree,
+/// so what the request says is where that row goes (ADR 0019, *The tree*). The
+/// file is empty, and the text that goes into it is a save through the endpoint
+/// above.
+///
+/// Refused in the body like everything else here, with one refusal of its own —
+/// a name already taken — and each of them is a sentence drawn beside the field
+/// with what was typed still in it.
+export function makeFile(id: number, path: string): Promise<FileMade> {
+  return post<FileMade>(`/api/ui/conversations/${id}/files/file/new`, {
+    path,
+  } satisfies FileMaking);
+}
+
+/// And a folder made there, which is the same request about the other kind of
+/// row.
+///
+/// Its own endpoint rather than a flag on the one above, because a file and a
+/// folder are two different things to make: what a new file does afterwards is
+/// open as a tab, and a new folder opens nothing.
+export function makeFolder(id: number, path: string): Promise<FileMade> {
+  return post<FileMade>(`/api/ui/conversations/${id}/files/folder/new`, {
+    path,
+  } satisfies FileMaking);
 }
 
 /// One commit, rendered: what it said about itself, and its diff.

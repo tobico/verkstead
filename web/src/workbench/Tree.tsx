@@ -52,9 +52,36 @@
 //! about a drag writes anything: the row is still where it is and the folder
 //! still open or closed, whatever the drag came to.
 //!
-//! No row menu and no quick open: those are stage 03 of the roadmap, and no git
-//! status marks, which are stage 04's with the watcher that keeps them honest.
-//! Each of them wants this tree to be here first.
+//! **And a row drops a menu, which is where a file or a folder is made.** The
+//! one `ContextMenu` the app has, opened by a right-click, with which row it is
+//! about held here rather than by a menu per row — which is exactly how the tab
+//! bar beside the tree opens its own. **The mouse's alone**: a long press on a
+//! file row is how it is picked up and dragged into a group, so the gesture is
+//! spoken for, and the sidebar's cards answer the same problem the same way.
+//! Code is desktop-first and ADR 0019 promises nothing on a phone, so a touch
+//! screen gets no row menu rather than a second gesture invented for one.
+//!
+//! **New file and New folder, on a folder row and on a root**, and on neither in
+//! a read-only root — the root's own flag, which the roots listing already
+//! carries, so the rows are not drawn rather than drawn to be refused. A file
+//! row offers neither, so nothing comes down over one at all: the rows that will
+//! be there for a file are rename and delete, which are the two tasks after
+//! this.
+//!
+//! **And the name is typed in place.** The row pressed expands, a new row
+//! appears under it carrying nothing but a field, and what is typed there is the
+//! name. Enter makes it, Escape takes the row away and leaves nothing behind,
+//! and a refusal is the server's sentence drawn beside the field with what was
+//! typed still in it. A modal was decided against — what is being named is a row
+//! in the tree, and the tree is where it is seen.
+//!
+//! Afterwards the folder is read again, there being no watcher until stage 04,
+//! and a new file opens as a tab in the active group the way a file pressed in
+//! the tree does. A new folder opens nothing: there is nothing in it to open.
+//!
+//! No rename, no delete and no quick open yet: those are the rest of this stage.
+//! And no git status marks, which are stage 04's with the watcher that keeps them
+//! honest.
 
 import {
   faChevronDown,
@@ -72,8 +99,14 @@ import {
 } from "solid-js";
 
 import { Icon } from "../Icon";
-import { listFileRoots, listFolder } from "../api/client";
-import type { FileRoot, FolderEntry, FolderListing } from "../api/types";
+import { ContextMenu } from "../Menu";
+import { listFileRoots, listFolder, makeFile, makeFolder } from "../api/client";
+import type {
+  FileMade,
+  FileRoot,
+  FolderEntry,
+  FolderListing,
+} from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
 import styles from "./Tree.module.css";
@@ -92,6 +125,37 @@ export const FOLDER_REFUSAL: Record<Extract<FolderListing, string>, string> = {
   Missing: "That folder is no longer there.",
   NotAFolder: "That is not a folder.",
 };
+
+/// And each way a making can be refused, in the words of what it is.
+///
+/// The folder's sentences said about a row that is not there yet, with the one
+/// that is a making's alone: a name already in the folder. Drawn beside the field
+/// the name was typed into rather than where a folder's would go — what it is
+/// about is what was just typed, and the field keeps it so the next Enter is a
+/// correction rather than a retype.
+export const MADE_REFUSAL: Record<Extract<FileMade, string>, string> = {
+  Taken: "There is already something called that in this folder.",
+  ReadOnly: "Nothing can be written in this worktree.",
+  Outside: "That is not in any of this conversation's worktrees.",
+  UnderGit: "Code does not touch what is inside a repository's .git.",
+  RootGone: "This worktree is no longer on disk.",
+  Missing: "That folder is no longer there.",
+  NotAFolder: "That is not a folder.",
+};
+
+/// What a making came back saying, where it was refused — and `null` where it
+/// landed.
+///
+/// The unwritable one is the server's own sentence, being the only one of them
+/// that says something this side could not have worked out: permissions, a full
+/// disk, or a folder that went between the check and the making.
+export function madeRefusal(made: FileMade): string | null {
+  if (typeof made !== "string") {
+    return "Unwritable" in made ? made.Unwritable.why : null;
+  }
+
+  return MADE_REFUSAL[made];
+}
 
 /// And what the tree says when the conversation has no worktrees at all.
 ///
@@ -190,13 +254,91 @@ export function Tree(props: {
   const expanded = (path: string): boolean =>
     held()[path] !== undefined || reading().includes(path);
 
+  /// Which row a menu is open over, where one is: where the pointer was, the
+  /// row's path, and whether it is a folder.
+  ///
+  /// The whole of what the menu is about, and `null` while nothing is open. Held
+  /// here rather than by the row, which is what one `ContextMenu` for the tree
+  /// means — the tab bar beside it holds its own the same way.
+  const [pointed, setPointed] = createSignal<{
+    at: { x: number; y: number };
+    path: string;
+  } | null>(null);
+
+  /// Whether the gesture that is opening a menu began under a finger.
+  ///
+  /// A phone has no right-click and fires `contextmenu` from a long press, which
+  /// is the gesture a file row is dragged into a group with. So the menu is the
+  /// mouse's alone, and what tells the two apart is the pointer that started the
+  /// press rather than the event itself, which carries nothing about the hand
+  /// that made it — the sidebar's cards and the tab bar say the same thing the
+  /// same way.
+  let fromTouch = false;
+
+  /// Which folder a name is being typed into, where one is: the folder the new
+  /// row goes in, and which of the two kinds it will be.
+  const [naming, setNaming] = createSignal<{
+    at: string;
+    folder: boolean;
+  } | null>(null);
+
+  /// What has been typed into that field so far.
+  ///
+  /// Held here rather than in the field, so that a refusal keeps it: what comes
+  /// back is a sentence to read beside what was typed, and a field that emptied
+  /// itself would make a correction a retype.
+  const [typed, setTyped] = createSignal("");
+
+  /// And what the server refused the last Enter with, where it refused one.
+  const [said, setSaid] = createSignal<string | null>(null);
+
+  /// Whether a making is in flight, so that a second Enter while the first is
+  /// still being answered does not make two rows.
+  let making = false;
+
+  /// Which root a path is in, or nothing where it is under none of them.
+  ///
+  /// Read off the roots listing rather than carried down the rows, because what
+  /// it is wanted for is one press: whether the menu has anything to offer over
+  /// this row, which is the root's own writable flag.
+  const rooted = (path: string): FileRoot | undefined =>
+    roots.data?.roots.find((root) => path.startsWith(root.path));
+
+  /// Read a folder off the disk and hold what came back.
+  ///
+  /// Every time, because nothing here is told when the disk moves and the folder
+  /// may have been rewritten by the agent since it was last drawn — which is why
+  /// a making reads it again rather than adding the row it just asked for.
+  const read = (path: string): Promise<void> => {
+    setReading((was) => (was.includes(path) ? was : [...was, path]));
+
+    return (
+      listFolder(props.conversation, path)
+        .then((listing) => {
+          setHeld((was) => ({ ...was, [path]: listing }));
+        })
+        // A request that never landed is a folder that says why it is empty, the
+        // way a folder the server refused does: the sentence is the server's
+        // where there is one, and this is the sentence there is instead.
+        .catch((error: Error) => {
+          setHeld((was) => ({
+            ...was,
+            [path]: { Unreadable: { why: error.message } },
+          }));
+        })
+        .finally(() => setReading((was) => was.filter((one) => one !== path)))
+    );
+  };
+
   /// Open a folder, or shut it.
   ///
-  /// Shutting forgets what it held. Opening asks the server afresh — every
-  /// time, because nothing here is told when the disk moves and the folder may
-  /// have been rewritten by the agent since it was last drawn.
+  /// Shutting forgets what it held, and takes any field open in it with it: a
+  /// row being named is a row of that folder, and a folder that is shut is not
+  /// drawing its rows.
   const toggle = (path: string): void => {
     if (expanded(path)) {
+      if (naming()?.at === path) leave();
+
       setReading((was) => was.filter((one) => one !== path));
       setHeld((was) => {
         const rest = { ...was };
@@ -206,20 +348,93 @@ export function Tree(props: {
       return;
     }
 
-    setReading((was) => [...was, path]);
+    void read(path);
+  };
 
-    void listFolder(props.conversation, path)
-      .then((listing) => setHeld((was) => ({ ...was, [path]: listing })))
-      // A request that never landed is a folder that says why it is empty, the
-      // way a folder the server refused does: the sentence is the server's
-      // where there is one, and this is the sentence there is instead.
-      .catch((error: Error) =>
-        setHeld((was) => ({
-          ...was,
-          [path]: { Unreadable: { why: error.message } },
-        })),
-      )
-      .finally(() => setReading((was) => was.filter((one) => one !== path)));
+  /// A right-click on a row asks what can be done with it.
+  ///
+  /// The browser's own menu is not what the hand is asking for, so that goes —
+  /// and only where there is a menu to put in its place: a file row and a row of
+  /// a read-only root have nothing on theirs yet, and a card with no rows in it
+  /// is worse than the browser's own.
+  ///
+  /// A mouse's gesture and only a mouse's, for the reason [`fromTouch`] is kept.
+  const ask = (event: MouseEvent, path: string, folder: boolean): void => {
+    if (fromTouch || !folder || !rooted(path)?.writable) {
+      return;
+    }
+
+    event.preventDefault();
+    setPointed({ at: { x: event.clientX, y: event.clientY }, path });
+  };
+
+  /// Start naming one: the folder opens, and a row carrying nothing but a field
+  /// appears under it.
+  ///
+  /// The folder opens because the field is drawn among its rows, and a field
+  /// inside a folder nobody can see would be a press that did nothing. Already
+  /// open, it stays as it is — what is in it was read when it was opened, and
+  /// the making reads it again afterwards.
+  const begin = (at: string, folder: boolean): void => {
+    setPointed(null);
+    setTyped("");
+    setSaid(null);
+    setNaming({ at, folder });
+
+    if (!expanded(at)) void read(at);
+  };
+
+  /// And leave off naming, which takes the row away and leaves nothing behind.
+  const leave = (): void => {
+    setNaming(null);
+    setTyped("");
+    setSaid(null);
+  };
+
+  /// Make it, under the name that has been typed.
+  ///
+  /// Nothing at all typed is not a name, so Enter over an empty field is a press
+  /// that waits rather than one that asks: there is nothing for the server to
+  /// refuse that the field has not already said by being empty.
+  ///
+  /// Afterwards the folder is read again — there being no watcher until stage 04
+  /// — and a new file opens as a tab in the active group the way a file pressed
+  /// in the tree does. A new folder opens nothing.
+  const make = (): void => {
+    const asked = naming();
+    const name = typed().trim();
+
+    if (asked === null || name === "" || making) {
+      return;
+    }
+
+    making = true;
+    setSaid(null);
+
+    const at = `${asked.at}/${name}`;
+    const asking = asked.folder
+      ? makeFolder(props.conversation, at)
+      : makeFile(props.conversation, at);
+
+    void asking
+      .then((made) => {
+        if (typeof made === "string" || !("Made" in made)) {
+          setSaid(madeRefusal(made));
+          return;
+        }
+
+        leave();
+
+        void read(asked.at);
+
+        if (!asked.folder) props.open(made.Made.path);
+      })
+      // A request that never landed is the same thing to say as one the server
+      // refused: a sentence beside the field, with what was typed still in it.
+      .catch((error: Error) => setSaid(error.message))
+      .finally(() => {
+        making = false;
+      });
   };
 
   return (
@@ -245,6 +460,16 @@ export function Tree(props: {
                   open={props.open}
                   pick={props.pick}
                   carried={props.carried}
+                  ask={ask}
+                  touched={(touch) => {
+                    fromTouch = touch;
+                  }}
+                  naming={naming}
+                  typed={typed}
+                  setTyped={setTyped}
+                  said={said}
+                  make={make}
+                  leave={leave}
                 />
               )}
             </For>
@@ -254,6 +479,46 @@ export function Tree(props: {
           <Empty>{NO_ROOTS}</Empty>
         </Match>
       </Switch>
+
+      {/* And what a right-click on a folder row drops: the two things that can
+          be made in it. The tree's only menu, and the same component the tab bar
+          beside it opens its own with (ADR 0019, *The tree*).
+
+          Outside the Switch above because it is drawn over the page rather than
+          among the rows: what is behind it is whichever of those arms the tree is
+          in. */}
+      <ContextMenu
+        class={styles.rowActions!}
+        name="Row actions"
+        at={pointed()?.at ?? null}
+        close={() => setPointed(null)}
+      >
+        {() => (
+          <For
+            each={
+              [
+                ["New file", false],
+                ["New folder", true],
+              ] as const
+            }
+          >
+            {([says, folder]) => (
+              <button
+                type="button"
+                role="menuitem"
+                class={folder ? styles.newFolder : styles.newFile}
+                onClick={() => {
+                  const asked = pointed();
+
+                  if (asked !== null) begin(asked.path, folder);
+                }}
+              >
+                {says}
+              </button>
+            )}
+          </For>
+        )}
+      </ContextMenu>
     </div>
   );
 }
@@ -301,6 +566,23 @@ function Row(props: {
   pick: (event: PointerEvent, path: string) => void;
   /// And which file that pane is carrying, where it is carrying one.
   carried: Accessor<string | null>;
+  /// And drop the menu over it, which the tree holds the one of.
+  ask: (event: MouseEvent, path: string, folder: boolean) => void;
+  /// Said as any press on any row begins, with which hand made it: the menu is
+  /// the mouse's alone, and `contextmenu` is the one event that cannot say.
+  touched: (touch: boolean) => void;
+  /// Which folder a name is being typed into, where one is — and so whether the
+  /// field is drawn among *this* folder's rows.
+  naming: Accessor<{ at: string; folder: boolean } | null>;
+  /// What has been typed into it so far, and the typing itself.
+  typed: Accessor<string>;
+  setTyped: Setter<string>;
+  /// And what the last Enter was refused with, where it was refused.
+  said: Accessor<string | null>;
+  /// Enter: make it, under the name that has been typed.
+  make: () => void;
+  /// And Escape: take the row away and leave nothing behind.
+  leave: () => void;
 }): JSX.Element {
   /// The indent, in the one unit a tree has: a level.
   const inset = (): string => `${0.5 + props.depth * 0.75}rem`;
@@ -327,8 +609,12 @@ function Row(props: {
             // one that scrolls the tree, or a drag — is settled by what the
             // hand does next, and by the pane beside the tree: the bars and
             // the zones such a drag lands on are all over there.
-            onPointerDown={(event) => props.pick(event, props.path)}
+            onPointerDown={(event) => {
+              props.touched(event.pointerType !== "mouse");
+              props.pick(event, props.path);
+            }}
             onClick={() => props.open(props.path)}
+            onContextMenu={(event) => props.ask(event, props.path, false)}
           >
             <span class={styles.name}>{props.name}</span>
           </button>
@@ -339,7 +625,15 @@ function Row(props: {
           class={styles.folder}
           style={{ "padding-left": inset() }}
           aria-expanded={props.expanded(props.path)}
+          // Nothing is picked up off a folder row — there is nothing for a drop
+          // to open — so this says only which hand is pressing, which is what
+          // the menu below needs and the whole of what a folder's press gives
+          // the pointer.
+          onPointerDown={(event) =>
+            props.touched(event.pointerType !== "mouse")
+          }
           onClick={() => props.toggle(props.path)}
+          onContextMenu={(event) => props.ask(event, props.path, true)}
         >
           <Icon
             of={props.expanded(props.path) ? faChevronDown : faChevronRight}
@@ -347,6 +641,25 @@ function Row(props: {
           />
           <span class={styles.name}>{props.name}</span>
         </button>
+
+        {/* And the row a name is typed into, where this is the folder it is
+            being made in: under the row pressed and above what the folder
+            holds, which is where the row it becomes will be drawn. */}
+        <Show when={props.naming()?.at === props.path}>
+          <ul class={styles.rows}>
+            <li class={styles.row}>
+              <Naming
+                folder={props.naming()!.folder}
+                inset={`calc(${inset()} + 0.75rem)`}
+                typed={props.typed}
+                setTyped={props.setTyped}
+                said={props.said}
+                make={props.make}
+                leave={props.leave}
+              />
+            </li>
+          </ul>
+        </Show>
 
         <Show when={listing()}>
           {(read) => (
@@ -373,6 +686,14 @@ function Row(props: {
                         open={props.open}
                         pick={props.pick}
                         carried={props.carried}
+                        ask={props.ask}
+                        touched={props.touched}
+                        naming={props.naming}
+                        typed={props.typed}
+                        setTyped={props.setTyped}
+                        said={props.said}
+                        make={props.make}
+                        leave={props.leave}
                       />
                     )}
                   </For>
@@ -383,5 +704,72 @@ function Row(props: {
         </Show>
       </Show>
     </li>
+  );
+}
+
+/// The row a new file or a new folder is named in: a field, and the sentence a
+/// refusal came back with.
+///
+/// **A field on a row rather than a modal** — what is being named is a row in the
+/// tree, and the tree is where it is seen (ADR 0019, *The tree*). So it is drawn
+/// where the row it becomes will be, indented one level in from the folder it is
+/// going into.
+///
+/// Enter makes it and Escape takes it away, and nothing else does either: a blur
+/// leaves the field standing, because the sentence a refusal draws is beside it
+/// and a field that went when the eye moved would take the sentence with it.
+///
+/// The text is the tree's rather than this field's, so that a refusal keeps it —
+/// see the signal in [`Tree`], where the reason is.
+function Naming(props: {
+  /// Which of the two is being made, which is the whole of what the field says
+  /// about itself: what is read aloud, and what a human sees as the placeholder.
+  folder: boolean;
+  /// How far in it stands, which is the row it will become's own indent.
+  inset: string;
+  typed: Accessor<string>;
+  setTyped: Setter<string>;
+  said: Accessor<string | null>;
+  make: () => void;
+  leave: () => void;
+}): JSX.Element {
+  const called = (): string =>
+    props.folder ? "New folder name" : "New file name";
+
+  return (
+    <div class={styles.naming} style={{ "padding-left": props.inset }}>
+      <input
+        class={styles.field}
+        type="text"
+        value={props.typed()}
+        aria-label={called()}
+        placeholder={called()}
+        // The field is what the press asked for, so it takes the keyboard on the
+        // way in: a row that appeared and then waited to be pressed would be two
+        // presses for one gesture.
+        ref={(field) => queueMicrotask(() => field.focus())}
+        onInput={(event) => props.setTyped(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            props.make();
+          }
+
+          // Kept off the pane behind it: Escape over a tree is this row going,
+          // rather than anything the page around it does with the key.
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            props.leave();
+          }
+        }}
+      />
+
+      {/* And what the server refused it with, under the field it is about, in
+          the one colour the app means a refusal by. */}
+      <Show when={props.said()}>
+        {(why) => <ErrorLine class={styles.refused}>{why()}</ErrorLine>}
+      </Show>
+    </div>
   );
 }

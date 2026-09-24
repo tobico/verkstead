@@ -139,3 +139,61 @@
   font-size: 0.8rem;
   color: var(--ink-soft);
 }
+
+/* The row a new file or a new folder is named in: the field, and the sentence a
+   refusal came back with under it. Where the row it becomes will be drawn,
+   indented one level in from the folder it is going into — see `Tree.tsx`, which
+   is where that indent is worked out, the indent being a style on the row. */
+.naming {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.1rem 0.5rem 0.2rem;
+}
+
+/* The field itself, drawn as the row it stands in rather than as a form control:
+   the same size and the same quiet fill the names around it have, with an edge
+   to say it takes typing. Full width of what is left of the tree, a name being
+   as long as a name is. */
+.field {
+  width: 100%;
+  min-width: 0;
+  padding: 0.1rem 0.3rem;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--edge);
+  border-radius: 0.3rem;
+}
+
+.field:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* And why the last name was refused, which stays under the field with what was
+   typed still in it: a correction rather than a retype. The colour is the app's
+   own for a refusal, which the component brings; what is written here is the size
+   of it, a sentence in a tree being read at the size the rows are. It wraps,
+   because a sentence is read where a name is scanned. */
+.refused {
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+/* And the menu a right-click on a folder row drops: the two things that can be
+   made in it. Sized like the tab bar's own beside it, one dropdown holding two
+   short rows. */
+.rowActions > [role="menu"] {
+  width: 10rem;
+}
+
+/* Its two rows, which are painted by the menu's own sheet and take nothing of
+   their own — a row that makes something is an ordinary row. Named here so each
+   can be found. */
+.newFile {
+}
+
+.newFolder {
+}

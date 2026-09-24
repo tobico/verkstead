@@ -28,7 +28,8 @@ use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
-    FileReading, FileRootsView, FileWrite, FileWritten, FolderEntry, FolderListing,
+    FileMade, FileMaking, FileReading, FileRootsView, FileWrite, FileWritten, FolderEntry,
+    FolderListing,
 };
 use verkstead_server::{open_database, router, store};
 
@@ -730,4 +731,195 @@ async fn a_file_at_the_top_of_what_code_opens_is_still_one_it_saves() {
     };
 
     assert_eq!(std::fs::read_to_string(&at).unwrap(), big);
+}
+
+/// One made out of a row's own menu: an empty file or a folder, at a path under
+/// a folder of one of the roots.
+async fn make(app: &Router, conversation: i64, at: &Path, kind: &str) -> FileMade {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/ui/conversations/{conversation}/files/{kind}/new"
+                ))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&FileMaking {
+                        path: at.display().to_string(),
+                    })
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let body = String::from_utf8(bytes.to_vec()).unwrap();
+
+    assert_eq!(status, StatusCode::OK, "the making failed: {body}");
+
+    serde_json::from_str(&body)
+        .unwrap_or_else(|error| panic!("the making answered {body}: {error}"))
+}
+
+/// A new file lands in the Worktree, empty, and is a row of its folder the next
+/// time the tree reads it — which is the whole of what the menu's first row
+/// does. A new folder is the same about a directory.
+#[tokio::test]
+async fn a_new_file_and_a_new_folder_land_in_the_worktree() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling_alongside(&pool, dir.path(), &[]).await;
+
+    let made = make(&app, conversation, &worktree.join("crates"), "folder").await;
+    assert_eq!(
+        made,
+        FileMade::Made {
+            path: worktree.join("crates").display().to_string()
+        }
+    );
+
+    let file = worktree.join("crates/lib.rs");
+    assert_eq!(
+        make(&app, conversation, &file, "file").await,
+        FileMade::Made {
+            path: file.display().to_string()
+        }
+    );
+
+    // Empty, which is what a new file is: the text that goes in it is a save
+    // through the endpoint the tab it opens in uses.
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "");
+
+    // And both are rows of the tree the moment it reads their folders again.
+    assert!(names(folder(&app, conversation, &worktree).await).contains(&"crates".to_owned()));
+    assert_eq!(
+        names(folder(&app, conversation, &worktree.join("crates")).await),
+        ["lib.rs"]
+    );
+}
+
+/// A name already in the folder is refused with nothing written, whichever kind
+/// of thing is standing there.
+#[tokio::test]
+async fn a_name_already_taken_is_refused_with_nothing_written() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling_alongside(&pool, dir.path(), &[]).await;
+
+    assert_eq!(
+        make(&app, conversation, &worktree.join("README.md"), "file").await,
+        FileMade::Taken
+    );
+    assert_eq!(
+        std::fs::read_to_string(worktree.join("README.md")).unwrap(),
+        "# a repository\n"
+    );
+
+    std::fs::create_dir(worktree.join("src")).unwrap();
+    assert_eq!(
+        make(&app, conversation, &worktree.join("src"), "folder").await,
+        FileMade::Taken
+    );
+}
+
+/// A read-only companion takes neither, on the endpoint's own account: the tree
+/// draws neither row under one, and the root's flag is read here again whatever
+/// a request claims.
+#[tokio::test]
+async fn a_read_only_companion_takes_neither() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, _, companions) = grilling_alongside(
+        &pool,
+        dir.path(),
+        &[
+            ("askance", store::CompanionMode::ReadWrite),
+            ("verkstead-site", store::CompanionMode::ReadOnly),
+        ],
+    )
+    .await;
+
+    // The read-write companion is a root like the Conversation's own: what is
+    // refused is the mode rather than being a companion.
+    assert_eq!(
+        make(&app, conversation, &companions[0].join("mine.rs"), "file").await,
+        FileMade::Made {
+            path: companions[0].join("mine.rs").display().to_string()
+        }
+    );
+
+    assert_eq!(
+        make(&app, conversation, &companions[1].join("mine.rs"), "file").await,
+        FileMade::ReadOnly
+    );
+    assert_eq!(
+        make(&app, conversation, &companions[1].join("mine"), "folder").await,
+        FileMade::ReadOnly
+    );
+    assert!(!companions[1].join("mine.rs").exists());
+    assert!(!companions[1].join("mine").exists());
+}
+
+/// And a making is bounded by exactly the roots a read is: a Conversation's own
+/// checkouts and no more, whatever path a request names.
+#[tokio::test]
+async fn a_making_outside_this_conversations_roots_is_refused() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling_alongside(&pool, dir.path(), &[]).await;
+
+    // Another Conversation's Worktree, which is a real checkout this server
+    // reads and is under none of *these* roots.
+    let (_, elsewhere, _) = grilling_alongside(&pool, &dir.path().join("second"), &[]).await;
+
+    assert_eq!(
+        make(&app, conversation, &elsewhere.join("mine.rs"), "file").await,
+        FileMade::Outside
+    );
+    assert_eq!(
+        make(&app, conversation, &worktree.join("../mine.rs"), "file").await,
+        FileMade::Outside
+    );
+    assert_eq!(
+        make(&app, conversation, &worktree.join(".git/hooks"), "folder").await,
+        FileMade::UnderGit
+    );
+    assert_eq!(
+        make(
+            &app,
+            conversation,
+            &worktree.join("nowhere/mine.rs"),
+            "file"
+        )
+        .await,
+        FileMade::Missing
+    );
+    assert!(!elsewhere.join("mine.rs").exists());
+
+    // And a Conversation nothing knows about has no roots, so nothing is under
+    // one of them — the read's answer, and the same thing is true of it.
+    let none: FileMade = {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/ui/conversations/404/files/file/new")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&FileMaking {
+                            path: worktree.join("mine.rs").display().to_string(),
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap()
+    };
+    assert_eq!(none, FileMade::Outside);
+    assert!(!worktree.join("mine.rs").exists());
 }

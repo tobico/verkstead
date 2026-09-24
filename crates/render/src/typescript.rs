@@ -22,18 +22,18 @@ use crate::{
     BriefSaved, Capture, CommitPane, CompanionAdded, CompanionBaseRecorded, CompanionBranchRenamed,
     CompanionModeChoice, CompanionModeChosen, CompanionRemoved, ConversationArchived,
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
-    ConversationUnarchived, ConversationView, Created, Creation, DirectoryListing, FileReading,
-    FileRootsView, FileWrite, FileWritten, FolderListing, GrillingStarted, InstallPress, Locked,
-    NewAdoption, NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption, OnboardingView,
-    OpenPullRequestRepo, PrefillView, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
-    ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
-    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched,
-    RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress,
-    SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
-    SharedConversation, ShowArchived, ShowingArchived, Shown, Started, SteerCancelled, SteerForm,
-    SteerOpened, SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp,
-    TerminalClosed, TerminalOpened, TerminalsView, TranscriptView, Unsubscribe, UpdateNotice,
-    Watching,
+    ConversationUnarchived, ConversationView, Created, Creation, DirectoryListing, FileMade,
+    FileMaking, FileReading, FileRootsView, FileWrite, FileWritten, FolderListing, GrillingStarted,
+    InstallPress, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder,
+    NewPullRequestAdoption, OnboardingView, OpenPullRequestRepo, PrefillView, ProfileChoice,
+    ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
+    PushKey, Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
+    RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane,
+    RoleChoice, Screen, ServeEdit, ServePress, SetReading, SettingsEdit, SettingsSaved,
+    SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
+    ShowingArchived, Shown, Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved,
+    SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalClosed, TerminalOpened,
+    TerminalsView, TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -248,6 +248,13 @@ fn the_viewers_types_are_written_from_these() {
     // bar in front of the human.
     FileWrite::export_all(&config).unwrap();
     FileWritten::export_all(&config).unwrap();
+
+    // And one made out of a row's own menu: an empty file or a folder, named in
+    // full under a folder of a root (ADR 0019, *The tree*). The write's
+    // refusals said about a path that is not there yet, with the one that is a
+    // making's alone — a name already taken.
+    FileMaking::export_all(&config).unwrap();
+    FileMade::export_all(&config).unwrap();
 
     // And what a session committed: the summary drawn out, and the diff, both of
     // which are this payload's alone — the Timeline's own card is the subject

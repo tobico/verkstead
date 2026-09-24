@@ -3328,6 +3328,13 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await,
     );
 
+    // And no fixture for a file or a folder made out of a row's menu, for the
+    // refused save's reason and one of its own: what a making answers with is
+    // the path it was asked at, so the payload is a path the test that drives
+    // the tree has already typed — a pinned one would be a second answer about
+    // where the checkout of *this* machine's fixtures is, and the refusals are
+    // each a word and the sentence the field draws from it.
+
     // And what the Remote access section reads: what this machine's Tailscale
     // is doing. One fixture per state the pane draws differently, because each
     // of them is a different sentence in front of the human — a machine with
