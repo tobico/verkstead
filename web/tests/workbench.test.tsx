@@ -20159,6 +20159,40 @@ describe("what a right-click on a row of the code pane's tree offers", () => {
     expect(field(container)).toBeTruthy();
   });
 
+  /// And a name that is really a path is refused here rather than sent: the
+  /// request is the folder with what was typed joined onto it, so a separator
+  /// would make the row under another folder — one this press is not about and
+  /// does not read again. The rename's own sentence, the mistake being one
+  /// mistake.
+  it("refuses a name with a path in it, rather than making the row elsewhere", async () => {
+    const { container, fetching } = await expanded(
+      whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+    );
+
+    rightClick(row(container, OWN_ROOT.repo));
+    fireEvent.click(
+      await drawn(container, `.${shell.detailsPane} .${treePane.newFile}`),
+    );
+
+    for (const typed of ["crates/notes.md", "crates\\notes.md", ".."]) {
+      fireEvent.input(await drawn(container, `.${treePane.field}`), {
+        target: { value: typed },
+      });
+      fireEvent.keyDown(field(container)!, { key: "Enter" });
+
+      await waitFor(() =>
+        expect(refused(container)).toBe("That is a path rather than a name."),
+      );
+    }
+
+    // Nothing went out, and the field is still standing with what was typed in
+    // it: the next Enter is a correction rather than a retype.
+    expect(
+      fetching.mock.calls.filter(([path]) => String(path) === NEW_FILE),
+    ).toHaveLength(0);
+    expect(field(container)?.value).toBe("..");
+  });
+
   /// Rename: the field is drawn over the row it is about, holding the name it
   /// has now, and Enter moves it — after which the folder is read again and the
   /// tree draws the row under its new name.

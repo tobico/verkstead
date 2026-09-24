@@ -83,10 +83,17 @@
 //! a new row appears under it carrying nothing but a field; for a rename, the
 //! field is drawn *over* the row it is about, holding the name it has now. One
 //! field either way, and one at a time: what is typed there is the name, Enter
-//! does it, Escape leaves nothing behind, and a refusal is the server's sentence
-//! drawn beside the field with what was typed still in it. A modal was decided
+//! does it, Escape leaves nothing behind, and a refusal is a sentence drawn
+//! beside the field with what was typed still in it. A modal was decided
 //! against — what is being named is a row in the tree, and the tree is where it
 //! is seen.
+//!
+//! **A name rather than a path, either way.** The rename sends a name and the
+//! server refuses a separator in it; a making sends the folder with the name
+//! already joined on, so a separator has to be refused here, where the two
+//! halves are still apart — otherwise the row would be made under some other
+//! folder, one the press is not about and does not read again. One sentence for
+//! both, the mistake being one mistake.
 //!
 //! Afterwards the folder is read again, there being no watcher until stage 04,
 //! and a new file opens as a tab in the active group the way a file pressed in
@@ -176,6 +183,26 @@ export const FOLDER_REFUSAL: Record<Extract<FolderListing, string>, string> = {
   NotAFolder: "That is not a folder.",
 };
 
+/// What either name field says about a name that is really a path.
+///
+/// **One sentence for one mistake**, said in two places because the two fields
+/// are refused in two places. A rename carries a *name* over the wire and the
+/// server refuses a separator in it — [`FileRenamed::Outside`]. A making
+/// carries the folder with the name already joined onto it, which is a path and
+/// is meant to be, so there is no shape the request arrives in for the server to
+/// tell a separator that was typed from one that was always in the folder: it
+/// is refused here, where the two halves are still apart.
+export const A_PATH = "That is a path rather than a name.";
+
+/// And whether what was typed into one of them is a name at all.
+///
+/// One plain segment and nothing else, which is [`crate::files::rename`]'s own
+/// test read on this side: a separator either way it is spelled, a `.` or a
+/// `..` is a path somebody wrote into a field that asks for a name.
+export function aName(name: string): boolean {
+  return !/[/\\]/.test(name) && name !== "." && name !== "..";
+}
+
 /// And each way a making can be refused, in the words of what it is.
 ///
 /// The folder's sentences said about a row that is not there yet, with the one
@@ -222,7 +249,7 @@ export const RENAMED_REFUSAL: Record<Extract<FileRenamed, string>, string> = {
   Taken: "There is already something called that in this folder.",
   IsRoot: "A worktree is not renamed from here.",
   ReadOnly: "Nothing can be written in this worktree.",
-  Outside: "That is a path rather than a name.",
+  Outside: A_PATH,
   UnderGit: "Code does not touch what is inside a repository's .git.",
   RootGone: "This worktree is no longer on disk.",
   Missing: "That is no longer there.",
@@ -727,10 +754,22 @@ export function Tree(props: {
 
   /// Make it, under the name that has been typed.
   ///
+  /// **A name rather than a path**, which is the rename's own refusal said
+  /// where the name is still a name: the request below is the folder with what
+  /// was typed joined onto it, so a separator in it would make the row under
+  /// some *other* folder — one this press is not about and does not read again,
+  /// leaving a tab open over a file the tree is not drawing. Refused here
+  /// because here is the last place the two halves are apart; see [`A_PATH`].
+  ///
   /// Afterwards the folder is read again — there being no watcher until stage 04
   /// — and a new file opens as a tab in the active group the way a file pressed
   /// in the tree does. A new folder opens nothing.
   const make = (asked: Making, name: string): void => {
+    if (!aName(name)) {
+      setSaid(A_PATH);
+      return;
+    }
+
     working = true;
     setSaid(null);
 
