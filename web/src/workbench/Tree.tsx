@@ -139,8 +139,24 @@
 //! a file is found by where it sits, and that one is how it is found by what it
 //! is called.
 //!
-//! No git status marks yet. They are the last of this stage, and they are read
-//! again on the Nudge the rows above already follow.
+//! **And the rows carry git's account of themselves.** A file git sees as
+//! changed and one it has never seen are marked — a letter at the end of the
+//! row and a colour on its name — and a folder wears the strongest mark of
+//! anything under it, so that a change deep in a tree shows on the row above it
+//! before anybody expands one (ADR 0019, *The tree*). Two marks, which is what
+//! a tree has any use for: whether something here is not what was committed,
+//! and whether git has ever seen it.
+//!
+//! One reading for the whole conversation rather than a call per row, and a
+//! query rather than a field on a folder listing — which is what a *commit* is
+//! the argument for: one made in a terminal beside the tree clears every mark in
+//! the worktree without touching a file, so nothing the listings are about has
+//! moved and every mark has changed. So it is read again on the `commit` kind as
+//! well as on `files`, which makes it the one reading in the app that two kinds
+//! both stand for — see the table in `nudge.ts`, where both name it.
+//!
+//! A root git will not answer about — no git on the machine, a directory that is
+//! no checkout — draws its rows unmarked rather than refusing to draw them.
 
 import {
   faChevronDown,
@@ -152,6 +168,7 @@ import {
   Show,
   Switch,
   createEffect,
+  createMemo,
   createSignal,
   createUniqueId,
   onCleanup,
@@ -169,6 +186,7 @@ import {
   listFolder,
   makeFile,
   makeFolder,
+  readFileStatus,
   renamePath,
 } from "../api/client";
 import type {
@@ -178,6 +196,7 @@ import type {
   FileRoot,
   FolderEntry,
   FolderListing,
+  Marked,
 } from "../api/types";
 import { useReading } from "../freshness";
 import { Empty, ErrorLine } from "../notices";
@@ -541,6 +560,46 @@ export function Tree(props: {
     queryFn: () => listFileRoots(props.conversation),
     freshness: { reconcile: "path" },
   }));
+
+  /// And what git says about every one of them, folded into the marks the rows
+  /// carry.
+  ///
+  /// Merged by path like the roots above, and for the same reason said about
+  /// what is *in* a root: nearly every re-read of this says what it said before
+  /// — the human saved one file, and the other two hundred marks are the marks
+  /// they already were — and a re-read that replaced the lot would redraw every
+  /// row in the tree.
+  ///
+  /// Read back on a `files` Nudge and on a `commit`, which is the table in
+  /// `nudge.ts` rather than anything here: this one *is* a query, unlike the
+  /// folder listings beside it, because there is one of it for the whole pane
+  /// and nothing about it is worth keeping across a swap.
+  const status = useReading(() => ({
+    queryKey: ["file-status", props.conversation],
+    queryFn: () => readFileStatus(props.conversation),
+    freshness: { reconcile: "path" },
+  }));
+
+  /// Every marked path of every root, which is what a row looks itself up in.
+  ///
+  /// One map built per reading rather than a scan per row: the server has
+  /// already folded each mark up onto the folders over it, so a row — file or
+  /// folder, root or leaf — is drawn by asking about its own path and nothing
+  /// else.
+  const marks = createMemo(() => {
+    const found = new Map<string, Marked>();
+
+    for (const root of status.data?.roots ?? []) {
+      for (const mark of root.marks) {
+        found.set(mark.path, mark.mark);
+      }
+    }
+
+    return found;
+  });
+
+  /// And what one row's mark is, where it has one.
+  const marked = (path: string): Marked | undefined => marks().get(path);
 
   /// Which folders are open, and what each of them last read — see the prop,
   /// which is where it is kept and why it is not kept here.
@@ -1003,6 +1062,7 @@ export function Tree(props: {
                   depth={0}
                   expanded={expanded}
                   held={held}
+                  marked={marked}
                   toggle={toggle}
                   open={props.open}
                   pick={props.pick}
@@ -1211,6 +1271,58 @@ function Removing(props: {
   );
 }
 
+/// What each mark is drawn as, and what it says when it is read aloud.
+///
+/// **A letter as well as a colour.** The two are a green and an ember, which is
+/// a pair an eye that cannot tell those hues apart would read as one colour —
+/// and a mark that says something only to some readers says nothing. The letters
+/// are the ones every git tool writes: `M` for modified, and `U` for the file it
+/// has never seen.
+///
+/// The words are what a screen reader is given, and they are said rather than
+/// spelled: `M` read aloud is a letter, and *changed* is the news.
+export const MARKS: Record<
+  Marked,
+  { letter: string; says: string; paint: string }
+> = {
+  Changed: { letter: "M", says: "changed", paint: styles.changed! },
+  Untracked: { letter: "U", says: "untracked", paint: styles.untracked! },
+};
+
+/// And what a row's name is drawn in, which is the mark's own colour where it
+/// has one.
+///
+/// The colour is on the name rather than on the row, so that it survives the
+/// pointer: a row under the hand takes the page's ink, and a marked row keeps
+/// saying what it is while it is being pointed at.
+function nameIn(mark: Marked | undefined): string {
+  return mark === undefined
+    ? styles.name!
+    : `${styles.name!} ${MARKS[mark].paint}`;
+}
+
+/// The mark on one row, where it has one.
+///
+/// At the end of the row rather than beside the name, so that the marks make a
+/// column down the right edge of the tree to run an eye down — which is the
+/// whole of what a mark on a row is for. The name itself takes the colour, in
+/// `Tree.module.css`.
+function RowMark(props: { mark: Marked | undefined }): JSX.Element {
+  return (
+    <Show when={props.mark}>
+      {(mark) => (
+        <span
+          class={`${styles.mark!} ${MARKS[mark()].paint}`}
+          role="img"
+          aria-label={MARKS[mark()].says}
+        >
+          {MARKS[mark()].letter}
+        </span>
+      )}
+    </Show>
+  );
+}
+
 /// What a root is called: the repository it is a checkout of, with a word about
 /// a companion nothing can be written in.
 ///
@@ -1257,6 +1369,9 @@ function Row(props: {
   /// Whether this folder is open, which a file is never.
   expanded: (path: string) => boolean;
   held: () => Record<string, FolderListing>;
+  /// What git says about this row, where it says anything — a folder's being
+  /// the strongest mark of anything under it, folded by the server.
+  marked: (path: string) => Marked | undefined;
   /// Open this folder or shut it.
   toggle: (path: string) => void;
   /// And open this file, which is the groups of tabs beside the tree.
@@ -1352,7 +1467,8 @@ function Row(props: {
                 props.ask(event, props.path, false, props.within)
               }
             >
-              <span class={styles.name}>{props.name}</span>
+              <span class={nameIn(props.marked(props.path))}>{props.name}</span>
+              <RowMark mark={props.marked(props.path)} />
             </button>
           </Show>
         }
@@ -1392,7 +1508,8 @@ function Row(props: {
               of={props.expanded(props.path) ? faChevronDown : faChevronRight}
               class={styles.caret}
             />
-            <span class={styles.name}>{props.name}</span>
+            <span class={nameIn(props.marked(props.path))}>{props.name}</span>
+            <RowMark mark={props.marked(props.path)} />
           </button>
         </Show>
 
@@ -1439,6 +1556,7 @@ function Row(props: {
                         depth={props.depth + 1}
                         expanded={props.expanded}
                         held={props.held}
+                        marked={props.marked}
                         toggle={props.toggle}
                         open={props.open}
                         pick={props.pick}

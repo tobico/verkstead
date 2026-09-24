@@ -111,6 +111,38 @@
   text-overflow: ellipsis;
 }
 
+/* And the mark git's account of a row came to: a letter at the end of it, in the
+   colour the name beside it takes — see `Tree.tsx`, where the two letters and
+   the words they are read aloud as are.
+
+   Pushed to the right edge, so the marks make a column to run an eye down rather
+   than a jog after every name. Monospace, because what it is is one letter and a
+   column of them in the face the names are set in would not line up with itself.
+
+   A letter *and* a colour, because the two colours are a green and an ember, and
+   an eye that cannot tell those hues apart would read the pair as one mark — see
+   `--modified` in `styles/base.css`, where both are named. */
+.mark {
+  flex: none;
+  margin-left: auto;
+  padding-left: 0.4rem;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.75em;
+  font-weight: 600;
+}
+
+/* A file git sees as changed, and every folder over it: its own colour rather
+   than the Diff's red, red meaning *deleted* in this app. */
+.changed {
+  color: var(--modified);
+}
+
+/* And one git has never seen, which is an addition and takes what the app
+   already means an addition by. */
+.untracked {
+  color: var(--added);
+}
+
 /* A root says the repository it is a checkout of, which is what the human knows
    it by — and a root is the one row of the tree that is not a path segment, so
    it is drawn as the heading it is. */

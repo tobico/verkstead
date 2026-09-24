@@ -24,17 +24,17 @@ use crate::{
     ConversationClosed, ConversationEntry, ConversationSteered, ConversationStopped,
     ConversationUnarchived, ConversationView, Created, Creation, DirectoryListing, FileDeleted,
     FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed, FileRenaming,
-    FileRootsView, FileWrite, FileWritten, FolderListing, GrillingStarted, InstallPress, Locked,
-    NewAdoption, NewCompanion, NewConversation, NewOrder, NewPullRequestAdoption, OnboardingView,
-    OpenPullRequestRepo, PrefillView, ProfileChoice, ProfileChosen, ProfileDeleted, ProfileEdit,
-    ProfileEntry, ProfileSaved, PullRequestDetails, PushKey, Registered, Registration,
-    RemoteBanner, RemoteView, RepoChoice, RepoEntry, RepoPairingsView, RepoRemoved, RepoSwitched,
-    RepoView, Resolved, Resumed, RoadmapPane, RoleChoice, Screen, ServeEdit, ServePress,
-    SetReading, SettingsEdit, SettingsSaved, SettingsView, ShareCommented, SharePublished,
-    SharedConversation, ShowArchived, ShowingArchived, Shown, Started, SteerCancelled, SteerForm,
-    SteerOpened, SteerSaved, SteerSubmission, Submitted, Subscribed, Subscription, TakenUp,
-    TerminalClosed, TerminalOpened, TerminalsView, TranscriptView, Unsubscribe, UpdateNotice,
-    Watching,
+    FileRootsView, FileStatusView, FileWrite, FileWritten, FolderListing, GrillingStarted,
+    InstallPress, Locked, NewAdoption, NewCompanion, NewConversation, NewOrder,
+    NewPullRequestAdoption, OnboardingView, OpenPullRequestRepo, PrefillView, ProfileChoice,
+    ProfileChosen, ProfileDeleted, ProfileEdit, ProfileEntry, ProfileSaved, PullRequestDetails,
+    PushKey, Registered, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
+    RepoPairingsView, RepoRemoved, RepoSwitched, RepoView, Resolved, Resumed, RoadmapPane,
+    RoleChoice, Screen, ServeEdit, ServePress, SetReading, SettingsEdit, SettingsSaved,
+    SettingsView, ShareCommented, SharePublished, SharedConversation, ShowArchived,
+    ShowingArchived, Shown, Started, SteerCancelled, SteerForm, SteerOpened, SteerSaved,
+    SteerSubmission, Submitted, Subscribed, Subscription, TakenUp, TerminalClosed, TerminalOpened,
+    TerminalsView, TranscriptView, Unsubscribe, UpdateNotice, Watching,
 };
 
 /// Everything `/api/ui/` hands over or takes in, as TypeScript.
@@ -242,6 +242,12 @@ fn the_viewers_types_are_written_from_these() {
     // time the palette opens and capped per root (ADR 0019, *The tree*). The
     // lists write the root each of them belongs to with them.
     FileListsView::export_all(&config).unwrap();
+
+    // And git's account of every one of those roots, folded into the marks the
+    // tree draws on its rows: one status read per root, a folder wearing the
+    // strongest mark of anything under it (ADR 0019, *The tree*). The marks and
+    // the two words a mark can be are written with it.
+    FileStatusView::export_all(&config).unwrap();
 
     // And one file of one of those folders, opened: what kind of thing it
     // turned out to be, the version a write will name itself as being over, and

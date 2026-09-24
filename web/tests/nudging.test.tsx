@@ -41,7 +41,8 @@ import marks from "../src/workbench/Mark.module.css";
 import outputPane from "../src/workbench/Output.module.css";
 import prPane from "../src/workbench/PullRequest.module.css";
 import timeline from "../src/workbench/Timeline.module.css";
-// And the tree of the Code pane, whose roots are what a `files` Nudge reads back.
+// And the tree of the Code pane, whose roots and marks are what a `files` Nudge
+// reads back.
 import tree from "../src/workbench/Tree.module.css";
 // The panes themselves, for the one an Event is opened into.
 import shell from "../src/Panes.module.css";
@@ -58,6 +59,7 @@ import { Streaming, stream, streaming } from "./streaming";
 import { worker } from "./worker";
 import kinds from "./fixtures/nudges.json" with { type: "json" };
 import codeRoots from "./fixtures/code-roots.json" with { type: "json" };
+import codeStatus from "./fixtures/code-status.json" with { type: "json" };
 import onboarding from "./fixtures/onboarding-ready.json" with { type: "json" };
 import grilling from "./fixtures/conversation-grilling.json" with { type: "json" };
 import drafting from "./fixtures/conversation.json" with { type: "json" };
@@ -580,14 +582,14 @@ describe("what a Nudge is about", () => {
   /// the sweep opens a conversation and stops at its timeline, and nothing
   /// there is drawn over a worktree's files.
   ///
-  /// The tree's roots here — a root that appeared or went — which is what the
-  /// page has to read again before it can read anything inside one, and the one
-  /// read of this kind a query key names. What is *inside* a root is the pane's
-  /// own subscription beside that table rather than a row of it, so where those
-  /// re-reads are asked about is the tree's own tests — see
-  /// `workbench.test.tsx`, *and the disk moving under it*.
-  it("reads the Code pane's roots back where its tree is drawing them", async () => {
+  /// The tree's roots here — a root that appeared or went — and the marks its
+  /// rows carry, which are the two reads of this kind a query key names. What is
+  /// *inside* a root is the pane's own subscription beside that table rather
+  /// than a row of it, so where those re-reads are asked about is the tree's own
+  /// tests — see `workbench.test.tsx`, *and the disk moving under it*.
+  it("reads the Code pane's roots and marks back where its tree is drawing them", async () => {
     const roots = `/api/ui/conversations/${CONVERSATION.id}/files/roots`;
+    const status = `/api/ui/conversations/${CONVERSATION.id}/files/status`;
 
     // The pane holds a socket open for as long as it is drawn, which is what
     // runs the watcher this Nudge comes from — and jsdom would dial a real one.
@@ -610,6 +612,7 @@ describe("what a Nudge is about", () => {
       whenever(OPENED, json(CONVERSATION)),
       whenever(`${OPENED}/terminals`, json({ live: [] })),
       whenever(roots, json(codeRoots)),
+      whenever(status, json(codeStatus)),
     );
     const { container } = render(() => <App />);
 
@@ -621,12 +624,16 @@ describe("what a Nudge is about", () => {
       }
     });
     stream().opens();
-    const before = askedFor(fetching, roots);
+    const before = [roots, status].map((path) => askedFor(fetching, path));
 
     stream().nudges({ kind: "files", conversation: CONVERSATION.id });
     await vi.advanceTimersByTimeAsync(0);
 
-    await waitFor(() => expect(askedFor(fetching, roots)).toBe(before + 1));
+    await waitFor(() =>
+      [roots, status].forEach((path, at) => {
+        expect(askedFor(fetching, path), path).toBe(before[at]! + 1);
+      }),
+    );
 
     // And the pane really did say it was drawn, which is the other half of the
     // same arrangement: a Nudge of this kind only ever arrives because of it.

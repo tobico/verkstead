@@ -1,8 +1,9 @@
 //! The files API the Code pane's tree stands on, asked of a real router over a
 //! real Conversation: which roots there are, what one folder of one of them
 //! holds, what one file of one of those is — that file saved back, one of them
-//! renamed, one taken away — and every root's files at once, which is what the
-//! quick-open palette matches over.
+//! renamed, one taken away — every root's files at once, which is what the
+//! quick-open palette matches over, and git's account of the lot of them, which
+//! is what the tree draws its marks from.
 //!
 //! What is worth proving out here rather than in the module's own tests is
 //! everything that takes a *Conversation* to say. The roots are read off the
@@ -31,7 +32,8 @@ use sqlx::SqlitePool;
 use tower::ServiceExt;
 use verkstead_render::{
     FileDeleted, FileDeleting, FileListsView, FileMade, FileMaking, FileReading, FileRenamed,
-    FileRenaming, FileRootsView, FileWrite, FileWritten, FolderEntry, FolderListing,
+    FileRenaming, FileRootsView, FileStatusView, FileWrite, FileWritten, FolderEntry,
+    FolderListing, Marked,
 };
 use verkstead_server::{open_database, router, store};
 
@@ -1468,5 +1470,143 @@ async fn a_conversation_with_no_worktree_lists_no_files() {
 
     // And a Conversation nothing at all knows about, which is the same nothing.
     let none: FileListsView = get(&app, "/api/ui/conversations/404/files/list").await;
+    assert!(none.roots.is_empty(), "{:?}", none.roots);
+}
+
+/// The marks are answered for the whole Conversation at once too — a reading per
+/// root, in the roots' own order — and folded, so that a folder wears the
+/// strongest mark of anything under it.
+///
+/// Over real checkouts, because the whole of this reading is what git says about
+/// one: a hand-written list of marks would be a test of the fold and of nothing
+/// else.
+#[tokio::test]
+async fn the_marks_are_every_root_of_the_conversation_folded_up() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, companions) = grilling_alongside(
+        &pool,
+        dir.path(),
+        &[("askance", store::CompanionMode::ReadOnly)],
+    )
+    .await;
+
+    // A checkout somebody has been working in: a tracked file edited, a new one
+    // written deep in folders that were not there before, and the build
+    // directory the `.gitignore` keeps out of the tree.
+    std::fs::write(worktree.join("README.md"), "# edited\n").unwrap();
+    std::fs::create_dir_all(worktree.join("crates/server")).unwrap();
+    std::fs::create_dir_all(worktree.join("target/debug")).unwrap();
+    std::fs::write(worktree.join("crates/server/lib.rs"), "").unwrap();
+    std::fs::write(worktree.join("target/debug/verkstead"), "").unwrap();
+
+    let view: FileStatusView = get(
+        &app,
+        &format!("/api/ui/conversations/{conversation}/files/status"),
+    )
+    .await;
+
+    assert_eq!(
+        view.roots
+            .iter()
+            .map(|root| (root.repo.as_str(), root.path.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("verkstead", worktree.to_str().unwrap()),
+            ("askance", companions[0].to_str().unwrap()),
+        ]
+    );
+
+    // Spelled in full the way the root is, which is what a row of the tree is
+    // drawn by — and every folder over a marked file is in the answer, the root
+    // itself included, wearing the stronger of the two where it holds both.
+    assert_eq!(
+        view.roots[0]
+            .marks
+            .iter()
+            .map(|mark| (mark.path.as_str(), mark.mark))
+            .collect::<Vec<_>>(),
+        vec![
+            (worktree.to_str().unwrap(), Marked::Changed),
+            (
+                worktree.join("README.md").to_str().unwrap(),
+                Marked::Changed
+            ),
+            (worktree.join("crates").to_str().unwrap(), Marked::Untracked),
+            (
+                worktree.join("crates/server").to_str().unwrap(),
+                Marked::Untracked
+            ),
+            (
+                worktree.join("crates/server/lib.rs").to_str().unwrap(),
+                Marked::Untracked
+            ),
+        ]
+    );
+
+    // And the companion beside it has moved in no way at all, which is a root
+    // answered about with nothing marked rather than a root left out.
+    assert!(view.roots[1].marks.is_empty(), "{:?}", view.roots[1].marks);
+}
+
+/// And a commit made beside the tree clears them, with nothing in the tree
+/// having been written — which is why the marks are their own reading.
+#[tokio::test]
+async fn a_commit_clears_the_marks_with_no_folder_having_moved() {
+    let (dir, pool, app) = fresh_app().await;
+    let (conversation, worktree, _) = grilling_alongside(&pool, dir.path(), &[]).await;
+
+    std::fs::write(worktree.join("README.md"), "# edited\n").unwrap();
+
+    let marked: FileStatusView = get(
+        &app,
+        &format!("/api/ui/conversations/{conversation}/files/status"),
+    )
+    .await;
+    assert!(!marked.roots[0].marks.is_empty());
+
+    let before = folder(&app, conversation, &worktree).await;
+
+    git(&worktree, &["add", "-A"]);
+    git(&worktree, &["commit", "-m", "the work"]);
+
+    let cleared: FileStatusView = get(
+        &app,
+        &format!("/api/ui/conversations/{conversation}/files/status"),
+    )
+    .await;
+
+    assert!(
+        cleared.roots[0].marks.is_empty(),
+        "{:?}",
+        cleared.roots[0].marks
+    );
+    assert_eq!(folder(&app, conversation, &worktree).await, before);
+}
+
+/// And a Conversation with nothing checked out has nothing to mark, which is
+/// the palette's answer said about the marks.
+#[tokio::test]
+async fn a_conversation_with_no_worktree_marks_nothing() {
+    let (_dir, pool, app) = fresh_app().await;
+
+    let repo = store::register_repo(&pool, Path::new("/srv/verkstead"), "verkstead", "main")
+        .await
+        .unwrap()
+        .expect("nothing is registered at that path yet");
+    let drafting = store::start_conversation(&pool, repo.id, "code-pane")
+        .await
+        .unwrap()
+        .expect("the Repo was just registered");
+
+    let view: FileStatusView = get(
+        &app,
+        &format!("/api/ui/conversations/{drafting}/files/status"),
+    )
+    .await;
+
+    assert!(view.roots.is_empty(), "{:?}", view.roots);
+
+    // And a Conversation nothing at all knows about, which is the same nothing.
+    let none: FileStatusView = get(&app, "/api/ui/conversations/404/files/status").await;
     assert!(none.roots.is_empty(), "{:?}", none.roots);
 }

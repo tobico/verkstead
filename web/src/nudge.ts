@@ -279,23 +279,30 @@ function standsFor(moved: Nudge): readonly QueryKey[] | null {
     // request it was pushed onto — which is the one query here that costs a
     // GitHub API call, and so the one that must be read on this and nothing
     // else.
+    //
+    // And the Code pane's marks, which is the one reading on this wire that two
+    // kinds both stand for: a commit clears every mark in a Worktree without
+    // touching a file, so nothing the `files` kind is about has moved and every
+    // mark has changed (ADR 0019, *The tree*).
     case "commit":
       return [
         ["commit", moved.conversation],
         ["pull-request", moved.conversation],
         ["conversation", String(moved.conversation)],
+        ["file-status", moved.conversation],
       ];
 
     // The Worktrees moved: something wrote, made, or took a file away, and the
     // Code pane's watcher said so (ADR 0019, *Following the disk*).
     //
-    // The tree's roots, which is every read of this kind a query key can name
-    // — a root that appeared or went, in a reading that costs a row apiece and
-    // disturbs nothing that is open. What is *inside* them is not a query at
-    // all: the folders the tree has expanded and what each open file was read
-    // as are held above the pane together, and what re-reads those is the
-    // pane's own subscription beside this table — see [`whenFilesMove`], which
-    // this kind tells as well.
+    // The tree's roots — a root that appeared or went, in a reading that costs
+    // a row apiece and disturbs nothing that is open — and the marks its rows
+    // carry, which is git's account of the lot of them read again. The two
+    // reads of this kind a query key can name. What is *inside* a root is not a
+    // query at all: the folders the tree has expanded and what each open file
+    // was read as are held above the pane together, and what re-reads those is
+    // the pane's own subscription beside this table — see [`whenFilesMove`],
+    // which this kind tells as well.
     //
     // Nothing above the pane is here on purpose. A file written in a Worktree
     // moves no record at all: there is no Event for it, no Timeline row and
@@ -303,7 +310,10 @@ function standsFor(moved: Nudge): readonly QueryKey[] | null {
     // `commit` kind above. This is the one kind that is only ever about a pane
     // that happens to be open.
     case "files":
-      return [["file-roots", moved.conversation]];
+      return [
+        ["file-roots", moved.conversation],
+        ["file-status", moved.conversation],
+      ];
 
     // A Set arrived, was answered, or was closed: the Set itself, the Timeline
     // Event standing for it, and the sidebar row, whose *waiting on you* mark

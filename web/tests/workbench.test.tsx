@@ -47,6 +47,7 @@ import type {
   FileRenamed,
   FileRoot,
   FileRootsView,
+  FileStatusView,
   FileWritten,
   FolderListing,
   GrillingStarted,
@@ -216,6 +217,7 @@ import {
   DELETED_REFUSAL,
   FOLDER_REFUSAL,
   MADE_REFUSAL,
+  MARKS as ROW_MARKS,
   NO_ROOTS,
   RENAMED_REFUSAL,
   deletedRefusal,
@@ -223,6 +225,7 @@ import {
   renamedRefusal,
 } from "../src/workbench/Tree";
 import treePane from "../src/workbench/Tree.module.css";
+import treePaneCss from "../src/workbench/Tree.module.css?raw";
 // And the quick-open palette Ctrl+P drops over it, whose two sentences are read
 // off the component that words them.
 import { NOTHING_TO_SEARCH, onlyPartOf } from "../src/workbench/Quick";
@@ -373,6 +376,7 @@ import screenOfIt from "./fixtures/screen.json" with { type: "json" };
 import codeRoots from "./fixtures/code-roots.json" with { type: "json" };
 import codeFolder from "./fixtures/code-folder.json" with { type: "json" };
 import codeFiles from "./fixtures/code-files.json" with { type: "json" };
+import codeStatus from "./fixtures/code-status.json" with { type: "json" };
 import codeFile from "./fixtures/code-file.json" with { type: "json" };
 import codeImage from "./fixtures/code-image.json" with { type: "json" };
 import codeWritten from "./fixtures/code-written.json" with { type: "json" };
@@ -12778,7 +12782,13 @@ describe("a commit on the timeline", () => {
 
     // And both tokens follow the scheme, which is the whole of what the change
     // buys: the hardcoded red never did.
-    expect(base).toContain("--added: #2f7d4f;");
+    //
+    // The green is a step deeper than the one the Diff was first drawn in,
+    // because Code's tree now marks an untracked file in it and the tree is
+    // drawn on `--code-wash` — the darkest ground anything in the app is read
+    // on, where the first green came in under the 4.5:1 the palette holds
+    // itself to. Every surface the Diff uses it on is lighter than that one.
+    expect(base).toContain("--added: #2a7248;");
     expect(base).toContain("--removed: #b3382c;");
     expect(base).toContain("--added: #79c48f;");
     expect(base).toContain("--removed: #e0857a;");
@@ -17870,6 +17880,25 @@ const ROOTS_OF_IT = `/api/ui/conversations/${GRILLING.id}/files/roots`;
 /// quick-open palette matches over (ADR 0019, *The tree*).
 const FILES_OF_IT = `/api/ui/conversations/${GRILLING.id}/files/list`;
 
+/// And where git's account of all of them is read, which is what the tree draws
+/// its marks from — one reading for the pane rather than a call per row.
+const STATUS_OF_IT = `/api/ui/conversations/${GRILLING.id}/files/status`;
+
+/// That account with nothing moved in either root, which is what every test but
+/// the marks' own is served.
+///
+/// A checkout nobody has written in is an ordinary state and it is the quiet
+/// one: a test about the tabs, the menus or a rename should no more have to
+/// read around a column of letters than it should have to say what the sidebar
+/// asked for. The tests that *are* about the marks answer this path with the
+/// fixture instead.
+const NOTHING_MOVED: FileStatusView = {
+  roots: (codeStatus as FileStatusView).roots.map((root) => ({
+    ...root,
+    marks: [],
+  })),
+};
+
 /// And where one folder of one of them is read, which is what expanding a row
 /// asks for.
 function folderOf(path: string): string {
@@ -17913,6 +17942,11 @@ function idle(live: number[]): TerminalsView {
 /// The roots come with it, every opening of the pane reading them: the tree is
 /// half of Code, and a test about its tabs should no more have to say what the
 /// tree asked for than it has to say what the sidebar did.
+///
+/// And git's account of them, for the same reason: the tree reads it the moment
+/// it is drawn, whatever the test is about. With nothing moved — see
+/// [`NOTHING_MOVED`], where the quiet default is — so that the tests about the
+/// marks are the ones that say what git found.
 function withTerminals(
   live: number[],
   ...answers: Parameters<typeof serving>
@@ -17924,6 +17958,7 @@ function withTerminals(
     {},
     whenever(TERMINALS_OF_IT, json(idle(live))),
     whenever(ROOTS_OF_IT, json(codeRoots)),
+    whenever(STATUS_OF_IT, json(NOTHING_MOVED)),
     ...answers,
   );
 }
@@ -19941,6 +19976,215 @@ describe("the code pane's file tree", () => {
       expect(still).not.toBeNull();
       expect(still!.value).toBe("notes.");
     });
+  });
+
+  /// And git's account of the rows, which is what the marks are: a file it sees
+  /// as changed, one it has never seen, and a folder wearing the strongest mark
+  /// of anything under it (ADR 0019, *The tree*).
+  describe("and the marks its rows carry", () => {
+    /// The page listening on the Nudge stream, which the bench does not wire —
+    /// the describe above says why it is stood up here.
+    ///
+    /// The marks are a *query*, unlike the folder listings, so what re-reads
+    /// them is the table in `nudge.ts` rather than the pane's subscription —
+    /// which is the half of this worth mounting the stream for.
+    let stop: (() => void) | undefined;
+
+    afterEach(() => {
+      stop?.();
+      stop = undefined;
+    });
+
+    /// The mark drawn on the row called `name`, or `null` where it has none:
+    /// the letter, what it is read aloud as, and whether the name beside it took
+    /// the same colour.
+    function markOn(
+      container: ParentNode,
+      name: string,
+    ): { letter: string; says: string | null; named: boolean } | null {
+      const label = rows(container).find((one) => one.textContent === name);
+
+      if (!label) {
+        throw new Error(
+          `no row called ${name}; the tree has ${named(container).join(", ")}`,
+        );
+      }
+
+      const mark = label.parentElement!.querySelector(`.${treePane.mark}`);
+
+      if (!mark) {
+        return null;
+      }
+
+      // Whichever of the two it is, the name is drawn in the mark's own colour:
+      // a row says what it is by more than the letter at the end of it.
+      const paint = mark.className.replace(treePane.mark!, "").trim();
+
+      return {
+        letter: mark.textContent ?? "",
+        says: mark.getAttribute("aria-label"),
+        named: label.className.includes(paint),
+      };
+    }
+
+    /// A changed file and an untracked one are told apart by the letter, by the
+    /// word each is read aloud as, and by the colour the name takes.
+    it("marks a changed file and an untracked one, each as what it is", async () => {
+      withTerminals(
+        [],
+        whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+        whenever(STATUS_OF_IT, json(codeStatus)),
+      );
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+      await waitFor(() => expect(rows(container)).toHaveLength(2));
+      fireEvent.click(row(container, OWN_ROOT.repo));
+      await waitFor(() => expect(named(container)).toContain("README.md"));
+
+      expect(markOn(container, "README.md")).toEqual({
+        letter: ROW_MARKS.Changed.letter,
+        says: ROW_MARKS.Changed.says,
+        named: true,
+      });
+
+      expect(markOn(container, "Cargo.toml")).toEqual({
+        letter: ROW_MARKS.Untracked.letter,
+        says: ROW_MARKS.Untracked.says,
+        named: true,
+      });
+
+      // Two marks that are told apart, which is the whole of what a pair of
+      // them is for: a different letter, a different word, a different colour.
+      expect(ROW_MARKS.Changed.letter).not.toBe(ROW_MARKS.Untracked.letter);
+      expect(ROW_MARKS.Changed.says).not.toBe(ROW_MARKS.Untracked.says);
+      expect(ROW_MARKS.Changed.paint).not.toBe(ROW_MARKS.Untracked.paint);
+    });
+
+    /// And a folder wears the strongest mark of anything under it, as far up as
+    /// the root — so a change deep in a tree shows on the row above it before
+    /// anybody expands one.
+    it("marks a folder with the strongest mark of anything under it", async () => {
+      withTerminals(
+        [],
+        whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+        whenever(STATUS_OF_IT, json(codeStatus)),
+      );
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+      await waitFor(() => expect(rows(container)).toHaveLength(2));
+
+      // The root, before anything under it has been read at all: what it says
+      // is that something in this checkout has moved, and the strongest of what
+      // is under it is a tracked file that changed.
+      expect(markOn(container, OWN_ROOT.repo)?.letter).toBe(
+        ROW_MARKS.Changed.letter,
+      );
+
+      fireEvent.click(row(container, OWN_ROOT.repo));
+      await waitFor(() => expect(named(container)).toContain("crates"));
+
+      // A folder holding nothing but an untracked file deep inside it, marked
+      // as that — the fold, made by the server, drawn on a row nobody expanded.
+      expect(markOn(container, "crates")?.letter).toBe(
+        ROW_MARKS.Untracked.letter,
+      );
+
+      // And a folder nothing has moved in wears nothing, which is what makes
+      // the rest worth reading.
+      expect(markOn(container, "web")).toBeNull();
+      expect(markOn(container, ".gitignore")).toBeNull();
+    });
+
+    /// And the colours they are drawn in are the app's own tokens, which is what
+    /// makes them follow the scheme: an untracked file is an addition and takes
+    /// the Diff's green, and a changed one takes a name of its own — red means
+    /// *deleted* in this app, the way `--stopped` was given a name rather than
+    /// borrowing that red.
+    ///
+    /// The stylesheet's, jsdom laying nothing out and computing no variable.
+    /// Both schemes name the new token, which is the whole of what a token buys
+    /// over a hex: the palette holds itself to 4.5:1 on the paper a thing is
+    /// read on, and the tree is read on the darkest of them.
+    it("draws the two marks in tokens that follow the scheme", () => {
+      expect(treePaneCss).toContain("color: var(--modified);");
+      expect(treePaneCss).toContain("color: var(--added);");
+      expect(treePaneCss).not.toContain("var(--removed)");
+
+      // Named in both, which is what says the dark scheme was not left to read
+      // the light one's ember.
+      expect(base.match(/--modified: #[0-9a-f]{6};/g)).toHaveLength(2);
+    });
+
+    /// A root git will not answer about draws its rows unmarked rather than
+    /// failing to draw them: no git on the machine, or a checkout that is no
+    /// repository.
+    it("draws the rows unmarked where git answered nothing", async () => {
+      withTerminals(
+        [],
+        whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+        whenever(STATUS_OF_IT, json(NOTHING_MOVED)),
+      );
+      const { container } = mount(`/conversations/${GRILLING.id}/code`);
+
+      await waitFor(() => expect(rows(container)).toHaveLength(2));
+      fireEvent.click(row(container, OWN_ROOT.repo));
+      await waitFor(() => expect(named(container)).toContain("README.md"));
+
+      expect(markOn(container, OWN_ROOT.repo)).toBeNull();
+      expect(markOn(container, "README.md")).toBeNull();
+      expect(
+        container.querySelectorAll(
+          `.${shell.detailsPane} .${treePane.mark}`,
+        ).length,
+      ).toBe(0);
+    });
+
+    /// And they are read again on both kinds of Nudge: a `files`, which is the
+    /// disk moving under the tree, and a `commit`, which clears every mark in
+    /// the worktree without touching a file — the one reading in the app that
+    /// two kinds both stand for.
+    it.each([["files"], ["commit"]] as const)(
+      "reads the marks back on a %s Nudge",
+      async (kind) => {
+        streaming();
+
+        let marks: FileStatusView = codeStatus as FileStatusView;
+        const fetching = withTerminals(
+          [],
+          whenever(folderOf(OWN_ROOT.path), json(codeFolder)),
+          whenever(STATUS_OF_IT, () => json(marks)()),
+        );
+        const { container, client } = mount(
+          `/conversations/${GRILLING.id}/code`,
+        );
+
+        await waitFor(() => expect(rows(container)).toHaveLength(2));
+        fireEvent.click(row(container, OWN_ROOT.repo));
+        await waitFor(() => expect(named(container)).toContain("README.md"));
+        expect(markOn(container, "README.md")).not.toBeNull();
+
+        stop = listenForNudges(client);
+        stream().opens();
+
+        const before = askedFor(fetching, STATUS_OF_IT);
+
+        // The commit made in a terminal tab, which is every mark in the
+        // worktree gone with no folder having moved.
+        marks = NOTHING_MOVED;
+        stream().nudges({ kind, conversation: GRILLING.id } as Nudge);
+
+        await waitFor(() =>
+          expect(askedFor(fetching, STATUS_OF_IT)).toBe(before + 1),
+        );
+        await waitFor(() =>
+          expect(markOn(container, "README.md")).toBeNull(),
+        );
+
+        // And the rows are all still there: nothing about the tree moved, which
+        // is exactly why the marks are their own reading.
+        expect(named(container)).toContain("README.md");
+      },
+    );
   });
 });
 

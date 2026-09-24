@@ -59,6 +59,14 @@
 //! not about a path somebody named: what it answers is every path there is to
 //! name.
 //!
+//! **And the rows carry git's account of themselves** — see [`FileStatusView`]
+//! and [`Marked`]: one status read per root, folded so that a folder wears the
+//! strongest mark of anything under it, so what the agent changed is visible
+//! before a diff is (ADR 0019, *The tree*). The second reading here that is
+//! about no path in particular, and the one that is read again on a `commit` as
+//! well as on a `files` Nudge: a commit clears every mark in a Worktree without
+//! touching a file.
+//!
 //! Every refusal is a named outcome rather than a status code, as registering
 //! a Repo refuses and as that dropdown's listing does — because each of them is
 //! a different sentence for the human and none of them is a failure to retry: a
@@ -707,4 +715,93 @@ pub struct FileList {
     /// says so, because a palette quietly matching over half a checkout is a
     /// palette that says a file is not there.
     pub cut: bool,
+}
+
+/// What git says about every root of the Conversation, folded into the marks
+/// the tree draws.
+///
+/// One ask answers the whole Conversation, a reading per root under the root it
+/// belongs to — [`FileListsView`]'s shape, for its reason: the tree draws every
+/// root at once, and two roots can hold the same path (ADR 0019, *The tree*).
+///
+/// **Its own reading rather than a field on a folder listing**, which is what a
+/// commit is the argument for: a commit made in a terminal clears every mark in
+/// the Worktree without touching a file, so nothing about any folder has moved
+/// and every mark has changed. Read again on a `files` Nudge and on a `commit`,
+/// which is the one thing on this wire that two kinds both stand for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct FileStatusView {
+    pub roots: Vec<FileStatus>,
+}
+
+/// One root's, which is git's own account of what has moved in it.
+///
+/// **A root git will not answer about is marked nothing**, the way it is listed
+/// nothing by [`FileList`]: git's answer *is* the marks, so no answer is no
+/// marks — and a tree whose rows are drawn unmarked is a tree, where one that
+/// refused to draw would be a checkout the human cannot read because the
+/// machine has no git on it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct FileStatus {
+    /// The Repo's name, which is what the root's own row is called — carried
+    /// for the palette's reason, a reading per root being a reading of
+    /// something the human knows by the repository it is a checkout of.
+    pub repo: String,
+
+    /// And the root itself, spelled the way the roots listing spells it.
+    pub path: String,
+
+    /// What is marked in it, each path spelled in full the way the root is —
+    /// the join the folder listing makes, so that a mark and the row it is
+    /// about are the same string (see [`FolderEntry::path`]).
+    ///
+    /// **Folders are in here too.** A folder carries the strongest mark of
+    /// anything under it, folded up from each marked file to the root itself,
+    /// so that a change deep in a tree shows on the row above it before
+    /// anybody expands one — and so that the tree can draw a row by looking its
+    /// path up rather than by scanning every mark for one under it.
+    ///
+    /// By path, which is the order a `BTreeMap` folded them in rather than
+    /// anything the tree reads: a row is drawn from its own path.
+    pub marks: Vec<FileMark>,
+}
+
+/// One marked path, and what the mark is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub struct FileMark {
+    pub path: String,
+    pub mark: Marked,
+}
+
+/// The two marks a tree has any use for.
+///
+/// **Two rather than git's own dozen.** What a row of a tree can say is that
+/// something here is not what was committed, and the one distinction worth
+/// drawing inside that is whether git has ever seen the file at all: a modified
+/// file is an edit to read, and an untracked one may be something that should
+/// never have been written. Staged and unstaged are the same news to a tree —
+/// the file is not what the commit says — and which of them it is is the Diff's
+/// to say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript", derive(TS), ts(export_to = "types.ts"))]
+pub enum Marked {
+    /// Git has never seen it: a file written beside the work rather than a
+    /// change to it.
+    ///
+    /// First of the two, which is what makes the derived order the strength
+    /// order — see [`FileStatus::marks`], where the fold is.
+    Untracked,
+
+    /// Tracked, and not what the commit says — staged or not, which is the
+    /// Diff's distinction rather than the tree's.
+    ///
+    /// **The stronger of the two**, and so what a folder holding one of each
+    /// carries. The mark is there so that what changed is visible before a diff
+    /// is, and an untracked file is already visible by being a row that was not
+    /// there before; a change inside a tracked file is the one that cannot be
+    /// seen without it.
+    Changed,
 }

@@ -37,8 +37,16 @@
   --marked: #fbeeba;
 
   /* The Diff: a saturated colour for the markers and the tally, a wash of the
-     same behind the line. */
-  --added: #2f7d4f;
+     same behind the line.
+
+     The green is a step deeper than the one the Diff was drawn in, because it
+     has one more paper to clear: Code's tree marks an untracked file in it —
+     an untracked file is an addition, and this is what the app already means an
+     addition by — and the tree is drawn on `--code-wash`, which is the darkest
+     ground anything in the app is read on. 4.8:1 there, which is exactly what
+     the tree's own rows are read at, and every surface the Diff uses it on is
+     lighter still. */
+  --added: #2a7248;
   --added-wash: #e9f5ec;
   --removed: #b3382c;
   --removed-wash: #fbeceb;
@@ -51,6 +59,17 @@
      it is text on the card at 6.0:1, and the *blocked on you* badge is `--paper`
      on it at 5.6:1. */
   --stopped: #b3382c;
+
+  /* A file git sees as changed, on a row of Code's tree. Its own name rather
+     than borrowing the Diff's `--removed`, for the reason the stopped run above
+     has one: red means *deleted* in this app, and a modified file is nothing of
+     the kind. Seeded on the accent's ember, which is the colour the app already
+     means *in flight* by — the icon's own hue, and the one the marks sit beside
+     the untracked green in without either reading as the other for an eye that
+     cannot tell the two hues apart. It is read on `--code-wash`, where it is
+     4.8:1, and a mark is a letter as well as a colour so that the pair are told
+     apart by shape too — see `.mark` in `workbench/Tree.module.css`. */
+  --modified: #a34b12;
 
   --tok-comment: #8d857a;
   --tok-string: #4a7a4f;
@@ -94,6 +113,10 @@
        same hue lifted: 6.2:1 as text on the card, and 6.9:1 the other way round
        under the badge. */
     --stopped: #e0857a;
+
+    /* The dark scheme's ember, which is the accent unaltered here: 5.6:1 on the
+       tree's own `--code-wash`, where the light one would be unreadable. */
+    --modified: #f08a3c;
 
     --tok-comment: #8b8378;
     --tok-string: #9dc493;

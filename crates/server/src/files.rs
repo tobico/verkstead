@@ -82,6 +82,13 @@
 //! bound to measure: what it answers *is* the paths, and a root git will not
 //! answer about has none.
 //!
+//! **And the tree is given git's account of every root at once** — see
+//! [`status`]: one `git status` per root, porcelain and NUL-separated, folded so
+//! that a folder wears the strongest mark of anything under it. The palette's
+//! shape said about what has *moved* rather than about what is there, and the
+//! one reading here that a `commit` moves: a commit clears every mark in a
+//! Worktree without touching a file.
+//!
 //! **And the watcher is told which directories to watch** — see [`watchable`]:
 //! every non-ignored directory of a root, walked by the same ignore rules the
 //! tree hides by, so that what follows the disk for the pane follows the part of
@@ -101,15 +108,16 @@
 //! the page re-reads the folders it has expanded, a listing apiece, because a
 //! Nudge carries no payload and a folder is one `read_dir`.
 
-use std::collections::HashSet;
+use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use sha2::{Digest, Sha256};
 use verkstead_render::{
-    FileDeleted, FileList, FileListsView, FileMade, FileReading, FileRenamed, FileRoot,
-    FileWritten, FolderEntry, FolderListing,
+    FileDeleted, FileList, FileListsView, FileMade, FileMark, FileReading, FileRenamed, FileRoot,
+    FileStatus, FileStatusView, FileWritten, FolderEntry, FolderListing, Marked,
 };
 
 use crate::repos::{feeding, git};
@@ -783,6 +791,134 @@ fn listed(root: &FileRoot) -> FileList {
 /// the pathological case rather than something a human meets, and the root that
 /// meets it says so rather than quietly matching over half a checkout.
 pub(crate) const MAX_LISTED: usize = 10_000;
+
+/// Every root's marks, which is what the tree draws on its rows.
+///
+/// Blocking: one run of `git status` per root.
+///
+/// **One reading per root and never a call per row**, answered for the whole
+/// Conversation at once the way the palette's lists are: what a mark is about
+/// is the difference between a checkout and its commit, and git says the whole
+/// of that in one run.
+///
+/// **Its own reading rather than a field on a folder listing**, and a commit is
+/// the argument for it: a commit made in a terminal beside the tree clears every
+/// mark in the Worktree without touching a file, so nothing about any folder has
+/// moved and every mark has changed. Which is why the page reads this back on a
+/// `commit` Nudge as well as on a `files` one.
+pub(crate) fn status(roots: &[FileRoot]) -> FileStatusView {
+    FileStatusView {
+        roots: roots.iter().map(marked).collect(),
+    }
+}
+
+/// One root's, folded up so that a folder wears the strongest mark of anything
+/// under it.
+///
+/// **Porcelain and NUL-separated**, so that a path with a newline or a quote in
+/// its name arrives as itself rather than as git's own quoting of it — the
+/// palette's list is read the same way for the same reason.
+///
+/// **Every untracked file rather than the folder holding them.** Git's default
+/// is to name a wholly untracked directory once and leave what is in it unsaid,
+/// which would be a folder marked over rows that were not: `--untracked-files=all`
+/// is the answer that matches row for row with what the tree draws. Ignored
+/// paths are not in it either way, which is the same account of the repository
+/// the listing hides `target/` by.
+///
+/// **And renames are two paths rather than one.** `--no-renames` turns a rename
+/// into the removal and the addition it is on the disk, which is both what a
+/// tree wants — two rows moved, and both marked — and what keeps the parsing to
+/// one path per record: a rename is the one porcelain record that carries two.
+///
+/// **A root git will not answer about is marked nothing** — no git on the
+/// machine, a Worktree that has gone, a directory that is no checkout — which
+/// is [`listed`]'s rule for the same reason: git's answer *is* the marks, so
+/// there is nothing to fall back to and a tree of unmarked rows is still a tree.
+fn marked(root: &FileRoot) -> FileStatus {
+    let at = Path::new(&root.path);
+
+    let answer = git(
+        at,
+        &[
+            "status",
+            "--porcelain",
+            "-z",
+            "--untracked-files=all",
+            "--no-renames",
+        ],
+    )
+    .unwrap_or_default();
+
+    let mut marks: BTreeMap<String, Marked> = BTreeMap::new();
+
+    for record in answer.split('\0').filter(|record| !record.is_empty()) {
+        if marks.len() >= MAX_MARKED {
+            break;
+        }
+
+        // `XY <path>`: the two status letters, the space git writes after them,
+        // and the path as the filesystem holds it. Anything shorter is not a
+        // record this understands, and what it does about one is nothing.
+        let Some((state, under)) = record.split_at_checked(3) else {
+            continue;
+        };
+
+        let mark = match state.starts_with("??") {
+            true => Marked::Untracked,
+            false => Marked::Changed,
+        };
+
+        // Spelled in full the way the root is, which is what the tree draws its
+        // rows by: git answers with the path under the checkout, and a mark the
+        // page could not match to a row would be a mark nothing drew.
+        let path = at.join(under);
+
+        // And folded up, the file first and then every folder over it as far as
+        // the root, which is the row the fold is *for*: a change deep in a tree
+        // is on the row above it before anybody expands one.
+        for over in path.ancestors() {
+            match marks.entry(over.display().to_string()) {
+                Entry::Vacant(empty) => {
+                    empty.insert(mark);
+                }
+                // The strongest wins, which is what makes a folder holding one
+                // of each read as changed — see [`Marked`], where the order is.
+                Entry::Occupied(mut held) => {
+                    *held.get_mut() = (*held.get()).max(mark);
+                }
+            }
+
+            if over == at {
+                break;
+            }
+        }
+    }
+
+    FileStatus {
+        repo: root.repo.clone(),
+        path: root.path.clone(),
+        marks: marks
+            .into_iter()
+            .map(|(path, mark)| FileMark { path, mark })
+            .collect(),
+    }
+}
+
+/// How many paths of one root the tree is given marks for.
+///
+/// The palette's cap read on a different reading, and a looser bound than it
+/// looks: what is capped is what git *said*, and the folders folded over each of
+/// them are inside the same count. A root where ten thousand paths have moved is
+/// one where a tree of marks says nothing anybody can read — a `cargo build` in
+/// a checkout with no `.gitignore` is the case — so what the cap is against is
+/// the page being handed a payload the size of a build directory.
+///
+/// Nothing says it was reached, unlike the palette's. A list cut short is a
+/// palette saying a file is not there, which is a wrong answer worth marking; a
+/// mark cut short is a row drawn the way every unmarked row in the tree is
+/// drawn, and there is nowhere on a row to say so.
+const MAX_MARKED: usize = 10_000;
 
 /// The directories of `root` a watcher of it watches: `from` and every
 /// non-ignored directory under it, `from` first and the rest breadth-first.
@@ -2586,6 +2722,237 @@ mod tests {
         let listed = list(&[root(&worktree)]);
 
         assert!(!listed.roots[0].cut);
+    }
+
+    /// The marks of one root, as the paths they are drawn on paired with what
+    /// each of them says.
+    fn marks(view: &FileStatusView, at: usize) -> Vec<(String, Marked)> {
+        view.roots[at]
+            .marks
+            .iter()
+            .map(|mark| (mark.path.clone(), mark.mark))
+            .collect()
+    }
+
+    /// And the same said about one root, as the paths *under* it: what the fold
+    /// is about is which rows are marked, and a temporary directory in front of
+    /// every one of them says nothing about that.
+    fn marked_under(root: &Path, view: &FileStatusView) -> Vec<(String, Marked)> {
+        marks(view, 0)
+            .into_iter()
+            .map(|(path, mark)| {
+                let under = Path::new(&path)
+                    .strip_prefix(root)
+                    .map(|under| under.to_string_lossy().replace('\\', "/"))
+                    // The root's own row, which is the last thing the fold marks
+                    // and is drawn as the repository rather than as a path.
+                    .unwrap_or_default();
+
+                (under, mark)
+            })
+            .collect()
+    }
+
+    /// A file that has moved is marked changed, one git has never seen is marked
+    /// untracked, and every folder over either carries the mark as far as the
+    /// root — the strongest one where a folder holds both.
+    #[test]
+    fn a_change_is_marked_and_so_is_every_folder_over_it() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+
+        // A tracked file edited, and a new one written deep in a tree of folders
+        // that were not there before.
+        std::fs::write(worktree.join("README.md"), "# edited\n").unwrap();
+        std::fs::create_dir_all(worktree.join("crates/server")).unwrap();
+        std::fs::write(worktree.join("crates/server/lib.rs"), "").unwrap();
+
+        let view = status(&[root(&worktree)]);
+
+        assert_eq!(view.roots.len(), 1);
+        assert_eq!(view.roots[0].repo, "verkstead");
+        assert_eq!(view.roots[0].path, worktree.display().to_string());
+
+        assert_eq!(
+            marked_under(&worktree, &view),
+            [
+                // The root wears both, so it wears the stronger.
+                (String::new(), Marked::Changed),
+                ("README.md".to_owned(), Marked::Changed),
+                ("crates".to_owned(), Marked::Untracked),
+                ("crates/server".to_owned(), Marked::Untracked),
+                ("crates/server/lib.rs".to_owned(), Marked::Untracked),
+            ]
+        );
+    }
+
+    /// And a folder holding one of each wears the changed one, wherever in it
+    /// the two are: the mark is there so that what changed is visible before a
+    /// diff is, and an untracked file is already visible by being a row.
+    #[test]
+    fn a_folder_holding_both_wears_the_changed_one() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+
+        std::fs::create_dir_all(worktree.join("src")).unwrap();
+        std::fs::write(worktree.join("src/main.rs"), "fn main() {}\n").unwrap();
+        commit(&worktree);
+
+        std::fs::write(worktree.join("src/main.rs"), "fn main() {/**/}\n").unwrap();
+        std::fs::write(worktree.join("src/new.rs"), "").unwrap();
+
+        assert_eq!(
+            marked_under(&worktree, &status(&[root(&worktree)])),
+            [
+                (String::new(), Marked::Changed),
+                ("src".to_owned(), Marked::Changed),
+                ("src/main.rs".to_owned(), Marked::Changed),
+                ("src/new.rs".to_owned(), Marked::Untracked),
+            ]
+        );
+    }
+
+    /// Every untracked file rather than the folder holding them, which is what
+    /// matches the tree row for row: git's own default names a wholly untracked
+    /// directory once and leaves what is in it unsaid.
+    #[test]
+    fn every_file_of_an_untracked_folder_is_marked() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+
+        std::fs::create_dir_all(worktree.join("notes")).unwrap();
+        std::fs::write(worktree.join("notes/one.md"), "").unwrap();
+        std::fs::write(worktree.join("notes/two.md"), "").unwrap();
+
+        assert_eq!(
+            marked_under(&worktree, &status(&[root(&worktree)])),
+            [
+                (String::new(), Marked::Untracked),
+                ("notes".to_owned(), Marked::Untracked),
+                ("notes/one.md".to_owned(), Marked::Untracked),
+                ("notes/two.md".to_owned(), Marked::Untracked),
+            ]
+        );
+    }
+
+    /// And what git ignores is marked nothing, which is the same account of the
+    /// repository the tree hides a `target/` by: a row nobody draws is a row
+    /// nothing marks.
+    #[test]
+    fn nothing_ignored_is_marked_and_a_clean_checkout_is_marked_nothing() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+
+        std::fs::create_dir_all(worktree.join("target/debug")).unwrap();
+        std::fs::write(worktree.join("target/debug/verkstead"), "").unwrap();
+        std::fs::write(worktree.join("build.log"), "").unwrap();
+
+        assert!(
+            marks(&status(&[root(&worktree)]), 0).is_empty(),
+            "{:?}",
+            marks(&status(&[root(&worktree)]), 0)
+        );
+    }
+
+    /// And a commit clears them all, with nothing in the tree having been
+    /// written — which is the whole reason this is a reading of its own rather
+    /// than a field on a folder listing.
+    #[test]
+    fn a_commit_clears_every_mark_without_a_file_moving() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+
+        std::fs::write(worktree.join("README.md"), "# edited\n").unwrap();
+        std::fs::create_dir_all(worktree.join("src")).unwrap();
+        std::fs::write(worktree.join("src/main.rs"), "fn main() {}\n").unwrap();
+
+        assert!(!marks(&status(&[root(&worktree)]), 0).is_empty());
+
+        // The folder listing says exactly what it said before, and every mark
+        // has gone.
+        let before = folder(&[root(&worktree)], &worktree);
+        commit(&worktree);
+
+        assert_eq!(folder(&[root(&worktree)], &worktree), before);
+        assert!(
+            marks(&status(&[root(&worktree)]), 0).is_empty(),
+            "{:?}",
+            marks(&status(&[root(&worktree)]), 0)
+        );
+    }
+
+    /// Every root is answered about, in the roots' own order — the palette's
+    /// rule, and a read-only companion is marked like any other: it is a
+    /// checkout to read, and something may well have moved in it.
+    #[test]
+    fn every_root_is_marked_in_the_order_they_come() {
+        let held = tempfile::tempdir().unwrap();
+        let worktree = repository(&held.path().join("worktree"));
+        let alongside = repository(&held.path().join("askance"));
+
+        std::fs::write(worktree.join("README.md"), "# mine\n").unwrap();
+        std::fs::write(alongside.join("README.md"), "# theirs\n").unwrap();
+
+        let mut companion = root(&alongside);
+        companion.repo = "askance".to_owned();
+        companion.own = false;
+        companion.writable = false;
+
+        let view = status(&[root(&worktree), companion]);
+
+        assert_eq!(
+            view.roots
+                .iter()
+                .map(|one| one.repo.as_str())
+                .collect::<Vec<_>>(),
+            ["verkstead", "askance"]
+        );
+
+        // The same path under two roots, spelled in full each time — which of
+        // them a mark is about is the root it is under.
+        assert!(marks(&view, 0).contains(&(
+            worktree.join("README.md").display().to_string(),
+            Marked::Changed
+        )));
+        assert!(marks(&view, 1).contains(&(
+            alongside.join("README.md").display().to_string(),
+            Marked::Changed
+        )));
+    }
+
+    /// And a root git will not answer about is marked nothing, which draws its
+    /// rows unmarked rather than failing to draw them — [`list`]'s rule, said
+    /// about the marks.
+    #[test]
+    fn a_root_git_will_not_answer_about_is_marked_nothing() {
+        let held = tempfile::tempdir().unwrap();
+        let plain = held.path().join("not-a-repository");
+        std::fs::create_dir_all(&plain).unwrap();
+        std::fs::write(plain.join("README.md"), "# not a checkout\n").unwrap();
+
+        let view = status(&[root(&plain)]);
+
+        assert_eq!(view.roots.len(), 1);
+        assert!(marks(&view, 0).is_empty(), "{:?}", view.roots[0].marks);
+
+        // And so does a Worktree that is no longer on disk: nobody is there to
+        // ask.
+        let view = status(&[root(&held.path().join("gone"))]);
+
+        assert!(marks(&view, 0).is_empty(), "{:?}", view.roots[0].marks);
+    }
+
+    /// Everything in the checkout, committed by the same hand the repository
+    /// was made by — what a commit in a terminal beside the tree comes to.
+    fn commit(at: &Path) {
+        for args in [vec!["add", "-A"], vec!["commit", "-m", "the work"]] {
+            let ran = std::process::Command::new("git")
+                .args(&args)
+                .current_dir(at)
+                .output()
+                .unwrap();
+            assert!(ran.status.success(), "git {args:?} failed");
+        }
     }
 
     /// What the watcher is given: every non-ignored directory of the root, the

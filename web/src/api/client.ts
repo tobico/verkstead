@@ -45,6 +45,7 @@ import type {
   FileRenamed,
   FileRenaming,
   FileRootsView,
+  FileStatusView,
   FileWrite,
   FileWritten,
   FolderListing,
@@ -768,6 +769,27 @@ export function deletePath(id: number, path: string): Promise<FileDeleted> {
 /// about answers with no files.
 export function listFiles(id: number): Promise<FileListsView> {
   return get<FileListsView>(`/api/ui/conversations/${id}/files/list`);
+}
+
+/// And what git says about every one of those roots, folded into the marks the
+/// tree draws on its rows.
+///
+/// One status read per root rather than a call per row, answered for the whole
+/// conversation at once — and folded, so that a folder wears the strongest mark
+/// of anything under it and the tree draws a row by looking its own path up
+/// (ADR 0019, *The tree*).
+///
+/// **Read again on a `files` Nudge and on a `commit`**, which is the one reading
+/// on this wire that two kinds both stand for: a commit made in a terminal
+/// beside the tree clears every mark in the worktree without touching a file, so
+/// nothing about any folder has moved and every mark has changed.
+///
+/// Nothing here is refused, for the list's reason: it is about no path anybody
+/// named. A conversation with no worktrees answers with no roots, and a root git
+/// will not answer about answers with no marks — which is a tree whose rows are
+/// drawn unmarked rather than a tree that will not draw.
+export function readFileStatus(id: number): Promise<FileStatusView> {
+  return get<FileStatusView>(`/api/ui/conversations/${id}/files/status`);
 }
 
 /// One commit, rendered: what it said about itself, and its diff.

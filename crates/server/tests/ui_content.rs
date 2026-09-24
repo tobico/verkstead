@@ -3348,6 +3348,35 @@ async fn the_viewers_own_tests_are_fed_from_here() {
         .await,
     );
 
+    // And what the tree draws its marks from: what git says about every root of
+    // that Conversation, folded so that a folder wears the strongest mark of
+    // anything under it (ADR 0019, *The tree*).
+    //
+    // Last of the Code fixtures, because it is the one that reads what the ones
+    // before it *did*: the save above really wrote `Cargo.toml`, and the
+    // untracked files of that checkout are really untracked. A tracked file is
+    // edited here first so that the fixture carries one of each mark — the whole
+    // of what a tree tells apart — which no hand-written payload could have
+    // arrived at, git's own account of a checkout being the entire subject.
+    std::fs::write(
+        code_root.join("worktrees/verkstead-code-pane/README.md"),
+        "# verkstead\n\nEdited beside the tree.\n",
+    )
+    .unwrap();
+
+    write(
+        "code-status.json",
+        &pin_under(
+            &get(
+                &code_app,
+                &format!("/api/ui/conversations/{coding}/files/status"),
+            )
+            .await,
+            &code_root,
+            "/var/lib/verkstead",
+        ),
+    );
+
     // And no fixture for a file or a folder made out of a row's menu, for the
     // refused save's reason and one of its own: what a making answers with is
     // the path it was asked at, so the payload is a path the test that drives

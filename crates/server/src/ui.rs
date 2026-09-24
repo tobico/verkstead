@@ -38,9 +38,9 @@ use verkstead_render::{
     CompanionView, CompileCaching, ConflictResolution, ConversationArchived, ConversationClosed,
     ConversationEntry, ConversationSteered, ConversationStopped, ConversationUnarchived,
     ConversationView, Creation, Cursor, FileDeleted, FileDeleting, FileListsView, FileMade,
-    FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileWrite, FileWritten,
-    FolderListing, GrillingStarted, IgnoreRule, IgnoredCommentsEdit, InstallPress, Lifecycle,
-    Locked, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder,
+    FileMaking, FileReading, FileRenamed, FileRenaming, FileRootsView, FileStatusView, FileWrite,
+    FileWritten, FolderListing, GrillingStarted, IgnoreRule, IgnoredCommentsEdit, InstallPress,
+    Lifecycle, Locked, Merging, MissedOut, NewAdoption, NewCompanion, NewConversation, NewOrder,
     NewPullRequestAdoption, PairingView, Parked, PendingSteerView, ProfileChoice, ProfileEdit,
     ProfileEntry, PushKey, Registration, RemoteBanner, RemoteView, RepoChoice, RepoEntry,
     RepoSwitched, Resolved, Resumed, RoleChoice, RuleField, RuleRefused, ServeEdit, ServePress,
@@ -258,6 +258,13 @@ pub(crate) fn routes() -> axum::Router<AppState> {
         // every time that palette opens, a list kept between openings going
         // stale the first time the agent writes anything.
         .route("/api/ui/conversations/{id}/files/list", get(file_list))
+        // And the one that answers about no folder in particular either: what
+        // git says about every root at once, folded into the marks the tree
+        // draws on its rows — see [`file_status`]. One status read per root, and
+        // read again on a `commit` as well as on a `files` Nudge, a commit being
+        // the one thing that clears every mark in a Worktree without touching a
+        // file (ADR 0019, *The tree*).
+        .route("/api/ui/conversations/{id}/files/status", get(file_status))
         // And one file of one of those folders, opened: what it holds, what
         // kind of thing that turned out to be, and the version a write names
         // itself as being over — see [`file`]. Asked for by path like the
@@ -3084,6 +3091,54 @@ async fn file_list(State(state): State<AppState>, Path(id): Path<String>) -> Htt
         Err(error) => {
             tracing::error!(error = ?error, conversation_id = id, "listing a Conversation's files failed");
             unavailable("this conversation's files could not be listed")
+        }
+    }
+}
+
+/// `GET /api/ui/conversations/{id}/files/status` — what git says about every
+/// root of the Conversation, folded into the marks the tree draws.
+///
+/// One ask for the whole Conversation, a reading per root, which is the shape
+/// [`file_list`] beside it answers in and for its reason: the tree draws every
+/// root at once, and a mark is drawn on a row rather than fetched for one.
+///
+/// Read again on a `files` Nudge and on a `commit` — the one thing on this wire
+/// that two kinds both stand for. A commit made in a terminal beside the tree
+/// clears every mark in the Worktree without touching a file, which is exactly
+/// what a reading of the *folders* cannot notice (ADR 0019, *The tree*).
+///
+/// **No refusals**, for [`file_list`]'s reason: nothing here is about a path
+/// somebody named, so there is no bound to measure. A Conversation with no
+/// Worktrees answers with no roots, and a root git will not answer about answers
+/// with no marks — which is a tree of rows drawn unmarked rather than a tree
+/// that will not draw.
+async fn file_status(State(state): State<AppState>, Path(id): Path<String>) -> HttpResponse {
+    // Read as permissively as the lists beside it: one that names no number
+    // names no Conversation, and no Conversation has no Worktrees to mark.
+    let Ok(id) = id.parse::<i64>() else {
+        return Json(FileStatusView { roots: Vec::new() }).into_response();
+    };
+
+    let conversation = match store::load_conversation(&state.pool, id).await {
+        Ok(Some(conversation)) => conversation,
+        Ok(None) => return Json(FileStatusView { roots: Vec::new() }).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's roots failed");
+            return unavailable("this conversation's worktrees could not be read");
+        }
+    };
+
+    // Off the runtime: git is a process, and one per root.
+    let read = tokio::task::spawn_blocking(move || {
+        crate::files::status(&crate::files::roots(&conversation))
+    })
+    .await;
+
+    match read {
+        Ok(status) => Json(status).into_response(),
+        Err(error) => {
+            tracing::error!(error = ?error, conversation_id = id, "reading a Conversation's file marks failed");
+            unavailable("this conversation's files could not be read")
         }
     }
 }
